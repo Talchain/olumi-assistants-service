@@ -45,6 +45,15 @@ export interface NormaliseInput {
    */
   readonly factorUnit?: string;
   /**
+   * ROADMAP 2.159 — the factor's stored `observed_state.value` /
+   * `observed_state.raw_value`, threaded so the shared predicate can tell a
+   * scale REDECLARATION (a proposal-supplied unit/cap on a factor that already
+   * has a recorded state) from a first-time declaration. Absent ⇒ both gates
+   * inert ⇒ today's behaviour.
+   */
+  readonly factorObservedValue?: number;
+  readonly factorObservedRawValue?: number;
+  /**
    * When true, the parameter arrived as a bare number with no unit. We
    * use this to detect ambiguous proposals against capped factors —
    * see correction #9 ("ambiguous value rejection").
@@ -72,8 +81,16 @@ export interface NormaliseResult {
  * BEFORE the handler runs at all.
  */
 export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
-  const { rawInput, unit, proposalCap, factorCap, factorUnit, inputHasUnit } =
-    input;
+  const {
+    rawInput,
+    unit,
+    proposalCap,
+    factorCap,
+    factorUnit,
+    factorObservedValue,
+    factorObservedRawValue,
+    inputHasUnit,
+  } = input;
 
   // `rawInput` here is the POST-operator computed value (the handler has
   // already applied the operator), not the user's stated number. Use the
@@ -89,6 +106,8 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     ...(proposalCap !== undefined ? { proposalCap } : {}),
     ...(factorCap !== undefined ? { factorCap } : {}),
     ...(factorUnit !== undefined ? { factorUnit } : {}),
+    ...(factorObservedValue !== undefined ? { factorObservedValue } : {}),
+    ...(factorObservedRawValue !== undefined ? { factorObservedRawValue } : {}),
     inputHasUnit,
   });
 

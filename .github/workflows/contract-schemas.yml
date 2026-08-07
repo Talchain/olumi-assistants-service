@@ -23,5 +23,21 @@ jobs:
         env:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
       - run: npx tsx scripts/export-schemas.ts
-      - name: Verify committed schemas match generated output
+      - name: Verify committed schemas match generated output (modified files)
         run: git diff --exit-code contracts/
+      - name: Verify no untracked / uncommitted schema files (close the drift blind spot)
+        # `git diff --exit-code` only compares TRACKED files, so a NEW schema
+        # emitted by export-schemas.ts (a newly-exported contract, or a stray
+        # file under contracts/) is invisible to it — the job would go green
+        # while a required contract sits uncommitted. `git status --porcelain`
+        # reports untracked (`??`) and modified (` M`) paths alike; any output
+        # here means contracts/ is not fully committed. Fail loud.
+        shell: bash
+        run: |
+          PORCELAIN="$(git status --porcelain contracts/)"
+          if [[ -n "$PORCELAIN" ]]; then
+            echo "::error::export-schemas.ts left untracked/uncommitted files under contracts/ — regenerate and commit them:"
+            echo "$PORCELAIN"
+            exit 1
+          fi
+          echo "contracts/ is fully committed — no drift, no untracked files."

@@ -35,6 +35,7 @@
 import type { StageContext } from "../../types.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+import { attemptOptionsIdenticalGracefulDedup } from "./options-identical-graceful-dedup.js";
 
 const VIOLATION_CODE = "OPTIONS_IDENTICAL";
 
@@ -45,14 +46,32 @@ interface OptionsIdenticalContext {
 
 /**
  * Fail-fast gate for OPTIONS_IDENTICAL. Sets `ctx.earlyReturn` with a 400
- * CEE_GRAPH_INVALID envelope and returns true when the gate fires;
- * returns false otherwise (no side effects).
+ * CEE_GRAPH_INVALID envelope and returns true when the gate fires.
+ *
+ * Returns false when there is no OPTIONS_IDENTICAL violation (no side
+ * effects), OR when the graceful dedup resolved the collision by dropping
+ * AI-inferred duplicate option(s) (graph mutated, remainingViolations /
+ * llmRepairNeeded re-derived — see options-identical-graceful-dedup.ts;
+ * ROADMAP 2.53 mitigation rung 1). In the latter case the pipeline
+ * continues instead of failing the draft.
  */
 export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
   const violation = (ctx.remainingViolations ?? []).find(
     (v) => v.code === VIOLATION_CODE,
   );
   if (!violation) return false;
+
+  // ROADMAP 2.53 mitigation rung 1: before failing the whole draft, try to
+  // resolve the collision by dropping AI-inferred duplicate option(s) —
+  // mirroring #203's doctrine (AI-generated duplicates are safe to drop;
+  // anything user-anchored is not). Strictly failure-path-only: this line
+  // is only reachable when the fail-fast error below would otherwise fire.
+  // On success the pipeline continues with the deduped graph and
+  // re-derived remainingViolations/llmRepairNeeded; on decline (null) the
+  // existing error path below runs byte-identically.
+  if (attemptOptionsIdenticalGracefulDedup(ctx)) {
+    return false;
+  }
 
   // Extract diagnostic detail from the validator's context (preserved by
   // deterministic-sweep step 9 into ctx.remainingViolations[i].context).
@@ -63,19 +82,33 @@ export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
   const interventionSignature: string | null =
     typeof violationContext.signature === "string" ? violationContext.signature : null;
 
-  // Build the user-facing recovery payload. Copy is intentionally
-  // generic-but-specific: pricing is the most common trigger (per the
-  // failing staging traffic) but the same wording covers any decision
-  // where options need distinct numeric or qualitative differentiators.
+  // Build the user-facing recovery payload.
+  //
+  // DOMAIN-HARDCODING REMOVED (2026-07-24, draft-honesty lane). The copy used
+  // to assert "For a pricing decision, give a price for each option (e.g. Low =
+  // £49/month, Mid = £99/month, High = £199/month)" on EVERY firing, on the
+  // reasoning that pricing was the most common trigger. Live probe
+  // (STARTER-BRIEF-VALIDATION-2026-07-24, reqs 25f0c95f / a7c24c91) served that
+  // pricing script on a BUILD-VS-BUY brief. Recovery copy that names the wrong
+  // domain is worse than none: it tells the user to do something irrelevant to
+  // the decision they are actually making. The guidance is now domain-neutral
+  // and names the KIND of differentiator instead of inventing one.
+  //
+  // RETRYABLE (same lane): the envelope previously defaulted to
+  // `retryable: false`, so this was a hard dead end — but the same briefs draft
+  // cleanly on other attempts (2/5 in the live run), because identical
+  // intervention signatures are a stochastic model outcome, not a property of
+  // the brief. Retry is honest, and it is offered ALONGSIDE the real user
+  // lever rather than instead of it.
   const recovery = {
     suggestion:
-      "Your options need at least one distinct value to compare. " +
-      "For a pricing decision, give a price for each option " +
-      "(e.g. Low = £49/month, Mid = £99/month, High = £199/month).",
+      "Your options came out looking identical, so there was nothing to compare — " +
+      "this often clears on a retry. If it happens again, give each option at least " +
+      "one value that differs from the others.",
     hints: [
-      "Give each option at least one unique value (price, headcount, timeline, scope).",
-      "Use specific numbers rather than vague descriptions.",
-      "Or describe how each option differs from the others in plain language.",
+      "Retrying the same brief often produces distinct options",
+      "Give each option at least one unique value — whichever dimension your decision turns on (cost, time, scope, capacity, risk)",
+      "Or describe in plain language how each option differs from the others",
     ],
   };
 
@@ -85,6 +118,7 @@ export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
     {
       requestId: ctx.requestId,
       reason: "options_identical_unrepairable_by_llm",
+      retryable: true,
       recovery,
     },
   );

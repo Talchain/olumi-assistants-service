@@ -206,6 +206,8 @@ function makeRunFact(opts: {
               node_id: d.id,
               label: d.label,
               sensitivity: d.sensitivity,
+              // DGAI #341: driver ranking reads influence_score only.
+              influence_score: Math.abs(d.sensitivity),
               direction: 'increases',
             })),
           },

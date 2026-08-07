@@ -27,6 +27,7 @@ import { createClient } from '@supabase/supabase-js';
 import { SessionLRUCache } from './cache.js';
 import { SupabaseSessionStore } from './supabase-store.js';
 import type { SessionStore } from './store.js';
+import { config as appConfig } from '../../config/index.js';
 
 interface ResolvedConfig {
   readonly url: string;
@@ -54,6 +55,14 @@ export function getSessionStore(): SessionStore {
   });
   cachedInstance = new SupabaseSessionStore(client, cache, {
     defaultReadLimit: config.readWindow,
+    // A3 graph CAS observe-mode (CEE_V5_GRAPH_CAS_MODE via the central Zod
+    // config, which owns the off|observe|enforce parse + the prod
+    // enforce→observe downgrade). Default 'off' — zero behavioural change.
+    graphCasMode: appConfig.features.graphCasMode,
+    // ATOMIC graph CAS commit RPC (CEE_V5_GRAPH_CAS_RPC — off|shadow|enforce).
+    // Default 'off' → append_turn_atomic_v2 exactly as today. Requires
+    // migration 20260717120000 (Paul-gated) live before any non-'off' value.
+    graphCasRpc: appConfig.features.graphCasRpc,
   });
   return cachedInstance;
 }

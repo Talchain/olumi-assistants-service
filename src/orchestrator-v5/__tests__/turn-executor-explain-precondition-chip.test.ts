@@ -266,8 +266,17 @@ describe('turn-executor × explanation precondition-fail — wire-level chip sur
       scenarioReader: async () => makeReadyScenarioSnapshot(),
     });
 
+    // Carrier-message note (same class of drift the BASE_PAYLOAD comment
+    // documents): the previous carrier "What would change the outcome?"
+    // now matches `classifyAnalyticalIntent`'s broadened `what_would_flip`
+    // patterns (analytical-intent.ts, #200/#236), so with no prior
+    // run_analysis fact the deterministic no-analysis guard intercepts the
+    // turn before Sonnet and this test's precondition-fail path never
+    // executes. Reuse the proven-neutral BASE_PAYLOAD carrier — the mocked
+    // routing adapter steers the turn into the what_would_flip tool_use
+    // proposal regardless of message text.
     const { response, telemetry } = await runTurnExecutor(
-      { ...BASE_PAYLOAD, message: 'What would change the outcome?' },
+      BASE_PAYLOAD,
       'req-flip-precondition',
       {
         routingAdapter,
@@ -278,6 +287,12 @@ describe('turn-executor × explanation precondition-fail — wire-level chip sur
 
     OlumiResponseSchema.parse(response);
     expect(telemetry.failure_type).toBeNull();
+
+    // Guard-drift tripwire (mirrors the explain_results test): the routing
+    // adapter must actually be consulted — if a future classifier or guard
+    // broadening swallows the carrier message deterministically, fail here
+    // rather than on an unrelated chip assertion.
+    expect(routingAdapter.chatWithTools).toHaveBeenCalled();
 
     const runAnalysisChip = response.suggested_actions.find(
       (a: { action_type?: string }) => a.action_type === 'run_analysis',

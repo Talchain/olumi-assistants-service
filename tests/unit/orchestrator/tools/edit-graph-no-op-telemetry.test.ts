@@ -120,8 +120,10 @@ describe('handleEditGraph no-op branch — edit_graph.no_operations emit (PR #19
     expect(noOpEvent!.payload.scenario_id).toBe(ctx.scenario_id);
     expect(typeof noOpEvent!.payload.deterministic_chips_emitted).toBe('number');
     // First-attempt LLM no-op with no prior validator failure → no
-    // safe anchors → zero deterministic chips.
-    expect(noOpEvent!.payload.deterministic_chips_emitted).toBe(0);
+    // referential-error anchors. Lane 22: the branch now falls back to
+    // the shared clarify label chips (never zero-chip canned copy), so
+    // the count reflects those chips instead of the pre-Lane-22 zero.
+    expect(noOpEvent!.payload.deterministic_chips_emitted).toBeGreaterThan(0);
     expect(noOpEvent!.payload.warnings_dropped).toBe(false);
     expect(noOpEvent!.payload.coaching_dropped).toBe(false);
     expect(noOpEvent!.payload.preceded_by_plot_rejection).toBe(false);

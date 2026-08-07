@@ -1,18 +1,28 @@
 /**
  * V5 Phase 1.5 — HTTP boundary request extensions.
  *
- * `@talchain/schemas` v0.7.0 `OrchestratorTurnPayload` is a discriminated
- * union on `kind: 'message' | 'system_event'`. The `kind: 'message'` variant
- * declares base fields (turn_id, scenario_id, message, turn_class, stage,
- * source, and optional chip / retry_of). The UI ALSO sends `graph_state`,
- * `analysis_state`, and `user_id` on the same request body, but they bypass
- * B1 boundary validation because the base schema (`.strict()`) does not
- * declare them.
+ * `@talchain/schemas` `OrchestratorTurnPayload` is a discriminated union on
+ * `kind: 'message' | 'system_event'`. The `kind: 'message'` variant declares
+ * base fields (turn_id, scenario_id, message, turn_class, stage, source, and
+ * optional chip / retry_of). This module parses FOUR OPTIONAL extension fields
+ * — `graph_state`, `analysis_state`, `user_id`, `selected_elements` — that a
+ * caller MAY put on the same request body but that B1's base schema
+ * (`.strict()`) does not declare, so B1 would otherwise reject them as unknown
+ * keys. The pre-flight strips them off before B1, then re-parses them here.
  *
- * This module adds a second, independent Zod parse over the same request body
- * — extracting `graph_state`, `analysis_state`, and `user_id` with permissive
- * content schemas that match the ACTUAL wire shape (not the CEE response
- * envelope).
+ * ⚠ NO LIVE UI PRODUCER SENDS THESE TODAY. Byte-checked at DGAI `6bc31128d`:
+ * the sole live V5 send site posts `buildV5Payload`'s core keys only; caller
+ * identity travels via HTTP headers; and the request builder that DOES attach
+ * `graph_state` posts to the 410'd V1 route, not the live `/orchestrate/v2/turn`
+ * wire (trap-16: the V5 wire sends no graph). This module is therefore a CEE-
+ * SIDE CAPABILITY, parsed defensively so that IF a producer ever starts sending
+ * these fields they are validated at the boundary rather than silently dropped
+ * — it is NOT evidence the UI sends them today. See
+ * tests/fixtures/golden/PROVENANCE.md for the split live-vs-capability fixtures.
+ *
+ * The parse is a second, independent pass over the same request body,
+ * extracting the four fields with permissive content schemas that match the
+ * ACTUAL wire shape a producer would use (not the CEE response envelope).
  *
  * `user_id` was added 2026-04-21 as part of the upsert-on-append pre-flight
  * (see supabase/migrations/20260421000000_v5_ensure_scenario_exists.sql).
@@ -41,6 +51,7 @@ import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
 
@@ -139,6 +150,42 @@ export type SelectedElementsIngress = {
   readonly edge_ids: readonly string[];
 };
 
+/**
+ * The V5 request-extension CONTRACT as one declarative object schema.
+ *
+ * DERIVE-DON'T-MIRROR anchor. This composite is assembled from the very
+ * field schemas that `parseRequestExtensions` (below) runs — so its `.shape`
+ * keys ARE, by construction, the exact set of extension fields the pre-flight
+ * strips off the body before B1 and re-parses afterwards. Two things derive
+ * from it instead of hand-mirroring it:
+ *
+ *   1. `route-v2-preflight.ts` derives its `V5_EXTENSION_FIELDS` strip-list
+ *      from `Object.keys(V5RequestExtensionsSchema.shape)` — add a field here
+ *      and it is stripped automatically; there is no second list to forget.
+ *   2. `scripts/export-schemas.ts` emits this to
+ *      `contracts/v5-request-extensions.schema.json`, so the "Contract schemas"
+ *      CI job drift-checks the LIVE extension shapes (not just the dead
+ *      V1-derived input schemas).
+ *
+ * Every field is optional-and-nullable because the pre-flight treats an
+ * absent or `null` extension as "not provided" (graceful pass-through). This
+ * schema documents the extension SLICE of the request body only — it is NOT
+ * a whole-body validator (the core turn fields live in B1's
+ * `OrchestratorTurnPayload`); `.strict()` keeps the slice contract tight so
+ * the drift tripwire in `tests/contract/v5-extension-fields-derived.test.ts`
+ * fails loudly if the strip-set and the parser's consumed-set ever diverge.
+ */
+export const V5RequestExtensionsSchema = z
+  .object({
+    graph_state: GraphStateIngressSchema.nullable().optional(),
+    analysis_state: AnalysisStateIngressSchema.nullable().optional(),
+    user_id: UserIdIngressSchema.nullable().optional(),
+    selected_elements: SelectedElementsIngressSchema.nullable().optional(),
+  })
+  .strict();
+
+export type V5RequestExtensions = z.infer<typeof V5RequestExtensionsSchema>;
+
 function normaliseSelectedElements(
   parsed: z.infer<typeof SelectedElementsIngressSchema>,
 ): SelectedElementsIngress {
@@ -234,7 +281,60 @@ export function parseRequestExtensions(
         },
       };
     }
-    graphState = parsed.data;
+    // W2E-2 numeric-bounds gate (schema-hard-boundary): the shape schema above
+    // is deliberately permissive (passthrough), so numeric graph values need an
+    // explicit check against the vendored @talchain/schemas ranges before they
+    // can flow onwards to PLoT/ISL. Contract-declared ranges (exists_probability
+    // [0,1], strength.mean [-1,1], strength.std > 0, observed_state.std > 0)
+    // plus universal finiteness (NaN/±Infinity — JSON.parse("1e999") yields
+    // Infinity, so this IS reachable from the wire).
+    //
+    // This is path (a): PERSISTED state re-entering CEE on every turn. Per the
+    // doctrine (src/validators/numeric-bounds.ts header), this gate is
+    // IDENTITY-PRESERVING: it rejects or it hands the graph straight back, and
+    // it NEVER rewrites a value. `strength.std` is part of the
+    // analysis-affecting hash projection, and every hash token is minted off
+    // the UNREPAIRED persisted graph at other parse sites — so repairing here
+    // would fork graph identity and silently desync those tokens
+    // (clarify_hash_mismatch on every pending proposal). A sigma <= 0 therefore
+    // passes through untouched and is floored at the persisted-load boundary
+    // instead (loadScenarioSnapshotForRunAnalysis → floorGraphSigmaForCompute,
+    // build-turn-context.ts — copy-on-write, BEFORE the GraphV3 parse there),
+    // where it is actually consumed and where nothing hashes the result.
+    //
+    // Values with no safe reading (non-finite, out-of-range probability/mean)
+    // reject here, with the same BoundaryError shape as a structural failure so
+    // the UI's existing CEE-validation-error handling renders them. Messages
+    // carry field paths and bounds only — no values, no labels (PII rule).
+    const bounds = assertIngressGraphNumericBounds(parsed.data);
+    if (!bounds.ok) {
+      emit(TelemetryEvents.BoundaryValidation, {
+        boundary: 'B1',
+        direction: 'ingress',
+        validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+        contract_version: '1.5.0',
+        pass: false,
+        request_id: requestId,
+        field: 'graph_state',
+        reason: 'numeric_bounds',
+      });
+      return {
+        ok: false,
+        error: {
+          error: 'INGRESS_CONTRACT_VIOLATION',
+          boundary: 'B1',
+          direction: 'ingress',
+          validator: REQUEST_EXTENSIONS_VALIDATOR_NAME,
+          details: {
+            field: 'graph_state',
+            issues: bounds.issues,
+          },
+          request_id: requestId,
+          retryable: false,
+        },
+      };
+    }
+    graphState = bounds.graph;
   }
 
   let analysisState: AnalysisStateIngress | null = null;

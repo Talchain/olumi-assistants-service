@@ -220,8 +220,8 @@ describe('buildAnalysisFromPriorFacts', () => {
           outcome_p10: 1200000,
           outcome_p90: 1800000,
           factor_sensitivity: [
-            { node_id: 'fac-marketing', label: 'Marketing Spend', sensitivity: 0.45, direction: 'positive' },
-            { node_id: 'fac-eng-cap',   label: 'Eng Capacity',    sensitivity: -0.32, direction: 'negative' },
+            { node_id: 'fac-marketing', label: 'Marketing Spend', sensitivity: 0.45, direction: 'positive', influence_score: 0.45 },
+            { node_id: 'fac-eng-cap',   label: 'Eng Capacity',    sensitivity: -0.32, direction: 'negative', influence_score: 0.32 },
           ],
           robustness: {
             overall_robustness: 'moderate',
@@ -345,9 +345,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           },
         ],
         factor_sensitivity: [
-          { label: 'Marketing Spend',  elasticity: 0.45,  direction: 'positive' },
-          { label: 'Eng Capacity',     elasticity: -0.32, direction: 'negative' },
-          { label: 'Customer Acq Cost', elasticity: 0.21, direction: 'negative' },
+          { label: 'Marketing Spend',  elasticity: 0.45,  direction: 'positive', influence_score: 0.45 },
+          { label: 'Eng Capacity',     elasticity: -0.32, direction: 'negative', influence_score: 0.32 },
+          { label: 'Customer Acq Cost', elasticity: 0.21, direction: 'negative', influence_score: 0.21 },
         ],
         analysis_status: 'complete',
       });
@@ -360,7 +360,11 @@ describe('buildAnalysisFromPriorFacts', () => {
       expect(summary.top_drivers[0].factor_label).toBe('Marketing Spend');
     });
 
-    it('top-level factor_sensitivity tolerates `factor_label`/`sensitivity` field names', () => {
+    it('top-level factor_sensitivity tolerates `factor_label` naming; `sensitivity` is NOT a ranking source (DGAI #341)', () => {
+      // REPLACES the former alternate-ranking pin ("tolerates
+      // `factor_label`/`sensitivity` field names"): the `sensitivity` field
+      // is no longer a driver-ranking source — influence_score is the only
+      // one. Label-name tolerance (`factor_label` vs `label`) is preserved.
       const fact = runAnalysisFactWithEnrichment({
         meta: { seed_used: 1, n_samples: 1000, response_hash: 'h-alt' },
         results: [
@@ -368,7 +372,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { factor_label: 'Alt Field A', sensitivity: 0.7, direction: 'positive', factor_id: 'fac-a' },
+          { factor_label: 'Alt Field A', sensitivity: 0.7, direction: 'positive', factor_id: 'fac-a', influence_score: 0.7 },
+          // Carries only the legacy `sensitivity` magnitude — no
+          // influence_score, so it is not a driver candidate.
           { factor_label: 'Alt Field B', sensitivity: 0.4, direction: 'negative', factor_id: 'fac-b' },
         ],
         analysis_status: 'complete',
@@ -376,7 +382,7 @@ describe('buildAnalysisFromPriorFacts', () => {
       const summary = buildAnalysisFromPriorFacts([fact])!;
       const labels = summary.top_drivers.map((d) => d.factor_label);
       expect(labels).toContain('Alt Field A');
-      expect(labels).toContain('Alt Field B');
+      expect(labels).not.toContain('Alt Field B');
     });
 
     it('top-level factor_sensitivity: signed elasticity with no direction → sign inferred from value', () => {
@@ -391,8 +397,8 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { label: 'Drag',   elasticity: -0.45 }, // no direction
-          { label: 'Boost',  elasticity:  0.30 }, // no direction
+          { label: 'Drag',   elasticity: -0.45, influence_score: 0.45 }, // no direction
+          { label: 'Boost',  elasticity:  0.30, influence_score: 0.3 }, // no direction
         ],
         analysis_status: 'complete',
       });
@@ -417,7 +423,7 @@ describe('buildAnalysisFromPriorFacts', () => {
         ],
         factor_sensitivity: [
           // Magnitude positive, but direction says negative — driver hurts the goal.
-          { label: 'Cost Pressure', elasticity: 0.45, direction: 'negative' },
+          { label: 'Cost Pressure', elasticity: 0.45, direction: 'negative', influence_score: 0.45 },
         ],
         analysis_status: 'complete',
       });
@@ -438,7 +444,7 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { label: 'Mixed Signal', elasticity: 0.5, direction: 'neutral' },
+          { label: 'Mixed Signal', elasticity: 0.5, direction: 'neutral', influence_score: 0.5 },
         ],
         analysis_status: 'complete',
       });
@@ -456,9 +462,9 @@ describe('buildAnalysisFromPriorFacts', () => {
           { option_id: 'opt-b', option_label: 'B', win_probability: 0.4, outcome_mean: 80 },
         ],
         factor_sensitivity: [
-          { label: 'Good',     elasticity: 0.5, direction: 'positive' },
-          { label: 'NaN-y',    elasticity: Number.NaN, direction: 'positive' },
-          { label: 'Inf-y',    elasticity: Number.POSITIVE_INFINITY, direction: 'positive' },
+          { label: 'Good',     elasticity: 0.5, direction: 'positive', influence_score: 0.5 },
+          { label: 'NaN-y',    elasticity: Number.NaN, direction: 'positive', influence_score: Number.NaN },
+          { label: 'Inf-y',    elasticity: Number.POSITIVE_INFINITY, direction: 'positive', influence_score: Number.POSITIVE_INFINITY },
           { label: 'No-elast', direction: 'positive' },
         ],
         analysis_status: 'complete',
@@ -474,7 +480,7 @@ describe('buildAnalysisFromPriorFacts', () => {
       const fact = runAnalysisFactWithEnrichment({
         ...RICH_ENRICHMENT,
         factor_sensitivity: [
-          { label: 'Top-Level Only', elasticity: 0.99, direction: 'positive' },
+          { label: 'Top-Level Only', elasticity: 0.99, direction: 'positive', influence_score: 0.99 },
         ],
       });
       const summary = buildAnalysisFromPriorFacts([fact])!;
@@ -1047,8 +1053,8 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
       { option_id: 'opt-b', option_label: 'Option B', win_probability: 0.38 },
     ],
     factor_sensitivity: [
-      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive' },
-      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative' },
+      { label: 'Local Senior Hire Programme', elasticity: 0.42, direction: 'positive', influence_score: 0.42 },
+      { label: 'Offshore Partner Engagement', elasticity: 0.31, direction: 'negative', influence_score: 0.31 },
     ],
     robustness: { level: 'moderate' },
     analysis_status: 'complete',
@@ -1123,11 +1129,15 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
     expect(ingress.top_drivers).toEqual(fallback.top_drivers);
   });
 
-  it('accepts the alternate {factor_label, sensitivity} field naming', () => {
+  it('accepts the alternate {factor_label} naming; DriverSummary.sensitivity carries the influence magnitude (DGAI #341)', () => {
+    // REPLACES the former alternate-ranking pin ("accepts the alternate
+    // {factor_label, sensitivity} field naming"): `sensitivity` is no longer
+    // a ranking source — influence_score is the only one. `factor_label`
+    // naming tolerance is preserved.
     const { summary, source } = projectDriversViaIngress({
       ...STAGING_DRIVERS_ENRICHMENT,
       factor_sensitivity: [
-        { factor_label: 'Hiring Budget', sensitivity: 0.5, direction: 'negative' },
+        { factor_label: 'Hiring Budget', sensitivity: 0.5, direction: 'negative', influence_score: 0.5 },
       ],
     });
     expect(source).toBe('top_level');
@@ -1173,12 +1183,280 @@ describe('applyTopLevelDriversOverride — shared ingress/fallback seam', () => 
   it('fail-closed: non-finite or unlabelled sensitivity entries are skipped', () => {
     const out = applyTopLevelDriversOverride(driversBaseSummary(), {
       factor_sensitivity: [
-        { label: 'Bad Sensitivity', elasticity: Number.NaN },
-        { elasticity: 0.4 }, // no id/label at all
+        { label: 'Bad Sensitivity', influence_score: Number.NaN },
+        { influence_score: 0.4 }, // no id/label at all
         'not-an-object',
       ],
     });
     expect(out.source).toBe('none');
     expect(out.summary.top_drivers).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lane 21 (P0-A) — gate reconciliation: the projection and the fallback must
+// consult the SAME top-level enrichment source. Before this lane,
+// buildAnalysisFromPriorFacts gated the entire enrichment projection on
+// `compactAnalysis(enrichment).options.length > 0`; when that gate failed the
+// minimal win_probabilities path silently returned `top_drivers: []`,
+// `robustness_level: 'unknown'`, and no fragile edges even though the
+// top-level enrichment carried all three. The composite
+// `reconcileAnalysisSummaryWithEnrichment` is the single seam shared by this
+// fallback and the turn-executor body-analysis_state ingress path.
+// ---------------------------------------------------------------------------
+
+import {
+  reconcileAnalysisSummaryWithEnrichment,
+} from '../analysis-fallback.js';
+import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
+
+/** Staging-shaped enrichment whose option_comparison is UNUSABLE (entries
+ *  carry no option identity), but whose top-level drivers / robustness /
+ *  flip / VOI / goal-fit surfaces are all present. */
+function topLevelOnlyEnrichment(): Record<string, unknown> {
+  return {
+    meta: { seed_used: 7, n_samples: 1000, response_hash: 'h-lane21' },
+    analysis_status: 'computed',
+    option_comparison: [{ status: 'computed' }, { status: 'computed' }],
+    factor_sensitivity: [
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', elasticity: 0.43, direction: 'positive', influence_score: 0.43 },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', elasticity: 0.34, direction: 'negative', influence_score: 0.34 },
+    ],
+    robustness: {
+      level: 'moderate',
+      fragile_edges: [
+        { edge_id: 'f1->o1', from_id: 'f1', to_id: 'o1', from_label: 'Engineering Capacity', to_label: 'Delivery Throughput', switch_probability: 0.45 },
+      ],
+    },
+    flip_thresholds: [
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers' },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, flip_reason: 'no_effect_within_bounds' },
+    ],
+    m1_coaching: {
+      evidence_gaps: [
+        { factor_id: 'f3', factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
+      ],
+    },
+    critiques: [{ code: 'CONSTRAINT_GOALFIT_MODELLED_BASIS', severity: 'info' }],
+  };
+}
+
+describe('Lane 21 — fallback/projection source reconciliation', () => {
+  it('minimal win_probabilities path no longer returns empty drivers/robustness when top-level enrichment data exists', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.72, 'opt-b': 0.28 },
+        summary: 'Prior run',
+        enrichment: topLevelOnlyEnrichment(),
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([fact]);
+    expect(summary).not.toBeNull();
+    // Options still come from win_probabilities (enrichment carries no
+    // usable option identity)…
+    expect(summary!.options.map((o) => o.option_id)).toEqual(['opt-a', 'opt-b']);
+    // …but the top-level enrichment surfaces are no longer dropped:
+    expect(summary!.top_drivers.map((d) => d.factor_label)).toEqual([
+      'Engineering Capacity',
+      'Offshore Engagement',
+    ]);
+    expect(summary!.robustness_level).toBe('moderate');
+    expect(summary!.top_fragile_edges?.[0]).toMatchObject({
+      from_label: 'Engineering Capacity',
+      to_label: 'Delivery Throughput',
+    });
+    expect(summary!.fragile_edge_count).toBe(1);
+  });
+
+  it('minimal path attaches the Lane 21 signals (tipping / VOI / goal-fit)', () => {
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.72, 'opt-b': 0.28 },
+        summary: 'Prior run',
+        enrichment: topLevelOnlyEnrichment(),
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([fact]) as
+      | (AnalysisResponseSummary & {
+          tipping_points?: unknown;
+          evidence_gaps?: unknown;
+          goal_fit?: unknown;
+        })
+      | null;
+    expect(summary?.tipping_points).toEqual([
+      { factor_id: 'f1', factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.24, unit: 'engineers', no_flip_within_bounds: false },
+      { factor_id: 'f2', factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
+    ]);
+    expect(summary?.evidence_gaps).toEqual([
+      { factor_id: 'f3', factor_label: 'Talent Market Tightness', voi_score: 0.6327 },
+    ]);
+    expect(summary?.goal_fit).toEqual({
+      scored: true,
+      basis: 'modelled_outcome_distribution',
+    });
+  });
+
+  it('enriched (options > 0) path ALSO attaches the Lane 21 signals', () => {
+    const enrichment = {
+      ...topLevelOnlyEnrichment(),
+      option_comparison: [
+        { option_id: 'opt-a', option_label: 'Hire locally', win_probability: 0.72 },
+        { option_id: 'opt-b', option_label: 'Status quo', win_probability: 0.28 },
+      ],
+    };
+    const fact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: '00000000-0000-4000-8000-000000000001',
+        leading_option_id: 'opt-a',
+        win_probabilities: { 'opt-a': 0.72, 'opt-b': 0.28 },
+        summary: 'Prior run',
+        enrichment,
+      },
+    } as unknown as HandlerFact;
+
+    const summary = buildAnalysisFromPriorFacts([fact]) as
+      | (AnalysisResponseSummary & { tipping_points?: unknown; goal_fit?: unknown })
+      | null;
+    expect(summary?.options.map((o) => o.option_label)).toEqual([
+      'Hire locally',
+      'Status quo',
+    ]);
+    expect(summary?.tipping_points).toBeDefined();
+    expect(summary?.goal_fit).toEqual({
+      scored: true,
+      basis: 'modelled_outcome_distribution',
+    });
+  });
+
+  it('composite reconcile helper: applies drivers + fragile overrides + signals in one pass (turn-executor parity seam)', () => {
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'A', win_probability: 0.7 },
+      options: [
+        { option_id: 'opt-a', option_label: 'A', win_probability: 0.7, outcome_mean: 0 },
+        { option_id: 'opt-b', option_label: 'B', win_probability: 0.3, outcome_mean: 0 },
+      ],
+      top_drivers: [],
+      robustness_level: 'unknown',
+      fragile_edge_count: 0,
+      margin: 0.4,
+      margin_pp: 40,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, topLevelOnlyEnrichment());
+    expect(out.top_driver_source).toBe('top_level');
+    expect(out.fragile_edge_source).toBe('top_level');
+    expect(out.summary.top_drivers).toHaveLength(2);
+    expect(out.summary.top_fragile_edges).toHaveLength(1);
+    expect(out.summary.tipping_points).toHaveLength(2);
+    expect(out.summary.evidence_gaps).toHaveLength(1);
+    expect(out.summary.goal_fit).toEqual({ scored: true, basis: 'modelled_outcome_distribution' });
+    // Robustness is NOT touched by the composite (compactAnalysis already
+    // derived it on both call paths) — the minimal fallback path merges it
+    // separately from the enrichment-derived summary.
+    expect(out.summary.robustness_level).toBe('unknown');
+  });
+
+  it('composite reconcile helper: per-option data wins; signals still attach', () => {
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'A', win_probability: 0.7 },
+      options: [
+        { option_id: 'opt-a', option_label: 'A', win_probability: 0.7, outcome_mean: 0 },
+      ],
+      top_drivers: [
+        { factor_id: 'pf', factor_label: 'Per-Option Driver', sensitivity: 0.9, direction: 'positive' },
+      ],
+      robustness_level: 'stable',
+      fragile_edge_count: 2,
+      top_fragile_edges: [
+        { from_label: 'X', to_label: 'Y', from_id: 'x' },
+      ],
+      margin: null,
+      margin_pp: null,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, topLevelOnlyEnrichment());
+    expect(out.top_driver_source).toBe('per_option');
+    expect(out.fragile_edge_source).toBe('per_option');
+    expect(out.summary.top_drivers[0]!.factor_label).toBe('Per-Option Driver');
+    expect(out.summary.top_fragile_edges?.[0]).toMatchObject({ from_label: 'X' });
+    expect(out.summary.tipping_points).toHaveLength(2);
+  });
+
+  // Lane 30 — per-option goal-fit values attach through the SAME composite
+  // seam, so the prior-facts fallback AND the turn-executor ingress path both
+  // carry them (the live-defect scenario 90385279 reached the LLM via this
+  // seam with only the global provenance sentence attached).
+  it('composite reconcile helper: attaches per-option goal-fit values (PLoT #204 live shape)', () => {
+    const enrichment = {
+      ...topLevelOnlyEnrichment(),
+      option_comparison: [
+        {
+          option_id: 'opt-a',
+          option_label: 'Relocate to Manchester',
+          win_probability: 0.8706666666666666,
+          probability_of_joint_goal: 0.293,
+          goal_fit_basis: { scored_from: 'modelled_outcome_distribution', node_ids: ['goal_cost'] },
+        },
+        {
+          option_id: 'opt-b',
+          option_label: 'Stay in London',
+          win_probability: 0.12891666666666668,
+          probability_of_joint_goal: 0.07375,
+          goal_fit_basis: { scored_from: 'modelled_outcome_distribution', node_ids: ['goal_cost'] },
+        },
+      ],
+    };
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'Relocate to Manchester', win_probability: 0.87 },
+      options: [
+        { option_id: 'opt-a', option_label: 'Relocate to Manchester', win_probability: 0.87, outcome_mean: 0 },
+        { option_id: 'opt-b', option_label: 'Stay in London', win_probability: 0.13, outcome_mean: 0 },
+      ],
+      top_drivers: [],
+      robustness_level: 'unknown',
+      fragile_edge_count: 0,
+      margin: 0.74,
+      margin_pp: 74,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, enrichment);
+    expect(out.summary.option_goal_fits).toEqual([
+      { option_id: 'opt-a', option_label: 'Relocate to Manchester', probability_of_joint_goal: 0.293 },
+      { option_id: 'opt-b', option_label: 'Stay in London', probability_of_joint_goal: 0.07375 },
+    ]);
+    // Global provenance also resolves from the same entries.
+    expect(out.summary.goal_fit).toEqual({ scored: true, basis: 'modelled_outcome_distribution' });
+  });
+
+  it('composite reconcile helper: no option_goal_fits key when the enrichment carries no per-option values', () => {
+    const base: AnalysisResponseSummary = {
+      winner: { option_id: 'opt-a', option_label: 'A', win_probability: 0.7 },
+      options: [
+        { option_id: 'opt-a', option_label: 'A', win_probability: 0.7, outcome_mean: 0 },
+      ],
+      top_drivers: [],
+      robustness_level: 'unknown',
+      fragile_edge_count: 0,
+      margin: null,
+      margin_pp: null,
+      analysis_status: 'complete',
+    };
+    const out = reconcileAnalysisSummaryWithEnrichment(base, topLevelOnlyEnrichment());
+    expect(out.summary).not.toHaveProperty('option_goal_fits');
   });
 });

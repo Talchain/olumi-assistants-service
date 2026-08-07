@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "task": "decision_review",
+  "promptSha16": "ba4879dd0a714b8f",
+  "generatedAt": "2026-07-31T00:00:00.000Z",
+  "verdict": "PASS",
+  "sampleSize": 21,
+  "dims": [
+    {
+      "name": "contract_caps_respected",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "entity_references_grounded",
+      "status": "not_applicable",
+      "required": false
+    },
+    {
+      "name": "extraction_contract",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "infeasible_winner_disclosed",
+      "status": "pass",
+      "required": false
+    },
+    {
+      "name": "no_banned_lexicon",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_dashes",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_entity_ids_in_prose",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_fabricated_continuity",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_internal_term_leak",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_internal_vocabulary",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_raw_probability_decimals",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "numbers_grounded",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "primary_risk_coherent",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "review_card_coverage",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "scenario_contexts_keyed_on_fragile_edges",
+      "status": "pass",
+      "required": false
+    },
+    {
+      "name": "shape_valid",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "story_headlines_distinct",
+      "status": "pass",
+      "required": false
+    },
+    {
+      "name": "story_headlines_match_options",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "substance_present",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "tone_alignment",
+      "status": "pass",
+      "required": true
+    }
+  ],
+  "evidence": {
+    "baseline_compared": "PMS row 14 (b4f15305c2bb32e9) at the same n, same fixtures, same scorer: 7/21 clean outputs, 18 failing dimension-observations. This prompt: 21/21 clean, 0 failing.",
+    "contract_parity": "The DERIVED scoring contract is byte-identical across row 14 and row 15 — same 10 banned terms, same 21 internal-vocabulary terms, same em-dash ban, same 4 tone rows (parseServedTerminologyContract / parseToneTable). The measuring instrument did not move.",
+    "sampling_posture": "provider DEFAULT sampling, and that IS production for this model: invoke.ts:505 passes temperature 0 but buildModelParams (adapters/llm/openai.ts:155-198) drops it on the requiresMaxCompletionTokens branch that gpt-4.1 takes.",
+    "caveat_in_sample": "THE 21/21 IS IN-SAMPLE. Nothing was held out: the three prompt iterations were each tuned against these same 7 fixtures, so this measures compliance on the corpus that shaped it. The out-of-sample check is the live witness on real staging turns, recorded separately.",
+    "caveat_unit_branch": "The flip-threshold contract has two branches. The unitless [0,1] -> percentage branch is measured on 3 fixtures x 3 arms; the unit-bearing -> verbatim-with-unit branch is measured on ONE fixture (06, fac_cac, 420/610 GBP) x 3 arms. Before this lane the unit branch was measured by NOTHING. One fixture is coverage, not confidence.",
+    "live_witness_out_of_sample": "THE OUT-OF-SAMPLE CHECK, AND IT IS NOT CLEAN — recorded here rather than beside the report, because a corpus caveat that lives in a separate document is a caveat nobody reads. Three real turns were driven against the DEPLOYED service on the live path (POST /assist/v1/decision-review, cee-staging, PMS-resolved prompt, real model config, SCIENCE_CLAIMS injected and responseFormat json_object — two things the offline harness does NOT do), then scored with this same shipped scorer. Result: 47 measured dimension-rows across the three turns, ONE failure. Clean on every defect this prompt revision targeted — zero readiness echoes, zero em dashes, zero bare probability decimals, and BOTH flip branches correct on the wire (\"35%\"/\"62%\" unitless, \"420 GBP\"/\"610 GBP\" unit-bearing). The one failure is no_banned_lexicon on 01-clear-winner: pre_mortem said \"customer wins\" and \"win rates\" — wins/win rate as ordinary business English, not as the banned \"which option wins\" sense. Same homonym class E1 already documented for \"edge\", and the matcher cannot tell the senses apart by construction. NOT a user-harm defect and NOT a regression against v14 (which was never witnessed on this path), but it IS a real scored failure that n=21 offline did not surface, and it means this report should be read as: clean in-sample, one known-class homonym out-of-sample. Rowed for a considered fix (prompt-side hardening vs scorer-side sense disambiguation is a design call, not a one-liner). Captures: PHASE0-EVIDENCE-2026-07-28/fix-decision-review-v15-artifacts/witness/.",
+    "source": "fix-decision-review-v15 lane: n=21 = 7 committed fixtures x 3 independent arms, OFFLINE against fixtures (zero staging traffic), scored by the shipped 19-dimension pack — reports/decision-review-v15-2026-07-31/live-capture-report.json. Raw per-call model text, latency and token counts: PHASE0-EVIDENCE-2026-07-28/fix-decision-review-v15-artifacts/runs-final2/.",
+    "model": "gpt-4.1",
+    "aggregation": "worst-case per dimension across captures (ab-verdict safety discipline)",
+    "block_reasons": [],
+    "note": "FIRST report to clear the gate on its own evidence rather than a grandfather entry. The v14 grandfather entry is REMOVED in the same commit: the ratchet tightens."
+  }
+}

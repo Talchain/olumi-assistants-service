@@ -11,15 +11,15 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  assembleContextPack,
+  assembleDraftProvenanceDescriptor,
   computeHash,
   computeStringHash,
   hashClarificationAnswers,
   hashConfig,
   hashPromptContent,
   computeCacheBoundary,
-  type AssembleContextPackInput,
-  type ContextPackV1,
+  type AssembleDraftProvenanceInput,
+  type DraftProvenanceDescriptor,
   type RelevantConfig,
 } from "../../src/context/context-pack.js";
 
@@ -35,7 +35,7 @@ const BASE_CONFIG: RelevantConfig = {
   clarifierEnabled: false,
 };
 
-const BASE_INPUT: AssembleContextPackInput = {
+const BASE_INPUT: AssembleDraftProvenanceInput = {
   capability: "draft_graph",
   brief: "Should we expand into the European market given current tariff uncertainty and supply chain constraints?",
   resolvedModel: { route: "default", id: "openai/gpt-4o" },
@@ -45,7 +45,7 @@ const BASE_INPUT: AssembleContextPackInput = {
   config: BASE_CONFIG,
 };
 
-function buildInput(overrides: Partial<AssembleContextPackInput> = {}): AssembleContextPackInput {
+function buildInput(overrides: Partial<AssembleDraftProvenanceInput> = {}): AssembleDraftProvenanceInput {
   return { ...BASE_INPUT, ...overrides };
 }
 
@@ -55,26 +55,26 @@ function buildInput(overrides: Partial<AssembleContextPackInput> = {}): Assemble
 
 describe("ContextPack v1 — determinism", () => {
   it("same inputs → same context_hash", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput());
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput());
     expect(pack1.context_hash).toBe(pack2.context_hash);
   });
 
   it("same inputs → same brief_hash", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput());
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput());
     expect(pack1.brief_hash).toBe(pack2.brief_hash);
   });
 
   it("same inputs → same config_hash", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput());
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput());
     expect(pack1.config_hash).toBe(pack2.config_hash);
   });
 
   it("same inputs → same prompt_hash", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput());
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput());
     expect(pack1.prompt_hash).toBe(pack2.prompt_hash);
   });
 });
@@ -84,13 +84,13 @@ describe("ContextPack v1 — determinism", () => {
 // =============================================================================
 
 describe("ContextPack v1 — hash sensitivity", () => {
-  let basePack: ContextPackV1;
+  let basePack: DraftProvenanceDescriptor;
 
   // Use a shared base pack for comparison
-  basePack = assembleContextPack(buildInput());
+  basePack = assembleDraftProvenanceDescriptor(buildInput());
 
   it("different brief → different context_hash", () => {
-    const other = assembleContextPack(buildInput({
+    const other = assembleDraftProvenanceDescriptor(buildInput({
       brief: "Should we invest in AI infrastructure or cloud migration for the next fiscal year?",
     }));
     expect(other.context_hash).not.toBe(basePack.context_hash);
@@ -98,24 +98,24 @@ describe("ContextPack v1 — hash sensitivity", () => {
   });
 
   it("different model_id → different context_hash", () => {
-    const other = assembleContextPack(buildInput({
+    const other = assembleDraftProvenanceDescriptor(buildInput({
       resolvedModel: { route: "default", id: "anthropic/claude-sonnet-4-20250514" },
     }));
     expect(other.context_hash).not.toBe(basePack.context_hash);
   });
 
   it("different seed → different context_hash", () => {
-    const other = assembleContextPack(buildInput({ seed: 99 }));
+    const other = assembleDraftProvenanceDescriptor(buildInput({ seed: 99 }));
     expect(other.context_hash).not.toBe(basePack.context_hash);
   });
 
   it("different capability → different context_hash", () => {
-    const other = assembleContextPack(buildInput({ capability: "decision_review" }));
+    const other = assembleDraftProvenanceDescriptor(buildInput({ capability: "decision_review" }));
     expect(other.context_hash).not.toBe(basePack.context_hash);
   });
 
   it("different prompt content → different prompt_hash and context_hash", () => {
-    const other = assembleContextPack(buildInput({
+    const other = assembleDraftProvenanceDescriptor(buildInput({
       promptContent: "You are a decision analysis engine. Evaluate the following...",
     }));
     expect(other.prompt_hash).not.toBe(basePack.prompt_hash);
@@ -123,7 +123,7 @@ describe("ContextPack v1 — hash sensitivity", () => {
   });
 
   it("different config → different config_hash and context_hash", () => {
-    const other = assembleContextPack(buildInput({
+    const other = assembleDraftProvenanceDescriptor(buildInput({
       config: { ...BASE_CONFIG, maxTokens: { draft: 8192 } },
     }));
     expect(other.config_hash).not.toBe(basePack.config_hash);
@@ -131,14 +131,14 @@ describe("ContextPack v1 — hash sensitivity", () => {
   });
 
   it("different model_route (same model_id) → different context_hash", () => {
-    const other = assembleContextPack(buildInput({
+    const other = assembleDraftProvenanceDescriptor(buildInput({
       resolvedModel: { route: "fast", id: "openai/gpt-4o" },
     }));
     expect(other.context_hash).not.toBe(basePack.context_hash);
   });
 
   it("with seed_graph → different context_hash", () => {
-    const other = assembleContextPack(buildInput({
+    const other = assembleDraftProvenanceDescriptor(buildInput({
       seedGraph: { nodes: [{ id: "dec_1", kind: "decision" }], edges: [] },
     }));
     expect(other.context_hash).not.toBe(basePack.context_hash);
@@ -174,14 +174,14 @@ describe("ContextPack v1 — clarification canonicalisation", () => {
   });
 
   it("clarification order does not affect context_hash", () => {
-    const pack1 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput({
       clarificationRound: 1,
       clarificationAnswers: [
         { question_id: "q2", answer: "option-b" },
         { question_id: "q1", answer: "option-a" },
       ],
     }));
-    const pack2 = assembleContextPack(buildInput({
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       clarificationRound: 1,
       clarificationAnswers: [
         { question_id: "q1", answer: "option-a" },
@@ -194,7 +194,7 @@ describe("ContextPack v1 — clarification canonicalisation", () => {
   });
 
   it("no clarifications → undefined clarification_hash", () => {
-    const pack = assembleContextPack(buildInput());
+    const pack = assembleDraftProvenanceDescriptor(buildInput());
     expect(pack.clarification_hash).toBeUndefined();
     expect(pack.clarification_round).toBe(0);
   });
@@ -206,18 +206,18 @@ describe("ContextPack v1 — clarification canonicalisation", () => {
 
 describe("ContextPack v1 — seed fallback", () => {
   it("uses provided seed when present", () => {
-    const pack = assembleContextPack(buildInput({ seed: 42 }));
+    const pack = assembleDraftProvenanceDescriptor(buildInput({ seed: 42 }));
     expect(pack.seed).toBe(42);
   });
 
   it("falls back to 0 when seed is undefined", () => {
-    const pack = assembleContextPack(buildInput({ seed: undefined }));
+    const pack = assembleDraftProvenanceDescriptor(buildInput({ seed: undefined }));
     expect(pack.seed).toBe(0);
   });
 
   it("undefined seed produces same hash as explicit 0", () => {
-    const pack1 = assembleContextPack(buildInput({ seed: undefined }));
-    const pack2 = assembleContextPack(buildInput({ seed: 0 }));
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput({ seed: undefined }));
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({ seed: 0 }));
     expect(pack1.context_hash).toBe(pack2.context_hash);
   });
 });
@@ -228,10 +228,10 @@ describe("ContextPack v1 — seed fallback", () => {
 
 describe("ContextPack v1 — caching boundaries", () => {
   it("cache_prefix_key stable across requests with same prompt/config", () => {
-    const pack1 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput({
       brief: "Brief A: Should we merge departments?",
     }));
-    const pack2 = assembleContextPack(buildInput({
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       brief: "Brief B: Should we open a new office?",
     }));
 
@@ -245,8 +245,8 @@ describe("ContextPack v1 — caching boundaries", () => {
   });
 
   it("different prompt → different cache_prefix_key", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       promptContent: "Different system prompt content",
     }));
 
@@ -257,8 +257,8 @@ describe("ContextPack v1 — caching boundaries", () => {
   });
 
   it("different config → different cache_prefix_key", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       config: { ...BASE_CONFIG, enforceSingleGoal: false },
     }));
 
@@ -269,10 +269,10 @@ describe("ContextPack v1 — caching boundaries", () => {
   });
 
   it("dynamic_suffix_key varies with brief", () => {
-    const pack1 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput({
       brief: "Should we expand into Asia-Pacific markets this quarter?",
     }));
-    const pack2 = assembleContextPack(buildInput({
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       brief: "Should we reduce headcount in the engineering department?",
     }));
 
@@ -283,8 +283,8 @@ describe("ContextPack v1 — caching boundaries", () => {
   });
 
   it("dynamic_suffix_key varies with seed_graph", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       seedGraph: { nodes: [], edges: [] },
     }));
 
@@ -301,7 +301,7 @@ describe("ContextPack v1 — caching boundaries", () => {
 
 describe("ContextPack v1 — golden fixture", () => {
   it("full pack with all fields has deterministic hashes", () => {
-    const pack = assembleContextPack(buildInput());
+    const pack = assembleDraftProvenanceDescriptor(buildInput());
 
     // Version
     expect(pack.context_pack_version).toBe("1");
@@ -339,7 +339,7 @@ describe("ContextPack v1 — golden fixture", () => {
   it("golden hash values are stable across runs", () => {
     // This test pins specific hash values. If the hashing algorithm changes,
     // update these expected values and document the migration.
-    const pack = assembleContextPack(buildInput());
+    const pack = assembleDraftProvenanceDescriptor(buildInput());
 
     // Pin: these values MUST remain stable. Changing them breaks cache keys.
     const snapshot = {
@@ -350,7 +350,7 @@ describe("ContextPack v1 — golden fixture", () => {
     };
 
     // Re-assemble to verify stability
-    const pack2 = assembleContextPack(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput());
     expect(pack2.brief_hash).toBe(snapshot.brief_hash);
     expect(pack2.prompt_hash).toBe(snapshot.prompt_hash);
     expect(pack2.config_hash).toBe(snapshot.config_hash);
@@ -412,14 +412,14 @@ describe("ContextPack v1 — hashing primitives", () => {
 describe("ContextPack v1 — promptHashPrecomputed", () => {
   it("uses precomputed hash when provided (no re-hashing)", () => {
     const precomputed = "aabbccddeeff";
-    const pack = assembleContextPack(buildInput({
+    const pack = assembleDraftProvenanceDescriptor(buildInput({
       promptHashPrecomputed: precomputed,
     }));
     expect(pack.prompt_hash).toBe(precomputed);
   });
 
   it("falls back to hashing promptContent when precomputed absent", () => {
-    const pack = assembleContextPack(buildInput({
+    const pack = assembleDraftProvenanceDescriptor(buildInput({
       promptHashPrecomputed: undefined,
     }));
     // Should be the hash of the promptContent string, not "undefined"
@@ -428,8 +428,8 @@ describe("ContextPack v1 — promptHashPrecomputed", () => {
   });
 
   it("precomputed hash changes context_hash", () => {
-    const pack1 = assembleContextPack(buildInput());
-    const pack2 = assembleContextPack(buildInput({
+    const pack1 = assembleDraftProvenanceDescriptor(buildInput());
+    const pack2 = assembleDraftProvenanceDescriptor(buildInput({
       promptHashPrecomputed: "different12ab",
     }));
     expect(pack1.context_hash).not.toBe(pack2.context_hash);

@@ -524,7 +524,22 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     // sentinel and invert the provisioning model (Paul authors the real copy
     // as a fresh store prompt, which clears the sentinel). Same discipline as
     // the 'routing' file-based slot.
-    const SEED_BLOCKLIST = new Set<CeeTaskId>(['routing', 'm2_graph_review']);
+    // 'orchestrator': the operator-managed PMS row for this task IS the V5
+    // routing/orchestrator system prompt (~22k chars — PMS_TASK_ALIAS in
+    // src/prompts/tracked.ts resolves 'routing' to 'orchestrator' for store
+    // lookups). Its registered code default, however, is the LEGACY cf-v28
+    // V4 mega-prompt (57,643 chars). Auto-seeding that default into a FRESH
+    // store (file store / ':memory:' in tests, or a new deployment with
+    // PROMPTS_ENABLED=true) put the 57,643-char coach prompt on the
+    // orchestrator row; buildRoutingPromptSnapshot() then resolved it as the
+    // routing prompt (source=store) and the [18,500–22,000] size guard
+    // correctly refused to start the server — the permanent CI
+    // admin.models/admin.routes "Routing prompt size 57643" startup reds.
+    // Skipping the seed lets a PMS-miss fall through to the guard-safe v40
+    // routing default, exactly as the alias design in tracked.ts intends.
+    // Existing operator-authored rows (e.g. the production Supabase row)
+    // are unaffected — seeding never touched them.
+    const SEED_BLOCKLIST = new Set<CeeTaskId>(['routing', 'm2_graph_review', 'orchestrator']);
 
     for (const taskId of taskIds) {
       if (SEED_BLOCKLIST.has(taskId)) {

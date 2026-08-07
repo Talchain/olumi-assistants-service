@@ -45,6 +45,7 @@ describe('isRecoverableHandlerCause', () => {
       'options_not_configured',
       'analysis_not_ready', // EP2 (V5 Edit Safety Core) — read-boundary guard blocked outcome
       'analysis_blocked',
+      'analysis_engine_busy', // ROADMAP 2.202 fix ③ — downstream 429 is capacity, not breakage
       'parameter_invalid_at_execute',
       'entity_not_found_in_graph',
       'entity_kind_mismatch_at_execute',
@@ -71,8 +72,16 @@ describe('isRecoverableHandlerCause', () => {
     }
   });
 
-  it('locked-set size matches the documented War-Room list (8: +analysis_not_ready, EP2 V5 Edit Safety Core)', () => {
-    expect(RECOVERABLE_HANDLER_CAUSES.size).toBe(8);
+  it('locked-set size matches the documented War-Room list (9: +analysis_engine_busy, ROADMAP 2.202 fix 3)', () => {
+    // This assertion is the fail-loud guard on the locked set, and it did its
+    // job: adding `analysis_engine_busy` REDDED it, forcing the addition to be
+    // declared here rather than absorbed silently. Bump the number ONLY
+    // alongside a recorded decision.
+    //   8 → 9: `analysis_engine_busy` (downstream HTTP 429 = the analysis
+    //   engine is at its concurrency limit). diagnosis-run-analysis-500s.md §7
+    //   FIX 3; same principle CEE accepted for its own ingress limiter in
+    //   41d5ecf0. Deliberately narrow — only a 429 recovers.
+    expect(RECOVERABLE_HANDLER_CAUSES.size).toBe(9);
   });
 });
 
@@ -82,6 +91,7 @@ describe('composeRecoverableHandlerResponse', () => {
     ['options_not_configured', { first_option_label: 'Hire Senior Engineer' }],
     ['analysis_not_ready', { reason_code: 'NO_CAP_UNRECOVERABLE', next_step: 'Review the option values — this option needs a bound (cap) before it can be analysed.' }],
     ['analysis_blocked', {}],
+    ['analysis_engine_busy', { downstream_http_status: 429 }],
     ['parameter_invalid_at_execute', { specific_issue: 'value out of range' }],
     ['entity_not_found_in_graph', {}],
     ['entity_kind_mismatch_at_execute', {}],

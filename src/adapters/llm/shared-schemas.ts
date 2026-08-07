@@ -10,6 +10,7 @@ import { z } from "zod";
 import { ProvenanceSource, NodeKind, StructuredProvenance, NodeData, FactorCategory } from "../../schemas/graph.js";
 import { log } from "../../utils/telemetry.js";
 import { LLM_STRENGTH_STD_FLOOR } from "../../cee/constants.js";
+import { refineFiniteNumbers } from "../../validators/numeric-bounds.js";
 
 // ============================================================================
 // Edge Strength Validation Constants
@@ -134,42 +135,29 @@ export const LLMDraftResponse = z.object({
   rationales: z.array(z.object({ target: z.string(), why: z.string(), provenance_source: z.string().optional() })).optional(),
   // .passthrough() preserves additive fields (e.g. goal_constraints, future
   // LLM output) so the normalisation → Zod pipeline doesn't silently drop them.
-}).passthrough();
+  //
+  // W2E-2 finiteness gate: every number anywhere in the draft (including
+  // passthrough fields — legacy `weight`, `belief_exists`, goal thresholds,
+  // factor data) must be finite. Zod's z.number() already rejects NaN but
+  // accepts ±Infinity, which previously sailed through to the pipeline and
+  // on to PLoT/ISL. Runs AFTER the field transforms, so the long-standing
+  // strength clamp/floor convention (contract-declared ranges, mirrored by
+  // PLoT) is unchanged. A failure throws the adapter's existing
+  // `*_response_invalid_schema` error → existing retry convention; never a
+  // silent drop or clamp for contract-silent fields.
+}).passthrough().superRefine(refineFiniteNumbers);
 
 export type LLMDraftResponseT = z.infer<typeof LLMDraftResponse>;
 
 // ============================================================================
-// Repair Response Schema
+// Repair Response Schema — REMOVED (ROADMAP 2.763)
 // ============================================================================
-
-/**
- * Rationale shape produced by the repair prompt (repair_graph_v8+).
- *
- * The repair prompt instructs the LLM to emit one rationale per violation
- * with fields {violation_code, node_or_edge, action, elements_changed}.
- * This is a different shape from the draft rationale ({target, why}).
- */
-const LLMRepairRationale = z.object({
-  violation_code: z.string(),
-  node_or_edge: z.string(),
-  action: z.string(),
-  elements_changed: z.number(),
-}).passthrough();
-
-/**
- * Schema for repair graph responses from LLM.
- *
- * Uses the same node/edge validation as draft responses but with the
- * repair-specific rationale shape. This decouples the repair and draft
- * validation contracts so rationale format mismatches don't break repairs.
- */
-export const LLMRepairResponse = z.object({
-  nodes: z.array(LLMNode),
-  edges: z.array(LLMEdge),
-  rationales: z.array(LLMRepairRationale).optional().default([]),
-}).passthrough();
-
-export type LLMRepairResponseT = z.infer<typeof LLMRepairResponse>;
+//
+// `LLMRepairResponse` / `LLMRepairRationale` parsed the output of the LLM
+// graph-repair call. That call was retired with `LLMAdapter.repairGraph`
+// (2.731 removed the draft-path caller, 2.740a substep 1b's, 2.763 the
+// capability itself), so the schema had zero production readers left.
+// The deterministic repair (`simpleRepair`) has no LLM response to parse.
 
 // ============================================================================
 // Options Response Schema

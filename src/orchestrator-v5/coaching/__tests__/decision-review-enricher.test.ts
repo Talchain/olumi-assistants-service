@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import * as invokeMod from '../../../cee/decision-review/invoke.js';
+import * as decomposeMod from '../../../cee/decision-review/decompose.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
 import * as turnDebugMod from '../../debug/turn-debug-store.js';
+import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+import { config, _resetConfigCache } from '../../../config/index.js';
 
 /**
  * Fixture resolution returned alongside the mocked invoke result. Matches
@@ -228,7 +234,7 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
     expect(out).toBe(facts);
   });
 
-  it('returns facts unchanged when the 15s hard timeout fires (AbortError)', async () => {
+  it('returns facts unchanged when the hard timeout fires (AbortError)', async () => {
     vi.spyOn(invokeMod, 'invokeDecisionReview').mockImplementation(async (_input, opts) => {
       // Resolve when caller aborts; simulates the adapter respecting signal.
       return await new Promise((_resolve, reject) => {
@@ -248,8 +254,10 @@ describe('enrichRunAnalysisWithDecisionReview', () => {
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
     });
-    // Advance past the 15s DECISION_REVIEW_TIMEOUT_MS default.
-    await vi.advanceTimersByTimeAsync(15_000);
+    // Advance past DECISION_REVIEW_TIMEOUT_MS — derived from the constant
+    // (ROADMAP 2.73 Fix B raised the default 15s -> 22s), so this test
+    // cannot silently pin a stale hard-coded value again.
+    await vi.advanceTimersByTimeAsync(DECISION_REVIEW_TIMEOUT_MS);
     const out = await pending;
     expect(out).toBe(facts);
     vi.useRealTimers();
@@ -849,30 +857,34 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     expect(callArg.winner.win_probability).toBeCloseTo(0.722);
   });
 
-  // Test 5d: cross-source walker — declared leader is in `results`
-  // first, so the walker stops there (priority-order preserved).
-  it('cross-source walker: leader present in results → adapter uses it without consulting later sources', async () => {
+  // Test 5d: cross-source walker — declared leader is in the CURRENT
+  // `option_comparison` (priority source since the decompose-hardening
+  // lane's current-first reorder), so the walker stops there without
+  // consulting the later legacy source.
+  it('cross-source walker: leader present in option_comparison → adapter uses it without consulting later sources', async () => {
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
-      leading_option_id: 'opt_legacy_match',
+      leading_option_id: 'opt_current_match',
       enrichment: {
-        results: [
-          { option_id: 'opt_legacy_match', option_label: 'Legacy Match', win_probability: 0.6 },
-          { option_id: 'opt_legacy_other', option_label: 'Legacy Other', win_probability: 0.4 },
-        ],
-        // option_comparison also contains an entry with the same ID but a
-        // DIFFERENT label. Priority must win → label from results, not
-        // from option_comparison.
         option_comparison: [
+          { option_id: 'opt_current_match', option_label: 'Current Match', win_probability: 0.6, outcome: { mean: 0.2 } },
+          { option_id: 'opt_current_other', option_label: 'Current Other', win_probability: 0.4, outcome: { mean: 0.1 } },
+        ],
+        // Legacy `results` also contains an entry with the same ID but a
+        // DIFFERENT label. Priority must win → label from option_comparison,
+        // not from the legacy source (this is the #437 winner-source
+        // alignment: the winner reads the SAME envelope the prompt's
+        // option_comparison slice reads).
+        results: [
           {
-            id: 'opt_legacy_match', option_id: 'opt_legacy_match',
+            id: 'opt_current_match', option_id: 'opt_current_match',
             label: 'WRONG: should NOT be picked from here',
             option_label: 'WRONG: should NOT be picked from here',
-            status: 'computed', outcome: { mean: 0.1 }, win_probability: 0.99,
+            status: 'computed', outcome_mean: 0.1, win_probability: 0.99,
           },
         ],
         graph: { nodes: [], edges: [] },
@@ -887,11 +899,11 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
-    // Winner came from `results` (priority) — label proves it; the
-    // option_comparison entry with a deliberately-wrong label was NOT
-    // consulted because the priority source matched first.
-    expect(callArg.winner.id).toBe('opt_legacy_match');
-    expect(callArg.winner.label).toBe('Legacy Match');
+    // Winner came from `option_comparison` (priority) — label proves it; the
+    // legacy entry with a deliberately-wrong label was NOT consulted because
+    // the priority source matched first.
+    expect(callArg.winner.id).toBe('opt_current_match');
+    expect(callArg.winner.label).toBe('Current Match');
     expect(callArg.winner.win_probability).toBeCloseTo(0.6);
   });
 
@@ -1069,7 +1081,9 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
       winner: { option_id: 'opt-1', option_label: 'Option A' },
       runner_up: { option_id: 'opt-2', option_label: 'Option B' },
       narrative_summary: 'Option A leads with a 70% win probability driven by factor A.',
-      story_headlines: ['Headline one', 'Headline two'],
+      // Live shape per the served prompt contract (defaults.ts OUTPUT_SCHEMA):
+      // story_headlines is a Record<option_id, string>, never an array.
+      story_headlines: { 'opt-1': 'Headline one', 'opt-2': 'Headline two' },
       robustness_explanation: {
         summary: 'The result is reasonably stable but watch factor B.',
         primary_risk: 'Factor B reversal',
@@ -1186,10 +1200,16 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
   it('safely reports zero for every missing / empty input + output field', async () => {
     mockInvokeReturning({
       winner: { option_id: 'opt-1', option_label: 'Option A' },
-      // No narrative_summary, no robustness_explanation, no evidence_enhancements,
-      // no scenario_contexts, no flip_thresholds, no bias_findings,
-      // no key_assumptions, no story_headlines, no decision_quality_prompts,
-      // no pre_mortem, no framing_check.
+      // The POST-parse contract gate requires a review_card (a non-empty
+      // narrative_summary) to reach the density-emit path — an output missing
+      // it is DROPPED, never "completed". So this carries the minimal
+      // narrative_summary the gate requires; EVERY OTHER output field stays
+      // absent so the density diagnostic still reports zeros for them:
+      // no robustness_explanation, no evidence_enhancements, no
+      // scenario_contexts, no flip_thresholds, no bias_findings, no
+      // key_assumptions, no story_headlines, no decision_quality_prompts, no
+      // pre_mortem, no framing_check.
+      narrative_summary: 'Option A leads.',
     });
 
     // Minimal enrichment: only the results array needed to clear `no_winner`
@@ -1222,7 +1242,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     expect(data!.enrichment_results_count).toBe(1);
     expect(data!.enrichment_option_comparison_count).toBe(0);
     expect(data!.enrichment_decision_brief_options_count).toBe(0);
-    expect(data!.output_narrative_summary_length).toBe(0);
+    expect(data!.output_narrative_summary_length).toBe('Option A leads.'.length);
     expect(data!.output_robustness_explanation_summary_length).toBe(0);
     expect(data!.output_robustness_stability_factors_count).toBe(0);
     expect(data!.output_robustness_fragility_factors_count).toBe(0);
@@ -1236,6 +1256,90 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     expect(data!.output_decision_quality_prompts_count).toBe(0);
     expect(data!.output_has_pre_mortem).toBe(false);
     expect(data!.output_has_framing_check).toBe(false);
+  });
+
+  // ==========================================================================
+  // ROADMAP 1.78 residual — output_story_headlines_count map-shape mis-count.
+  //
+  // The served prompt contract (defaults.ts OUTPUT_SCHEMA) emits
+  // story_headlines as a Record<option_id, string>, but the density helper
+  // counted it via Array.isArray — so output_story_headlines_count was
+  // permanently 0 on every live turn while headlines actually shipped
+  // (proven live 2026-07-16: wire had 3 headlines, telemetry logged 0).
+  // ==========================================================================
+
+  it('counts MAP-shaped story_headlines (real staging capture: 4 headlines, not 0)', async () => {
+    // REAL staging capture: the persisted coaching payload carries
+    // story_headlines in exactly the live map shape keyed by option_id.
+    // Provenance: tests/fixtures/cross-service/*.metadata.json. Never hand-edit.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const fixturePath = join(
+      here, '..', '..', '..', '..',
+      'tests', 'fixtures', 'cross-service', 'v5-turn.run-analysis.staging.json',
+    );
+    const turn = JSON.parse(readFileSync(fixturePath, 'utf-8')) as {
+      blocks: Array<Record<string, unknown>>;
+    };
+    const block = turn.blocks.find((b) => b.type === 'analysis_result');
+    if (!block) throw new Error('fixture: no analysis_result block');
+    const coaching = (block.enrichment as Record<string, unknown>)
+      .m1_coaching as Record<string, unknown>;
+    const fixtureHeadlines = coaching.story_headlines as Record<string, string>;
+
+    // Pin the fixture facts this test's proof rests on: the live shape is a
+    // plain object keyed by option_id (NOT an array) with 4 entries.
+    expect(Array.isArray(fixtureHeadlines)).toBe(false);
+    expect(typeof fixtureHeadlines).toBe('object');
+    expect(Object.keys(fixtureHeadlines)).toHaveLength(4);
+
+    mockInvokeReturning({
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      // Contract gate requires a review_card to reach the density-emit path.
+      narrative_summary: 'Option A leads.',
+      story_headlines: fixtureHeadlines,
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-headlines-map',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-headlines-map');
+    expect(data).not.toBeNull();
+    // THE BUG: this read 0 on the live path while 4 headlines shipped.
+    expect(data!.output_story_headlines_count).toBe(4);
+  });
+
+  it('still counts legacy ARRAY-shaped story_headlines (shape tolerance preserved)', async () => {
+    mockInvokeReturning({
+      winner: { option_id: 'opt-1', option_label: 'Option A' },
+      // Contract gate requires a review_card to reach the density-emit path.
+      narrative_summary: 'Option A leads.',
+      story_headlines: ['h1', 'h2', 'h3'],
+    });
+
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: denseEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-headlines-array',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    const data = findCompleted('req-headlines-array');
+    expect(data).not.toBeNull();
+    expect(data!.output_story_headlines_count).toBe(3);
   });
 
   it('never includes prose, labels, raw IDs, or any string content in the payload', async () => {
@@ -1356,6 +1460,8 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     //   - non-record value
     mockInvokeReturning({
       winner: { option_id: 'opt-1', option_label: 'Option A' },
+      // Contract gate requires a review_card to reach the density-emit path.
+      narrative_summary: 'Option A leads.',
       evidence_enhancements: {
         good: {
           specific_action: 'Run customer survey.',
@@ -1624,5 +1730,412 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     );
     expect(failed).toHaveLength(1);
     expect(failed[0].data.reason).toBe('shape_extraction_failed');
+  });
+});
+
+/**
+ * ROADMAP 1.77 (B1) — CEE_DECISION_REVIEW_DECOMPOSE flag branch at the
+ * enricher. The dedicated flag selects monolith-vs-decomposed; flag-off is
+ * byte-identical to today (the enricher invokes the gpt-4.1 monolith and never
+ * touches the decomposed composer). This is the integration-level proof of
+ * 07-REVIEW R4.
+ */
+describe('enricher — CEE_DECISION_REVIEW_DECOMPOSE flag branch (B1)', () => {
+  const RESULT = {
+    output: { narrative_summary: 'x', story_headlines: { 'opt-1': 'a' } },
+    raw: '{}',
+    model: 'm',
+    provider: 'p',
+    llm_latency_ms: 1,
+    input_tokens: 1,
+    output_tokens: 1,
+    prompt_version: 'v',
+    resolution: MOCK_RESOLUTION,
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    _resetConfigCache();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    _resetConfigCache();
+  });
+
+  it('flag OFF (default) → invokes the MONOLITH, never the decomposed composer', async () => {
+    expect(config.cee.decisionReviewDecompose).toBe(false);
+    const monolith = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(RESULT);
+    const decomposed = vi
+      .spyOn(decomposeMod, 'invokeDecomposedDecisionReview')
+      .mockResolvedValue(RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' })],
+      requestId: 'req-flag-off',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(monolith).toHaveBeenCalledTimes(1);
+    expect(decomposed).not.toHaveBeenCalled();
+  });
+
+  it('flag ON → invokes the DECOMPOSED composer, not the monolith directly', async () => {
+    vi.stubEnv('CEE_DECISION_REVIEW_DECOMPOSE', 'true');
+    _resetConfigCache();
+    expect(config.cee.decisionReviewDecompose).toBe(true);
+
+    const monolith = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(RESULT);
+    const decomposed = vi
+      .spyOn(decomposeMod, 'invokeDecomposedDecisionReview')
+      .mockResolvedValue(RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment(), leading_option_id: 'opt-1' })],
+      requestId: 'req-flag-on',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(decomposed).toHaveBeenCalledTimes(1);
+    expect(monolith).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-ask-1 (2.11 P0-1) — P1-2: scaffold disclosure channel into the DR prompt.
+// Without this, decision_review narrates a scaffolded option's placeholder
+// numbers as real user data. A disclosed review beats a silently-skipped
+// one, so DR stays ON — the invoke input carries an explicit disclosure the
+// prompt renders in its own <SCAFFOLDED_OPTIONS> section.
+// ---------------------------------------------------------------------------
+
+describe('D-ask-1 scaffold disclosure channel (P1-2)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const SUCCESS_RESULT = {
+    output: { narrative_summary: 'option A wins' },
+    raw: '{}',
+    model: 'gpt-4.1',
+    provider: 'openai',
+    llm_latency_ms: 200,
+    input_tokens: 100,
+    output_tokens: 200,
+    prompt_version: 'v1',
+    resolution: MOCK_RESOLUTION,
+  };
+
+  it('DISCLOSURE: a scaffolded run’s DR invoke input carries the scaffold disclosure, and the assembled prompt renders it', async () => {
+    const spy = vi
+      .spyOn(invokeMod, 'invokeDecisionReview')
+      .mockResolvedValue(SUCCESS_RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment() })],
+      requestId: 'req-scaffold-dr',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+      scaffoldedOptions: [
+        {
+          option_id: 'opt-2',
+          label: 'New Option',
+          factor_ids: ['fac_price', 'fac_volume'],
+          value_defaulted: true,
+        },
+      ],
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const input = spy.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
+    expect(input.scaffold_disclosure).toBeDefined();
+    expect(input.scaffold_disclosure).toMatch(/[Pp]laceholder/);
+    expect(input.scaffold_disclosure).toContain('New Option');
+    expect(input.scaffold_disclosure).toMatch(/illustrative/);
+
+    // The prompt context the LLM actually sees renders the disclosure in an
+    // explicit section — not buried in _meta (which never reaches the
+    // user message).
+    const message = invokeMod.buildDecisionReviewUserMessage(input, null);
+    expect(message).toContain('<SCAFFOLDED_OPTIONS>');
+    expect(message).toContain('New Option');
+    expect(message).toMatch(/[Pp]laceholder/);
+  });
+
+  it('no scaffolded options → no disclosure field and no SCAFFOLDED_OPTIONS section (byte-identical prompt)', async () => {
+    const spy = vi
+      .spyOn(invokeMod, 'invokeDecisionReview')
+      .mockResolvedValue(SUCCESS_RESULT);
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment() })],
+      requestId: 'req-no-scaffold-dr',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const input = spy.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
+    expect(input.scaffold_disclosure).toBeUndefined();
+    const message = invokeMod.buildDecisionReviewUserMessage(input, null);
+    expect(message).not.toContain('<SCAFFOLDED_OPTIONS>');
+  });
+
+  it('the decomposed path receives the same disclosure on its invoke input', async () => {
+    process.env.CEE_DECISION_REVIEW_DECOMPOSE = 'true';
+    _resetConfigCache();
+    try {
+      const decomposed = vi
+        .spyOn(decomposeMod, 'invokeDecomposedDecisionReview')
+        .mockResolvedValue(SUCCESS_RESULT);
+
+      await enrichRunAnalysisWithDecisionReview({
+        handlerFacts: [runAnalysisFact({ enrichment: minimalEnrichment() })],
+        requestId: 'req-scaffold-dr-decomposed',
+        scenarioId: 'scen-a',
+        signal: notAbortedSignal(),
+        brief: DEFAULT_BRIEF,
+        scaffoldedOptions: [
+          {
+            option_id: 'opt-2',
+            label: 'New Option',
+            factor_ids: ['fac_price'],
+            value_defaulted: true,
+          },
+        ],
+      });
+
+      expect(decomposed).toHaveBeenCalledTimes(1);
+      const input = decomposed.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
+      expect(input.scaffold_disclosure).toMatch(/[Pp]laceholder/);
+      // The headline slice (R1) — the one that narrates option numbers —
+      // must carry the disclosure block.
+      const { slices } = decomposeMod.buildSlices(input);
+      expect(slices.r1).toContain('<SCAFFOLDED_OPTIONS>');
+    } finally {
+      delete process.env.CEE_DECISION_REVIEW_DECOMPOSE;
+      _resetConfigCache();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST-parse CONTRACT GATE (ROADMAP 1.185(c)) — integration at the auto-fire
+// consume seam. A parsed-but-contract-violating decision_review output must be
+// DROPPED down the SAME graceful no-review path as a shape-extraction failure
+// (facts returned unchanged, thin content), emitting a reason-tagged,
+// R-004-clean `v5.decision_review.contract_violation` event — never shipped,
+// never silently trimmed. A clean output attaches as before and emits NO
+// contract-violation event.
+// ---------------------------------------------------------------------------
+describe('decision_review contract gate (auto-fire consume seam)', () => {
+  let events: Array<{ name: string; data: Record<string, unknown> }>;
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    events = [];
+    setTestSink((name, data) => events.push({ name, data }));
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.restoreAllMocks();
+  });
+
+  function fullResult(output: Record<string, unknown> | null) {
+    return {
+      output,
+      raw: '{}',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      llm_latency_ms: 40,
+      input_tokens: 10,
+      output_tokens: 20,
+      prompt_version: 'v1',
+      resolution: MOCK_RESOLUTION,
+    };
+  }
+
+  /** Enrichment whose graph carries real node/edge ids (for entity grounding). */
+  function groundedEnrichment(): Record<string, unknown> {
+    return {
+      results: [
+        { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
+        { option_id: 'opt-2', option_label: 'Option B', win_probability: 0.3 },
+      ],
+      robustness: { level: 'stable', fragile_edges: [] },
+      graph: { nodes: [{ id: 'node-price', label: 'Price' }], edges: [] },
+    };
+  }
+
+  function contractEvents(requestId: string) {
+    return events.filter(
+      (e) =>
+        e.name === TelemetryEvents.V5DecisionReviewContractViolation &&
+        e.data.request_id === requestId,
+    );
+  }
+
+  it('drops a review missing its review_card (empty narrative_summary) + emits contract_violation', async () => {
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(
+      fullResult({ narrative_summary: '   ', bias_findings: [] }),
+    );
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-cg-cov',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+
+    // Dropped: facts returned unchanged (thin content), no attach.
+    expect(out).toBe(facts);
+    const cg = contractEvents('req-cg-cov');
+    expect(cg).toHaveLength(1);
+    expect(cg[0].data.reason).toBe('missing_review_card');
+    expect(cg[0].data.violation_count).toBe(1);
+    // Safety violation → dropped=true (the enforce leg of the D-11 split).
+    expect(cg[0].data.dropped).toBe(true);
+  });
+
+  it('count-cap-only breach (ka=4/dqp=3/bias=3): review ATTACHES + emits a telemetry-only contract_violation (dropped=false)', async () => {
+    // B1 / D-11: the TIGHT count caps are TELEMETRY-ONLY. A prompt-legal
+    // tolerance-band review (shape-check rejects only at bias>3 / dqp>3 / ka>5)
+    // must NOT be dropped by this gate — dropping it would silently change
+    // current gpt-4.1 output. The breach is still COUNTED so the per-model A/B
+    // regression signal survives.
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(
+      fullResult({
+        narrative_summary: 'Option A holds a clear lead across the modelled scenarios.',
+        key_assumptions: ['a', 'b', 'c', 'd'], // 4 > 3
+        decision_quality_prompts: [{ q: 1 }, { q: 2 }, { q: 3 }], // 3 > 2
+        bias_findings: [
+          { type: 'a', source: 'structural', description: 'a', affected_elements: ['node-price'] },
+          { type: 'b', source: 'structural', description: 'b', affected_elements: ['node-price'] },
+          { type: 'c', source: 'structural', description: 'c', affected_elements: ['node-price'] },
+        ], // 3 > 2, every affected_element grounded (node-price exists)
+      }),
+    );
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: groundedEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-cg-cap',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    // ATTACHED — the review still ships (byte-unchanged output), NOT dropped.
+    expect(out).not.toBe(facts);
+    const patched = out[0];
+    if (patched.fact_type !== 'run_analysis') throw new Error('narrowing');
+    expect((patched.result.enrichment as Record<string, unknown>).decision_review).toBeDefined();
+    // Telemetry-only: the A/B signal still fires, tagged dropped=false and
+    // carrying every breached cap.
+    const cg = contractEvents('req-cg-cap');
+    expect(cg).toHaveLength(1);
+    expect(cg[0].data.dropped).toBe(false);
+    expect(cg[0].data.violation_count).toBe(3);
+    expect(cg[0].data.reasons).toBe(
+      'bias_findings_cap_exceeded,decision_quality_prompts_cap_exceeded,key_assumptions_cap_exceeded',
+    );
+  });
+
+  it('drops a review with a fabricated conversational callback', async () => {
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(
+      fullResult({ narrative_summary: 'As you mentioned, Option A stays ahead.' }),
+    );
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: minimalEnrichment() }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-cg-cont',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(out).toBe(facts);
+    const cg = contractEvents('req-cg-cont');
+    expect(cg).toHaveLength(1);
+    expect(cg[0].data.reason).toBe('fabricated_continuity_phrase');
+  });
+
+  it('drops a review with an ungrounded entity reference', async () => {
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(
+      fullResult({
+        narrative_summary: 'Option A stays ahead across most scenarios.',
+        bias_findings: [
+          {
+            type: 'anchoring',
+            source: 'structural',
+            description: 'Leans on one price point.',
+            affected_elements: ['node-does-not-exist'],
+          },
+        ],
+      }),
+    );
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: groundedEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-cg-ent',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(out).toBe(facts);
+    const cg = contractEvents('req-cg-ent');
+    expect(cg).toHaveLength(1);
+    expect(cg[0].data.reason).toBe('ungrounded_entity_reference');
+    // R-004: the offending id never reaches telemetry.
+    expect(JSON.stringify(cg[0].data)).not.toContain('node-does-not-exist');
+  });
+
+  it('attaches a contract-clean review and emits NO contract_violation event', async () => {
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(
+      fullResult({
+        narrative_summary: 'Option A holds a clear lead, leaning on the price assumption.',
+        story_headlines: { 'opt-1': 'Stays ahead.' },
+        bias_findings: [
+          {
+            type: 'anchoring',
+            source: 'structural',
+            description: 'Leans on one price point.',
+            affected_elements: ['node-price'],
+          },
+        ],
+        key_assumptions: ['Demand holds.'],
+        decision_quality_prompts: [{ technique: 'pre-mortem', question: 'What would make this fail?' }],
+      }),
+    );
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: groundedEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-cg-ok',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    expect(out).not.toBe(facts);
+    const patched = out[0];
+    if (patched.fact_type !== 'run_analysis') throw new Error('narrowing');
+    expect((patched.result.enrichment as Record<string, unknown>).decision_review).toBeDefined();
+    expect(contractEvents('req-cg-ok')).toHaveLength(0);
   });
 });

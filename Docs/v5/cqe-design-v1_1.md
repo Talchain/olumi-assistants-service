@@ -135,7 +135,7 @@ The 13 rules:
 | P4 | `multiplier_verb` | 4 | "double", "triple", "quadruple", "halve" (and -ing forms) | multiplier, operator: multiply | None |
 | P5 | `word_fraction` | 5 | "(reduce/cut/decrease/increase) by a/two-thirds/half/quarter" — accepts hyphenated, single-word, and **spaced** forms (`one third`, `two thirds`, `three quarters`) | value, operator: decrement/increment, direction, value_origin: word_fraction | None |
 | P6 | `directional_percent` | 6 | "(direction-verb) by N%" e.g. "increase by 10%" | value/100, direction, operator: increment/decrement, unit: percentage | Must contain `%` |
-| P6b | `directional_absolute` | 7 | "(direction-verb) by N [unit]" or "(direction-verb) N [unit]" without `%` e.g. "add 2 engineers", "cut £50k" | value, direction, operator: add/decrement, unit | Must NOT contain `%` (P6 territory) |
+| P6b | `directional_absolute` | 7 | "(direction-verb) by N [unit]" or "(direction-verb) N [unit]" e.g. "add 2 engineers", "cut £50k", "grew 5%" | value (**/100 when unit is percentage**), direction, operator: add/decrement, unit | Defers to P6 whenever P6 matches (P6 runs first and masks). See note below — P6b is NOT `%`-free. |
 | P7 | `set_verb_value` | 8 | "set/change/update/make X to N [unit]" | value, operator: set, direction: set, unit | None |
 | P8 | `currency` | 9 | "£/$/€ N [k\|m\|bn]" or "N GBP/USD/EUR" or "N grand/quid" (UK colloquial → GBP) | value × suffix, unit: currency code, value_origin: suffix_expansion if suffix or colloquial | None |
 | P9 | `bare_percentage` | 10 | "N%" not preceded by direction verb | value/100, unit: percentage | Must NOT be preceded by direction verb (P6 territory) |
@@ -162,11 +162,46 @@ The 13 rules:
 | `between 5 and 10 months` | P1 | Single trailing unit applied to both bounds |
 | `reduce by 10%` | P6 | Directional verb + `%` |
 | `reduce by 10 engineers` | P6b | Directional verb + no `%` |
+| `grew 5%` (no `by`) | P6b | Directional verb + `%` but **no `by`** — outside P6, refused by P9. See below. |
 | `10%` (standalone) | P9 | No preceding directional verb |
 | `5pp` | P13 | `pp` suffix takes precedence over bare number |
 | `1.5 percentage points` | P13 | Word form of pp |
 
 These guards must be implemented as explicit regex lookbehinds/lookaheads in the rule table, not relied on via priority alone.
+
+#### P6 / P6b / P9 percentage territory — CORRECTED 2026-07-27 (ROADMAP 1.235)
+
+This table previously said P6b "Must NOT contain `%` (P6 territory)", and
+`P6B_REGEX` carries a trailing `(?!\s*%)` that was evidently written to enforce
+it. **That guard does not work, and — more importantly — the rule it encodes is
+not achievable as stated.**
+
+- **Why the guard does not fire:** the lookahead sits *after* the optional
+  `(UNIT)` group, and `UNIT` includes `%`. When `UNIT` consumes the `%`, the
+  lookahead is evaluated past it and is trivially satisfied.
+- **Why the rule is unachievable:** `P6_REGEX` requires a **mandatory** `by`,
+  while P6b's `by` is optional. So `"grew 5%"`, `"raise it 5%"`,
+  `"grow revenue 5%"` are outside P6 *by construction*, and P9 refuses any
+  `N%` preceded by a direction verb. If P6b also declined them, the span would
+  fall through to the compromise backstop — which returns the right number but
+  drops `operator` and `direction` and reports `source: 'compromise'`
+  (measured). That is the lower-fidelity-substitute failure §5 exists to
+  prevent.
+
+**Resolution: P6b legitimately owns "(direction-verb) N%" without `by`, and
+normalises it like every other rule.** P6 still wins wherever it matches,
+because P6 runs before P6b and masks the span — precedence, not exclusion.
+
+**THE CONVENTION, stated once so it is not re-derived:** a result with
+`unit: 'percentage'` always carries its value as a **fraction** (`5%` → `0.05`),
+in `value`, `range_min` and `range_max` alike; `unit` is metadata, not a scale
+factor. This is load-bearing: `mapCqeQuantityToProposalValue`
+(`routing/deterministic-value-update.ts`) multiplies by 100 to recover user
+units, so an un-normalised value becomes a 100x error on a value that is
+deterministically applied to the user's graph. **`percentage_points` is the
+deliberate exception** and stays a raw count (`5pp` → `5`); the same consumer
+passes it through unscaled. Pinned over the whole rule table in
+`extract-quantities.p6b-percentage.test.ts`.
 
 ### 4.3 Cross-cutting modifiers
 
@@ -215,7 +250,22 @@ function extractQuantities(rawMessage: string): QuantityExtractionResult[]
 - Deterministic — same input always produces same output
 - Target latency: <5ms for messages <500 chars
 - Hard cap: 2000 chars (longer messages truncated, `cqe_message_too_long` flag)
-- Regex timeout: 50ms per pattern execution. On timeout: fail closed to `[]` plus telemetry. **No partial-result fallback** — risky without semantic guarantees
+- Regex timeout: 50ms per pattern execution — see **Timeout behaviour** below (amended 2026-07-19; the original "fail closed to `[]`" clause is RETIRED and was never what the code did)
+
+**Timeout behaviour (amended 2026-07-19 — supersedes the retired clause above):**
+
+The original bullet read: *"On timeout: fail closed to `[]` plus telemetry. **No partial-result fallback** — risky without semantic guarantees."* It is retired for two reasons, and the deviation is recorded here rather than left implicit, because code and contract silently contradicting each other is how a future reader "fixes" this straight back into the P0.
+
+1. **The shipped code never implemented it.** From the original CQE commit through 2026-07-19 the per-rule branch did `continue` — it neither returned `[]` nor failed closed. It dropped ONE rule's result and let later rules and the compromise backstop re-claim the now-unmasked span. That is precisely the "partial-result fallback" this clause forbade, and it was the mechanism of the P0: a skipped rule's span silently re-claimed by a lower-fidelity substitute emitting a **different number** (`"from £50k to £70k"` → two point quantities `50000, 70000` instead of one range, claimed by P8 with `source` still `cqe`; `"USD 1.2bn"` → `1.2` instead of `1200000000`, claimed by the backstop). *(The example originally given here was `"increase by about 10%"` → `10` instead of `0.1` via P6b. That one is withdrawn: the 100x was not caused by degradation but by P6b failing to normalise percentages at all — it returned `10` on the healthy path too. Fixed under ROADMAP 1.235; see §4.2. The degradation class itself is unaffected and is re-evidenced by the two examples above plus the operator-flip mode `"reduce to 5%"` `set` → `decrement`.)*
+
+2. **The semantic guarantee the clause said was missing now exists.** `PatternRule.apply()` is all-or-nothing across all 15 rules — it returns a complete match set or nothing, never a partial one — and extraction output is timing-invariant (300/300 identical pairs at HEAD vs 18 divergences before the fix, same harness). Given that guarantee, a rule that ran to completion but slowly has produced a result exactly as correct as an in-budget one: a deterministic regex's slowness does not change what it matches.
+
+**Behaviour as built:**
+
+- **Per-rule cap exceeded, rule COMPLETED** → keep the result; emit `cqe.pattern_timeout`. This is a SLOW signal, not a correctness signal, and is the regex-redesign trigger the *Regex quality* note below asks for. The check runs *after* `apply()` returns, and JS regex is synchronous and non-interruptible, so discarding the result reclaims **zero** latency — the cost is already sunk — while destroying a correct answer. `summary.degraded` stays `false`; routing may apply the value.
+- **Total budget exhausted, rules NEVER RAN** → those rules are genuinely missing, so `summary.degraded = true` and `cqe.budget_exhausted` is emitted naming exactly which pattern ids were skipped. Consumers that deterministically APPLY a value must refuse on `degraded` and fall through to LLM/clarify (`tryDeterministicValueUpdate` / `tryDeicticValueUpdate` return `skip_reason: 'degraded_extraction'`).
+
+The invariant this preserves is the one the retired clause was reaching for: **a degraded extraction must never silently yield a value that gets deterministically applied.** It is enforced on provenance (did every rule run?), never on quantity count — the count is unchanged in the two demo corruption modes, and the corrupting rule may still report `source: 'cqe'`.
 
 **Regex quality (for CC):** patterns must be designed to avoid catastrophic backtracking by construction — no unbounded nested quantifiers, no overlapping alternations without anchors, bounded repetition where possible. The 50ms timeout is defence-in-depth against pathological input, not a normal control-flow mechanism. If a regex regularly approaches the timeout, redesign the regex.
 

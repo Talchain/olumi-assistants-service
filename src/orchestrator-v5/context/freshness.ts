@@ -65,9 +65,15 @@ export type FreshnessReason =
   | 'invariant_failed'
   /** Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): the analysed
    *  option identities on the selected fact no longer match the current graph's
-   *  option IDs, so a `fresh` or hash-impossible `unknown` verdict is forced to
-   *  `stale` (fail closed). Only reachable when the guard is enabled and the
-   *  caller threaded current graph option IDs. */
+   *  option IDs, so a hash-impossible `unknown` verdict is forced to `stale`
+   *  (fail closed). Only reachable when the guard is enabled, the caller
+   *  threaded current graph option IDs, AND the hash comparison could not run
+   *  (legacy fact missing hash / current graph hash unavailable). NEVER
+   *  reachable from a hash-proven `fresh` verdict — identical hashes ⇒ fresh,
+   *  by construction (F10 root, ROADMAP 1.133): the analysis-affecting hash
+   *  already covers options[].id, while the analysed identifiers on the fact
+   *  come from the PLoT enrichment namespace and can legitimately differ from
+   *  graph option IDs on byte-identical input. */
   | 'analysed_options_diverged'
   /** Dispatcher attempted derivation and failed (session-store error,
    *  bad graph parse, etc.). Honours the "always emit freshness"
@@ -240,45 +246,39 @@ export function isSuccessfulRunAnalysisFact(fact: HandlerFact): boolean {
  * "degraded analysis" case (analysis ran but partial / blocked / failed)
  * so the explanation handlers can offer the right recovery copy.
  *
- * Sorted by computed_at desc, same convention as `selectRunAnalysisFact`.
+ * Sorted by computed_at desc, same convention as `selectRunAnalysisFact` —
+ * and now BY that convention rather than alongside it.
+ *
+ * ⚠ THIS FUNCTION USED TO CARRY A BYTE-IDENTICAL PRIVATE COPY of the
+ * computed_at-desc / nulls-last comparator, kept in step with the canonical one
+ * by nothing but the sentence above. That is the fourth copy of one ordering
+ * rule in this estate, in the same file as the docstring claiming there was
+ * one — the "two agreeing copies plus a comment asserting they agree" pattern
+ * that CLAUDE.md trap #12 is about, and it made the completeness claim on
+ * {@link selectClaimBearingRunAnalysisFact} false.
+ *
+ * It now takes the ENTITLEMENT ordering (`requireSuccessfulStatus: false` — the
+ * candidate set of all non-noop `run_analysis` facts, which is a superset of
+ * the degraded ones) and filters to the degraded subset AFTER the shared sort.
+ * Filtering a stably-sorted list preserves the relative order of what survives,
+ * so this is order-identical to collect-then-sort — the equivalence is a
+ * property of stable sort, not a coincidence to re-verify.
+ *
  * Returns null when no degraded fact exists.
  */
 export function selectDegradedRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
 ): { readonly fact: HandlerFact; readonly status: string } | null {
-  const candidates: Array<{
-    readonly fact: HandlerFact;
-    readonly status: string;
-    readonly computed_at: string | null;
-  }> = [];
-  for (const fact of priorFacts) {
-    if (!isRunAnalysisFact(fact)) continue;
-    if (fact.noop !== false) continue;
-    const status = readAnalysisStatus(fact.result.enrichment);
-    if (status === null) continue;
-    if (normaliseAnalysisStatus(status) !== null) continue;
-    candidates.push({
-      fact,
-      status,
-      computed_at:
-        typeof fact.result.computed_at === 'string'
-          ? fact.result.computed_at
-          : null,
-    });
+  for (const view of orderRunAnalysisFacts(priorFacts, {
+    requireSuccessfulStatus: false,
+  })) {
+    // "Degraded" = status PRESENT and not normalising to a canonical success.
+    // A missing status is the legacy-success case, not a degradation.
+    if (view.status === null) continue;
+    if (normaliseAnalysisStatus(view.status) !== null) continue;
+    return { fact: view.fact, status: view.status };
   }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    if (a.computed_at !== null && b.computed_at !== null) {
-      if (a.computed_at < b.computed_at) return 1;
-      if (a.computed_at > b.computed_at) return -1;
-      return 0;
-    }
-    if (a.computed_at !== null) return -1;
-    if (b.computed_at !== null) return 1;
-    return 0;
-  });
-  const top = candidates[0]!;
-  return { fact: top.fact, status: top.status };
+  return null;
 }
 
 /**
@@ -300,20 +300,119 @@ export function selectDegradedRunAnalysisFact(
 export function selectRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
 ): SelectedRunAnalysisFact | null {
+  return selectNewestRunAnalysisFact(priorFacts, { requireSuccessfulStatus: true });
+}
+
+/**
+ * ⭐ THE ENTITLEMENT SELECTOR — newest CLAIM-BEARING `run_analysis` fact,
+ * chosen WITHOUT regard to analysis quality.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS SEPARATELY FROM {@link selectRunAnalysisFact}, AND WHY THAT
+ * IS NOT THE SECOND-DERIVATION DEFECT.
+ *
+ * The two selectors answer DIFFERENT QUESTIONS, and the P0 this closes was
+ * caused by one of them being used to answer the other:
+ *
+ *   - FRESHNESS asks "is this analysis good enough to build a result view
+ *     from?" — `partial` / `degraded` / an unrecognised future status all mean
+ *     NO, and excluding them is correct.
+ *   - ENTITLEMENT asks "did an analysis make a claim, and what did its verdict
+ *     say about naming a leader?" — and a `partial` analysis MAKES CLAIMS. The
+ *     run_analysis handler accepts it (permissive accept matrix, resilience
+ *     contract Part C), persists it, and may name a leading option from it.
+ *
+ * Composed, the quality filter silently deleted the entitlement question's
+ * input: a `partial` fact carrying `may_name_leading_option: false` was
+ * invisible, so `readMayNameLeadingOptionVerdict` took its `no analysis
+ * exists ⇒ true` branch — the branch whose entire justification is "no claim
+ * can be grounded, so nothing can leak", on an input where a claim HAD been
+ * grounded and explicitly withheld. The fail-closed default was never wrong;
+ * the SELECTOR made it unreachable.
+ *
+ * ⚠ AND THE FORWARD-COMPATIBILITY CLAUSE INVERTED. `selectRunAnalysisFact`
+ * excludes statuses it does not recognise so a new PLoT status can never be
+ * mistaken for success. Safe for freshness; the exact opposite here — the day
+ * PLoT ships a new status string, every fact carrying it becomes entitled to
+ * name a leader, with no CEE deploy and no alarm. A conservative rule in one
+ * question is a fail-open in the other.
+ *
+ * ONE ORDERING, TWO FILTERS — and it now covers the COMPARISON PAIR too.
+ * Every consumer that asks "which run_analysis fact is newest?" reaches the
+ * single {@link orderRunAnalysisFacts} core:
+ *
+ *   - {@link selectRunAnalysisFact}            (freshness: newest SUCCESSFUL)
+ *   - {@link selectClaimBearingRunAnalysisFact}(entitlement: newest CLAIM-BEARING)
+ *   - {@link orderSuccessfulRunAnalysisFactsNewestFirst}
+ *       → `coaching/compare-runs.ts:selectTwoNewestRunAnalysisFacts` (the
+ *         prior/current PAIR) and `deriveRerunReadiness`'s count;
+ *       → `signals/coaching-signals.ts:buildRerunDelta`, via
+ *         {@link selectRunAnalysisFact}.
+ *   - {@link selectDegradedRunAnalysisFact}   (the newest DEGRADED fact)
+ *
+ * The list is exhaustive as written: no other function in this estate orders
+ * `run_analysis` facts. It was not exhaustive when first written — see the
+ * warning below, and the one on `selectDegradedRunAnalysisFact`, which held a
+ * fourth copy of the comparator in THIS FILE while this paragraph claimed
+ * there was one.
+ *
+ * ⚠ THAT LAST ONE IS A CORRECTION, NOT A RESTATEMENT. Until #738 the pair
+ * selector took `filter(isSuccessfulRunAnalysisFact)[0]` and `[1]` — by ARRAY
+ * POSITION — so this paragraph's "true by construction" was FALSE of it: a
+ * legacy fact carrying no `computed_at` (still "successful") sitting at window
+ * position 0, or any `computed_at` skew, made the comparison's `current` a
+ * DIFFERENT fact from the one whose hash grounded `freshness === 'fresh'`, and
+ * with two skewed timestamps the prior/current roles — and every margin
+ * direction derived from them — inverted. The claim is true now because the
+ * pair IS this function, not because two copies were checked against each
+ * other: two selectors answering two questions is DESIGN; two copies of one
+ * ordering rule is the mirror defect (CLAUDE.md trap #12), and a docstring
+ * asserting they agree is the mirror's alibi.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export function selectClaimBearingRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+): SelectedRunAnalysisFact | null {
+  return selectNewestRunAnalysisFact(priorFacts, { requireSuccessfulStatus: false });
+}
+
+/**
+ * ⭐ THE ONE ORDERING CORE. Every eligible `run_analysis` fact, newest-first.
+ * `requireSuccessfulStatus` is the ONLY difference between the freshness and
+ * entitlement selectors — the sort is shared, never copied.
+ *
+ * Exposed to consumers that need MORE than the head of the list (the
+ * prior/current comparison pair) through
+ * {@link orderSuccessfulRunAnalysisFactsNewestFirst}, so "the pair is ordered
+ * the same way as the freshness fact" is a property of one function rather
+ * than an agreement between two.
+ */
+function orderRunAnalysisFacts(
+  priorFacts: readonly HandlerFact[],
+  opts: { readonly requireSuccessfulStatus: boolean },
+): RunAnalysisFactView[] {
   const candidates: RunAnalysisFactView[] = [];
   for (let i = 0; i < priorFacts.length; i += 1) {
-    const view = viewRunAnalysisFact(priorFacts[i]!, i);
+    const fact = priorFacts[i]!;
+    const view = viewRunAnalysisFact(fact, i);
     if (!view) continue;
-    // Eligibility filter: status missing entirely (legacy fact) is
-    // accepted; otherwise the value must normalise to a canonical
+    // Eligibility filter (FRESHNESS ONLY): status missing entirely (legacy
+    // fact) is accepted; otherwise the value must normalise to a canonical
     // success. Everything else (partial / blocked / failed / degraded /
     // future PLoT statuses) is excluded.
-    if (view.status !== null && normaliseAnalysisStatus(view.status) === null) {
+    //
+    // CALLS the exported predicate rather than re-testing the status inline:
+    // `isSuccessfulRunAnalysisFact` is the same rule the compose layer and the
+    // comparison-pair count use, and an inline copy here is exactly the mirror
+    // that let the pair selector drift (CLAUDE.md trap #12).
+    //
+    // Deliberately NOT applied to the entitlement question — see
+    // `selectClaimBearingRunAnalysisFact` for the P0 that earned this branch.
+    if (opts.requireSuccessfulStatus && !isSuccessfulRunAnalysisFact(fact)) {
       continue;
     }
     candidates.push(view);
   }
-  if (candidates.length === 0) return null;
 
   // Stable sort by computed_at desc, putting facts without computed_at
   // last. JavaScript Array.sort is stable in V8, so insertion order is
@@ -331,7 +430,52 @@ export function selectRunAnalysisFact(
     if (b.computed_at !== null) return 1;
     return 0;
   });
-  return candidates[0]!;
+  return candidates;
+}
+
+/**
+ * The SUCCESSFUL run_analysis facts of this window, newest-first, under the
+ * SAME ordering {@link selectRunAnalysisFact} uses — of which it is the head.
+ *
+ * Exists for `coaching/compare-runs.ts`, which needs the two newest rather
+ * than the newest. Returning the ordered list (instead of exporting the
+ * comparator, or a "second-newest" selector) is what makes
+ * `pair.current === selectRunAnalysisFact(window)!.fact` hold by construction
+ * for any window: same filter, same sort, same array.
+ */
+export function orderSuccessfulRunAnalysisFactsNewestFirst(
+  priorFacts: readonly HandlerFact[],
+): readonly SelectedRunAnalysisFact[] {
+  return orderRunAnalysisFacts(priorFacts, { requireSuccessfulStatus: true });
+}
+
+/**
+ * The CLAIM-BEARING run_analysis facts of this window, newest-first — the
+ * ENTITLEMENT ordering, of which {@link selectClaimBearingRunAnalysisFact} is
+ * the head. Same filter, same sort, same array, so "the newest claim-bearing
+ * fact" and "the head of this list" are one fact by construction rather than by
+ * two selectors agreeing (the property {@link orderSuccessfulRunAnalysisFactsNewestFirst}
+ * exists to preserve, and for the same reason).
+ *
+ * Exists for ROADMAP 2.211's lens history (`compose/lens-history.ts`), which
+ * needs the whole list rather than its head, and which must ask the ENTITLEMENT
+ * question, not the freshness one: a lens is EMITTED with no status gate at all
+ * (`compose.ts`'s current-turn branch gates only on `graph_hash_at_run`), so a
+ * history built on the freshness filter would be blind to lenses that really
+ * shipped — see that file's fact-set note.
+ */
+export function orderClaimBearingRunAnalysisFactsNewestFirst(
+  priorFacts: readonly HandlerFact[],
+): readonly SelectedRunAnalysisFact[] {
+  return orderRunAnalysisFacts(priorFacts, { requireSuccessfulStatus: false });
+}
+
+/** The shared newest-first pick: the head of {@link orderRunAnalysisFacts}. */
+function selectNewestRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+  opts: { readonly requireSuccessfulStatus: boolean },
+): SelectedRunAnalysisFact | null {
+  return orderRunAnalysisFacts(priorFacts, opts)[0] ?? null;
 }
 
 function assertExhaustive(value: never): never {
@@ -339,9 +483,17 @@ function assertExhaustive(value: never): never {
 }
 
 /**
- * Validate post-derivation invariants. Returns null on pass, or an
- * invariant-violation reason on fail. Hard violations cause the caller
- * to fall back to 'unknown' and emit telemetry.
+ * A hard-invariant violation names the freshness value the enforcer must
+ * coerce the derivation to. The reason is always overwritten with
+ * 'invariant_failed' so telemetry surfaces the enforcement.
+ */
+interface HardInvariantViolation {
+  readonly coerce_to: AnalysisFreshness;
+}
+
+/**
+ * Validate post-derivation invariants. Returns null on pass, or the
+ * coercion the enforcer must apply on fail.
  *
  * Soft invariants (monotonicity, previous-fresh) are NOT enforced here
  * because the previous-turn outcome is not reliably persisted yet
@@ -349,7 +501,7 @@ function assertExhaustive(value: never): never {
  */
 function checkHardInvariants(
   derivation: FreshnessDerivation,
-): FreshnessReason | null {
+): HardInvariantViolation | null {
   // Invariant 1: enum exhaustiveness. TypeScript already enforces this at
   // compile time via the union type, but a runtime guard catches any
   // sneaky `as unknown` upstream.
@@ -363,15 +515,30 @@ function checkHardInvariants(
       assertExhaustive(derivation.freshness);
   }
 
-  // Invariant 2: if both hashes are present, freshness must be 'fresh'
-  // or 'stale' — never 'unknown'. Unknown should only fire when data is
-  // genuinely missing.
+  // Invariant 2 (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
+  // construction. If both hashes are present AND equal, the verdict MUST be
+  // 'fresh' — a run's own response can never be stale versus the hash it just
+  // analysed. Checked BEFORE invariant 3 so an identical-hash 'unknown' also
+  // lands on 'fresh' (the hashes prove freshness; 'unknown' would discard
+  // that proof). Coerce to 'fresh', never 'unknown'/'stale'.
+  if (
+    derivation.graph_hash_at_run !== null &&
+    derivation.current_graph_hash !== null &&
+    derivation.graph_hash_at_run === derivation.current_graph_hash &&
+    derivation.freshness !== 'fresh'
+  ) {
+    return { coerce_to: 'fresh' };
+  }
+
+  // Invariant 3: if both hashes are present (and, per invariant 2, differ),
+  // freshness must be 'fresh' or 'stale' — never 'unknown'. Unknown should
+  // only fire when data is genuinely missing.
   if (
     derivation.graph_hash_at_run !== null &&
     derivation.current_graph_hash !== null &&
     derivation.freshness === 'unknown'
   ) {
-    return 'invariant_failed';
+    return { coerce_to: 'unknown' };
   }
 
   return null;
@@ -391,13 +558,26 @@ function checkHardInvariants(
  *
  * Option-identity guard (optional `currentGraphOptionIds`, gated by
  * `cee.optionIdentityFreshnessGuard` at the call sites): when provided, a
- * `fresh` or hash-impossible `unknown` verdict is downgraded to `stale`
- * (reason `analysed_options_diverged`) if the analysed option identities on the
+ * hash-impossible `unknown` verdict is downgraded to `stale` (reason
+ * `analysed_options_diverged`) if the analysed option identities on the
  * selected fact no longer match the current graph's option IDs. This fails
  * closed on the recovered-session / unparseable-graph paths the hash cannot
  * reach. Passing `undefined` (the default — flag off) skips the guard entirely,
  * so behaviour is byte-identical to the two-argument form. `none` and already-
  * `stale` verdicts, and indeterminate option data, are left untouched.
+ *
+ * INVARIANT (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
+ * construction. The guard is deliberately NOT consulted on the hash-proven
+ * `fresh` path: the analysis-affecting graph hash already includes
+ * options[].id, so equal hashes prove the option set is unchanged — whereas
+ * the analysed identifiers on the fact (enrichment.option_comparison[]
+ * .option_id / leading_option_id) come from the PLoT enrichment namespace and
+ * can legitimately differ from graph option IDs on byte-identical input. The
+ * former "defence-in-depth check on the fresh path" compared those two
+ * namespaces and stamped a run's OWN response stale with identical hashes on
+ * both sides (verified live, 16 Jul). `enforceInvariants` backstops this
+ * structurally: a non-fresh verdict with equal non-null hashes is coerced to
+ * `fresh`.
  *
  * Caller is responsible for emitting the `analysis_freshness.derived`
  * telemetry event with the returned derivation. The function does not
@@ -464,13 +644,17 @@ export function deriveAnalysisFreshness(
   }
 
   // Option-identity guard. Only engaged when the caller threaded current graph
-  // option IDs (flag on) AND the hash path could not already prove staleness
-  // (`fresh`, or the hash-impossible `unknown` paths). A genuine divergence
-  // fails closed to `stale`. `undefined` (flag off) → skip → byte-identical.
-  if (
-    currentGraphOptionIds !== undefined &&
-    (base.freshness === 'fresh' || base.freshness === 'unknown')
-  ) {
+  // option IDs (flag on) AND the hash comparison was IMPOSSIBLE (the `unknown`
+  // paths: legacy fact missing hash / current graph hash unavailable). A
+  // genuine divergence fails closed to `stale`. `undefined` (flag off) → skip
+  // → byte-identical.
+  //
+  // The guard MUST NOT run on the `fresh` path (identical-hash ⇒ fresh, by
+  // construction — see the function docstring): equal hashes already prove the
+  // option set unchanged, and the enrichment-namespace identifiers this guard
+  // compares can differ from graph option IDs on byte-identical input, which
+  // stamped a run's own response stale in production (F10).
+  if (currentGraphOptionIds !== undefined && base.freshness === 'unknown') {
     const verdict = compareAnalysedOptionIdentity(
       extractAnalysedOptionIds(selected.fact),
       extractAnalysedLeaderId(selected.fact),
@@ -487,8 +671,13 @@ export function deriveAnalysisFreshness(
 /**
  * Run the hard-invariant enforcer on a candidate derivation. Returns
  * the derivation unchanged when invariants hold; otherwise returns a
- * coerced derivation with `freshness: 'unknown'` and
- * `reason: 'invariant_failed'`.
+ * coerced derivation with the violation's mandated freshness and
+ * `reason: 'invariant_failed'`:
+ *   - identical non-null hashes but not 'fresh' → coerced to 'fresh'
+ *     (identical-hash ⇒ fresh, by construction — F10 root); NEVER 'stale',
+ *     and never 'unknown' (which would discard the hashes' proof);
+ *   - differing non-null hashes but 'unknown' → coerced to 'unknown'
+ *     with the violation marker (NEVER 'stale').
  *
  * Exported for test injection — production code paths reach this only
  * via the regular `deriveAnalysisFreshness` decision tree (which is
@@ -501,13 +690,13 @@ export function enforceInvariants(
 ): FreshnessDerivation {
   const violation = checkHardInvariants(derivation);
   if (violation === null) return derivation;
-  // Hard invariant failed — fall back to 'unknown' (NEVER 'stale') and
+  // Hard invariant failed — coerce to the violation's mandated freshness and
   // overwrite the reason with the violation marker. Caller checks for
   // reason === 'invariant_failed' to emit the
   // analysis_freshness.invariant_failed telemetry event.
   return {
     ...derivation,
-    freshness: 'unknown',
+    freshness: violation.coerce_to,
     reason: 'invariant_failed',
   };
 }

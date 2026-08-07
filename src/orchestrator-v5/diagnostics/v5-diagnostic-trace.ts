@@ -47,6 +47,7 @@
  * threads it onto the BoundaryError wire envelope.
  */
 
+import type { MayNameLeadingOptionProvenance } from '../context/claim-safety-read.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import type {
   DiagnosticTrace,
@@ -58,11 +59,14 @@ import {
 } from '../../orchestrator/pipeline/diagnostic-trace.js';
 import type { PipelineOutcome } from '../../cee/unified-pipeline/types.js';
 import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
+import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type { CommitResult } from '../commit.js';
 import type {
   V5TurnTimings,
   DraftGraphTimings,
+  DraftGraphNumericTimingKey,
 } from '../telemetry/turn-timings.js';
+import { DRAFT_GRAPH_NUMERIC_TIMING_KEYS } from '../telemetry/turn-timings.js';
 import { config } from '../../config/index.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -82,8 +86,36 @@ export interface V5BenchmarkingTimings {
     persistence_ms?: number;
     finalisation_ms?: number;
     total_handler_duration_ms?: number;
+    // ── Full draft substage detail (CEE_DRAFT_SUBSTAGE_DETAIL, default OFF).
+    // Absent entirely when the flag is off, so the historical payload is
+    // byte-identical. See DRAFT_GRAPH_NUMERIC_TIMING_KEYS for why these
+    // exist: without them the draft's non-LLM time is an unattributable
+    // residual. Measured on staging 2026-07-18, these five sum to ~29 ms
+    // against a ~62,500 ms LLM call — the point of emitting them is to make
+    // that ratio VISIBLE rather than assumed.
+    total_ms?: number;
+    normalise_ms?: number;
+    enrich_ms?: number;
+    repair_llm_ms?: number;
+    repair_deterministic_ms?: number;
+    threshold_sweep_ms?: number;
+    // v12 (lean-draft contract): Stage 4.5 post-draft coaching pass.
+    coaching_pass_ms?: number;
+    package_ms?: number;
+    boundary_ms?: number;
   };
 }
+
+/**
+ * Trace-surface names for the pipeline's numeric timing keys. Only the two
+ * historically-renamed keys need an entry; everything else passes through
+ * under its own name. Keyed by `DraftGraphNumericTimingKey` so a new
+ * pipeline timing key cannot be added without TypeScript checking it here.
+ */
+const TRACE_KEY_RENAMES: Partial<Record<DraftGraphNumericTimingKey, string>> = {
+  parse_llm_ms: 'llm_call_ms',
+  validation_pipeline_ms: 'validation_ms',
+};
 
 export interface V5CorrelationIds {
   request_id: string;
@@ -155,11 +187,104 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
    */
   coaching_delivery?: V5CoachingDelivery;
   /**
+   * T1 claim safety, made observable at the wire (ROADMAP 1.233). Stamped by
+   * route-v2 on every dispatch family from the values it already holds; see
+   * {@link V5ClaimSafety}.
+   */
+  claim_safety?: V5ClaimSafety;
+  /**
    * Schema version of the V5 trace envelope itself (NOT a prompt /
    * grammar version). Bumped on any breaking shape change. Exporters
    * read this to choose the right field projection.
    */
   trace_version: 1;
+}
+
+/**
+ * T1 claim safety as the WIRE can see it. ROADMAP 1.233.
+ *
+ * WHY THIS EXISTS. Every claim-safety mechanism this programme has shipped is
+ * server-side: the persisted verdict, the Layer-2 projection gate, and the
+ * Layer-3 egress alarm all live in logs. Three consecutive live acceptance
+ * walks were therefore forced to infer the mechanism from prose, and the
+ * POST-#713 walk hit the wall that inference always hits:
+ *
+ *   - it proved the REPLACE branch ONLY because that branch substitutes a
+ *     byte-identifiable exported constant;
+ *   - it recorded `unchanged` as "indistinguishable from 'gate never ran' at
+ *     the wire";
+ *   - it recorded the APPEND branch as **UNVERIFIED — never exercised**, and
+ *     named a telemetry read as the cheapest thing that would settle it;
+ *   - and on non-execute turns it could not use the alarm at all, because the
+ *     permission was the hardcoded `true` this same roadmap row removes.
+ *
+ * Two bounded scalars close all four. This is DIAGNOSTIC ONLY — it rides the
+ * flag-gated `_diagnostic_trace`, never `response`, and no product behaviour
+ * reads it. It is deliberately NOT a second derivation: both members are
+ * stamped from values route-v2 already holds for the egress guard.
+ *
+ * BOUNDED BY CONSTRUCTION (this is the cardinality contract): one boolean and
+ * one four-valued nullable enum. No ids, no labels, no free text, nothing that
+ * could carry the very claim it reports on.
+ */
+export interface V5ClaimSafety {
+  /**
+   * The permission the Layer-3 egress guard was armed with on this turn —
+   * the SAME value passed to `sanitiseOlumiResponseForEgress`, not a re-read.
+   * `false` = the persisted verdict withheld the leading-option claim.
+   */
+  may_name_leading_option: boolean;
+  /**
+   * WHERE the boolean above came from — the discriminator that makes it
+   * FALSIFIABLE.
+   *
+   * ⭐ WHY. Until 2026-07-27, a `true` meaning *"the scenario's newest analysis
+   * PERMITTED naming a leader"* and a `true` meaning *"no analysis was in the
+   * 20-turn window I was handed"* were **the same wire byte**. That is the
+   * reason the acceptance walk which uncovered the window-scope defect could
+   * not construct a valid control, and why it reached for a turn-shape
+   * hypothesis that its own `false` control refuted. A field that reads the
+   * same for "permitted" and for "blind" is not evidence.
+   *
+   *   - `scenario_fact`         — a `run_analysis` fact was selected and its
+   *                               verdict read. The value describes a real
+   *                               analysis, whichever way it went.
+   *   - `no_analysis_exists`    — no selectable analysis anywhere in the
+   *                               scenario. The honest `true`.
+   *   - `fail_closed_truncated` — the scenario-scoped read degraded AND the
+   *                               window was provably truncated, so "no
+   *                               analysis" was unproven and the turn withheld.
+   *
+   * ADDITIVE. `_diagnostic_trace` is stripped before the response schema
+   * validates and re-attached afterwards (route-v2), so a new key breaks no
+   * contract and older consumers drop it silently.
+   *
+   * `fail_closed_truncated` appearing at any volume is an ALARM, not noise: it
+   * means the scenario-scoped fact read is failing in production.
+   */
+  // ⚠ DERIVED, NOT RE-LISTED (2026-07-27). This union used to be a hand-typed
+  // copy of `MayNameLeadingOptionProvenance`, and route-v2.ts carried a THIRD
+  // copy. Adding `fail_closed_uninterpretable` at the source would have left
+  // both copies silently narrower than the values that actually flow — the
+  // mirror defect (CLAUDE.md trap #12) applied to a type, where the compiler
+  // reports it as an error at the consumer rather than at the stale list.
+  // Importing the type makes a new provenance state propagate for free.
+  verdict_provenance: MayNameLeadingOptionProvenance | null;
+  /**
+   * Which branch the Layer-2 withheld-explanation gate took, or `null` when it
+   * did not run on this turn (non-explanation handler, permitted verdict, or a
+   * dispatch family that has no such gate).
+   *
+   * Typed as the string union rather than importing
+   * `WithheldExplanationReason` so this diagnostics module stays free of a
+   * compose-layer dependency; the drift risk is covered by the compile-time
+   * assignability check at the route seam, where the real type is in scope.
+   */
+  withheld_projection_reason:
+    | 'leader_claim_replaced'
+    | 'disclosure_appended'
+    | 'unchanged'
+    | null;
 }
 
 export type V5DiagnosticExitPath =
@@ -169,7 +294,124 @@ export type V5DiagnosticExitPath =
   | 'edit_graph'
   | 'system_event'
   | 'frame_no_brief_guard'
+  // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta intake
+  // guard: a question TO the assistant about the process (the product's
+  // own pre-analysis spark prompts, or a narrowly-matched typed variant)
+  // on the empty-canvas frame state is ANSWERED deterministically instead
+  // of being captured as a decision brief by the draft/clarify pipeline.
+  // Zero LLM calls, no commit (scenario stays fresh so the user's next
+  // real brief still drafts).
+  | 'process_meta_intake'
+  // S2-L1 — typed readiness/coaching intake arm: a `source='chip_click'` +
+  // `chip.action_type='analysis_readiness'` turn consumed on its TYPE and
+  // answered with readiness/coaching keyed on the persisted graph (fresh
+  // canvas → the same honest checklist as process_meta_intake; populated →
+  // deterministic readiness coaching). Zero LLM calls, no commit.
+  | 'readiness_intake'
+  // ROADMAP 2.63 C2 — deterministic honest decline when an explicit
+  // generate (generate_model/explicit_generate wire flag) arrives but no
+  // usable brief exists anywhere (message, persisted brief_text, recent
+  // user turns). Distinct from frame_no_brief_guard by design: the user
+  // explicitly asked to generate, so the copy names what is missing.
+  | 'explicit_generate_no_brief'
+  // ROADMAP 2.63 C4 — deterministic decline-with-redraft-offer when an
+  // explicit generate (or a stale build-offer consent) arrives on a
+  // scenario that already has a graph (request graph_state or persisted).
+  // The turn commits a `draft_graph` (redraft) pending + offer chip; the
+  // consent turn resumes through the draft-offer pre-route and exits as
+  // a normal `draft_graph`.
+  | 'explicit_generate_graph_present'
+  // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — flag-gated
+  // (CEE_CLARIFY_V2_ENABLED) draft-preflight clarification response: the
+  // deterministic brief rubric found the brief thin and the route replied
+  // with up to 3 tap-able questions instead of dispatching the draft.
+  // Zero LLM calls on this path.
+  | 'clarify_v2'
+  // ROADMAP 1.203 R2(d) / A2-ASKS 1.193c — the deterministic typed add-option
+  // compound transaction (chip.intent='add_option' → held graph_management batch,
+  // route-v2 S3 §5). Zero LLM calls (`llm_calls:[]`), no LLM edit round-trip; it
+  // was previously mis-stamped `edit_graph` (the LLM edit lane's label), so the
+  // wire `exit_path` could not distinguish the 1.7s deterministic transaction from
+  // the 13.6s LLM edit. Its own member, mirroring the other zero-LLM exits
+  // (process_meta_intake / readiness_intake / clarify_v2). External dashboards
+  // that bucket by exit_path gain a new `add_option_transaction` bucket.
+  | 'add_option_transaction'
   | 'draft_graph_error';
+
+/**
+ * Edit-lane LLM call attribution (S3-L6 / F-5). The edit_graph turn calls the
+ * LLM once (plus repair attempts), but its exit path builds only the minimal
+ * trace, whose `llm_calls[]` came exclusively from `V5TurnTimings` — a shape
+ * the edit dispatch never captures. The result: `_diagnostic_trace.llm_calls`
+ * was structurally `[]` on every edit turn that demonstrably called the LLM,
+ * so diagnosing an edit meant reading Render logs. This carries the edit LLM
+ * call's real, already-captured attribution (`EditGraphTraceDiagnostics` R7
+ * accumulators + `EditGraphResult.latencyMs`) into the trace's `llm_calls[]`
+ * — the same "record the real call" shape the draft (`toolLLMTelemetry`) and
+ * turn_executor (`V5TurnTimings`) paths already emit.
+ *
+ * Present ONLY when the edit LLM actually ran: the edit dispatch builds this
+ * from the diagnostics of a returned edit result, and omits it entirely on
+ * deterministic (no-LLM) edit exits (constraint shortcut, deterministic
+ * value pre-route), so a no-LLM edit still honestly reports `llm_calls: []`.
+ * `input_tokens` is the R7 estimate (`input_tokens_est`) summed across repair
+ * attempts; `latency_ms` is the handler's wall-clock (includes repair loop),
+ * not a single provider round-trip. `model` is `null` only when the adapter
+ * genuinely did not expose one (test doubles) — an honest sentinel, mapped to
+ * `'unknown'` at record time (mirrors the routing-call convention).
+ */
+export interface EditGraphLlmCallTelemetry {
+  readonly provider: string;
+  readonly model: string | null;
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+  readonly latency_ms: number;
+  readonly stop_reason: string | null;
+  readonly repair_attempts: number;
+}
+
+/**
+ * S3-L6 / F-5 — map a returned edit result's already-captured R7 LLM
+ * diagnostics into edit-lane call attribution, so an edit turn's
+ * `_diagnostic_trace.llm_calls[]` carries the call it made (previously
+ * structurally empty on every edit turn — diagnosis-hostile).
+ *
+ * Lives HERE (the trace assembly), not in `edit-graph.ts`: 19 dispatch test
+ * suites `vi.mock` the whole `tools/edit-graph.js` module with a bare factory,
+ * which would strand a new export there (trap-12 — a mock factory REPLACES the
+ * module). This module is mocked by no test, and it already type-imports the
+ * sibling `draft-graph.js` result shape — so it is the natural, mock-safe home.
+ *
+ * Returns `undefined` when the edit LLM did NOT run (deterministic exits:
+ * constraint shortcut, deterministic value pre-route, and any partial result
+ * with no diagnostics), so a no-LLM edit still reports `llm_calls: []` honestly
+ * rather than a fabricated zero-token call. The "did it run" signal is the R7
+ * accumulators: on an LLM path `model` is the adapter model and/or tokens are
+ * summed; on a deterministic path `model` stays `null` and both sums are 0.
+ *
+ * `provider` is the resolved adapter name (the dispatch knows it; the R7
+ * diagnostics do not carry it).
+ */
+export function extractEditLlmCallTelemetry(
+  result: Pick<EditGraphResult, 'diagnostics' | 'latencyMs'>,
+  provider: string,
+): EditGraphLlmCallTelemetry | undefined {
+  const diag = result.diagnostics;
+  if (!diag) return undefined;
+  const inputTokens = diag.input_tokens_est ?? 0;
+  const outputTokens = diag.output_tokens ?? 0;
+  const llmRan = diag.model != null || inputTokens > 0 || outputTokens > 0;
+  if (!llmRan) return undefined;
+  return {
+    provider,
+    model: diag.model ?? null,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    latency_ms: result.latencyMs,
+    stop_reason: diag.stop_reason ?? null,
+    repair_attempts: diag.repair_attempts ?? 0,
+  };
+}
 
 // ─── Inputs ────────────────────────────────────────────────────────────────
 
@@ -194,6 +436,13 @@ export interface BuildMinimalV5DiagnosticTraceInput {
   /** Copy-source delivery diagnostics (Scope C). Surfaced when the
    *  post-analysis advice gate produced the response. */
   readonly coachingDelivery?: V5CoachingDelivery;
+  /**
+   * Edit-lane LLM call attribution (S3-L6 / F-5). Present only when the
+   * edit_graph turn actually invoked the LLM; recorded into `llm_calls[]`
+   * with role `edit_graph`. Omitted on deterministic edit exits so a no-LLM
+   * edit honestly reports `llm_calls: []`. See `EditGraphLlmCallTelemetry`.
+   */
+  readonly editLlmCall?: EditGraphLlmCallTelemetry;
 }
 
 export interface BuildErrorV5DiagnosticTraceInput {
@@ -272,6 +521,13 @@ export function buildMinimalV5DiagnosticTrace(
   if (tt) {
     populateCollectorFromTurnTimings(collector, tt);
   }
+  // S3-L6 / F-5: record the edit-lane LLM call so an edit turn's trace carries
+  // the call it demonstrably made (previously always `[]` on this path). The
+  // edit dispatch supplies this ONLY when the LLM actually ran, so a
+  // deterministic edit still freezes an empty `llm_calls[]` honestly.
+  if (input.editLlmCall) {
+    populateCollectorFromEditTelemetry(collector, input.editLlmCall);
+  }
   const frozen = collector.freeze();
 
   const correlationIds: V5CorrelationIds = {
@@ -279,6 +535,10 @@ export function buildMinimalV5DiagnosticTrace(
     scenario_id: input.scenarioId,
     turn_id: input.turnId,
     graph_hash: safeGraphHash(input.graph) ?? undefined,
+    // Served routing prompt hash (when captured) — mirrors the draft_graph
+    // builder's correlation prompt_hash so a bundle can join a turn_executor
+    // turn to its prompt identity.
+    ...(tt?.routing_prompt_hash ? { prompt_hash: tt.routing_prompt_hash } : {}),
   };
 
   return assembleTrace({
@@ -442,17 +702,22 @@ function populateCollectorFromTurnTimings(
   collector: DiagnosticTraceCollector,
   turnTimings: V5TurnTimings,
 ): void {
-  // Synthetic routing-call record so the trace has a non-empty
-  // llm_calls[] for turn_executor turns. Provider / model details are
-  // not directly on V5TurnTimings; we fall back to "unknown" rather
-  // than guess. Token counts come from the routing call.
+  // Routing-call record so the trace has a non-empty llm_calls[] for
+  // turn_executor turns. All values are REAL data captured at the routing
+  // site (turn-executor's `if (timingsEnabled)` block): wall-clock latency,
+  // model, input/output tokens, cache split, and served-prompt identity.
+  // `model` falls back to 'unknown' ONLY when the routing layer genuinely did
+  // not expose it (test injectors / recovery) — an honest sentinel, not a
+  // fabricated id. This is the routing/orient LLM call; the awaited
+  // decision_review call (when it fired) is added as a SECOND entry below from
+  // its own threaded model/token attribution.
   if (turnTimings.routing_llm_ms != null || turnTimings.total_input_tokens != null) {
     collector.recordLLMCall({
       role: 'routing',
       provider: 'anthropic',
-      model: 'unknown',
+      model: turnTimings.routing_model ?? 'unknown',
       input_tokens: turnTimings.total_input_tokens ?? 0,
-      output_tokens: 0,
+      output_tokens: turnTimings.routing_output_tokens ?? 0,
       cache_read_tokens: turnTimings.cache_read_input_tokens ?? null,
       cache_creation_tokens: turnTimings.cache_creation_input_tokens ?? null,
       latency_ms: turnTimings.routing_llm_ms ?? 0,
@@ -460,7 +725,72 @@ function populateCollectorFromTurnTimings(
       thinking_enabled: false,
       error: null,
     });
+    if (turnTimings.routing_prompt_hash) {
+      collector.recordPromptIdentity({
+        task_id: 'routing',
+        prompt_id: turnTimings.routing_prompt_version ?? 'unknown',
+        version: turnTimings.routing_prompt_version ?? 'unknown',
+        hash: turnTimings.routing_prompt_hash,
+        source: 'pms',
+        is_staging: config.server.nodeEnv !== 'production',
+      });
+    }
   }
+
+  // Second llm_calls entry: the awaited decision_review enrichment call — the
+  // dominant analysis-turn LLM cost (~14 s on staging). Present only when the
+  // turn actually awaited a decision_review that RETURNED
+  // (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true), which is exactly when the
+  // executor co-sets `decision_review_ms` with the threaded model/provider/token
+  // usage — so every field below is REAL data, never fabricated for a call that
+  // did not happen. `latency_ms` is the executor's wall-clock for the await
+  // (includes adapter/parse/attach), not the LLM's self-reported figure. The
+  // `?? ` fallbacks are type-narrowing only: the four fields are co-set, so they
+  // are never actually reached when the entry is emitted.
+  if (turnTimings.decision_review_ms != null) {
+    collector.recordLLMCall({
+      role: 'decision_review',
+      provider: turnTimings.decision_review_provider ?? 'unknown',
+      model: turnTimings.decision_review_model ?? 'unknown',
+      input_tokens: turnTimings.decision_review_input_tokens ?? 0,
+      output_tokens: turnTimings.decision_review_output_tokens ?? 0,
+      cache_read_tokens: null,
+      cache_creation_tokens: null,
+      latency_ms: turnTimings.decision_review_ms,
+      stop_reason: null,
+      thinking_enabled: false,
+      error: null,
+    });
+  }
+}
+
+/**
+ * S3-L6 / F-5 — record the edit-lane LLM call into `llm_calls[]`. Called only
+ * when the edit dispatch confirmed the LLM ran (see `EditGraphLlmCallTelemetry`
+ * and `extractEditLlmCallTelemetry`). Every value is REAL data already captured
+ * at the edit site (R7 diagnostics + handler wall-clock); `model` falls back to
+ * the `'unknown'` sentinel only when the adapter genuinely did not expose one
+ * (test doubles), never a fabricated id. Cache-token split and thinking flag
+ * are not threaded through the edit result today, so they are recorded as
+ * `null`/`false` rather than guessed.
+ */
+function populateCollectorFromEditTelemetry(
+  collector: DiagnosticTraceCollector,
+  editLlmCall: EditGraphLlmCallTelemetry,
+): void {
+  collector.recordLLMCall({
+    role: 'edit_graph',
+    provider: editLlmCall.provider,
+    model: editLlmCall.model ?? 'unknown',
+    input_tokens: editLlmCall.input_tokens,
+    output_tokens: editLlmCall.output_tokens,
+    cache_read_tokens: null,
+    cache_creation_tokens: null,
+    latency_ms: editLlmCall.latency_ms,
+    stop_reason: editLlmCall.stop_reason,
+    thinking_enabled: false,
+    error: null,
+  });
 }
 
 function buildBenchmarkingForDraftGraph(
@@ -468,13 +798,41 @@ function buildBenchmarkingForDraftGraph(
 ): V5BenchmarkingTimings {
   const totalDurationMs = Math.max(0, Date.now() - input.startedAt);
   const dgt = input.draftResult.draftGraphTimings;
+
+  // Flag OFF: the historical four-key subset, emitted exactly as before so
+  // the wire payload is byte-identical. Deliberately NOT derived — this
+  // branch is frozen legacy shape, and freezing it is what makes the
+  // flag-off guarantee checkable.
+  if (!config.features.draftSubstageDetail) {
+    return {
+      total_duration_ms: totalDurationMs,
+      substage_timings: {
+        llm_call_ms: dgt?.parse_llm_ms,
+        parse_ms: dgt?.parse_ms,
+        repair_ms: dgt?.repair_ms,
+        validation_ms: dgt?.validation_pipeline_ms,
+        persistence_ms: input.persistenceMs,
+        total_handler_duration_ms: input.draftResult.latencyMs,
+      },
+    };
+  }
+
+  // Flag ON: DERIVE the substage set from the pipeline's own key list, so a
+  // timing added to the pipeline cannot be silently dropped here. Undefined
+  // values are omitted rather than emitted as `undefined` so a stage that
+  // genuinely did not run is distinguishable from one that ran in 0 ms —
+  // an honesty property, not a cosmetic one.
+  const derived: Record<string, number> = {};
+  for (const key of DRAFT_GRAPH_NUMERIC_TIMING_KEYS) {
+    const value = dgt?.[key];
+    if (typeof value !== 'number') continue;
+    derived[TRACE_KEY_RENAMES[key] ?? key] = value;
+  }
+
   return {
     total_duration_ms: totalDurationMs,
     substage_timings: {
-      llm_call_ms: dgt?.parse_llm_ms,
-      parse_ms: dgt?.parse_ms,
-      repair_ms: dgt?.repair_ms,
-      validation_ms: dgt?.validation_pipeline_ms,
+      ...derived,
       persistence_ms: input.persistenceMs,
       total_handler_duration_ms: input.draftResult.latencyMs,
     },

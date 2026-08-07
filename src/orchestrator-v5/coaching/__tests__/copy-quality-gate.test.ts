@@ -48,20 +48,31 @@ describe('gateAssumptionFragment', () => {
     rejectsWith(gateAssumptionFragment, 'a'.repeat(200), 'too_long');
   });
 
-  it('rejects em dashes', () => {
-    rejectsWith(
-      gateAssumptionFragment,
+  // RC4 (2026-07-15 session RCA): em/en dashes are a STYLE offence — the
+  // proportionate remedy is a deterministic in-place rewrite, never a
+  // rejection that costs the user the generated coaching. The previous
+  // versions of these two tests pinned the rejection; they now pin the
+  // rewrite.
+  it('accepts em dashes with the dash rewritten to a comma join', () => {
+    const r = gateAssumptionFragment(
       'team capacity may be a bottleneck — review headcount before commit',
-      'em_dash',
     );
+    expect(r.accept).toBe(true);
+    expect(r.text).toBe(
+      'team capacity may be a bottleneck, review headcount before commit',
+    );
+    expect(r.styleRewritten).toBe(true);
   });
 
-  it('rejects en dashes', () => {
-    rejectsWith(
-      gateAssumptionFragment,
+  it('accepts numeric-range en dashes rewritten to "to"', () => {
+    const r = gateAssumptionFragment(
       'cost may overrun by 20–30% under stress scenarios with vendor risk',
-      'em_dash',
     );
+    expect(r.accept).toBe(true);
+    expect(r.text).toBe(
+      'cost may overrun by 20 to 30% under stress scenarios with vendor risk',
+    );
+    expect(r.styleRewritten).toBe(true);
   });
 
   it('rejects internal-id prefix tokens (fac_)', () => {
@@ -423,10 +434,20 @@ describe('gateFullResponse', () => {
     rejectsWith(gateFullResponse, text, 'schema_term');
   });
 
-  it('rejects responses with em dashes', () => {
+  it('accepts responses with em dashes, rewriting the dash in place (RC4)', () => {
+    // The 2026-07-15 live session lost its entire drafted coaching summary
+    // to this gate over ONE em dash (reject_reason 'em_dash' →
+    // strengthen_item_label fallback). Style offences are now rewritten,
+    // never fatal to the candidate.
     const text =
       "I've built a decision model — the routes weigh delivery speed against quality risk, with assumptions to consider. Next, run the analysis to validate the options.";
-    rejectsWith(gateFullResponse, text, 'em_dash');
+    const r = gateFullResponse(text);
+    expect(r.accept).toBe(true);
+    expect(r.text).toBe(
+      "I've built a decision model, the routes weigh delivery speed against quality risk, with assumptions to consider. Next, run the analysis to validate the options.",
+    );
+    expect(r.styleRewritten).toBe(true);
+    expect(r.text).not.toMatch(/[–—]/);
   });
 
   it('accepts a response containing a legitimate user-facing snake-case label', () => {

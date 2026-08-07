@@ -14,7 +14,6 @@ vi.mock("../../src/config/index.js", () => ({
   config: {
     cee: {
       draftArchetypesEnabled: false,
-      draftStructuralWarningsEnabled: false,
       pipelineCheckpointsEnabled: false,
     },
   },
@@ -50,7 +49,10 @@ vi.mock("../../src/cee/guidance/index.js", () => ({
 }));
 
 vi.mock("../../src/cee/structure/index.js", () => ({
-  detectStructuralWarnings: vi.fn(),
+  // Structural-warning detection is UNCONDITIONAL since 2026-07-20 (O-7
+  // wave 2: CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED deleted) — the mock must
+  // return the real empty shape, not undefined.
+  detectStructuralWarnings: vi.fn().mockReturnValue({ warnings: [], uncertainNodeIds: [] }),
   detectUniformStrengths: vi.fn(),
   detectStrengthClustering: vi.fn(),
   detectSameLeverOptions: vi.fn(),
@@ -87,9 +89,9 @@ vi.mock("../../src/cee/llm-output-store.js", () => ({
   buildLLMRawTrace: vi.fn(),
 }));
 
-// Mock context pack (assembleContextPack computes hashes over pipeline state)
+// Mock context pack (assembleDraftProvenanceDescriptor computes hashes over pipeline state)
 vi.mock("../../src/context/context-pack.js", () => ({
-  assembleContextPack: vi.fn().mockReturnValue({
+  assembleDraftProvenanceDescriptor: vi.fn().mockReturnValue({
     pipelinePath: "unified",
     context_hash: "test-hash",
   }),
@@ -176,7 +178,6 @@ function makeCtx(graphOverride?: any, coachingOverride?: any): any {
     checkpointsEnabled: false,
     validationSummary: undefined,
     structuralMeta: undefined,
-    clarifierResult: undefined,
     quality: undefined,
     archetype: undefined,
     draftWarnings: [],

@@ -56,7 +56,8 @@ function meta(coaching_state: CoachingState | null): CommitMetadata {
   };
 }
 
-const RESPONSE = composeDirectAnswerResponse({ assistant_text: 'hi', stage: 'frame' });
+const RESPONSE = composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'hi', stage: 'frame' });
 
 /**
  * In-memory SessionStore that records each turn's coaching_state as a wrapped

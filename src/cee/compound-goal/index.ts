@@ -41,6 +41,20 @@ export {
 } from "./deadline-extractor.js";
 
 export {
+  deriveRiskPolarity,
+  polaritySafeOperator,
+  contradictedRiskPolarity,
+  partitionRiskFramedInversions,
+  type RiskPolarity,
+} from "./risk-polarity.js";
+
+export {
+  buildBoundDisplayName,
+  buildReductionDisplayName,
+  cleanConstraintSubject,
+} from "./constraint-display-name.js";
+
+export {
   mapQualitativeToProxy,
   type QualitativeProxyResult,
   QUALITATIVE_PROXY_MAPPINGS,

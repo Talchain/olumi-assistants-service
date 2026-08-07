@@ -297,10 +297,13 @@ describe('post-analysis contract — row 6: evidence_gap no-anchor honesty', () 
       freshness: 'fresh',
     });
     // evidence_gap requires EITHER analysisReady OR top_drivers; with
-    // neither, it falls through to data_unavailable_for_class so the
-    // caller (turn-executor) reaches the fresh-analysis-followup-guard
-    // which emits the honest recap. The honesty contract is preserved
-    // here by the gate refusing to invent advice.
+    // neither, it falls through to data_unavailable_for_class.
+    // ⚠ ROADMAP 2.229 — the sentence here used to continue "...so the caller
+    // (turn-executor) reaches the fresh-analysis-followup-guard which emits
+    // the honest recap". That guard is RETIRED (founder ruling) and its
+    // module deleted; the caller now reaches `routeWithToolUse`. The property
+    // THIS test asserts is unchanged and is about the gate alone: it refuses
+    // to invent advice it has no data for.
     expect(out.matched).toBe(false);
     if (!out.matched) {
       expect(out.reason).toBe('data_unavailable_for_class');
@@ -674,14 +677,47 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
       }
     });
 
-    it(`mutation precedence: ${label} → stale guard rejects with mutation_signal`, () => {
+    it(`mutation precedence: ${label} → stale guard honours the shared flip-overlap exception`, () => {
       const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      // Stale guard uses raw hasMutationSignal (no strip exception), so
-      // any verb-to-X / numeric / from-to clause forces fall-through.
-      expect(out.matched).toBe(false);
-      if (!out.matched) expect(out.reason).toBe('mutation_signal');
+      // Mission 1 (#195): the stale guard now carries the SAME
+      // strip-and-recheck exception as the advice gate — the outcome is
+      // either mutation_signal (an independent edit clause survives the
+      // flip-pattern strip, e.g. numeric / concrete set) or a
+      // what_would_flip match via the exception. No other class can
+      // admit a mutation-signal phrase.
+      if (out.matched) {
+        expect(out.intent_class).toBe('what_would_flip');
+      } else {
+        expect(out.reason).toBe('mutation_signal');
+      }
     });
   }
+
+  // ── #195 parity lock: the one wouldMutations phrase whose mutation
+  // signal is PURE flip-overlap ("change the result to a draw" — no
+  // independent edit clause survives the strip) must now be treated
+  // identically by both guards: advice gate (fresh) matches via the
+  // exception, stale guard (stale) matches via the exception. Before
+  // Mission 1 the stale guard declined it `mutation_signal` and the
+  // question fell through to broad LLM routing with no staleness cue.
+  it('flip-overlap parity: "What would change the result to a draw?" matches BOTH guards via the shared exception', () => {
+    const message = 'What would change the result to a draw?';
+    const gate = tryPostAnalysisAdviceGate({
+      message,
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(gate.matched).toBe(true);
+    if (gate.matched) expect(gate.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
+    const guard = tryStaleRerunGuard({ message, freshness: 'stale' });
+    expect(guard.matched).toBe(true);
+    if (guard.matched) {
+      expect(guard.intent_class).toBe('what_would_flip');
+      expect(guard.mode).toBe('stale');
+      expect(guard.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
+    }
+  });
 
   // ── isAnalyticalQuestion delegation lock
   it('isAnalyticalQuestion inherits would-parity patterns via classifier delegation', () => {

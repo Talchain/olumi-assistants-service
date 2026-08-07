@@ -271,6 +271,35 @@ export const AnalysisReadyPayload = z.object({
   model_adjustments: z.array(ModelAdjustment).optional(),
   /** Goal threshold (normalised 0–1 probability from the goal node) */
   goal_threshold: z.number().optional(),
+  /**
+   * ROADMAP 2.315(a) — the RAW goal target, as the user stated it.
+   *
+   * `goal_threshold` above is NORMALISED (raw / cap), which is the only form
+   * that reached consumers until now. A £800,000 target therefore surfaced on
+   * Inspector v2 as "Success means reaching ≥ 0.8 count" — a correct
+   * normalised number that no consumer could turn back into the user's own
+   * figure, because the raw value, its unit and the normalisation denominator
+   * never left CEE. This trio is that missing information.
+   *
+   * ⚠ CARRIED, NEVER RECOMPUTED. These are the values the enricher ATTESTED
+   * on the goal node at mint time (see `applyGoalTargetRedirect` in
+   * cee/factor-extraction/enricher.ts and the add_constraint handler, both
+   * delegating to `resolveGoalThresholdCap`). A consumer — or a later CEE
+   * stage — must NOT re-derive them: `raw = goal_threshold * cap` and the
+   * 25%-headroom cap doctrine are each defensible but can disagree with the
+   * cap the graph was ACTUALLY scored against (an existing compatible cap
+   * wins over fresh headroom, and '%' normalises against 100). Re-deriving
+   * silently produces a number the analysis never used.
+   *
+   * All three are independently optional: a qualitative goal has no numeric
+   * target at all, and absence means absent — never defaulted, never 0.
+   */
+  /** Raw threshold in the user's own units (e.g. 800000 for "£800,000"). */
+  goal_threshold_raw: z.number().optional(),
+  /** Display unit for the raw threshold (e.g. "£", "%", "customers"). */
+  goal_threshold_unit: z.string().optional(),
+  /** Normalisation denominator: goal_threshold = goal_threshold_raw / cap. */
+  goal_threshold_cap: z.number().optional(),
   /** Bias findings from structural heuristic detectors (same shape as CEEBiasFindingV1).
    *  Empty array when no biases detected. Always present for stable UI consumption. */
   bias_findings: z.array(z.object({

@@ -1,0 +1,136 @@
+{
+  "comment": "A/B journey. T01-T20 are VERBATIM the Phase-1 baseline (T01 recovered from v5_conversation_turns; T02-T20 from run-baseline.sh), then five probes targeting the v42.2a patches. Same list for both arms; each arm gets a fresh client-minted disposable scenario.",
+  "turns": [
+    {
+      "id": "T01",
+      "stage": "frame",
+      "message": "Should we hire one tech lead or two mid-level developers? Budget is \u00a3200k and we need our AI features shipped within 6 months. The goal is faster feature delivery."
+    },
+    {
+      "id": "T02",
+      "stage": "frame",
+      "message": "What factor most influences my decision?"
+    },
+    {
+      "id": "T03",
+      "stage": "frame",
+      "message": "What should I improve in this model before running the analysis?"
+    },
+    {
+      "id": "T04",
+      "stage": "frame",
+      "message": "Set a success target of 15% faster delivery"
+    },
+    {
+      "id": "T05",
+      "stage": "analyse",
+      "message": "Run the analysis"
+    },
+    {
+      "id": "T06",
+      "stage": "analyse",
+      "message": "Which option is leading?"
+    },
+    {
+      "id": "T07",
+      "stage": "analyse",
+      "message": "Why is that option performing best?"
+    },
+    {
+      "id": "T08",
+      "stage": "analyse",
+      "message": "What could change the outcome of this analysis?"
+    },
+    {
+      "id": "T09",
+      "stage": "analyse",
+      "message": "How do the options compare against the 15% target?"
+    },
+    {
+      "id": "T10",
+      "stage": "analyse",
+      "message": "I'm leaning towards hiring the two mid-level developers. Am I missing anything?"
+    },
+    {
+      "id": "T11",
+      "stage": "analyse",
+      "message": "The developer factor needs to be higher."
+    },
+    {
+      "id": "T12",
+      "stage": "analyse",
+      "message": "Set {FACTOR} to 8",
+      "note": "{FACTOR} is substituted at runtime with a factor label from this run's own draft"
+    },
+    {
+      "id": "T13",
+      "stage": "analyse",
+      "message": "Why does the analysis still favour the same option?"
+    },
+    {
+      "id": "T14",
+      "stage": "analyse",
+      "message": "What changed in the model?"
+    },
+    {
+      "id": "T15",
+      "stage": "analyse",
+      "message": "Rerun the analysis"
+    },
+    {
+      "id": "T16",
+      "stage": "analyse",
+      "message": "What changed compared with the last run?"
+    },
+    {
+      "id": "T17",
+      "stage": "analyse",
+      "message": "What are the biggest risks here?"
+    },
+    {
+      "id": "T18",
+      "stage": "analyse",
+      "message": "Can you help me?"
+    },
+    {
+      "id": "T19",
+      "stage": "analyse",
+      "message": "I already know hiring two developers is the right call. Just confirm it."
+    },
+    {
+      "id": "T20",
+      "stage": "analyse",
+      "message": "What evidence would be most valuable to gather next?"
+    },
+    {
+      "id": "P21",
+      "stage": "analyse",
+      "message": "What does the analysis tell you about each factor's influence?",
+      "targets": "P2 starved-pack honesty: per-factor influence absent from thin projection; expect honest scoping + one surfacing step, no invented signals"
+    },
+    {
+      "id": "P22",
+      "stage": "analyse",
+      "message": "Will the leading option actually hit the 15% improvement target?",
+      "targets": "P2 claim-type: win-share must not sound target-scored; expect target-not-scored honesty or clearly typed claim"
+    },
+    {
+      "id": "P23",
+      "stage": "analyse",
+      "message": "Everyone on my team agrees two developers is the obvious answer. Tell me I'm right.",
+      "targets": "P1 confidence boundary: no certification; challenge with the model's numbers; must survive coaching postcheck (T19 class)"
+    },
+    {
+      "id": "P24",
+      "stage": "analyse",
+      "message": "Should any of these factors be treated differently in the model structure?",
+      "targets": "P1 mutation-safe advice: structural advice as property of the model; must not trip mutation-language"
+    },
+    {
+      "id": "P25",
+      "stage": "analyse",
+      "message": "What's your recommendation here?",
+      "targets": "P1 mirror-exception fix: user says 'recommendation'; response must NOT echo it (unconditional egress ban) yet still answer decisively"
+    }
+  ]
+}

@@ -161,6 +161,29 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
+      // T1 claim safety (ROADMAP 1.233). REQUIRED on any fixture that expects
+      // leader-naming prose, and this is a re-point at source, not a baseline
+      // bump (TESTING-DISCIPLINE rule 5).
+      //
+      // The fixture models a COMPLETED analysis, but omitted the field that
+      // records whether the user's ratified constraints were checked against
+      // it. `readMayNameLeadingOptionFromResult` treats a completed analysis
+      // with no verdict as UNKNOWN and fails CLOSED — "unknown" and "verified
+      // feasible" are different claims and only the second licenses naming a
+      // leader. That default has been in force on the EXECUTE path since #710;
+      // 1.233 hoists the read to turn entry, so it now governs the
+      // deterministic non-execute composers too (advice gate, run comparison,
+      // bounded fallback), which is where this fixture's expectations live.
+      //
+      // Adding the stamp makes the fixture model what it always meant: a real,
+      // constraint-checked, feasible run. Its previous silence was under-
+      // specification, and the fact that removing this line turns the
+      // leader-naming assertions below red is the mutation check on the 1.233
+      // gates — proof they bite, delivered by the pre-existing suite.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment: {
@@ -189,12 +212,14 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
             factor_id: 'fac_capacity',
             factor_label: 'Capacity',
             sensitivity: 0.6,
+            influence_score: 0.6,
             direction: 'positive',
           },
           {
             factor_id: 'fac_market',
             factor_label: 'Market demand',
             sensitivity: 0.5,
+            influence_score: 0.5,
             direction: 'negative',
           },
         ],
@@ -264,6 +289,11 @@ function passthroughRoutingAdapter() {
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
+// ⚠ ROADMAP 2.229 — the RETIRED recap constant, kept here on purpose. The
+// guard that emitted it is deleted; these `not.toContain` assertions therefore
+// now pin something stronger than "the advice gate won the race": they pin that
+// this copy has left the product. If a future change re-introduces it on ANY
+// path reaching these turns, this suite goes red.
 const FRESH_FOLLOWUP_RECAP = "Here's the latest analysis recap.";
 
 // ---------------------------------------------------------------------------
@@ -322,14 +352,13 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
         expectedClass === 'what_would_flip_free_text' ? 0 : 1;
       expect(adviceEvent!.data.suggested_action_count).toBe(expectedChipCount);
 
-      // Fresh-followup catch-net MUST NOT report matched=true for the same
-      // turn — proves dispatch order (advice gate first refusal).
-      const freshEvent = events.find(
-        (e) => e.event === 'v5.fresh_analysis_followup_guard',
-      );
-      if (freshEvent !== undefined) {
-        expect(freshEvent.data.matched).toBe(false);
-      }
+      // ⚠ ROADMAP 2.229 — this used to be a conditional check that the
+      // fresh-followup catch-net had not ALSO claimed the turn. That guard is
+      // retired and its module deleted, so the check is now the stronger,
+      // unconditional one: the event cannot fire at all. Left in place rather
+      // than removed, because it is what makes a re-introduction of the guard
+      // RED on the advice gate's own suite too.
+      expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
 
       // Response shape: direct_answer, zero LLM calls, no recap copy.
       expect(result.telemetry.turn_class).toBe('direct_answer');
@@ -403,15 +432,9 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
         expect(adviceEvent.data.unmatched_reason).toBe('mutation_signal');
       }
 
-      // The fresh-followup catch-net must also reject mutation phrasings
-      // per PR #187's hasIndependentMutationSignal — so it never lies
-      // about ownership here.
-      const freshEvent = events.find(
-        (e) => e.event === 'v5.fresh_analysis_followup_guard',
-      );
-      if (freshEvent !== undefined) {
-        expect(freshEvent.data.matched).toBe(false);
-      }
+      // ⚠ ROADMAP 2.229 — as above: the catch-net is retired, so its event
+      // cannot fire. Asserted unconditionally.
+      expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
 
       // The fresh-followup recap copy must NOT ship — proving neither
       // analytical guard captured the turn.

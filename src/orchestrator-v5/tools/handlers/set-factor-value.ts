@@ -31,6 +31,7 @@ import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator'
 import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
@@ -39,13 +40,21 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   applyFactorValueOperator,
+  canonicaliseUnit,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
-import { formatFactorChange, formatFactorValueSet } from './d1-shared/format-confirmation.js';
+import {
+  formatFactorChange,
+  formatFactorValueSet,
+  formatFactorValueUnchanged,
+  formatValueWithUnit,
+} from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
+import { log } from '../../../utils/telemetry.js';
 
 /**
  * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
@@ -60,6 +69,15 @@ import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
  * patch language). Suppressed on noop applies (raw_value unchanged) and
  * when no prior analysis existed (the model is being built; nothing to
  * stale yet).
+ *
+ * SCOPE — this "suppressed on noop" note governs THIS constant only.
+ * It never covered the receipt sentence (`changeText`), which ignored
+ * `noop` and narrated "Updated X from 0.8 to 0.8." until the Gate-1 fix
+ * below, nor the Step 5 coaching signal, which is a separate channel in
+ * `signals/coaching-signals.ts` and emitted its own false staleness
+ * claim ("This change affects the model...") on the same no-op turn.
+ * Three channels, three independent noop gates — do not read a
+ * suppression note on one as covering the others.
  */
 // V5 stale-aware explain recovery — the phrase "previous analysis"
 // is on the brief's hard-fail list. The narrative uses "last analysis"
@@ -72,7 +90,7 @@ import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 // foamy-bee UI handoff brief bans `recommended`, `winner`, `winning`
 // from user-facing copy; the noun form `recommendation` is treated
 // in scope by the same rule).
-const STALENESS_NARRATIVE =
+export const STALENESS_NARRATIVE =
   ' This makes the last analysis stale. Re-run analysis to see how this affects the results.';
 
 /**
@@ -90,8 +108,26 @@ const STALENESS_NARRATIVE =
  * dead documentation that risked silent double-normalisation) fail
  * validation loudly.
  */
+/**
+ * Graph node kinds this handler will set a value on. Exported as the SINGLE
+ * source of truth for `set_factor_value`'s target-kind capability: the
+ * execute-time gate below reads it, and
+ * `routing/__tests__/registry-handler-kind-drift.test.ts` projects it through
+ * `toEntityKind` and asserts the routing registry's `accepted_entity_kinds`
+ * matches exactly. Without that derivation the registry is a hand-maintained
+ * mirror of this list, and a mirror drifts silently in the direction that
+ * reads as green — refusing requests this handler would have served.
+ */
+export const SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS: readonly string[] = ['factor'];
+const SET_FACTOR_VALUE_ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(
+  SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS,
+);
+
+// W2E-2: `.finite()` on every number — factor values are contract-silent on
+// range (no bound invented) but NaN/±Infinity must never enter the graph.
+// A failure here rides the existing proposal-validation rejection mechanism.
 export const SetFactorValueValueSchema = z.union([
-  z.number(),
+  z.number().finite(),
   z
     .object({
       // V5 D1 golden-path closure (A3.1 Task 4): `raw_value` was
@@ -100,9 +136,9 @@ export const SetFactorValueValueSchema = z.union([
       // schema closes the silent-strip footgun: a proposal carrying
       // `{ value: 5, raw_value: 0.05 }` now fails Zod validation with
       // "Unrecognized key(s)" rather than silently picking `value`.
-      value: z.number(),
+      value: z.number().finite(),
       unit: z.string().optional(),
-      cap: z.number().optional(),
+      cap: z.number().finite().optional(),
     })
     .strict(),
 ]);
@@ -124,11 +160,17 @@ function parseProposalValue(raw: unknown): ParsedValue {
   }
   if (raw && typeof raw === 'object') {
     const obj = raw as { value: number; unit?: string; cap?: number };
+    // An empty / whitespace-only unit is NOT a unit — canonicalise it away here
+    // so it can never be PERSISTED by `after.unit = parsed.unit ?? before.unit`.
+    // `inputHasUnit` already treated `''` as no-unit; carrying `''` in `unit`
+    // while saying "no unit" in `inputHasUnit` is the disagreement that let a
+    // `unit: ''` write through. See `canonicaliseUnit`.
+    const unit = canonicaliseUnit(obj.unit);
     return {
       numeric: obj.value,
-      ...(obj.unit !== undefined ? { unit: obj.unit } : {}),
+      ...(unit !== undefined ? { unit } : {}),
       ...(obj.cap !== undefined ? { cap: obj.cap } : {}),
-      inputHasUnit: typeof obj.unit === 'string' && obj.unit.length > 0,
+      inputHasUnit: unit !== undefined,
     };
   }
   throw new D1HandlerError(
@@ -218,7 +260,7 @@ export function createSetFactorValueHandler(): HandlerFn {
         },
       );
     }
-    if (targetNode.kind !== 'factor') {
+    if (!SET_FACTOR_VALUE_ALLOWED_TARGET_KIND_SET.has(targetNode.kind)) {
       throw new D1HandlerError(
         'ENTITY_KIND_MISMATCH',
         `Cannot set value on a ${targetNode.kind} — set_factor_value only accepts factors.`,
@@ -227,6 +269,7 @@ export function createSetFactorValueHandler(): HandlerFn {
             handler_id: 'set_factor_value',
             target_id: targetId,
             actual_kind: targetNode.kind,
+            accepted_kinds: [...SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS],
           },
           userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         },
@@ -280,6 +323,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
       ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+      // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
+      // predicate can tell a scale REDECLARATION from a first-time declaration.
+      // Distinct from `factorExistingRaw` (the de-normalised delta LHS).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
       inputHasUnit: parsed.inputHasUnit,
     });
     if (!preEvaluation.ok) {
@@ -305,6 +355,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      // ROADMAP 2.159 — same two fields as `preEvaluation` above, so the
+      // execute-time re-check enforces the same redeclaration gates rather
+      // than a weaker rule set (the AC.1 parity invariant).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
       // The ambiguity guard only fires when the PROPOSAL itself omits the
       // unit. The factor's stored unit is irrelevant to the user's intent —
       // a bare-number proposal "200" against a cap=100 factor is ambiguous
@@ -328,6 +385,18 @@ export function createSetFactorValueHandler(): HandlerFn {
           : {}),
     };
 
+    // 1.16 item A2 — consented cap change detection. An explicit proposal
+    // cap that differs from the stored cap rescales the factor's SCALE:
+    // option interventions on this factor are stored as normalised
+    // multiples of the cap (value = raw / cap — see
+    // d1-shared/renormalise-interventions-for-cap-change.ts for the
+    // verified convention), so leaving them untouched would silently
+    // change every option's ABSOLUTE configuration. Renormalise them by
+    // old_cap/new_cap inside the same mutation.
+    const capChanged =
+      before.cap !== undefined && after.cap !== undefined && after.cap !== before.cap;
+    let rescaledInterventionCount = 0;
+
     // Apply the mutation to a clone and Zod-parse the result.
     const result = applyAndValidateMutation(rawGraph, (clone) => {
       const node = clone.nodes.find((n) => n.id === targetId);
@@ -344,6 +413,12 @@ export function createSetFactorValueHandler(): HandlerFn {
         raw_value: normalised.raw_value,
         ...(after.unit !== undefined ? { unit: after.unit } : {}),
         ...(after.cap !== undefined ? { cap: after.cap } : {}),
+        // 2.396(b) — the pill-earning stamp. The provenance stamp below is
+        // CLOBBERED by the V3 response transform (schema-v3.ts recomputes
+        // node.provenance from extractionType), so `observed_state.source` is
+        // the carrier that actually reaches the UI's isReviewedByUser rungs.
+        // Overrides any producer stamp deliberately: this write IS the user's.
+        source: USER_EDIT_SOURCE,
       };
       node.observed_state = merged;
 
@@ -373,6 +448,19 @@ export function createSetFactorValueHandler(): HandlerFn {
       // Stamp provenance so downstream consumers know the value was
       // user-set (NodeV3.provenance enum supports 'user_set' directly).
       node.provenance = 'user_set';
+
+      // 1.16 item A2 — preserve option-intervention absolutes across the
+      // cap change. Runs inside the mutation clone so the rewritten
+      // option NODES flow through the same nodes-stamping persistence
+      // merges as the factor mutation itself.
+      if (capChanged) {
+        rescaledInterventionCount = renormaliseOptionInterventionsForCapChange(
+          clone,
+          targetId,
+          before.cap,
+          after.cap,
+        );
+      }
 
       return { before, after };
     });
@@ -421,10 +509,43 @@ export function createSetFactorValueHandler(): HandlerFn {
       return snap.unit !== undefined ? { raw_value: raw, unit: snap.unit } : { raw_value: raw };
     };
     const beforeResolution = resolveExistingRawValue(before);
-    const baseText =
-      beforeResolution.kind === 'resolved'
+    // Gate-1 claim integrity: the fact channel decided this was a no-op
+    // above; the text channel must agree. Narrating `formatFactorChange`
+    // here produced the self-refuting "Updated X from 0.8 to 0.8." plus
+    // an implied commit that never happened. Checked FIRST because both
+    // change-shaped receipts below assert a change.
+    //
+    // `after` is the narration side on the no-op path: on a no-op it is
+    // equal to `before` by construction (the noop predicate compares
+    // value/raw_value/unit/cap), and `after` is always `resolved`
+    // (normaliseFactorValue writes raw_value), so this cannot fabricate
+    // a value the way a non-resolved `before` could.
+    const changeText = noop
+      ? formatFactorValueUnchanged({ label, after: narrationSide(after) })
+      : beforeResolution.kind === 'resolved'
         ? formatFactorChange({ label, before: narrationSide(before), after: narrationSide(after) })
         : formatFactorValueSet({ label, after: narrationSide(after) });
+
+    // 1.16 item A2 — honest receipt for a consented scale change: the user
+    // agreed to extend (or otherwise move) the factor's scale, so the
+    // receipt says so explicitly. Redacted telemetry (counts + ids only,
+    // never magnitudes) records how many option interventions were
+    // renormalised to preserve their absolute values.
+    if (capChanged) {
+      log.info(
+        {
+          event: 'v5.d1.set_factor_value.cap_changed',
+          target_id: targetId,
+          rescaled_intervention_count: rescaledInterventionCount,
+        },
+        'set_factor_value applied an explicit cap change; option interventions renormalised to preserve absolutes',
+      );
+    }
+    const scaleNote =
+      capChanged && after.cap !== undefined
+        ? ` The scale for this factor now allows values up to ${formatValueWithUnit(after.cap, after.unit)}.`
+        : '';
+    const baseText = `${changeText}${scaleNote}`;
 
     // P0 V5 golden-path repair (Wave 2): when a prior successful analysis
     // exists and this turn actually mutated the factor (non-noop), append

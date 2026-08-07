@@ -14,6 +14,15 @@ import { makeMessagePayload } from './fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
+import { config } from '../../config/index.js';
+
+/**
+ * Effective default turn budget: the configured 180s default CLAMPED to the
+ * browser-proxy deadline (2026-07-19) so CEE always answers before the proxy
+ * does. Derived rather than restated as a literal — a hard-coded post-clamp
+ * number would be exactly the silent-drift mirror the clamp exists to remove.
+ */
+const EXPECTED_DEFAULT_TURN_MS = Math.min(180_000, config.proxy.browserProxyTimeoutMs - 10_000);
 
 const BASE = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -47,10 +56,20 @@ describe('buildTurnContext', () => {
     // parse (TurnContextSchema is strict — an unstripped internal field throws).
     const {
       prior_turns: _pt,
+      // The scenario's pre-cap conversation length — CEE-internal, never on
+      // the wire; it exists so the ContextPack stops reporting the read
+      // window's size as the conversation's size.
+      prior_turns_total: _ptt,
+      // The scenario's newest run_analysis fact + whether that read succeeded —
+      // CEE-internal, never on the wire. They exist so the T1 claim-safety
+      // permission describes the SCENARIO rather than the 20-turn read window.
+      newest_analysis_fact: _naf,
+      newest_analysis_fact_read_ok: _nafok,
       prior_facts: _pf,
       prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,
       persistedGraph: _pg,
+      persistedGraphRead: _pgr,
       most_recent_pending_actions: _mrpa,
       decision_context: _dc,
       coaching_state: _cs,
@@ -79,7 +98,7 @@ describe('buildTurnContext', () => {
 
   it('uses default budgets when env vars are absent', async () => {
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
-    expect(ctx.budgets.turn_ms).toBe(180_000);
+    expect(ctx.budgets.turn_ms).toBe(EXPECTED_DEFAULT_TURN_MS);
     expect(ctx.budgets.llm_narrate_ms).toBe(60_000);
   });
 
@@ -95,7 +114,7 @@ describe('buildTurnContext', () => {
     process.env.TURN_BUDGET_MS = 'not-a-number';
     process.env.LLM_BUDGET_NARRATE_MS = '-1';
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
-    expect(ctx.budgets.turn_ms).toBe(180_000);
+    expect(ctx.budgets.turn_ms).toBe(EXPECTED_DEFAULT_TURN_MS);
     expect(ctx.budgets.llm_narrate_ms).toBe(60_000);
   });
 });
@@ -237,6 +256,29 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
       { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
       { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
     ]);
+    // Lane 28 — no brief persisted → the snapshot carries none (the PLoT leg
+    // will then attach nothing, so PLoT's `no_brief` skip stays honest).
+    expect(snapshot.briefText).toBeUndefined();
+  });
+
+  it('Lane 28: carries the persisted brief_text on the snapshot (same round trip as the graph)', async () => {
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'opt_a', kind: 'option', label: 'A', interventions: { fac_x: 1 } },
+        { id: 'opt_b', kind: 'option', label: 'B', interventions: { fac_x: 0.5 } },
+        { id: 'fac_x', kind: 'factor', label: 'X', category: 'controllable', observed_state: { value: 1, extractionType: 'explicit', factor_type: 'other' } },
+      ],
+      edges: [
+        { from: 'opt_a', to: 'fac_x', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_b', to: 'fac_x', strength: { mean: 0.5, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_x', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    };
+    const briefText = 'Should we hire locally or offshore? Budget £250k.';
+    const store = createNoopSessionStore({ loadGraphResult: graph, loadBriefTextResult: briefText });
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(BASE.scenario_id, 'req-snap-brief', store);
+    expect(snapshot.briefText).toBe(briefText);
   });
 });
 
@@ -487,5 +529,54 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
     const stale = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
     expect(stale?.status).toBe('active');
     expect(stale?.reason_code).toBe('graph_hash_diverged');
+  });
+});
+
+/**
+ * The conversation's true length, threaded onto the turn context.
+ *
+ * `prior_turns` is a WINDOW (SESSION_READ_WINDOW_TURNS, default 20). Reporting
+ * its length as the conversation's length made the coach state a false total
+ * past 20 turns — live on build `f00b8ef`, a 78-turn scenario produced "Total
+ * turn count on record for this conversation is 20". `prior_turns_total`
+ * carries the store's pre-cap count so the ContextPack can stop guessing.
+ *
+ * The degraded path is the load-bearing one: `null` means UNKNOWN, and the
+ * projection must then decline to state a total. Substituting
+ * `prior_turns.length` is the defect, so it must never appear here.
+ */
+describe('buildTurnContext — prior_turns_total (pre-cap conversation length)', () => {
+  const cappedWindow = Array.from({ length: 20 }, (_, i) =>
+    makeSessionTurn(`t${i}`, `2026-07-2${i % 10}T10:00:00.000+00:00`),
+  );
+
+  it('carries the store’s exact count, not the capped window’s length', async () => {
+    const store = createNoopSessionStore({ priorTurns: cappedWindow });
+    const ctx = await buildTurnContext(BASE, 'req-ct-1', {
+      sessionStore: Object.assign(store, { countTurns: async () => 78 }),
+    });
+    expect(ctx.prior_turns).toHaveLength(20);
+    expect(ctx.prior_turns_total).toBe(78);
+  });
+
+  it('degrades to null — NOT to the window length — when the count read throws', async () => {
+    const store = createNoopSessionStore({ priorTurns: cappedWindow });
+    const ctx = await buildTurnContext(BASE, 'req-ct-2', {
+      sessionStore: Object.assign(store, {
+        countTurns: async () => {
+          throw new SessionReadError('count exploded');
+        },
+      }),
+    });
+    expect(ctx.prior_turns).toHaveLength(20);
+    expect(ctx.prior_turns_total).toBeNull();
+    expect(ctx.prior_turns_total).not.toBe(ctx.prior_turns.length);
+  });
+
+  it('degrades to null on a store that predates countTurns (legacy mocks)', async () => {
+    const ctx = await buildTurnContext(BASE, 'req-ct-3', {
+      sessionStore: createNoopSessionStore({ priorTurns: cappedWindow }),
+    });
+    expect(ctx.prior_turns_total).toBeNull();
   });
 });

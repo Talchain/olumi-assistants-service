@@ -342,7 +342,8 @@ describe('chip-click run_analysis — real enricher integration', () => {
     // 1. Seed scenarios.brief_text via a canonical draft commit
     //    (mirrors what dispatchDraftGraph does in production).
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: DRAFT_TURN_ID,
@@ -404,7 +405,8 @@ describe('chip-click run_analysis — real enricher integration', () => {
   it('composer emits non-zero Phase 3 blocks from the enriched fact', async () => {
     const store = liveStoreHolder.current;
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: DRAFT_TURN_ID,
@@ -452,6 +454,7 @@ describe('chip-click run_analysis — real enricher integration', () => {
     // additional layers; the direct composer call isolates the
     // decompose-from-enrichment contract.
     const composed = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Ran analysis on your current scenario.',
       coaching: null,
@@ -474,7 +477,8 @@ describe('chip-click run_analysis — real enricher integration', () => {
     // compose.ts wiring, not the enricher / persistence chain.
     const store = liveStoreHolder.current;
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: DRAFT_TURN_ID,
@@ -519,6 +523,68 @@ describe('chip-click run_analysis — real enricher integration', () => {
     expect(buildCoachingBlocks(runFact as never, lookup, ctx).length).toBeGreaterThan(0);
     expect(buildEvidenceBlocks(runFact as never, lookup, confidence, ctx).length)
       .toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F10 (2026-07-24) — chip_run conditional-LLM conformance: the REAL dispatcher
+// with the flag OFF makes ZERO decision_review (LLM) calls. Paired with the
+// flag-ON "invokeDecisionReviewMock called times(1)" assertion above, this
+// proves chip_run is zero-OR-one child call gated by
+// V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW — the conditional the ContextPolicy row
+// now declares (conditional_llm_delegation).
+// ---------------------------------------------------------------------------
+describe('F10 — chip_run makes ZERO decision_review calls with the await flag OFF', () => {
+  let priorAwaitFlag: string | undefined;
+  beforeEach(async () => {
+    liveStoreHolder.current = createStatefulFakeStore();
+    invokeDecisionReviewMock.mockReset();
+    invokeDecisionReviewMock.mockResolvedValue(makeCannedInvokeResult());
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'false';
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
+  });
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    else process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    const { _resetConfigCache } = await import('../../config/index.js');
+    _resetConfigCache();
+    vi.restoreAllMocks();
+  });
+
+  it('flag OFF: the chip dispatch runs deterministically — no LLM (decision_review) call, no enrichment attached', async () => {
+    const store = liveStoreHolder.current;
+    await commitDirectAnswer(
+      composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
+      {
+        scenario_id: SCENARIO_ID, turn_id: DRAFT_TURN_ID, turn_class: 'direct_answer',
+        handler_id: null, request_hash: 'sha256:draft', llm_calls_used: 1, duration_ms: 5,
+        handler_facts: [], graph: { nodes: [], edges: [] }, briefText: BRIEF,
+      },
+      store,
+    );
+
+    const result = await dispatchChipClickRunAnalysis({
+      payload: makeMessagePayload({
+        scenario_id: SCENARIO_ID, turn_id: RUN_TURN_ID, stage: 'analyse',
+        message: 'Run analysis.', turn_class: 'decide', source: 'chip_click',
+        chip: { action_type: 'run_analysis' },
+      }),
+      requestId: 'req-integration-flagoff',
+      handlerRegistry: makeHandlerRegistry(),
+    });
+
+    expect(result.outcome).toBe('ok');
+    // The whole point: ZERO LLM child call on the deterministic default path.
+    expect(invokeDecisionReviewMock).not.toHaveBeenCalled();
+
+    // And no decision_review enrichment is attached to the persisted fact.
+    const fakeStore = store as SessionStore & { capturedWrites: readonly SessionTurnWrite[] };
+    const chipAppend = fakeStore.capturedWrites.find((w) => w.handler_id === 'run_analysis');
+    const runFact = chipAppend!.handler_facts!.find((f: HandlerFact) => f.fact_type === 'run_analysis');
+    const enrichment = (runFact!.result as Record<string, unknown>).enrichment as Record<string, unknown> | undefined;
+    expect(enrichment?.decision_review).toBeUndefined();
   });
 });
 

@@ -94,6 +94,10 @@ import type { FreshnessDerivation } from '../context/freshness.js';
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 import { createPLoTClient, type PLoTClient } from '../../orchestrator/plot-client.js';
+import {
+  createCounterfactualClient,
+  type CounterfactualClient,
+} from '../../adapters/isl/counterfactual-client.js';
 
 import {
   createRunAnalysisHandler,
@@ -262,6 +266,51 @@ export interface HandlerInvocation {
    * explicit "no flip evidence available" form.
    */
   readonly flipSummary?: import('../compose/flip-proposal.js').FlipSummary | null;
+  /**
+   * M1 (finish-line criterion 7) — the ONE option the user named in this turn's
+   * message, resolved to a graph option IDENTITY, or null when they named none
+   * (or named more than one, which is a comparison rather than a target).
+   *
+   * Resolved in the turn-executor rather than here because that is where the
+   * user text and the CANONICAL graph authority meet — the same
+   * `context.persistedGraph ?? options.graphState` the flip evidence is already
+   * filtered against, so the target and the rows it is matched into describe one
+   * graph. It is the same seam `structureProjection` uses to read a user-named
+   * FACTOR (`buildStructureProjectionSummary(..., { messageText })`).
+   *
+   * Read by `what_would_flip` to answer about THAT option — matching on
+   * `alternative_winner_id`, never on a label — with a typed refusal when no
+   * tested flip row makes it lead. Absent/null ⇒ the pre-existing generic
+   * answer, byte-identical.
+   */
+  readonly flipTargetOption?:
+    | import('./handlers/whatif/resolve-target-option.js').TargetOption
+    | null;
+  /**
+   * IDENTITY of the option currently leading, read off the SAME `run_analysis`
+   * fact `flipSummary` came from (`pickLatestLeadingOptionId`). `null` means
+   * UNKNOWN (no successful fact, or a tie left the field empty) — never "there
+   * is no leader".
+   *
+   * Needed because a flip row's `alternative_winner_id` is by construction never
+   * the option already leading: without this, "what would make {the leader}
+   * win?" selects no rows and the answer says nothing would put the result in
+   * favour of the option that has already won.
+   *
+   * IDENTITY, not label: `analysisProjection.leading_option` carries only a
+   * label, and two options can share one.
+   */
+  readonly analysisLeadingOptionId?: string | null;
+  /**
+   * This turn's OWN answer to "may a leading option be named" — the
+   * turn-executor's hoisted `mayNameLeadingOptionForRun`, threaded rather than
+   * re-derived (CLAUDE.md trap #12), so the permission and the prose it governs
+   * describe the same analysis.
+   *
+   * Absent ⇒ the consumer treats it as WITHHOLDING. A state we cannot read must
+   * not license copy that presupposes where an option stands.
+   */
+  readonly mayNameLeadingOption?: boolean;
 }
 
 /**
@@ -326,6 +375,39 @@ export interface HandlerOutcome {
    * the same pattern as `__plot_timings` above.
    */
   readonly __validation_beat?: import('../coaching/validation-priority.js').ValidationBeatDecision;
+  /**
+   * D-ask-1 (ROADMAP 2.11 P0-1) — set by `run_analysis` when the scaffold
+   * filled DISCLOSED placeholder interventions for options added without
+   * configuration. Internal channel on the same pattern as `__plot_timings`
+   * above (never crosses to the wire envelope directly): the turn-executor
+   * and the chip-click dispatch thread it to the chip generator so the
+   * analysis-success turn offers the deterministic configure chip for the
+   * scaffolded option. The user-facing disclosure itself rides
+   * `assistant_text` / the fact's `summary` (registry egress grammar in
+   * coaching/analysis-result-headline.ts).
+   */
+  readonly __scaffolded_options?: ReadonlyArray<
+    import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
+  >;
+  // ⚠ ROADMAP 2.804 — `__leading_option_claim_withheld` WAS DECLARED HERE AND
+  // IS DELETED. DO NOT REINSTATE IT.
+  //
+  // It was an internal channel by which `run_analysis` told the STEP-5 coaching
+  // detector that THIS RUN's constraint verdict forbade naming a leading
+  // option. The problem was never its default (absent ⇒ permitted is the only
+  // default that keeps every other handler byte-identical); it was that the
+  // coaching slot consumed it AS THE PERMISSION. The slot's question is
+  // "may this TURN name a leading option on screen?", which since #737 is a
+  // conjunction including the DISPLAYED analysis's verdict — and a
+  // `HandlerOutcome` never sees the fact array, so this channel could not carry
+  // that conjunct at any price. The result was a turn that withheld the leader
+  // in the confirmation and named it in the coaching sentence directly beneath.
+  //
+  // The permission is now read from the fact chain in `applyCoachingSignal`
+  // (`readMayNameLeadingOptionVerdict`), which is the same derivation the
+  // headline gate, the bounded fallback and the chip-click exit already use.
+  // A handler that wants to influence the leader claim must go through the
+  // persisted `constraint_verdict` on its own fact — the one channel.
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;
@@ -351,6 +433,14 @@ export const EMPTY_HANDLER_REGISTRY: HandlerRegistry = new Map();
 export interface RegistryOverrides {
   readonly plotClient?: PLoTClient;
   readonly scenarioReader?: ScenarioReader;
+  /**
+   * Counterfactual (what-if lens) transport injected into `what_would_flip`.
+   * Tests pass a mock; production omits it and the factory resolves
+   * `createCounterfactualClient()` (which returns `null` — a latent lens —
+   * when `ISL_BASE_URL` is unset). Pass `null` explicitly to force the latent
+   * state in a test without a mock.
+   */
+  readonly counterfactualClient?: CounterfactualClient | null;
 }
 
 /**
@@ -383,10 +473,18 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
     overrides?.plotClient ?? resolvePlotClient();
   const scenarioReader = overrides?.scenarioReader ?? DEFAULT_SCENARIO_READER;
 
+  // The what-if lens transport. `undefined` (not supplied) resolves the
+  // production factory (null when ISL is unconfigured); an explicit `null`
+  // forces the latent state without constructing a client.
+  const counterfactualClient =
+    overrides && 'counterfactualClient' in overrides
+      ? overrides.counterfactualClient ?? null
+      : createCounterfactualClient();
+
   const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
   const explainFromStructure = createExplainFromStructureHandler();
   const explainResults = createExplainResultsHandler();
-  const whatWouldFlip = createWhatWouldFlipHandler();
+  const whatWouldFlip = createWhatWouldFlipHandler({ counterfactualClient });
 
   const setFactorValue = createSetFactorValueHandler();
   const addConstraint = createAddConstraintHandler();

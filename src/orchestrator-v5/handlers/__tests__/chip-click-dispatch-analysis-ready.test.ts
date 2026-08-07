@@ -20,7 +20,7 @@
  * helper or the schema would surface here.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
@@ -490,13 +490,34 @@ describe('chip-click-dispatch — freshness derivation runs against produced fac
 // ---------------------------------------------------------------------------
 
 describe('chip-click-dispatch — decision_review brief sourcing (V5 Phase 1)', () => {
-  beforeEach(() => {
+  // V5 latency gate (#209, d92702d4): the decision_review auto-fire on the
+  // chip-click run_analysis path is gated behind
+  // `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` (default false → skip with
+  // reason `autofire_disabled`). These tests pin brief-sourcing INTO the
+  // enricher, which only runs on the legacy await path, so run them with
+  // the flag on — same pattern as
+  // turn-executor-decision-review-resilience.test.ts.
+  let priorAwaitFlag: string | undefined;
+  beforeEach(async () => {
     vi.clearAllMocks();
     createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
     enrichRunAnalysisMock.mockImplementation(async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts);
     // Reset stub to default null between tests so brief-presence does
     // not leak across the suite.
     buildTurnContextStub.scenarioBriefText = null;
+    priorAwaitFlag = process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = 'true';
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
+  });
+  afterEach(async () => {
+    if (priorAwaitFlag === undefined) {
+      delete process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW;
+    } else {
+      process.env.V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW = priorAwaitFlag;
+    }
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    _resetConfigCache();
   });
 
   it('passes context.scenarioBriefText to enrichRunAnalysisWithDecisionReview when persisted', async () => {

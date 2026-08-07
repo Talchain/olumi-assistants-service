@@ -14,6 +14,8 @@
 
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
 import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
+import { SCAFFOLD_ANY_DISCLOSURE_RE_SRC } from '../coaching/scaffold-disclosure.js';
+import { CONSTRAINT_GAP_DISCLOSURE_RE_SRC } from '../coaching/constraint-gap-disclosure.js';
 import {
   AddConstraintLabelSchema,
   AddConstraintTypeSchema,
@@ -90,6 +92,15 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
 // stricter allowlist after the PR #210 review flagged the substring
 // match as too permissive.
 const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
+// Compiled once; source is the disclosure's own published grammar.
+const SCAFFOLD_DISCLOSURE_EXTRACT_RE = new RegExp(SCAFFOLD_ANY_DISCLOSURE_RE_SRC);
+// T1: the same honesty floor for the constraint-gap disclosure. A run whose
+// ratified condition was never evaluated may not render undisclosed either, so
+// if the composed summary is rejected the gap sentence is salvaged onto the
+// fallback exactly as the scaffold one is — and the COMBINED result is
+// re-checked against the allowlist before shipping, so the salvage cannot
+// smuggle through content the allowlist just rejected.
+const CONSTRAINT_GAP_EXTRACT_RE = new RegExp(CONSTRAINT_GAP_DISCLOSURE_RE_SRC);
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   if (
     outcome === null ||
@@ -101,6 +112,33 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   const candidate = (outcome as { assistant_text: unknown }).assistant_text;
   if (isAllowedRunAnalysisAssistantText(candidate)) {
     return candidate as string;
+  }
+  // Review fix B6 (honesty floor): if the rejected composed summary carried a
+  // scaffold disclosure, the fallback must KEEP it — a scaffolded run may
+  // never render undisclosed (D-ask-1). The grammar match is STRUCTURE-only
+  // (its label slots accept digits/vocab), and this forwarder is the second
+  // line of defence precisely against upstream regressions — so the COMBINED
+  // output is re-checked against the allowlist before shipping (review-of-
+  // review P1: an unchecked append could smuggle the very content the
+  // allowlist rejected through the backstop itself). Genuine builder
+  // disclosures pass; a poisoned disclosure-shaped slice falls back bare.
+  if (typeof candidate === 'string') {
+    // Salvage in the handler's own append order (scaffold, then gap) so the
+    // combined text is a shape the allowlist's template branch recognises.
+    // Either, neither, or both may be present.
+    const scaffold = candidate.match(SCAFFOLD_DISCLOSURE_EXTRACT_RE)?.[0] ?? '';
+    const gap = candidate.match(CONSTRAINT_GAP_EXTRACT_RE)?.[0] ?? '';
+    if (scaffold.length > 0 || gap.length > 0) {
+      const combined = RUN_ANALYSIS_FALLBACK_TEXT + scaffold + gap;
+      if (isAllowedRunAnalysisAssistantText(combined)) return combined;
+      // A poisoned slice in one disclosure must not cost us the other: retry
+      // with each alone before giving up on disclosure entirely.
+      for (const only of [gap, scaffold]) {
+        if (only.length === 0) continue;
+        const single = RUN_ANALYSIS_FALLBACK_TEXT + only;
+        if (isAllowedRunAnalysisAssistantText(single)) return single;
+      }
+    }
   }
   return RUN_ANALYSIS_FALLBACK_TEXT;
 };
@@ -154,7 +192,27 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   // no-op handler accepting 'edge' would have ZERO existence validation.
   // Edge/link explanation is a separate follow-up that needs an
   // edge-existence-check design first. 'constraint' stays rejected too.
-  // what_would_flip keeps ['goal', 'option'] — out of scope for this lane.
+  // ⚠ ROADMAP 2.229 fix 2 — THE LINE ABOVE USED TO READ "what_would_flip keeps
+  // ['goal', 'option'] — out of scope for this lane." That deferral closed the
+  // P0 for the two handlers where factor questions are LEAST likely and left it
+  // open on the one handler whose entire subject matter is factors. Live cost,
+  // measured on the deployed build: "How far would Market Receptivity to
+  // Channel have to move before the other option wins?" — the canonical flip
+  // question — was routed correctly by the LLM, refused by this validator with
+  // ENTITY_KIND_MISMATCH, and answered with "I wasn't sure what you meant by
+  // Market Receptivity to Channel. Did you mean one of these?" offering the
+  // goal and the three options. The user asked about a factor and was offered
+  // four things that are not factors.
+  //
+  // `'node'` is now accepted here on EXACTLY the reasoning that justified it
+  // for the two explainers: what_would_flip does not consume the proposal
+  // entity either. Its only target-aware branch keys on
+  // `invocation.flipTargetOption` (what-would-flip.ts:159-166), which
+  // turn-executor.ts:7249-7259 resolves from the MESSAGE TEXT via
+  // `resolveTargetOptionFromMessage` — never from the proposal. A factor
+  // target leaves `flipTargetOption` null and the handler takes its existing,
+  // untouched scenario-wide branch. 'edge' and 'constraint' stay rejected for
+  // the same reason as above.
   explain_from_structure: {
     handler_id: 'explain_from_structure',
     accepted_entity_kinds: ['goal', 'option', 'node'],
@@ -167,7 +225,7 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   },
   what_would_flip: {
     handler_id: 'what_would_flip',
-    accepted_entity_kinds: ['goal', 'option'],
+    accepted_entity_kinds: ['goal', 'option', 'node'],
     confirmation_template: noopHandlerConfirmationTemplate,
   },
   // V5 D1 mutation handlers. Each accepts the wire `'node'` entity kind

@@ -44,16 +44,30 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export function pickLatestRawRobustness(
-  priorFacts: readonly HandlerFact[],
+/**
+ * Normalise a RAW `robustness` object into {@link RawRobustnessSignals}.
+ *
+ * Shape-agnostic on purpose (S4 round 5). The same two raw signals live at
+ * two different addresses depending on which pipeline holds the analysis:
+ *
+ * - V5 prior-facts: `fact.result.enrichment.robustness`
+ * - V4 deterministic ctx: `ctx.analysis.robustness` (the PLoT `/v2/run`
+ *   envelope carries it at the top level — see `V2RunResponseEnvelope`)
+ *
+ * Before this existed, only the V5 address had a reader, so every V4
+ * composer was structurally UNABLE to consult the `near_tie.is_tie`
+ * override and reinvented closeness from a local threshold instead. That
+ * is the round-5 defect class: a surface reinvents the classification
+ * precisely because the shared signal is out of reach at its call site.
+ * One normaliser, two addresses.
+ *
+ * Returns `null` when neither raw signal is reachable as a useable value,
+ * which callers treat exactly like "no raw signal" (margin-only verdict).
+ */
+export function readRawRobustnessSignals(
+  robustnessValue: unknown,
 ): RawRobustnessSignals | null {
-  const selected = selectRunAnalysisFact(priorFacts);
-  if (selected === null) return null;
-  const fact = selected.fact;
-  if (fact.fact_type !== 'run_analysis') return null;
-  const enrichment = asObject(fact.result.enrichment);
-  if (enrichment === null) return null;
-  const robustness = asObject(enrichment['robustness']);
+  const robustness = asObject(robustnessValue);
   if (robustness === null) return null;
 
   const rawLevel = robustness['level'];
@@ -66,4 +80,18 @@ export function pickLatestRawRobustness(
 
   if (level === null && !near_tie_is_tie) return null;
   return { level, near_tie_is_tie };
+}
+
+export function pickLatestRawRobustness(
+  priorFacts: readonly HandlerFact[],
+): RawRobustnessSignals | null {
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (selected === null) return null;
+  const fact = selected.fact;
+  if (fact.fact_type !== 'run_analysis') return null;
+  const enrichment = asObject(fact.result.enrichment);
+  if (enrichment === null) return null;
+  // Delegate: ONE normaliser, so the V4 and V5 addresses can never disagree
+  // about what `near_tie.is_tie` means.
+  return readRawRobustnessSignals(enrichment['robustness']);
 }

@@ -18,7 +18,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min");
+    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min,readiness-key-f4,readiness-key-f4b,readiness-key-f4c,readiness-key-f4d,readiness-key-f4e,readiness-key-f4f");
     vi.stubEnv("CEE_GRAPH_READINESS_RATE_LIMIT_RPM", "3");
 
     cleanBaseUrl();
@@ -36,6 +36,12 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   const headersRate = { "X-Olumi-Assist-Key": "readiness-key-rate" } as const;
   const headersAlt = { "X-Olumi-Assist-Key": "readiness-key-alt" } as const;
   const headersMin = { "X-Olumi-Assist-Key": "readiness-key-min" } as const;
+  const headersF4 = { "X-Olumi-Assist-Key": "readiness-key-f4" } as const;
+  const headersF4b = { "X-Olumi-Assist-Key": "readiness-key-f4b" } as const;
+  const headersF4c = { "X-Olumi-Assist-Key": "readiness-key-f4c" } as const;
+  const headersF4d = { "X-Olumi-Assist-Key": "readiness-key-f4d" } as const;
+  const headersF4e = { "X-Olumi-Assist-Key": "readiness-key-f4e" } as const;
+  const headersF4f = { "X-Olumi-Assist-Key": "readiness-key-f4f" } as const;
 
   function makeGraph() {
     return {
@@ -285,6 +291,413 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     expect(typeof body.factor_count).toBe("number");
 
     emitSpy.mockRestore();
+  });
+
+  // ==========================================================================
+  // F4 — readiness↔run gate drift: scaffold_plan on the V3 response.
+  //
+  // RED-first: before the route wiring, the V3 response carried NO scaffold_plan
+  // for a mixed-configured graph, so the pre-run panel had only
+  // can_run_analysis:false to read → "1 option(s) blocked" while run_analysis
+  // scaffolds the same option and succeeds. These pin the additive field AND
+  // that can_run_analysis stays honest (the field never flips the verdict).
+  //
+  // Provenance note (verified at the schema): the /graph-readiness `Graph`
+  // input rejects factor `observed_state` (constraint-shaped only) and PRESERVES
+  // `prior` via passthrough — so these graphs give the scaffold its neutral
+  // values through the `prior` rung, the provenance readiness can actually
+  // receive.
+  // ==========================================================================
+  function makeMixedV3Graph() {
+    return {
+      version: "1",
+      nodes: [
+        { id: "goal", kind: "goal", label: "Increase revenue" },
+        { id: "decision", kind: "decision", label: "Pricing" },
+        {
+          id: "fac_price",
+          kind: "factor",
+          label: "Price",
+          category: "controllable",
+          prior: { distribution: "uniform", range_min: 10, range_max: 30 },
+        },
+        { id: "opt_a", kind: "option", label: "Premium" },
+        { id: "opt_b", kind: "option", label: "Unconfigured" },
+      ],
+      edges: [
+        { id: "e1", from: "decision", to: "opt_a" },
+        { id: "e2", from: "decision", to: "opt_b" },
+        { id: "e3", from: "opt_a", to: "fac_price" },
+        { id: "e4", from: "opt_b", to: "fac_price" },
+      ],
+    };
+  }
+
+  it("F4: mixed-configured V3 graph → scaffold_plan.will_scaffold_options=true, can_run_analysis stays honest", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_user_mapping",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // opt_b: added WITHOUT configuration — the exact symptom.
+            { id: "opt_b", label: "Unconfigured", status: "needs_user_mapping", interventions: {} },
+          ],
+          user_questions: ["Which factors and values for: Unconfigured?"],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    // The run path WOULD scaffold opt_b → the panel now knows it.
+    expect(body.scaffold_plan).toBeDefined();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
+
+    // ...but can_run_analysis stays HONEST — an unconfigured option is not
+    // "ready"; scaffold_plan is additive and must never flip the verdict.
+    expect(body.can_run_analysis).toBe(false);
+  });
+
+  it("F4: fully-configured V3 graph → will_scaffold_options=false, option_count omitted", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "ready",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_b", label: "Volume", status: "ready", interventions: { fac_price: 0.2 } },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan).toBeDefined();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
+    expect(body.scaffold_plan.option_count).toBeUndefined();
+    // Two distinct ready options + valid goal → analysis can run.
+    expect(body.can_run_analysis).toBe(true);
+  });
+
+  // --- F4 over-report repro (review P1) -------------------------------------
+  // The proven defect: readiness must EXACTLY equal the run path's scaffold
+  // decision on the SAME graph state — no over-report in the PERMISSIVE
+  // direction (that reopens the readiness↔run drift, flipped).
+  //
+  // Same graph state: opt_b was CONFIGURED by the user with a NON-NUMERIC value
+  // (a categorical "UK"). On the persisted graph its node carries intervention
+  // INTENT (data.interventions), so the run path's scaffolder leaves it on the
+  // honest configure path (collectInterventionIntentOptionIds → never scaffold
+  // over intent) and the run stays blocked. The pre-run panel must AGREE it is
+  // NOT will_scaffold-to-runnable.
+  //
+  // On the wire that intent reaches readiness through analysis_ready: a
+  // configured-but-non-numeric option is status:"needs_encoding" with the
+  // original value under raw_interventions (interventions carries no numeric).
+  // The request `graph` (parsed) cannot carry a non-numeric data.interventions
+  // (the OptionData schema is numeric-only), so readiness's ONLY intent
+  // authority for this option is analysis_ready — exactly the provenance the
+  // over-report ignored.
+  it("F4 over-report: configured-but-non-numeric option (needs_encoding + raw_interventions) → will_scaffold_options=false (agrees with the run path's block)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_encoding",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // opt_b: the user DID configure it — with a categorical value that
+            // has not been encoded to a number yet. This is intervention INTENT,
+            // not an empty option; the run path will NOT scaffold over it.
+            {
+              id: "opt_b",
+              label: "UK launch",
+              status: "needs_encoding",
+              interventions: {},
+              raw_interventions: { fac_price: "UK" },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan).toBeDefined();
+    // The run path leaves opt_b on the configure path (persisted intent) → the
+    // panel must NOT advertise a scaffold. Over-reporting `true` here would
+    // un-block the panel while run_analysis stays blocked — the exact drift F4
+    // closes, in the permissive direction.
+    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
+    expect(body.scaffold_plan.option_count).toBeUndefined();
+    expect(body.can_run_analysis).toBe(false);
+  });
+
+  it("F4 over-report control: raw_interventions intent also blocks scaffold even when status is not needs_encoding", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4b,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_user_mapping",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // Intent present via raw_interventions (a value the user typed that
+            // failed numeric projection) — the run path treats ANY intervention
+            // entry, numeric or not, as intent. Readiness must too.
+            {
+              id: "opt_b",
+              label: "Bespoke",
+              status: "needs_user_mapping",
+              interventions: {},
+              raw_interventions: { fac_price: "tbd" },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
+    expect(body.can_run_analysis).toBe(false);
+  });
+
+  // --- F4 #2 — the UNDER-report the synthetic intent key created (Paul, 28 Jul)
+  //
+  // The defect this pins, end to end on the route:
+  //   1. A user adds an option by chat. It is created with NO effect values.
+  //   2. `reconcile-top-level-options.ts` stamps it `status: "needs_encoding"`
+  //      — that producer stamps `needs_encoding` on ANY option lacking a numeric
+  //      value, INCLUDING one with no values at all. It is NOT the narrow
+  //      documented meaning ("raw values awaiting numeric encoding",
+  //      `schemas/analysis-ready.ts`), and CEE's OWN payload validator flags this
+  //      exact wire state as an inconsistency
+  //      (`OPTION_NEEDS_ENCODING_WITHOUT_RAW`, `transforms/analysis-ready.ts`).
+  //   3. `buildReadinessRawPersistedGraph` used to READ that status as if it
+  //      carried the narrow meaning and FABRICATE an intervention-intent key for
+  //      it, even with `interventions: {}` and NO `raw_interventions`.
+  //   4. Intent is never scaffolded over (`scaffold-unconfigured-options.ts`), so
+  //      the fabricated intent suppressed the scaffold →
+  //      `will_scaffold_options: false` → the UI's OR-term collapsed → the run
+  //      was refused.
+  //
+  // It is a FALSE NEGATIVE: `run_analysis` reads the REAL persisted graph, which
+  // carries no such key, so it scaffolds the option and the analysis succeeds.
+  // F4 was re-created inside the code written to close F4.
+  //
+  // Live one-variable control (deployed CEE d6a765d, 28 Jul): flipping ONLY
+  // `opt_b.status` "needs_encoding" → "ready", `interventions` still `{}`,
+  // flipped `will_scaffold_options` false → true. The status was the sole
+  // discriminating variable.
+  //
+  // This is the exact wire shape captured live from the app's own request.
+  // RED before the fix: will_scaffold_options === false.
+  it("F4 #2 RED-first: needs_encoding with NO values at all (interventions {} and no raw_interventions) → will_scaffold_options=true (the run path DOES scaffold it)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4e,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_encoding",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // opt_b: added by chat, never configured. NOTHING was set — no
+            // numeric intervention, no raw value. There is no user intent here
+            // to protect; the run path scaffolds it and succeeds.
+            {
+              id: "opt_b",
+              label: "Partner with a specialist consultancy",
+              status: "needs_encoding",
+              interventions: {},
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan).toBeDefined();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
+    // can_run_analysis stays HONEST and unchanged (#612's invariant): the option
+    // genuinely is not "ready". The panel's runnability comes from the OR with
+    // scaffold_plan, never from readiness lying.
+    expect(body.can_run_analysis).toBe(false);
+    // The structured fields the UI must compose its blocked/runnable copy from
+    // stay truthful and specific — never "add a decision, a goal and at least
+    // two options" when five options are present.
+    expect(body.options_total).toBe(2);
+    expect(body.options_ready).toBe(1);
+    expect(body.issues).toContain('Option "opt_b" has no interventions');
+  });
+
+  // Control (the near neighbour that must NOT change): the same empty option
+  // with an EXPLICIT empty raw_interventions map. Same absence of intent, same
+  // answer — the fix must not depend on whether the caller omitted the field or
+  // sent it empty.
+  it("F4 #2 control: needs_encoding with an explicitly EMPTY raw_interventions → will_scaffold_options=true", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4f,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_encoding",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            {
+              id: "opt_b",
+              label: "Partner with a specialist consultancy",
+              status: "needs_encoding",
+              interventions: {},
+              raw_interventions: {},
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
+  });
+
+  // --- F4 #1b — the observed_state under-report residual (A2-coordinated) -----
+  // #612 closed the over-report and the configured-value / needs_encoding cases,
+  // but an option scaffolded off a factor's OBSERVED_STATE neutral values still
+  // under-reported (stayed "blocked") because the /graph-readiness `Graph` input
+  // rejected a FACTOR observed_state (it was constraint-shaped only, requiring
+  // metadata.operator) with a 400 — so readiness never saw the provenance the run
+  // path uses (buildNeutralFactorValues' observed_state rung).
+  //
+  // The coordinated contract (mutually verified with A2): on FACTOR nodes the UI
+  // sends snake_case observed_state { value:number (model 0-1), raw_value?:number
+  // (display) }. This graph has NO `prior` on the factor — the neutral value can
+  // come ONLY through the observed_state rung, so it isolates exactly the residual.
+  function makeObservedStateV3Graph() {
+    return {
+      version: "1",
+      nodes: [
+        { id: "goal", kind: "goal", label: "Increase revenue" },
+        { id: "decision", kind: "decision", label: "Pricing" },
+        {
+          id: "fac_price",
+          kind: "factor",
+          label: "Price",
+          category: "controllable",
+          // Factor observed_state — the exact A2 send shape. raw_value present so
+          // the run-path scaffolder's resolveRawInterventionValue takes rule 1
+          // (raw_value_used) → a concrete neutral wire number, never ambiguous.
+          observed_state: { value: 0.4, raw_value: 200 },
+        },
+        { id: "opt_a", kind: "option", label: "Premium" },
+        { id: "opt_b", kind: "option", label: "Unconfigured" },
+      ],
+      edges: [
+        { id: "e1", from: "decision", to: "opt_a" },
+        { id: "e2", from: "decision", to: "opt_b" },
+        { id: "e3", from: "opt_a", to: "fac_price" },
+        { id: "e4", from: "opt_b", to: "fac_price" },
+      ],
+    };
+  }
+
+  it("F4 #1b RED-first: a FACTOR observed_state {value, raw_value} request is ACCEPTED (200), not rejected (400)", async () => {
+    // Before the schema widening this exact body 400'd (CEE_VALIDATION_FAILED):
+    // Node.observed_state was ConstraintObservedState-only (required
+    // metadata.operator). The factor shape must now PARSE.
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4c,
+      payload: {
+        graph: makeObservedStateV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_user_mapping",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_b", label: "Unconfigured", status: "needs_user_mapping", interventions: {} },
+          ],
+          user_questions: ["Which factors and values for: Unconfigured?"],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    // EXACT PARITY: the run path scaffolds opt_b off fac_price's observed_state
+    // neutral value → readiness must now advertise the same, matching the run.
+    expect(body.scaffold_plan).toBeDefined();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
+
+    // can_run_analysis stays HONEST (unconfigured option is not "ready") — the
+    // field is additive and never flips the verdict.
+    expect(body.can_run_analysis).toBe(false);
+  });
+
+  it("F4 #1b: constraint observed_state is still validated strictly (metadata.operator required) — union is additive, not loosening", async () => {
+    // A CONSTRAINT observed_state with a MALFORMED metadata (bad operator) must
+    // still be rejected — the factor branch's no-metadata refinement forbids it
+    // from sliding through as a factor shape. Proves the widening did not loosen
+    // constraint validation.
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4d,
+      payload: {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal", kind: "goal", label: "Goal" },
+            {
+              id: "con_budget",
+              kind: "constraint",
+              label: "Budget",
+              // operator is not in {">=", "<="} → constraint branch fails; the
+              // factor branch rejects because `metadata` is present.
+              observed_state: { value: 5000, metadata: { operator: "==" } },
+            },
+          ],
+          edges: [],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error?.code ?? body.code).toBe("CEE_VALIDATION_FAILED");
   });
 
   it("accepts minimal graph without version/default_seed/meta (uses defaults)", async () => {

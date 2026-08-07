@@ -176,8 +176,6 @@ export function methodToStep(method: string): LLMCallStep {
   switch (method) {
     case "draftGraph":
       return "draft_graph";
-    case "repairGraph":
-      return "repair_graph";
     case "suggestOptions":
       return "suggest_options";
     case "clarifyBrief":

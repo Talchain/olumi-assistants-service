@@ -153,18 +153,6 @@
     },
     {
       "definition": {
-        "title": "Repair Fallback Rate",
-        "type": "timeseries",
-        "requests": [
-          {
-            "q": "(sum:olumi.assistants.draft.repair.fallback{*}.as_rate() / sum:olumi.assistants.draft.repair.attempted{*}.as_rate()) * 100",
-            "display_type": "line"
-          }
-        ]
-      }
-    },
-    {
-      "definition": {
         "title": "Legacy Provenance Usage (%)",
         "type": "timeseries",
         "requests": [

@@ -32,16 +32,20 @@ import type {
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 
-// Session store mock — capture append() calls for fact-round-trip assertions
+// Session store mock — capture append() calls for fact-round-trip assertions.
+// priorTurnRows / priorFactRows are mutable so individual tests can seed a
+// prior run_analysis turn (ROADMAP 2.73 rerun coverage); default empty.
 const appendCalls: Array<unknown> = [];
+const priorTurnRows: Array<unknown> = [];
+const priorFactRows: Array<unknown> = [];
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: unknown) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };
     },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
+    readRecent: async () => priorTurnRows,
+    readFactsFor: async () => priorFactRows,
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({
       scope: { kind: 'structural' as const },
@@ -172,6 +176,8 @@ function expectBI01(): void {
 
 beforeEach(() => {
   appendCalls.length = 0;
+  priorTurnRows.length = 0;
+  priorFactRows.length = 0;
   events = [];
   installSink();
 });
@@ -258,6 +264,61 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     // confirmation then coaching (composeToolCallResponse).
     expect(response.assistant_text).toMatch(/ currently leads\b/);
     expect(response.assistant_text).toContain('first analysis');
+  });
+
+  it('RERUN: RERUN_ANALYSIS_COMPLETE coaching joins assistant_text on the routed path (ROADMAP 2.73)', async () => {
+    // Seed one prior successful run_analysis turn + fact so this turn is a
+    // re-run. Pre-2.73 the signal table had no rerun entry, so the rerun
+    // turn's assistant_text carried the bare confirmation only.
+    priorTurnRows.push({
+      id: 'row-prior-1',
+      scenario_id: TEST_SCENARIO_ID,
+      turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      turn_class: 'handler',
+      handler_id: 'run_analysis',
+      created_at: '2026-07-15T00:00:00.000Z',
+      response_emitted: true,
+    });
+    priorFactRows.push({
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: TEST_SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'prior run',
+        enrichment: makeGoldenResponse(),
+        computed_at: '2026-07-15T00:00:00.000Z',
+        graph_hash_at_run: 'hash-prior',
+      },
+    });
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
+    );
+    const registry = createRegistry({
+      plotClient: makeMockPlotClient(),
+      scenarioReader: async () => makeScenarioSnapshot(),
+    });
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-rerun-coach', {
+      routingAdapter,
+      handlerRegistry: registry,
+    });
+
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
+    // The rerun acknowledgment (compareRuns-derived) joins assistant_text;
+    // the first-analysis text must NOT appear on a rerun.
+    expect(response.assistant_text).not.toContain('first analysis');
+    expect(response.assistant_text).toMatch(/unchanged|still leads|re-run/i);
+    // The committed fact carries the rerun signal marker.
+    const write = appendCalls[0] as {
+      handler_facts: Array<{ result: { enrichment: Record<string, unknown> } }>;
+    };
+    expect(write.handler_facts[0]!.result.enrichment.coaching_signal_id).toBe(
+      'RERUN_ANALYSIS_COMPLETE',
+    );
   });
 
   it('commit receives handler_facts with exactly one run_analysis fact', async () => {

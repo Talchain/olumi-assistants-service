@@ -252,42 +252,66 @@ src/cee/unified-pipeline/
 4. **Connectivity validation:**
    - Ensure all options connect to goal
    - Prune unreachable nodes
-5. **Optional clarifier:**
-   - If `CEE_CLARIFIER_ENABLED=true` and quality below threshold
-   - Ask user clarifying questions (up to 3 rounds)
+
+*(The former substep 5, the optional multi-turn clarifier, was retired
+2026-07-16 — ROADMAP 1.94 Option A, #486. `src/cee/clarifier/` and
+`runClarifier()` no longer exist; the CEE_CLARIFIER_* env vars are inert.
+Its replacement lives OUTSIDE this pipeline: the flag-gated clarify-v2
+draft preflight in route-v2 — see `src/orchestrator-v5/clarify-v2/`.)*
 
 **Inputs:**
 - `ctx.graph` — Graph from Stage 3
-- `ctx.input.clarificationAnswers` — Optional answers from previous round
 
 **Outputs:**
 - `ctx.validationSummary` — Validation result (errors, warnings, fixes)
-- `ctx.repairCost` — Token cost of LLM repair
-- `ctx.repairFallbackReason` — If LLM repair was skipped, why?
-- `ctx.clarifierResult` — Clarifier result (questions asked, answers)
 - `ctx.structuralMeta` — Structural analysis metadata
 - `ctx.goalConstraints` — Extracted compound goal constraints
-- `ctx.graph` — Repaired graph
+- `ctx.graph` — Graph after deterministic repair
+
+> ⚠ **Stage 4 performs NO LLM repair.** Every fix this stage makes is
+> deterministic — the sweep, structural-edge normalisation, value clamping,
+> origin defaulting. Both LLM repair calls that used to live here are gone:
+> the draft-path call (ROADMAP 2.731) and substep 1b's orchestrator-validation
+> limb (ROADMAP 2.740a).
+>
+> Three fields documented here went with them and **no longer exist on
+> `StageContext`** — they are deleted, not merely unused (ROADMAP 2.754):
+> `ctx.repairCost` (token cost of the LLM repair), `ctx.repairFallbackReason`
+> (why the LLM repair was skipped), and the `cee.repair.completed` event that
+> carried them. There is no token cost to report and no LLM fallback to
+> explain. Do not re-add them to describe the deterministic path.
+>
+> `validateAndRepairGraph()` keeps its historical name but is a deterministic,
+> single-pass validator; its `repairUsed` is always `false` and
+> `repairAttempts` always `0`. **Read "repair" here as "deterministic
+> normalisation", never as "LLM call".**
 
 **Key Functions Called:**
-- `runDeterministicSweep()` from `src/cee/repair/deterministic-sweep.ts`
-- `repairGraph()` from `src/cee/repair/index.ts`
+- `runDeterministicSweep()` from `src/cee/unified-pipeline/stages/repair/deterministic-sweep.ts`
+- `validateAndRepairGraph()` from `src/cee/graph-orchestrator.ts` (deterministic; gated by `config.cee.orchestratorValidationEnabled`)
 - `validateAndFixGraph()` from `src/cee/structure/index.ts`
-- `runClarifier()` from `src/cee/clarifier/index.ts` (if enabled)
 
 **Telemetry Events:**
 ```typescript
 "cee.unified_pipeline.stage_started" { stage: "repair" }
 "cee.deterministic_sweep.completed" { violations_in, violations_out, repairs_count }
 "REPAIR_SKIPPED" { reason: "budget_exceeded" | "deterministic_sweep_sufficient" }
-"cee.repair.completed" { repairCost, violations_remaining }
 "cee.unified_pipeline.stage_completed" { stage: "repair", durationMs }
 ```
 
+*(The `assist.draft.repair_*` quintet — `repair_attempted` / `repair_start` /
+`repair_success` / `repair_partial` / `repair_fallback` — was deleted with the
+draft path's LLM repair call. Any dashboard or log query over
+`draft.repair.*` / `assist.draft.repair_*` now reads a permanent zero. See
+`src/utils/telemetry.ts`.)*
+
 **Error Handling:**
-- Validation errors → Attempt repair
-- Repair timeout → Use deterministic fixes only, mark as `repair_timeout`
-- Budget exceeded → Skip LLM repair, use deterministic fixes
+- Validation errors → apply deterministic fixes; there is no LLM retry
+- Violations surviving the deterministic sweep → defer to PLoT validation and
+  the post-enforcement gate (9b), which fails closed with a `retryable:true`
+  envelope
+- Graph still invalid at substep 1b → 422 `CEE_GRAPH_INVALID`, with
+  `llm_repair_called: false` on the envelope (hardcoded-honest since 2.740a)
 
 ---
 
@@ -450,7 +474,7 @@ export interface StageContext {
   draftAdapter: "anthropic" | "openai" | "fixtures" | undefined;
   llmMeta: Record<string, unknown> | undefined;
   confidence: number | undefined;
-  clarifierStatus: "skipped" | "ran" | "failed" | undefined;
+  // (clarifierStatus removed 2026-07-16 — Stage-4 clarifier retired, #486)
   effectiveBrief: string;
   edgeFieldStash: Record<string, unknown> | undefined;
   skipRepairDueToBudget: boolean;
@@ -470,9 +494,9 @@ export interface StageContext {
   nodeRenames: Map<string, string>;
   goalConstraints: GoalConstraint[] | undefined;
   constraintStrpResult: unknown | undefined;
-  repairCost: number;
-  repairFallbackReason: string | undefined;
-  clarifierResult: ClarifierResult | undefined;
+  // (repairCost + repairFallbackReason removed 2026-08-06 — both were LLM-repair
+  //  bookkeeping; the last writer went with substep 1b's LLM limb, ROADMAP 2.754)
+  // (clarifierResult removed 2026-07-16 — Stage-4 clarifier retired, #486)
   structuralMeta: StructuralMeta | undefined;
   validationSummary: ValidationSummary | undefined;
 
@@ -529,7 +553,7 @@ ctx.enrichmentResult = { called_count: 1 };
 │   - brief: string                                            │
 │   - docs?: Document[]                                        │
 │   - previous_graph?: GraphV1                                 │
-│   - clarificationAnswers?: ClarificationAnswer[]             │
+│   - clarificationAnswers?  (accepted, INERT since #486)      │
 └──────────────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────────────┐
@@ -551,9 +575,9 @@ ctx.enrichmentResult = { called_count: 1 };
 └──────────────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────────────┐
-│ STAGE 4: Repair                                              │
-│   GraphT → [Validate + Fix + Merge + Clarify] → GraphT       │
-│   Output: validationSummary, repairCost, clarifierResult     │
+│ STAGE 4: Repair (DETERMINISTIC ONLY — no LLM call)           │
+│   GraphT → [Validate + Fix + Merge] → GraphT                 │
+│   Output: validationSummary, structuralMeta                  │
 └──────────────────────────────────────────────────────────────┘
                          ↓
 ┌──────────────────────────────────────────────────────────────┐

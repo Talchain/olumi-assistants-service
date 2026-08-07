@@ -12,7 +12,24 @@ vi.mock('../../../src/utils/telemetry.js', () => ({
   emit: vi.fn(),
 }));
 
-vi.mock('../../../src/config/timeouts.js', () => ({
+// ⚠ FROZEN ON PURPOSE, NOT A MIRROR OF THE LIVE DEFAULT (ROADMAP 2.146).
+// The real default is now 60_000; this file pins 30_000 because its subject is
+// PARSE behaviour, which must not move when the budget moves. Do NOT "sync" it:
+// a vi.mock factory REPLACES the module, so any suite asserting the real value
+// under this mock would be vacuous. The budget itself is pinned against the
+// unmocked constant in pass2-budget.test.ts.
+//
+// ⚠ importOriginal SPREAD, NOT A HAND-LISTED FACTORY — and this is not tidiness.
+// The previous two-key factory replaced the whole module, so the FIRST time the
+// module under test reached for any other export of timeouts.js the suite died
+// at COLLECTION. That is exactly what happened when validate-graph.ts began
+// importing `isDraftTruncated` (draft-budget.ts reads
+// OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS from timeouts.js at module load):
+// "No OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS export is defined on the mock".
+// The spread keeps the deliberate override and makes the mock inert to every
+// unrelated addition — CLAUDE.md trap 12's prescribed shape.
+vi.mock('../../../src/config/timeouts.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/config/timeouts.js')>()),
   VALIDATION_PIPELINE_TIMEOUT_MS: 30_000,
 }));
 
@@ -60,7 +77,6 @@ function makeCtx(nodes: unknown[], edges: unknown[]): StageContext {
     draftAdapter: null,
     llmMeta: null,
     confidence: undefined,
-    clarifierStatus: undefined,
     effectiveBrief: 'Should I hire a VP?',
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -74,9 +90,6 @@ function makeCtx(nodes: unknown[], edges: unknown[]): StageContext {
     nodeRenames: new Map(),
     goalConstraints: null,
     constraintStrpResult: null,
-    repairCost: 0,
-    repairFallbackReason: undefined,
-    clarifierResult: null,
     structuralMeta: null,
     orchestratorRepairUsed: false,
     orchestratorWarnings: [],

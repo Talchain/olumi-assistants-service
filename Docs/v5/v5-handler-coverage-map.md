@@ -167,7 +167,7 @@ chip-click-dispatch.ts:143-146`.
    `tryShortConfirmResume` `:1094` → proposal ordinal/label `:1721` → `tryProposalDismissal` `:1926` →
    `tryClarificationResume` `:1999` → `tryDeterministicValueUpdate`/deictic `:2338` →
    `tryStateQueryGuard` `:2898` → `tryStaleRerunGuard` `:3004` → `tryPostAnalysisAdviceGate` `:3077` →
-   `tryFreshAnalysisFollowupGuard` `:3242` → `tryNoAnalysisGuard` `:3327`.
+   ~~`tryFreshAnalysisFollowupGuard` `:3242`~~ **RETIRED 2026-08-01 (ROADMAP 2.229)** → `tryNoAnalysisGuard` `:3327`.
 3. **`routeWithToolUse`** (`prompt-run`) — runs only if still `undefined` at `:3401`, invoked at `:3424`
    (`source-verified`).
 4. **post-compose** `containsMutationLanguage` (`:4617`) — detection-only telemetry, never blocks
@@ -206,7 +206,7 @@ archived `Docs/v5/olumi-v5-routing-prompt-v6.txt` is **not** the runtime file (`
 | `compose/recoverable-handler-response.ts`, `handler-failure-responses.ts`, `validation-failure-responses.ts`, `unsupported-action-response.ts`, `edit-clarify-response.ts` | error/recovery/clarify copy | `composer-owned` deterministic |
 | `handlers/edit-graph-dispatch.ts` (`decideNoOpRecovery`) + V4 `handleEditGraph` | edit copy | `handler-owned` + V4 (`hybrid`) |
 | `handlers/edit-rejection-text.ts` | edit rejection copy | `handler-owned` deterministic |
-| `routing/fresh-analysis-followup-guard.ts` | recap constant | `composer-owned` deterministic |
+| ~~`routing/fresh-analysis-followup-guard.ts`~~ **DELETED 2026-08-01 (ROADMAP 2.229)** | ~~recap constant~~ | ~~`composer-owned` deterministic~~ |
 
 ---
 
@@ -256,10 +256,10 @@ contract must cover all 14, not just the ContextPack.
 | 10 | `post-analysis-advice-gate` 7 composers | own (`AdviceGateAnalysis` + optional decisionReview/rawRobustness) | deterministic | top_drivers, fragile_edges, win-prob, robustness, margin; `evidence_gap` splices decision_review | `post-analysis-advice-gate.ts:1083-1486` (`source-verified`) |
 | 11 | `analysis-result-headline` | own (raw enrichment) | deterministic | factor_sensitivity, fragile_edges, robustness, results | `analysis-result-headline.ts:138-263` (`source-verified`) |
 | 12 | `post-analysis-wrapper` chips | own (`enrichment.review_cards`) | deterministic | review_cards | `post-analysis-wrapper.ts:165-451` (`source-verified` agent) |
-| 13 | `fresh-analysis-followup-guard` recap | own (constant) | deterministic | none | `fresh-analysis-followup-guard.ts:172-277` (`source-verified` agent) |
+| 13 | ~~`fresh-analysis-followup-guard` recap~~ **RETIRED 2026-08-01 (ROADMAP 2.229, founder ruling)** — module deleted; the count below is now 13, not 14 | ~~own (constant)~~ | ~~deterministic~~ | none | ~~`fresh-analysis-followup-guard.ts:172-277`~~ |
 | 14 | `handler-failure-responses` | own (failure cause) | deterministic | none | `handler-failure-responses.ts:60-325` (`source-verified` agent) |
 
-**Count: 14. LLM surfaces: 2 (#1/3/5 share the routing call; #9 separate). ContextPack readers: 1
+**Count: ~~14~~ 13 as of 2026-08-01 (ROADMAP 2.229 retired row 13). LLM surfaces: 2 (#1/3/5 share the routing call; #9 separate). ContextPack readers: 1
 (the routing prompt).** No shared explanation-prompt builder exists — explanation `answer_text` is
 centralised in the routing call by design.
 
@@ -290,7 +290,7 @@ the LLM; not part of the V5 turn loop.
 | Where V4 ends / V5 begins | V4 ends at `handleDraftGraph(...)` return (`draft-graph-dispatch.ts:317`); all downstream is V5 | `source-verified:317`, import `:53` |
 | `post-draft-narrative.ts` V5-owned? | **Yes** | path + import `:67` (`source-verified`) |
 | `strengthen_items` crosses before copy? | **Yes** at `:165` into `buildPostDraftNarrative`; **only `[0]` consumed** | `source-verified:165`; `post-draft-narrative.ts:533` (agent) |
-| `widening_log` crosses before copy? | On `DraftGraphResult.coachingWideningLog` (crosses as field) but **not read** in dispatch → **never reaches same-turn copy**; **is** written to JSONL sidecar → next-turn `ContextPack.coaching.draft_coaching` | `draft-graph.ts:77,397`; `dispatch.ts:162-168` (absent); `parallel-generate.ts:204-211`; `coaching-cache-reader.ts:43-46` (`source-verified` agent) |
+| `widening_log` crosses before copy? | On `DraftGraphResult.coachingWideningLog` (crosses as field) but **not read** in dispatch → **never reaches same-turn copy**. ⚠ **CORRECTED 2026-07-27:** this cell claimed it **is** written to the JSONL sidecar → next-turn `ContextPack.coaching.draft_coaching`. **It is not** — the sidecar writer has zero production callers (see the corrected note under §8), so it reaches the next turn **no more than the same turn**. | `draft-graph.ts:77,397`; `dispatch.ts:162-168` (absent); ~~`parallel-generate.ts:204-211`~~ — **that file does not exist in this repo** (`git ls-files \| grep parallel-generate` → empty); `coaching-cache-reader.ts:43-46` is the READ end only |
 | `bias_signals` crosses before copy? | **Yes** at `:167`, used in assumption picker | `source-verified:167`; `post-draft-narrative.ts:492-506` (agent) |
 | draft_graph fact persisted? | **No** — `handler_facts:[]`; no `draft_graph` HandlerFact variant | `source-verified:38-40,397` |
 
@@ -298,8 +298,32 @@ the LLM; not part of the V5 turn loop.
 V5-only changes; no V4 edit required.** Both already cross the boundary on `DraftGraphResult`.
 `strengthen_items[1..n]` touches only `post-draft-narrative.ts`; `widening_log` needs a one-line add at
 `dispatch.ts:162-168` plus interface/logic in `post-draft-narrative.ts` — both under
-`src/orchestrator-v5/`. *(Note: sidecar writer `appendDraftCoaching` is V5-owned but invoked from V4
-callers — a cross-boundary invocation, not a blocker.)*
+`src/orchestrator-v5/`.
+
+> **⚠ CORRECTED 2026-07-27 at `8b46f2a0`.** This note used to read: *"sidecar writer
+> `appendDraftCoaching` is V5-owned but invoked from V4 callers — a cross-boundary invocation,
+> not a blocker."* **`appendDraftCoaching` has ZERO production callers — it is not invoked from
+> V4, or from anywhere.** The sidecar is **never written in production**, so
+> `readLatestDraftCoaching` always returns `null`.
+>
+> **Derive it, do not trust this line** — the complete manifest is one command, and it is the
+> enforcement, because a restated status is just another mirror waiting to go stale:
+>
+> ```sh
+> git grep -n appendDraftCoaching -- src | grep -v __tests__ | grep -v 'coaching/draft-coaching-log.ts'
+> ```
+>
+> Empty output = zero production callers. At `8b46f2a0` every one of the 15 tracked hits is the
+> definition (`src/orchestrator-v5/coaching/draft-coaching-log.ts:37`), this document, or one of
+> exactly two test files (`coaching/__tests__/draft-coaching-log.test.ts`,
+> `coaching/__tests__/coaching-cache-reader.test.ts`).
+>
+> **Why this mattered enough to correct:** the READ end *is* wired into production —
+> `turn-executor.ts:1927` → `readCoachingCache` (`coaching-cache-reader.ts:44`) →
+> `ContextPack.coaching.draft_coaching`. A live reader over a writer that never runs looks like a
+> working replay path in every code read. Asserting the writer was live could persuade someone
+> the path is *evaluated*, when in fact it is **neither written nor exercised** — so a change to
+> the read side would be tested against data that production never produces.
 
 ---
 
@@ -307,9 +331,9 @@ callers — a cross-boundary invocation, not a blocker.)*
 
 | # | Drop-point | Verdict | Evidence |
 |---|---|---|---|
-| 1 | `coaching.summary` dropped at ActionResult / draft_graph boundary | **PARTIALLY FIXED** | Verbatim only if `gateFullResponse` accepts (`post-draft-narrative.ts:263-277`, `source-verified`); else discarded. Not in structured facts (`draft-graph-dispatch.ts:38-40,397`, `source-verified`); only JSONL sidecar. |
+| 1 | `coaching.summary` dropped at ActionResult / draft_graph boundary | **PARTIALLY FIXED** | Verbatim only if `gateFullResponse` accepts (`post-draft-narrative.ts:263-277`, `source-verified`); else discarded. Not in structured facts (`draft-graph-dispatch.ts:38-40,397`, `source-verified`). ⚠ **CORRECTED 2026-07-27:** this cell ended *"only JSONL sidecar"*, which read as "at least the sidecar keeps it". **The sidecar is never written in production** (zero callers of `appendDraftCoaching` — see §8), so when the gate rejects, the summary is **discarded outright**, not retained anywhere. |
 | 2 | `strengthen_items[]` degraded by string-only filter | **PARTIALLY FIXED** | Full `{id,label,detail,action_type,bias_category}` crosses boundary (`draft-graph.ts:654-675` → `dispatch.ts:165`); **only `items[0]` consumed** (`post-draft-narrative.ts:533`). Old `.label`-only path now telemetry-only. (`source-verified` agent) |
-| 3 | `widening_log` + `bias_signals[]` stripped by schema/whitelist | **PARTIALLY FIXED** | Both survive into next-turn `ContextPack.coaching.draft_coaching` (opaque passthrough; `sanitise-enrichment` allowlist does not apply to the coaching slot). `bias_signals` reaches the same-turn assumption bullet (`:308-312`); **`widening_log` is absent from `BuildPostDraftNarrativeInput` (`:223-229`, `source-verified`) → never reaches same-turn copy.** |
+| 3 | `widening_log` + `bias_signals[]` stripped by schema/whitelist | **PARTIALLY FIXED** (was overstated) | ⚠ **CORRECTED 2026-07-27:** this cell claimed *"Both survive into next-turn `ContextPack.coaching.draft_coaching`"*. **Neither does.** That slot is fed only by the draft-coaching sidecar, whose writer has **zero production callers** (§8), so `draft_coaching` is **always `null`** in production and nothing survives by that route. The structural point still holds — the slot is an opaque passthrough and `sanitise-enrichment`'s allowlist does not apply to it — but that is a property of a channel **nothing currently writes to**. `bias_signals` does reach the same-turn assumption bullet (`:308-312`); **`widening_log` is absent from `BuildPostDraftNarrativeInput` (`:223-229`, `source-verified`) → never reaches same-turn copy either.** |
 | 4 | Per-node/edge/option provenance flattened to counts | **PARTIALLY FIXED (graph) / STILL TRUE (analysis)** | Compact graph node/edge entries pass through opaque (provenance survives). But `analysis.top_drivers` → `{factor_label, sensitivity_value}` and `fragile_edges` → label pairs in the ContextPack analysis projection (`context-pack-assembler.ts:540-577`; schema `:79-108`, `source-verified`). Confidence / attribution_stability / EVPI / switch_probability dropped from that projection. |
 | 5 | `decision_review` doesn't reliably reach post-analysis coaching/composer | **FIXED for blocks / RESIDUAL for free-text prose** | `phase3-blocks.ts:286-340` emits narrative/pre_mortem/flip_threshold/bias/robustness/evidence_priority/assumption/scenario_context cards (`source-verified`); advice-gate `evidence_gap` splices `evidence_enhancements`/`key_assumptions` (`post-analysis-advice-gate.ts:1186-1299`, `source-verified`). **Residual:** a fall-through free-text post-analysis turn sees `coaching.decision_review` as raw opaque JSON with no deterministic composer; whether the routing prompt instructs Sonnet to use it is **`unknown-needs-runtime-proof`**. Also `decision_review` only exists when a `brief` was present (`decision-review-enricher.ts:7`, `source-verified`). |
 | 6 | `top_drivers` / `fragile_paths` / `triggered_plays` / `bias_signals` / `evidence_priority`(VoI) / `top_fragile_assumption` | **MIXED** | `top_drivers` **FIXED** (advice gate `:955`+ fallback `:128-129`, `source-verified`). `fragile_edges` **PARTIAL** (label pairs + flip-threshold cards; switch-prob not in ContextPack analysis). `bias_signals` **PARTIAL** (one draft signal → bullet; `bias` cards via blocks). `evidence_priority`/VoI **PARTIAL** (EvidenceBlocks, droppable by confidence gate `phase3-blocks.ts:499-505`, `source-verified` agent). **`triggered_plays` + `top_fragile_assumption` STILL TRUE — V4-only (`orchestrator/deterministic/coaching-context-builder.ts`); zero occurrences in `src/orchestrator-v5/`** (`source-verified` grep, agent). |

@@ -13,6 +13,7 @@ import type { GraphV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import { labelMatchesBaseline } from "../../cee/transforms/analysis-ready.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 
 // ============================================================================
 // Types
@@ -310,5 +311,9 @@ export function computeStructuralReadiness(
     goal_node_id: goalNode.id,
     status: payloadStatus,
     ...(goalNode.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
+    // ROADMAP 2.315(a) — the raw target trio, carried verbatim from the goal
+    // node's attested mint. RAW-ANCHORED via the shared rule, so this mirror
+    // cannot drift from the primary builder's.
+    ...pickGoalThresholdTrio(goalNode),
   };
 }

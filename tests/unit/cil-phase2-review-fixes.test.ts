@@ -398,13 +398,13 @@ describe("Task 8: Anthropic adapter node spread pattern", () => {
     );
     // Verify the spread pattern is used (not explicit whitelist)
     expect(source).toContain("...n,");
-    // Should NOT have the old whitelist pattern for draft or repair
-    // The old pattern had explicit id, kind, label, body, category, data fields
+    // Should NOT have the old whitelist pattern.
+    // The old pattern had explicit id, kind, label, body, category, data fields.
+    // The repair section this test also used to check ("nodes: parsed.nodes.map")
+    // was deleted with the LLM graph-repair capability (ROADMAP 2.763); only the
+    // draft section remains to assert on.
     const draftSection = source.indexOf("// Build graph");
-    const repairSection = source.indexOf("nodes: parsed.nodes.map");
-    // Both sections should use spread
     expect(draftSection).toBeGreaterThan(-1);
-    expect(repairSection).toBeGreaterThan(-1);
   });
 });
 

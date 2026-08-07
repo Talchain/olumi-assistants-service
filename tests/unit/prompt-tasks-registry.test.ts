@@ -1,102 +1,194 @@
 /**
- * Prompt Tasks Registry Drift Prevention Tests
+ * Prompt Task Registry — Drift Prevention
  *
- * Verifies that the canonical PROMPT_TASKS registry stays in sync with:
- * - CeeTaskIdSchema in prompts/schema.ts
- * - Default prompts registered in prompts/defaults.ts
+ * `CeeTaskIdSchema` (src/prompts/schema.ts) is the single source of truth for
+ * CEE prompt task identifiers. Everything that can be derived from it IS
+ * derived; this file guards the seams that cannot be.
  *
- * If these tests fail, it means a new task was added somewhere but not
- * to the canonical registry, which would cause the admin UI to be out of sync.
+ * Anchoring status of every prompt-task list in the repo:
+ *
+ *   | list                             | file                              | anchoring          |
+ *   |----------------------------------|-----------------------------------|--------------------|
+ *   | CeeTaskIdSchema                  | src/prompts/schema.ts             | SSOT               |
+ *   | PROMPT_TASKS                     | src/constants/prompt-tasks.ts     | DERIVED (guarded)  |
+ *   | PROMPT_TASK_LABELS               | src/constants/prompt-tasks.ts     | DERIVED (guarded)  |
+ *   | OPERATION_TO_TASK_ID             | src/prompts/operations.ts         | typed Record<string, CeeTaskId> — invalid values are a COMPILE error. MOVED here from adapters/llm/prompt-loader.ts so the estate can derive from it without an import cycle |
+ *   | registerDefaultPrompt(...) calls | src/prompts/defaults.ts           | typed CeeTaskId — invalid ids are a COMPILE error; COVERAGE guarded below |
+ *   | LIVE/REPORTED_PMS_TASKS          | src/prompts/estate.ts             | DERIVED from OPERATION_TASK_IDS minus two exception lists — guarded in prompt-estate-drift.test.ts |
+ *   | GATED / RETIRED_PMS_TASKS        | src/prompts/estate.ts             | hand-declared, but every drift mode REDs — see prompt-estate-drift.test.ts |
+ *   | TRACKED_KEYS (= CRITICAL_PMS_TASKS) | src/prompts/tracked.ts → estate.ts | `satisfies readonly LivePmsTask[]` — deliberate subset, COMPILE-guarded |
+ *   | STATUS_KEYS (= REPORTED_PMS_TASKS)  | src/prompts/tracked.ts → estate.ts | DERIVED — the reporting surface |
+ *   | DEFAULT_PROMPT_VERSIONS          | src/prompts/estate.ts             | one map; was DEFAULT_VERSIONS + FALLBACK_VERSIONS, two mirrors of one fact |
+ *   | CeeTask / TASK_MODEL_DEFAULTS    | src/config/model-routing.ts       | separate vocabulary — guarded below |
+ *
+ * History: this suite previously existed but its entire sync block was
+ * `describe.skip`-ed, with a comment naming `validate_graph` as the known
+ * failure. The alarm was disabled instead of the drift being fixed, and the
+ * admin UI silently under-reported 11 store-backed tasks for months. Every
+ * assertion below is mutation-checked in both directions (extra entry → RED,
+ * missing entry → RED). If you find yourself skipping one of these, fix the
+ * drift instead.
  */
 
 import { describe, it, expect } from 'vitest';
-import { PROMPT_TASKS, type PromptTask } from '../../src/constants/prompt-tasks.js';
+import { PROMPT_TASKS, PROMPT_TASK_LABELS, type PromptTask } from '../../src/constants/prompt-tasks.js';
 import { CeeTaskIdSchema } from '../../src/prompts/schema.js';
+import { TASK_MODEL_DEFAULTS } from '../../src/config/model-routing.js';
+import { TRACKED_KEYS } from '../../src/prompts/tracked.js';
+import { getDefaultPrompts } from '../../src/prompts/loader.js';
+import { registerAllDefaultPrompts } from '../../src/prompts/defaults.js';
+import { generateTaskOptions } from '../../src/routes/admin.ui.js';
 
-describe('PROMPT_TASKS Registry', () => {
-  // Skipped: validate_graph added to CeeTaskIdSchema but not yet to PROMPT_TASKS — needs source update
-  // TODO: ISSUE-9017 — prompt-tasks-registry sync with CeeTaskIdSchema
-  describe.skip('sync with CeeTaskIdSchema', () => {
-    it('contains all tasks from CeeTaskIdSchema', () => {
-      // Get all values from the Zod enum schema
-      const schemaTaskIds = CeeTaskIdSchema.options;
+/**
+ * Schema tasks that intentionally have NO registered default prompt.
+ *
+ * These three are legacy slots: they sit in the Zod enum and in model routing
+ * but have no default, no loader operation, and no row in the prompt store.
+ * They are kept (rather than deleted) because removing them from the enum
+ * would make the API start rejecting task ids it currently accepts — a
+ * separate, deliberate decision.
+ *
+ * This is an EXACT-set assertion, not an allowlist: adding a fourth
+ * default-less task goes RED (you must justify it), and registering a default
+ * for one of these ALSO goes RED (you must delete it from this set). It
+ * cannot silently assume-good in either direction.
+ */
+const SCHEMA_TASKS_WITHOUT_DEFAULTS = ['evidence_helper', 'sensitivity_coach', 'preflight'] as const;
 
-      // Every task in the schema should be in PROMPT_TASKS
-      for (const taskId of schemaTaskIds) {
+/**
+ * Model-routing keys that are deliberately NOT prompt task ids.
+ *
+ * `src/config/model-routing.ts` keys a model per *routing* task, and its
+ * vocabulary predates the prompt registry: `clarification` and `options` are
+ * legacy aliases of `clarify_brief` and `suggest_options`. They are real
+ * routing entries, not drift. Exact-set assertion, same rationale as above.
+ */
+const MODEL_ROUTING_NON_PROMPT_TASKS = ['clarification', 'options'] as const;
+
+describe('prompt task registry', () => {
+  describe('PROMPT_TASKS is derived from CeeTaskIdSchema', () => {
+    it('is exactly CeeTaskIdSchema.options, in order', () => {
+      // Guards against anyone re-introducing a hand-written array here.
+      expect([...PROMPT_TASKS]).toEqual([...CeeTaskIdSchema.options]);
+    });
+
+    it('accepts every task the create endpoint accepts', () => {
+      // The one-directional failure that caused the original bug: the UI must
+      // never under-report what CreatePromptRequestSchema will validate.
+      for (const taskId of CeeTaskIdSchema.options) {
         expect(
-          PROMPT_TASKS.includes(taskId as PromptTask),
-          `Task '${taskId}' is in CeeTaskIdSchema but missing from PROMPT_TASKS registry`
+          (PROMPT_TASKS as readonly string[]).includes(taskId),
+          `Task '${taskId}' validates against CeeTaskIdSchema but is missing from PROMPT_TASKS — the admin UI cannot offer it`,
         ).toBe(true);
       }
     });
 
-    it('has same number of tasks as CeeTaskIdSchema', () => {
-      const schemaTaskIds = CeeTaskIdSchema.options;
-      expect(
-        PROMPT_TASKS.length,
-        `PROMPT_TASKS has ${PROMPT_TASKS.length} tasks but CeeTaskIdSchema has ${schemaTaskIds.length}`
-      ).toBe(schemaTaskIds.length);
+    it('has no duplicates', () => {
+      expect(new Set(PROMPT_TASKS).size).toBe(PROMPT_TASKS.length);
     });
 
-    it('CeeTaskIdSchema contains all tasks from PROMPT_TASKS', () => {
-      const schemaTaskIds = new Set(CeeTaskIdSchema.options);
-
-      // Every task in PROMPT_TASKS should be in the schema
-      for (const taskId of PROMPT_TASKS) {
-        expect(
-          schemaTaskIds.has(taskId),
-          `Task '${taskId}' is in PROMPT_TASKS but missing from CeeTaskIdSchema`
-        ).toBe(true);
-      }
-    });
-  });
-
-  describe('canonical registry properties', () => {
-    it('has no duplicate tasks', () => {
-      const uniqueTasks = new Set(PROMPT_TASKS);
-      expect(uniqueTasks.size).toBe(PROMPT_TASKS.length);
-    });
-
-    it('all tasks are lowercase with underscores', () => {
+    it('uses lower_snake_case ids throughout', () => {
       for (const task of PROMPT_TASKS) {
         expect(task).toMatch(/^[a-z][a-z0-9_]*$/);
       }
     });
+  });
 
-    it('includes core required tasks', () => {
-      // These are the minimum required tasks that must always exist
-      const coreTasks = ['draft_graph', 'clarify_brief', 'repair_graph'] as const;
-      for (const coreTask of coreTasks) {
+  describe('PROMPT_TASK_LABELS is total over PROMPT_TASKS', () => {
+    it('labels every task with a non-empty string', () => {
+      for (const task of PROMPT_TASKS) {
+        expect(PROMPT_TASK_LABELS[task], `Task '${task}' has no display label`).toBeTruthy();
+      }
+    });
+
+    it('carries no label for a task that does not exist', () => {
+      for (const labelled of Object.keys(PROMPT_TASK_LABELS)) {
         expect(
-          PROMPT_TASKS.includes(coreTask as PromptTask),
-          `Core task '${coreTask}' missing from PROMPT_TASKS`
+          (PROMPT_TASKS as readonly string[]).includes(labelled),
+          `Label declared for unknown task '${labelled}'`,
+        ).toBe(true);
+      }
+    });
+  });
+
+  describe('admin UI dropdown covers the registry', () => {
+    it('renders an <option> for every prompt task', () => {
+      // Closes the loop at the real consumer: this is the surface where the
+      // original drift was user-visible.
+      const html = generateTaskOptions();
+      for (const task of PROMPT_TASKS) {
+        expect(
+          html.includes(`<option value="${task}">`),
+          `Admin task dropdown is missing '${task}' — it cannot be selected when creating a prompt`,
         ).toBe(true);
       }
     });
 
-    it('includes explainer task (was previously missing from admin UI)', () => {
-      // This test specifically guards against the bug where explainer was missing
-      expect(PROMPT_TASKS.includes('explainer')).toBe(true);
+    it('renders exactly as many options as there are tasks', () => {
+      const optionCount = (generateTaskOptions().match(/<option /g) ?? []).length;
+      expect(optionCount).toBe(PROMPT_TASKS.length);
+    });
+  });
+
+  describe('registered defaults cover the schema', () => {
+    it('registers a default for every schema task except the documented legacy slots', () => {
+      registerAllDefaultPrompts();
+      const withDefaults = new Set(Object.keys(getDefaultPrompts()));
+
+      const missing = CeeTaskIdSchema.options.filter((t) => !withDefaults.has(t)).sort();
+      expect(
+        missing,
+        'Schema tasks without a registered default changed. Either register a default, ' +
+          'or update SCHEMA_TASKS_WITHOUT_DEFAULTS with a justification.',
+      ).toEqual([...SCHEMA_TASKS_WITHOUT_DEFAULTS].sort());
     });
 
-    it('includes preflight task', () => {
-      expect(PROMPT_TASKS.includes('preflight')).toBe(true);
+    it('registers no default for a task the schema does not know', () => {
+      registerAllDefaultPrompts();
+      for (const taskId of Object.keys(getDefaultPrompts())) {
+        expect(
+          CeeTaskIdSchema.safeParse(taskId).success,
+          `Default registered for '${taskId}', which is not in CeeTaskIdSchema`,
+        ).toBe(true);
+      }
+    });
+  });
+
+  describe('model routing vocabulary', () => {
+    it('diverges from the schema only by the documented legacy aliases', () => {
+      const nonPromptTasks = Object.keys(TASK_MODEL_DEFAULTS)
+        .filter((task) => !CeeTaskIdSchema.safeParse(task).success)
+        .sort();
+      expect(
+        nonPromptTasks,
+        'model-routing keys that are not prompt tasks changed. Either use the canonical ' +
+          'task id, or update MODEL_ROUTING_NON_PROMPT_TASKS with a justification.',
+      ).toEqual([...MODEL_ROUTING_NON_PROMPT_TASKS].sort());
+    });
+  });
+
+  describe('TRACKED_KEYS is a deliberate subset', () => {
+    it('contains only real prompt tasks', () => {
+      // Compile-time guarded by `satisfies readonly LivePmsTask[]` in
+      // src/prompts/estate.ts; asserted at runtime too so a future `as` cast
+      // cannot slip past.
+      for (const key of TRACKED_KEYS) {
+        expect(
+          (PROMPT_TASKS as readonly string[]).includes(key),
+          `TRACKED_KEYS entry '${key}' is not a valid prompt task`,
+        ).toBe(true);
+      }
+    });
+
+    it('is a strict subset (it reports a chosen few, not everything)', () => {
+      expect(TRACKED_KEYS.length).toBeLessThan(PROMPT_TASKS.length);
     });
   });
 
   describe('type safety', () => {
-    it('PROMPT_TASKS is readonly', () => {
-      // TypeScript should prevent mutation at compile time
-      // This runtime check verifies the array is const
-      expect(Object.isFrozen(PROMPT_TASKS)).toBe(false); // Note: `as const` doesn't freeze at runtime
-      // But we can verify it's an array
-      expect(Array.isArray(PROMPT_TASKS)).toBe(true);
-    });
-
-    it('exports PromptTask type', () => {
-      // Type check - if this compiles, the type is properly exported
+    it('exports a usable PromptTask type', () => {
       const task: PromptTask = 'draft_graph';
-      expect(PROMPT_TASKS.includes(task)).toBe(true);
+      expect((PROMPT_TASKS as readonly string[]).includes(task)).toBe(true);
     });
   });
 });

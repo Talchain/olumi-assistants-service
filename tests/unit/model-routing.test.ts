@@ -194,12 +194,16 @@ describe("Task-to-Model Routing", () => {
     });
 
     it("assigns optimized models to complex reasoning tasks", () => {
-      // draft_graph uses gpt-4.1 (reverted 2026-03-18)
-      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("gpt-4.1-2025-04-14");
+      // Reconciled to live staging CEE_MODEL_* (2026-07-19): draft/edit serve
+      // claude-sonnet-4-6, orchestrator serves claude-sonnet-5.
+      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("claude-sonnet-4-6");
+      expect(TASK_MODEL_DEFAULTS.edit_graph).toBe("claude-sonnet-4-6");
+      expect(TASK_MODEL_DEFAULTS.orchestrator).toBe("claude-sonnet-5");
       // bias_check uses Claude Sonnet 4 (excellent reasoning)
       expect(TASK_MODEL_DEFAULTS.bias_check).toBe("claude-sonnet-4-20250514");
-      // repair_graph uses gpt-4.1 (reverted 2026-03-18)
+      // repair_graph / decision_review: registered pin of live gpt-4.1
       expect(TASK_MODEL_DEFAULTS.repair_graph).toBe("gpt-4.1-2025-04-14");
+      expect(TASK_MODEL_DEFAULTS.decision_review).toBe("gpt-4.1-2025-04-14");
       // Other complex tasks use premium tier (gpt-5.2)
       expect(TASK_MODEL_DEFAULTS.options).toBe("gpt-5.2");
       expect(TASK_MODEL_DEFAULTS.critique_graph).toBe("gpt-5.2");
@@ -236,7 +240,7 @@ describe("Task-to-Model Routing", () => {
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
       expect(getDefaultModelForTask("clarification")).toBe("gpt-4.1-2025-04-14");
-      expect(getDefaultModelForTask("draft_graph")).toBe("gpt-4.1-2025-04-14");
+      expect(getDefaultModelForTask("draft_graph")).toBe("claude-sonnet-4-6");
       expect(getDefaultModelForTask("bias_check")).toBe("claude-sonnet-4-20250514");
     });
   });

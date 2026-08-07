@@ -22,7 +22,13 @@ vi.mock("../../src/utils/telemetry.js", async (importOriginal) => {
   };
 });
 
-import { runAutoBaselineDedup } from "../../src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.js";
+import {
+  runAutoBaselineDedup,
+  isExplicitBaseline,
+  looksHeuristicallyLikeBaseline,
+  buildSignature,
+  type OptionLike,
+} from "../../src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.js";
 import type { StageContext, PipelineOutcome } from "../../src/cee/unified-pipeline/types.js";
 import { emit, TelemetryEvents } from "../../src/utils/telemetry.js";
 
@@ -59,12 +65,15 @@ function makeCtx(graph: unknown): StageContext {
 function optionNode(
   id: string,
   interventions: Record<string, number>,
-  opts: { is_baseline?: boolean; label?: string } = {},
+  opts: { is_baseline?: boolean; node_is_baseline?: boolean; label?: string } = {},
 ): Record<string, unknown> {
   return {
     id,
     kind: "option",
     label: opts.label ?? id,
+    // Node-level (legacy) surface — the draft LLM stamps this directly on
+    // the node in the split-field emission shape (2026-07-14 rung-2 finding).
+    ...(typeof opts.node_is_baseline === "boolean" ? { is_baseline: opts.node_is_baseline } : {}),
     data: {
       interventions,
       ...(typeof opts.is_baseline === "boolean" ? { is_baseline: opts.is_baseline } : {}),
@@ -538,6 +547,162 @@ describe("runAutoBaselineDedup", () => {
     const report = runAutoBaselineDedup(ctx);
     expect(report.dropped_option_ids).toEqual([]);
     expect(report.groups_evaluated).toBe(0);
+  });
+
+  // ── SPLIT-FIELD baseline flag (2026-07-14 rung-2 finding, live variant (b)) ──
+  //
+  // Measured offline 5/30 across BOTH prompt versions: the draft LLM emits
+  // node-level `is_baseline: true` but `data.is_baseline: false` on the same
+  // status-quo option. The old data-first read let data:false MASK the
+  // explicit node:true, so the option was treated as non-explicit, the #203
+  // dedup could not fire, and the collision fell to the #452 heuristic
+  // decline (Guard 2) → fail-fast → HTTP 500. An explicit `true` on EITHER
+  // surface must win so the collision is absorbed at substep 0.9.
+
+  it("absorbs the live current-CHANNEL-1 split-field shape via the explicit-baseline dedup path (no fall-through to the bypass)", () => {
+    // Exact option ids / labels / vectors from
+    // acceptance-evidence/behavioural-retest-2026-07-14/rung2-prompt-candidate/
+    // samples/current-CHANNEL-1.json, in repair-stage shape
+    // (interventions normalised to Record<string, number>).
+    const graph = {
+      nodes: [
+        { id: "dec_channel", kind: "decision", label: "Channel decision" },
+        { id: "goal_profit", kind: "goal", label: "Profit" },
+        { id: "fac_channel_focus", kind: "factor", label: "Channel focus" },
+        { id: "fac_cac_spend", kind: "factor", label: "CAC spend" },
+        { id: "fac_margin_rate", kind: "factor", label: "Margin rate" },
+        optionNode(
+          "opt_own_site",
+          { fac_channel_focus: 1, fac_cac_spend: 0.7, fac_margin_rate: 0.75 },
+          { is_baseline: false, node_is_baseline: false, label: "Go All-In on Own Webshop" },
+        ),
+        optionNode(
+          "opt_amazon",
+          { fac_channel_focus: 0, fac_cac_spend: 0.3, fac_margin_rate: 0.4 },
+          { is_baseline: false, node_is_baseline: false, label: "Double Down on Amazon" },
+        ),
+        optionNode(
+          "opt_split",
+          { fac_channel_focus: 0.5, fac_cac_spend: 0.5, fac_margin_rate: 0.58 },
+          { is_baseline: false, node_is_baseline: false, label: "Split Focus Across Both Channels" },
+        ),
+        // THE SPLIT-FIELD EMISSION: node-level true, data-level false —
+        // colliding with opt_split on {0.5, 0.5, 0.58}.
+        optionNode(
+          "opt_status_quo",
+          { fac_channel_focus: 0.5, fac_cac_spend: 0.5, fac_margin_rate: 0.58 },
+          { is_baseline: false, node_is_baseline: true, label: "Continue Current Mix (Status Quo)" },
+        ),
+      ],
+      edges: [
+        edge("dec_channel", "opt_own_site"),
+        edge("dec_channel", "opt_amazon"),
+        edge("dec_channel", "opt_split"),
+        edge("dec_channel", "opt_status_quo"),
+        edge("opt_status_quo", "fac_channel_focus"),
+      ],
+    };
+    const ctx = makeCtx(graph);
+    const report = runAutoBaselineDedup(ctx);
+
+    // The explicit-baseline dedup path absorbs the collision: the
+    // node-level-flagged status quo is dropped, the non-explicit
+    // colliding option survives.
+    expect(report.dropped_option_ids).toEqual(["opt_status_quo"]);
+    expect(report.dropped_edge_count).toBe(2);
+    // NOT misclassified as heuristic-only prompt drift — the flag IS explicit.
+    expect(report.heuristic_only_collisions).toBe(0);
+
+    const finalNodes = (ctx.graph as { nodes: Array<Record<string, unknown>> }).nodes;
+    const finalIds = finalNodes.map((n) => n.id);
+    expect(finalIds).toContain("opt_own_site");
+    expect(finalIds).toContain("opt_amazon");
+    expect(finalIds).toContain("opt_split");
+    expect(finalIds).not.toContain("opt_status_quo");
+
+    // No OPTIONS_IDENTICAL collision remains for the downstream sweep —
+    // i.e. the draft can never reach the fail-fast bypass (the 500 path)
+    // on this shape. Verified with the validator's own identity definition.
+    const survivingSignatures = finalNodes
+      .filter((n) => n.kind === "option")
+      .map((n) => buildSignature((n.data as { interventions?: Record<string, unknown> }).interventions));
+    expect(new Set(survivingSignatures).size).toBe(survivingSignatures.length);
+  });
+
+  // ── Truth table for the explicit-baseline read (data.is_baseline × node.is_baseline) ──
+  //
+  // The dangerous cell is (data:false, node:true): an explicit true must
+  // never be masked by the sibling surface's false. Explicit-false-only and
+  // absent cells keep their previous semantics.
+  it("isExplicitBaseline: explicit true on EITHER surface wins; false/absent cells unchanged", () => {
+    const cell = (data: boolean | undefined, node: boolean | undefined): OptionLike => ({
+      id: "opt_x",
+      kind: "option",
+      label: "opt_x",
+      ...(node !== undefined ? { is_baseline: node } : {}),
+      data: { interventions: { fac_x: 0.5 }, ...(data !== undefined ? { is_baseline: data } : {}) },
+    });
+
+    // [data, node, expected isExplicitBaseline]
+    const table: Array<[boolean | undefined, boolean | undefined, boolean]> = [
+      [true, true, true], // both true → explicit (unchanged)
+      [true, false, true], // data true wins (unchanged)
+      [true, undefined, true], // canonical surface alone (unchanged)
+      [false, true, true], // THE FIX: node-level explicit true no longer masked by data:false
+      [false, false, false], // explicit false on both → not baseline (unchanged)
+      [false, undefined, false], // explicit false, no node flag (unchanged)
+      [undefined, true, true], // node-level fallback (unchanged)
+      [undefined, false, false], // node-level explicit false (unchanged)
+      [undefined, undefined, false], // absent both → not explicit (heuristics' territory, unchanged)
+    ];
+    for (const [data, node, expected] of table) {
+      expect(isExplicitBaseline(cell(data, node)), `data=${data} node=${node}`).toBe(expected);
+    }
+  });
+
+  it("looksHeuristicallyLikeBaseline: split-field explicit true is NOT heuristic; absent/false-flag heuristics unchanged", () => {
+    const sq = (data: boolean | undefined, node: boolean | undefined): OptionLike => ({
+      id: "opt_status_quo",
+      kind: "option",
+      label: "Status Quo",
+      ...(node !== undefined ? { is_baseline: node } : {}),
+      data: { interventions: { fac_x: 0.5 }, ...(data !== undefined ? { is_baseline: data } : {}) },
+    });
+
+    // Split-field shape is now EXPLICIT, so the heuristic classifier must
+    // not claim it (it feeds Guard 2 in the #452 graceful dedup and the
+    // heuristic-only drift telemetry).
+    expect(looksHeuristicallyLikeBaseline(sq(false, true))).toBe(false);
+    // GREEN-PINS: absent-flag and explicit-false shapes keep their previous
+    // heuristic classification (label/id vocabulary untouched).
+    expect(looksHeuristicallyLikeBaseline(sq(undefined, undefined))).toBe(true);
+    expect(looksHeuristicallyLikeBaseline(sq(false, false))).toBe(true);
+    expect(looksHeuristicallyLikeBaseline(sq(false, undefined))).toBe(true);
+  });
+
+  // ── GREEN-PIN: explicit false on BOTH surfaces still never authorises deletion ──
+  it("does NOT delete on collision when is_baseline is explicitly false on both surfaces (heuristic-only telemetry fires)", () => {
+    const graph = {
+      nodes: [
+        { id: "dec", kind: "decision" },
+        optionNode("opt_explicit", { fac_x: 0.5 }),
+        optionNode(
+          "opt_user_status_quo",
+          { fac_x: 0.5 },
+          { is_baseline: false, node_is_baseline: false, label: "Status Quo" },
+        ),
+      ],
+      edges: [],
+    };
+    const ctx = makeCtx(graph);
+    const report = runAutoBaselineDedup(ctx);
+
+    expect(report.dropped_option_ids).toEqual([]);
+    expect(report.dropped_edge_count).toBe(0);
+    // Still surfaces as heuristic-only drift (unchanged from pre-fix).
+    expect(report.heuristic_only_collisions).toBe(1);
+    const finalIds = (ctx.graph as { nodes: Array<{ id: string }> }).nodes.map((n) => n.id);
+    expect(finalIds).toContain("opt_user_status_quo");
   });
 
   it("handles multiple distinct duplicate groups (drops baselines in each)", () => {

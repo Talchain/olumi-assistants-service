@@ -34,25 +34,59 @@ import type {
 } from '../../src/adapters/llm/types.js';
 
 // ----- session store mock: capture commit writes so we can inspect facts ----
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
 const appendCalls: Array<unknown> = [];
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async (write: unknown) => {
-      appendCalls.push(write);
-      return { id: 'mock-row-id' };
-    },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: async (write) => {
+          appendCalls.push(write);
+          return { id: 'mock-row-id' };
+        },
+      }),
+    resetSessionStoreForTests: () => {},
+  };
+});
+
+// ----- config mock: control the decision_review auto-fire latency gate -----
+// ROADMAP 1.148 C7: PR #209 (latency fix 1.41 FIX 3) gated the run_analysis
+// decision_review auto-fire behind V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW,
+// DEFAULT FALSE. The default path emits `v5.decision_review.skipped`
+// (reason=autofire_disabled) instead of awaiting the enrichment LLM call.
+// Both branches are pinned below; this mutable flag selects the branch.
+let awaitDecisionReviewFlag = false;
+vi.mock('../../src/config/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/config/index.js')>();
+  return {
+    ...original,
+    config: new Proxy(original.config as object, {
+      get(target, prop) {
+        if (prop === 'cee') {
+          return new Proxy(Reflect.get(target, prop) as object, {
+            get(ceeTarget, ceeProp) {
+              if (ceeProp === 'runAnalysisAwaitDecisionReview') return awaitDecisionReviewFlag;
+              return Reflect.get(ceeTarget, ceeProp);
+            },
+          });
+        }
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
+});
 
 // ----- decision_review mock: return a fake output so enrichment lights up ---
 const FAKE_DECISION_REVIEW_OUTPUT = {
+  // narrative_summary present so the POST-parse contract gate admits the
+  // review (a missing review_card is dropped down the no-review path);
+  // `summary`/`confidence` remain the fields the attach assertion reads.
+  narrative_summary: 'Option A leads on the current evidence.',
   summary: 'Proceed with option A — dominant on return of investment.',
   confidence: 'high',
   headline: 'Group 1 activation proof',
@@ -172,14 +206,16 @@ type TelemEvent = { event: string; data: Record<string, unknown> };
 describe('V5 Group 1 activation proof — final integration test (Group 3)', () => {
   beforeEach(() => {
     appendCalls.length = 0;
+    awaitDecisionReviewFlag = false;
   });
 
-  it('activates BOTH Group 1 outputs on a single V5 run_analysis turn', async () => {
-    // Collect every telemetry event so we can assert on Step 5's
-    // v5.coaching.signal_fired and the turn-completed shape.
+  /**
+   * Shared single-turn driver: one V5 run_analysis turn through the real
+   * TurnExecutor with routing adapter / PLoT / decision_review mocked.
+   */
+  async function runOneRunAnalysisTurn() {
     const events: TelemEvent[] = [];
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
-
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(RUN_ANALYSIS_TOOL_CALL_INPUT),
     );
@@ -187,11 +223,9 @@ describe('V5 Group 1 activation proof — final integration test (Group 3)', () 
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeScenarioSnapshot(),
     });
-
     // Routing log writer — the brief's acceptance criterion is that the
     // routing log includes coaching_signal_id for FIRST_ANALYSIS_COMPLETE.
     const routingLogWriter = vi.fn().mockResolvedValue(undefined);
-
     const { response, telemetry } = await runTurnExecutor(
       RUN_ANALYSIS_PAYLOAD,
       'req-group1-activation',
@@ -205,8 +239,57 @@ describe('V5 Group 1 activation proof — final integration test (Group 3)', () 
         scenarioBrief: 'Should we expand into the German market this quarter?',
       },
     );
-
     setTestSink(null);
+    return { response, telemetry, events, routingLogWriter };
+  }
+
+  // ROADMAP 1.148 C7 — pin the DEFAULT behaviour: PR #209 (latency fix)
+  // gates the decision_review auto-fire behind
+  // V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW (default FALSE). On the default
+  // path run_analysis returns without awaiting the enrichment LLM call,
+  // `enrichment.decision_review` is absent, and the skip is RECORDED via
+  // `v5.decision_review.skipped` reason=autofire_disabled. The Group 1
+  // Task C coaching signal is NOT gated and must still fire.
+  it('DEFAULT flag=false: decision_review auto-fire is skipped (autofire_disabled telemetry), coaching signal still fires', async () => {
+    awaitDecisionReviewFlag = false;
+    const { response, telemetry, events, routingLogWriter } =
+      await runOneRunAnalysisTurn();
+
+    OlumiResponseSchema.parse(response);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
+
+    // The skip is explicit, not silent.
+    const skipped = events.filter((e) => e.event === 'v5.decision_review.skipped');
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]!.data.reason).toBe('autofire_disabled');
+    expect(skipped[0]!.data.brief_present).toBe(true);
+
+    // No decision_review enrichment on the persisted fact.
+    expect(appendCalls).toHaveLength(1);
+    const write = appendCalls[0] as {
+      handler_facts: Array<{ fact_type: string; result: { enrichment?: Record<string, unknown> } }>;
+    };
+    const raFact = write.handler_facts.find((f) => f.fact_type === 'run_analysis');
+    expect(raFact).toBeDefined();
+    expect(raFact!.result.enrichment?.decision_review).toBeUndefined();
+
+    // Group 1 Task C is NOT behind the latency gate — still fires.
+    await new Promise((r) => setImmediate(r));
+    expect(routingLogWriter).toHaveBeenCalledTimes(1);
+    const record = routingLogWriter.mock.calls[0]![0] as {
+      coaching_signal_id: string | null;
+    };
+    expect(record.coaching_signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+  });
+
+  it('flag=true: activates BOTH Group 1 outputs on a single V5 run_analysis turn', async () => {
+    // ROADMAP 1.148 C7: opt in to the auto-fire (PR #209 default is
+    // false) so the original Group 1 activation proof still runs against
+    // the real awaited path.
+    awaitDecisionReviewFlag = true;
+    const { response, telemetry, events, routingLogWriter } =
+      await runOneRunAnalysisTurn();
 
     // ---- Basic turn health ----------------------------------------------
     OlumiResponseSchema.parse(response);

@@ -8,6 +8,7 @@ import {
   decideProposalContinuation,
   detectsAddAsFactorIntent,
   detectsContinuationAgreement,
+  detectsProposalAgreement,
   extractProposedConcept,
   findProposedConceptAction,
   findProposedConceptEntry,
@@ -439,6 +440,156 @@ describe('detectsContinuationAgreement', () => {
   });
 });
 
+// Lane 22 (live 2026-07-07 session, 3-for-3 edit-lane failure) — the
+// agreement-matcher misses that dropped the resumed proposal. Table-driven:
+// each accept row is a real or realistic reply to a captured proposal that
+// must resume; each reject row must keep NOT resuming.
+describe('detectsContinuationAgreement — affirmative-prefix and imperative forms (live misses)', () => {
+  it.each([
+    // Live miss #1 (verbatim): assistant proposed "add the 20% velocity
+    // target as a constraint", user agreed with content after "Yes,".
+    'Yes, add that velocity target.',
+    // Live miss #2 tail (verbatim).
+    'Yes, please update the model now.',
+    // $-anchored STANDALONE_AGREEMENT missed even bare politeness pairs.
+    'Yes please.',
+    'yes please',
+    'Ok, go ahead.',
+    'Sure, do it.',
+    // Whitelist gaps called out in the brief.
+    'Sounds good.',
+    'sounds good, do it',
+    'Do it.',
+    'Add it.',
+    'add it to the model',
+    'Include it.',
+    'Yes, do that.',
+    'Go for it.',
+  ])('accepts: %s', (m) => {
+    expect(detectsContinuationAgreement(m)).toBe(true);
+  });
+
+  it('accepts a pasted question followed by an affirmative sentence (live miss #2 shape)', () => {
+    const pasted =
+      'Would you like me to add the 20% velocity target as a constraint '
+      + 'so the analysis can check your options against it? '
+      + 'Yes, please update the model now.';
+    expect(detectsContinuationAgreement(pasted)).toBe(true);
+  });
+
+  it('accepts a long pasted question + affirmative tail even past the 400-char cap', () => {
+    const filler = 'This is context the user pasted back before answering. '.repeat(9);
+    const message = `${filler}Yes, please update the model now.`;
+    expect(message.length).toBeGreaterThan(400);
+    expect(detectsContinuationAgreement(message)).toBe(true);
+  });
+
+  it.each([
+    'Yes, but do not add it.',
+    "Yes, but don't add the velocity target.",
+    'No, skip the velocity target.',
+    'Ok, but not that one.',
+    'Sure, but never add it.',
+  ])('still rejects negated forms: %s', (m) => {
+    expect(detectsContinuationAgreement(m)).toBe(false);
+  });
+
+  it('still rejects a fresh statement that merely opens with an affirmative word', () => {
+    // "Okay so ..." steers to a new topic; the remainder carries no
+    // continuation imperative, so the prefix alone must not resume.
+    expect(
+      detectsContinuationAgreement('Okay so the market has three segments beyond this one.'),
+    ).toBe(false);
+  });
+
+  it('does not swallow a fully-specified value edit behind an affirmative prefix', () => {
+    // "Yes, set the price to 30." is a complete edit instruction — it must
+    // route to the real edit path, not the Stage 1 ladder.
+    expect(detectsContinuationAgreement('Yes, set the price to 30.')).toBe(false);
+    expect(detectsContinuationAgreement('Ok, update the budget to 1.5 million.')).toBe(false);
+  });
+});
+
+describe('detectsProposalAgreement — concept token-overlap (live miss #1 robustness)', () => {
+  const concept = '20% velocity target as a constraint';
+
+  it.each([
+    'Yes, add that velocity target.',
+    'Please include the velocity target.',
+    "Let's go with the velocity target.",
+    'add the velocity target',
+  ])('resumes when the reply names the pending concept: %s', (m) => {
+    expect(detectsProposalAgreement(m, concept)).toBe(true);
+  });
+
+  it('does not resume on a negated or contrary reference to the concept', () => {
+    expect(detectsProposalAgreement('Drop the velocity target idea.', concept)).toBe(false);
+    expect(detectsProposalAgreement("Don't add the velocity target.", concept)).toBe(false);
+  });
+
+  it('does not resume on an interrogative reference to the concept', () => {
+    expect(
+      detectsProposalAgreement('Why would the velocity target matter here?', concept),
+    ).toBe(false);
+  });
+
+  it('does not resume when the reply shares no tokens with the concept', () => {
+    expect(detectsProposalAgreement('Focus on churn instead of this.', concept)).toBe(false);
+  });
+
+  it('requires two overlapping tokens for multi-token concepts', () => {
+    // "target" alone is too weak a signal for this concept.
+    expect(detectsProposalAgreement('The target seems fine.', concept)).toBe(false);
+  });
+
+  it('does not resume on an explicit value assignment naming the concept', () => {
+    // A concrete value instruction is a fresh edit, not consent.
+    expect(
+      detectsProposalAgreement('Set the velocity target to 25%.', concept),
+    ).toBe(false);
+  });
+});
+
+describe('decideProposalContinuation — live-miss end-to-end (Stage 1 resume)', () => {
+  const pending = {
+    concept: '20% velocity target as a constraint',
+    preferred_kind: 'either' as const,
+  };
+
+  it('live miss #1: "Yes, add that velocity target." resumes Stage 1', () => {
+    const d = decideProposalContinuation({
+      message: 'Yes, add that velocity target.',
+      pendingProposedConcept: pending,
+      nodes: [],
+    });
+    expect(d).not.toBeNull();
+    expect(d!.stage).toBe('stage_one');
+    expect(d!.assistantText).toContain(pending.concept);
+  });
+
+  it('live miss #2: pasted question + "Yes, please update the model now." resumes Stage 1', () => {
+    const d = decideProposalContinuation({
+      message:
+        'Would you like me to add the 20% velocity target as a constraint '
+        + 'so the analysis can check your options against it? '
+        + 'Yes, please update the model now.',
+      pendingProposedConcept: pending,
+      nodes: [],
+    });
+    expect(d).not.toBeNull();
+    expect(d!.stage).toBe('stage_one');
+  });
+
+  it('an already-disambiguated factor instruction is NEVER intercepted (falls through to edit dispatch)', () => {
+    const d = decideProposalContinuation({
+      message: 'Add velocity target as a factor affecting Revenue.',
+      pendingProposedConcept: pending,
+      nodes: [],
+    });
+    expect(d).toBeNull();
+  });
+});
+
 describe('detectsAddAsFactorIntent', () => {
   it('accepts free-text add-as-factor', () => {
     expect(detectsAddAsFactorIntent('Add team morale as a factor.')).toBe(true);
@@ -796,29 +947,36 @@ describe('findProposedConceptAction', () => {
     expect(findProposedConceptAction(undefined)).toBeNull();
   });
 
-  it('returns the most recent proposed_concept when multiple present', () => {
-    const a1 = buildProposalPendingAction({
-      concept: 'first concept',
-      preferred_kind: 'risk',
-      scenario_id: '11111111-1111-1111-1111-111111111111',
-      emitted_at_iso: '2026-05-28T09:00:00.000Z',
-      graph_hash: 'h1',
-    });
-    const a2 = buildProposalPendingAction({
-      concept: 'second concept',
+  it('D2: the FRESH capture wins over a carried stale one (commit order = fresh first)', () => {
+    // `commitDirectAnswer` persists [...thisTurnPendings, ...carriedSurvivors]
+    // — the fresh capture at the FRONT, the carried stale entry at the tail.
+    // The old end-first scan returned the carried stale concept here (the
+    // live 2026-07-10 stale-resume inversion); the scan must be front-first.
+    const fresh = buildProposalPendingAction({
+      concept: 'fresh concept',
       preferred_kind: 'factor',
       scenario_id: '11111111-1111-1111-1111-111111111111',
       emitted_at_iso: '2026-05-28T10:00:00.000Z',
       graph_hash: 'h2',
     });
-    const found = findProposedConceptAction([a1, a2]);
-    expect(found?.concept).toBe('second concept');
+    const carriedStale = {
+      ...buildProposalPendingAction({
+        concept: 'stale carried concept',
+        preferred_kind: 'risk',
+        scenario_id: '11111111-1111-1111-1111-111111111111',
+        emitted_at_iso: '2026-05-28T09:00:00.000Z',
+        graph_hash: 'h1',
+      }),
+      expires_at_turn_count: 1, // decremented once by carry-forward
+    };
+    const found = findProposedConceptAction([fresh, carriedStale]);
+    expect(found?.concept).toBe('fresh concept');
     expect(found?.preferred_kind).toBe('factor');
   });
 });
 
 describe('findProposedConceptEntry', () => {
-  it('returns the full PendingAction object for the most recent proposed_concept', () => {
+  it('returns the full PendingAction object for the freshest proposed_concept', () => {
     const entry = buildProposalPendingAction({
       concept: 'team morale',
       preferred_kind: 'factor',
@@ -830,6 +988,29 @@ describe('findProposedConceptEntry', () => {
     expect(found).not.toBeNull();
     expect(found?.expires_at_iso).toBe(entry.expires_at_iso);
     expect(found?.preconditions.graph_hash).toBe('h1');
+  });
+
+  it('D2: returns the FRONT (fresh) entry when a carried stale one follows it', () => {
+    const fresh = buildProposalPendingAction({
+      concept: 'fresh concept',
+      preferred_kind: 'factor',
+      scenario_id: '11111111-1111-1111-1111-111111111111',
+      emitted_at_iso: '2026-05-28T10:00:00.000Z',
+      graph_hash: 'h2',
+    });
+    const carriedStale = {
+      ...buildProposalPendingAction({
+        concept: 'stale carried concept',
+        preferred_kind: 'risk',
+        scenario_id: '11111111-1111-1111-1111-111111111111',
+        emitted_at_iso: '2026-05-28T09:00:00.000Z',
+        graph_hash: 'h1',
+      }),
+      expires_at_turn_count: 1,
+    };
+    const found = findProposedConceptEntry([fresh, carriedStale]);
+    expect(found?.id).toBe(fresh.id);
+    expect(found?.preconditions.graph_hash).toBe('h2');
   });
 
   it('returns null on empty / missing input', () => {
@@ -1075,5 +1256,201 @@ describe('resolveProposalResume — wall-clock + graph-hash gate', () => {
     });
     expect(r.rejection).toBeNull();
     expect(r.decision?.stage).toBe('stage_one');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Diagnosis D (2026-07-10, run-1/run-2 wire captures + Render telemetry) —
+// proposal-continuation capture + stale-resume defects. The specimen texts
+// below are the verbatim assistant-turn phrasings from the diagnosis, NOT
+// mirrors of the regexes.
+// ---------------------------------------------------------------------------
+
+describe('extractProposedConcept — diagnosis D1 live capture specimens', () => {
+  it('D1a: adjective before the kind word ("as a new factor") captures a clean concept', () => {
+    // Live run-1 specimen. Before the fix: pattern 1 had no adjective
+    // slot, the generic "would you like me to add X" pattern captured
+    // the whole tail, and the kind-strip left the mangled persisted
+    // concept "marketing budget as a new".
+    const r = extractProposedConcept(
+      'Would you like me to add marketing budget as a new factor?',
+    );
+    expect(r).not.toBeNull();
+    expect(r?.concept).toBe('marketing budget');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1a: the mangled live specimen "marketing budget as a new" is never produced', () => {
+    const r = extractProposedConcept(
+      'Would you like me to add marketing budget as a new factor?',
+    );
+    expect(r?.concept).not.toBe('marketing budget as a new');
+  });
+
+  it('D1a: bare active form with adjective ("add X as a significant new risk")', () => {
+    const r = extractProposedConcept(
+      'You could add supplier delays as a significant new risk.',
+    );
+    expect(r?.concept).toBe('supplier delays');
+    expect(r?.preferred_kind).toBe('risk');
+  });
+
+  it('D1a: adjective-free active form still captures identically (no regression)', () => {
+    const r = extractProposedConcept(
+      'The most useful next step would be to add team morale or cultural fit as a factor.',
+    );
+    expect(r?.concept).toBe('team morale or cultural fit');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1b: passive form "would you like X added as a new factor?" is captured', () => {
+    // Live run-2 specimen. Before the fix: "added" matched NO pattern
+    // (add(?:ing)? does not cover the passive participle), so nothing
+    // was captured and the continuation never resumed.
+    const r = extractProposedConcept(
+      'Would you like marketing budget added as a new factor?',
+    );
+    expect(r).not.toBeNull();
+    expect(r?.concept).toBe('marketing budget');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1b: passive form without an adjective ("would you like X added as a risk?")', () => {
+    const r = extractProposedConcept(
+      'Would you like supplier delays added as a risk?',
+    );
+    expect(r?.concept).toBe('supplier delays');
+    expect(r?.preferred_kind).toBe('risk');
+  });
+
+  it('D1b: passive bridge form "would you like to see X added as a factor?"', () => {
+    const r = extractProposedConcept(
+      'Would you like to see customer churn added as a factor?',
+    );
+    expect(r?.concept).toBe('customer churn');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+
+  it('D1c: kind-strip residue "as a new" is stripped, so a pronoun capture fails closed', () => {
+    // Pattern 1 captures the bare pronoun "it" (rejected as a concept),
+    // then the generic pattern captures "it as a new factor". Before the
+    // fix the kind-strip left "it as a new", which passed cleanConcept
+    // (not an exact pronoun) and persisted a mangled concept. With the
+    // residue strip the capture reduces to the bare pronoun "it" and is
+    // rejected — extraction fails closed instead of persisting garbage.
+    expect(
+      extractProposedConcept('Would you like me to add it as a new factor?'),
+    ).toBeNull();
+  });
+});
+
+describe('resolveProposalResume — diagnosis D2 fresh capture wins over carried stale', () => {
+  const SCENARIO_D2 = '11111111-1111-1111-1111-111111111111';
+
+  it('a fresh capture and a carried stale one coexist → the FRESH concept resumes', () => {
+    // Persisted row order mirrors commitDirectAnswer:
+    // [...thisTurnPendings (fresh capture first), ...carriedSurvivors].
+    // Live 2026-07-10 specimen: the end-first read resumed the 2-turn-old
+    // carried proposal over the immediately-preceding turn's offer.
+    const fresh = buildProposalPendingAction({
+      concept: 'marketing budget',
+      preferred_kind: 'factor',
+      scenario_id: SCENARIO_D2,
+      emitted_at_iso: '2026-07-10T10:00:00.000Z',
+      graph_hash: 'sha256:live',
+    });
+    const carriedStale = {
+      ...buildProposalPendingAction({
+        concept: 'legacy stale concept',
+        preferred_kind: 'risk',
+        scenario_id: SCENARIO_D2,
+        emitted_at_iso: '2026-07-10T09:00:00.000Z',
+        graph_hash: 'sha256:live',
+      }),
+      expires_at_turn_count: 1, // already carried once
+    };
+    const r = resolveProposalResume({
+      message: 'Yes, add that.',
+      pendingActions: [fresh, carriedStale],
+      nodes: null,
+      currentGraphHash: 'sha256:live',
+      nowMs: Date.parse('2026-07-10T10:00:30.000Z'),
+    });
+    expect(r.rejection).toBeNull();
+    expect(r.decision?.stage).toBe('stage_one');
+    expect(r.decision?.assistantText).toContain('marketing budget');
+    expect(r.decision?.assistantText).not.toContain('legacy stale concept');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR #418 adversarial-review fixups — probe sentences are the reviewer's
+// exact texts. D2a supersession makes a false capture strictly COSTLIER (it
+// evicts a genuine carried concept), so the capture widening gains a screen.
+// ---------------------------------------------------------------------------
+
+describe('extractProposedConcept — review fixup 1a: negation/contrast screen', () => {
+  it('does NOT capture "I wouldn\'t recommend adding price sensitivity as a separate risk"', () => {
+    expect(
+      extractProposedConcept(
+        "I wouldn't recommend adding price sensitivity as a separate risk",
+      ),
+    ).toBeNull();
+  });
+
+  it('does NOT capture "Rather than adding brand equity as a standalone factor…"', () => {
+    expect(
+      extractProposedConcept(
+        'Rather than adding brand equity as a standalone factor…',
+      ),
+    ).toBeNull();
+  });
+
+  it('does NOT capture "We should avoid adding headcount as a direct driver"', () => {
+    expect(
+      extractProposedConcept(
+        'We should avoid adding headcount as a direct driver',
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('extractProposedConcept — review fixup 1b: interrogative anchor on the passive pattern', () => {
+  it('does NOT capture the reported negative "You said you did not want churn added as a factor"', () => {
+    expect(
+      extractProposedConcept(
+        'You said you did not want churn added as a factor',
+      ),
+    ).toBeNull();
+  });
+
+  it('does NOT capture the declarative retrospective "I have already seen churn added as a factor in similar models"', () => {
+    expect(
+      extractProposedConcept(
+        'I have already seen churn added as a factor in similar models',
+      ),
+    ).toBeNull();
+  });
+
+  it('still captures "Would you like churn added as a new factor?"', () => {
+    const r = extractProposedConcept(
+      'Would you like churn added as a new factor?',
+    );
+    expect(r).not.toBeNull();
+    expect(r?.concept).toBe('churn');
+    expect(r?.preferred_kind).toBe('factor');
+  });
+});
+
+describe('extractProposedConcept — review fixup 2: pattern precedence for kind-anchored "to the model"', () => {
+  it('captures "software as a service" from "add a software as a service factor to the model"', () => {
+    // Regression introduced by the D1a adjective slot: pattern 1 consumed
+    // "service" as an adjective and captured the bare "software". The
+    // kind-anchored "add a {concept} factor to the model" shape must win.
+    const r = extractProposedConcept(
+      'add a software as a service factor to the model',
+    );
+    expect(r?.concept).toBe('software as a service');
+    expect(r?.preferred_kind).toBe('factor');
   });
 });

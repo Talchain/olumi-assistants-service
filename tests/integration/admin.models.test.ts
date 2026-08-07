@@ -10,9 +10,18 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
+
+// NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
+// store treats it as a literal file name in cwd. Suites that share the
+// literal ":memory:" race each other's atomic rename (`:memory:.tmp` ->
+// `:memory:`) when vitest runs them in parallel forks, failing store init
+// non-deterministically. Use a per-suite unique temp path instead.
+const STORE_PATH = join(tmpdir(), `prompt-store-admin-models-${process.pid}-${Date.now()}.json`);
 
 const ADMIN_KEY = "test-admin-key-models";
 const ADMIN_HEADERS = { "X-Admin-Key": ADMIN_KEY };
@@ -24,7 +33,7 @@ beforeAll(async () => {
   vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
   vi.stubEnv("PROMPTS_ENABLED", "true");
   vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-  vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+  vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
   vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
   vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
   cleanBaseUrl();
@@ -32,7 +41,8 @@ beforeAll(async () => {
   const { build } = await import("../../src/server.js");
   app = await build();
   await app.ready();
-});
+  // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   await app.close();
@@ -121,7 +131,7 @@ describe("GET /admin/models/routing", () => {
     vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-    vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+    vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
     vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
     vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
 
@@ -218,7 +228,7 @@ describe("GET /admin/dashboard/env", () => {
     expect(body).toHaveProperty("timestamp");
   });
 
-  it("feature_flags includes all four expected flags", async () => {
+  it("feature_flags includes all three expected flags", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/admin/dashboard/env",
@@ -226,7 +236,7 @@ describe("GET /admin/dashboard/env", () => {
     });
     const body = res.json();
     const flagNames = body.feature_flags.map((f: { name: string }) => f.name);
-    expect(flagNames).toContain("CEE_ORCHESTRATOR_ENABLED");
+    // CEE_ORCHESTRATOR_ENABLED removed with the V1 orchestrator belt (2026-07-21).
     expect(flagNames).toContain("DSK_ENABLED");
     expect(flagNames).toContain("ANTHROPIC_PROMPT_CACHE_ENABLED");
     expect(flagNames).toContain("CEE_ZONE2_REGISTRY_ENABLED");
@@ -285,17 +295,24 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     vi.resetModules();
     cleanBaseUrl();
     vi.stubEnv("LLM_PROVIDER", "anthropic");
+    // server.ts build() fails fast when LLM_PROVIDER=anthropic without an
+    // API key (src/server.ts ~line 172). This suite only exercises the
+    // /admin/models/routing REPORTING surface — no LLM call is ever made —
+    // so a dummy key is required for boot and safe here. Without it the
+    // whole describe block dies in beforeAll (CI's integration job has no
+    // ANTHROPIC_API_KEY).
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key-not-used");
     vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-    vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+    vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
     vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
     vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
 
     const { build } = await import("../../src/server.js");
     appAnthropicProvider = await build();
     await appAnthropicProvider.ready();
-  });
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await appAnthropicProvider.close();
@@ -329,13 +346,16 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     });
     const body = res.json();
 
-    // draft_graph defaults to gpt-4.1 (openai) — should be skipped when provider=anthropic
-    const draftRow = body.tasks.find((t: { task: string }) => t.task === "draft_graph");
-    expect(draftRow).toBeDefined();
-    expect(draftRow.source).toBe("provider_mismatch");
-    expect(draftRow.model).toBeNull();
-    expect(typeof draftRow.resolution_note).toBe("string");
-    expect(draftRow.resolution_note.length).toBeGreaterThan(0);
+    // options defaults to gpt-5.2 (openai) and has no CEE_MODEL_* override key,
+    // so it stays an OpenAI default — should be skipped when provider=anthropic.
+    // (draft_graph is no longer a valid probe here: its default is now the
+    // anthropic model claude-sonnet-4-6, reconciled to live staging.)
+    const optionsRow = body.tasks.find((t: { task: string }) => t.task === "options");
+    expect(optionsRow).toBeDefined();
+    expect(optionsRow.source).toBe("provider_mismatch");
+    expect(optionsRow.model).toBeNull();
+    expect(typeof optionsRow.resolution_note).toBe("string");
+    expect(optionsRow.resolution_note.length).toBeGreaterThan(0);
   });
 
   it("bias_check (anthropic default) is still resolved when provider=anthropic", async () => {
@@ -372,14 +392,14 @@ describe("Read-only key deployment (ADMIN_API_KEY_READ only)", () => {
     vi.stubEnv("ADMIN_API_KEY_READ", READ_KEY);
     vi.stubEnv("PROMPTS_ENABLED", "true");
     vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-    vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+    vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
     vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
     vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
 
     const { build } = await import("../../src/server.js");
     appReadOnly = await build();
     await appReadOnly.ready();
-  });
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await appReadOnly.close();

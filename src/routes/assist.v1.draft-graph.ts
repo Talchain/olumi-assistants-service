@@ -3,7 +3,7 @@ import { DraftGraphInput, type DraftGraphInputT } from "../schemas/assist.js";
 import { extractZodIssues } from "../schemas/llmExtraction.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
-import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { enforceRateBuckets } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
@@ -81,91 +81,11 @@ export type DraftGraphResponse =
   | DraftGraphSuccessResponse
   | DraftGraphErrorResponse;
 
-// Simple in-memory rate limiter for CEE Draft My Model
-// Keyed by API key ID when available, otherwise client IP
-const WINDOW_MS = 60_000;
-// Guardrail to prevent unbounded growth of the in-memory bucket map.
-const MAX_BUCKETS = 10_000;
-// Buckets older than this are considered idle and may be evicted when MAX_BUCKETS is exceeded.
-const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
-// Only prune every N requests to amortize O(n) cost
-const PRUNE_INTERVAL = 100;
-
-type BucketState = {
-  count: number;
-  windowStart: number;
-};
-
-const ceeDraftBuckets = new Map<string, BucketState>();
-let pruneCounter = 0;
-let oldestKnownTimestamp = Date.now();
-
-function pruneBuckets(map: Map<string, BucketState>, now: number): void {
-  // Early exit: skip if under threshold and no old buckets exist
-  if (map.size <= MAX_BUCKETS && now - oldestKnownTimestamp <= MAX_BUCKET_AGE_MS) {
-    return;
-  }
-
-  // Amortize pruning: only run expensive iteration every N calls
-  pruneCounter++;
-  if (pruneCounter < PRUNE_INTERVAL && map.size <= MAX_BUCKETS) {
-    return;
-  }
-  pruneCounter = 0;
-
-  // Track new oldest timestamp during iteration
-  let newOldest = now;
-
-  // First pass: drop buckets that have been idle for multiple windows.
-  for (const [key, state] of map) {
-    if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
-      map.delete(key);
-    } else if (state.windowStart < newOldest) {
-      newOldest = state.windowStart;
-    }
-  }
-
-  oldestKnownTimestamp = newOldest;
-
-  if (map.size <= MAX_BUCKETS) return;
-
-  // As a last resort, drop the oldest keys until we are back under the cap.
-  let toRemove = map.size - MAX_BUCKETS;
-  for (const key of map.keys()) {
-    if (toRemove <= 0) break;
-    map.delete(key);
-    toRemove -= 1;
-  }
-}
-
-function checkCeeDraftLimit(key: string, limit: number): { allowed: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
-  pruneBuckets(ceeDraftBuckets, now);
-  let state = ceeDraftBuckets.get(key);
-
-  if (!state) {
-    state = { count: 0, windowStart: now };
-    ceeDraftBuckets.set(key, state);
-  }
-
-  if (now - state.windowStart >= WINDOW_MS) {
-    state.count = 0;
-    state.windowStart = now;
-  }
-
-  if (state.count >= limit) {
-    const resetAt = state.windowStart + WINDOW_MS;
-    const diffMs = Math.max(0, resetAt - now);
-    const retryAfterSeconds = Math.max(1, Math.ceil(diffMs / 1000));
-    return { allowed: false, retryAfterSeconds };
-  }
-
-  state.count += 1;
-  return { allowed: true, retryAfterSeconds: 0 };
-}
+// Rate limiting for CEE Draft My Model uses the shared tiered bucket
+// (enforceRateBuckets, draft tier) — see src/cee/config/limits.ts. The former
+// inline bucket twin was removed in favour of the single derived limiter.
 
 export default async function route(app: FastifyInstance) {
-  const DRAFT_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.draftFeatureVersion || "draft-model-1.0.0";
 
   function isUnsafeCaptureRequested(req: FastifyRequest): boolean {
@@ -208,9 +128,14 @@ export default async function route(app: FastifyInstance) {
       api_key_present: apiKeyPresent,
     });
 
-    // Per-feature rate limiting for CEE Draft My Model
-    const rateKey = keyId || req.ip || "unknown";
-    const { allowed, retryAfterSeconds } = checkCeeDraftLimit(rateKey, DRAFT_RATE_LIMIT_RPM);
+    // Per-feature rate limiting for CEE Draft My Model (shared draft-tier bucket,
+    // fail-closed, sanctioned-key aware). Draft carries no scenario dimension.
+    const { allowed, retryAfterSeconds } = enforceRateBuckets({
+      feature: "draft_graph",
+      envVarName: "CEE_DRAFT_RATE_LIMIT_RPM",
+      keyId,
+      ip: req.ip,
+    });
     if (!allowed) {
       const errorBody = buildCeeErrorResponse("CEE_RATE_LIMIT", "CEE Draft My Model rate limit exceeded", {
         retryable: true,

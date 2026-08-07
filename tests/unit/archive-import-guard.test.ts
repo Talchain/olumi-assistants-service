@@ -5,8 +5,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readdirSync, statSync } from "fs";
 import { join } from "path";
+
+import { stripCommentsFile, GUARD_WALK_TIMEOUT_MS } from "../../scripts/ci/strip-source-comments.mjs";
 
 /** Recursively collect .ts/.tsx/.js files, skipping directories matching `skip`. */
 function walkDir(dir: string, skip: string): string[] {
@@ -29,11 +31,17 @@ describe("Archive import guard", () => {
     const files = walkDir("src", "_archive");
     const violations: string[] = [];
     for (const file of files) {
-      const content = readFileSync(file, "utf-8");
+      // Comment-stripped view (scripts/ci/strip-source-comments.mjs): a
+      // comment pointing at an archived file ("superseded implementation
+      // retained at src/_archive/…") is exactly the documentation archival
+      // should leave behind, and must not read as re-coupling. A real
+      // import's module specifier is a STRING LITERAL, which the stripped
+      // view keeps, so genuine violations still fail.
+      const content = stripCommentsFile(file);
       if (content.includes("/_archive/")) {
         violations.push(file);
       }
     }
     expect(violations).toEqual([]);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 });

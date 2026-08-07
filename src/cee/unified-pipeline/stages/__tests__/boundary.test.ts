@@ -87,6 +87,11 @@ vi.mock('../../../transforms/graph-data-integrity.js', () => ({
     scale_consistency_repairs: [],
     edge_field_repairs: [],
     intercept_population_repairs: [],
+    // This mock is a hand-maintained mirror of IntegrityRepairSummary
+    // (trap 12) — the stage reads `.length` on every arm, so an omitted key
+    // here is a TypeError, not a silent pass. That is the intended direction:
+    // it fails loud the next time the summary grows. (The 2.714 honour arms
+    // were removed with the capability on 8 Aug 2026.)
   })),
 }));
 
@@ -127,7 +132,6 @@ function makeCtx(overrides?: Partial<StageContext>): StageContext {
     draftAdapter: undefined,
     llmMeta: undefined,
     confidence: undefined,
-    clarifierStatus: undefined,
     effectiveBrief: '',
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -141,9 +145,6 @@ function makeCtx(overrides?: Partial<StageContext>): StageContext {
     nodeRenames: new Map(),
     goalConstraints: null,
     constraintStrpResult: null,
-    repairCost: 0,
-    repairFallbackReason: undefined,
-    clarifierResult: null,
     structuralMeta: null,
     validationSummary: null,
     quality: undefined,

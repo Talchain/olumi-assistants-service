@@ -59,7 +59,6 @@ function makeMessage(role: 'user' | 'assistant', content = "message content") {
 
 function makeContext(overrides?: Partial<BudgetEnforcementContext>): BudgetEnforcementContext {
   return {
-    messages: [makeMessage("user")],
     graph_compact: makeCompactGraph(),
     analysis_response: makeAnalysisSummary(),
     ...overrides,
@@ -75,7 +74,7 @@ function largeString(chars: number): string {
 // Tests
 // ============================================================================
 
-describe("enforceContextBudget", () => {
+describe("enforceContextBudget (pathological-input safety valve — graph/analysis only)", () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -87,12 +86,11 @@ describe("enforceContextBudget", () => {
 
   it("returns context unchanged when within budget", async () => {
     const enforceContextBudget = await getEnforceContextBudget();
-    const context = makeContext({ messages: [makeMessage("user", "Hello")] });
+    const context = makeContext();
     const result = enforceContextBudget(context, 120_000);
-    // Small context should not be modified
-    expect(result.messages).toHaveLength(1);
-    expect(result.graph_compact).toBeDefined();
-    expect(result.analysis_response).toBeDefined();
+    // Small context should not be modified — returned by reference.
+    expect(result.graph_compact).toBe(context.graph_compact);
+    expect(result.analysis_response).toBe(context.analysis_response);
   });
 
   it("drops low-value metadata (type/category/source) before value when graph exceeds budget", async () => {
@@ -117,7 +115,7 @@ describe("enforceContextBudget", () => {
       _node_count: 5,
       _edge_count: 3,
     };
-    const context = makeContext({ graph_compact: bigGraph, messages: [makeMessage("user", "Hi")] });
+    const context = makeContext({ graph_compact: bigGraph });
     const result = enforceContextBudget(context, tinyMax);
 
     // All edges must be preserved — pass 4 drops the exists *field*, not edges
@@ -128,7 +126,7 @@ describe("enforceContextBudget", () => {
     const enforceContextBudget = await getEnforceContextBudget();
     // Analysis budget = 15% of maxTokens. Use tiny maxTokens.
     const tinyMax = 50;
-    const context = makeContext({ messages: [makeMessage("user", "Hi")] });
+    const context = makeContext();
     const result = enforceContextBudget(context, tinyMax);
 
     if (result.analysis_response) {
@@ -139,51 +137,20 @@ describe("enforceContextBudget", () => {
     }
   });
 
-  it("reduces conversation to 3 turns when over budget", async () => {
+  it("does NOT shape the conversation window — the dead 5→3→1 trim was deleted (P5)", async () => {
+    // MUTATION GUARD (ROADMAP 1.199, P5): the safety valve must NOT touch the
+    // conversation window. A pass-through `messages` array of many oversized
+    // turns comes back UNCHANGED even at a tiny budget — proving the 5→3→1
+    // ladder is gone. Restoring the ladder turns this RED (it would trim to 3/1).
     const enforceContextBudget = await getEnforceContextBudget();
-    // Create 6 messages — should reduce to 3 (keeping latest)
     const messages = Array.from({ length: 6 }, (_, i) =>
-      makeMessage(i % 2 === 0 ? "user" : "assistant", largeString(500)),
-    );
-    // Conversation budget = 30% of 200 tokens = 60 tokens = 240 chars. 6 × 500 = 3000 chars >> 240 chars
-    const tinyMax = 200;
-    const context = makeContext({ messages, graph_compact: null, analysis_response: null });
-    const result = enforceContextBudget(context, tinyMax);
-    const resultMessages = result.messages ?? [];
-    expect(resultMessages.length).toBeLessThanOrEqual(3);
-    // Always keeps latest — last message should be preserved
-    const lastOriginal = messages[messages.length - 1];
-    const lastResult = resultMessages[resultMessages.length - 1];
-    expect(lastResult.content).toBe(lastOriginal.content);
-  });
-
-  it("reduces conversation to 1 turn when 3 turns still over budget", async () => {
-    const enforceContextBudget = await getEnforceContextBudget();
-    // Each message is 5000 chars — very large
-    const messages = Array.from({ length: 5 }, (_, i) =>
       makeMessage(i % 2 === 0 ? "user" : "assistant", largeString(5000)),
     );
-    const tinyMax = 50; // Conversation budget = 15 tokens = 60 chars << 3 × 5000
     const context = makeContext({ messages, graph_compact: null, analysis_response: null });
-    const result = enforceContextBudget(context, tinyMax);
-    expect((result.messages ?? []).length).toBeLessThanOrEqual(1);
-  });
-
-  it("always keeps latest messages (not first)", async () => {
-    const enforceContextBudget = await getEnforceContextBudget();
-    const messages = [
-      makeMessage("user", "First message"),
-      makeMessage("assistant", "Second message"),
-      makeMessage("user", "Third message"),
-      makeMessage("assistant", "Fourth message"),
-      makeMessage("user", "Fifth — the latest"),
-    ];
-    const tinyMax = 50;
-    const context = makeContext({ messages, graph_compact: null, analysis_response: null });
-    const result = enforceContextBudget(context, tinyMax);
-    const resultMessages = result.messages ?? [];
-    const lastMsg = resultMessages[resultMessages.length - 1];
-    expect(lastMsg.content).toContain("Fifth — the latest");
+    const result = enforceContextBudget(context, 50 /* tiny — would have trimmed under the old ladder */);
+    expect((result as { messages?: unknown[] }).messages).toHaveLength(6);
+    // The exact same array reference is preserved (no re-slice happened).
+    expect((result as { messages?: unknown[] }).messages).toBe(messages);
   });
 
   it("never throws when given malformed input", async () => {
@@ -201,19 +168,36 @@ describe("enforceContextBudget", () => {
     expect(result).toBe(brokenInput);
   });
 
-  it("uses ORCHESTRATOR_CONTEXT_BUDGET env variable", async () => {
-    // Set a very small budget via env
+  it("uses ORCHESTRATOR_CONTEXT_BUDGET env variable (drives the GRAPH sub-budget)", async () => {
+    // Set a very small budget via env → the graph sub-budget (25%) shrinks and
+    // an otherwise-fitting graph is trimmed. (The env var is still live for the
+    // graph/analysis valve; it no longer gates any conversation trim.)
     process.env.ORCHESTRATOR_CONTEXT_BUDGET = "100";
     vi.resetModules();
     const { enforceContextBudget: freshFn } = await import("../../../../src/orchestrator/context/budget.js");
 
-    const messages = Array.from({ length: 10 }, (_, i) =>
-      makeMessage(i % 2 === 0 ? "user" : "assistant", largeString(200)),
-    );
-    const context = makeContext({ messages, graph_compact: null, analysis_response: null });
-    // With budget of 100 tokens, conversation budget = 30 tokens — should trim
-    const result = freshFn(context);
-    expect((result.messages ?? []).length).toBeLessThan(10);
+    const bigGraph: GraphV3Compact = {
+      nodes: Array.from({ length: 6 }, (_, i) => ({
+        id: `n${i}`,
+        kind: "factor",
+        label: `Factor with a fairly long label ${i}`,
+        value: i * 100,
+        type: "some_type",
+        category: "controllable",
+        source: "user" as const,
+      })),
+      edges: [
+        { from: "n0", to: "n1", strength: 0.5, exists: 0.9,
+          plain_interpretation: "n0 moderately increases n1 (high confidence)" },
+      ],
+      _node_count: 6,
+      _edge_count: 1,
+    };
+    const context = makeContext({ graph_compact: bigGraph, analysis_response: null });
+    const result = freshFn(context); // no explicit maxTokens → reads env (100)
+    // A changed graph reference is exactly "this section was trimmed".
+    expect(result.graph_compact).not.toBe(bigGraph);
+    expect(result.graph_compact?.edges[0]).not.toHaveProperty("plain_interpretation");
   });
 
   it("pass 1 removes plain_interpretation while preserving node fields (isolated)", async () => {
@@ -240,7 +224,6 @@ describe("enforceContextBudget", () => {
     const maxTokens = 320;
     const context = makeContext({
       graph_compact: graph,
-      messages: [],
       analysis_response: null,
     });
     const result = enforceContextBudget(context, maxTokens);
@@ -280,7 +263,6 @@ describe("enforceContextBudget", () => {
     const maxTokens = 400;
     const context = makeContext({
       graph_compact: graph,
-      messages: [],
       analysis_response: null,
     });
     const result = enforceContextBudget(context, maxTokens);
@@ -297,10 +279,10 @@ describe("enforceContextBudget", () => {
 
   it("returns a copy — does not mutate the original context", async () => {
     const enforceContextBudget = await getEnforceContextBudget();
-    const originalMessages = [makeMessage("user", "Hello")];
-    const context = makeContext({ messages: originalMessages });
+    const originalGraph = makeCompactGraph();
+    const context = makeContext({ graph_compact: originalGraph });
     enforceContextBudget(context, 120_000);
-    // Original messages array should be unchanged
-    expect(context.messages).toBe(originalMessages);
+    // Original graph reference is unchanged.
+    expect(context.graph_compact).toBe(originalGraph);
   });
 });

@@ -6,6 +6,8 @@
  */
 
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
+import { contentDigest } from "../../utils/redaction.js";
+import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
 
 // ============================================================================
 // Types
@@ -97,6 +99,166 @@ export function normaliseNodeKind(kind: string): CanonicalNodeKind {
   return normalised;
 }
 
+// ============================================================================
+// STRINGIFIED AUX FIELDS (v8 — 2026-07-07 grammar-size fix, Lane 26)
+// The Anthropic draft schema declares coaching, causal_claims, and
+// topology_plan as `{ type: "string" }` JSON-string fields (see the GRAMMAR
+// BUDGET (v8) note in src/cee/draft/anthropic-graph-schema.ts) — the full
+// object subtrees pushed the compiled grammar past Anthropic's unpublished
+// size limit, 400-failing structured outputs on every draft. This ingress
+// parse converts the strings back to objects/arrays BEFORE Zod and every
+// downstream consumer (normalise-legacy-coaching, validateCausalClaims,
+// Stage 5 Package).
+// ============================================================================
+
+const STRINGIFIED_AUX_FIELDS = [
+  { key: 'coaching', expect: 'object' },
+  { key: 'causal_claims', expect: 'array' },
+  { key: 'topology_plan', expect: 'array' },
+] as const;
+
+/**
+ * Parse the v8 JSON-string aux fields in place.
+ *
+ * Shape-based and tolerant by design:
+ * - Field absent, or already an object/array (prompt-only fallback path,
+ *   OpenAI adapter, legacy fixtures) → untouched.
+ * - Valid JSON string of the expected shape → replaced with the parsed value.
+ * - Double-encoded string (model JSON-encoded the JSON string once more) →
+ *   parsed twice. A single parse can never yield a valid final shape when it
+ *   yields a string, so the second attempt is unambiguous.
+ * - Malformed JSON or wrong shape → the field is DROPPED. Downstream then
+ *   behaves exactly as when the LLM omits the field — Stage 5 emits the
+ *   canonical-empty coaching block; causal_claims / topology_plan are
+ *   omitted from the response — which is identical to today's prompt-only
+ *   fallback behaviour. Enforcement is therefore never worse than status
+ *   quo, while nodes/edges/goal_constraints gain full grammar enforcement.
+ */
+export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
+  for (const { key, expect } of STRINGIFIED_AUX_FIELDS) {
+    const raw = obj[key];
+    if (typeof raw !== 'string') continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+      // Double-encoded edge case: unwrap exactly one extra layer.
+      if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+    } catch {
+      parsed = undefined;
+    }
+
+    const shapeOk = expect === 'array'
+      ? Array.isArray(parsed)
+      : parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+
+    if (shapeOk) {
+      obj[key] = parsed;
+    } else {
+      delete obj[key];
+      log.warn({
+        event: 'llm.normalisation.aux_field_parse_failed',
+        field: key,
+        expected_shape: expect,
+        raw_length: raw.length,
+        // Digest raw model output — never place it on the wire verbatim (see contentDigest).
+        raw_preview: contentDigest(raw),
+      }, `Draft aux field "${key}" was not a JSON-encoded ${expect} — dropped (canonical-empty default applies downstream)`);
+    }
+  }
+}
+
+/**
+ * Every field of the goal-threshold contract CEE mints for itself (ROADMAP
+ * 2.281). The quad the draft grammar used to declare, PLUS the attestation
+ * fields — `goal_threshold_frame` is the whole point of the exercise, and
+ * `goal_baseline*` are only sound when divided by the SAME cap on the SAME
+ * branch that produced the threshold (enricher.ts:699-719).
+ *
+ * DERIVED-BY-INTENT, not mirrored: this list is the fields no model may author,
+ * and the pinning test asserts it covers every `goal_*` field the node schema
+ * declares, so a new goal field added to `schemas/graph.ts` REDs rather than
+ * quietly becoming model-writable.
+ */
+export const CEE_MINTED_GOAL_FIELDS = [
+  'goal_threshold',
+  'goal_threshold_raw',
+  'goal_threshold_unit',
+  'goal_threshold_cap',
+  'goal_threshold_frame',
+  'goal_baseline',
+  'goal_baseline_raw',
+] as const;
+
+/** What a strip actually removed — returned so the caller can log it, never silent. */
+export interface GoalThresholdStripResult {
+  /** Node ids that carried at least one CEE-minted goal field. */
+  nodeIds: string[];
+  /** Field names actually removed, deduped, for telemetry. */
+  fields: string[];
+}
+
+/**
+ * Remove any model-authored goal-threshold contract from a DRAFT response.
+ *
+ * ── WHY THIS EXISTS ALONGSIDE THE GRAMMAR CUT (ROADMAP 2.281) ──────────────
+ * `buildDraftGraphSchema()` (cee/draft/anthropic-graph-schema.ts, v15) makes the
+ * quad UNEMITTABLE — but only when the grammar is actually sent. Structured
+ * outputs is conditional on `CEE_ANTHROPIC_STRUCTURED_OUTPUTS` (config default
+ * FALSE), a model allowlist, thinking being off, and no `so_reject` fallback
+ * having fired (anthropic.ts:792-798). On the prompt-only path there is NO
+ * GRAMMAR AT ALL, so the grammar cut alone would be inert on exactly the path
+ * the 2026-08-01 live witness measured. This strip is the layer that does not
+ * depend on that posture: it holds for every REAL provider draft call
+ * (anthropic.ts:1801, openai.ts:747).
+ *
+ * Neither layer is redundant. The grammar stops the tokens being generated (and
+ * so also saves the output tokens); this stops the value being persisted. The
+ * claim "the enricher is the only mint" is true because of BOTH.
+ *
+ * ── WHY THIS IS SAFE TO DO UNCONDITIONALLY *ON A DRAFT RESPONSE* ───────────
+ * A draft response is a from-scratch graph: `draftGraph` receives a brief, docs
+ * and an optional attachment — never an existing graph — and Stage 1 (Parse)
+ * runs BEFORE Stage 3 (Enrich) in the unified pipeline. So at this seam no
+ * legitimate, attested threshold can exist yet: anything present was written by
+ * the model. Deleting it cannot destroy a CEE-minted value because none has been
+ * minted.
+ *
+ * ⚠ AND WHY IT IS NOT WIRED INTO `normaliseDraftResponse` ITSELF. That function
+ * is SHARED with the repair_graph path (anthropic.ts:2624, openai.ts:1215),
+ * which runs at Stage 4 — i.e. AFTER Stage 3 has enriched. A strip there would
+ * delete a threshold the enricher had already minted and attested, turning this
+ * fix into the very defect it closes. The two seams are deliberately separate;
+ * do not "simplify" this by folding it into the normaliser.
+ *
+ * Mutates in place (the file's established style) and reports what it removed.
+ */
+export function stripModelAuthoredGoalThreshold(raw: unknown): GoalThresholdStripResult {
+  const result: GoalThresholdStripResult = { nodeIds: [], fields: [] };
+  if (!raw || typeof raw !== 'object') return result;
+  const nodes = (raw as Record<string, unknown>).nodes;
+  if (!Array.isArray(nodes)) return result;
+
+  const seenFields = new Set<string>();
+  for (const node of nodes as any[]) {
+    if (!node || typeof node !== 'object') continue;
+    let touched = false;
+    for (const field of CEE_MINTED_GOAL_FIELDS) {
+      // `in`, not a truthiness check: an explicit `null` (the shape the old
+      // nullable grammar taught) is still a model-authored key, and 0 is a
+      // legitimate threshold value that a truthiness test would skip.
+      if (field in node && node[field] !== undefined) {
+        delete node[field];
+        touched = true;
+        seenFields.add(field);
+      }
+    }
+    if (touched) result.nodeIds.push(String(node.id ?? '<unidentified>'));
+  }
+  result.fields = [...seenFields];
+  return result;
+}
+
 /**
  * Normalise all node kinds in a draft response before Zod validation.
  * Also coerces string numbers to actual numbers for belief/weight.
@@ -106,6 +268,10 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 
   const obj = raw as Record<string, unknown>;
   let normalisedCount = 0;
+
+  // v8 stringified aux fields: must run before the coaching sentinel
+  // coercion below and before any Zod/downstream consumer sees the fields.
+  parseStringifiedAuxFields(obj);
 
   // ========================================================================
   // PRE-NORMALISATION DIAGNOSTIC: Capture raw LLM output shape for edge
@@ -206,6 +372,138 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           (node.goal_threshold_raw === null || node.goal_threshold_raw === undefined)
         ) {
           node.goal_threshold_cap = undefined;
+        }
+
+        // ── ROADMAP 2.239: degenerate model-supplied cap ────────────────
+        // `goal_threshold_cap` is an LLM-WRITABLE draft field
+        // (cee/draft/anthropic-graph-schema.ts:299) and the LIVE draft
+        // prompt sanctions `cap >= raw` verbatim ("goal_threshold_cap:
+        // reference maximum (must be >= goal_threshold_raw)",
+        // prompts/defaults-v187.ts:294 — v187 is the live default;
+        // defaults.ts:2231 marks v19 deprecated/superseded). A model that
+        // takes the `=` produces `goal_threshold = raw/cap = 1.0` — the
+        // state utils/goal-threshold-cap.ts's own doctrine forbids, because
+        // ISL then scores P(sample >= the ceiling of the scale). Measured
+        // on the deployed build: 0.021 and exactly 0.0 across two options
+        // whose leader won 95% of scenarios (diagnosis §5 Finding B).
+        //
+        // ⚠ AND v187 IS STRICTLY WORSE THAN ITS PREDECESSOR HERE. v19
+        // carried a mitigating line — ":184 …prefer a headroom cap above
+        // the target (not cap = target, which forces goal_threshold = 1.0
+        // and eliminates probability spread)" — and **v187 has no such
+        // sentence anywhere**; :294 is a bare `>=`. The prompt got weaker
+        // while the code kept the same hole. Restoring that sentence to
+        // v187 is rowed separately; this guard must hold regardless of
+        // what any prompt version says, which is the reason it lives here
+        // and not only in the prompt.
+        //
+        // WHY HERE. This is the only seam that sees a model-authored
+        // threshold quad before it is persisted, for every REAL provider:
+        // `normaliseDraftResponse` is called by anthropic.ts :1801/:2624
+        // and openai.ts :747/:1215. (NOT literally every drafted graph —
+        // `FixturesAdapter.draftGraph`, router.ts:298-316, returns
+        // `fixtureGraph` WITHOUT normalising, so `LLM_PROVIDER=fixtures`
+        // never reaches this code. Zero blast radius, but it means no
+        // fixtures-backed end-to-end test can exercise it — the coverage
+        // below is unit-level against this function by necessity.)
+        // The three resolver-bearing paths — add_constraint's two sites and
+        // the factor-extraction enricher — are fixed by the `>` change in
+        // resolveGoalThresholdCap, but NONE runs on a quad the model wrote
+        // itself: the enricher's branch is gated on `goal_threshold ===
+        // undefined` (enricher.ts:649), and nothing anywhere recomputes
+        // goal_threshold from raw/cap for a goal node (every raw/cap
+        // recomputation site in src/ is a FACTOR site). Stage 4b
+        // (threshold-sweep) only DELETES — its contract declares
+        // `allowedModifications.node: []` — and does not fire on the live
+        // shape anyway (raw present, label carries digits). So without this
+        // block the fix would be provably partial while looking complete.
+        //
+        // ── THE TWO GATES, and why each is load-bearing ─────────────────
+        // (1) `gtCap <= gtRaw`. WITHOUT THIS THE REPAIR IS ITSELF A DEFECT
+        //     OF THE CLASS IT FIXES. `resolveGoalThresholdCap` evaluates
+        //     its '%' rule (raw 0-100 → cap 100) BEFORE the existing-cap
+        //     rule, so calling it unconditionally rewrites SOUND, strictly
+        //     -greater percentage caps: {raw 5, '%', cap 20, th 0.25} would
+        //     become th 0.05 (5x), {raw 80, '%', cap 1000, th 0.08} would
+        //     become th 0.8 (10x) — silently, on non-degenerate graphs, in
+        //     the OVER-OPTIMISTIC direction. This gate confines the repair
+        //     to caps that are equal to or below the target, i.e. exactly
+        //     the ones that cannot be a sound denominator.
+        // (2) the drafted threshold must actually BE `raw / cap`. v187's
+        //     MODEL UNIT TYPES table (:296-303) declares `goal_threshold`
+        //     is NOT raw/cap for two of its four rows — "NRR 110% → 1.10,
+        //     raw 110" and "3 hires → 3, raw 3". A model following the
+        //     prompt exactly, with the minimum cap the prompt permits
+        //     (cap = raw), would otherwise be rewritten to 0.8 and have a
+        //     correct, prompt-instructed threshold destroyed. Requiring the
+        //     raw/cap convention to hold means we only touch quads that are
+        //     using the normalisation this fix is about.
+        // Together the gates imply the drafted threshold is >= 1 - 1e-6 —
+        // i.e. the repair fires only on the "kills probability spread" state
+        // and nothing else. NOT >= 1.0 exactly: gate (1) gives r = raw/cap
+        // >= 1, so the tolerance below is 1e-6*r and gate (2) admits any
+        // threshold down to r*(1 - 1e-6), whose infimum over r >= 1 is
+        // 0.999999. That band is still the degenerate state (a threshold of
+        // 0.9999991 asks for the ceiling of the scale just as 1.0 does, and
+        // every case in it has cap <= raw), so the CONSEQUENCE is unchanged
+        // — but the bound is the stated one, and a later reader must not
+        // build on a strict >= 1.0 that does not hold.
+        // Tolerance mirrors the established convention for this same
+        // cross-check (SCALE_CONSISTENCY_TOLERANCE, relative,
+        // magnitude-scaled — src/orchestrator-v5/system-events/
+        // factor-value-edit.ts:82).
+        //
+        // Repairs the DENOMINATOR only — `goal_threshold_raw` and
+        // `goal_threshold_unit` (what the user actually asked for) are
+        // never rewritten. `unit`/`existingUnit` are deliberately the
+        // node's OWN goal_threshold_unit for both arguments: cap and raw
+        // are two numbers on one node under one declared unit, so there is
+        // no second unit to be incompatible with.
+        //
+        // DELIBERATELY NOT REPAIRED (each would be a different defect):
+        // a threshold that disagrees with an otherwise-sound raw/cap pair;
+        // a missing cap or a missing threshold (so this never MINTS a
+        // threshold, and never closes the enricher's `goal_threshold ===
+        // undefined` redirect branch); a non-positive or non-finite value.
+        const gtRaw = node.goal_threshold_raw;
+        const gtCap = node.goal_threshold_cap;
+        const gtVal = node.goal_threshold;
+        const usesRawOverCapConvention =
+          typeof gtRaw === 'number' && Number.isFinite(gtRaw) && gtRaw > 0 &&
+          typeof gtCap === 'number' && Number.isFinite(gtCap) && gtCap > 0 &&
+          typeof gtVal === 'number' && Number.isFinite(gtVal) &&
+          Math.abs(gtVal - gtRaw / gtCap) <=
+            1e-6 * Math.max(1, Math.abs(gtRaw / gtCap));
+        if (
+          usesRawOverCapConvention &&
+          // gate (1) — only a degenerate or undercutting denominator
+          (gtCap as number) <= (gtRaw as number)
+        ) {
+          const soundCap = resolveGoalThresholdCap(
+            gtCap,
+            gtRaw,
+            node.goal_threshold_unit,
+            node.goal_threshold_unit,
+          );
+          if (soundCap !== null && soundCap !== gtCap) {
+            const before = { cap: gtCap, threshold: node.goal_threshold };
+            node.goal_threshold_cap = soundCap;
+            node.goal_threshold = gtRaw / soundCap;
+            log.info(
+              {
+                node_id: node.id,
+                goal_threshold_raw: gtRaw,
+                goal_threshold_unit: node.goal_threshold_unit,
+                cap_before: before.cap,
+                cap_after: soundCap,
+                threshold_before: before.threshold,
+                threshold_after: node.goal_threshold,
+                reason: gtCap === gtRaw ? 'cap_equals_raw' : 'cap_undercuts_raw',
+                event: 'cee.normalisation.goal_threshold_cap_repaired',
+              },
+              'Repaired a degenerate model-supplied goal_threshold_cap',
+            );
+          }
         }
       }
 

@@ -110,8 +110,14 @@ describe('PROPOSALS_JSON_SCHEMA — structural agreement with the contract', () 
     }
   });
 
-  it('caps the proposal list at PROPOSAL_CAP', () => {
-    expect(proposals.maxItems).toBe(PROPOSAL_CAP);
+  it('proposal-list cap is NOT expressed as maxItems (API-rejected keyword) — G5 owns it', () => {
+    // The Anthropic structured-outputs compiler 400s on `maxItems` (live-probed
+    // 2026-07-14; evidence in UNSUPPORTED_KEYWORDS / ACCEPTED_KEYWORDS,
+    // src/adapters/llm/anthropic-schema-compliance.ts).
+    // The cap is enforced deterministically by the merge (G5, index >=
+    // PROPOSAL_CAP -> proposal_cap_exceeded) and taught by the prompt.
+    expect(proposals.maxItems).toBeUndefined();
+    expect(PROPOSAL_CAP).toBe(8);
   });
 
   it('type enum matches PROPOSAL_TYPES exactly', () => {
@@ -137,7 +143,10 @@ describe('PROPOSALS_JSON_SCHEMA — structural agreement with the contract', () 
     expect(node.id.maxLength).toBe(PROPOSAL_FIELD_CAPS.node_id);
     expect(node.label.maxLength).toBe(PROPOSAL_FIELD_CAPS.label);
     expect(node.description.maxLength).toBe(PROPOSAL_FIELD_CAPS.description);
-    expect(node.uncertainty_drivers.maxItems).toBe(PROPOSAL_FIELD_CAPS.uncertainty_drivers_items);
+    // uncertainty_drivers item-count cap: `maxItems` is API-rejected (see
+    // UNSUPPORTED_KEYWORDS, anthropic-schema-compliance.ts) — findOversizedProposalField
+    // enforces PROPOSAL_FIELD_CAPS.uncertainty_drivers_items in the merge.
+    expect(node.uncertainty_drivers.maxItems).toBeUndefined();
     expect(node.uncertainty_drivers.items!.maxLength).toBe(PROPOSAL_FIELD_CAPS.uncertainty_driver_length);
     expect(delta.properties!.question.maxLength).toBe(PROPOSAL_FIELD_CAPS.question);
     expect(envelope.properties!.evidence_pointer.minLength).toBe(1);

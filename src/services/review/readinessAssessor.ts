@@ -288,9 +288,13 @@ function generateSummary(level: ReadinessLevel, factors: ReadinessFactors): stri
       if (factors.bias_risk > 0.5) {
         return "Potential biases detected. Review and address before making decisions.";
       }
-      return "The model needs some improvements before analysis. Review the recommendations.";
+      // ROADMAP 2.725 — "recommendations" is banned user-facing vocabulary on
+      // the turn path; this route family emitted it unscanned. The referenced
+      // list is the `recommendations` FIELD (schema-owned, unchanged) — only
+      // the prose noun moves to "suggestions".
+      return "The model needs some improvements before analysis. Review the suggestions.";
     case "not_ready":
-      return "The model is not ready for analysis. Address the critical issues listed in recommendations.";
+      return "The model is not ready for analysis. Address the critical issues listed in the suggestions.";
   }
 }
 

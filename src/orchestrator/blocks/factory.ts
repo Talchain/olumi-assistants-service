@@ -261,6 +261,17 @@ export function createFramingBlock(
  *
  * Ephemeral ID (research results are context-dependent — claims extraction varies
  * even for the same query due to web content changes).
+ *
+ * ⚠ ZERO CALLERS — exported but dead since 2026-07-22. Its only caller was the `research_topic`
+ * tool, deleted in `f957d6d8`. Verified: `git grep -n "createEvidenceBlock" -- .` over all 3,336
+ * tracked files → 1 hit, this definition (positive control: `createGraphPatchBlock` → 7 files).
+ * Note the provenance below still reads `tool:research_topic` — a tool that no longer exists.
+ *
+ * RETAINED DELIBERATELY as the constructor half of the spec for the research rebuild; see
+ * `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1. This comment exists because an
+ * exported-but-uncalled function reads as live to a grep — which is precisely how `f957d6d8`
+ * swept away working code. If you are here to delete it, that is a defensible call; make it
+ * knowing it is a spec, and take `EvidenceBlockData` and the design doc with it.
  */
 export function createEvidenceBlock(
   data: EvidenceBlockData,

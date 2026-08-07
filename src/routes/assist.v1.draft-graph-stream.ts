@@ -4,7 +4,7 @@ import { DraftGraphInput } from "../schemas/assist.js";
 import { sanitizeDraftGraphInput } from "./assist.draft-graph.js";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { runUnifiedPipeline } from "../cee/unified-pipeline/index.js";
-import { resolveCeeRateLimit } from "../cee/config/limits.js";
+import { enforceRateBuckets } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
@@ -37,75 +37,9 @@ const SSE_HEADERS = {
   "cache-control": "no-cache",
 } as const;
 
-// Simple in-memory rate limiter for CEE SSE streaming
-const WINDOW_MS = 60_000;
-const MAX_BUCKETS = 10_000;
-const MAX_BUCKET_AGE_MS = WINDOW_MS * 10;
-const PRUNE_INTERVAL = 100;
-
-type BucketState = {
-  count: number;
-  windowStart: number;
-};
-
-const ceeStreamBuckets = new Map<string, BucketState>();
-let pruneCounter = 0;
-let oldestKnownTimestamp = Date.now();
-
-function pruneBuckets(map: Map<string, BucketState>, now: number): void {
-  if (map.size <= MAX_BUCKETS && now - oldestKnownTimestamp <= MAX_BUCKET_AGE_MS) {
-    return;
-  }
-
-  pruneCounter++;
-  if (pruneCounter < PRUNE_INTERVAL && map.size <= MAX_BUCKETS) {
-    return;
-  }
-  pruneCounter = 0;
-
-  let newOldest = now;
-  for (const [key, state] of map) {
-    if (now - state.windowStart > MAX_BUCKET_AGE_MS) {
-      map.delete(key);
-    } else if (state.windowStart < newOldest) {
-      newOldest = state.windowStart;
-    }
-  }
-  oldestKnownTimestamp = newOldest;
-
-  if (map.size <= MAX_BUCKETS) return;
-
-  let toRemove = map.size - MAX_BUCKETS;
-  for (const key of map.keys()) {
-    if (toRemove <= 0) break;
-    map.delete(key);
-    toRemove -= 1;
-  }
-}
-
-function checkCeeStreamLimit(key: string, limit: number): { allowed: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
-  pruneBuckets(ceeStreamBuckets, now);
-  let state = ceeStreamBuckets.get(key);
-
-  if (!state) {
-    state = { count: 0, windowStart: now };
-    ceeStreamBuckets.set(key, state);
-  }
-
-  if (now - state.windowStart > WINDOW_MS) {
-    state.count = 0;
-    state.windowStart = now;
-  }
-
-  if (state.count >= limit) {
-    const retryAfter = Math.ceil((state.windowStart + WINDOW_MS - now) / 1000);
-    return { allowed: false, retryAfterSeconds: Math.max(1, retryAfter) };
-  }
-
-  state.count++;
-  return { allowed: true, retryAfterSeconds: 0 };
-}
+// Rate limiting for CEE SSE streaming uses the shared tiered bucket
+// (enforceRateBuckets, draft tier). The former inline bucket twin was removed
+// in favour of the single derived limiter in src/cee/config/limits.ts.
 
 interface StageEvent {
   stage: string;
@@ -132,7 +66,6 @@ async function writeStage(reply: FastifyReply, event: StageEvent): Promise<void>
 }
 
 export default async function route(app: FastifyInstance) {
-  const RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_STREAM_RATE_LIMIT_RPM") ?? 20;
   const FEATURE_VERSION = "stream-1.0.0";
 
   app.post("/assist/v1/draft-graph/stream", async (req, reply) => {
@@ -145,9 +78,13 @@ export default async function route(app: FastifyInstance) {
     // Check for v2 schema request via query parameter
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
 
-    // Rate limiting (per API key or per IP)
-    const rateLimitKey = keyId ?? req.ip ?? "anonymous";
-    const { allowed, retryAfterSeconds } = checkCeeStreamLimit(rateLimitKey, RATE_LIMIT_RPM);
+    // Rate limiting: shared draft-tier bucket (fail-closed, sanctioned-key aware).
+    const { allowed, retryAfterSeconds } = enforceRateBuckets({
+      feature: "draft_graph_stream",
+      envVarName: "CEE_STREAM_RATE_LIMIT_RPM",
+      keyId: keyId ?? undefined,
+      ip: req.ip,
+    });
 
     if (!allowed) {
       const errorBody = buildCeeErrorResponse(

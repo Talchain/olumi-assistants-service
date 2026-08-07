@@ -176,7 +176,7 @@ describe('Prompt Content Quality', () => {
     const defaults = getDefaultPrompts();
 
     // orchestrator uses XML envelope output, not JSON.
-    // V5 narrate-mode prompts (direct_answer_narrate, clarify_narrate, and
+    // V5 narrate-mode prompts (direct_answer_narrate and
     // the seven handler narrates wired in Phase 0 for C2/D1/D2) output
     // plain prose for the OlumiResponse.assistant_text field — structured
     // output is not applicable. turn_classifier DOES use JSON and remains
@@ -184,7 +184,6 @@ describe('Prompt Content Quality', () => {
     const JSON_EXEMPT_TASKS = new Set([
       'orchestrator',
       'direct_answer_narrate',
-      'clarify_narrate',
       'run_analysis_narrate',
       'set_factor_value_narrate',
       'add_constraint_narrate',

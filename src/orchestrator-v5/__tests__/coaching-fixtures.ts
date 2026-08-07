@@ -1,7 +1,7 @@
 /**
  * Shared fixtures for the AI-harness coaching suites — Cap-1 post-analysis
- * loop (`CEE_POST_ANALYSIS_LOOP_ENABLED`) and Cap-2A add-risk rejection
- * guidance (`CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED`).
+ * loop and Cap-2A add-risk rejection guidance (both UNCONDITIONAL since
+ * 2026-07-20 — O-7 wave 2: their flags were deleted, live-true on staging).
  *
  * Extracted from the suites that previously carried diverging copies:
  *   - src/orchestrator-v5/__tests__/turn-executor-post-analysis-loop.integration.test.ts
@@ -119,9 +119,18 @@ export const PRICING_GRAPH: GraphStateIngress = {
 } as unknown as GraphStateIngress;
 
 /**
- * LLM proposal that adds a risk wired ONLY to an option — the candidate graph
- * fails structural validation with the reachability class (the risk has no
- * path through the model), which is exactly the Cap-2A target shape.
+ * LLM proposal that adds a risk as a DEAD-END (inbound edge only — nothing
+ * flows out of it) — the candidate graph fails structural validation with
+ * the reachability class (the risk cannot reach the goal via forward
+ * edges), which is the Cap-2A target shape.
+ *
+ * 1.16 item C — deliberate fixture change: this fixture previously wired
+ * the risk with an OUTBOUND edge (`risk → opt_subscription`). Under the
+ * corrected reachability predicate (a node fails only when it cannot REACH
+ * the goal via forward edges), that shape is a legitimate exogenous
+ * influence — risk → option → factor → goal — and is now ACCEPTED, so it
+ * can no longer drive a rejection-guidance test. The inbound-only sink
+ * below is a TRUE dead-end and still legitimately rejects.
  */
 export const TARGETED_ADD_RISK_OPS = [
   {
@@ -132,10 +141,10 @@ export const TARGETED_ADD_RISK_OPS = [
   },
   {
     op: 'add_edge',
-    path: 'risk_team_dynamics->opt_subscription',
+    path: 'opt_subscription->risk_team_dynamics',
     value: {
-      from: 'risk_team_dynamics',
-      to: 'opt_subscription',
+      from: 'opt_subscription',
+      to: 'risk_team_dynamics',
       strength: { mean: 0.4, std: 0.1 },
       exists_probability: 0.8,
       effect_direction: 'negative',

@@ -1,10 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+/**
+ * graph-orchestrator — DETERMINISTIC validation tests.
+ *
+ * ROADMAP 2.740a removed every LLM limb from this module (and 2.731/#846
+ * removed the draft-side ones before it). The tests that exercised
+ * `generateGraph`, the repair adapter, and the repair-prompt builders went
+ * with the code they tested.
+ *
+ * What did NOT go: the deterministic coverage those tests happened to carry.
+ * Structural-edge normalisation, Zod mapping, post-normalisation validation
+ * and the causal-edge preservation checks are all still here, re-routed
+ * through `validateAndRepairGraph` — the surviving deterministic entry point.
+ * Removing the LLM call is not removing the validator.
+ */
+
+import { describe, it, expect } from "vitest";
 import {
-  generateGraph,
   GraphValidationError,
-  formatErrorsForRepair,
-  buildRepairPromptContext,
-  type GraphLLMAdapter,
+  validateAndRepairGraph,
 } from "../../src/cee/graph-orchestrator.js";
 import { zodToValidationErrors, isZodError } from "../../src/validators/zod-error-mapper.js";
 import { type GraphT } from "../../src/schemas/graph.js";
@@ -89,440 +101,35 @@ function createGraphWithSignMismatch(): GraphT {
   return graph;
 }
 
-function _createGraphWithWarnings(): GraphT {
-  const graph = createValidGraph();
-  // Add warning-level issue: strength out of typical range
-  graph.edges[4] = {
-    ...graph.edges[4],
-    strength_mean: 1.5, // Out of range (will be clamped, generates warning)
-  };
-  return graph;
+const idsOf = (g: any): string[] => (g?.nodes ?? []).map((n: any) => n.id).sort();
+
+/**
+ * Await a call that MUST reject with GraphValidationError, and return it
+ * typed. Fails loudly if the promise resolves — a plain `.catch(e => e)`
+ * would hand back the success result and let the assertions run against the
+ * wrong object.
+ */
+async function rejectsWithValidationError(
+  p: Promise<unknown>,
+): Promise<GraphValidationError> {
+  let result: unknown;
+  try {
+    result = await p;
+  } catch (e) {
+    expect(e).toBeInstanceOf(GraphValidationError);
+    return e as GraphValidationError;
+  }
+  throw new Error(
+    `expected validateAndRepairGraph to reject with GraphValidationError, but it resolved: ${JSON.stringify(result)?.slice(0, 200)}`,
+  );
 }
 
 // =============================================================================
-// Mock Adapter
+// validateAndRepairGraph — the surviving deterministic entry point
 // =============================================================================
-
-function createMockAdapter(overrides: Partial<GraphLLMAdapter> = {}): GraphLLMAdapter {
-  return {
-    draftGraph: vi.fn().mockResolvedValue({
-      graph: createValidGraph(),
-      usage: { input_tokens: 100, output_tokens: 200 },
-    }),
-    repairGraph: vi.fn().mockResolvedValue({
-      graph: createValidGraph(),
-      usage: { input_tokens: 150, output_tokens: 250 },
-    }),
-    ...overrides,
-  };
-}
-
-// =============================================================================
-// Tests
-// =============================================================================
-
-describe("generateGraph orchestrator", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 1: Happy path — valid graph on first attempt
-  // -------------------------------------------------------------------------
-  describe("happy path", () => {
-    it("returns valid graph on first attempt without repair", async () => {
-      const adapter = createMockAdapter();
-
-      const result = await generateGraph(
-        { brief: "Should we hire a contractor?", requestId: "test-1" },
-        adapter
-      );
-
-      expect(result.graph).toBeDefined();
-      expect(result.attempts).toBe(1);
-      expect(result.repairUsed).toBe(false);
-      expect(result.warnings).toEqual([]);
-      expect(adapter.draftGraph).toHaveBeenCalledTimes(1);
-      expect(adapter.repairGraph).not.toHaveBeenCalled();
-    });
-
-    it("includes graph metadata in result", async () => {
-      const adapter = createMockAdapter();
-
-      const result = await generateGraph(
-        { brief: "Test brief" },
-        adapter
-      );
-
-      expect(result.graph.nodes).toHaveLength(6);
-      expect(result.graph.edges).toHaveLength(6);
-      expect(result.graph.version).toBe("1");
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 2: Repair success — invalid graph → repair → valid
-  // -------------------------------------------------------------------------
-  describe("repair success", () => {
-    it("repairs invalid graph and succeeds on second attempt", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
-      const validGraph = createValidGraph();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: invalidGraph,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
-        repairGraph: vi.fn().mockResolvedValue({
-          graph: validGraph,
-          usage: { input_tokens: 150, output_tokens: 250 },
-        }),
-      });
-
-      const result = await generateGraph(
-        { brief: "Test brief", requestId: "test-repair" },
-        adapter
-      );
-
-      expect(result.attempts).toBe(2);
-      expect(result.repairUsed).toBe(true);
-      expect(adapter.draftGraph).toHaveBeenCalledTimes(1);
-      expect(adapter.repairGraph).toHaveBeenCalledTimes(1);
-      expect(result.graph.nodes.some((n) => n.kind === "goal")).toBe(true);
-    });
-
-    it("passes errors to repair adapter", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
-      const validGraph = createValidGraph();
-
-      const repairFn = vi.fn().mockResolvedValue({
-        graph: validGraph,
-        usage: { input_tokens: 150, output_tokens: 250 },
-      });
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: invalidGraph,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
-        repairGraph: repairFn,
-      });
-
-      await generateGraph({ brief: "Test brief" }, adapter);
-
-      // Check that repair was called with errors
-      const repairCall = repairFn.mock.calls[0];
-      expect(repairCall[2]).toBeDefined(); // errors array
-      expect(repairCall[2].length).toBeGreaterThan(0);
-      expect(repairCall[2][0]).toHaveProperty("code");
-      expect(repairCall[2][0]).toHaveProperty("message");
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 3: Max retries exceeded — fails after 3 attempts
-  // -------------------------------------------------------------------------
-  describe("max retries exceeded", () => {
-    it("throws GraphValidationError after exhausting all retries", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: invalidGraph,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
-        repairGraph: vi.fn().mockResolvedValue({
-          graph: invalidGraph, // Still invalid
-          usage: { input_tokens: 150, output_tokens: 250 },
-        }),
-      });
-
-      await expect(
-        generateGraph({ brief: "Test", maxRetries: 2 }, adapter)
-      ).rejects.toThrow(GraphValidationError);
-
-      // 1 draft + 2 repairs = 3 total attempts
-      expect(adapter.draftGraph).toHaveBeenCalledTimes(1);
-      expect(adapter.repairGraph).toHaveBeenCalledTimes(2);
-    });
-
-    it("includes errors and attempt count in thrown error", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({ graph: invalidGraph }),
-        repairGraph: vi.fn().mockResolvedValue({ graph: invalidGraph }),
-      });
-
-      try {
-        await generateGraph({ brief: "Test", maxRetries: 2 }, adapter);
-        expect.fail("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(GraphValidationError);
-        const validationError = error as GraphValidationError;
-        expect(validationError.attempts).toBe(3);
-        expect(validationError.errors.length).toBeGreaterThan(0);
-        expect(validationError.lastGraph).toBeDefined();
-      }
-    });
-
-    it("respects custom maxRetries setting", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({ graph: invalidGraph }),
-        repairGraph: vi.fn().mockResolvedValue({ graph: invalidGraph }),
-      });
-
-      try {
-        await generateGraph({ brief: "Test", maxRetries: 1 }, adapter);
-      } catch {
-        // 1 draft + 1 repair = 2 total attempts
-        expect(adapter.draftGraph).toHaveBeenCalledTimes(1);
-        expect(adapter.repairGraph).toHaveBeenCalledTimes(1);
-      }
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 4: Zod failure triggers repair
-  // -------------------------------------------------------------------------
-  describe("Zod failure triggers repair", () => {
-    it("triggers repair when Zod parse fails", async () => {
-      const zodInvalidGraph = createZodInvalidGraph();
-      const validGraph = createValidGraph();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: zodInvalidGraph,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
-        repairGraph: vi.fn().mockResolvedValue({
-          graph: validGraph,
-          usage: { input_tokens: 150, output_tokens: 250 },
-        }),
-      });
-
-      const result = await generateGraph({ brief: "Test" }, adapter);
-
-      expect(result.attempts).toBe(2);
-      expect(result.repairUsed).toBe(true);
-      expect(adapter.repairGraph).toHaveBeenCalledTimes(1);
-    });
-
-    it("includes Zod errors in repair history", async () => {
-      const zodInvalidGraph = createZodInvalidGraph();
-      const validGraph = createValidGraph();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({ graph: zodInvalidGraph }),
-        repairGraph: vi.fn().mockResolvedValue({ graph: validGraph }),
-      });
-
-      const result = await generateGraph({ brief: "Test" }, adapter);
-
-      expect(result.repairHistory).toBeDefined();
-      expect(result.repairHistory!.length).toBe(1);
-      expect(result.repairHistory![0].phase).toBe("zod");
-      expect(result.repairHistory![0].errors.length).toBeGreaterThan(0);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 5: Phase 2 (post-normalisation) failure triggers repair
-  // -------------------------------------------------------------------------
-  describe("post-normalisation failure triggers repair", () => {
-    it("triggers repair when post-normalisation validation fails", async () => {
-      const graphWithSignMismatch = createGraphWithSignMismatch();
-      const validGraph = createValidGraph();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: graphWithSignMismatch,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
-        repairGraph: vi.fn().mockResolvedValue({
-          graph: validGraph,
-          usage: { input_tokens: 150, output_tokens: 250 },
-        }),
-      });
-
-      const result = await generateGraph({ brief: "Test" }, adapter);
-
-      expect(result.attempts).toBe(2);
-      expect(result.repairUsed).toBe(true);
-    });
-
-    it("records post_norm phase in repair history", async () => {
-      const graphWithSignMismatch = createGraphWithSignMismatch();
-      const validGraph = createValidGraph();
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({ graph: graphWithSignMismatch }),
-        repairGraph: vi.fn().mockResolvedValue({ graph: validGraph }),
-      });
-
-      const result = await generateGraph({ brief: "Test" }, adapter);
-
-      expect(result.repairHistory).toBeDefined();
-      expect(result.repairHistory!.some((r) => r.phase === "post_norm")).toBe(true);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 6: Warnings don't trigger repair
-  // -------------------------------------------------------------------------
-  describe("warnings don't trigger repair", () => {
-    it("returns graph with warnings without triggering repair", async () => {
-      // Create a valid graph that will generate warnings during normalisation
-      const validGraph = createValidGraph();
-      // Add a low std on non-structural edge to trigger LOW_STD_NON_STRUCTURAL warning
-      validGraph.edges[4].strength_std = 0.02;
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: validGraph,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
-      });
-
-      const result = await generateGraph({ brief: "Test" }, adapter);
-
-      expect(result.attempts).toBe(1);
-      expect(result.repairUsed).toBe(false);
-      expect(result.warnings.length).toBeGreaterThan(0);
-      expect(adapter.repairGraph).not.toHaveBeenCalled();
-    });
-
-    it("includes warning codes in result", async () => {
-      const validGraph = createValidGraph();
-      validGraph.edges[4].strength_std = 0.02; // Will trigger LOW_STD_NON_STRUCTURAL
-
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({ graph: validGraph }),
-      });
-
-      const result = await generateGraph({ brief: "Test" }, adapter);
-
-      expect(result.warnings.some((w) => w.code === "LOW_STD_NON_STRUCTURAL")).toBe(true);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Test 7: Zod error mapping
-  // -------------------------------------------------------------------------
-  describe("Zod error mapping", () => {
-    it("converts Zod errors to ValidationIssue format", () => {
-      const schema = z.object({
-        nodes: z.array(
-          z.object({
-            id: z.string().min(1),
-            kind: z.enum(["goal", "decision", "option"]),
-          })
-        ),
-      });
-
-      const result = schema.safeParse({
-        nodes: [{ id: "", kind: "invalid_kind" }],
-      });
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const errors = zodToValidationErrors(result.error);
-
-        expect(errors.length).toBeGreaterThan(0);
-        expect(errors[0]).toHaveProperty("code");
-        expect(errors[0]).toHaveProperty("severity", "error");
-        expect(errors[0]).toHaveProperty("message");
-        expect(errors[0]).toHaveProperty("path");
-      }
-    });
-
-    it("extracts node/edge index from path", () => {
-      const schema = z.object({
-        nodes: z.array(z.object({ id: z.string().min(1) })),
-      });
-
-      const result = schema.safeParse({
-        nodes: [{ id: "valid" }, { id: "" }],
-      });
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const errors = zodToValidationErrors(result.error);
-        const errorWithIndex = errors.find((e) => e.context?.nodeIndex !== undefined);
-        expect(errorWithIndex).toBeDefined();
-        expect(errorWithIndex!.context!.nodeIndex).toBe(1);
-      }
-    });
-
-    it("isZodError correctly identifies Zod errors", () => {
-      const schema = z.string();
-      const result = schema.safeParse(123);
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(isZodError(result.error)).toBe(true);
-      }
-
-      expect(isZodError(new Error("not zod"))).toBe(false);
-      expect(isZodError(null)).toBe(false);
-      expect(isZodError({ issues: "not an array" })).toBe(false);
-    });
-  });
-});
-
-// =============================================================================
-// Utility Function Tests
-// =============================================================================
-
-describe("formatErrorsForRepair", () => {
-  it("formats errors into numbered list", () => {
-    const errors = [
-      { code: "MISSING_GOAL" as const, severity: "error" as const, message: "Graph must have exactly 1 goal node" },
-      { code: "INVALID_EDGE_TYPE" as const, severity: "error" as const, message: "Invalid edge from option to goal", path: "edges[2]" },
-    ];
-
-    const formatted = formatErrorsForRepair(errors);
-
-    expect(formatted).toContain("1. [MISSING_GOAL]");
-    expect(formatted).toContain("2. [INVALID_EDGE_TYPE] at edges[2]");
-  });
-
-  it("returns 'No errors' for empty array", () => {
-    expect(formatErrorsForRepair([])).toBe("No errors");
-  });
-});
-
-describe("buildRepairPromptContext", () => {
-  it("includes brief, graph, and errors", () => {
-    const brief = "Should we expand?";
-    const graph = createValidGraph();
-    const errors = [
-      { code: "MISSING_GOAL" as const, severity: "error" as const, message: "Missing goal" },
-    ];
-
-    const context = buildRepairPromptContext(brief, graph, errors);
-
-    expect(context).toContain("Should we expand?");
-    expect(context).toContain('"nodes"');
-    expect(context).toContain('"edges"');
-    expect(context).toContain("MISSING_GOAL");
-    expect(context).toContain("Fix ALL the errors");
-  });
-});
-
-// =============================================================================
-// validateAndRepairGraph Tests
-// =============================================================================
-
-import {
-  validateAndRepairGraph,
-  type RepairOnlyAdapter,
-} from "../../src/cee/graph-orchestrator.js";
 
 describe("validateAndRepairGraph", () => {
-  describe("valid graph without repair adapter", () => {
+  describe("valid graph", () => {
     it("returns validated graph when graph is valid", async () => {
       const validGraph = createValidGraph();
 
@@ -538,7 +145,20 @@ describe("validateAndRepairGraph", () => {
       expect(result.graph.nodes).toHaveLength(6);
     });
 
-    it("throws GraphValidationError when graph is invalid and no repair adapter", async () => {
+    it("2.740a: repairUsed/repairAttempts are permanently inert — there is no repair to report", async () => {
+      const result = await validateAndRepairGraph({
+        graph: createValidGraph(),
+        brief: "Test decision",
+        requestId: "test-inert",
+      });
+
+      expect(result.repairUsed).toBe(false);
+      expect(result.repairAttempts).toBe(0);
+    });
+  });
+
+  describe("invalid graph", () => {
+    it("throws GraphValidationError when deterministic validation fails", async () => {
       const invalidGraph = createInvalidGraphMissingGoal();
 
       await expect(
@@ -549,60 +169,40 @@ describe("validateAndRepairGraph", () => {
         })
       ).rejects.toThrow(GraphValidationError);
     });
-  });
 
-  describe("with repair adapter", () => {
-    it("repairs invalid graph and returns validated result", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
-      const validGraph = createValidGraph();
-
-      const repairAdapter: RepairOnlyAdapter = {
-        repairGraph: vi.fn().mockResolvedValue({
-          graph: validGraph,
-          usage: { input_tokens: 100, output_tokens: 50 },
-        }),
-      };
-
-      const result = await validateAndRepairGraph(
-        {
-          graph: invalidGraph,
+    it("carries the validator's own MISSING_GOAL code on the thrown error", async () => {
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: createInvalidGraphMissingGoal(),
           brief: "Test decision",
-          requestId: "test-789",
-          maxRetries: 1,
-        },
-        repairAdapter
+          requestId: "test-codes",
+        }),
       );
 
-      expect(result.graph).toBeDefined();
-      expect(result.repairUsed).toBe(true);
-      expect(result.repairAttempts).toBeGreaterThan(0);
-      expect(repairAdapter.repairGraph).toHaveBeenCalled();
+      expect(error.errors.map((e) => e.code)).toContain("MISSING_GOAL");
+      expect(error.attempts).toBe(1);
     });
 
-    it("throws GraphValidationError after max retries exceeded", async () => {
-      const invalidGraph = createInvalidGraphMissingGoal();
+    /**
+     * 2.740a provenance guard. Before the removal, `lastGraph` on a
+     * repair-attempted path was the graph the LLM returned and the validator
+     * then rejected — and substep 1b adopted it. With no adapter in the
+     * module, lastGraph can only be a deterministic derivative of the input.
+     * Bound by IDENTITY (node IDs), not by a value predicate.
+     */
+    it("2.740a: GraphValidationError.lastGraph is a deterministic derivative of the INPUT", async () => {
+      const input = createInvalidGraphMissingGoal();
 
-      const repairAdapter: RepairOnlyAdapter = {
-        repairGraph: vi.fn().mockResolvedValue({
-          graph: invalidGraph, // Return same invalid graph
-          usage: { input_tokens: 100, output_tokens: 50 },
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: input,
+          brief: "Test decision",
+          requestId: "test-lastgraph",
         }),
-      };
+      );
 
-      await expect(
-        validateAndRepairGraph(
-          {
-            graph: invalidGraph,
-            brief: "Test decision",
-            requestId: "test-max-retries",
-            maxRetries: 1,
-          },
-          repairAdapter
-        )
-      ).rejects.toThrow(GraphValidationError);
-
-      // Should have tried repair once
-      expect(repairAdapter.repairGraph).toHaveBeenCalled();
+      expect(error.lastGraph).toBeDefined();
+      expect(idsOf(error.lastGraph)).toEqual(idsOf(input));
     });
   });
 
@@ -621,10 +221,42 @@ describe("validateAndRepairGraph", () => {
         })
       ).rejects.toThrow(GraphValidationError);
     });
+
+    it("catches an empty node id via Zod, before any deterministic phase runs", async () => {
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: createZodInvalidGraph(),
+          brief: "Test",
+          requestId: "test-zod-empty-id",
+        }),
+      );
+
+      expect(error.errors.length).toBeGreaterThan(0);
+      // Zod failed before Phase 1.5, so nothing was normalised and there is
+      // no graph to carry forward.
+      expect(error.lastGraph).toBeUndefined();
+    });
+  });
+
+  describe("post-normalisation validation", () => {
+    // Re-routed from the deleted generateGraph suite: this is the only
+    // coverage of the Phase-4 (post-normalisation) failure path.
+    it("rejects a sign mismatch between effect_direction and strength_mean", async () => {
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: createGraphWithSignMismatch(),
+          brief: "Test sign mismatch",
+          requestId: "test-sign",
+        }),
+      );
+
+      expect(error.errors.map((e) => e.code)).toContain("SIGN_MISMATCH");
+    });
   });
 
   // -------------------------------------------------------------------------
-  // Test: Structural edge normalisation
+  // Structural edge normalisation (re-routed from the deleted generateGraph
+  // suite — deterministic behaviour, unaffected by the LLM removal)
   // -------------------------------------------------------------------------
   describe("structural edge normalisation", () => {
     it("normalises non-canonical option→factor edges before validation", async () => {
@@ -682,21 +314,15 @@ describe("validateAndRepairGraph", () => {
         meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
       };
 
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: graphWithDriftedEdge,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
+      const result = await validateAndRepairGraph({
+        graph: graphWithDriftedEdge,
+        brief: "Test structural normalisation",
+        requestId: "test-norm",
       });
 
-      const result = await generateGraph(
-        { brief: "Test structural normalisation", requestId: "test-norm" },
-        adapter
-      );
-
-      // Should succeed without repair because structural edges are normalised
-      expect(result.attempts).toBe(1);
+      // Deterministic normalisation alone is enough — no repair exists to help.
       expect(result.repairUsed).toBe(false);
+      expect(result.repairAttempts).toBe(0);
 
       // Find the option→factor edges in the result
       const optAToFactor = result.graph.edges.find(
@@ -728,17 +354,11 @@ describe("validateAndRepairGraph", () => {
       // Use the standard valid graph and check that causal edges remain unchanged
       const validGraph = createValidGraph();
 
-      const adapter = createMockAdapter({
-        draftGraph: vi.fn().mockResolvedValue({
-          graph: validGraph,
-          usage: { input_tokens: 100, output_tokens: 200 },
-        }),
+      const result = await validateAndRepairGraph({
+        graph: validGraph,
+        brief: "Test causal edge preservation",
+        requestId: "test-causal",
       });
-
-      const result = await generateGraph(
-        { brief: "Test causal edge preservation", requestId: "test-causal" },
-        adapter
-      );
 
       // Find the factor→outcome edge (causal, not structural)
       const causalEdge = result.graph.edges.find(
@@ -749,5 +369,70 @@ describe("validateAndRepairGraph", () => {
       expect(causalEdge?.strength_mean).toBe(0.7);
       expect(causalEdge?.belief_exists).toBe(0.9);
     });
+  });
+});
+
+// =============================================================================
+// Zod error mapping (validators/zod-error-mapper — unaffected by 2.740a,
+// kept here because this is where its coverage has always lived)
+// =============================================================================
+
+describe("Zod error mapping", () => {
+  it("converts Zod errors to ValidationIssue format", () => {
+    const schema = z.object({
+      nodes: z.array(
+        z.object({
+          id: z.string().min(1),
+          kind: z.enum(["goal", "decision", "option"]),
+        })
+      ),
+    });
+
+    const result = schema.safeParse({
+      nodes: [{ id: "", kind: "invalid_kind" }],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errors = zodToValidationErrors(result.error);
+
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0]).toHaveProperty("code");
+      expect(errors[0]).toHaveProperty("severity", "error");
+      expect(errors[0]).toHaveProperty("message");
+      expect(errors[0]).toHaveProperty("path");
+    }
+  });
+
+  it("extracts node/edge index from path", () => {
+    const schema = z.object({
+      nodes: z.array(z.object({ id: z.string().min(1) })),
+    });
+
+    const result = schema.safeParse({
+      nodes: [{ id: "valid" }, { id: "" }],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const errors = zodToValidationErrors(result.error);
+      const errorWithIndex = errors.find((e) => e.context?.nodeIndex !== undefined);
+      expect(errorWithIndex).toBeDefined();
+      expect(errorWithIndex!.context!.nodeIndex).toBe(1);
+    }
+  });
+
+  it("isZodError correctly identifies Zod errors", () => {
+    const schema = z.string();
+    const result = schema.safeParse(123);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(isZodError(result.error)).toBe(true);
+    }
+
+    expect(isZodError(new Error("not zod"))).toBe(false);
+    expect(isZodError(null)).toBe(false);
+    expect(isZodError({ issues: "not an array" })).toBe(false);
   });
 });

@@ -19,6 +19,23 @@
  * Idempotent collision rule: when a constraint with the same
  * `(node_id, operator)` already exists, its `value`/`label`/`unit` are
  * updated in place. `noop: true` only when the value matches exactly.
+ *
+ * Gate-1 unit integrity (2026-07-15, Paul-ruled doctrine):
+ *   - OMISSION MEANS UNCHANGED. An update turn that does not mention a
+ *     unit keeps the persisted constraint's unit ("keep it at most 30"
+ *     means 30 of the same kind). The unit fallback chain is
+ *     `params.unit` → `existing?.unit` → `observed_state.unit`; before
+ *     this fix `existing` was never consulted, so the whole-object
+ *     update splice silently STRIPPED the persisted `%` — and the
+ *     unit-less 30 fell through PLoT's range priority to the default
+ *     [0,1] range, clamped to 1.0, turning "attrition <= 30%" into the
+ *     trivially-true "<= 1.0" (silent guardrail nullification; see
+ *     acceptance-evidence/constraint-unit-drop/).
+ *   - A CONSTRAINT MUST NOT REACH THE WIRE UNIT-AMBIGUOUS. A unit-less
+ *     value outside [0,1] targeting a probability-domain node
+ *     (goal/outcome/risk) with no declared cap is KNOWN to be
+ *     heuristically normalised downstream; the handler refuses it and
+ *     asks for the unit (see the emit guard below).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -30,6 +47,16 @@ import type { AddConstraintHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GoalConstraintSchema, type GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import {
+  CEE_GOAL_THRESHOLD_FRAME,
+  resolveGoalThresholdCap,
+} from '../../../utils/goal-threshold-cap.js';
+import {
+  extractIncreaseByDelta,
+  hasReductionByFraming,
+  valuesMatch,
+} from '../../../utils/reduction-framing.js';
+import { extractGoalTargetWithBaseline } from '../../../cee/factor-extraction/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -37,7 +64,11 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   formatConstraintAdded,
+  formatConstraintLabelUpdated,
+  formatConstraintUnchanged,
   formatConstraintUpdated,
+  formatGoalTargetSet,
+  formatGoalTargetUnchanged,
 } from './d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
@@ -50,7 +81,15 @@ import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
  * `at_most`; the validator rejects others as PARAMETER_INVALID.
  */
 export const AddConstraintTypeSchema = z.enum(['at_least', 'at_most']);
-export const AddConstraintValueSchema = z.number();
+// W2E-2: `.finite()` — constraint thresholds are contract-silent on range (any
+// finite number is a legal threshold, so no bound is invented here), but zod's
+// bare `z.number()` ACCEPTS ±Infinity: only NaN is rejected by the base type.
+// An Infinity threshold lands in `graph.goal_constraints` and is forwarded
+// verbatim to PLoT by the run_analysis handler. Same channel and same closure
+// as SetFactorValueValueSchema; a failure rides the existing PARAMETER_INVALID
+// rejection mechanism. The complete channel manifest is swept in
+// __tests__/proposal-parameter-finiteness.test.ts.
+export const AddConstraintValueSchema = z.number().finite();
 export const AddConstraintLabelSchema = z.string().min(1);
 export const AddConstraintUnitSchema = z.string().min(1);
 
@@ -77,7 +116,12 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
  * the constrained-node kind. `add_constraint` itself does not call
  * PLoT — see file header.
  */
-const ALLOWED_TARGET_KINDS: readonly string[] = [
+// Exported as the SINGLE source of truth for this handler's target-kind
+// capability. `routing/__tests__/registry-handler-kind-drift.test.ts` projects
+// it through `toEntityKind` and asserts the routing registry's
+// `accepted_entity_kinds` matches exactly, so the registry can no longer
+// drift into refusing a target this handler would have accepted.
+export const ALLOWED_TARGET_KINDS: readonly string[] = [
   'factor',
   'outcome',
   'goal',
@@ -85,12 +129,57 @@ const ALLOWED_TARGET_KINDS: readonly string[] = [
 ];
 const ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(ALLOWED_TARGET_KINDS);
 
+/**
+ * Probability-domain target kinds (Gate-1 emit guard). Mirrors PLoT's
+ * PROBABILITY_DOMAIN_KINDS (plot-lite-service
+ * src/normalisation/constraint-filter.ts): ISL evaluates these nodes on
+ * a [0,1] scale, so a unit-less constraint value outside [0,1] cannot
+ * be interpreted without a unit or a declared cap — downstream it is
+ * heuristically ranged and CLAMPED (value > 1 → 1.0, a trivially-true
+ * threshold; value < 0 → 0, a trivially-false one). `factor` is
+ * deliberately absent: unit-less absolute factor thresholds ("at most
+ * 30" on a headcount) are legitimate.
+ */
+const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
+  'goal',
+  'outcome',
+  'risk',
+]);
+
+/**
+ * User-visible clarify for the unit-ambiguity refusal (Gate-1). Rides
+ * the SAME wired mechanic as the reduction-sign backstop:
+ * `D1HandlerError.userGuidance` → `details.specific_issue`
+ * (error-boundary.ts) → the recoverable composer's full assistant_text
+ * (compose/handler-failure-responses.ts, `parameter_invalid_at_execute`
+ * branch) with a text-prompt recovery chip. Wording is leak-safe per
+ * the d1-user-guidance-leak panel (no handler ids, parameter names,
+ * enum or operator literals). A specific clarify (not the canonical
+ * ADD_CONSTRAINT_USER_GUIDANCE phrase) is deliberate and
+ * design-sanctioned: the Gate-1 fix design requires an honest
+ * "percentage or absolute?" question, because the generic phrase gives
+ * the user no path to resolve the ambiguity. Kept comfortably under the
+ * composer's 100-char `sanitiseForUser` truncation (MAX_USER_STRING in
+ * compose/helpers.ts) so the question is never cut mid-sentence.
+ */
+function formatUnitAmbiguityClarify(value: number): string {
+  return `Did you mean ${value}% or an absolute ${value}? Tell me which, and I'll apply it.`;
+}
+
 interface ResolvedParams {
   readonly constraint_type: 'at_least' | 'at_most';
   readonly value: number;
   readonly label?: string;
   readonly unit?: string;
 }
+
+// `resolveGoalThresholdCap` (Lane CEE-W5 Mission B — goal-threshold join,
+// Gate-item-8 dead-end) now lives in `../../../utils/goal-threshold-cap.js`
+// as the shared cap-resolution doctrine (ROADMAP 1.18, cap-doctrine
+// unification hygiene batch) — the draft-path enricher
+// (cee/factor-extraction/enricher.ts) delegates to the SAME function so a
+// goal target scores identically regardless of registration path. See that
+// module's doc comment for the full doctrine.
 
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   const params = invocation.proposal?.parameters ?? [];
@@ -246,6 +335,64 @@ export function createAddConstraintHandler(): HandlerFn {
 
       const params = resolveParams(invocation);
       const operator = TYPE_TO_OPERATOR[params.constraint_type];
+
+      // ROADMAP 1.52 — goal-fit sign-inversion backstop. "reduce/decrease/
+      // cut/lower/shrink X BY N%" states a CHANGE amount: X moves DOWN on
+      // success. The tool-schema guidance (above this handler in the call
+      // chain) tells Sonnet to encode that as `at_most`/negative — but if
+      // Sonnet ignores the guidance and still emits the naive positive
+      // "at_least +N" reading against a message that used exactly this
+      // reduction framing, that is the precise fingerprint of the traced
+      // bug (6B capture: displayed ~0%, honest ~97-99%). Block and ask for
+      // confirmation rather than silently persisting an inverted claim —
+      // never guess a fix, per the fix doctrine. Deliberately coarse
+      // (whole-message scan): a false positive here only ever costs a
+      // clarifying round-trip, never a silent wrong-sign persist.
+      if (
+        operator === '>=' &&
+        params.value > 0 &&
+        hasReductionByFraming(invocation.payload.message)
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'add_constraint: reduction-framed message ("reduce/decrease/cut/' +
+            'lower/shrink ... by ...") but the resolved constraint is ' +
+            '">= positive" — this is the sign-inversion fingerprint ' +
+            '(ROADMAP 1.52). Refusing to persist; ask the user to confirm ' +
+            'the target instead of guessing the flip.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+        );
+      }
+
+      // ROADMAP 2.273 prerequisite — the INCREASE-side mirror of the backstop
+      // above. "grow revenue BY 2M" states a CHANGE amount; persisting it as
+      // `>= 2M` and stamping `goal_threshold_frame: 'level'` asserts an
+      // ABSOLUTE level the user never stated (their target is baseline + 2M).
+      // Inert before this PR — a goal with no `observed_state.baseline` made
+      // ISL refuse the conversion outright — but this PR POPULATES that
+      // baseline, so the same misencoding now yields a confident WRONG
+      // probability. Refuse rather than guess the delta→level arithmetic:
+      // same doctrine as 1.52, never a silent auto-correction.
+      //
+      // The trigger is deliberately narrower than 1.52's whole-message scan:
+      // it fires only when the RESOLVED value IS the stated delta. If the
+      // model already resolved "grow by 2M" to `at_least 6M` it did the
+      // arithmetic correctly and must not be punished for it.
+      if (operator === '>=' && params.value > 0) {
+        const statedDelta = extractIncreaseByDelta(invocation.payload.message);
+        if (statedDelta !== null && valuesMatch(params.value, statedDelta)) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'add_constraint: increase-framed message ("increase/grow/raise/' +
+              'boost/lift/expand ... by <amount>") resolved to ">= " that same ' +
+              'amount, so a stated CHANGE would be persisted and attested as an ' +
+              'absolute LEVEL (ROADMAP 2.273). Refusing to persist; ask the user ' +
+              'for the target level rather than guessing baseline + delta.',
+            { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+          );
+        }
+      }
+
       // Default the constraint label from the target node's label so the
       // confirmation text and the persisted shape are coherent.
       const constraintLabel = params.label ?? targetNode.label;
@@ -263,11 +410,24 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
+        // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
+        // UNCHANGED). On an update, a turn that does not mention a unit
+        // keeps the persisted row's unit — `existing?.unit` sits between
+        // the explicit parameter and the node's observed unit, and it
+        // OUTRANKS the observed unit because the row is the prior state
+        // of the thing being updated (same convention as
+        // set_factor_value's `parsed.unit → before.unit` merge). Before
+        // this fix the chain skipped `existing` entirely, so the
+        // whole-object update splice below silently stripped the
+        // persisted `%` (the live gc-cdd6eb74 silent-nullification
+        // defect). Never silently clear a persisted unit.
         ...(params.unit !== undefined
           ? { unit: params.unit }
-          : targetNode.observed_state?.unit !== undefined
-            ? { unit: targetNode.observed_state.unit }
-            : {}),
+          : existing?.unit !== undefined
+            ? { unit: existing.unit }
+            : targetNode.observed_state?.unit !== undefined
+              ? { unit: targetNode.observed_state.unit }
+              : {}),
       };
 
       const newConstraint: GoalConstraintT = {
@@ -291,35 +451,261 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
+      // Lane CEE-W5 Mission B — the goal-threshold JOIN. An `at_least`
+      // constraint whose target IS the goal node is the conversational
+      // "set the success target" intent (tool-schema routes it here;
+      // validation-registry accepts entity kind 'goal'). Historically the
+      // constraint fact landed while the goal node's threshold fields —
+      // the ONLY source `has_goal_target` / the UI goal chip / PLoT's
+      // explicit-threshold path read — stayed unset (Gate-item-8
+      // dead-end). Stamp them in the SAME validated write below (single
+      // derivation from the same params, same sanctioned commit path:
+      // mutated_graph → mergeMutatedGraphForPersistence →
+      // commitDirectAnswer — no new writer). With goal_threshold now
+      // explicit on the goal node, PLoT's auto_goal_threshold synthesis
+      // no longer triggers — the user threshold travels explicitly.
+      //
+      // `at_most` goal constraints deliberately do NOT stamp a threshold:
+      // ISL computes P(samples >= threshold) (MINIMISATION doctrine —
+      // encoding a "keep below" bound as a >=-threshold would invert the
+      // claim). The constraint entry still lands.
+      const isGoalTargetSet = targetNode.kind === 'goal' && operator === '>=';
+
+      // Review hardening (2026-07-07): a success target must be a positive
+      // number — the shared value schema is a plain z.number(), so without
+      // this guard "-5%" would persist a negative goal_threshold that ships
+      // to PLoT/ISL unbounded.
+      if (isGoalTargetSet && !(params.value > 0)) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'A success target must be a positive number — tell me the target value again.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+        );
+      }
+
+      // Overnight review F8+F9 — ONE add-constraint channel-unification fix
+      // (ORCHESTRATOR-DEFAULT doctrine, pending Paul ratification — see
+      // acceptance-evidence/receipt-honesty/README.md). A success
+      // target can be registered through TWO channels, and unchanged-value
+      // detection must compare against BOTH before the mutation runs:
+      //   (a) the goal_constraints row (`existing`, above) — this
+      //       handler's own canonical representation.
+      //   (b) the goal node's OWN goal_threshold_raw/_unit fields — the
+      //       draft path (cee/factor-extraction/enricher.ts) stamps ONLY
+      //       these, by design, and never writes a goal_constraints row.
+      //       A restatement of an already-draft-registered value must not
+      //       read the row's absence as "nothing registered yet" (F8).
+      // `label` is EXCLUDED from the value-sameness predicate (F8
+      // secondary): an LLM-supplied label paraphrase must not flip an
+      // identical-value restatement into a false "fresh update" claim. A
+      // label-only change gets its own distinct receipt below — never a
+      // value-change claim, never a total no-op either (the label DID
+      // change and is persisted).
+      const rowValueUnchanged =
+        existing !== undefined &&
+        existing.value === newConstraint.value &&
+        existing.unit === newConstraint.unit;
+      const nodeChannelUnchanged =
+        isGoalTargetSet &&
+        typeof targetNode.goal_threshold_raw === 'number' &&
+        targetNode.goal_threshold_raw === params.value &&
+        targetNode.goal_threshold_unit === newConstraint.unit;
+      const valueUnchanged = rowValueUnchanged || nodeChannelUnchanged;
+      const labelChanged = existing !== undefined && existing.label !== newConstraint.label;
+      // F9 — the node's goal_threshold_raw/_unit/_cap fields are the exact
+      // fields `computeAnalysisAffectingGraphHash` reads; re-stamping them
+      // on a turn whose OWN receipt says "nothing changed" moves the
+      // analysis-affecting hash out from under an honest noop claim. Only
+      // stamp when the value genuinely changed this turn. The
+      // goal_constraints row upsert below still runs unconditionally
+      // (matching every other D1 handler's noop contract — see
+      // d1-cross-handler.test.ts: a noop turn still returns a
+      // `mutated_graph`, just one whose hash is unchanged because its
+      // content is byte-identical to what was already persisted); it is
+      // ONLY the node-threshold stamp that is gated, since that is the
+      // field the F9 defect actually moved.
+      const stampGoalThreshold = isGoalTargetSet && !valueUnchanged;
+
+      // Gate-1 EMIT GUARD — a constraint must not reach the wire
+      // unit-ambiguous. A unit-less value outside [0,1] targeting a
+      // probability-domain node (goal/outcome/risk) with no declared cap
+      // is KNOWN to be heuristically normalised downstream: PLoT's range
+      // priority finds no percent unit and no explicit cap, falls to the
+      // default [0,1] range, and CLAMPS — value > 1 becomes a
+      // trivially-true threshold (the analysis reports the guardrail
+      // checked-and-passed while it was never evaluated; the live
+      // 2026-07-15 silent-nullification defect), value < 0 the
+      // trivially-false mirror. Refuse and ask for the unit instead of
+      // guessing — a false positive costs one clarifying round-trip,
+      // never a silent wrong persist (same doctrine as the
+      // reduction-framing backstop above). Exemptions, in order:
+      //   - the effective unit (params → existing row → observed_state)
+      //     resolved: the scale is asserted;
+      //   - the node carries a declared cap (`observed_state.cap` or
+      //     `goal_threshold_cap`): downstream normalisation is explicit;
+      //   - this very turn co-stamps a goal_threshold_cap (goal `>=`
+      //     target-set with a changed value — `capToStamp` below is
+      //     non-null whenever the stamp will run, since the positive-
+      //     target guard above guarantees `params.value > 0`): the cap
+      //     travels in the SAME committed write, PLoT's P0 tier.
+      // NOTE: this deliberately fires even when the ambiguous row is
+      // ALREADY persisted and the turn is a value-identical restatement —
+      // confirming "already constrained ✓" would re-affirm a guardrail
+      // that is not being evaluated; the clarify is the repair path.
+      const declaredCap =
+        (typeof targetNode.observed_state?.cap === 'number' &&
+          targetNode.observed_state.cap > 0) ||
+        (typeof targetNode.goal_threshold_cap === 'number' &&
+          targetNode.goal_threshold_cap > 0);
+      const capToStamp = stampGoalThreshold
+        ? resolveGoalThresholdCap(
+            targetNode.goal_threshold_cap,
+            params.value,
+            newConstraint.unit,
+            targetNode.goal_threshold_unit,
+          )
+        : null;
+      if (
+        newConstraint.unit === undefined &&
+        (params.value > 1 || params.value < 0) &&
+        PROBABILITY_DOMAIN_KIND_SET.has(targetNode.kind) &&
+        !declaredCap &&
+        capToStamp === null
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'add_constraint: unit-ambiguous constraint refused — a unit-less ' +
+            `value ${params.value} on a probability-domain node with no ` +
+            'declared cap would be heuristically ranged downstream and ' +
+            'clamped into a trivially-satisfied (or trivially-violated) ' +
+            'threshold. Ask the user for the unit instead of guessing.',
+          {
+            details: {
+              handler_id: 'add_constraint',
+              target_id: targetId,
+              target_kind: targetNode.kind,
+              value: params.value,
+              rejection_reason: 'unit_ambiguous_probability_domain',
+            },
+            userGuidance: formatUnitAmbiguityClarify(params.value),
+          },
+        );
+      }
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
+        // F8 backfill residual (self-review hardening): when there is no
+        // existing row (`existing === undefined`) AND the value is
+        // unchanged (necessarily via the NODE channel in that case — see
+        // `nodeChannelUnchanged` above), appending a brand-new
+        // goal_constraints row would move the analysis-affecting hash
+        // (goal_constraints is part of that hash) on a turn whose own
+        // receipt says nothing changed — the same defect class F9 closed
+        // for the node stamp, manifesting via row-creation instead. Skip
+        // the append in exactly that case; a genuinely NEW constraint
+        // (existing undefined, valueUnchanged false) still appends as
+        // before.
         const next = existing
           ? list.map((c) =>
               c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
             )
-          : [...list, constraintParse.data];
+          : valueUnchanged
+            ? list
+            : [...list, constraintParse.data];
         clone.goal_constraints = next;
+        if (stampGoalThreshold) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode) {
+            const cap = resolveGoalThresholdCap(
+              goalNode.goal_threshold_cap,
+              params.value,
+              newConstraint.unit,
+              goalNode.goal_threshold_unit,
+            );
+            goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+            // Unit is ALWAYS reconciled (review hardening): the node's
+            // threshold unit follows the constraint row's effective unit.
+            // Gate-1 doctrine note: with `existing?.unit` now in the
+            // fallback chain, a turn that OMITS the unit inherits the
+            // persisted row's unit (omission means unchanged) rather
+            // than clearing it — the inherited unit is displayed in the
+            // receipt, so a wrong inheritance is user-visible and
+            // correctable, never a silent scale change. The clearing
+            // branch below now only runs when no unit resolves anywhere
+            // (params, existing row, observed_state).
+            if (newConstraint.unit !== undefined) {
+              goalNode.goal_threshold_unit = newConstraint.unit;
+            } else {
+              delete goalNode.goal_threshold_unit;
+            }
+            if (cap !== null) {
+              goalNode.goal_threshold_cap = cap;
+              goalNode.goal_threshold = params.value / cap; // model units (0–1)
+              // ROADMAP 2.273 — the chat-path twin of the draft-path baseline
+              // stamp (cee/factor-extraction/enricher.ts). Same shared
+              // extractor, so the two registration paths cannot drift.
+              //
+              // GATED ON THE TARGET MATCHING `params.value`. The extractor
+              // guarantees its target and baseline came from ONE match, i.e.
+              // the same metric — but it says nothing about whether that
+              // metric is the one being persisted here. Requiring the stated
+              // target to equal the value actually being stamped carries that
+              // guarantee across: if the user mentioned a different metric's
+              // target in the same message, the numbers won't match and no
+              // baseline is written. Divided by the SAME `cap` as the line
+              // above, never a separately-derived one.
+              // This path already holds a V3 node, so it writes the WIRE field
+              // (`observed_state`) directly rather than a V1 carrier the
+              // transform would later convert — there is no transform left to
+              // run. `value` and `baseline` are the same single extracted
+              // number for the reason documented in
+              // `cee/transforms/schema-v3.ts`: ISL's `ObservedState.value` is
+              // required, and at registration time the goal's current observed
+              // level IS its baseline.
+              const statedPair = extractGoalTargetWithBaseline(invocation.payload.message);
+              if (statedPair) {
+                const rawTarget =
+                  statedPair.unit === '%' ? statedPair.value * 100 : statedPair.value;
+                const rawBaseline =
+                  statedPair.unit === '%' ? statedPair.baseline * 100 : statedPair.baseline;
+                if (valuesMatch(rawTarget, params.value)) {
+                  const normalisedBaseline = rawBaseline / cap;
+                  goalNode.observed_state = {
+                    ...goalNode.observed_state,
+                    value: normalisedBaseline,
+                    baseline: normalisedBaseline,
+                    source: 'brief_extraction',
+                    raw_value: rawBaseline,
+                    cap,
+                    ...(goalNode.goal_threshold_unit !== undefined && {
+                      unit: goalNode.goal_threshold_unit,
+                    }),
+                  };
+                }
+              }
+              // ROADMAP 2.258 — attest the FRAME beside the number, on the
+              // same branch that mints it so the two can never diverge. A CODE
+              // CONSTANT: the line above divides a user-units target by a cap,
+              // which is an absolute LEVEL by construction.
+              goalNode.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
+            }
+          }
+        }
         return {
           before: existing ? (existing as Record<string, unknown>) : null,
           after: constraintParse.data as unknown as Record<string, unknown>,
         };
       });
 
-      const valueUnchanged =
-        existing !== undefined &&
-        existing.value === newConstraint.value &&
-        existing.unit === newConstraint.unit &&
-        existing.label === newConstraint.label;
-
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
-        noop: valueUnchanged,
+        noop: valueUnchanged && !labelChanged,
         result: {
           target_id: newConstraint.constraint_id,
-          status: valueUnchanged ? 'noop' : 'applied',
-          before: result.before as Record<string, unknown> | null,
-          after: result.after as Record<string, unknown> | null,
+          status: valueUnchanged && !labelChanged ? 'noop' : 'applied',
+          before: result.before,
+          after: result.after,
         },
       };
 
@@ -337,10 +723,37 @@ export function createAddConstraintHandler(): HandlerFn {
         value: params.value,
         ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
       };
-      const assistantText =
-        existing !== undefined
-          ? formatConstraintUpdated(formatInput)
-          : formatConstraintAdded(formatInput);
+      // Goal-target sets get the honest target-naming receipt (the
+      // threshold IS stamped in the committed write above); everything
+      // else keeps the existing constraint copy byte-for-byte. ROADMAP
+      // 1.19(a): a re-registration whose value is IDENTICAL to what is
+      // already persisted (`valueUnchanged`, computed above across BOTH
+      // channels per F8/F9) must not claim "Updated"/"set" — that
+      // borrows the pre-existing threshold/constraint to narrate a
+      // commit that did not happen this turn. The fact channel already
+      // marks this `noop`; the text channel now agrees. F8(b): a
+      // label-only change (value unchanged, label differs) gets its own
+      // distinct receipt — never the fresh-update claim, never the
+      // total-noop claim either.
+      const assistantText = isGoalTargetSet
+        ? valueUnchanged
+          ? formatGoalTargetUnchanged({
+              goalLabel: targetNode.label,
+              value: params.value,
+              ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
+            })
+          : formatGoalTargetSet({
+              goalLabel: targetNode.label,
+              value: params.value,
+              ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
+            })
+        : valueUnchanged
+          ? labelChanged
+            ? formatConstraintLabelUpdated(formatInput)
+            : formatConstraintUnchanged(formatInput)
+          : existing !== undefined
+            ? formatConstraintUpdated(formatInput)
+            : formatConstraintAdded(formatInput);
 
       return {
         assistant_text: assistantText,

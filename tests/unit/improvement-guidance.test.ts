@@ -268,7 +268,7 @@ describe("generateImprovementGuidance", () => {
 
       const result = generateImprovementGuidance(context);
 
-      expect(result.items[0].reason).toBe("Structural improvement recommended");
+      expect(result.items[0].reason).toBe("Structural improvement suggested");
     });
   });
 

@@ -18,6 +18,7 @@
  */
 
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
+import { isTier3LeakBlocked, TIER3_TRANSPORT_BANNED_FIELDS } from './claim-safety-cage.js';
 import {
   HARD_BAN_PATTERNS,
   WARNING_PATTERNS,
@@ -60,6 +61,20 @@ export const CRITIQUE_BUCKETS: Readonly<Record<string, CritiqueBucket>> = {
   IDENTIFIABILITY_ISSUE: 'D',
   CONSTRAINT_NODE_DEFAULT_BASE: 'D',
   INTERNAL_ERROR: 'D',
+  // Lane 3 Car 3 (2026-08-04): three ISL codes that had NO entry and were
+  // being suppressed by the unknown→'D' fail-safe — i.e. by nobody's
+  // decision. Listed as EXPLICIT 'D' so the suppression is a recorded
+  // choice; each is a candidate for a conscious S-promotion, which needs
+  // Paul-approved copy (out of scope here; MARGINAL_SWITCH_TRUNCATED's
+  // promotion is the 2.410 follow-up — PLoT now merges it on success
+  // responses and ships its own user_message, so the moment it is promoted
+  // the display copy question is already answered at the PLoT layer).
+  // Completeness is now TESTED against a hand-written 34-code ISL corpus:
+  // __tests__/critique-buckets-completeness.test.ts (trap 12d — the header
+  // claim below this table stopped being an untested assertion).
+  GOAL_ANCESTOR_DATA_GAP: 'D',
+  STRUCTURAL_INFLUENCE_TRUNCATED: 'D',
+  MARGINAL_SWITCH_TRUNCATED: 'D',
   // ── Bucket U — plain English, surface as-is after ID resolution ──────
   NO_OPTIONS: 'U',
   INSUFFICIENT_OPTIONS: 'U',
@@ -74,6 +89,16 @@ export const CRITIQUE_BUCKETS: Readonly<Record<string, CritiqueBucket>> = {
   LOW_EFFECTIVE_SAMPLES: 'S',
   DEGENERATE_OPTION_ZERO_VARIANCE: 'S',
   HIGH_TIE_RATE: 'S',
+  // PLoT-authored (not ISL critique.py): degraded-success disclosure from
+  // PLoT's complexity guard (#209/#212). Consciously promoted to S per the
+  // CRITIQUE_BUCKETS honest-surfacing ruling (seam item 3) — a reduced-samples
+  // run the user never hears about is a claim-integrity leak. NOTE: the
+  // transport keep-list does not carry `critiques` today AND PLoT rides this
+  // disclosure on a Tier-3 claim-denied warning channel, so no orchestrated
+  // surface renders it yet — the answer-text caveat half is pending a
+  // claim-safety review (Brief 4 §9); this entry is the fail-safe so any
+  // future critique-carrying surface gets the approved copy.
+  SAMPLES_REDUCED_FOR_COMPLEXITY: 'S',
 };
 
 /**
@@ -141,6 +166,11 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
 
   HIGH_TIE_RATE: (_ctx, _vars) =>
     `The options are very close in this analysis. Treat the current lead as finely balanced.`,
+
+  // Seam item 3 (CRITIQUE_BUCKETS ruling). If the answer-text caveat half
+  // lands after its claim-safety review, keep that copy in this voice.
+  SAMPLES_REDUCED_FOR_COMPLEXITY: (_ctx, _vars) =>
+    `Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.`,
 };
 
 // ============================================================================
@@ -165,7 +195,11 @@ const ALLOWLISTED_LEAF_PATHS: ReadonlyArray<RegExp> = [
   /^\$\.improvement_guidance\[\d+\]$/,
   /^\$\.factor_sensitivity\[\d+\]\.interpretation$/,
   /^\$\.m1_review\[\d+\]\.text$/,
-  /^\$\.m1_coaching\[\d+\]\.text$/,
+  // `$.m1_coaching[*].text` was REMOVED from this allow-list (Brief 5
+  // blocking precondition): m1_coaching is a ratified Tier-3 deny field
+  // (claim-safety-cage.ts), so its prose is fail-closed SUPPRESSED by the
+  // walker below — never scrubbed-and-kept. The prose-clean allowance
+  // contradicted its Tier-3 status.
   /^\$\.rationale$/,
   /^\$\.robustness_synthesis$/,
   /^\$\.review_cards\[\d+\]\.what$/,
@@ -285,7 +319,16 @@ export interface CritiqueLike {
   readonly severity?: string;
   readonly source?: string;
   readonly message?: string;
+  /**
+   * The display-safe twin of `message` (schemas 0.31.0
+   * `EnrichmentCritiqueSchema`). `message` is internal/debug wording — it
+   * carries raw node ids on the staging capture — so THIS is the field that
+   * ships to the UI. Declared explicitly rather than left to the index
+   * signature so the transport projection typechecks it as a string.
+   */
+  readonly user_message?: string;
   readonly suggestion?: string;
+  readonly blocks_analysis?: boolean;
   readonly affected_option_ids?: ReadonlyArray<string>;
   readonly affected_node_ids?: ReadonlyArray<string>;
   readonly [k: string]: unknown;
@@ -422,15 +465,38 @@ export interface SanitiseEnrichmentResult {
  * by deep-clone: the contract acceptance test asserts byte-equal on
  * the excluded subtrees pre/post.
  */
+export interface SanitiseEnrichmentOptions {
+  /**
+   * WIRE-BACKSTOP mode (response-finaliser only): DELETE the Tier-3
+   * transport-banned subtrees (`TIER3_TRANSPORT_BANNED_FIELDS`, today
+   * `m1_coaching`) outright instead of only suppressing their known
+   * prose leaves. A transport-banned subtree reaching the wire is
+   * already a contract anomaly, and an UNKNOWN prose field inside it
+   * must not ride to users just because this walker does not know its
+   * name. Default OFF: on the enricher/fact path the m1 adapter still
+   * reads m1_coaching's structured enums for the v11 prompt, so there
+   * only the known prose leaf is suppressed (adapter-v1 starvation
+   * regression guard).
+   */
+  readonly dropTier3TransportBanned?: boolean;
+}
+
 export function sanitiseEnrichment(
   enrichment: Record<string, unknown>,
   graph: LabelResolverContext['graph'] = null,
   analysisReady: LabelResolverContext['analysisReady'] = null,
+  options: SanitiseEnrichmentOptions = {},
 ): SanitiseEnrichmentResult {
   const ctx: LabelResolverContext = { graph, analysisReady, enrichment };
   // Node 17+ global; `globalThis.` prefix avoids a no-undef lint hit
   // under the project's lint config (matches src/orchestrator/patch-applier.ts pattern).
   const cloned = globalThis.structuredClone(enrichment) as Record<string, unknown>;
+  // Tier-3 claim-safety cage, wire-backstop posture (see options doc).
+  if (options.dropTier3TransportBanned === true) {
+    for (const key of TIER3_TRANSPORT_BANNED_FIELDS) {
+      if (key in cloned) delete cloned[key];
+    }
+  }
   const hardBans: Array<{ path: string; hit: string }> = [];
   const warnings: Array<{ path: string; hit: string }> = [];
 
@@ -530,6 +596,17 @@ export function sanitiseEnrichment(
       const v = rec[field];
       if (typeof v !== 'string' || v.length === 0) continue;
       const path = `$.${arrayKey}[${i}].${field}`;
+      // Tier-3 claim-safety cage (Brief 5): prose belonging to a ratified
+      // Tier-3 deny field is SUPPRESSED outright — never scrubbed-and-kept.
+      // Same fail-shut marker as a hard-ban hit, so array length and
+      // structural siblings stay stable for consumers. Today this covers
+      // m1_coaching (the one Tier-3 field with a prose leaf in this
+      // walker); membership is owned by claim-safety-cage.ts so the
+      // runtime block and the assurance scanner cannot drift.
+      if (isTier3LeakBlocked(arrayKey)) {
+        rec[field] = SUPPRESSED_PROSE_FALLBACK;
+        continue;
+      }
       if (!isAllowlistedPath(path)) continue;
       const scrubbed = sanitiseEnrichmentText(v, ctx);
       for (const hit of scrubbed.hardBans) hardBans.push({ path, hit });
@@ -583,4 +660,103 @@ export function sanitiseEnrichment(
     hardBans,
     warnings,
   };
+}
+
+// ============================================================================
+// Transport-seam critique projection (schemas 0.31.0 — `critiques` keep-list)
+// ============================================================================
+
+/**
+ * Project `enrichment.critiques[]` for CEE→UI TRANSPORT.
+ *
+ * ⚠ WHY THIS EXISTS SEPARATELY FROM `sanitiseEnrichment`. The response-finaliser
+ * runs `sanitiseEnrichment` as a wire backstop, but it is bypassed WHOLESALE
+ * when `CEE_TURN_DEBUG_ENABLED` is on:
+ *
+ *     const scrubbed = debugEnabled ? ceeTraceClean : sanitiseEnrichmentBlocks(...)
+ *
+ * so on those turns nothing would stand between raw D-bucket critiques and the
+ * browser. Keep-listing the key without a projection HERE — at the block-build
+ * seam, which is debug-independent, exactly like the keep-list itself — would
+ * have shipped internal wording carrying raw node ids. The schemas 0.31.0 entry
+ * states the duty explicitly: "TRANSPORT IS LICENSED HERE; SANITISATION IS NOT
+ * WAIVED" and "keep-listing licenses the KEY, not the whole row".
+ *
+ * The per-row contract:
+ *   - bucket D (including every UNKNOWN code — `bucketFor` fails safe) is
+ *     DROPPED. `_diagnostics` is a debug-only, CEE-owned surface and never
+ *     rides the transport keep-list.
+ *   - `message` is WITHHELD. It is internal/debug wording and carries raw node
+ *     ids on the staging capture.
+ *   - `user_message` is what SHIPS: the display-safe twin. For bucket S that is
+ *     the Paul-approved replacement copy (2026-04-30); for bucket U it is the
+ *     producer's own `user_message` when present, else the scrubbed `message`.
+ *   - a row whose copy trips a hard-ban is dropped entirely (fail-shut), never
+ *     shipped with contaminated text.
+ *
+ * CLAIM-GATING IS DELIBERATELY NOT DONE HERE. Removing option identity on a
+ * withheld turn is withheld-claim policy, and it lives with the rest of that
+ * policy in `projectCritiquesForWithheldClaim`
+ * (compose/withheld-claim-projection.ts). Keeping the two duties apart is what
+ * lets this function stay unconditional: sanitisation is owed on EVERY turn,
+ * and a seam that owed it only sometimes is how a debug-gated leak happens.
+ */
+export function projectCritiquesForTransport(
+  rawCritiques: unknown,
+  ctx: LabelResolverContext,
+): ReadonlyArray<CritiqueLike> | undefined {
+  if (!Array.isArray(rawCritiques)) return undefined;
+
+  const out: CritiqueLike[] = [];
+  for (const raw of rawCritiques as ReadonlyArray<CritiqueLike>) {
+    if (raw == null || typeof raw !== 'object') continue;
+    const bucket = bucketFor(raw.code);
+    // Fail-safe by construction: `bucketFor` maps every unknown code to 'D'.
+    if (bucket === 'D') continue;
+
+    const vars = {
+      affected_option_ids: raw.affected_option_ids,
+      affected_node_ids: raw.affected_node_ids,
+    };
+
+    let display: string;
+    if (bucket === 'S') {
+      const fn = raw.code ? S_BUCKET_REPLACEMENTS[raw.code] : undefined;
+      display = fn ? fn(ctx, vars) : (raw.user_message ?? raw.message ?? '');
+    } else {
+      display =
+        typeof raw.user_message === 'string' && raw.user_message.length > 0
+          ? raw.user_message
+          : (raw.message ?? '');
+    }
+
+    const scrubbed = sanitiseEnrichmentText(display, ctx);
+    // Fail-shut: contaminated copy is dropped, never shipped.
+    if (scrubbed.suppress) continue;
+
+    const projected: Record<string, unknown> = {};
+    // Structural fields only — an explicit ALLOW-list, so a future producer
+    // field cannot reach the wire merely by existing.
+    if (raw.id !== undefined) projected.id = raw.id;
+    if (raw.code !== undefined) projected.code = raw.code;
+    if (raw.severity !== undefined) projected.severity = raw.severity;
+    if (raw.source !== undefined) projected.source = raw.source;
+    if (raw.blocks_analysis !== undefined) projected.blocks_analysis = raw.blocks_analysis;
+    if (raw.affected_node_ids !== undefined) projected.affected_node_ids = raw.affected_node_ids;
+    // OPTION IDENTITY. Carried here; REMOVED by
+    // `projectCritiquesForWithheldClaim` when the leader claim is withheld.
+    // This is the field the schemas 0.31.0 entry singles out as NOT trivially
+    // leading-option-inert, unlike the 0.30.0 VOI family.
+    if (raw.affected_option_ids !== undefined) {
+      projected.affected_option_ids = raw.affected_option_ids;
+    }
+    if (typeof raw.suggestion === 'string') {
+      const s = sanitiseEnrichmentText(raw.suggestion, ctx);
+      if (!s.suppress) projected.suggestion = s.text;
+    }
+    // `message` is DELIBERATELY ABSENT — see the contract above.
+    projected.user_message = scrubbed.text;
+    out.push(projected as CritiqueLike);
+  }
+  return out;
 }

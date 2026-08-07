@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 
@@ -56,8 +56,36 @@ export const ObservedStateV3 = z.object({
   baseline: z.number().optional(),
   /** Unit of measurement (e.g., 'GBP', 'USD', 'percent', 'count', 'months') */
   unit: z.string().optional(),
-  /** How the value was determined */
-  source: z.enum(["brief_extraction", "cee_inference"]).optional(),
+  /** How the value was determined.
+   *
+   *  PRODUCER members: `brief_extraction` / `cee_inference` (CEE's own
+   *  extraction/inference writers).
+   *
+   *  USER-OWNED members (2.396(b), P4 transport 2026-08-05): the literals the
+   *  estate's user-edit writers actually stamp — CEE's own chat-edit seams
+   *  write `user_override` (stampUserEditProvenance / set_factor_value), and
+   *  the UI's edit surfaces write `user_override` / `user_confirmed` /
+   *  `user` (+ `user_assumption` / `user_edited` recognised forward-compat by
+   *  its REVIEWED_SOURCES predicate, DecisionGuideAI isReviewedByUser.ts —
+   *  the acknowledged cross-repo source of this list). Before this widening
+   *  the enum was structurally incapable of carrying ANY user stamp, so every
+   *  chat-set value rendered as "Olumi estimate", and a UI-stamped stored
+   *  graph FAILED this parse at every edit seam.
+   *
+   *  The pill-earning wire literal is `user_override` (witnessed runE2,
+   *  journey-witness-final-2026-08-04). The shared contract types this field
+   *  as a free string (`ObservedStateSchema.source: z.string()`), and ISL as
+   *  `Optional[str]` — this enum is the narrowest validator in the chain, so
+   *  it is the one that must name every legitimate writer. */
+  source: z.enum([
+    "brief_extraction",
+    "cee_inference",
+    "user_override",
+    "user_confirmed",
+    "user_assumption",
+    "user",
+    "user_edited",
+  ]).optional(),
   /** Raw value before normalization (preserves original extraction) */
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */
@@ -111,6 +139,19 @@ export const NodeV3 = z.object({
   goal_threshold_unit: z.string().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().optional(),
+  /**
+   * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
+   * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION. `NodeV3` is a plain
+   * `z.object` — "declared fields only — unknown fields stripped" (see the
+   * closing comment on this object). An undeclared `goal_threshold_frame`
+   * would be SILENTLY DELETED by `GraphV3.safeParse` on the run path
+   * (build-turn-context.ts), so the stamp would reach nothing and the goal
+   * probability would stay absent with no error anywhere. Derived from the
+   * contract's own enum rather than restated as a local literal union.
+   */
+  goal_threshold_frame: GoalThresholdFrame.optional(),
   /** Encoding map for categorical factor labels (v191+). Maps encoded integer keys to display strings.
    * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)".
    * Node-level field (not in observed_state) — describes label encoding, not observed state. */

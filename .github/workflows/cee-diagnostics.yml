@@ -1,9 +1,30 @@
 name: CEE Diagnostics (staging)
 
+# MANUAL-DISPATCH STAGING DIAGNOSTICS. NO SCHEDULE. FAILS LOUDLY.
+#
+# What this was: an hourly cron gated on `vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED`
+# with `continue-on-error: true` on the only step that did any work. The
+# repository has ZERO Actions variables (`gh api .../actions/variables` returns
+# `total_count: 0`; positive control: the same API form returns `total_count: 1`
+# for secrets), so that gate was PERMANENTLY FALSE — the scheduled job never
+# ran a single assertion while the workflow read as active in the workflow list.
+#
+# What it is now:
+#   - `workflow_dispatch` ONLY. No cron. It runs when a human asks for it.
+#   - NO `if: vars.X` gate. There is no variable to leave unset.
+#   - NO `continue-on-error`. The diagnostics step's own exit code fails the
+#     run directly — there is no second `Fail if ...` step, because two
+#     mechanisms for one outcome is how the first one rots unnoticed.
+#   - The base URL is DEFAULTED in code, so a missing variable cannot silently
+#     blank it (the script would otherwise fall back to http://localhost:3101
+#     and "pass" against nothing).
+#
+# These properties are swept by tests/unit/ci/staging-journey-smoke.test.ts,
+# which parses every workflow in this directory and fails on any `if:` that
+# reads a repo variable. The opt-out list is empty — there is no precedent to
+# point at.
+
 on:
-  schedule:
-    # Hourly diagnostics against staging (gated by CEE_DIAGNOSTICS_SCHEDULE_ENABLED)
-    - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,9 +40,6 @@ jobs:
     name: Run CEE diagnostics against staging
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Gate scheduled runs on a repo variable so this can be disabled without code changes.
-    # Manual workflow_dispatch runs always execute.
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED == 'true' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -36,23 +54,47 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      # OWNER ACTION REQUIRED: the repository secret STAGING_ASSIST_API_KEY does
+      # not exist yet. `staging-journey-smoke.yml` expects the same name. It must
+      # hold the staging value of ASSIST_API_KEY (see .env.staging.local).
+      #
+      # Without this guard the run does NOT fail usefully: scripts/cee-diagnostics.ts
+      # treats ASSIST_API_KEY as OPTIONAL, so a missing key sails past /healthz and
+      # surfaces as a bare "/diagnostics returned 401" — an auth error that reads
+      # like a service fault. Name the missing secret instead, and stop.
+      - name: Require the staging API key
+        env:
+          ASSIST_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
+        run: |
+          if [ -z "${ASSIST_API_KEY}" ]; then
+            echo "::error::Repository secret STAGING_ASSIST_API_KEY is not set. This workflow cannot authenticate against staging /diagnostics. Set it in Settings -> Secrets and variables -> Actions (value = the staging ASSIST_API_KEY)."
+            exit 1
+          fi
+          echo "STAGING_ASSIST_API_KEY is present."
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
 
+      # No `continue-on-error`. A non-zero exit here fails the run, which is the
+      # entire point of running diagnostics at all.
+      #
+      # CEE_DIAGNOSTICS_ERROR_THRESHOLD is deliberately NOT passed:
+      # scripts/cee-diagnostics.ts:135 already defaults it to 20 recent errors,
+      # and forwarding an unset repo variable would pass an empty string.
+      # (Verified: unset and "" both take the 20 default; an explicit "5" changes
+      # the verdict, so the default is really being read and not merely inert.)
       - name: Run CEE diagnostics CLI (staging)
-        id: diagnostics
-        continue-on-error: true
         env:
-          # Staging URL for assistants service (set as a GitHub variable)
-          ASSIST_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL }}
-          # Operator key for diagnostics in staging (stored as a GitHub secret)
+          # Defaulted in code — a missing repo variable must not blank the target.
+          ASSIST_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
           ASSIST_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
-          # Slightly higher threshold for staging noise; prod can override separately via env.
-          CEE_DIAGNOSTICS_ERROR_THRESHOLD: ${{ vars.CEE_DIAGNOSTICS_ERROR_THRESHOLD }}
-        run: |
-          pnpm cee:diagnostics --json > cee-diagnostics.json
+        # `shell: bash` selects `bash --noprofile --norc -eo pipefail {0}`. There
+        # is no pipe here today, but the redirect below must not mask a non-zero
+        # exit if one is ever added.
+        shell: bash
+        run: pnpm cee:diagnostics --json > cee-diagnostics.json
 
       - name: Upload diagnostics summary
         if: always()
@@ -60,7 +102,3 @@ jobs:
         with:
           name: cee-diagnostics-summary
           path: cee-diagnostics.json
-
-      - name: Fail if diagnostics failed
-        if: steps.diagnostics.outcome == 'failure'
-        run: exit 1

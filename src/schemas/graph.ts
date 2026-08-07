@@ -24,6 +24,7 @@
  * @see src/schemas/assist.ts              — route I/O schemas
  */
 import { z } from "zod";
+import { GoalThresholdFrame } from "@talchain/schemas";
 
 export const ProvenanceSource = z.enum([
   "document", "metric", "hypothesis", "engine", "synthetic",
@@ -40,6 +41,65 @@ export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk",
  * Shared across all prompts for consistent factor categorization.
  */
 export const FactorType = z.enum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]);
+
+/**
+ * How a factor's value was extracted. Hoisted out of `FactorData` (2026-07-25) so
+ * the SENT draft grammar can DERIVE its enum from this one declaration rather
+ * than re-typing the member list — `anthropic-graph-schema.ts` reads `.options`
+ * off it.
+ *
+ * ⚠ "EXACTLY ONE HOME" WAS OVERCLAIMED, CORRECTED 2026-07-25 (F8). This is one
+ * home for the DRAFT LLM BOUNDARY, which validates through `shared-schemas.ts` →
+ * `NodeData` → here, so the grammar and its validator do agree. The V3 WIRE
+ * schema keeps its own unpinned copy (`cee-v3.ts` — a byte-identical
+ * `z.enum([...])` for extractionType, and `FactorTypeV3` beside `FactorType`).
+ * Those are not derived from this and will not fail loud if they drift. Do not
+ * inherit the stronger claim.
+ */
+export const ExtractionType = z.enum(["explicit", "inferred", "range", "observed"]);
+
+/**
+ * Prior distribution family for external factors.
+ *
+ * ONE member, deliberately. The served prompt states the invariant itself —
+ * draft_graph "distribution is always \"uniform\" in current version" — and every
+ * worked example in every prompt version emits it; measured 35/35 "uniform" over
+ * a 20-draft live corpus (2026-07-25). Declaring it here lets the draft grammar
+ * enforce what the prompt already promises, at a cost of one enum value.
+ *
+ * ⚠ COUPLED TO THE PROMPT BY DESIGN. If a future prompt teaches a second family,
+ * it must be added HERE in the same change — the grammar would otherwise make the
+ * new value ungrammatical. That coupling is the point: today the field is free
+ * text that nothing constrains, and the prompt's promise is unenforced.
+ */
+export const PriorDistribution = z.enum(["uniform"]);
+
+/**
+ * Is `value` a distribution family this build's grammar can express?
+ *
+ * ⚠ THE COUPLING ABOVE HAS NO COMPILE-TIME ALARM, AND CANNOT HAVE ONE (F4,
+ * /code-review 2026-07-25). `PriorDistribution` reads like the other two hoisted
+ * enums, but it is NOT the same shape:
+ *
+ *   * `ExtractionType` / `FactorType` are read by the downstream validator, so
+ *     the grammar and the validator genuinely cannot disagree.
+ *   * `prior.distribution` is validated by `cee-v3.ts` as `z.string()` — FREE
+ *     TEXT. Nothing reads this enum except the grammar. It is therefore a
+ *     hand-typed mirror of a PMS-SERVED PROMPT, and that prompt is re-pinnable
+ *     WITHOUT A CEE DEPLOY. No test in this repo can see the served prompt.
+ *
+ * So the drift alarm has to be a RUNTIME one, at the boundary where a real
+ * emitted value arrives. Called from the V3 transform (`transforms/schema-v3.ts`)
+ * for every prior that reaches the pipeline. Deliberately a DETECTOR, not a
+ * rejector: a second distribution family is a prompt decision, and silently 400ing
+ * live drafts is a worse failure than loudly passing the value through.
+ *
+ * Derived from `PriorDistribution.options`, so adding a member here retires the
+ * alarm for that member automatically — never re-type the list.
+ */
+export function isKnownPriorDistribution(value: unknown): boolean {
+  return typeof value === "string" && (PriorDistribution.options as readonly string[]).includes(value);
+}
 
 /**
  * Factor category classification (V12.4+).
@@ -72,7 +132,7 @@ export const FactorData = z.object({
     max: z.number()
   }).optional(),
   /** How the value was extracted (explicit, inferred, range, observed) */
-  extractionType: z.enum(["explicit", "inferred", "range", "observed"]).optional(),
+  extractionType: ExtractionType.optional(),
   /** Extraction confidence (0-1) for uncertainty derivation */
   confidence: z.number().min(0).max(1).optional(),
   /** For range extractions: minimum bound */
@@ -141,6 +201,53 @@ export const ConstraintObservedState = z.object({
 }).passthrough();
 
 /**
+ * Observed state for FACTOR nodes (F4 — graph-readiness↔run scaffold parity).
+ *
+ * A factor's stored position: `value` on the model 0-1 scale, plus an optional
+ * display-scale magnitude `raw_value` (raw user units). This is the exact
+ * provenance the run-path scaffolder reads to compute neutral placeholder
+ * interventions for unconfigured options (`buildNeutralFactorValues`, the
+ * `observed_state` rung). Before this, the /assist/v1/graph-readiness `Graph`
+ * input accepted ONLY the constraint-shaped observed_state (below), so a factor
+ * observed_state 400'd and readiness could not see the provenance the run path
+ * uses — the pre-run panel under-reported a runnable graph as "blocked".
+ *
+ * Additive by construction: it is a UNION MEMBER alongside ConstraintObservedState
+ * (see NodeObservedState), tried SECOND, so a valid constraint observed_state is
+ * validated byte-identically to before. Distinguished from the constraint shape
+ * by the ABSENCE of constraint `metadata`. The `.passthrough()` preserves
+ * additive factor fields (e.g. `cap`, `unit`), but the refinement REJECTS any
+ * `metadata` key so a MALFORMED constraint observed_state (metadata present but
+ * operator invalid/missing) still fails BOTH branches → still a 400. Constraint
+ * validation is therefore not loosened: you cannot slip a broken operator
+ * through by shedding the constraint shape.
+ */
+export const FactorObservedState = z.object({
+  /** The factor's current position on the model 0-1 scale (PLoT normalises). */
+  value: z.number(),
+  /** Optional display-scale magnitude in raw user units (for round-trip). */
+  raw_value: z.number().optional(),
+}).passthrough().refine(
+  (o) => !("metadata" in o),
+  { message: "factor observed_state must not carry constraint metadata (operator)" },
+);
+
+/**
+ * A node's observed_state is EITHER constraint-shaped (threshold `value` +
+ * `metadata.operator`, for constraint nodes — PLoT Phase 1 T6) OR factor-shaped
+ * (`{ value, raw_value? }`, for factor nodes — F4 readiness parity).
+ *
+ * Order is load-bearing: ConstraintObservedState is tried FIRST, so a valid
+ * constraint observed_state parses exactly as it did before this union existed
+ * (identical output bytes). A factor observed_state (no `metadata`) fails the
+ * constraint branch and matches the factor branch. A malformed constraint
+ * (metadata present but invalid) matches NEITHER branch and still 400s — the
+ * factor branch's refinement forbids any `metadata` key. Both branches
+ * `.passthrough()`, so additive fields on either shape survive.
+ */
+export const NodeObservedState = z.union([ConstraintObservedState, FactorObservedState]);
+
+/**
  * Data field for constraint nodes (redundant operator for PLoT compatibility).
  * PLoT checks both observed_state.metadata.operator and data.operator.
  */
@@ -181,11 +288,15 @@ export const Node = z.object({
    */
   data: NodeData.optional(),
   /**
-   * Observed state for constraint nodes (PLoT Phase 1 T6).
-   * Contains threshold value and explicit operator.
-   * PLoT requires operator in observed_state.metadata.operator.
+   * Observed state — kind-dependent (F4):
+   * - constraint nodes: ConstraintObservedState (threshold value + explicit
+   *   operator; PLoT Phase 1 T6 — PLoT requires observed_state.metadata.operator).
+   * - factor nodes: FactorObservedState ({ value, raw_value? }) — the neutral-
+   *   value provenance the run-path scaffolder reads.
+   * The union is additive: constraint observed_state parses byte-identically to
+   * before; the factor shape was previously rejected (400). See NodeObservedState.
    */
-  observed_state: ConstraintObservedState.optional(),
+  observed_state: NodeObservedState.optional(),
   /**
    * Goal threshold fields (V14+).
    * Only applies to goal nodes. Extracted from explicit numeric targets in brief.
@@ -199,6 +310,33 @@ export const Node = z.object({
   goal_threshold_unit: z.string().nullable().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().nullable().optional(),
+  /**
+   * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
+   * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Typed here so
+   * the draft-path mint site is contextually typed rather than relying on
+   * `.passthrough()` to smuggle an unknown key across.
+   */
+  goal_threshold_frame: GoalThresholdFrame.optional(),
+  /**
+   * The goal metric's CURRENT LEVEL as stated by the user (ROADMAP 2.273),
+   * normalised against `goal_threshold_cap` — the SAME denominator
+   * `goal_threshold` uses.
+   *
+   * ⚠ THE SHARED DENOMINATOR IS THE WHOLE CONTRACT. ISL computes
+   * `delta_threshold = goal_threshold − baseline + intercept`. Subtracting a
+   * baseline scored against a different cap than the threshold does not fail —
+   * it silently returns a WRONG probability, which is the one outcome the
+   * whole 2.258/2.273 train exists to prevent. Both numbers are therefore
+   * divided by `goal_threshold_cap` at the same mint site, never separately.
+   *
+   * EXTRACTION ONLY. Present only when the user STATED a current level in the
+   * same breath as the target. Never inferred, never defaulted from the
+   * target, never derived. Absent means absent: ISL then refuses with
+   * `missing_goal_baseline` and renders no probability, which is honest.
+   */
+  goal_baseline: z.number().nullable().optional(),
+  /** The stated current level in RAW user units, for display and round-trip. */
+  goal_baseline_raw: z.number().nullable().optional(),
 }).passthrough();
 
 // Structured provenance for production trust and traceability
@@ -321,6 +459,8 @@ export type NodeT = z.infer<typeof Node>;
 export type FactorDataT = z.infer<typeof FactorData>;
 export type OptionDataT = z.infer<typeof OptionData>;
 export type NodeDataT = z.infer<typeof NodeData>;
+export type FactorObservedStateT = z.infer<typeof FactorObservedState>;
+export type NodeObservedStateT = z.infer<typeof NodeObservedState>;
 export type StructuredProvenanceT = z.infer<typeof StructuredProvenance>;
 export type EffectDirectionT = z.infer<typeof EffectDirection>;
 export type EdgeOriginT = z.infer<typeof EdgeOrigin>;

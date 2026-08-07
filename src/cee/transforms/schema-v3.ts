@@ -23,6 +23,7 @@ import { deriveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
+import { readIsBaseline } from "../baseline-identity.js";
 import {
   extractOptionsFromNodes,
   toOptionsV3,
@@ -31,6 +32,7 @@ import {
   type EdgeHint,
 } from "../extraction/intervention-extractor.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
+import { PriorDistribution, isKnownPriorDistribution } from "../../schemas/graph.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { validateV3Response } from "../validation/v3-validator.js";
 import { config } from "../../config/index.js";
@@ -205,11 +207,84 @@ export function transformNodeToV3(
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
     ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
+    // ROADMAP 2.258 — the frame rides across the V1→V3 transform with its
+    // threshold. This copy is REQUIRED, not decorative: the transform rebuilds
+    // the node field-by-field, so a `goal_threshold_frame` minted on the V1
+    // draft graph is dropped here unless it is named. Carried only when the
+    // threshold itself is present, so the frame can never travel without the
+    // number it describes.
+    ...(node.goal_threshold != null &&
+      node.goal_threshold_frame != null && {
+        goal_threshold_frame: node.goal_threshold_frame,
+      }),
   };
 
-  // Transform data to observed_state (only if it's FactorData with value defined)
-  // OptionData (with interventions) is handled separately in options extraction
-  if (isFactorData(node.data) && node.data.value !== undefined) {
+  // Transform data to observed_state.
+  // OptionData (with interventions) is handled separately in options extraction.
+  //
+  // ⚠ ORDER IS LOAD-BEARING (ROADMAP 2.294): the goal limb is checked FIRST.
+  // This gate originally led with the factor-data branch, on the 2.273
+  // assumption that a goal node never carries `data` — FALSE on live drafts.
+  // The third 2.258 witness (witness-2258-goal-probability-THIRD.md §3.2, CEE
+  // 33c10e52) caught the model authoring `data.value = 0.667` on the goal, so
+  // the data branch shadowed the goal limb — the ONLY projection of
+  // `goal_baseline` into `observed_state.baseline` — the minted 0.5333…
+  // baseline died here, and ISL refused with `missing_goal_baseline`. A
+  // baseline-bearing goal must take the goal limb regardless of model-authored
+  // `data`. (Stripping `data` off goal nodes generally is NOT this gate's job —
+  // that belongs to the 2.286 server-owned attestation object.)
+  if (node.kind === "goal" && node.goal_baseline != null) {
+    // ROADMAP 2.273 — THE GOAL LIMB of this gate. The factor-data branch below
+    // builds `observed_state` only from `data`; before this limb existed a
+    // goal without factor-shaped data reached the wire with a threshold and a
+    // frame but no `observed_state` AT ALL — ISL's stronger refusal limb
+    // (`observed_state_present=False`, `missing_goal_baseline`), pinned by the
+    // 2.258 characterisation test that PR retired.
+    //
+    // ⚠ `value` IS REQUIRED, and it is NOT a second measurement. ISL's
+    // `ObservedState.value` is a required Pydantic field
+    // (`robustness_v2.py:171`, `Field(...)`) and so is `ObservedStateV3.value`
+    // here, so a baseline-only observed_state cannot reach ISL — it would be
+    // rejected before the conversion it exists to enable. Both fields
+    // therefore carry the SAME single extracted number: the goal metric's
+    // current observed level. That is exactly what each field is documented to
+    // mean (`value` = "current observed value"; `baseline` = "reference for
+    // change-from-baseline"), and at draft time — before any option is
+    // applied — they genuinely coincide. Nothing is invented to fill `value`.
+    //
+    // KNOWN, ACCEPTED CONSEQUENCES — both disclosed rather than discovered
+    // later (adversarial review, PR #787):
+    //
+    // 1. NON-ROOT goal (the normal case): ISL emits
+    //    `GOAL_OBSERVED_VALUE_UNUSED` (robustness_analyzer_v2.py:2735-2754)
+    //    telling us `value` is not used as a base under doctrine B. Correct
+    //    and harmless — `baseline`, the field the conversion actually reads,
+    //    is the one we are here to deliver. Ruled non-blocking (info
+    //    severity, no wrong number); ISL-side suppression is rowed as 2.279.
+    //
+    // 2. ROOT goal (a goal with no parents): ISL DOES consult
+    //    `observed_state.value` as the node's base (:1158-1166, :2686), so
+    //    stamping it shifts that goal's sample base from 0.0 to B. The shift
+    //    is UNIFORM ACROSS OPTIONS — it moves every option's samples by the
+    //    same constant — so comparative verdicts (which option leads, by how
+    //    much) are unchanged. Goal PROBABILITY is unaffected for a different
+    //    reason: a root goal is refused outright at :3182 (`root_goal`,
+    //    "takes its base from observed_state.value, so its samples are not in
+    //    the non-root change-from-origin frame"), so no probability is
+    //    rendered either way. What DOES change is the absolute level of a root
+    //    goal's reported samples and `GOAL_NODE_ROOT_STATIC.base_value` —
+    //    arguably more correct (0.0 was a placeholder for "no observed
+    //    value"), but a change, and named here so it is not mistaken for a
+    //    regression.
+    v3Node.observed_state = {
+      value: node.goal_baseline,
+      baseline: node.goal_baseline,
+      ...(node.goal_threshold_unit != null && { unit: node.goal_threshold_unit }),
+      source: "brief_extraction",
+      ...(node.goal_baseline_raw != null && { raw_value: node.goal_baseline_raw }),
+      ...(node.goal_threshold_cap != null && { cap: node.goal_threshold_cap }),
+    };
+  } else if (isFactorData(node.data) && node.data.value !== undefined) {
     // Map extractionType to V3 source format
     const source: "brief_extraction" | "cee_inference" =
       node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
@@ -243,6 +318,31 @@ export function transformNodeToV3(
   // repair. ISL needs prior ranges to run Monte Carlo sampling on external factors.
   const nodePrior = (node as any).prior;
   if (nodePrior && typeof nodePrior === "object") {
+    // ⭐ PROMPT/GRAMMAR DRIFT ALARM (F4, /code-review 2026-07-25).
+    //
+    // `PriorDistribution` (schemas/graph.ts) is a ONE-MEMBER enum in the SENT
+    // draft grammar, and its only justification is that the PMS-served
+    // `draft_graph` prompt promises `distribution` is always "uniform". That
+    // prompt is re-pinnable WITHOUT a CEE deploy, and the actual validator
+    // (`cee-v3.ts`) types the field as `z.string()` — free text. So the
+    // grammar's claim that "the grammar and the validator cannot disagree" is
+    // FALSE for this one field, and nothing in this repo can prove otherwise at
+    // build time.
+    //
+    // Without this, a prompt that taught a second family would drift silently:
+    // on the structured path the grammar would force "uniform" and the prior
+    // would be MISLABELLED downstream rather than rejected; on the prompt-only
+    // fallback (no grammar) the new value would pass through untouched. Both
+    // read as green. So the alarm is a RUNTIME one, at the boundary where a real
+    // value arrives, and it is LOUD rather than assume-good.
+    if (!isKnownPriorDistribution((nodePrior as any).distribution)) {
+      log.error({
+        event: "cee.draft.prior_distribution_drift",
+        node_id: v3Node.id,
+        observed_distribution: (nodePrior as any).distribution,
+        grammar_distributions: [...PriorDistribution.options],
+      }, "[V3] prior.distribution is OUTSIDE the value set the sent draft grammar can express — the served draft_graph prompt and PriorDistribution (schemas/graph.ts) have drifted apart. Add the family to PriorDistribution, or re-pin the prompt. The value is passed through unchanged: a prompt decision must not 400 live drafts.");
+    }
     v3Node.prior = nodePrior;
   }
 
@@ -817,7 +917,13 @@ export function transformResponseToV3(
     optionNodes.map((n) => {
       const dataBaseline = isOptionData(n.data) ? (n.data as any).is_baseline : undefined;
       const nodeBaseline = (n as any).is_baseline;
-      const resolved = dataBaseline ?? nodeBaseline;
+      // SINGLE SOURCE OF TRUTH (ROADMAP 2.55 / F3): reconcile the two flag
+      // surfaces via the shared reader so DISPLAY/analysis-ready agree with the
+      // #456 auto-baseline-dedup truth table. An explicit `true` on EITHER
+      // surface wins — the old `dataBaseline ?? nodeBaseline` let a split-field
+      // `data:false` MASK an explicit `node:true`, mis-rendering the status-quo
+      // option as "not the current arrangement".
+      const resolved = readIsBaseline({ is_baseline: nodeBaseline, data: { is_baseline: dataBaseline } });
       // Log when node-level fallback is used (data-level was undefined but node-level had a value)
       if (dataBaseline === undefined && nodeBaseline !== undefined) {
         log.debug({ event: 'cee.v3_transform.is_baseline_fallback', node_id: n.id, value: nodeBaseline }, 'cee.v3_transform.is_baseline_fallback');

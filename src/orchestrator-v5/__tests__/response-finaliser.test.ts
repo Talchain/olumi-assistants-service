@@ -36,6 +36,8 @@ import { finaliseV5Response } from '../response-finaliser.js';
 import type { ValidationError } from '../routing/validator.js';
 import type { ComposeContext } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
+import { AnalysisReadyPayload as CeeAnalysisReadyPayloadSchema } from '../../schemas/analysis-ready.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────
 
@@ -76,17 +78,20 @@ function fixtureValidationError(): ValidationError {
 
 describe('finaliser contract — composers do not set analysis_ready', () => {
   it('composeDirectAnswerResponse output omits analysis_ready', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     expect('analysis_ready' in env).toBe(false);
   });
 
   it('composeClarifyResponse output omits analysis_ready', () => {
-    const env = composeClarifyResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeClarifyResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     expect('analysis_ready' in env).toBe(false);
   });
 
   it('composeToolCallResponse output omits analysis_ready', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: 'o',
       confirmation: 'c',
       coaching: null,
@@ -128,14 +133,16 @@ describe('finaliser contract — composers do not set analysis_ready', () => {
 
 describe('finaliseV5Response — behaviour', () => {
   it('omits analysis_ready when ctx.analysisReady is undefined', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {});
     expect('analysis_ready' in finalised).toBe(false);
     OlumiResponseSchema.parse(finalised);
   });
 
   it('stamps analysis_ready with a fresh ISO-8601 computed_at when payload provided', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, { analysisReady: fixturePayload() });
     expect(finalised.analysis_ready).toBeDefined();
     const ts = (finalised.analysis_ready as { computed_at?: string }).computed_at;
@@ -145,7 +152,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('preserves the response shape (response_version, blocks, suggested_actions, etc.)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'hello', stage: 'analyse' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'hello', stage: 'analyse' });
     const finalised = finaliseV5Response(env, { analysisReady: fixturePayload() });
     expect(finalised.response_version).toBe(env.response_version);
     expect(finalised.assistant_text).toBe(env.assistant_text);
@@ -156,7 +164,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('does not mutate the input response or payload (caller refs stay clean)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const payload = fixturePayload();
     finaliseV5Response(env, { analysisReady: payload });
     expect('analysis_ready' in env).toBe(false);
@@ -164,7 +173,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('is idempotent — calling twice re-stamps computed_at; structure is identical', async () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const payload = fixturePayload();
     const first = finaliseV5Response(env, { analysisReady: payload });
     await new Promise((r) => setTimeout(r, 5));
@@ -181,7 +191,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('regenerates computed_at across two emissions of the same payload', async () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const payload = fixturePayload();
     const a = finaliseV5Response(env, { analysisReady: payload });
     await new Promise((r) => setTimeout(r, 5));
@@ -189,6 +200,169 @@ describe('finaliseV5Response — behaviour', () => {
     const tsA = (a.analysis_ready as { computed_at?: string }).computed_at!;
     const tsB = (b.analysis_ready as { computed_at?: string }).computed_at!;
     expect(new Date(tsB).getTime()).toBeGreaterThan(new Date(tsA).getTime());
+  });
+});
+
+// ─── Group 2.5: freshness-only synthesis (Mission 3 transport recovery) ───
+//
+// A legacy/unparseable graph reload derives an honest 'unknown' freshness
+// verdict but builds no structural readiness payload. The finaliser
+// synthesises a minimal science-free analysis_ready carrier for EXACTLY the
+// two legacy/unparseable reasons; every other no-readiness case keeps the
+// omit behaviour. Widening the gate (stale-without-readiness, other unknown
+// reasons such as edit_graph's derivation_failed) is a separate product
+// decision — the omission tests below are enforcing pins, not placeholders.
+
+describe('finaliseV5Response — freshness-only synthesis', () => {
+  function derivation(overrides: Partial<FreshnessDerivation> = {}): FreshnessDerivation {
+    return {
+      freshness: 'unknown',
+      reason: 'current_graph_hash_unavailable',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'sha256:prior',
+      current_graph_hash: null,
+      computed_at: '2026-05-10T10:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('synthesises a freshness-only block for unknown/current_graph_hash_unavailable with no readiness payload', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, { freshness: derivation() });
+
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar).toBeDefined();
+    expect(ar.freshness).toBe('unknown');
+    expect(ar.freshness_reason).toBe('current_graph_hash_unavailable');
+    expect(ar.status).toBe('blocked');
+    expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
+    expect(ar.bias_findings).toEqual([]);
+    expect(ar.graph_hash_at_run).toBe('sha256:prior');
+    expect('current_graph_hash' in ar).toBe(false);
+    // computed_at preserves the selected fact's run timestamp.
+    expect(ar.computed_at).toBe('2026-05-10T10:00:00.000Z');
+
+    // Science-free: no claim-bearing keys ride the synthesized carrier.
+    expect('blockers' in ar).toBe(false);
+    expect('model_adjustments' in ar).toBe(false);
+    expect('user_questions' in ar).toBe(false);
+    expect('coaching_summary' in ar).toBe(false);
+
+    // Wire-valid at both the boundary and the CEE schema.
+    OlumiResponseSchema.parse(finalised);
+    CeeAnalysisReadyPayloadSchema.parse(ar);
+  });
+
+  it('synthesises for legacy_fact_missing_hash; null fact timestamp falls back to wire-emit time', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        reason: 'legacy_fact_missing_hash',
+        graph_hash_at_run: null,
+        computed_at: null,
+      }),
+    });
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar.freshness).toBe('unknown');
+    expect(ar.freshness_reason).toBe('legacy_fact_missing_hash');
+    expect('graph_hash_at_run' in ar).toBe(false);
+    expect(ar.computed_at).toBeTypeOf('string');
+    expect(new Date(ar.computed_at as string).toISOString()).toBe(ar.computed_at);
+    OlumiResponseSchema.parse(finalised);
+  });
+
+  // ─── leg κ(a): authoritative top-level graph_hash from freshness ───
+  it('κ(a): stamps top-level graph_hash from freshness.current_graph_hash and OVERRIDES the sanitiser fallback', () => {
+    // env carries a fallback graph_hash (as the egress sanitiser would set from
+    // the GraphV3-parsed effectiveGraph); the finaliser must override it with
+    // the authoritative freshness hash so it matches computed_against_hash.
+    const env = {
+      ...composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
+      graph_hash: 'fallback_effectivegraph_hash',
+    };
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({ freshness: 'fresh', reason: 'graph_hash_match', current_graph_hash: 'authoritative_fresh_hash' }),
+    });
+    expect((finalised as { graph_hash?: string }).graph_hash).toBe('authoritative_fresh_hash');
+    OlumiResponseSchema.parse(finalised);
+  });
+
+  it('κ(a): with no freshness.current_graph_hash, the sanitiser fallback graph_hash is preserved', () => {
+    const env = {
+      ...composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
+      graph_hash: 'fallback_effectivegraph_hash',
+    };
+    // current_graph_hash null → no override → fallback survives.
+    const finalised = finaliseV5Response(env, { freshness: derivation({ current_graph_hash: null }) });
+    expect((finalised as { graph_hash?: string }).graph_hash).toBe('fallback_effectivegraph_hash');
+  });
+
+  it('a real readiness payload wins over synthesis on the same unknown verdict', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      analysisReady: fixturePayload(),
+      freshness: derivation(),
+    });
+    const ar = finalised.analysis_ready as Record<string, unknown>;
+    expect(ar.status).toBe('ready');
+    expect((ar.options as unknown[]).length).toBe(2);
+    expect(ar.freshness).toBe('unknown');
+  });
+
+  it('does NOT synthesise for freshness none (no prior analysis)', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        freshness: 'none',
+        reason: 'no_successful_run_analysis_fact',
+        selected_fact_index: null,
+        graph_hash_at_run: null,
+        computed_at: null,
+      }),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+  });
+
+  it('does NOT synthesise for freshness fresh without a readiness payload', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        freshness: 'fresh',
+        reason: 'graph_hash_match',
+        current_graph_hash: 'sha256:prior',
+      }),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+  });
+
+  it('does NOT synthesise for stale without a readiness payload (known follow-up, deliberately unrecovered)', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({
+        freshness: 'stale',
+        reason: 'graph_hash_diverged',
+        current_graph_hash: 'sha256:current',
+      }),
+    });
+    expect('analysis_ready' in finalised).toBe(false);
+  });
+
+  it('does NOT synthesise for unknown with non-allowlisted reasons (derivation_failed, invariant_failed)', () => {
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
+    for (const reason of ['derivation_failed', 'invariant_failed'] as const) {
+      const finalised = finaliseV5Response(env, {
+        freshness: derivation({ reason, selected_fact_index: null, graph_hash_at_run: null, computed_at: null }),
+      });
+      expect('analysis_ready' in finalised).toBe(false);
+    }
   });
 });
 
@@ -207,16 +381,19 @@ describe('finaliser contract — schema sweep across compose surface', () => {
   const cases: Array<{ name: string; build: () => unknown }> = [
     {
       name: 'composeDirectAnswerResponse',
-      build: () => composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' }),
+      build: () => composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
     },
     {
       name: 'composeClarifyResponse',
-      build: () => composeClarifyResponse({ assistant_text: 'x', stage: 'frame' }),
+      build: () => composeClarifyResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
     },
     {
       name: 'composeToolCallResponse',
       build: () =>
         composeToolCallResponse({
+          answerKind: 'functional',
           orientation: 'o',
           confirmation: 'c',
           coaching: null,
@@ -290,6 +467,7 @@ describe('finaliser contract — schema sweep across compose surface', () => {
 describe('finaliser contract — chip-click compose negative-then-positive', () => {
   it('composeToolCallResponse omits analysis_ready; finaliseV5Response stamps it on the same envelope', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Ran analysis on your current scenario.',
       coaching: null,
@@ -326,7 +504,8 @@ describe('finaliser contract — chip-click compose negative-then-positive', () 
 
 describe('finaliser contract — ceeTrace defensive scrub', () => {
   it('strips ceeTrace when present on the response and debug is disabled', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = { ...env, ceeTrace: { reason: 'CEE' } } as typeof env & {
       ceeTrace: { reason: string };
     };
@@ -335,7 +514,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('strips ceeTrace alongside analysis_ready stamping when payload also provided', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = { ...env, ceeTrace: { reason: 'CEE', pipeline: 'foo' } } as typeof env & {
       ceeTrace: { reason: string; pipeline: string };
     };
@@ -345,7 +525,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('no-op when ceeTrace is absent (no spurious key insertion)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     expect('ceeTrace' in (env as object)).toBe(false);
     const finalised = finaliseV5Response(env, {});
     expect('ceeTrace' in (finalised as object)).toBe(false);
@@ -370,7 +551,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
       // each access, so the new value is observed without cache busting.
       vi.resetModules();
       const { finaliseV5Response: finaliseDebug } = await import('../response-finaliser.js');
-      const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+      const env = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
       const polluted = { ...env, ceeTrace: { reason: 'CEE', pipeline: 'foo' } } as typeof env & {
         ceeTrace: { reason: string; pipeline: string };
       };
@@ -395,7 +577,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   // strip missed it entirely. These four cases lock the deeper walk in.
 
   it('strips nested blocks[*].enrichment.ceeTrace when debug is disabled', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = {
       ...env,
       blocks: [
@@ -423,7 +606,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('strips both top-level and nested ceeTrace in the same response', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = {
       ...env,
       ceeTrace: { reason: 'top' },
@@ -445,7 +629,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
       process.env.CEE_TURN_DEBUG_ENABLED = 'true';
       vi.resetModules();
       const { finaliseV5Response: finaliseDebug } = await import('../response-finaliser.js');
-      const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+      const env = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
       const polluted = {
         ...env,
         blocks: [
@@ -468,7 +653,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('is a no-op when blocks have enrichment without ceeTrace', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const clean = {
       ...env,
       blocks: [

@@ -715,3 +715,70 @@ describe('AC.1 — validator/executor parity property table', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 1.16 items A1/A2/B — the validator's PARAMETER_INVALID details must carry
+// the full user-facing context the composer needs: the sanitised issue was
+// already threaded, but the composer branches for value_exceeds_cap /
+// delta_no_existing_value additionally need the proposed value, operator,
+// factor id + label, and (for the consented rescale chip) a suggested
+// extended cap.
+// ---------------------------------------------------------------------------
+
+describe('validator details threading for composer honesty (items A1/A2/B, 1.16)', () => {
+  const graphLookup = makeLookup(buildD1Fixture());
+
+  it('value_exceeds_cap threads value/unit/operator/factor identity + suggested_cap', () => {
+    const proposal = makeProposal({
+      entityId: 'f-budget', // cap=100000, unit='£', label 'Marketing budget'
+      value: { value: 250000, unit: '£' },
+      operator: 'set',
+    });
+    const validation = validateToolCall(proposal, graphLookup, HANDLER_VALIDATION_REGISTRY);
+    expect(validation.valid).toBe(false);
+    if (validation.valid) return;
+    const details = validation.error.details ?? {};
+    expect(details.rejection_reason).toBe('value_exceeds_cap');
+    expect(details.issue).toContain('£250,000');
+    expect(details.value).toBe(250000);
+    expect(details.unit).toBe('£');
+    expect(details.operator).toBe('set');
+    expect(details.factor_id).toBe('f-budget');
+    expect(details.factor_label).toBe('Marketing budget');
+    // value * 1.25 rounded up to a clean number, and never below the value.
+    expect(details.suggested_cap).toBe(320000);
+  });
+
+  it('value_exceeds_cap via a delta operator does NOT thread suggested_cap', () => {
+    const proposal = makeProposal({
+      entityId: 'f-budget', // existing raw 40000 + 70000 = 110000 > cap
+      value: { value: 70000, unit: '£' },
+      operator: 'increase',
+    });
+    const validation = validateToolCall(proposal, graphLookup, HANDLER_VALIDATION_REGISTRY);
+    expect(validation.valid).toBe(false);
+    if (validation.valid) return;
+    expect(validation.error.details?.rejection_reason).toBe('value_exceeds_cap');
+    expect(validation.error.details?.suggested_cap).toBeUndefined();
+  });
+
+  it('delta_no_existing_value threads the factor label for entity-named copy (item B)', () => {
+    const graph = buildD1Fixture();
+    graph.nodes.push({
+      id: 'f-team',
+      kind: 'factor',
+      label: 'Team Size',
+    } as GraphV3T['nodes'][number]);
+    const lookup = makeLookup(graph);
+    const proposal = makeProposal({
+      entityId: 'f-team',
+      value: { value: 5, unit: 'people' },
+      operator: 'increase',
+    });
+    const validation = validateToolCall(proposal, lookup, HANDLER_VALIDATION_REGISTRY);
+    expect(validation.valid).toBe(false);
+    if (validation.valid) return;
+    expect(validation.error.details?.rejection_reason).toBe('delta_no_existing_value');
+    expect(validation.error.details?.factor_label).toBe('Team Size');
+  });
+});

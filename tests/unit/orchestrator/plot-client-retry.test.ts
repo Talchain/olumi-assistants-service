@@ -392,11 +392,20 @@ describe("PLoT Client Retry Logic (H.4)", () => {
     });
   });
 
-  describe("run — timeout retry with remaining budget", () => {
-    it("retries once on PLoT timeout", async () => {
-      const _controller = new AbortController();
-
-      // First call: abort (simulating timeout)
+  describe("run — timeout is NOT retried (policy change 2026-07-19)", () => {
+    // DELIBERATE INVERSION. This test previously asserted the opposite
+    // ("retries once on PLoT timeout"). That behaviour was correct when CEE's
+    // cap (30s) sat BELOW PLoT's own REQUEST_BUDGET_MS (70s): a timeout then
+    // meant CEE cut PLoT off early, and a second attempt could genuinely
+    // succeed. Now that the cap is 75s — ABOVE PLoT's budget — a timeout means
+    // PLoT failed to finish within its OWN budget, i.e. an internal failure. A
+    // retry near-certainly reproduces it at double the PLoT+ISL compute cost,
+    // on a request the user is already waiting on.
+    //
+    // The premise is pinned separately, so this inversion cannot outlive it:
+    // `budget-timeout-invariants.test.ts` fails if PLOT_RUN_TIMEOUT_MS ever
+    // drops back below PLoT's request budget.
+    it("does NOT retry on PLoT timeout, even with ample remaining budget", async () => {
       fetchSpy
         .mockImplementationOnce(() => {
           return Promise.reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
@@ -407,10 +416,152 @@ describe("PLoT Client Retry Logic (H.4)", () => {
         });
 
       const client = createPLoTClient()!;
-      const result = await client.run(
-        VALID_RUN,
-        "req-1",
+
+      await expect(client.run(VALID_RUN, "req-1")).rejects.toThrow(PLoTTimeoutError);
+
+      // The second mock was primed with a SUCCESS: if a retry fired, this call
+      // would have resolved instead of rejecting. It rejects, so no retry.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("run — brief-bearing timeout budget (FIX 1)", () => {
+    it("uses the extended brief-bearing timeout window (does not abort at the base 30s budget)", async () => {
+      // Simulate a fetch that resolves successfully but only after the base
+      // (non-brief) 30s timeout would have already fired an AbortController
+      // abort. If the client is still using the base PLOT_RUN_TIMEOUT_MS for
+      // a brief-bearing payload, advancing fake timers past 30s aborts the
+      // in-flight fetch before it resolves and this call rejects instead of
+      // succeeding.
+      fetchSpy.mockImplementationOnce(
+        (_url: string, init: { signal: AbortSignal }) =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              resolve({ ok: true, json: () => Promise.resolve(VALID_RUN_RESPONSE) });
+            }, 45_000); // beyond the base 30s window, within the brief-bearing window
+            init.signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+            });
+          }),
       );
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+      const resultPromise = client.run(briefRun, "req-brief-1");
+
+      await vi.advanceTimersByTimeAsync(45_000);
+      const result = await resultPromise;
+
+      expect(result.meta.seed_used).toBe(42);
+      // Exactly one attempt — the extended window covered the full call, no retry needed.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a slow brief-bearing review callback that exceeds even the extended window does NOT trigger a retry (retry-storm structurally impossible)", async () => {
+      // Both attempts would abort — but we only care that a SECOND attempt
+      // never fires. A brief-bearing timeout is expensive (it means PLoT's
+      // synchronous LLM-backed decision-review chain ran, or nearly ran, to
+      // completion) — retrying would double LLM spend on a call that isn't
+      // cheaply idempotent. Pin: exactly one fetch call, no retry.
+      fetchSpy.mockImplementation(
+        (_url: string, init: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener("abort", () => {
+              reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+            });
+          }),
+      );
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+      const resultPromise = client.run(briefRun, "req-brief-2");
+      resultPromise.catch(() => {}); // swallow — asserted below via rejects
+
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).rejects.toThrow(PLoTTimeoutError);
+      // Only the ONE attempt — no retry-storm on a brief-bearing timeout.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    // REPLACES "a non-brief run still retries on timeout as before".
+    //
+    // That test was the brief-vs-non-brief DISCRIMINATOR: brief skips the
+    // timeout retry, non-brief takes it. The 2026-07-19 policy change disables
+    // the timeout retry for BOTH, which would have left the brief carve-out
+    // tests unable to distinguish a working carve-out from a removed one —
+    // they would pass either way, which is no evidence at all.
+    //
+    // The 5xx class restores the discrimination: a brief-bearing 5xx must NOT
+    // retry (asserted below), while a non-brief 5xx MUST. Keep BOTH sides, or
+    // `skipRetryEntirely` could be deleted outright with the suite still green.
+    it("DISCRIMINATOR: a non-brief run DOES still retry on a fast 5xx (the brief carve-out is what suppresses it)", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.run(VALID_RUN, "req-no-brief-1");
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.meta.seed_used).toBe(42);
+    });
+
+    // FIX B (1.41 fix round, C2) — the retry-storm guard previously only
+    // checked `firstError instanceof PLoTTimeoutError`. A 5xx or network
+    // error firing WHILE the expensive, non-idempotent decision-review LLM
+    // chain is running would still re-fire the whole chain a second time.
+    // A brief-bearing run must never retry on ANY retryable error class.
+    it("a brief-bearing 5xx does NOT retry (retry-storm structurally impossible for any error class, not just timeout)", async () => {
+      fetchSpy.mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      });
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+
+      await expect(client.run(briefRun, "req-brief-5xx")).rejects.toThrow(PLoTError);
+
+      // Only the ONE attempt — no retry-storm on a brief-bearing 5xx.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a brief-bearing network error does NOT retry (retry-storm structurally impossible for any error class, not just timeout)", async () => {
+      fetchSpy.mockRejectedValue(new Error("fetch failed: ECONNRESET"));
+
+      const client = createPLoTClient()!;
+      const briefRun = { ...VALID_RUN, brief: "A decision brief with real content." };
+
+      await expect(client.run(briefRun, "req-brief-network")).rejects.toThrow();
+
+      // Only the ONE attempt — no retry-storm on a brief-bearing network error.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("a non-brief run still retries on 5xx as before (existing behaviour unchanged)", async () => {
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ message: "Service Unavailable" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(VALID_RUN_RESPONSE),
+        });
+
+      const client = createPLoTClient()!;
+      const result = await client.run(VALID_RUN, "req-no-brief-5xx");
 
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       expect(result.meta.seed_used).toBe(42);

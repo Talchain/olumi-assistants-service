@@ -4,7 +4,7 @@
  * Unit tests for the request timing context utility.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Fastify, { type FastifyRequest } from "fastify";
 import {
   getOrCreateTiming,
@@ -30,7 +30,20 @@ describe("Request Timing Context", () => {
 
   afterEach(() => {
     setTestSink(null);
+    // Safety net: restore real timers even if a fake-timer test failed mid-way.
+    vi.useRealTimers();
   });
+
+  /**
+   * The wrappers under test measure elapsed time via Date.now(), and the test
+   * workloads simulate latency via setTimeout. Fake both (and ONLY both — faking
+   * Fastify's other internals is unnecessary) so elapsed_ms is exactly the
+   * advanced duration instead of a wall-clock measurement subject to timer
+   * rounding (a real ~50ms setTimeout can measure as 49ms in CI).
+   */
+  function useDeterministicClock(): void {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout"] });
+  }
 
   /**
    * Helper to create a Fastify app with a test route and run a test
@@ -244,25 +257,32 @@ describe("Request Timing Context", () => {
       let capturedContext: any;
 
       await withTestApp(async (request) => {
-        const result = await withLlmTiming(
-          request,
-          "test_step",
-          "test-model",
-          "test-provider",
-          async () => {
-            await new Promise((r) => setTimeout(r, 50));
-            return { data: "result", usage: { input_tokens: 100, output_tokens: 50 } };
-          }
-        );
+        useDeterministicClock();
+        try {
+          const pending = withLlmTiming(
+            request,
+            "test_step",
+            "test-model",
+            "test-provider",
+            async () => {
+              await new Promise((r) => setTimeout(r, 50));
+              return { data: "result", usage: { input_tokens: 100, output_tokens: 50 } };
+            }
+          );
+          await vi.advanceTimersByTimeAsync(50);
+          const result = await pending;
 
-        expect(result.data).toBe("result");
-        capturedContext = getTiming(request);
+          expect(result.data).toBe("result");
+          capturedContext = getTiming(request);
+        } finally {
+          vi.useRealTimers();
+        }
         return { ok: true };
       });
 
       expect(capturedContext?.llm_calls).toHaveLength(1);
       expect(capturedContext?.llm_calls[0].step).toBe("test_step");
-      expect(capturedContext?.llm_calls[0].elapsed_ms).toBeGreaterThanOrEqual(50);
+      expect(capturedContext?.llm_calls[0].elapsed_ms).toBe(50);
       expect(capturedContext?.llm_calls[0].tokens_prompt).toBe(100);
       expect(capturedContext?.llm_calls[0].tokens_completion).toBe(50);
     });
@@ -271,22 +291,33 @@ describe("Request Timing Context", () => {
       let capturedContext: any;
 
       await withTestApp(async (request) => {
+        useDeterministicClock();
         try {
-          await withLlmTiming(request, "failing_step", "test-model", "test-provider", async () => {
-            await new Promise((r) => setTimeout(r, 25));
-            throw new Error("LLM call failed");
-          });
-        } catch {
-          // Expected
-        }
+          // Attach the rejection handler before advancing so the expected
+          // failure never surfaces as an unhandled rejection.
+          const settled = withLlmTiming(
+            request,
+            "failing_step",
+            "test-model",
+            "test-provider",
+            async () => {
+              await new Promise((r) => setTimeout(r, 25));
+              throw new Error("LLM call failed");
+            }
+          ).catch((err: unknown) => err);
+          await vi.advanceTimersByTimeAsync(25);
+          expect(await settled).toBeInstanceOf(Error);
 
-        capturedContext = getTiming(request);
+          capturedContext = getTiming(request);
+        } finally {
+          vi.useRealTimers();
+        }
         return { ok: true };
       });
 
       expect(capturedContext?.llm_calls).toHaveLength(1);
       expect(capturedContext?.llm_calls[0].step).toBe("failing_step");
-      expect(capturedContext?.llm_calls[0].elapsed_ms).toBeGreaterThanOrEqual(20);
+      expect(capturedContext?.llm_calls[0].elapsed_ms).toBe(25);
       expect(capturedContext?.llm_calls[0].tokens_prompt).toBeUndefined();
     });
   });
@@ -296,42 +327,54 @@ describe("Request Timing Context", () => {
       let capturedContext: any;
 
       await withTestApp(async (request) => {
-        const result = await withDownstreamTiming(request, "test-service", "fetch", async () => {
-          await new Promise((r) => setTimeout(r, 40));
-          return { data: "downstream-result" };
-        });
+        useDeterministicClock();
+        try {
+          const pending = withDownstreamTiming(request, "test-service", "fetch", async () => {
+            await new Promise((r) => setTimeout(r, 40));
+            return { data: "downstream-result" };
+          });
+          await vi.advanceTimersByTimeAsync(40);
+          const result = await pending;
 
-        expect(result.data).toBe("downstream-result");
-        capturedContext = getTiming(request);
+          expect(result.data).toBe("downstream-result");
+          capturedContext = getTiming(request);
+        } finally {
+          vi.useRealTimers();
+        }
         return { ok: true };
       });
 
       expect(capturedContext?.downstream_calls).toHaveLength(1);
       expect(capturedContext?.downstream_calls[0].target).toBe("test-service");
       expect(capturedContext?.downstream_calls[0].operation).toBe("fetch");
-      expect(capturedContext?.downstream_calls[0].elapsed_ms).toBeGreaterThanOrEqual(35);
+      expect(capturedContext?.downstream_calls[0].elapsed_ms).toBe(40);
     });
 
     it("should record timing even on failure", async () => {
       let capturedContext: any;
 
       await withTestApp(async (request) => {
+        useDeterministicClock();
         try {
-          await withDownstreamTiming(request, "failing-service", "call", async () => {
+          // Attach the rejection handler before advancing so the expected
+          // failure never surfaces as an unhandled rejection.
+          const settled = withDownstreamTiming(request, "failing-service", "call", async () => {
             await new Promise((r) => setTimeout(r, 25));
             throw new Error("Downstream call failed");
-          });
-        } catch {
-          // Expected
-        }
+          }).catch((err: unknown) => err);
+          await vi.advanceTimersByTimeAsync(25);
+          expect(await settled).toBeInstanceOf(Error);
 
-        capturedContext = getTiming(request);
+          capturedContext = getTiming(request);
+        } finally {
+          vi.useRealTimers();
+        }
         return { ok: true };
       });
 
       expect(capturedContext?.downstream_calls).toHaveLength(1);
       expect(capturedContext?.downstream_calls[0].target).toBe("failing-service");
-      expect(capturedContext?.downstream_calls[0].elapsed_ms).toBeGreaterThanOrEqual(20);
+      expect(capturedContext?.downstream_calls[0].elapsed_ms).toBe(25);
     });
   });
 });

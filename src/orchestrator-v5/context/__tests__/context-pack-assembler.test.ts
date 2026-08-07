@@ -34,6 +34,7 @@ import type { HandlerFact, SessionTurn } from '@talchain/schemas/orchestrator';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 import { log } from '../../../utils/telemetry.js';
+import { sha8 } from '../../../utils/logger-config.js';
 
 import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
 import { buildAnalysisFromPriorFacts } from '../analysis-fallback.js';
@@ -282,32 +283,54 @@ describe('assembleContextPack', () => {
     ]);
   });
 
-  it('conversation is capped at CONTEXT_PACK_RECENT_TURNS_CAP (5)', () => {
-    const priorTurns = Array.from({ length: 8 }, (_, idx) =>
+  it('conversation is capped at CONTEXT_PACK_RECENT_TURNS_CAP (memory window)', () => {
+    // Feed one MORE than the cap so the window slice is exercised regardless of
+    // the cap value (derive-don't-mirror: the assertion reads the constant).
+    const total = CONTEXT_PACK_RECENT_TURNS_CAP + 1;
+    const priorTurns = Array.from({ length: total }, (_, idx) =>
       makeSessionTurn({ turn_id: `t-prev-${idx}`, created_at: `2026-04-18T23:${String(idx).padStart(2, '0')}:00.000Z` }),
     );
 
     const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns });
 
     expect(pack.conversation.recent_turns.length).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
-    expect(pack.conversation.turn_count).toBe(8);
+    expect(pack.conversation.turn_count).toBe(total);
   });
 
-  it('last_tool_used picks the most-recent handler turn even beyond the five-turn window', () => {
-    // Handler turn is sixth in prior_turns (index 5) — outside the five-turn
-    // window — but it is still the only handler turn and must surface.
+  it('D-59-11 — the verbatim memory window is 8 (RED at the old cap of 5)', () => {
+    // Boundary pin for the 5→8 flip: exactly-window turns are ALL kept verbatim
+    // (no window disclosure cut); window+1 keeps the cap and discloses one behind.
+    expect(CONTEXT_PACK_RECENT_TURNS_CAP).toBe(8);
+    const atWindow = Array.from({ length: 8 }, (_, idx) =>
+      makeSessionTurn({ turn_id: `w-${idx}`, created_at: `2026-04-19T10:${String(idx).padStart(2, '0')}:00.000Z` }),
+    );
+    const packAt = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: atWindow });
+    expect(packAt.conversation.recent_turns.length).toBe(8);
+
+    const overWindow = Array.from({ length: 9 }, (_, idx) =>
+      makeSessionTurn({ turn_id: `o-${idx}`, created_at: `2026-04-19T11:${String(idx).padStart(2, '0')}:00.000Z` }),
+    );
+    const packOver = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: overWindow });
+    expect(packOver.conversation.recent_turns.length).toBe(8);
+    expect(packOver.conversation.turn_count).toBe(9);
+  });
+
+  it('last_tool_used picks the most-recent handler turn even beyond the verbatim window', () => {
+    // Handler turn sits at the LAST index (beyond the verbatim window) — derived
+    // from the cap so it stays "beyond the window" whatever the cap is.
+    const filler = Array.from({ length: CONTEXT_PACK_RECENT_TURNS_CAP }, (_, idx) =>
+      makeSessionTurn({ turn_id: `t-${idx}`, turn_class: 'direct_answer' }),
+    );
     const priorTurns: SessionTurn[] = [
-      makeSessionTurn({ turn_id: 't-1', turn_class: 'direct_answer' }),
-      makeSessionTurn({ turn_id: 't-2', turn_class: 'direct_answer' }),
-      makeSessionTurn({ turn_id: 't-3', turn_class: 'clarify' }),
-      makeSessionTurn({ turn_id: 't-4', turn_class: 'direct_answer' }),
-      makeSessionTurn({ turn_id: 't-5', turn_class: 'direct_answer' }),
-      makeSessionTurn({ turn_id: 't-6', turn_class: 'handler', handler_id: 'run_analysis' }),
+      ...filler,
+      makeSessionTurn({ turn_id: 't-handler', turn_class: 'handler', handler_id: 'run_analysis' }),
     ];
 
     const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns });
 
-    expect(pack.conversation.recent_turns.length).toBe(5);
+    // The window keeps exactly the cap; the handler at the tail is OUTSIDE it…
+    expect(pack.conversation.recent_turns.length).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    // …yet last_tool_used scans all prior turns and still surfaces it.
     expect(pack.conversation.last_tool_used).toBe('run_analysis');
   });
 
@@ -622,7 +645,11 @@ describe('non-production runtime gate', () => {
 });
 
 describe('projectAnalysis — enriched projection', () => {
-  it('caps top_drivers at 3 and sorts by absolute magnitude descending', () => {
+  // Lane 21 (P0-A): the routed projection cap widened 3 → 5
+  // (CONTEXT_PACK_TOP_DRIVER_CAP) so the LLM sees the same driver breadth
+  // the UI renders. Ordering rule unchanged. A sixth driver is still capped
+  // out — see the breadth suite (context-pack-analysis-breadth.test.ts).
+  it('caps top_drivers at 5 on the routed path and sorts by absolute magnitude descending', () => {
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
       priorTurns: [],
@@ -640,6 +667,8 @@ describe('projectAnalysis — enriched projection', () => {
       { factor_label: 'Big −', sensitivity_value: -0.80 },
       { factor_label: 'Big +', sensitivity_value: 0.60 },
       { factor_label: 'Med +', sensitivity_value: 0.40 },
+      { factor_label: 'Small +', sensitivity_value: 0.05 },
+      { factor_label: 'Tiny −', sensitivity_value: -0.01 },
     ]);
   });
 
@@ -806,7 +835,13 @@ describe('projectAnalysis — enriched projection', () => {
     }
   });
 
-  it('analysis section stays under 800 chars for a realistic 4-option, 3-driver run', () => {
+  // Lane 21 (P0-A): budget raised from 800 — the raw section now carries
+  // EVERY option plus tipping/VOI/goal-fit signal slots (breadth was the
+  // point: the old ~600-char projection starved the LLM). The measured size
+  // for this fixture is ~1.25k; 1800 leaves headroom without letting the
+  // section grow unbounded. The LLM-facing budget is asserted separately on
+  // the display projection (format-analysis-for-context.test.ts).
+  it('analysis section stays under 1800 chars for a realistic 4-option, 3-driver run', () => {
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
       priorTurns: [],
@@ -832,7 +867,7 @@ describe('projectAnalysis — enriched projection', () => {
       analysisStalenessReason: null,
     });
     const chars = JSON.stringify(pack.analysis ?? {}).length;
-    expect(chars).toBeLessThan(800);
+    expect(chars).toBeLessThan(1800);
   });
 
   it('scale guard: degradation log fires when the dropped option would have been the leader', () => {
@@ -858,18 +893,24 @@ describe('projectAnalysis — enriched projection', () => {
       expect(pack.analysis?.leading_option).toEqual({ label: 'PromotedA', probability: 0.6 });
       expect(pack.analysis?.runner_up).toEqual({ label: 'PromotedB', probability: 0.4 });
 
-      // Telemetry contract: at least one warn carrying the dropped option's
-      // label and the offending value.
+      // Telemetry contract (14-Jul PII ruling): at least one warn
+      // correlating to the dropped option via DIGEST, with a bounded
+      // violation enum — never the raw label or the raw value.
       const matchingCalls = warnSpy.mock.calls.filter((call) => {
         const payload = call[0] as Record<string, unknown> | undefined;
         return (
           payload != null &&
           payload.event === 'analysis_projection_invalid_probability' &&
-          payload.option_label === 'OutOfScale' &&
-          payload.value === 1.5
+          payload.option_id_digest === sha8('opt-bad') &&
+          payload.violation === 'out_of_range'
         );
       });
       expect(matchingCalls.length).toBeGreaterThan(0);
+      // The raw label and raw value must NOT appear in any warn call.
+      const allWarns = JSON.stringify(warnSpy.mock.calls);
+      expect(allWarns).not.toContain('OutOfScale');
+      expect(allWarns).not.toContain('"option_label"');
+      expect(allWarns).not.toContain('1.5');
     } finally {
       warnSpy.mockRestore();
     }

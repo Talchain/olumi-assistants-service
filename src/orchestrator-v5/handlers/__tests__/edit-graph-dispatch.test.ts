@@ -56,11 +56,16 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 // `null` = a genuinely-empty scenarios.graph → ingress-base fallback merge,
 // i.e. the same (request-graph) base these tests used before the fix.
 // Everything else in build-turn-context stays real.
+// ROADMAP 1.33: `loadRecentConversationTurns` defaults to empty (matches the
+// real degraded-store fallback these tests already ran against implicitly
+// before this export existed) so pre-existing tests are unaffected. Tests
+// that need a specific conversation slice override via mockResolvedValueOnce.
 vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return {
     ...actual,
     loadPersistedGraphStrict: vi.fn().mockResolvedValue(null),
+    loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -69,7 +74,9 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { loadRecentConversationTurns } from '../../build-turn-context.js';
 import type { GraphStateIngress, AnalysisStateIngress } from '../../boundary/request-extensions.js';
+import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import type {
   PendingClarificationState,
   PendingProposalState,
@@ -839,6 +846,128 @@ describe('dispatchEditGraph', () => {
       const [context] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]!;
       expect(context.analysis_response).not.toBeNull();
       expect((context.analysis_response as { analysis_status: string }).analysis_status).toBe('complete');
+    });
+  });
+
+  describe('ROADMAP 1.33 — edit-lane conversation feed', () => {
+    // `loadRecentConversationTurns` arrives most-recent-first (matches
+    // `SessionStore.readRecent` / context-pack-assembler convention).
+    // Index 0 = turn 4 (most recent prior turn); index 3 = turn 1 (oldest).
+    function makePriorTurn(overrides: Partial<SessionTurnWithContent> = {}): SessionTurnWithContent {
+      return {
+        id: overrides.id ?? 'row-1',
+        scenario_id: overrides.scenario_id ?? SCENARIO_ID,
+        user_id: overrides.user_id ?? 'user-1',
+        turn_id: overrides.turn_id ?? 't-prev-1',
+        turn_class: overrides.turn_class ?? 'direct_answer',
+        handler_id: overrides.handler_id ?? null,
+        request_hash: overrides.request_hash ?? 'hash-1',
+        response_emitted: overrides.response_emitted ?? true,
+        llm_calls_used: overrides.llm_calls_used ?? 1,
+        duration_ms: overrides.duration_ms ?? 250,
+        created_at: overrides.created_at ?? '2026-07-01T00:00:00.000Z',
+        user_message: overrides.user_message ?? null,
+        assistant_message: overrides.assistant_message ?? null,
+      };
+    }
+
+    const TURN_1_USER = "Let's model whether to launch our product.";
+    const TURN_1_ASSISTANT = "Sure - I've drafted a decision graph.";
+    const TURN_2_USER = 'What affects revenue the most?';
+    const TURN_2_ASSISTANT = 'Marketing spend and launch timing are the top two drivers.';
+    // Turn 3 establishes the edit target a later ambiguous "increase it"
+    // request depends on.
+    const TURN_3_USER = "Let's focus on marketing spend as the main lever for revenue.";
+    const TURN_3_ASSISTANT = 'Got it - marketing spend is now the focus factor.';
+    const TURN_4_USER = 'Now bump the launch timing to Q3.';
+    const TURN_4_ASSISTANT = 'Done - updated the launch timing.';
+
+    const FOUR_PRIOR_TURNS: readonly SessionTurnWithContent[] = [
+      makePriorTurn({
+        turn_id: 't-4',
+        created_at: '2026-07-01T00:03:00.000Z',
+        user_message: TURN_4_USER,
+        assistant_message: TURN_4_ASSISTANT,
+      }),
+      makePriorTurn({
+        turn_id: 't-3',
+        created_at: '2026-07-01T00:02:00.000Z',
+        user_message: TURN_3_USER,
+        assistant_message: TURN_3_ASSISTANT,
+      }),
+      makePriorTurn({
+        turn_id: 't-2',
+        created_at: '2026-07-01T00:01:00.000Z',
+        user_message: TURN_2_USER,
+        assistant_message: TURN_2_ASSISTANT,
+      }),
+      makePriorTurn({
+        turn_id: 't-1',
+        created_at: '2026-07-01T00:00:00.000Z',
+        user_message: TURN_1_USER,
+        assistant_message: TURN_1_ASSISTANT,
+      }),
+    ];
+
+    it('feeds turn-3\'s edit-target-establishing content to the edit LLM context, not just the verbatim current message', async () => {
+      (loadRecentConversationTurns as MockedFunction<typeof loadRecentConversationTurns>)
+        .mockResolvedValueOnce(FOUR_PRIOR_TURNS);
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      await dispatchEditGraph({
+        payload: makePayload({ message: 'Increase it by 10%' }),
+        requestId: 'req-edit-conversation-feed',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      const [context] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]!;
+
+      // The defect: before this fix, context.messages was hardcoded to
+      // `[{ role: 'user', content: payload.message }]` — turn 3's
+      // disambiguating content ("marketing spend is now the focus factor")
+      // never reached the edit LLM, so a follow-up "increase it by 10%"
+      // had no way to resolve "it" to the factor the user just established.
+      expect(context.messages).toContainEqual({ role: 'user', content: TURN_3_USER });
+      expect(context.messages).toContainEqual({ role: 'assistant', content: TURN_3_ASSISTANT });
+
+      // Chronological order (oldest first) so the conversation reads as a
+      // narrative: turn 1 precedes turn 3 precedes turn 4.
+      const contents = context.messages.map((m) => m.content);
+      expect(contents.indexOf(TURN_1_USER)).toBeLessThan(contents.indexOf(TURN_3_USER));
+      expect(contents.indexOf(TURN_3_USER)).toBeLessThan(contents.indexOf(TURN_4_USER));
+
+      // The current turn's message is sent separately as handleEditGraph's
+      // `editDescription` argument (mock.calls[0][1]) — asserting it is NOT
+      // duplicated into context.messages guards against double-counting it
+      // in the rendered prompt.
+      expect(contents).not.toContain('Increase it by 10%');
+      const [, editDescription] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]!;
+      expect(editDescription).toBe('Increase it by 10%');
+    });
+
+    it('degrades to an empty conversation slice (not a thrown error) when the prior-turns read is empty', async () => {
+      (loadRecentConversationTurns as MockedFunction<typeof loadRecentConversationTurns>)
+        .mockResolvedValueOnce([]);
+      (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+        .mockResolvedValue(makeAppliedEditResult());
+      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+      await dispatchEditGraph({
+        payload: makePayload(),
+        requestId: 'req-edit-no-prior-turns',
+        request: STUB_REQUEST,
+        graphState: INGRESS_GRAPH,
+        analysisState: null,
+      });
+
+      const [context] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]!;
+      expect(context.messages).toEqual([]);
     });
   });
 });

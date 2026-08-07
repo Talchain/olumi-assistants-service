@@ -22,11 +22,12 @@
  *     the handler indicated by `inline_patch.handler_id`.
  *
  *   The remaining kinds (`set_factor_value`, `edit_graph_add_risk`)
- *   are recognised as "valid pending actions" but do not yet have a
- *   synthesis path in TurnExecutor; they will be added when their
- *   resume drivers land. Until then, those kinds appear in
- *   `candidates` and fall through to the LLM (matched=false,
- *   skip_reason='kind_not_yet_resumable') — never silently misfired.
+ *   are recognised as "valid pending actions" but are CLARIFICATION
+ *   continuations, not bare-confirm resumables: their drivers live in
+ *   `tryClarificationResume` (label answer / driver answer), not here.
+ *   In this module those kinds appear in `candidates` and fall through
+ *   to the LLM (matched=false, skip_reason='kind_not_yet_resumable') —
+ *   never silently misfired.
  *
  * Negative gate: messages containing edit verbs or numeric quantities
  * are NOT short-confirmations. They might be value updates instead and
@@ -36,6 +37,7 @@
 
 import type { PendingAction } from '../session/pending-action.js';
 import {
+  CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -50,9 +52,22 @@ import {
  * "apply it", "go ahead", and chip-click equivalents. The pattern
  * extends those bases with common politeness suffixes ("please",
  * "now", "thanks") and natural variants ("yes do", "yeah ok").
+ *
+ * P1a (real-user run 2026-07-17, scenario c510030e): the GM held ask
+ * copy invites "Reply yes to continue", and a real user naturally
+ * OVER-answers with a DOUBLED confirmation ("Yes, go ahead" / "yeah
+ * go ahead" / "ok proceed") — the exact P1a repro. The pre-fix pattern
+ * recognised a SINGLE confirmation token only, so those fell to the LLM
+ * router, which role-played agreement while nothing applied. The
+ * OPTIONAL leading-affirmative prefix below (`yes|yeah|yep|sure|ok`
+ * plus a comma/whitespace/"and" separator) lets one affirmative precede
+ * a second confirmation phrase, so a doubled confirmation resolves the
+ * lone live hold. It stays anchored start-to-end and carries NO edit
+ * verb / quantity, so the negative gate still owns fresh requests that
+ * merely start with "yes" ("yes change the timeframe", "yes option 2").
  */
 export const SHORT_CONFIRM_PATTERN =
-  /^\s*(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+it)?|confirm(?:ed)?|please\s+do|yeah\s+ok|yes\s+do(?:\s+it)?)(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:yes|yep|yeah|sure|ok(?:ay)?|do(?:\s+(?:it|that))?|go(?:\s+ahead)?|apply(?:\s+(?:it|them|these))?|confirm(?:ed)?|please\s+do|proceed|yeah\s+ok|yes\s+do(?:\s+it)?)(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Negative gate. If any of these appear in the message, the user is
@@ -86,6 +101,97 @@ const EDIT_VERB_OR_QUANTITY_PATTERN =
  */
 export const PROPOSAL_CONFIRM_PATTERN =
   /^\s*(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|try\s+that(?:\s+(?:change|update|edit|one))?|test\s+that(?:\s+(?:change|update|edit|one))?|(?:update|try|test)\s+the\s+model|let'?s\s+(?:do\s+that|apply\s+that|try\s+that|test\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+
+/**
+ * ⭐⭐ OFFER-REFERENCE ACCEPTANCE (ROADMAP 2.663 / F-B). Two patterns, and the
+ * DIFFERENCE BETWEEN THEM IS THE WHOLE SAFETY ARGUMENT — read both.
+ *
+ * WITNESSED (consent-witness walk, CEE `bb33751`, 6 Aug 2026): the assistant
+ * offered a repair, the user accepted with
+ *   "Yes, please rephrase the churn constraint as you offered earlier."
+ * and #836's warrant gate answered "You did not ask me to edit the model."
+ * The gate was RIGHT — the third warrant source is a consumed pending, and
+ * neither matcher above recognises an acceptance that points BACK at the
+ * offer rather than restating it. The vocabulary was short, not the gate.
+ *
+ * Both patterns fire ONLY while at least one live `apply_proposed_change`
+ * exists, and both are anchored start-to-end.
+ *
+ * ── (1) {@link OFFER_REFERENCE_CONFIRM_PATTERN} — CLOSED VOCABULARY ────────
+ * "do what you offered", "go ahead with the change you suggested". The object
+ * is a fixed generic noun; the user names NO value of their own, so resuming
+ * the held proposal is exactly what they asked for. Safe to OVERRIDE the
+ * edit-verb gate for the same reason `PROPOSAL_CONFIRM_PATTERN` is ("make that
+ * change" carries `change`): the phrase is idiomatic confirmation, not a fresh
+ * request. The affirmative lead is OPTIONAL — "do what you offered" is already
+ * unambiguous.
+ *
+ * ── (2) {@link OFFER_ACCEPTANCE_IN_CONTEXT_PATTERN} — BOUNDED FREE CONTENT ─
+ * The witnessed shape: an acceptance that restates WHAT was offered in the
+ * user's own words and closes with an explicit back-reference ("… as you
+ * offered earlier"). Free content is the risk, so this one is fenced three ways
+ * and is SUBORDINATE to the edit-verb/quantity gate rather than overriding it:
+ *   a. the AFFIRMATIVE LEAD IS MANDATORY. Without it a read-shaped ask
+ *      carrying the same back-reference ("Show me the comparison as you
+ *      described earlier") would resolve a held mutation — ROADMAP 2.652
+ *      running backwards, and the worse direction of the two.
+ *   b. {@link READ_INTENT_PATTERN} must NOT appear. An affirmative can precede
+ *      a read ("Yes, show me the comparison as you offered") and that is not
+ *      consent to mutate.
+ *   c. the caller applies `EDIT_VERB_OR_QUANTITY_PATTERN` to it. "Yes, set
+ *      churn to 5% as you offered earlier" names a DIFFERENT value from the
+ *      held proposal's; resuming would apply 3% and call it agreement — a
+ *      wrong-target mutation dressed as consent.
+ * The free segment is `[^.!?]{1,80}?` so it can never span a sentence.
+ */
+const OFFER_BACKREF = String.raw`you\s+(?:offered|suggested|proposed)`;
+
+/** Trailing recency/politeness tail shared by both offer-reference patterns. */
+const OFFER_TAIL =
+  String.raw`(?:\s+(?:earlier|before|just\s+now|above|a\s+moment\s+ago))?` +
+  String.raw`(?:\s*,?\s*(?:please|now|thanks|thank\s+you))?` +
+  String.raw`[\s.!?\u{1F300}-\u{1FAFF}]*$`;
+
+export const OFFER_REFERENCE_CONFIRM_PATTERN = new RegExp(
+  String.raw`^\s*` +
+    String.raw`(?:(?:yes|yep|yeah|sure|ok(?:ay)?)\b[,\s]+)?` +
+    String.raw`(?:please\b[,\s]+)?` +
+    String.raw`(?:go\s+ahead\s+with|proceed\s+with|do|apply|make)\s+` +
+    String.raw`(?:what|the\s+(?:change|limit|edit|update|one|thing))\s+` +
+    OFFER_BACKREF +
+    OFFER_TAIL,
+  'iu',
+);
+
+/**
+ * Read/display intent. Its presence disqualifies the free-content acceptance
+ * form (2b above). Deliberately broad — a false negative here costs one extra
+ * "yes"; a false positive applies a graph mutation the user never asked for.
+ */
+const READ_INTENT_PATTERN =
+  /\b(?:show|display|explain|describe|tell|list|compare|summarise|summarize|summary|what|why|how|which|where|when)\b/i;
+
+export const OFFER_ACCEPTANCE_IN_CONTEXT_PATTERN = new RegExp(
+  String.raw`^\s*` +
+    // MANDATORY affirmative lead — see (2a) above.
+    String.raw`(?:yes|yep|yeah|sure|ok(?:ay)?)\b[,\s]+` +
+    String.raw`(?:please\b[,\s]+)?` +
+    String.raw`[^.!?]{1,80}?\b(?:as|like)\s+` +
+    OFFER_BACKREF +
+    OFFER_TAIL,
+  'iu',
+);
+
+/**
+ * True when the message is the bounded free-content acceptance (2) AND carries
+ * no read intent. Exported so the spec binds to the predicate the caller uses
+ * rather than re-deriving it (CLAUDE.md trap 12).
+ */
+export function isOfferAcceptanceInContext(message: string): boolean {
+  return (
+    OFFER_ACCEPTANCE_IN_CONTEXT_PATTERN.test(message) && !READ_INTENT_PATTERN.test(message)
+  );
+}
 
 /**
  * Phrasal-ordinal confirmation patterns. When at least one live
@@ -129,6 +235,60 @@ export type ShortConfirmSkipReason =
   | 'multiple_ambiguous';
 
 /**
+ * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — "all of them" pattern.
+ *
+ * Recognised ONLY while at least one live consent-expecting pending
+ * exists, and ONLY for EXPLICIT collective forms: "all of them" /
+ * "all of those" / "all of it" / "both of them" / "apply all" /
+ * "apply both" / "apply them all" / "yes to all". The disambiguation
+ * chip sends "All of them.", so the chip path always resolves.
+ *
+ * Deliberately EXCLUDED (adversarial review, 2026-07-11): bare "all" /
+ * "both" / "do all". A bare "both" is routinely the answer to an
+ * UNRELATED assistant question ("which options should I compare?" →
+ * "both"); binding it to live consents would fire an unintended
+ * multi-mutation — the exact intent-mismatch class the amendment
+ * targets. Bare forms fall through to the normal gates (and the LLM)
+ * untouched.
+ *
+ * POC-BOARD 5d (Step-0 trust-spine capture T11, 2026-07-17): with TWO
+ * proposals held, the natural reply "Yes, all of them." matched NOTHING —
+ * this pattern had no leading-affirmative prefix (SHORT_CONFIRM_PATTERN
+ * gained one in P1a for exactly this over-answering habit), so the turn
+ * fell to the LLM router, which minted a false "that covers both changes
+ * I'm holding" acknowledgement while the committed graph stayed
+ * byte-unchanged. The OPTIONAL leading affirmative below mirrors
+ * SHORT_CONFIRM_PATTERN's P1a prefix so the doubled form resolves
+ * deterministically to `consent_all` (GM-live atomic apply, else the
+ * honest one-at-a-time listing). The ratified bare-form exclusions are
+ * unchanged: the prefix is optional, but the COLLECTIVE body must still
+ * be one of the explicit forms — "Yes, both." stays unbound just as bare
+ * "both" does.
+ *
+ * Anchored start-to-end with the usual politeness/punctuation tail so
+ * any substantive content ("all of the numbers") falls through.
+ */
+export const CONSENT_RESOLVE_ALL_PATTERN =
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:all\s+of\s+(?:them|those|it)|both\s+of\s+(?:them|those)|yes\s+to\s+all|apply\s+(?:them\s+all|all(?:\s+of\s+(?:them|those))?|both(?:\s+of\s+(?:them|those))?))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+
+/**
+ * Order consent-expecting candidates for LISTING and for ordinal
+ * resolution: `apply_proposed_change` entries first (in input order —
+ * the read side places the freshest first), then `proposed_concept`.
+ * This keeps the numbered list the executor renders aligned with the
+ * ordinal pre-resolve above, which indexes into the live
+ * `apply_proposed_change` set: "1" always means the first listed item.
+ */
+export function orderConsentCandidates(
+  candidates: readonly PendingAction[],
+): readonly PendingAction[] {
+  return [
+    ...candidates.filter((pa) => pa.action.kind === 'apply_proposed_change'),
+    ...candidates.filter((pa) => pa.action.kind !== 'apply_proposed_change'),
+  ];
+}
+
+/**
  * Coarse summary of analysis state at resume time. Drives the
  * `what_would_flip` freshness precondition: a stale or missing analysis
  * means resuming what_would_flip would surface a misleading answer, so
@@ -152,6 +312,20 @@ export type ShortConfirmDispatch =
   | {
       readonly matched: true;
       readonly dispatch: 'recovery_ambiguous';
+      readonly candidates: readonly PendingAction[];
+    }
+  | {
+      /**
+       * CONSENT-CLARITY AMENDMENT — the user answered the multi-consent
+       * disambiguation (or typed it unprompted) with an "all of them"
+       * confirmation. `candidates` carries every live consent-expecting
+       * pending in listing order (see `orderConsentCandidates`). The
+       * executor applies them together only where a safe direct-apply
+       * path exists (GM holds); otherwise it lists them honestly and
+       * takes them one at a time — never a silent partial apply.
+       */
+      readonly matched: true;
+      readonly dispatch: 'consent_all';
       readonly candidates: readonly PendingAction[];
     }
   | {
@@ -200,12 +374,11 @@ export interface TryShortConfirmResumeInput {
  *                                TurnExecutor before dispatch.
  *
  * The remaining kinds (`set_factor_value`, `edit_graph_add_risk`) are
- * persisted but resume requires either a follow-up driver/parameter
- * or a label-match pre-route that disambiguates between candidates of
- * the same kind (e.g. user types "Engineering Budget" alone after a
- * multi-candidate clarify). That pre-route is the bounded follow-up
- * for full clarification continuity; until it lands those kinds are
- * deliberately excluded from the bare-confirm resumer.
+ * persisted but resume requires a follow-up driver/parameter or a
+ * label match — that continuity lives in `tryClarificationResume`
+ * (the label-answer pre-route for set_factor_value; the F-HELD 4b
+ * driver-answer pre-route for edit_graph_add_risk), so those kinds
+ * stay deliberately excluded from the bare-confirm resumer.
  *
  * `proposed_concept` is ALSO excluded here. It IS confirmation-expecting
  * (it flips `pending_confirmation` — Track 2's
@@ -240,6 +413,33 @@ function emittedAtMs(pa: PendingAction): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+/**
+ * F-HELD round 2 (FIXUP 1) — intent-vs-kind guard for chip-click resumes.
+ *
+ * A chip click carries an EXPLICIT intent: route-v2's
+ * `detectChipClickResumeIntent` maps a `what_would_flip` chip click to the
+ * TurnExecutor option `chipClickResumeIntent`, and the executor feeds the
+ * resumer a SYNTHETIC "yes". That synthetic confirmation must only ever
+ * resolve pendings of the CLICKED kind — without this scope, the F-HELD
+ * consent-priority pick would prefer a live `apply_proposed_change` hold
+ * over the wwf pending and EXECUTE a held graph mutation off an explanation
+ * click (the hold's hash gate passes because analysis does not mutate the
+ * graph). Callers apply this BEFORE `tryShortConfirmResume`.
+ *
+ * Typed confirmations (no intent flag) pass through untouched — the
+ * consent-priority ruling governs a genuine bare "yes", not a click whose
+ * intent the user already named. When the scope empties the set, the
+ * resumer returns `no_pending` and the chip-click no-pending recovery owns
+ * the turn (an honest "that offer is no longer available"), never the hold.
+ */
+export function scopePendingsToChipClickIntent(
+  pendings: readonly PendingAction[],
+  chipClickResumeIntent: 'what_would_flip' | undefined,
+): readonly PendingAction[] {
+  if (chipClickResumeIntent !== 'what_would_flip') return pendings;
+  return pendings.filter((pa) => pa.action.kind === 'what_would_flip');
+}
+
 export function tryShortConfirmResume(
   input: TryShortConfirmResumeInput,
 ): ShortConfirmDispatch {
@@ -272,16 +472,66 @@ export function tryShortConfirmResume(
     }
   }
 
+  // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — "all of them".
+  // Checked BEFORE the bare-confirm pattern gates because "all of them"
+  // is not a SHORT_CONFIRM phrase, and before the edit-verb gate because
+  // "apply all" / "do all" carry no edit verb but must still resolve
+  // deterministically. Fires only when at least one LIVE consent-
+  // expecting pending exists — with none, the message falls through to
+  // the normal gates (and ultimately the LLM) untouched.
+  const liveConsentExpectingAll = orderConsentCandidates(
+    input.pendingActions.filter(
+      (pa) =>
+        CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
+        !isExpired(pa, input.nowMs, input.currentTurnIndex),
+    ),
+  );
+  if (
+    liveConsentExpectingAll.length > 0 &&
+    CONSENT_RESOLVE_ALL_PATTERN.test(input.message)
+  ) {
+    if (liveConsentExpectingAll.length > 1) {
+      return {
+        matched: true,
+        dispatch: 'consent_all',
+        candidates: liveConsentExpectingAll,
+      };
+    }
+    // Exactly one live consent: "all of them" means that one. Resolve it
+    // through the normal single-pending path when the kind is bare-
+    // confirm-resumable; a lone `proposed_concept` keeps its dedicated
+    // continuation (fall through — same as a bare "yes" today).
+    const only = liveConsentExpectingAll[0]!;
+    if (only.action.kind === 'apply_proposed_change') {
+      return { matched: true, dispatch: 'pending_action', pending: only };
+    }
+  }
+
   // Edit-verb / numeric-quantity gate. Override only when a live
   // apply_proposed_change exists AND the message matches a
   // proposal-targeted confirmation phrase ("add that" / "make that
-  // change" / "apply that change").
+  // change" / "apply that change") or the CLOSED-VOCABULARY offer-reference
+  // form ("do what you offered") — see OFFER_REFERENCE_CONFIRM_PATTERN for
+  // why that one may override the gate and its free-content sibling may not.
   const isProposalConfirm =
-    liveApplyProposed.length > 0 && PROPOSAL_CONFIRM_PATTERN.test(input.message);
+    liveApplyProposed.length > 0 &&
+    (PROPOSAL_CONFIRM_PATTERN.test(input.message) ||
+      OFFER_REFERENCE_CONFIRM_PATTERN.test(input.message));
+  // ROADMAP 2.663 (F-B) — the bounded free-content acceptance. Deliberately
+  // NOT folded into `isProposalConfirm`: it is SUBORDINATE to the edit-verb /
+  // quantity gate below, so an acceptance that names its own value
+  // ("Yes, set churn to 5% as you offered") falls through to the value-update
+  // path instead of resuming a proposal carrying a different number.
+  const isOfferAcceptance =
+    liveApplyProposed.length > 0 && isOfferAcceptanceInContext(input.message);
   if (EDIT_VERB_OR_QUANTITY_PATTERN.test(input.message) && !isProposalConfirm) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
-  if (!SHORT_CONFIRM_PATTERN.test(input.message) && !isProposalConfirm) {
+  if (
+    !SHORT_CONFIRM_PATTERN.test(input.message) &&
+    !isProposalConfirm &&
+    !isOfferAcceptance
+  ) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
   if (input.pendingActions.length === 0) {
@@ -303,12 +553,37 @@ export function tryShortConfirmResume(
     return { matched: true, dispatch: 'recovery_expired', expired_count: expired.length };
   }
 
+  // CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — ratified doctrine (b):
+  // when a bare confirmation arrives while MULTIPLE consent-expecting
+  // pendings are live, the system must NOT silently resolve one of them
+  // (the pre-amendment posture was most-recent-wins WITHIN the consent
+  // class). Return every live consent candidate so the executor lists
+  // them (numbered, short labels) with per-item chips plus "All of them"
+  // and "None" — no mutation on that turn. Ordinal picks ("the first
+  // one") were already resolved deterministically by the pre-resolve
+  // block above, so only genuinely subject-less confirmations reach
+  // this rule. `proposed_concept` counts: it is consent-expecting even
+  // though its resume rides the concept-continuation path, so a bare
+  // "yes" with a live concept AND a live proposal is ambiguous.
+  const liveConsentExpecting = live.filter((pa) =>
+    CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind),
+  );
+  if (liveConsentExpecting.length > 1) {
+    return {
+      matched: true,
+      dispatch: 'recovery_ambiguous',
+      candidates: orderConsentCandidates(liveConsentExpecting),
+    };
+  }
+
   // Filter to kinds with a synthesis path.
   let resumable = live.filter((pa) => RESUMABLE_KINDS.has(pa.action.kind));
-  // PROPOSAL_CONFIRM_PATTERN is unambiguous about proposal intent —
-  // narrow the resumable set to apply_proposed_change candidates only,
-  // even if other resumable kinds (e.g. run_analysis) are also live.
-  if (isProposalConfirm) {
+  // PROPOSAL_CONFIRM_PATTERN and both offer-reference forms are unambiguous
+  // about proposal intent — narrow the resumable set to apply_proposed_change
+  // candidates only, even if other resumable kinds (e.g. run_analysis) are
+  // also live. Without this an acceptance of a HELD PROPOSAL could resume a
+  // freshly-minted run_analysis chip instead (the F-HELD wire finding).
+  if (isProposalConfirm || isOfferAcceptance) {
     resumable = resumable.filter((pa) => pa.action.kind === 'apply_proposed_change');
   }
   if (resumable.length === 0) {
@@ -316,24 +591,45 @@ export function tryShortConfirmResume(
     // TurnExecutor. Fall through to the LLM rather than misfire.
     return { matched: false, skip_reason: 'kind_not_yet_resumable' };
   }
-  // V5 P0.2 — DELIBERATE behaviour change (replaces the prior
-  // `recovery_ambiguous` clarification round-trip): when multiple live
-  // resumable pendings coexist, the MOST RECENTLY EMITTED relevant pending
-  // wins, so "do it" / "make that update" resumes the latest offer without
-  // a clarification detour. Expired pendings are already filtered out above
-  // (so an expired-newer never wins). Ordinal pointers ("the first one")
-  // are still resolved by index in the pre-resolve block above, and the
-  // turn-executor echoes the chosen proposal's label ("Applying: …") so a
-  // wrong-target resume stays visible. Graph-hash divergence, idempotency
-  // and stale-proposal recovery remain enforced downstream by
+  // F-HELD CONSENT-PRIORITY (wire finding 2026-07-11; ratified by Paul
+  // 2026-07-11 WITH the consent-clarity amendment above): a bare confirm
+  // answers the live CONSENT-EXPECTING pending, not the newest chip
+  // suggestion. Wire captures 13c→14c showed "yes" binding to a
+  // freshly-minted run_analysis offer while a GM hold (apply_proposed_change)
+  // was still live — the held change was never applied. Class priority is
+  // therefore: live `apply_proposed_change` (a proposal awaiting the user's
+  // explicit accept/decline) outranks the chip-suggestion kinds
+  // (`run_analysis` / `what_would_flip`) REGARDLESS of emit recency.
+  // Liveness still comes first — an expired hold never outranks anything
+  // (the expiry split above already removed it). By the time this pick
+  // runs, the amendment rule above guarantees AT MOST ONE live
+  // consent-expecting pending remains — the multi-consent case returned
+  // `recovery_ambiguous` (list, never a silent pick).
+  const consentExpecting = resumable.filter(
+    (pa) => pa.action.kind === 'apply_proposed_change',
+  );
+  const pickPool = consentExpecting.length > 0 ? consentExpecting : resumable;
+
+  // V5 P0.2 — most-recent-wins is retained WITHIN the picked class for the
+  // NON-consent suggestion kinds only (run_analysis / what_would_flip):
+  // when multiple live pendings of the winning class coexist, the MOST
+  // RECENTLY EMITTED one wins, so "do it" resumes the latest offer
+  // without a clarification detour. For the consent class this can no
+  // longer bind more than one candidate — the consent-clarity amendment
+  // rule above lists multiple live consents instead of picking. Ordinal
+  // pointers ("the first one") are still resolved by index in the
+  // pre-resolve block above, and the turn-executor echoes the chosen
+  // proposal's label ("Applying: …") so a wrong-target resume stays
+  // visible. Graph-hash divergence, idempotency and stale-proposal
+  // recovery remain enforced downstream by
   // `decideProposedChangeSynthesis` before any mutation is applied.
   // Tie-break: equal `emitted_at_iso` resolves to the first in input
   // order (Array.prototype.sort is stable) — deterministic, and the
   // read side already places the freshest proposal first.
   const pending =
-    resumable.length === 1
-      ? resumable[0]!
-      : [...resumable].sort((a, b) => emittedAtMs(b) - emittedAtMs(a))[0]!;
+    pickPool.length === 1
+      ? pickPool[0]!
+      : [...pickPool].sort((a, b) => emittedAtMs(b) - emittedAtMs(a))[0]!;
 
   // Freshness precondition for what_would_flip: if analysis is missing
   // or stale, do not resume. The whole point of "what would flip" is

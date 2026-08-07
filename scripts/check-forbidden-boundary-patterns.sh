@@ -19,8 +19,13 @@
 #                                         before the fallback). Partial by design.
 #
 # Scope: src/ TypeScript only, excluding tests (**/__tests__/**, *.test.ts),
-# generated code (src/generated/**), and comment-only lines (a line whose first
-# non-space token is `//`, `/*`, or `*`).
+# generated code (src/generated/**), and COMMENTS. Comment handling is done by
+# scripts/ci/strip-source-comments.mjs (literal-aware tokeniser, UI PR #386
+# template): matching runs against the comment-stripped view of each file, so
+# an accurate comment DOCUMENTING a forbidden pattern can never trip the gate
+# (the source-scanning-guard footgun), while string literals stay intact and
+# real code — including code sharing a line with a trailing comment — still
+# counts.
 #
 # Exemption (escape hatch): place a dedicated comment on the line IMMEDIATELY
 # ABOVE the offending line:
@@ -69,11 +74,13 @@ cd "$REPO_ROOT"
 
 BASELINE="scripts/ci/forbidden-boundary-baseline.txt"
 SCAN_DIR="src"
+STRIPPER="scripts/ci/strip-source-comments.mjs"
 
-# Science-field constant-fallback regex (ERE): `<sciencefield> ?? <c>` or
+# Science-field constant-fallback regex (JS RegExp — consumed by the
+# comment-stripping scanner, not grep): `<sciencefield> ?? <c>` or
 # `<sciencefield> || <c>` where <c> is null or a zero-leading number (0, 0.5,
 # 0.8, ...). Operator must immediately follow the identifier (modulo spaces).
-SCIENCE_ERE='(robustness|confidence|freshness|evpi|value_of_information|stale)[A-Za-z0-9_]*[[:space:]]*(\?\?|\|\|)[[:space:]]*(null|0)'
+SCIENCE_RE='(robustness|confidence|freshness|evpi|value_of_information|stale)[A-Za-z0-9_]*\s*(\?\?|\|\|)\s*(null|0)'
 
 # Exemption marker: a preceding comment LINE (starts with `//`) + non-empty reason.
 EXEMPT_RE='^[[:space:]]*//[[:space:]]*forbidden-exempt:[[:space:]]*[^[:space:]]'
@@ -84,13 +91,14 @@ PATTERN_KEYS=(warnOnInvalid as_unknown_as science_field_default_fallback)
 die() { echo "::error::$*" >&2; exit 1; }
 
 # ── Match production ─────────────────────────────────────────────────────────
-# Scope filter: drop out-of-scope + comment-only lines from a `path:line:content`
-# stream (the comment-only test covers `//`, `/*`, and `*` openers).
+# Scope filter: drop out-of-scope files from a `path:line:content` stream.
+# (No comment-line filter here any more: comments are stripped BEFORE matching
+# by $STRIPPER, which — unlike the old first-token test — also handles trailing
+# comments and unstarred block-comment body lines.)
 scope_filter() {
   grep -v '/__tests__/' \
   | grep -v '\.test\.ts:' \
-  | grep -v '/src/generated/' \
-  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)'
+  | grep -v '/src/generated/'
 }
 
 # Exemption: drop a match when the line IMMEDIATELY ABOVE it is a dedicated
@@ -114,18 +122,20 @@ apply_exemptions() {
   done
 }
 
-# Emit in-scope, unexempted `path:line:content` for <key> under <path>. `-H`
-# forces the filename prefix even when <path> is a single file (self-test).
+# Emit in-scope, unexempted `path:line:content` for <key> under <path>.
+# Matching runs on the comment-stripped view (via $STRIPPER --scan); the
+# emitted content is the ORIGINAL line, so exemption markers and human context
+# survive. Output shape is grep -rnH-compatible.
 scan() {
   local key="$1" path="$2"
   {
     case "$key" in
       warnOnInvalid)
-        grep -rnH --include='*.ts' 'warnOnInvalid' "$path" 2>/dev/null ;;
+        node "$STRIPPER" --scan 'warnOnInvalid' "$path" 2>/dev/null ;;
       as_unknown_as)
-        grep -rnH --include='*.ts' 'as unknown as' "$path" 2>/dev/null ;;
+        node "$STRIPPER" --scan 'as unknown as' "$path" 2>/dev/null ;;
       science_field_default_fallback)
-        grep -rnHE --include='*.ts' "$SCIENCE_ERE" "$path" 2>/dev/null ;;
+        node "$STRIPPER" --scan "$SCIENCE_RE" "$path" 2>/dev/null ;;
       *)
         echo "INTERNAL ERROR: unknown pattern key '$key'" >&2; return 2 ;;
     esac
@@ -251,6 +261,27 @@ EOF
   if [[ "$c" -eq 0 ]]; then printf '  OK   %-28s block-comment opener not counted\n' "comment-only"
   else printf '  FAIL %-28s block comment counted (got %s)\n' "comment-only" "$c"; failures=$((failures + 1)); fi
 
+  # (e) the source-scanning-guard footgun: an ACCURATE comment documenting a
+  # forbidden pattern — trailing on a code line, or in an unstarred block-
+  # comment body — must NOT count. Only the tokeniser can see these; the old
+  # first-token line filter could not, and this gate red-flagged honest
+  # design notes (positive-controlled 2026-07-20).
+  cat > "$SELFTEST_TMP/footgun.ts" <<'EOF'
+export const ok = 1; // never launder types via as unknown as at this seam
+/*
+ Historical context: the V4 adapter used as unknown as to bypass the contract.
+*/
+export const ok2 = 2; // never default confidence ?? 0 at a boundary
+export const ok3 = 3; // warnOnInvalid must stay banned
+EOF
+  local fg_failures=0
+  for key in "${PATTERN_KEYS[@]}"; do
+    c="$(count "$key" "$SELFTEST_TMP/footgun.ts")"
+    [[ "$c" -eq 0 ]] || fg_failures=$((fg_failures + 1))
+  done
+  if [[ "$fg_failures" -eq 0 ]]; then printf '  OK   %-28s documenting comments (trailing + block body) not counted\n' "comment-footgun"
+  else printf '  FAIL %-28s %s pattern(s) fired on comments\n' "comment-footgun" "$fg_failures"; failures=$((failures + 1)); fi
+
   if [[ "$failures" -ne 0 ]]; then
     echo "SELF-TEST FAILED: $failures check(s) misbehaved — the gate is not enforcing." >&2
     return 1
@@ -279,6 +310,11 @@ case "${1:-}" in
   "")          ;; # fall through to the gate
   *)           echo "Unknown argument: $1 (use --help)" >&2; exit 1 ;;
 esac
+
+# The comment-stripping scanner needs node; without this preflight a missing
+# node would empty every scan and misreport as "cleanup detected".
+command -v node >/dev/null 2>&1 || die "node is required (the gate matches via $STRIPPER)."
+[[ -f "$STRIPPER" ]] || die "Missing comment stripper: $STRIPPER"
 
 validate_baseline
 

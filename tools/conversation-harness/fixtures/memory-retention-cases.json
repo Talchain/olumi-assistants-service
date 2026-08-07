@@ -1,0 +1,236 @@
+{
+  "//": [
+    "MEMORY-RETENTION EVAL — the golden pack (POC-STATE-ASSESSMENT rec 8).",
+    "",
+    "A 20-turn conversation in which the user states TEN things a real user would",
+    "state and expect the system to remember: the decision goal, a hard numeric",
+    "constraint, a date constraint, an option name with a stated preference for it,",
+    "a headcount, a lease preference, a CORRECTION to the headcount, a legal",
+    "constraint, a transition constraint, and a scope lock. Then ten turns of",
+    "ordinary back-and-forth that state nothing durable.",
+    "",
+    "WHY THE SHAPE IS WHAT IT IS — every number below is derived, not chosen:",
+    "  * All ten durable statements sit in turns 1-10, and the verbatim window is",
+    "    CONTEXT_PACK_RECENT_TURNS_CAP (8) turns. Measuring at turn 19 therefore",
+    "    puts EVERY durable statement OUTSIDE the window, so the retention reading",
+    "    can only come from the rolling summary. MEM-FLOOR 4 asserts exactly that",
+    "    rather than trusting the arithmetic.",
+    "  * measure_at_turns is [19, 20] because shouldRegenerate() regenerates from",
+    "    full history when turnCount % SUMMARY_REGEN_INTERVAL === 0. Turn 19 is the",
+    "    end of a nine-pass INCREMENTAL chain (where a loss compounds); turn 20 is a",
+    "    REGEN from full history (where the estate's anti-compounding guard gets its",
+    "    chance to repair one).",
+    "  * The durable statements are ordinary length (~110-140 chars), NOT padded.",
+    "    That is the point: ten of them, carried verbatim, land BETWEEN the 1,200",
+    "    target and the 1,600 hard cap, so budget pressure is produced by the real",
+    "    constants rather than by a tuned fixture. MEM-FLOOR 5 pins that band and",
+    "    fails loud if editing the pack drifts out of it.",
+    "  * Every durable statement is exactly ONE sentence ending in a single full",
+    "    stop — the contract splitStatements() depends on, asserted at load.",
+    "",
+    "ASSISTANT TURNS are deliberately uniform and content-free. A summariser arm",
+    "that minted from assistant prose would put GATE 2 (unwitnessed attribution)",
+    "in the middle of the measurement; keeping them inert isolates the CONSTRAINTS",
+    "carrier, which is what this eval is about."
+  ],
+  "cases": [
+    {
+      "id": "northern-hub-20-turn",
+      "note": "Site-selection decision. Ten durable statements (turns 1-10) then ten ordinary turns.",
+      "measure_at_turns": [19, 20],
+      "turns": [
+        {
+          "n": 1,
+          "user": "We need to decide where to put our northern distribution hub, and I want a recommendation I can take to the board.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 2,
+          "user": "The total fit-out budget must not go above £180,000 — that is a hard ceiling from finance, not a target, so anything over it is out.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 3,
+          "user": "Site works cannot start any earlier than March, because the lease on the current unit in Openshaw runs right up to the end of winter.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 4,
+          "user": "Of the three sites I do prefer Bramhall Park, mainly because it is the only one on the shortlist with its own rail siding for inbound pallets.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 5,
+          "user": "Plan for at least 25 people on site from day one; that is the number the operations team gave me this morning.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 6,
+          "user": "I would prefer a shorter lease even if the rent per square foot works out higher — we cannot be locked in for ten years on a guess.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 7,
+          "user": "Correction on the headcount: it is 40 people, not 25 — I was reading last year's plan when I told you that.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 8,
+          "user": "One more constraint from legal: we must not sign anything before the environmental survey on the site is back and clean.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 9,
+          "user": "Whatever we pick has to keep the Leeds depot running for at least six more months, because we cannot cut over both sites at once.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 10,
+          "user": "The shortlist must stay fixed at the three sites we already have, and I do not want new options introduced at this stage.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 11,
+          "user": "Can you walk me through how you are weighing these against each other?",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 12,
+          "user": "That makes sense so far, keep going.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 13,
+          "user": "What would move your ranking the most?",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 14,
+          "user": "Interesting. And how confident are you in that ordering?",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 15,
+          "user": "Okay, noted.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 16,
+          "user": "Anything I should be thinking about that I have not raised?",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 17,
+          "user": "Fair enough, carry on.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 18,
+          "user": "Right, let us get to a view.",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 19,
+          "user": "So which one do you land on, and why?",
+          "assistant": "Understood, I have that on record."
+        },
+        {
+          "n": 20,
+          "user": "And what should I check before I take this upstairs?",
+          "assistant": "Understood, I have that on record."
+        }
+      ],
+      "facts": [
+        {
+          "id": "decision_goal",
+          "kind": "decision_goal",
+          "stated_at_turn": 1,
+          "witness": ["northern distribution hub"],
+          "floor": true,
+          "note": "The decision itself. Losing this is the first thing a tester notices: the coach no longer knows what is being decided."
+        },
+        {
+          "id": "budget_ceiling",
+          "kind": "numeric_constraint",
+          "stated_at_turn": 2,
+          "witness": ["180000"],
+          "floor": false,
+          "note": "A hard number the user called non-negotiable. MEASURED, not floored — see the floor rationale in evaluateFloors."
+        },
+        {
+          "id": "earliest_start",
+          "kind": "date_constraint",
+          "stated_at_turn": 3,
+          "witness": ["march"],
+          "floor": false,
+          "note": "A date constraint stated once and never repeated."
+        },
+        {
+          "id": "preferred_option",
+          "kind": "option_name",
+          "stated_at_turn": 4,
+          "witness": ["bramhall park"],
+          "floor": false,
+          "note": "A named option the user expressed a preference for."
+        },
+        {
+          "id": "headcount_original",
+          "kind": "superseded_value",
+          "stated_at_turn": 5,
+          "witness": ["25 people"],
+          "floor": false,
+          "note": "SUPERSEDED by headcount_corrected. Its survival is only a problem if the correction is lost — MEM-FLOOR 2."
+        },
+        {
+          "id": "lease_preference",
+          "kind": "preference",
+          "stated_at_turn": 6,
+          "witness": ["shorter lease"],
+          "floor": false,
+          "note": "A stated preference with an explicit trade-off attached."
+        },
+        {
+          "id": "headcount_corrected",
+          "kind": "user_correction",
+          "stated_at_turn": 7,
+          "witness": ["40 people"],
+          "floor": true,
+          "supersedes": "headcount_original",
+          "note": "The user CORRECTING themselves. Losing a correction is the worst class: the system keeps acting on the withdrawn number."
+        },
+        {
+          "id": "legal_precondition",
+          "kind": "other_constraint",
+          "stated_at_turn": 8,
+          "witness": ["environmental survey"],
+          "floor": false,
+          "note": "A blocking precondition from a third party."
+        },
+        {
+          "id": "transition_constraint",
+          "kind": "other_constraint",
+          "stated_at_turn": 9,
+          "witness": ["leeds depot"],
+          "floor": false,
+          "note": "An operational constraint naming another site."
+        },
+        {
+          "id": "scope_lock",
+          "kind": "scope_constraint",
+          "stated_at_turn": 10,
+          "witness": ["shortlist must stay fixed"],
+          "floor": false,
+          "note": "A scope instruction. Losing it makes the coach reopen a closed question."
+        },
+        {
+          "id": "never_stated_aberdeen",
+          "kind": "never_stated_control",
+          "stated_at_turn": null,
+          "witness": ["aberdeen"],
+          "floor": false,
+          "note": "NEGATIVE CONTROL. Never said by anyone. A detector that reports this as retained is reading something other than the conversation, and every other row is void."
+        }
+      ]
+    }
+  ]
+}

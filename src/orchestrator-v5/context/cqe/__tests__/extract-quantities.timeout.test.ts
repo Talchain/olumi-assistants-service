@@ -72,46 +72,53 @@ describe('CQE timeout behaviour (brief §6 Gate 5)', () => {
     expect(compromiseMatch).toBeDefined();
   });
 
-  it('exercises the real wall-clock branch when ruleDuration > CQE_REGEX_TIMEOUT_MS', () => {
+  it('exercises the real cpu-time branch when ruleDuration > CQE_REGEX_TIMEOUT_MS', () => {
     // Deterministic test of the physical code path `if (ruleDuration >
     // CQE_REGEX_TIMEOUT_MS) { ... }` (vs the forced-hook short-circuit in
-    // the tests above). Inject a trivial no-op rule and spy performance.now
+    // the tests above). Inject a trivial no-op rule and spy process.cpuUsage
     // so the orchestrator observes a 60ms apparent duration (>50ms cap).
+    //
+    // ROADMAP 1.232: this used to spy `performance.now()`, because the cap
+    // used to be a WALL-clock cap. It is now a CPU-time cap — wall time made
+    // the extractor's output depend on host contention — so the fake moved
+    // with the mechanism. What the test pins is unchanged.
     const slowRule: PatternRule = {
       id: 'P_SLOW_FOR_TEST',
       priority: 1,
       apply: () => [],
     };
 
-    // Sequence of clock reads performed by runExtractionInternal for a
+    // Sequence of CPU-clock reads performed by runExtractionInternal for a
     // single-rule run:
-    //   [0] startedAt
-    //   [1] budgetDeadline check at loop entry (startedAt + 200ms = 1200)
+    //   [0] cpuStartedAt
+    //   [1] budgetDeadline check at loop entry (cpuStartedAt + 200ms = 1200)
     //   [2] ruleStart
-    //   [3] ruleEnd (60ms > 50ms cap -> triggers wall-clock branch)
-    //   [4] summary.duration_ms
+    //   [3] ruleEnd (60ms > 50ms cap -> triggers the cpu-time branch)
     const ticks = [1000, 1000, 1000, 1060, 1060];
     let callCount = 0;
     const perfSpy = vi
-      .spyOn(globalThis.performance, 'now')
-      .mockImplementation(() => ticks[Math.min(callCount++, ticks.length - 1)] ?? 0);
+      .spyOn(process, 'cpuUsage')
+      .mockImplementation(() => ({
+        user: Math.round((ticks[Math.min(callCount++, ticks.length - 1)] ?? 0) * 1000),
+        system: 0,
+      }));
 
     try {
       const { summary } = __runExtractionForTesting('some text', {
         patternRules: [slowRule],
       });
 
-      // The wall-clock branch fired once for this rule.
-      const wallClockCalls = warnSpy.mock.calls.filter((call) => {
+      // The cpu-time branch fired once for this rule.
+      const cpuTimeCalls = warnSpy.mock.calls.filter((call) => {
         const payload = call[0] as Record<string, unknown>;
         return (
           payload.event === 'cqe.pattern_timeout' &&
           payload.pattern_id === 'P_SLOW_FOR_TEST' &&
-          payload.reason === 'wall_clock_exceeded'
+          payload.reason === 'cpu_time_exceeded'
         );
       });
-      expect(wallClockCalls).toHaveLength(1);
-      const payload = wallClockCalls[0]![0] as Record<string, unknown>;
+      expect(cpuTimeCalls).toHaveLength(1);
+      const payload = cpuTimeCalls[0]![0] as Record<string, unknown>;
       expect(payload.timeout).toBe(true);
       expect(payload.duration_ms).toBe(60);
       expect(payload.timeout_cap_ms).toBe(50);

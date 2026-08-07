@@ -263,15 +263,31 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     // before byte-for-byte comparison. The regression guard (PLoT
     // envelope → enrichment passthrough) is preserved; only the test's
     // expected shape needed to account for coaching metadata.
+    // T1 claim safety (@talchain/schemas 0.25.0): the constraint verdict —
+    // "may a leading option be named" — is a FIRST-CLASS field on
+    // `result.constraint_verdict` now, so it is NO LONGER STRIPPED HERE. It
+    // used to ride `enrichment.__cee_claim_safety` and had to be excluded from
+    // this byte-for-byte check, which is precisely the breach of the
+    // PLoT-passthrough invariant the release retires. The strip below is back
+    // to the coaching-signal fields alone.
     const {
       coaching_signal_id,
       coaching_signal_turn_id,
       coaching_signal_produced_at,
       ...enrichmentWithoutCoaching
     } = fact.result.enrichment;
-    void coaching_signal_id;  
+    void coaching_signal_id;
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
+    // Asserted (not merely assumed) so this test cannot hide an ABSENT verdict:
+    // a missing one fails the read side CLOSED and would silently suppress
+    // every leader-presuming block on a healthy run.
+    expect(
+      (fact.result as unknown as Record<string, unknown>).constraint_verdict,
+    ).toEqual({
+      may_name_leading_option: true,
+      constraint_verdict_state: 'not_applicable',
+    });
     expect(enrichmentWithoutCoaching).toEqual(largerFixture);
     expect(fact.result.enrichment.decision_brief).toBeDefined();
     expect(Array.isArray(fact.result.enrichment.fact_objects)).toBe(true);

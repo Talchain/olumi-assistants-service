@@ -58,7 +58,9 @@ When engine or product teams report failing CEE calls (e.g. 4xx/5xx from
      - `by capability` – counts per CEE feature.
      - `by status` – e.g. `error`, `limited`, `timeout`.
      - `by error_code` – e.g. `CEE_INTERNAL_ERROR`, `CEE_RATE_LIMIT`,
-       `CEE_VALIDATION_FAILED`.
+       `CEE_COST_CAP`, `CEE_BUDGET_EXCEEDED`, `CEE_VALIDATION_FAILED`.
+       (The three 429 codes mean *throttled* / *out of money* / *out of time*
+       respectively — see `CEE-incident-runbook.md` §3.1.)
 
    The underlying `recent_errors` are taken from CEE `cee.call` logs, which are
    strictly metadata-only (IDs, booleans, counts, error codes, status enums,
@@ -208,6 +210,9 @@ allowlist.
      - Configuration (wrong provider/model, feature versions, RPMs).
      - Upstream (LLM provider 5xx / timeouts).
      - Rate-limiting (`CEE_RATE_LIMIT` codes dominating).
+     - Spend caps (`CEE_COST_CAP`) — raising RPM limits will not help here.
+     - Elapsed-time deadline breaches (`CEE_BUDGET_EXCEEDED`) — a latency
+       symptom; check upstream alongside `CEE_TIMEOUT`.
      - Validation issues (`CEE_VALIDATION_FAILED`).
   3. If needed, inspect raw `/diagnostics.recent_errors` and structured
      `cee.call` logs keyed by `request_id`.

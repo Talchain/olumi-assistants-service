@@ -7,11 +7,29 @@
  *
  * Output contract (matches the existing wire — no new fields, no new
  * action_type, no new turn-class):
- *   - `assistant_text`: deterministic copy. Lead sentence: "No change
- *     was made to the model yet." If a fresh prior `run_analysis` fact
- *     exists, append: "Your previous analysis is still current."
- *     Closing sentence asks the user for a specific factor / edge /
- *     option / value to change.
+ *   - `assistant_text`: deterministic copy. Lead sentence:
+ *     "The model is unchanged so far." (`LEAD_TEXT`) If a fresh prior
+ *     `run_analysis` fact exists, append: "Your last analysis is still
+ *     current." (`FRESHNESS_SUFFIX`) Closing sentence asks the user for
+ *     a specific factor / edge / option / value to change
+ *     (`CLOSING_TEXT`).
+ *
+ *     ⚠ DO NOT reach for the natural phrasings here. "No change was
+ *     made to the model" / "no changes were made" / "nothing changed"
+ *     are BANNED at runtime as state-mutation denials
+ *     (`compose/forbidden-user-facing-phrases.ts`), as is "previous
+ *     analysis" / "prior analysis". They read perfectly and they are
+ *     landmines: the V5 egress guard replaces the ENTIRE response with
+ *     the neutral fallback when one fires. Use the positive framings
+ *     above ("unchanged so far", "last analysis").
+ *
+ *     This header previously quoted the two BANNED variants as though
+ *     they were the shipped copy (the constants had moved on; the
+ *     hand-maintained mirror had not). That drift actively misled PR
+ *     #464, whose lane wrote new user-facing refusal copy on the
+ *     strength of it and only caught the breach when the egress guard
+ *     fired in a test. If you change the constants, change these quotes
+ *     in the same edit — and see the copy contract at `LEAD_TEXT`.
  *   - `suggested_actions`: 1–3 text-prompt chips drawn from canonical
  *     graph factor / option labels. No `action_type` — chip clicks
  *     re-submit as fresh user turns and route normally. When the graph
@@ -108,10 +126,32 @@ export function composeEditClarifyResponse(
   const chips = buildClarifyChips(input.nodes ?? []);
 
   return composeDirectAnswerResponse({
+    answerKind: 'functional',
     assistant_text,
     stage: input.stage,
     suggested_actions: chips,
   });
+}
+
+/**
+ * Lane 22 — deterministic fallback PARTS for the V4 edit_graph no-op
+ * branch (edit-graph.ts). When the LLM no-ops and the R10 preservation
+ * gate declines the LLM's clarifying question, the branch previously
+ * shipped canned copy with ZERO chips (buildNoOpRecoveryChips emits no
+ * chips without a preceding validator referential error). This helper
+ * reuses the SAME copy + chip builder as the route-level intercepts
+ * (composeEditClarifyResponse) so the no-op fallback carries 1–3
+ * factor/option-label chips and copy that already passes the egress
+ * phrase guards. Returned as parts (text + chips) rather than an
+ * OlumiResponse because the V4 handler composes its own result shape.
+ */
+export function buildEditClarifyFallbackParts(
+  nodes: readonly EditClarifyComposerNode[] | null | undefined,
+): { readonly text: string; readonly chips: readonly SuggestedAction[] } {
+  return {
+    text: `${LEAD_TEXT} ${CLOSING_TEXT}`,
+    chips: buildClarifyChips(nodes ?? []),
+  };
 }
 
 /**

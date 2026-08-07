@@ -579,6 +579,37 @@ describe('summariseFlipEntries — overall_status verdict', () => {
     expect(s.overall_status).toBe('insufficient_data');
   });
 
+  // ROADMAP 2.228 F1 review amendment 5 — PLoT #300 adds a SECOND
+  // attested-no-flip token. Matching only the first by exact string meant ONE
+  // such row demoted the verdict to `insufficient_data`, which swaps the
+  // user-facing copy from a producer-attested certainty ("no single factor on
+  // its own reached a tipping point") to uncertainty ("did not isolate … not
+  // clear") at explanation-fallback.ts:544/:585 and
+  // compose-option-targeted-flip.ts:260.
+  it("RED-FIRST: all null + 'structurally_invariant' → no_practical_flip, NOT insufficient_data", () => {
+    const s = summariseFlipEntries([
+      entry({ flip_reason: 'structurally_invariant' }),
+      entry({ flip_reason: 'structurally_invariant' }),
+    ]);
+    expect(s.overall_status).toBe('no_practical_flip');
+  });
+
+  it('RED-FIRST: a MIXED attested no-flip set stays no_practical_flip — one new token cannot demote the verdict', () => {
+    const s = summariseFlipEntries([
+      entry({ flip_reason: 'no_effect_within_bounds' }),
+      entry({ flip_reason: 'structurally_invariant' }),
+    ]);
+    expect(s.overall_status).toBe('no_practical_flip');
+  });
+
+  it('one UNATTESTED row still demotes the verdict — the predicate did not become permissive', () => {
+    const s = summariseFlipEntries([
+      entry({ flip_reason: 'structurally_invariant' }),
+      entry({ flip_reason: 'max_iterations' }),
+    ]);
+    expect(s.overall_status).toBe('insufficient_data');
+  });
+
   it('margin_supports_flip aggregates across entries (some=true → true)', () => {
     const s = summariseFlipEntries([
       entry({ flip_reason: 'no_effect_within_bounds' }),

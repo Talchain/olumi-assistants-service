@@ -1,5 +1,9 @@
 {
-  "_doc": "Field-coverage audit (v1). Each non-audited category is an object map: key = JSON path actually present in tests/fixtures/cross-service/, value = per-path justification. NO wildcards. See tests/contract/field-coverage-audit.test.ts and Docs/v5/cross-boundary-contract-test-report.md.",
+  "_doc": "Field-coverage audit (v2). Each non-audited category is an object map: key = a FULLY-ANCHORED JSON path, value = { wire, why, ... }. NO wildcards, NO bare leaf names. `wire` is the ONLY place a serialisation claim may live and it is MACHINE-CHECKED against a code-derived client surface by tests/contract/field-coverage-allowlist-wire-claims.test.ts — prose in `why` may not restate it (the word 'user-facing' is banned: it conflated 'not on the wire' with 'not rendered', which is how v1 shipped a false claim about trace.repair_summary). See also tests/contract/field-coverage-audit.test.ts and Docs/v5/cross-boundary-contract-test-report.md.",
+  "_wire_values": {
+    "serialized": "The path IS present in a client response body at include_debug=false (V3 draft-graph HTTP body + SSE COMPLETE payload, and/or the V5 turn envelope). Whether the UI RENDERS it is a separate claim, owned by DecisionGuideAI, and is what `why` describes.",
+    "internal": "The path is NEVER present in a client response body. Requires `emitted_by` naming the producing source file, and any same-named leaf that IS serialized elsewhere must be declared in `wire_homonyms`."
+  },
   "audited_fields": [
     "coaching",
     "strengthen_items",
@@ -13,37 +17,154 @@
     "blocks"
   ],
   "diagnostic_allowed": {
-    "answer_source": "Handler-internal flag distinguishing Sonnet-emitted text from deterministic-fallback prose; consumed only by telemetry. Never user-facing.",
-    "fallback_reason": "Handler-internal explanation for why a deterministic fallback was chosen; consumed only by telemetry. Never user-facing.",
-    "_meta.input_shape_version": "Decision-review enricher version stamp (DecisionReviewMeta.input_shape_version); consumed by decision_review prompt v12 for adapter-side diagnostics. Never user-facing.",
-    "_meta.flip_threshold_count": "Diagnostic count of populated flip_threshold_data entries; consumed by decision_review prompt v12 for routing decisions. Never user-facing.",
-    "_meta.factor_sensitivity_count": "Diagnostic count of populated isl_results.factor_sensitivity entries. Never user-facing.",
-    "_meta.fragile_edge_count": "Diagnostic count of populated isl_results.fragile_edges entries. Never user-facing.",
-    "_meta.model_critique_count": "Diagnostic count of model_critiques carried by deterministic_coaching (0 until M1 ships). Never user-facing.",
-    "_meta.has_deterministic_coaching": "Diagnostic flag indicating whether deterministic_coaching is the M1 fully-derived shape. Never user-facing.",
-    "_meta.margin": "Winner.win_probability minus runner_up.win_probability. Adapter-side raw signal for prompt routing; not user-facing (the rendered prose owns the human-readable margin description).",
-    "_meta.robustness_level": "Robustness.level pulled defensively from the V2 envelope. Adapter-side raw signal; not user-facing.",
-    "trace.request_id": "Per-request correlation identifier echoed back to the caller for log correlation. Machine routing, not user-facing prose.",
-    "trace.correlation_id": "Distributed-tracing correlation ID. Machine routing, not user-facing prose.",
-    "trace.engine": "LLM engine metadata subtree (provider/model/version) used for telemetry and admin audit dashboards. Never user-facing.",
-    "trace.pipeline": "Stage-by-stage CEE pipeline diagnostics subtree (provenance, llm_metadata, repair, stage_snapshots, validation_summary, threshold_sweep, etc.). Consumed by admin debug panel and telemetry; never user-facing.",
-    "trace.repair_summary": "Top-level repair-stage diagnostic mirror (graph_delta, repair counts, bucket_summary). Consumed by debug bundles; never user-facing.",
-    "trace.transform_defaults": "Defaults applied during V3 transform (defaulted_edge_count, applied defaults). Diagnostic only; never user-facing."
+    "answer_source": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/tools/handlers/explain-results.ts",
+      "why": "Handler-fact flag distinguishing Sonnet-emitted text from deterministic-fallback prose. Lives on ExplainResultsHandlerFact, which is persisted to v5_handler_facts and read by telemetry; the strict OlumiResponseSchema has no facts key."
+    },
+    "fallback_reason": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/tools/handlers/explain-results.ts",
+      "wire_homonyms": ["_pipeline_outcome.llm_repair.fallback_reason"],
+      "why": "Handler-fact explanation for why a deterministic fallback was chosen; same carrier as answer_source. NOTE the declared homonym: the UNRELATED llm-repair fallback_reason under _pipeline_outcome IS serialized (attached at src/cee/unified-pipeline/index.ts:533). Two different fields share this leaf name — that collision is why bare leaf keys are no longer permitted."
+    },
+    "_meta.input_shape_version": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Decision-review enricher version stamp (DecisionReviewMeta.input_shape_version), read by decision_review prompt v12 for adapter-side diagnostics. `_meta` is an INTERNAL_ENRICHMENT_KEYS carrier stripped at any depth by stripInternalKeysDeep (src/orchestrator-v5/compose.ts)."
+    },
+    "_meta.flip_threshold_count": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Diagnostic count of populated flip_threshold_data entries, read by decision_review prompt v12 for routing. Stripped with the rest of the _meta carrier."
+    },
+    "_meta.factor_sensitivity_count": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Diagnostic count of populated isl_results.factor_sensitivity entries. Stripped with the rest of the _meta carrier."
+    },
+    "_meta.fragile_edge_count": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Diagnostic count of populated isl_results.fragile_edges entries. Stripped with the rest of the _meta carrier."
+    },
+    "_meta.model_critique_count": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Diagnostic count of model_critiques carried by deterministic_coaching. Stripped with the rest of the _meta carrier."
+    },
+    "_meta.has_deterministic_coaching": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Diagnostic flag indicating whether deterministic_coaching is the M1 fully-derived shape. Stripped with the rest of the _meta carrier."
+    },
+    "_meta.margin": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Winner.win_probability minus runner_up.win_probability — adapter-side raw signal for prompt routing. The rendered prose owns the human-readable margin description."
+    },
+    "_meta.robustness_level": {
+      "wire": "internal",
+      "emitted_by": "src/orchestrator-v5/coaching/decision-review-enricher.ts",
+      "why": "Robustness.level pulled defensively from the V2 envelope; adapter-side raw signal for prompt routing."
+    },
+    "trace.request_id": {
+      "wire": "serialized",
+      "why": "Per-request correlation identifier echoed back to the caller for log correlation. Machine routing. Verified against DecisionGuideAI staging 0dfb075d: the only read is DraftChat.tsx:312 into captureErrorDetail, rendered at DebugDrawer.tsx:362 which is dev-build only (import.meta.env.DEV guard). No production surface."
+    },
+    "trace.correlation_id": {
+      "wire": "serialized",
+      "why": "Distributed-tracing correlation ID. Machine routing. Verified against DecisionGuideAI staging 0dfb075d: the UI has ZERO reads of trace.correlation_id — the correlation ids it renders are its own generateCorrelationId() values or PLoT's diagnostics.correlation_id, behind Shift+D / expertMode."
+    },
+    "trace.engine": {
+      "wire": "serialized",
+      "why": "LLM engine metadata subtree (provider/model/version) used for telemetry and admin audit dashboards. Verified against DecisionGuideAI staging 0dfb075d: read only in useDebugData and rendered only inside DebugPanelV2, which requires VITE_APP_ENV in {staging,development} AND ?diag or window.__OLUMI_DEBUG. No production surface."
+    },
+    "trace.pipeline": {
+      "wire": "serialized",
+      "why": "Stage-by-stage CEE pipeline diagnostics subtree (provenance, llm_metadata, repair, stage_snapshots, validation_summary, threshold_sweep, etc.). Lifted to result.pipeline_trace by the UI adapter (client.ts:227). Most leaves render only inside DebugPanelV2 (staging/dev AND ?diag). CORRECTED 2026-07-25: the nested pipeline.repair_summary.deterministic_repairs[].action IS rendered in production — see the trace.repair_summary entry."
+    },
+    "trace.repair_summary": {
+      "wire": "serialized",
+      "why": "Top-level repair-stage diagnostic mirror (graph_delta, repair counts, bucket_summary). CORRECTED 2026-07-25: emitted UNCONDITIONALLY by src/cee/transforms/schema-v3.ts (`Always emitted so the UI can depend on the key existing`), NOT gated on includeDebug, and it survives Zod because src/schemas/cee-v3.ts declares the trace object .passthrough(). It therefore reaches every client on the draft-graph HTTP body and the SSE COMPLETE payload. It is also RENDERED: DecisionGuideAI staging 0dfb075d reads it at ModelTabBody.tsx:385 and renders deterministic_repairs[].action as visible text at model-tab/ModelAdjustments.tsx:353 and :283 (the 'Olumi applied N adjustments' expander) — production, no flag, no dev guard. Gating this field would break that surface."
+    },
+    "trace.transform_defaults": {
+      "wire": "serialized",
+      "why": "Defaults applied during the V3 transform (defaulted_edge_count, applied defaults). Diagnostic subtree. Verified against DecisionGuideAI staging 0dfb075d: ZERO occurrences anywhere under src/ in any casing — the UI does not read it at all, let alone render it."
+    }
   },
   "machine_routing_allowed": {
-    "action_type": "Suggested-action discriminant (run_analysis, set_factor_value, etc.). The UI dispatches on this value to route chip clicks; not rendered as text.",
-    "id": "Stable identifier on chips, insights, blocks, nodes, edges, options. Machine reference for click-handling and graph manipulation; never rendered as text.",
-    "error_code": "Wire-level failure type literal on error blocks (UPSTREAM_TIMEOUT, etc.). UI parser dispatches on this; never rendered raw to users.",
-    "request_id": "Same as trace.request_id at the top level — caller-supplied request correlation ID. Machine routing only.",
-    "correlation_id": "Distributed tracing correlation ID at the top level. Machine routing only."
+    "coaching.strengthen_items[].action_type": {
+      "wire": "serialized",
+      "why": "Suggested-action discriminant (run_analysis, set_factor_value, etc.). The UI dispatches on this value to route chip clicks; not rendered as text."
+    },
+    "suggested_actions[].action_type": {
+      "wire": "serialized",
+      "why": "Chip action discriminant on the V5 envelope. The UI dispatches on this value to route chip clicks; not rendered as text."
+    },
+    "coaching.strengthen_items[].id": {
+      "wire": "serialized",
+      "why": "Stable identifier for a strengthen-item chip. Machine reference for click-handling and React keying; not rendered as text."
+    },
+    "suggested_actions[].id": {
+      "wire": "serialized",
+      "why": "Stable identifier for a suggested-action chip. Machine reference for click-handling and React keying; not rendered as text."
+    },
+    "nodes[].id": {
+      "wire": "serialized",
+      "why": "Stable graph-node identifier. Machine reference for canvas manipulation and edge endpoints; the sibling label is the rendered text."
+    },
+    "options[].id": {
+      "wire": "serialized",
+      "why": "Stable option identifier. Machine reference for option selection and analysis wiring; the sibling label is the rendered text."
+    },
+    "blocks[].error_code": {
+      "wire": "serialized",
+      "why": "Wire-level failure type literal on error blocks (UPSTREAM_TIMEOUT, etc.). The UI parser dispatches on this to pick recovery copy; never rendered raw."
+    }
   },
   "structured_pointer_allowed": {
-    "bias_signals[].target": "Node-ID pointer the UI uses to highlight the referenced node in the canvas. detail (sibling) is the user-facing prose; target stays unscrubbed so the link is preserved (sanitiseCoachingForDisplay at src/cee/unified-pipeline/stages/package.ts:125).",
-    "referenced_option_ids": "Array of option IDs cited inside an explanation block (`OlumiResponseSchema.blocks[].referenced_option_ids`). UI uses these to cross-link the message to canvas option nodes; never rendered as text.",
-    "node_id": "Pointer field inside coaching.widening_log[] entries (mapped to camelCase nodeId in the UI store). Identifies which canvas node the widening reason describes; never rendered as text.",
-    "edge_id": "Pointer field inside isl_results.fragile_edges[] entries (decision-review enrichment). Identifies which causal edge is fragile; never rendered as text.",
-    "factor_id": "Pointer field inside flip_threshold_data[] and isl_results.factor_sensitivity[] entries. Identifies which factor the entry describes; from_label / factor_label are the rendered text.",
-    "option_id": "Pointer field inside comparison block options[] entries. Identifies which option each entry describes; the sibling label is the rendered text."
+    "coaching.bias_signals[].target": {
+      "wire": "serialized",
+      "why": "Node-ID pointer the UI uses to highlight the referenced node in the canvas. The sibling `detail` carries the prose shown to the reader; `target` stays unscrubbed so the link survives (sanitiseCoachingForDisplay at src/cee/unified-pipeline/stages/package.ts). Verified against DecisionGuideAI staging 0dfb075d: the id reaches only setHighlightedNodes / data-ref-id attributes; TargetRefPill renders the resolved canvas label, never the id."
+    },
+    "blocks[].referenced_option_ids": {
+      "wire": "serialized",
+      "why": "Array of option IDs cited inside an explanation block. CORRECTED 2026-07-25: contrary to v1, the UI RENDERS these raw — DecisionGuideAI staging 0dfb075d maps them verbatim (mapV5Blocks.ts:82) and prints each id as visible chip text at v5/blocks/V5ExplanationBlock.tsx:40, with no label lookup and no fallback (reachable whenever VITE_ENABLE_V5_ORCHESTRATOR is on). Raw ids reaching users is a product defect tracked separately, not a licence for CEE to send junk here."
+    },
+    "analysis_ready.model_adjustments[].node_id": {
+      "wire": "serialized",
+      "why": "Pointer identifying which canvas node an analysis-ready model adjustment describes; the sibling prose is the rendered text. RE-ANCHORED 2026-07-25: the previous entry claimed this pointer lives 'inside coaching.widening_log[] entries', a per-entry array shape removed at @talchain/schemas v0.11.0 (widening_log is now an object) — the claim described a shape that no longer exists. The rendering half is verified only for the old widening_log path (DecisionGuideAI staging 0dfb075d, WhatOlumiAddedSection.tsx:87-90: Map key and React key, no id fallback); the two re-anchored paths were NOT individually swept for render sites."
+    },
+    "goal_constraints[].node_id": {
+      "wire": "serialized",
+      "why": "Pointer identifying which node a goal constraint binds to; the sibling label is the rendered text. Rendering half NOT individually swept in DecisionGuideAI — see the analysis_ready.model_adjustments[].node_id entry."
+    },
+    "blocks[].enrichment.robustness.fragile_edges[].edge_id": {
+      "wire": "serialized",
+      "why": "Pointer identifying which causal edge is fragile, inside the decision-review enrichment. Not rendered as text; the UI resolves it to edge labels."
+    },
+    "blocks[].enrichment.factor_sensitivity[].factor_id": {
+      "wire": "serialized",
+      "why": "Pointer identifying which factor a sensitivity entry describes; factor_label / label are normally the rendered text. CORRECTED 2026-07-25: the UI falls back to a prettified factor_id when the producer omits both label fields AND no canvas node matches (DecisionGuideAI staging 0dfb075d, useResultsSectionData.ts:2053-2058 and :2735 → DriversSection / TriageActionCards). So an unlabelled entry surfaces this id to users."
+    },
+    "blocks[].enrichment.flip_thresholds[].factor_id": {
+      "wire": "serialized",
+      "why": "Pointer identifying which factor a flip-threshold entry describes; factor_label is normally the rendered text. Note the sibling V5 flip_analysis block DOES render its factor_id raw as a row label (V5FlipAnalysisBlock.tsx:34) — same id-visibility hazard as the factor_sensitivity entry."
+    },
+    "blocks[].enrichment.option_comparison[].option_id": {
+      "wire": "serialized",
+      "why": "Pointer identifying which option each comparison entry describes; option_label is normally the rendered text. CORRECTED 2026-07-25: the UI falls back to the raw option_id when option_label is absent (DecisionGuideAI staging 0dfb075d, inspector-v2/panels/OutcomePanel.tsx:101 plus five sibling editors/adapters). The V5 comparison block itself is clean — it uses option_id only as a React key."
+    }
   },
-  "currently_unrendered_but_intentional": {}
+  "currently_unrendered_but_intentional": {},
+  "_corrections_2026_07_25": {
+    "trace.repair_summary": "v1 said 'Consumed by debug bundles; never user-facing.' FALSE on the distribution half: verified at staging tip 55c64ed5 that it is emitted unconditionally to every client on both the HTTP body and the SSE COMPLETE payload (include_debug=false). Description corrected; emission deliberately NOT changed — the UI depends on the key existing, so gating it is a wire-format change needing a consumer manifest.",
+    "machine_routing_allowed.request_id": "v1 claimed a top-level request_id 'Same as trace.request_id at the top level'. No client response body carries a top-level request_id — the correlation id ships as the X-CEE-Request-ID HTTP header and as trace.request_id. Entry removed as redundant/false; trace.request_id (diagnostic_allowed) is the real field.",
+    "machine_routing_allowed.correlation_id": "v1 claimed a top-level correlation_id. Same finding as request_id — no body carries it. Entry removed as redundant/false; trace.correlation_id is the real field.",
+    "structured_pointer_allowed.node_id": "v1 anchored this to 'coaching.widening_log[] entries', a shape removed at @talchain/schemas v0.11.0. Re-anchored to the two real serialized node_id pointers.",
+    "_rendering_claims_are_NOT_enforced_here": "The `wire` field is machine-checked. The RENDERING half of every `why` is not, and cannot be from this repo — the render sites live in DecisionGuideAI. Those halves were verified by hand against DGAI staging 0dfb075d on 2026-07-25 and WILL drift. Four v1 rendering claims were already false at that SHA: trace.repair_summary (rendered in production), trace.pipeline (via the same nested path), blocks[].referenced_option_ids (raw ids as chip text), and the factor_id / option_id id-as-label fallbacks. Making this class drift-proof needs a DGAI-side test asserting that no allowlisted pointer reaches a JSX text position; that is a separate lane. Until it exists, treat every rendering sentence here as dated evidence, not a guarantee.",
+    "raw_ids_rendered_to_users": "Product defect surfaced by this audit, NOT fixed here: DGAI renders raw wire identifiers to users at V5ExplanationBlock.tsx:40 (referenced_option_ids), V5FlipAnalysisBlock.tsx:34 (factor_id), and via id-as-label fallbacks in useResultsSectionData.ts / OutcomePanel.tsx. Tracked separately.",
+    "bare_leaf_keys": "v1 keyed 12 of 27 entries by bare leaf name (id, node_id, action_type, request_id, ...). The audit matches FULLY-QUALIFIED paths, so none of those keys ever matched anything — measured: 0 of 27 entries consulted across 4,786 walked fixture paths, and deleting all 27 left the suite at 14/14 green. All keys are now anchored, and an entry that resolves to nothing now FAILS."
+  }
 }

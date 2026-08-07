@@ -10,9 +10,18 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { createHash } from "node:crypto";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
+
+// NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
+// store treats it as a literal file name in cwd. Suites that share the
+// literal ":memory:" race each other's atomic rename (`:memory:.tmp` ->
+// `:memory:`) when vitest runs them in parallel forks, failing store init
+// non-deterministically. Use a per-suite unique temp path instead.
+const STORE_PATH = join(tmpdir(), `prompt-store-admin-prompts-verify-${process.pid}-${Date.now()}.json`);
 
 const ADMIN_KEY = "test-admin-key-verify-endpoint";
 const ADMIN_HEADERS = {
@@ -27,7 +36,7 @@ beforeAll(async () => {
   vi.stubEnv("ADMIN_API_KEY", ADMIN_KEY);
   vi.stubEnv("PROMPTS_ENABLED", "false"); // use defaults so cache warms from defaults
   vi.stubEnv("PROMPTS_STORE_TYPE", "file");
-  vi.stubEnv("PROMPTS_STORE_PATH", ":memory:");
+  vi.stubEnv("PROMPTS_STORE_PATH", STORE_PATH);
   vi.stubEnv("PROMPTS_BACKUP_ENABLED", "false");
   vi.stubEnv("ASSIST_API_KEY", "test-assist-key");
   cleanBaseUrl();
@@ -35,7 +44,8 @@ beforeAll(async () => {
   const { build } = await import("../../src/server.js");
   app = await build();
   await app.ready();
-});
+  // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   await app.close();

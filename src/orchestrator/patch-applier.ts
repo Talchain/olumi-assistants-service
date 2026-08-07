@@ -8,7 +8,16 @@
  * Never silently skips or repairs.
  */
 
-import type { GraphV3T } from "../schemas/cee-v3.js";
+import { EdgeV3, NodeV3, type GraphV3T } from "../schemas/cee-v3.js";
+import {
+  EDGE_REQUIRED_NESTED_FIELDS,
+  NODE_REQUIRED_NESTED_FIELDS,
+  describeNonObjectWrite,
+  isPlainObjectWrite,
+  mergeRequiredNestedWrite,
+  readNestedField,
+  requiredNestedMemberNames,
+} from "../schemas/required-nested-merge.js";
 import type { PatchOperation } from "./types.js";
 
 // ============================================================================
@@ -124,9 +133,37 @@ function applyUpdateNode(graph: GraphV3T, op: PatchOperation): void {
   }
 
   const updates = op.value as Record<string, unknown>;
-  // Guard: prevent overwriting the node's identity field
-  const { id: _id, ...safeUpdates } = updates;
-  Object.assign(node, safeUpdates);
+  // Guard: prevent overwriting the node's identity field.
+  const { id: _id, ...rest } = updates;
+  // ROADMAP 2.380 — structurally identical to `applyUpdateEdge`, over NodeV3's
+  // OWN derived set. That set is EMPTY today (every object-typed NodeV3 field —
+  // observed_state, prior — is `.optional()`, which is precisely why node edits
+  // survived the whole-object replace that killed edge edits), so this loop is
+  // a no-op at present and the behaviour is unchanged. It is here so that a
+  // future required nested object on NodeV3 cannot reopen the same defect on
+  // the node path: the derived set, the merge semantics, and the referee's
+  // matching builder all move together.
+  const scalarUpdates: Record<string, unknown> = {};
+  const nestedUpdates: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(rest)) {
+    if (NODE_REQUIRED_NESTED_FIELDS.has(key)) nestedUpdates[key] = val;
+    else scalarUpdates[key] = val;
+  }
+  Object.assign(node, scalarUpdates);
+
+  for (const [field, incoming] of Object.entries(nestedUpdates)) {
+    if (incoming === undefined) continue;
+    if (!isPlainObjectWrite(incoming)) {
+      const members = requiredNestedMemberNames(NodeV3, field).join(' and/or ');
+      throw new PatchApplyError(
+        'INVALID_OPERATION',
+        `update_node "${nodeId}" requires ${field} to be an object with ${members}; got ${describeNonObjectWrite(incoming)}`,
+      );
+    }
+    Object.assign(node, {
+      [field]: mergeRequiredNestedWrite(readNestedField(node, field), incoming),
+    });
+  }
 }
 
 function applyAddEdge(graph: GraphV3T, op: PatchOperation): void {
@@ -167,42 +204,53 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
   }
 
   const updates = op.value as Record<string, unknown>;
-  // Guard: prevent overwriting edge identity fields. `strength` is pulled out
-  // separately because it is a REQUIRED nested object on EdgeV3 with required
-  // {mean, std} members — a shallow Object.assign would drop members the patch
-  // does not mention (a patch carrying only {mean} would silently strip the
-  // existing std, producing an edge that fails GraphV3.safeParse downstream).
-  const { from: _from, to: _to, strength: strengthUpdate, ...scalarUpdates } = updates;
+  // Guard: prevent overwriting edge identity fields. Required NESTED OBJECT
+  // fields are pulled out separately because a shallow Object.assign would
+  // drop members the patch does not mention (a patch carrying only {mean}
+  // would silently strip the existing std, producing an edge that fails
+  // GraphV3.safeParse downstream).
+  //
+  // ROADMAP 2.380: the field set and the merge semantics now come from
+  // `schemas/required-nested-merge.ts`, DERIVED from EdgeV3 rather than
+  // spelled `strength` here. The graph-management referee's candidate builder
+  // imports the SAME module. It previously carried its own, replacing
+  // (non-merging) write, and — because the referee's candidate is ADOPTED as
+  // the applied view for tunable mutations — it overwrote this correct result
+  // and killed every live edge-strength edit. Sharing the semantics is what
+  // stops that recurring; the applier↔referee parity test
+  // (graph-management/__tests__/applier-referee-tunable-parity.test.ts) is
+  // what proves it.
+  const { from: _from, to: _to, ...rest } = updates;
+  const scalarUpdates: Record<string, unknown> = {};
+  const nestedUpdates: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(rest)) {
+    if (EDGE_REQUIRED_NESTED_FIELDS.has(key)) nestedUpdates[key] = val;
+    else scalarUpdates[key] = val;
+  }
   Object.assign(edge, scalarUpdates);
-  if (strengthUpdate !== undefined) {
+
+  for (const [field, incoming] of Object.entries(nestedUpdates)) {
     // `strength: undefined` is treated as "no change to strength" — a
     // legitimate partial update touching other fields only. Any other
     // non-plain-object value (`null`, array, primitive) is incoherent: the
-    // patch claims to update strength but cannot. UpdateEdgeValue in
+    // patch claims to update the field but cannot. UpdateEdgeValue in
     // patch-validation.ts is permissive (`z.record(z.string(), z.unknown())`),
     // so these shapes survive patch-validation. Refusing here avoids a
     // false-success path where the candidate matches the base graph
     // unchanged but the assistant narrates "Updated edge…".
-    if (strengthUpdate === null || typeof strengthUpdate !== 'object' || Array.isArray(strengthUpdate)) {
-      const got = strengthUpdate === null ? 'null' : Array.isArray(strengthUpdate) ? 'array' : typeof strengthUpdate;
+    if (incoming === undefined) continue;
+    if (!isPlainObjectWrite(incoming)) {
+      const members = requiredNestedMemberNames(EdgeV3, field).join(' and/or ');
       throw new PatchApplyError(
         'INVALID_OPERATION',
-        `update_edge "${from}" → "${to}" requires strength to be an object with mean and/or std; got ${got}`,
+        `update_edge "${from}" → "${to}" requires ${field} to be an object with ${members}; got ${describeNonObjectWrite(incoming)}`,
       );
     }
-    const existing = (edge.strength ?? {}) as Record<string, unknown>;
-    // Filter out explicit `undefined` subfields. JSON parsing cannot produce
-    // an `undefined` own property — the production root-cause path is
-    // unaffected — but the applier is also reachable from direct JS callers
-    // (tests, future internal use). Treating an explicit `{ std: undefined }`
-    // as a wipe would silently re-introduce the staging defect; treating it
-    // as a no-op preserves the existing nested value.
-    const incoming = strengthUpdate as Record<string, unknown>;
-    const filtered: Record<string, unknown> = {};
-    for (const key of Object.keys(incoming)) {
-      if (incoming[key] !== undefined) filtered[key] = incoming[key];
-    }
-    edge.strength = { ...existing, ...filtered } as typeof edge.strength;
+    // Explicit `undefined` members are a no-op, never a wipe — see
+    // `mergeRequiredNestedWrite`.
+    Object.assign(edge, {
+      [field]: mergeRequiredNestedWrite(readNestedField(edge, field), incoming),
+    });
   }
 }
 

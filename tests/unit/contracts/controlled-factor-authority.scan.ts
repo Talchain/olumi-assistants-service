@@ -80,21 +80,58 @@ export interface ScanResult {
  *   - run-analysis.ts:662 snapshot projection (persisted-derived: the snapshot
  *     is loaded via the scenario reader, so both alternatives come from the
  *     saved model)
+ *
+ * Extended for D-U F2 (#444, critique-lever display filter):
+ *   - compose.ts:595 Phase 3 lever-union rebuild (persisted-derived: the shared
+ *     `rebuildPhase3BlocksFresh` helper reads the lever union from its
+ *     `rawPersistedGraphForLevers` parameter, which BOTH production callers
+ *     thread from the saved model — the hash-gated persisted snapshot on the
+ *     current-turn branch (`fallbackForFact`, fails closed to `undefined` on
+ *     hash divergence) and the FRESH-verdict persisted graph on the prior-fact
+ *     branch. Display/copy-only: an empty set ⇒ no suppression, byte-identical)
  */
 export const AUTHORITY_ALLOWLIST: Readonly<
   Record<string, { readonly count: number; readonly allowedArgs: readonly string[] }>
 > = {
   'orchestrator-v5/turn-executor.ts': {
-    count: 3,
+    // 4th site (ROADMAP 2.73): STEP-5 applyCoachingSignal threads the
+    // controlled set into the rerun-delta comparator — same persisted-first
+    // form as the other three sites.
+    //
+    // 5th site (F1-flip lane, 2026-07-22): the bounded routing-failure fallback
+    // for a FORCED what_would_flip pill filters the prior-fact flip summary
+    // through the controlled set before composing the deterministic flip answer
+    // — the SAME persisted-first authority the routed happy-path fallback uses,
+    // so the pill's degrade-honestly answer suppresses option-pinned levers
+    // identically. No request-graph leg.
+    count: 5,
     allowedArgs: ['context.persistedGraph ?? options.graphState'],
   },
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
+    // The run_analysis chip path threads the controlled set into
+    // applyCoachingSignal. Persisted-derived: the pre-loaded scenario
+    // snapshot's raw persisted graph (production) with the turn-context
+    // persisted graph as the injected-registry test-path fallback. No
+    // request-graph leg.
+    //
+    // 2026-07-22 dead-noop deletion: 2 → 1 — the second site lived in the
+    // deterministic no-op explanation chip-click dispatch
+    // (`buildProjectionInputs`, removed as dead code post-#619) and derived
+    // the controlled set from `context.persistedGraph`. Deleting that dead
+    // path removed the site and its `context.persistedGraph` allowedArg. The
+    // surviving site is the live run_analysis leg below.
     count: 1,
-    allowedArgs: ['context.persistedGraph'],
+    allowedArgs: [
+      'cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph',
+    ],
   },
   'orchestrator-v5/tools/handlers/run-analysis.ts': {
     count: 1,
     allowedArgs: ['snapshot.rawPersistedGraph ?? { options: snapshot.options }'],
+  },
+  'orchestrator-v5/compose.ts': {
+    count: 1,
+    allowedArgs: ['rawPersistedGraphForLevers'],
   },
 };
 

@@ -1,13 +1,27 @@
 # Group A — Safety and Canonical State Foundation
 
-**Status:** implemented (A0/A1/A2/A6) + approval-gated plans (A3/A4) · **Date:** 2026-07-04
+**Status:** implemented (A0/A1/A2/A6) + A4 DONE-live (see UPDATE below; was approval-gated plan at doc date) + A3 still approval-gated plan · **Date:** 2026-07-04
 **Branch:** `claude/group-a-canonical-state-foundation` · **Base:** `origin/staging` @ `d60bffb32`
 **Source of truth:** `Olumi_Cross_Workstream_Graph_Data_Contract_v0.2` + `Olumi_Group_A_..._Brief_v0.1`
 **Constraints honoured:** no push · no merge · no deploy · no migration · no RPC change · no schema-package change · no UI/PLoT change · no #341 change · no Track 4 / versioning / restore / compare / timeline / M2-ledger work.
 
 ---
 
-## 0. ⚠ SECURITY FINDING (standalone — separate from Group A and from the A4 plan)
+> ## ⚠ UPDATE (2026-07-08, ROADMAP 1.40, Lane A — orchestrator-verified, doc reconciliation hygiene item)
+>
+> **The §0 security finding below is SUPERSEDED — the live cross-tenant hole it describes is CLOSED, not open.** A later live-DB introspection (`pg_proc`/`proacl`, same read-only method as §0, re-run 2026-07-08) found:
+>
+> ```
+> store_draft_graph(uuid, jsonb)  ACL: {postgres=X, service_role=X}   -- NOT authenticated
+> ```
+>
+> `authenticated` EXECUTE is **no longer present** on the live grant — the `REVOKE EXECUTE ... FROM authenticated` this doc recommends in §0/§7 (or an equivalent) was **applied out-of-band** sometime between 2026-07-04 and 2026-07-08, outside this repo's migration history. **There is no live cross-tenant hole today.** A4 (§7) is DONE at the live-DB level, not merely "approval-gated plan."
+>
+> **One residual, tracked separately, NOT closed by this note:** the repo's own migration file (`20260422120000_*`) still contains the original `GRANT EXECUTE ... TO authenticated`, so a **fresh DB build or prod promotion from this repo's migrations would RE-ARM the hole** — repo state and live state have drifted apart. Fix = author a `REVOKE` migration so repo matches live (a DB-security-class change, Paul-gated separately from this doc edit; see the `claude-cee/store-draft-graph-revoke` PR in the same hygiene batch that produced this note).
+>
+> Every "queued / not applied / open" statement about the §0 finding below (§0, §7, §10, §12) describes the **2026-07-04 point-in-time state** and is being left as the historical record of that investigation — treat this UPDATE block, not those inline statements, as the current truth. `Docs/v5/V5_CURRENT_STATE.md` and `Docs/FEATURE_FLAGS.md` are reconciled to match (FEATURE_FLAGS.md already had this right).
+
+## 0. ⚠ SECURITY FINDING (standalone — separate from Group A and from the A4 plan) — 2026-07-04 point-in-time record, see UPDATE above for current status
 
 **`store_draft_graph` is an authenticated-reachable, ownership-blind durable graph writer.** Confirmed against the **live** staging database (read-only `pg_proc` introspection via the pooler, 2026-07-04), not migration filenames:
 
@@ -118,7 +132,7 @@ Prepares strict server-side CAS on the durable writer, **dark/observe first**. D
 
 **Deferred to Group A.2:** multi-tenant ownership on the CAS path; version writes; M2 artefact stale interplay.
 
-## 7. A4 — `store_draft_graph` plan (APPROVAL-GATED; not implemented)
+## 7. A4 — `store_draft_graph` plan (2026-07-04: APPROVAL-GATED, not implemented — SEE UPDATE AT TOP: live-DB, this is now DONE; only the repo-migration re-arm risk remains, tracked as a separate Paul-gated REVOKE migration)
 
 **Classification: dormant-but-reachable, with a live cross-tenant bypass** (evidence §0). Not dead: the DB grant is live and PostgREST-reachable. TS-side it is test-only (zero prod call sites, pinned by test).
 
@@ -156,7 +170,7 @@ No faking here — the seam is documented, not stubbed.
 - **Blocks #341:** none from Group A. #341 gains an optional identity-hash field to adopt (additive). Merge-order coordination only.
 - **Blocks Track 4 UI actions:** package re-vendor (UI 0.8.1 / PLoT 0.2.1 → ratified version). UI↔CEE hash parity is an **expected documented blocker** — UI has no hasher and is on an old schema; not silently assumed.
 - **Blocks live apply / CAS / versioning:** A3 approval + D1 migration; the `scenarios.graph_identity_hash` column and `append_turn_atomic_v2` params do not exist yet.
-- **Non-blocking queued remediation:** A4 `REVOKE authenticated` on `store_draft_graph` **and** legacy `append_turn_atomic` (elevated by §0 — recommend fast-follow); later TS retirement of `storeDraftGraph`.
+- **Non-blocking queued remediation (2026-07-04 status; SEE UPDATE AT TOP — the live REVOKE has since happened out-of-band):** A4 `REVOKE authenticated` on `store_draft_graph` **and** legacy `append_turn_atomic` (elevated by §0 — recommend fast-follow); later TS retirement of `storeDraftGraph`. Residual as of 2026-07-08: the repo migration still `GRANT`s — a separate Paul-gated REVOKE-migration PR closes that.
 - **Dead / no action:** phantom writers `apply_patch_and_log` / `store_analysis_and_log` / `calculate_canvas_diff` / `restore_canvas_blocks` — confirmed non-existent in live DB + code.
 
 ## 11. Rollback notes
@@ -167,6 +181,6 @@ No faking here — the seam is documented, not stubbed.
 
 ## 12. Security / performance notes
 
-- **Security:** §0 finding surfaced; fix is REVOKE-only, reversible, not applied. No RLS/ownership/service-role change made. No sensitive provenance reaches any UI surface (identity hash is opaque, structured; not prose).
+- **Security:** §0 finding surfaced; fix is REVOKE-only, reversible. 2026-07-04 status was "not applied" — SEE UPDATE AT TOP: live-DB introspection on 2026-07-08 found the REVOKE (or equivalent) already applied out-of-band; no live hole remains, only the repo-migration re-arm risk (separately Paul-gated). No RLS/ownership/service-role change made by this doc. No sensitive provenance reaches any UI surface (identity hash is opaque, structured; not prose).
 - **Performance:** `graphIdentityHash` is O(n) in graph size with one `stableStringify` + one SHA-256; it is **not** on any hot path (unwired). The dark CAS evaluator is pure and only runs where a future write path calls it. No unbounded hashing introduced.
 - **No out-of-scope work:** no versioning/restore/compare/timeline/M2-ledger/Track 4 wiring; no UI hasher; `computeAnalysisAffectingGraphHash` values and the pending-gate behaviour are unchanged (golden + cross-cutting tests prove it).

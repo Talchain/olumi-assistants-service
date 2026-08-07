@@ -111,6 +111,81 @@ describe("OpenAI draftGraph error classification", () => {
     }
   });
 
+  // M3 (Codex r2 pre-merge review): OpenAIAdapter.chat previously DROPPED
+  // CallOpts.signal, so an abort never cancelled the in-flight request and the
+  // catch could not classify it. It now wires the external signal (like
+  // draftGraph/repairGraph) and classifies pre_aborted vs body.
+  it("chat: external abort cancels the in-flight request and classifies pre_aborted", async () => {
+    let sdkSignalAborted = false;
+    mockCreate = vi.fn().mockImplementation(
+      (_body: unknown, options: { signal: AbortSignal }) => {
+        // RED against the pre-fix code: the signal was never wired, so this was
+        // never aborted and the AbortError below classified as `body`.
+        sdkSignalAborted = options.signal.aborted;
+        return Promise.reject(new FakeAbortError());
+      },
+    );
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const { UpstreamTimeoutError } = await import("../../src/adapters/llm/errors.js");
+
+    const adapter = new OpenAIAdapter("gpt-4.1");
+    try {
+      await adapter.chat(
+        { system: "s", userMessage: "u" },
+        { requestId: "test-chat-pre-abort", timeoutMs: 80000, signal: AbortSignal.abort() },
+      );
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpstreamTimeoutError);
+      expect((err as InstanceType<typeof UpstreamTimeoutError>).timeoutPhase).toBe("pre_aborted");
+    }
+    // The request abort controller saw the client abort — the paid call was cancelled.
+    expect(sdkSignalAborted).toBe(true);
+  });
+
+  it("chat: honours the legacy CallOpts.abortSignal alias", async () => {
+    let sdkSignalAborted = false;
+    mockCreate = vi.fn().mockImplementation(
+      (_body: unknown, options: { signal: AbortSignal }) => {
+        sdkSignalAborted = options.signal.aborted;
+        return Promise.reject(new FakeAbortError());
+      },
+    );
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const adapter = new OpenAIAdapter("gpt-4.1");
+    try {
+      await adapter.chat(
+        { system: "s", userMessage: "u" },
+        { requestId: "test-chat-alias", timeoutMs: 80000, abortSignal: AbortSignal.abort() },
+      );
+      expect.unreachable("Should have thrown");
+    } catch {
+      /* thrown as expected */
+    }
+    expect(sdkSignalAborted).toBe(true);
+  });
+
+  it("chat: an AbortError without an external signal classifies as body timeout", async () => {
+    mockCreate = vi.fn().mockRejectedValue(new FakeAbortError());
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const { UpstreamTimeoutError } = await import("../../src/adapters/llm/errors.js");
+
+    const adapter = new OpenAIAdapter("gpt-4.1");
+    try {
+      await adapter.chat(
+        { system: "s", userMessage: "u" },
+        { requestId: "test-chat-body", timeoutMs: 80000 },
+      );
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpstreamTimeoutError);
+      expect((err as InstanceType<typeof UpstreamTimeoutError>).timeoutPhase).toBe("body");
+    }
+  });
+
   it("serialises cause with name and message (not empty object)", async () => {
     const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
     const { UpstreamTimeoutError } = await import("../../src/adapters/llm/errors.js");

@@ -29,11 +29,22 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
-// ANTHROPIC_EDIT_GRAPH_SCHEMA import removed — structured outputs disabled for edit_graph
-// (operations[].value carries arbitrary patch payloads incompatible with closed schemas)
+// Tier A #1 (edit-reliability, 2026-07-09): re-enabled with the v2
+// stringified-payload schema (Lane 26 v8-aux-field trick applied to
+// value/old_value) — see GRAMMAR BUDGET (v2) in anthropic-edit-graph-schema.ts.
+import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
+// ROADMAP 2.474 / A3 — ONE definition of the complexity budget, shared with the
+// structural-edit batch splitter (see patch-budget-limits.ts for why).
+import {
+  MAX_NODE_OPS,
+  MAX_EDGE_OPS,
+  OPTION_ADD_MAX_EDGE_OPS,
+  PATCH_BUDGET_FAILURE_CODE,
+  type PatchBudgetDimension,
+} from "./patch-budget-limits.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
-import { GraphV3 } from "../../schemas/cee-v3.js";
+import { GraphV3, FactorCategoryV3 } from "../../schemas/cee-v3.js";
 import type {
   TypedConversationBlock,
   ConversationContext,
@@ -53,24 +64,35 @@ import type {
 import type { RouteMetadata } from "../pipeline/types.js";
 import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
-import { serialiseEditContextForLLM } from "../context/serialise.js";
+import { serialiseEditContextForLLMWithMeta } from "../context/serialise.js";
+import { emitContextBudget } from "../../orchestrator-v5/context/context-budget-telemetry.js";
 import {
   validatePatchOperations,
   formatPatchValidationErrors,
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
+import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
   classifyAddRiskToOptionRejection,
   ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER,
 } from "../add-risk-rejection-guidance.js";
+import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
+import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
+import {
+  detectLabelValueDivergences,
+  buildLabelValueDivergenceDescription,
+  buildLabelValueDivergenceNote,
+  buildLabelValueDivergenceActions,
+  type LabelValueDivergence,
+} from "../../orchestrator-v5/label-value-divergence.js";
 import {
   findSuccessClaimHit,
   findForbiddenPhraseHit,
@@ -85,6 +107,7 @@ import {
 } from "../../orchestrator-v5/handlers/edit-rejection-text.js";
 import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
 import { buildNoOpRecoveryChips } from "./edit-graph-noop-chips.js";
+import { buildEditClarifyFallbackParts } from "../../orchestrator-v5/compose/edit-clarify-response.js";
 
 // ============================================================================
 // Types
@@ -143,6 +166,27 @@ export interface EditGraphOpts {
   plotOpts?: PLoTClientRunOpts;
   /** Internal invocation context carried through orchestrator state. */
   invocationInput?: Record<string, unknown>;
+  /**
+   * ROADMAP 2.474 / AMENDMENT A1 — THE SINGLE ENTRY SEAM for an
+   * externally-composed batch (today: the coach's `propose_structural_edit`
+   * tool, after its grounding validator has accepted the batch WHOLE).
+   *
+   * When present, this handler SKIPS ITS OWN COMPOSITION — no edit_graph LLM
+   * call, no parse — and runs the batch down the IDENTICAL downstream train:
+   * field normalisation, structural-edge defaults, Zod validation, the PLoT
+   * semantic gate, apply, receipts. Everything after composition is shared
+   * byte-for-byte with the deterministic path, which is the whole point: a
+   * tool that reached the graph through its own applier would be a second
+   * referee↔applier agreement surface, i.e. 2.380's parity defect built on
+   * purpose. There is one applier, one gate, one commit.
+   *
+   * REPAIR IS DISABLED on this path. The composer's contract is
+   * reject-don't-repair: a batch that fails validation here is a batch the
+   * grounding validator already accepted, so a repair round would be the
+   * pipeline arguing with a decision that was already made against the
+   * persisted graph. It fails honestly instead.
+   */
+  preComposedOperations?: readonly PatchOperation[];
 }
 
 // ============================================================================
@@ -206,6 +250,18 @@ export interface EditTargetResolutionResult {
   confidence: EditResolutionConfidence;
   alternatives: Array<{ id: string; label: string }>;
   candidate_labels: string[];
+  /**
+   * REVIEW-573 C-1 — set when `preferOptionTargetForOptionConfiguration`
+   * REDIRECTED the resolution to a single named option over a wider match
+   * set. The preference is a text heuristic that is blind to negation and
+   * to whether the configure/option vocabulary actually GOVERNS the option
+   * ("…the configuration of Cloud-Native CRM shouldn't change" still
+   * resolves the option). `determineEditResolutionMode` therefore demotes
+   * flagged resolutions out of auto-apply eligibility: the held-proposal
+   * consent flow makes a wrong-entity pick visible and declinable instead
+   * of silently written.
+   */
+  option_target_preferred?: boolean;
 }
 
 export interface EditGraphTraceDiagnostics {
@@ -260,6 +316,34 @@ function getMaxPatchOperations(): number {
   return config.cee.maxPatchOperations;
 }
 
+// Tier A #1 (edit-reliability, 2026-07-09): appended to the edit_graph user
+// message ONLY when structured outputs actually engage for this call (the
+// adapter appends it only when its own flag+allowlist+thinking gate passes —
+// see ChatArgs.structuredOutputsUserReminder). The v2 schema forces
+// operations[].value / .old_value to be strings — this reminder tells the
+// model to put the JSON-ENCODED payload inside those strings rather than
+// prose or a raw (ungrammatical, schema-rejected) object.
+//
+// ⚠ CORRECTED 2026-07-25 (F7). This used to say it "Mirrors
+// STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in adapters/llm/anthropic.ts (Lane 26,
+// draft_graph)". No such identifier exists — the draft-side reminder was deleted
+// on 2026-07-24 once the lean-draft contract made it a no-op. This constant is
+// the only live instance of the pattern, not a copy of one.
+//
+// Omitted on the prompt-only fallback path, where
+// the system prompt's existing object-shaped examples apply unchanged —
+// parseStringifiedOperationPayload() accepts both shapes at ingress.
+const EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER = `
+
+OUTPUT FORMAT OVERRIDE (structured mode):
+Emit "value" and "old_value" as JSON-encoded STRINGS, not objects — the
+schema only allows strings there. Each string must contain exactly the JSON
+the operation needs, with correctly escaped quotes. Examples:
+"value": "{\\"id\\":\\"fac_x\\",\\"kind\\":\\"factor\\",\\"label\\":\\"X\\"}"
+for add_node; "value": "0.8" (a bare JSON scalar string) for a single-field
+update where the path already names the field. Omit "value"/"old_value"
+entirely for remove_node/remove_edge — no payload is needed.`;
+
 // Promise-aware copy for the propose-and-confirm path. The V5 dispatcher
 // does not persist `pendingProposal` across turns and does not render
 // accept/cancel chips (see edit-graph-dispatch.ts), so this branch
@@ -272,10 +356,13 @@ function getMaxPatchOperations(): number {
 // dishonest — the user should restate their request more specifically.
 const PROPOSE_AND_CONFIRM_FALLBACK_TEXT = 'I’ve drafted a change that fits your description, but I need the specifics to apply it directly. Tell me the specific factor and value you’d like, and I’ll make the change directly.';
 
-// No-op path fallback. Forward-looking by design — see the comment at
-// the no-op branch on why a denial-shaped default ("No changes were
-// needed") would be rewritten by the V5 egress forbidden-phrase guard.
-const NO_OP_FALLBACK_TEXT = 'I couldn’t see a concrete change to make from that description. Tell me the specific factor and value you’d like, and I’ll apply it directly.';
+// No-op path fallback: Lane 22 replaced the chip-less canned copy that
+// lived here ("I couldn't see a concrete change to make…") with the
+// shared clarify composer parts (buildEditClarifyFallbackParts), so the
+// declined-preservation branch always ships deterministic copy WITH 1–3
+// factor/option-label chips. The copy remains forward-looking by design —
+// a denial-shaped default ("No changes were needed") would be rewritten
+// by the V5 egress forbidden-phrase guard.
 
 /**
  * Build the propose-and-confirm assistant text. Surfaces the concrete
@@ -292,6 +379,7 @@ const NO_OP_FALLBACK_TEXT = 'I couldn’t see a concrete change to make from tha
 function buildProposeAndConfirmText(
   proposedChanges: ProposedChangesPayload,
   resolvedTarget: ResolvedEditTarget | null,
+  knownLabels: readonly string[] = [],
 ): string {
   if (!resolvedTarget) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
   const changes = proposedChanges.changes ?? [];
@@ -319,13 +407,26 @@ function buildProposeAndConfirmText(
     return `I have a change in mind for **${label}**, but I need the specifics to apply it directly. ${action} and I'll make it.`;
   }
 
+  // F-2 (POSTDEPLOY-PROBES-573): a bolded target is a graph entity or it is
+  // nothing. Before this filter the copy bolded raw message clauses —
+  // "**CRM Platform Cost to 0.55.**", "**Not anything on the option.**" —
+  // telling the user the system had understood entities by those names.
+  // `structural_add` labels are exempt: a new element the user just named is
+  // legitimately absent from the graph.
+  const entityLabels = new Set<string>(knownLabels.map((label) => label.trim()));
+  entityLabels.add(resolvedTarget.label.trim());
   const labels: string[] = [];
   for (const change of changes.slice(0, 3)) {
-    if (change.element_label && !labels.includes(change.element_label)) {
-      labels.push(change.element_label);
-    }
+    const candidate = change.element_label?.trim();
+    if (!candidate || labels.includes(candidate)) continue;
+    if (change.action_type !== 'structural_add' && !entityLabels.has(candidate)) continue;
+    labels.push(candidate);
   }
-  if (labels.length === 0) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+  // Every proposed change resolved to a non-entity: name the one target we
+  // genuinely resolved rather than inventing a list of clause echoes.
+  if (labels.length === 0) {
+    return `I have changes in mind for **${resolvedTarget.label}**, but I need the specifics to apply them directly. Reply with the exact changes you'd like and I'll make them one at a time.`;
+  }
 
   const list =
     labels.length === 1
@@ -675,6 +776,62 @@ function resolveTokenOverlapMatches(
   });
 }
 
+/**
+ * POC-BOARD 5c (Step-0 capture T12b, 2026-07-17) — option-configuration
+ * target preference. An option-configuration edit names the OPTION being
+ * configured AND the factors whose intervention values it sets:
+ * "Configure the Cloud-Native CRM option: set CRM Feature Depth to 0.7,
+ * set CRM Platform Cost to 0.55." Treating every matched label as a
+ * competing TARGET made this ambiguous, and the clarifier asked "Which
+ * option should I update: CRM Feature Depth or CRM Platform Cost or
+ * Cloud-Native CRM?" — offering FACTORS as options. Live dead-end: the
+ * user answered the option and looped.
+ *
+ * Doctrine: in an option-configuration edit, factor labels are the FIELDS
+ * being configured, never candidate targets. Exactly one matched option →
+ * it IS the target (high confidence). Several matched options → still
+ * ambiguous, but the alternatives list contains ONLY options.
+ *
+ * Fires for `option_configuration` intent, and for `parameter_update`
+ * carrying explicit configure vocabulary (T12 names the option by label
+ * without the word "option", so `classifyEditIntent` cannot see the
+ * category — the graph-aware resolver can). NEVER fires for `structural`
+ * intent: an add-option request that mentions an existing option must not
+ * snap to it.
+ */
+function preferOptionTargetForOptionConfiguration(
+  editDescription: string,
+  intentCategory: EditIntentCategory,
+  matches: ResolvedEditTarget[],
+): EditTargetResolutionResult | null {
+  if (intentCategory === 'structural') return null;
+  const isOptionConfigure =
+    intentCategory === 'option_configuration'
+    || /\bconfigur(?:e|es|ed|ing|ation)\b/i.test(editDescription);
+  if (!isOptionConfigure) return null;
+  const optionMatches = dedupeTargets(matches.filter((match) => match.type === 'option'));
+  if (optionMatches.length === 0) return null;
+  if (optionMatches.length === 1) {
+    if (matches.length === 1) return null; // single match — default path is already right
+    // REVIEW-573 C-1: flag the redirect so the mode decision demotes it out
+    // of auto-apply eligibility (see `option_target_preferred` on the
+    // interface). BOTH arms are flagged — the adversarial probes proved the
+    // exposure is shared, not configure-vocab-specific: A5/A6 land via the
+    // configure-vocab arm ("…the configuration of Cloud-Native CRM
+    // shouldn't change" → parameter_update + /configur/), and "The
+    // Cloud-Native CRM option shouldn't change. Set CRM Platform Cost to
+    // 0.55." lands the same wrong-entity auto-apply via the
+    // option_configuration-intent arm ("change" + "option" classifies the
+    // intent with no configure vocabulary at all).
+    return {
+      ...buildResolutionResult('exact_label', 'high', optionMatches),
+      option_target_preferred: true,
+    };
+  }
+  // Several options named: still ambiguous, but only options are candidates.
+  return buildResolutionResult('exact_label', 'medium', optionMatches);
+}
+
 export function resolveEditTarget(
   editDescription: string,
   context: ConversationContext,
@@ -684,7 +841,10 @@ export function resolveEditTarget(
   const targets = getResolvedTargets(context);
   const exactMatches = targets.filter((target) => normalisedMessage.includes(normaliseMatchingText(target.label)));
   if (exactMatches.length > 0) {
-    return buildResolutionResult('exact_label', 'high', exactMatches);
+    return (
+      preferOptionTargetForOptionConfiguration(editDescription, intentCategory, exactMatches)
+      ?? buildResolutionResult('exact_label', 'high', exactMatches)
+    );
   }
 
   const aliasMatches = resolveAliasMatches(editDescription, context);
@@ -697,10 +857,13 @@ export function resolveEditTarget(
   // "competitor pressure" → "Competitive Pressure" via substring containment.
   const tokenMatches = resolveTokenOverlapMatches(normalisedMessage, targets);
   if (tokenMatches.length > 0) {
-    return buildResolutionResult(
-      tokenMatches.length === 1 ? 'exact_label' : 'ambiguous',
-      tokenMatches.length === 1 ? 'high' : 'medium',
-      tokenMatches,
+    return (
+      preferOptionTargetForOptionConfiguration(editDescription, intentCategory, tokenMatches)
+      ?? buildResolutionResult(
+        tokenMatches.length === 1 ? 'exact_label' : 'ambiguous',
+        tokenMatches.length === 1 ? 'high' : 'medium',
+        tokenMatches,
+      )
     );
   }
 
@@ -755,6 +918,22 @@ export function determineEditResolutionMode(
     return 'clarify';
   }
 
+  // REVIEW-573 C-1 — consent demotion for option-preferred resolutions.
+  // The option-target preference is negation/governance-blind (probes A5
+  // "Set CRM Platform Cost to 0.55 - the configuration of Cloud-Native CRM
+  // shouldn't change." and A6 "Configure nothing on Cloud-Native CRM; just
+  // set CRM Platform Cost to 0.55." both resolved the PROTECTED option at
+  // high confidence and auto-applied toward it). A heuristically redirected
+  // target never auto-applies: the held-proposal consent flow names the
+  // resolved entity, so a wrong pick is visible and declinable — one extra
+  // confirm turn on the narrow non-compound single-clause class (the four
+  // captured 5c phrasings are all compound and already confirm-first).
+  // Confirmed replays are unaffected: `confirmationMode` forces auto_apply
+  // upstream of this function.
+  if (resolution.option_target_preferred === true) {
+    return 'propose_and_confirm';
+  }
+
   if (
     resolution.confidence === 'high'
     && resolution.resolved_target
@@ -783,14 +962,16 @@ function inferActionTypeFromClause(clause: string, intentCategory: EditIntentCat
   return 'value_update';
 }
 
-function inferElementLabel(clause: string, resolvedTarget: ResolvedEditTarget | null, candidateLabels: string[] = []): string {
+function inferElementLabel(clause: string, resolvedTarget: ResolvedEditTarget | null, candidateLabels: readonly string[] = []): string {
   if (resolvedTarget) return resolvedTarget.label;
-  // Try matching clause text against known graph labels before falling back to clause text.
-  // Handles compound requests where later clauses reference the same or a sibling entity.
-  const normClause = normaliseMatchingText(clause);
-  for (const label of candidateLabels) {
-    if (normClause.includes(normaliseMatchingText(label))) return label;
-  }
+  // F-2 (POSTDEPLOY-PROBES-573): match the clause against the GRAPH's label
+  // set, longest match first. The caller used to pass
+  // `resolution.candidate_labels`, which contains only the labels that ALREADY
+  // resolved as targets (verified live: `["Cloud-Native CRM"]` on every 5c
+  // probe) — so no clause after the first could ever match and every one fell
+  // through to echoing its own text.
+  const resolved = resolveClauseLabel(clause, candidateLabels);
+  if (resolved !== null) return resolved;
   const structuralMatch = clause.match(/\b(?:add|create|remove|delete)\s+(?:a |an )?(.*)$/i);
   if (structuralMatch?.[1]) {
     return formatClauseDescription(structuralMatch[1]);
@@ -802,6 +983,7 @@ function buildProposedChanges(
   editDescription: string,
   resolution: EditTargetResolutionResult,
   intentCategory: EditIntentCategory,
+  knownLabels: readonly string[] = [],
 ): ProposedChangesPayload {
   // Defence-in-depth: when a high-confidence single target is resolved AND
   // its label itself contains a compound-edit separator (`and`, `also`,
@@ -830,7 +1012,8 @@ function buildProposedChanges(
     description: formatClauseDescription(clause),
     element_label: index === 0
       ? inferElementLabel(clause, resolution.resolved_target)
-      : inferElementLabel(clause, null, resolution.candidate_labels),
+      // F-2: the GRAPH's labels, not the already-resolved candidates.
+      : inferElementLabel(clause, null, knownLabels.length > 0 ? knownLabels : resolution.candidate_labels),
     action_type: inferActionTypeFromClause(clause, intentCategory),
   }));
   return { changes };
@@ -1452,9 +1635,20 @@ export function buildAppliedChanges(
   hasExistingAnalysis: boolean,
   preGraph: GraphV3T | null = null,
 ): AppliedChanges {
-  const changes: AppliedChangeItem[] = operations.map(op => {
+  // Deterministic cross-check: a label-only rename that changes an embedded
+  // quantity on a node with a modelled value has NOT changed that value. Such
+  // an op must never read as a completed value change (the P0 leak: a bare
+  // `Renamed "…$49" to "…$39"` receipt while the intervention stays 0.49).
+  const divergences = detectLabelValueDivergences(operations, preGraph, graph);
+  const divergenceByIndex = new Map<number, LabelValueDivergence>();
+  for (const d of divergences) divergenceByIndex.set(d.index, d);
+
+  const changes: AppliedChangeItem[] = operations.map((op, index) => {
     const label = resolveElementLabel(op.path, graph, preGraph, op.value);
-    const description = buildOperationDescription(op, graph, preGraph);
+    const divergence = divergenceByIndex.get(index);
+    const description = divergence
+      ? buildLabelValueDivergenceDescription(divergence)
+      : buildOperationDescription(op, graph, preGraph);
     return { label, description, element_ref: op.path };
   });
 
@@ -1509,16 +1703,45 @@ export async function handleEditGraph(
   const maxRetries = opts?.maxRetries ?? config.cee.maxRepairRetries;
   const plotClient = opts?.plotClient ?? null;
   const invocationInput = opts?.invocationInput ?? {};
+  // ROADMAP 2.474 / A1 — an externally-composed, already-grounded batch. Null
+  // on every deterministic turn, so that path is byte-identical to today.
+  const preComposedOperations = opts?.preComposedOperations ?? null;
   const baseGraphHash = computeGraphHash(context.graph);
   const groupedTargetLabels = readGroupedTargetLabels(invocationInput.grouped_target_labels);
   const groupedTargets = resolveExplicitGroupedTargets(context, groupedTargetLabels);
   const pendingProposal = invocationInput.pending_proposal as PendingProposalState | undefined;
   const confirmationMode = invocationInput.confirmation_mode === 'apply_pending_proposal';
   const intentCategory = classifyEditIntent(editDescription);
+  // F-2: the graph's own label set — the only legitimate source of a target
+  // name in deterministic clarify copy (trap-12: derive, don't echo).
+  const knownGraphLabels = getResolvedTargets(context).map((target) => target.label);
   const targetResolution = groupedTargets.length > 0
     ? buildResolutionResult('graph_local', 'high', groupedTargets)
     : resolveEditTarget(editDescription, context, intentCategory);
-  const resolutionMode = confirmationMode
+  // ROADMAP 2.474 / A1 — a PRE-COMPOSED batch has already resolved its targets
+  // by id against the persisted graph, and the grounding validator hard-rejected
+  // the whole batch unless every one of them existed. The deterministic
+  // target-resolution modes below (`clarify` when the TEXT is ambiguous,
+  // `propose_and_confirm` when it is uncertain) are judgements about a sentence
+  // this path is no longer reading a target out of, so they cannot apply: their
+  // question — "which entity did they mean?" — is already answered, by id.
+  // `auto_apply` here means only "stop asking the sentence about which entity
+  // was meant". It is NOT an apply grant — but the reason it is not is
+  // CONDITIONAL, and saying so unconditionally would be false: what actually
+  // withholds apply power is the referee gate downstream holding every
+  // structural op for a confirm, and that routing exists only while
+  // `CEE_GRAPH_MANAGEMENT_MODE` resolves to 'live' (in 'shadow'/'off' the gate
+  // returns blockApply:false by construction).
+  //
+  // The condition is enforced where the tool ENGAGES, not here: the structural
+  // edit tool's entry decision requires `holdSpineActive` (see
+  // orchestrator-v5/tools/structural-edit-entry.ts), so a pre-composed batch
+  // cannot reach this line at all unless the hold is live. This comment
+  // therefore describes a guarantee that holds — and names the thing that makes
+  // it hold, so a future change that severs the two is visible from here.
+  const resolutionMode = preComposedOperations !== null
+    ? 'auto_apply'
+    : confirmationMode
     ? 'auto_apply'
     : groupedTargets.length > 0
     ? 'auto_apply'
@@ -1621,7 +1844,12 @@ export async function handleEditGraph(
   // Constraints (keep X under/below Y, hard requirement) can't be expressed
   // as standard patch operations. Detect and construct goal_constraints update
   // deterministically instead of falling through to the edit_graph LLM.
-  const constraintMatch = detectConstraintIntent(editDescription, context.graph);
+  // Same reasoning as `resolutionMode` above: the constraint shortcut composes
+  // operations from the SENTENCE, so it must not pre-empt a batch that has
+  // already been composed and grounded.
+  const constraintMatch = preComposedOperations !== null
+    ? null
+    : detectConstraintIntent(editDescription, context.graph);
   if (constraintMatch) {
     branchTaken = 'apply';
     branchReason = 'constraint_shortcut';
@@ -1681,29 +1909,74 @@ export async function handleEditGraph(
   }
 
   if (resolutionMode === 'propose_and_confirm') {
-    branchTaken = 'propose';
-    branchReason = confirmationMode ? 'confirmed_pending_proposal' : 'requires_confirmation_before_apply';
-    proposalReturned = true;
-    const proposedChanges = pendingProposal?.proposed_changes ?? buildProposedChanges(editDescription, targetResolution, intentCategory);
-    const candidateLabels = pendingProposal?.candidate_labels
-      ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
-    return {
-      blocks: [],
-      assistantText: buildProposeAndConfirmText(proposedChanges, targetResolution.resolved_target),
-      latencyMs: Date.now() - startTime,
-      appliedGraph: null,
-      wasRejected: false,
-      pendingProposal: {
-        tool: 'edit_graph',
-        original_edit_request: editDescription.trim(),
-        proposed_changes: proposedChanges,
-        candidate_labels: candidateLabels,
-        base_graph_hash: baseGraphHash,
-      },
-      proposedChanges,
-      diagnostics: diagnostics(),
-      routeMetadata: routeMetadata(),
-    };
+    // ── F-1 (POSTDEPLOY-PROBES-573) — claim-then-starve gate ────────────────
+    //
+    // MECHANISM RULE: a deterministic claim must either fully handle the turn
+    // OR fall through to the more capable path. It must never claim-then-
+    // starve. A clarify is correct ONLY when neither path can proceed.
+    //
+    // This branch returns ABOVE `getSystemPrompt('edit_graph')`, so taking it
+    // means the edit LLM is never called (`llm_calls=0` on every capture).
+    // What it returns instead asks the user for "the specifics" — but
+    // `ProposedChange` carries no value field, so the payload it mints cannot
+    // represent one, and on the live V5 path nothing ever reads the pending
+    // back (see the persist/read-back/thread note in edit-graph-dispatch.ts).
+    // Live result on build 53b817b: nine configure-shaped turns, every one
+    // carrying its specifics, every one answered with the same request for
+    // specifics; `interventions` still null at the end.
+    //
+    // So the branch keeps the turn only when it genuinely holds something the
+    // LLM lane does not — a STORED proposal to replay (the V4 confirm
+    // round-trip, which the V4 pipeline does persist) — or when the message
+    // carries no value and no direction, in which case the LLM lane could not
+    // produce a value op either and asking is the truthful, cheaper move.
+    const storedProposal = pendingProposal?.proposed_changes ?? null;
+    if (shouldHandOffProposeToLlmLane(editDescription, storedProposal !== null)) {
+      // Fall through to the edit LLM lane below. `resolutionMode` stays
+      // `propose_and_confirm`, which deliberately keeps
+      // `resolvedTargetInstruction` OUT of the prompt (see line ~1679): the
+      // REVIEW-573 C-1 target preference is negation-blind, so the LLM must
+      // read the message for itself rather than be pinned to a heuristically
+      // redirected entity. Every mutation it proposes still passes the GM
+      // referee gate in the dispatcher.
+      branchReason = 'propose_handed_off_to_llm_lane';
+    } else {
+      branchTaken = 'propose';
+      branchReason = confirmationMode
+        ? 'confirmed_pending_proposal'
+        : storedProposal !== null
+        ? 'requires_confirmation_before_apply'
+        : 'no_value_or_direction_in_message';
+      proposalReturned = true;
+      // S3-L1 — the propose-and-confirm hold no longer mints the vestigial V4
+      // `pendingProposal.proposed_changes` payload. That payload is the
+      // valueless V4 `ProposedChange` ({description, element_label, action_type}
+      // — no value field, orchestrator/types.ts) and it is WRITE-ONLY on the
+      // live V5 path: the V5 edit dispatcher does not persist it, read it back,
+      // or thread it (edit-graph-dispatch.ts:738-757), and this branch fires
+      // ONLY when the message carries no value or direction (propose-handoff.ts)
+      // — so there is nothing to carry. The value-bearing hold is the V5 carrier
+      // (`orchestrator-v5/types/proposed-change.ts` → `inline_patch.operations`),
+      // populated by the chip proposed-change synthesis and gm-held. What this
+      // branch still owns is the user-facing "ask for the specifics" copy, which
+      // is derived locally and never needs to round-trip. `proposedChanges`
+      // stays a within-turn local ONLY to build that copy — it is not returned.
+      const proposedChanges = storedProposal
+        ?? buildProposedChanges(editDescription, targetResolution, intentCategory, knownGraphLabels);
+      return {
+        blocks: [],
+        assistantText: buildProposeAndConfirmText(
+          proposedChanges,
+          targetResolution.resolved_target,
+          knownGraphLabels,
+        ),
+        latencyMs: Date.now() - startTime,
+        appliedGraph: null,
+        wasRejected: false,
+        diagnostics: diagnostics(),
+        routeMetadata: routeMetadata(),
+      };
+    }
   }
 
   // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)
@@ -1711,6 +1984,10 @@ export async function handleEditGraph(
 
   // Capture prompt metadata for telemetry/debugging
   let promptMeta: ReturnType<typeof getSystemPromptMeta> | undefined;
+  // Context v2 S0: repair-prompt identity for the repair-attempt
+  // `v5.context_budget` events. Resolved lazily on the first repair attempt;
+  // `null` = resolution failed (observability-only, never fatal).
+  let repairPromptMeta: ReturnType<typeof getSystemPromptMeta> | null | undefined;
   try {
     promptMeta = getSystemPromptMeta('edit_graph');
   } catch {
@@ -1731,8 +2008,12 @@ export async function handleEditGraph(
     );
   }
 
-  // Build context section for LLM (edit compact graph + framing + analysis + selected elements)
-  const contextSection = serialiseEditContextForLLM(context);
+  // Build context section for LLM (edit compact graph + framing + analysis + selected elements).
+  // Context v2 S0: the WithMeta form additionally yields per-section char
+  // counts + truncation records for `v5.context_budget` at this adapter
+  // boundary. `.text` is byte-identical to the legacy serialiser output.
+  const serialisedContext = serialiseEditContextForLLMWithMeta(context);
+  const contextSection = serialisedContext.text;
 
   // Combine system prompt with serialised context
   const fullSystemPrompt = `${systemPrompt}\n\n${intentInstruction ? `${intentInstruction}\n\n` : ''}${contextSection}`;
@@ -1755,7 +2036,9 @@ export async function handleEditGraph(
   }
 
   // ---- Attempt loop: LLM call → validate → PLoT → repair ----
-  const totalAttempts = maxRetries + 1;
+  // ROADMAP 2.474 / A1: a pre-composed batch gets exactly ONE attempt — the
+  // composer's contract is reject-don't-repair (see `preComposedOperations`).
+  const totalAttempts = preComposedOperations !== null ? 1 : maxRetries + 1;
   let lastValidationResult: PatchValidationResult | undefined;
   let lastPlotErrors: string | undefined;
   let lastRawOps: unknown[] | undefined;
@@ -1787,10 +2070,33 @@ export async function handleEditGraph(
         '',
         ...(intentInstruction ? ['## Narrow Edit Constraint', intentInstruction, ''] : []),
         '## Previous (Invalid) Operations',
-        JSON.stringify(lastRawOps ?? [], null, 2),
+        // Lane CEE-D (edit-loop reliability): embed previous ops in the SAME
+        // JSON OBJECT shape the repair prompt mandates for output
+        // ({ "operations": [...] }). A bare array here primed the model
+        // toward the v1 bare-array response format, contradicting the
+        // repair prompt's own "Respond ONLY with a corrected JSON object"
+        // instruction and priming repeat parse failures.
+        JSON.stringify({ operations: lastRawOps ?? [] }, null, 2),
       ].join('\n');
     }
 
+    // ── ROADMAP 2.474 / A1 — COMPOSITION, or the pre-composed batch ───────
+    // A pre-composed batch replaces the LLM composition and NOTHING ELSE.
+    // Everything below this block — normalisation, the intent guard, Zod
+    // validation, the PLoT gate, apply, receipts — is the same code on both
+    // paths, so the tool cannot acquire a power the deterministic path
+    // doesn't have.
+    let llmResult: EditGraphLLMResult;
+    if (preComposedOperations !== null) {
+      llmResult = {
+        // Copied, never aliased: the caller's array must not be mutated by
+        // the normalisation steps below.
+        operations: preComposedOperations.map((op) => ({ ...op })),
+        removed_edges: [],
+        warnings: [],
+        coaching: null,
+      };
+    } else {
     // LLM call
     let chatResult;
     try {
@@ -1800,12 +2106,18 @@ export async function handleEditGraph(
       const editGraphThinking = config.cee.thinking?.editGraphEnabled
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.editGraphBudget }
         : undefined;
-      // Structured Outputs DISABLED for edit_graph: the operations[].value field
-      // carries arbitrary patch payloads (node/edge objects) that cannot be represented
-      // as a closed Anthropic schema. With additionalProperties:false on operations items,
-      // the LLM cannot produce value/old_value, making add/update operations non-functional.
-      // edit_graph relies on prompt-driven JSON output instead.
-      const editGraphOutputSchema = undefined;
+      // Structured Outputs (Tier A #1, 2026-07-09): re-enabled via the v2
+      // stringified-payload schema — value/old_value are `{ type: "string" }`
+      // (Lane 26's v8-aux-field trick) so the closed-schema grammar no longer
+      // forbids them. Skipped only when extended thinking is enabled
+      // (incompatible with structured outputs, same as draft_graph). Applies
+      // to BOTH the first attempt and repair attempts (same call site), so
+      // the repair loop gets grammar enforcement too. The adapter itself
+      // decides (flag + model allowlist) whether structured mode actually
+      // engages; the reminder is only appended to the prompt when it does.
+      const editGraphOutputSchema = !editGraphThinking
+        ? ANTHROPIC_EDIT_GRAPH_SCHEMA as Record<string, unknown>
+        : undefined;
       chatResult = await adapter.chat(
         {
           system: effectiveInstruction,
@@ -1813,6 +2125,7 @@ export async function handleEditGraph(
           maxTokens: getMaxTokensFromConfig('edit_graph') ?? 4000,
           ...(editGraphThinking ? { thinking: editGraphThinking } : {}),
           ...(editGraphOutputSchema ? { outputSchema: editGraphOutputSchema } : {}),
+          ...(editGraphOutputSchema ? { structuredOutputsUserReminder: EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER } : {}),
         },
         callOpts,
       );
@@ -1848,13 +2161,42 @@ export async function handleEditGraph(
     outputTokensSum += chatResult.usage?.output_tokens ?? 0;
     lastStopReason = chatResult.stopReason ?? null;
 
+    // Context v2 S0 (ROADMAP 1.73, 03 §2): once per LLM call at this
+    // adapter boundary — repair attempts are their own call_site so the
+    // dashboard separates first-try context cost from repair context cost.
+    // The contextSection is IDENTICAL across attempts (only the system
+    // prompt + user message differ), so section_chars repeat by design.
+    // Prompt identity: the edit prompt's meta is captured above; the
+    // repair prompt's is resolved lazily on first repair attempt.
+    if (isRepair && repairPromptMeta === undefined) {
+      try {
+        repairPromptMeta = getSystemPromptMeta('repair_edit_graph');
+      } catch {
+        repairPromptMeta = null; // metadata is observability-only
+      }
+    }
+    const budgetPromptMeta = isRepair ? repairPromptMeta : promptMeta;
+    emitContextBudget({
+      call_site: isRepair ? 'repair_edit_graph' : 'edit_graph',
+      model: chatResult.model ?? null,
+      prompt_version: budgetPromptMeta?.prompt_version != null ? String(budgetPromptMeta.prompt_version) : null,
+      prompt_hash: budgetPromptMeta?.prompt_hash ?? null,
+      request_id: requestId,
+      scenario_id: context.scenario_id ?? null,
+      section_chars: serialisedContext.sectionChars,
+      total_chars: contextSection.length,
+      truncations: serialisedContext.truncations,
+      summary_lag_turns: null, // S4-inject is routing-only; this site has no summary layer yet
+      ui_narrowed: null, // narrowing marker is a routing-ingress concern
+      usage: chatResult.usage,
+    });
+
     // Bidirected edges: the edit_graph prompt (v6) constrains output to directional
     // from/to operations only. Bidirected edge references in the schema are for
     // context (the model may contain bidirected edges), but edit operations always
     // target a single directional edge. No decomposition logic needed.
 
     // Parse operations from LLM response (v2 object or legacy array)
-    let llmResult: EditGraphLLMResult;
     try {
       llmResult = parseEditGraphResponse(chatResult.content);
     } catch (error) {
@@ -1876,10 +2218,16 @@ export async function handleEditGraph(
       validationOutcome = 'parse_failed';
       setViolationCodes(['parse_error']);
       recoveryPathChosen = 'repair_retry';
-      lastRawOps = [];
+      // Lane CEE-D (edit-loop reliability): PRESERVE lastRawOps across a
+      // parse failure. Resetting to [] here wiped the previous attempt's
+      // operations out of the next repair message — the model lost the
+      // very context it needed to correct, priming repeat failures. A
+      // first-attempt parse failure leaves lastRawOps undefined, which the
+      // repair message renders as { "operations": [] } (nothing to keep).
       lastValidationResult = { valid: false, operations: [], zodErrors: undefined, referentialErrors: [{ index: 0, op: 'unknown', path: '', message: error instanceof Error ? error.message : String(error) }] };
       continue;
     }
+    } // ── end of the LLM-composition branch (A1 seam) ──────────────────────
 
     // Handle empty operations (no-op: conflict, forbidden edge, already-satisfied)
     if (llmResult.operations.length === 0) {
@@ -1891,7 +2239,7 @@ export async function handleEditGraph(
       // target), the user should keep that specific, useful question instead of
       // a generic dead-end. We scrub it with the SAME stack as the success
       // path, then a conservative trip test DECLINES preservation — falling
-      // back to the deterministic NO_OP_FALLBACK_TEXT — whenever the candidate
+      // back to the deterministic clarify copy + chips — whenever the candidate
       // is empty, makes a success/mutation claim, carries a denial/jargon
       // phrase, internal vocabulary, or a raw id/path. A preserved question
       // never contains a success claim by construction, so the V5 false-success
@@ -1914,28 +2262,63 @@ export async function handleEditGraph(
         if (proposalGuard.leaked && proposalGuard.suffixed) {
           noOpCandidate = proposalGuard.suffixed;
         }
+        // Lane 22 — R10 relaxation (transform, not decline): the edit
+        // prompt teaches the LLM the word "graph", so its clarifying
+        // questions routinely say "the graph" where product copy says
+        // "the model". Substituting the domain synonym is claim-safe
+        // and lets an otherwise-clean question survive the trip test
+        // below instead of being scrubbed to canned copy (live
+        // 2026-07-07: coaching_dropped:true, clarification_preserved:
+        // false). Case of the leading letter is preserved.
+        noOpCandidate = noOpCandidate.replace(/\bgraph\b/gi, (m) =>
+          m[0] === 'G' ? 'Model' : 'model',
+        );
       }
       const noOpClarificationPreserved =
         noOpCandidate.trim().length > 0 &&
         findSuccessClaimHit(noOpCandidate) === null &&
         findForbiddenPhraseHit(noOpCandidate) === null &&
         findEditInternalsHit(noOpCandidate) === null;
+
+      // Lane 22 — richer deterministic fallback. When preservation
+      // declines (or there is no candidate at all), reuse the SAME copy +
+      // factor/option-label chips as the route-level edit intercepts
+      // (composeEditClarifyResponse) instead of the chip-less canned
+      // NO_OP_FALLBACK_TEXT. The copy passes the egress phrase guards
+      // (pinned by the edit-clarify-response tests).
+      const clarifyFallback = noOpClarificationPreserved
+        ? null
+        : buildEditClarifyFallbackParts(
+            context.graph.nodes as ReadonlyArray<{ id: string; kind: string; label: string }>,
+          );
       const assistantText = noOpClarificationPreserved
         ? noOpCandidate
-        : NO_OP_FALLBACK_TEXT;
+        : clarifyFallback!.text;
 
       // V5 edit lifecycle recovery v1 — deterministic chips for the
-      // no-op branch. Source: validator referential errors only (the
-      // only available anchor that maps cleanly back to a graph node
-      // ID). PLoT errors carry a free-text reason string with no
-      // structured factor/edge anchor, so a no-op preceded ONLY by a
-      // PLoT failure produces zero chips — the "no safe anchor → no
-      // chips" contract. Strictly additive: existing telemetry,
-      // assistant_text, blocks, and graph fields are unchanged.
-      const recoveryChips = buildNoOpRecoveryChips({
+      // no-op branch. Source: validator referential errors first (the
+      // only anchor that maps cleanly back to a graph node ID). PLoT
+      // errors carry a free-text reason string with no structured
+      // factor/edge anchor, so a no-op preceded ONLY by a PLoT failure
+      // previously produced zero chips. Lane 22: when no
+      // referential-error chips are available and the LLM's question was
+      // not preserved, fall back to the clarify label chips so the user
+      // always has an affordance (the live 2026-07-07 no-op shipped
+      // canned copy with ZERO chips).
+      const referentialChips = buildNoOpRecoveryChips({
         referentialErrors: lastValidationResult?.referentialErrors,
         nodes: context.graph.nodes,
       });
+      const recoveryChips =
+        referentialChips.length > 0
+          ? referentialChips
+          : clarifyFallback !== null
+            ? clarifyFallback.chips.map((c) => ({
+                label: c.label,
+                prompt: c.message,
+                role: 'facilitator' as const,
+              }))
+            : [];
 
       log.info(
         {
@@ -2001,7 +2384,27 @@ export async function handleEditGraph(
     const rawOps: unknown[] = normalisedOps;
     lastRawOps = rawOps;
 
-    if (intentCategory !== 'structural' && hasStructuralOperations(normalisedOps)) {
+    // ROADMAP 2.474 / A1 — the narrow-intent guard is a guard on THIS
+    // handler's own composer: it catches the free-text edit prompt
+    // over-reaching into structure on a request that only asked for a value
+    // change. A pre-composed batch has no such failure mode to catch, and
+    // leaving the guard on would break the headline capability outright —
+    // "give each option its own driver" classifies as `parameter_update`
+    // ("change" + "option"), so every grounded restructure would fail the
+    // guard, and with repair disabled on this path (totalAttempts = 1) it
+    // would fail with no recourse.
+    //
+    // What replaces it here is STRONGER, not weaker: the batch was already
+    // proved against the persisted graph id-by-id by the grounding validator,
+    // and every structural op is HELD by the referee behind a confirm chip
+    // that NAMES each change. The user sees and consents to exactly the
+    // structure being added; the guard's job was to stop structure appearing
+    // unasked, and on this path nothing appears without a confirm.
+    if (
+      preComposedOperations === null &&
+      intentCategory !== 'structural' &&
+      hasStructuralOperations(normalisedOps)
+    ) {
       consecutiveNarrowStructuralFailures++;
       validationOutcome = 'intent_guard_failed';
       setViolationCodes(['intent_guard_structural_ops']);
@@ -2032,6 +2435,29 @@ export async function handleEditGraph(
         "edit_graph rejected — too many operations",
       );
       if (attempt === totalAttempts) {
+        // POC-BOARD #6 — over-cap edit split path (CEE_EDIT_CAP_SPLIT, default ON
+        // since 18 Jul, Paul-ratified; env var = kill-switch).
+        // Flag ON: instead of the bare whole-batch MAX_OPERATIONS_EXCEEDED refusal
+        // (a dead end — a static deflection asking the USER to re-scope, carrying no
+        // concrete next step for THIS batch), return a BOUNDED refusal under a
+        // distinct signal that carries a concrete split next-step: recovery chips
+        // inviting the user to make the change in smaller passes. Nothing is applied
+        // (an arbitrary index-15 truncation of an LLM op array risks an incoherent
+        // partial batch — add_node before its add_edge, etc. — so we do NOT auto-apply
+        // a partial; the honest bounded refusal is the safe in-scope fix), but the
+        // user is no longer dead-ended. The raw count/cap stay in rejection.reason
+        // (msg); the user-facing prose stays banned-token clean.
+        if (config.cee.editCapSplitEnabled) {
+          validationOutcome = 'max_operations_split_suggested';
+          setViolationCodes(['max_operations_split_suggested']);
+          recoveryPathChosen = 'rejection_block';
+          branchTaken = 'rejection';
+          branchReason = 'max_operations_split_suggested';
+          failureBranch = 'max_operations_split';
+          failureCode = 'max_operations_split_suggested';
+          failureMessage = msg;
+          return buildOverCapSplitResult(msg, rawOps as PatchOperation[], baseGraphHash, turnId, startTime, attempt, diagnostics());
+        }
         validationOutcome = 'max_operations_exceeded';
         setViolationCodes(['max_operations_exceeded']);
         recoveryPathChosen = 'rejection_block';
@@ -2121,11 +2547,15 @@ export async function handleEditGraph(
         );
         const rejectionCtx: PatchRejectionContext = {
           reason: 'budget_exceeded',
-          detail: 'Consider breaking this into smaller steps, or rebuilding the model from an updated brief.',
+          // ROADMAP 2.655 — INTERNAL from here on. This string is the logged
+          // `failure_message`; it is no longer appended to user copy, which the
+          // rejection helper now owns end to end.
+          detail: 'Patch operation budget exceeded; the request needs to be made in smaller parts.',
           node_ops: budgetResult.nodeOps,
           edge_ops: budgetResult.edgeOps,
           max_node_ops: MAX_NODE_OPS,
           max_edge_ops: budgetResult.effectiveMaxEdgeOps ?? MAX_EDGE_OPS,
+          breached_dimensions: budgetResult.breachedDimensions,
           suggested_actions: [
             { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
             { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
@@ -2138,7 +2568,11 @@ export async function handleEditGraph(
         branchTaken = 'rejection';
         branchReason = 'patch_budget_exceeded';
         failureBranch = 'patch_budget';
-        failureCode = 'budget_exceeded';
+        // ROADMAP 2.655 — the V5 dispatcher recognises this exact code to stop
+        // a declining structural-edit tool handing the turn back to the copy
+        // above. Consumed from the leaf, never re-spelled, so the producer and
+        // the consumer cannot drift apart.
+        failureCode = PATCH_BUDGET_FAILURE_CODE;
         failureMessage = rejectionCtx.detail;
         return {
           blocks: [],
@@ -2172,9 +2606,47 @@ export async function handleEditGraph(
     // failure (NODE_NOT_FOUND, EDGE_NOT_FOUND, etc.) and must be
     // surfaced regardless of validation config. The existing error
     // handler stays in place.
+    // B5 — canonicalise tunable value-op field spellings BEFORE the apply.
+    //
+    // `normalisePath` wraps a nested path into a LITERAL key
+    // (`/nodes/<id>/data/value` → `{ 'data/value': 0.5 }`, and the canonical
+    // `/nodes/<id>/observed_state/value` the same way). `applyUpdateNode` is a
+    // shallow Object.assign, so that key lands at the node ROOT and the
+    // GraphV3 parse strips it — the value silently no-ops. The shared
+    // canonicaliser (also used by the held/confirm path) translates those
+    // spellings into the one GraphV3 preserves: a MERGE onto observed_state.
+    //
+    // Only the SPELLING changes — never the number, order, or targets of ops.
+    // `operations` stays untouched for every downstream consumer (receipts,
+    // telemetry, `optionIdsTouchedByOperations`, `extractInterventionUpdates`),
+    // exactly as `executeGmHeldResume` does it. Ops the canonicaliser cannot
+    // translate are left VERBATIM so the landed-op postcondition below can
+    // refuse them honestly rather than strip-and-succeed.
+    //
+    // UNCONDITIONAL since 2026-07-25. This was gated on
+    // `CEE_VALUE_OP_CANONICALISATION` (default OFF), which meant the defect
+    // above was live on every real edit. A sweep of all persisted graphs found
+    // FOUR false successes — the number the user asked for written onto the
+    // node as a dead `data/value` key while `observed_state.value` never moved,
+    // and the turn reporting the edit as APPLIED. Freshest 2026-07-23:
+    // "Change the monthly cashflow factor to 0.42" → reported applied, value
+    // still 0.5. Pinned by
+    // `__tests__/persisted-false-success-2026-07-23.test.ts`.
+    //
+    // Rollback is a code revert, not an env flip (no dark launches).
+    //
+    // 2.396(b): the canonicalised value ops then earn the USER stamp
+    // (observed_state.source + node provenance) — a chat-set value is the
+    // user's, and before this every one rendered as "Olumi estimate". Stamped
+    // INTO the op so the write survives apply → re-parse → the landed-op
+    // postcondition identically on both sides (see stampUserEditProvenance).
+    const opsToApply: PatchOperation[] = stampUserEditProvenance(
+      canonicaliseValueOps(operations, context.graph).operations,
+    );
+
     let candidateGraph: GraphV3T | undefined;
     try {
-      candidateGraph = applyPatchOperations(context.graph as GraphV3T, operations);
+      candidateGraph = applyPatchOperations(context.graph as GraphV3T, opsToApply);
     } catch (applyErr) {
       if (applyErr instanceof PatchApplyError) {
         if (intentCategory !== 'structural') {
@@ -2207,7 +2679,9 @@ export async function handleEditGraph(
           detail: 'Try a different approach to the change.',
           violations: [applyErr.message],
           suggested_actions: [
-            { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+            // Lane 22 — dead-end "Simplify the change" chip replaced (see
+            // the structural-validation rejection site for the rationale).
+            { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
           ],
         };
         const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
@@ -2304,22 +2778,43 @@ export async function handleEditGraph(
           { request_id: requestId, attempt, violations: structResult.violations.map((v) => v.code) },
           'edit_graph rejected — structural validation failed',
         );
+        // Lane 22 — vetted, claim-safe reasons: ONLY codes with an entry in
+        // the user-facing VIOLATION_MESSAGES catalogue qualify (raw
+        // `v.detail` strings carry internal ids and stay suppressed).
+        const userSafeReasons = [
+          ...new Set(
+            structResult.violations
+              .map((v) => VIOLATION_MESSAGES[v.code])
+              .filter((m): m is string => typeof m === 'string' && m.length > 0),
+          ),
+        ].slice(0, 2);
         const rejectionCtx: PatchRejectionContext = {
           reason: 'structural_violation',
           detail: 'Consider simplifying the change or approaching it differently.',
           violations: translatedViolations,
+          ...(userSafeReasons.length > 0 ? { user_safe_reasons: userSafeReasons } : {}),
           suggested_actions: [
-            { role: 'facilitator', label: 'Simplify the change', prompt: 'Try a simpler version of this change.' },
+            // Lane 22 — the old "Simplify the change" chip was a known
+            // dead-end: its prompt re-entered the V4 edit LLM with no
+            // context, no-oped, and needed an exact-text interceptor
+            // (chip-simplify-intercept.ts, closed loop documented since
+            // 2026-05-22) to break the loop. Replaced with a
+            // question-shaped prompt that carries no edit verb, so it
+            // routes to the conversational path instead of a guaranteed
+            // no-op edit dispatch. The interceptor stays for
+            // already-rendered legacy chips.
+            { role: 'facilitator', label: 'What would work instead?', prompt: 'What would work instead?' },
             { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
           ],
         };
-        // Capability 2A (flag-gated): for the unsupported add-risk / reachability
-        // rejection class ONLY, substitute deterministic, structural-only next-step
-        // copy in place of the generic suppression. The classifier returns null for
-        // every other rejection, so all other reasons/types stay byte-identical
-        // (and the flag is default-OFF). Placeholder copy — final wording authored
-        // separately before any live run / flag enablement.
-        if (config.cee.addRiskRejectionGuidanceEnabled) {
+        // Capability 2A — UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+        // CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED deleted, live-true on
+        // staging). For the unsupported add-risk / reachability rejection
+        // class ONLY, substitute deterministic, structural-only next-step
+        // copy in place of the generic suppression. The classifier returns
+        // null for every other rejection, so all other reasons/types stay
+        // byte-identical.
+        {
           const addRiskMatch = classifyAddRiskToOptionRejection(
             candidateGraph,
             structResult.violations,
@@ -2327,6 +2822,24 @@ export async function handleEditGraph(
           );
           if (addRiskMatch) {
             rejectionCtx.structural_guidance = ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER;
+          }
+        }
+        // POC-BOARD #5c (flag-gated): honest, BOUNDED refusal that NAMES the
+        // specific offending item(s) when the FINAL post-batch state genuinely
+        // fails connectivity (orphan / no-path-to-goal) — instead of the generic
+        // wholesale error that names nothing (the live Step-0 s1-05 dead-end).
+        // Within-turn atomicity is preserved: nothing is partially applied, the
+        // whole edit is still declined (`appliedGraph: null`, wasRejected). The
+        // helper defers (returns null) on any non-connectivity/mixed failure, so
+        // it can never broaden a rejection. Runs AFTER the Cap-2A block and
+        // supersedes its generic placeholder when both flags are on (the named
+        // refusal is strictly more specific). Default ON since 18 Jul
+        // (Paul-ratified); env var = kill-switch — CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL=false
+        // makes this block no-op and the copy above byte-identical to the legacy path.
+        if (config.cee.editConnectivityNamedRefusalEnabled) {
+          const namedRefusal = buildConnectivityNamedRefusal(candidateGraph, structResult.violations);
+          if (namedRefusal) {
+            rejectionCtx.structural_guidance = namedRefusal;
           }
         }
         const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
@@ -2355,6 +2868,24 @@ export async function handleEditGraph(
     let repairsApplied: RepairEntry[] | undefined;
     let appliedGraph: GraphV3T | undefined;
     let appliedGraphHash: string | undefined;
+    // B5 — true when `appliedGraph` is the LOCAL `applyPatchOperations` result
+    // rather than a graph PLoT echoed back. The landed-op postcondition below
+    // compares the applier's raw writes against the persisted canonical graph,
+    // which is only a meaningful comparison for the locally-synthesised case
+    // (a PLoT-supplied graph legitimately differs from the local apply).
+    let appliedGraphSynthesisedLocally = false;
+    // V5 H5 narrowing, hoisted so BOTH the synthesis block and the B5 block
+    // below share ONE base-validity verdict. `context.graph` does not change
+    // within an attempt, so this is the same value the synthesis block used to
+    // compute locally.
+    //
+    // Load-bearing: when the BASE graph already fails strict GraphV3 (legacy
+    // persisted graph, migration window, or a `buildStructuralFallback` graph
+    // — which stamps `strength:{mean:0,std:0}` that `EdgeStrengthV3.std`
+    // rejects as non-positive), the patch is NOT the cause and strict-refusing
+    // here would make the scenario permanently uneditable while telling the
+    // user to rephrase. B5 must inherit that narrowing, not reverse it.
+    const baseValid = GraphV3.safeParse(context.graph as unknown).success;
     let plotWarnings: string[] | undefined;
     const allWarnings: string[] = [];
 
@@ -2665,7 +3196,6 @@ export async function handleEditGraph(
       // read of the base graph would have failed regardless. The narrow
       // conditional preserves the bug fix without scope-creeping into a
       // graph-wide canonicalisation gate.
-      const baseValid = GraphV3.safeParse(context.graph as unknown).success;
       const candidateParse = baseValid ? GraphV3.safeParse(candidateGraph) : { success: true as const };
       if (!candidateParse.success) {
         const firstIssue = candidateParse.error.issues[0];
@@ -2704,6 +3234,7 @@ export async function handleEditGraph(
 
       appliedGraph = candidateGraph;
       appliedGraphHash = computeGraphHash(candidateGraph);
+      appliedGraphSynthesisedLocally = true;
       log.info(
         {
           request_id: requestId,
@@ -2813,6 +3344,125 @@ export async function handleEditGraph(
       }
     }
 
+    // ── B5: promote the PARSED graph + landed-op postcondition ────────────
+    //
+    // ROOT CAUSE OF THE FALSE SUCCESS. `GraphV3.safeParse(candidate)` returns
+    // SUCCESS on a graph carrying an undeclared key — Zod STRIPS the unknown
+    // key rather than erroring — and the pre-B5 code then promoted the
+    // UNPARSED candidate. So the validation validated one graph and a
+    // different one was persisted, and the turn reported the edit applied
+    // while `observed_state.value` had not moved.
+    //
+    // The fix is to promote the PARSED output: validation must validate the
+    // thing that actually gets persisted. This runs AFTER
+    // `encodeOptionInterventionsForEdit` deliberately — that encoder READS the
+    // slash-keyed `data/interventions/<factor_id>` entries off the applied
+    // graph and promotes them to canonical top-level `interventions`. Parsing
+    // earlier would strip those keys before their owner could read them and
+    // would silently break the option-configure chain.
+    //
+    // The postcondition then requires every op to be verifiable as having
+    // LANDED on that canonical graph. Unknown field spellings now normalise or
+    // fail visibly — never strip-and-succeed.
+    // `baseValid` is REQUIRED here, not incidental. Without it this block
+    // re-parses a graph the synthesis block above deliberately DECLINED to
+    // parse, silently reversing the V5 H5 narrowing: ANY edit — including a
+    // trivial rename — on a scenario whose base graph fails strict GraphV3
+    // would return SYNTHESIZED_GRAPH_INVALID, leaving the scenario permanently
+    // uneditable behind copy that invites a rephrase that can never succeed.
+    // When the base is invalid we skip BOTH the re-parse and the postcondition
+    // and fall through to the legacy promotion — the pre-B5 behaviour exactly.
+    // Measured over every persisted graph: 98.1% have a valid base, so this
+    // block engages on essentially all real traffic.
+    //
+    // UNCONDITIONAL since 2026-07-25 (was `CEE_VALUE_OP_CANONICALISATION`).
+    // The postcondition ships with the canonicaliser above and NOT on its own
+    // switch — deliberately. Measured on the real op corpus: postcondition
+    // WITHOUT the rewriter refuses batches the rewriter would have repaired;
+    // the two together refuse none of them. Shipping the refusal without the
+    // repair is a strictly worse user outcome, and shipping the repair without
+    // the refusal leaves the strip-and-succeed class open for untranslatable
+    // spellings. They are one behaviour change. Do not split them.
+    if (
+      appliedGraph &&
+      appliedGraphSynthesisedLocally &&
+      baseValid
+    ) {
+      const persistedParse = GraphV3.safeParse(appliedGraph);
+      if (!persistedParse.success) {
+        // Reachable: the synthesis block strict-parsed the CANDIDATE, but the
+        // intervention encoder has run since and rewrites node shapes. Fail
+        // closed rather than persist a graph we could not parse.
+        log.error(
+          { request_id: requestId, attempt, issues_count: persistedParse.error.issues.length },
+          'edit_graph B5 — final appliedGraph failed GraphV3 parse; refusing to persist',
+        );
+        validationOutcome = 'synthesized_graph_invalid';
+        setViolationCodes(['synthesized_graph_invalid']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'synthesized_graph_invalid';
+        failureBranch = 'synthesized_graph_invalid';
+        failureCode = 'SYNTHESIZED_GRAPH_INVALID';
+        failureMessage = 'Final appliedGraph failed GraphV3 strict parse; cannot persist';
+        return buildRejectionResult(
+          'The change was validated but the system could not capture the final applied state. Try the change again.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'SYNTHESIZED_GRAPH_INVALID',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+
+      const rawApplied = appliedGraph;
+      const canonicalApplied = persistedParse.data as GraphV3T;
+
+      // `preEdit` (the base graph) lets the postcondition recognise the ONE
+      // legitimate way a stripped key can still have landed: an
+      // intervention-subtree spelling that `encodeOptionInterventionsForEdit`
+      // translated into canonical `interventions`. Everything else that was
+      // stripped is refused.
+      if (!batchFullyLanded(opsToApply, rawApplied, canonicalApplied, context.graph as GraphV3T)) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.scenario_id ?? null,
+            attempt,
+            operations_count: operations.length,
+          },
+          'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
+        );
+        validationOutcome = 'operation_did_not_land';
+        setViolationCodes(['operation_did_not_land']);
+        recoveryPathChosen = 'rejection_block';
+        branchTaken = 'rejection';
+        branchReason = 'operation_did_not_land';
+        failureBranch = 'operation_did_not_land';
+        failureCode = 'OPERATION_DID_NOT_LAND';
+        failureMessage = 'An operation did not survive canonicalisation onto the persisted graph';
+        return buildRejectionResult(
+          'That change could not be applied to the model. Try describing it a different way.',
+          operations,
+          baseGraphHash,
+          turnId,
+          startTime,
+          'OPERATION_DID_NOT_LAND',
+          undefined,
+          attempt,
+          diagnostics(),
+        );
+      }
+
+      // Promote the PARSED canonical graph — the graph that is persisted is now
+      // exactly the graph that was validated.
+      appliedGraph = canonicalApplied;
+      appliedGraphHash = computeGraphHash(appliedGraph);
+    }
+
     // ---- Success: build block ----
     const latencyMs = Date.now() - startTime;
 
@@ -2911,6 +3561,30 @@ export async function handleEditGraph(
       preGraphForReceipt,
     );
 
+    // P0 (label-edit silent-corruption, third leg of the silent-wrong-value
+    // family): a label rename that changes an embedded quantity on a node
+    // whose modelled value did NOT change must be DISCLOSED, never claimed as
+    // a completed value change. Consent-first (doctrine b): we do not silently
+    // mutate the modelled value on top of the rename (a different consent
+    // class); we surface the divergence and offer the typed configure
+    // affordance. Derived from the same detector the receipt uses above.
+    const labelValueDivergences = detectLabelValueDivergences(
+      operations,
+      preGraphForReceipt,
+      postGraphForReceipt,
+    );
+    if (labelValueDivergences.length > 0) {
+      log.warn(
+        {
+          event: 'edit_graph.label_value_divergence_disclosed',
+          request_id: requestId,
+          count: labelValueDivergences.length,
+          paths: labelValueDivergences.map((d) => d.path),
+        },
+        'edit_graph: label rename changed a displayed quantity but not the modelled value — disclosing',
+      );
+    }
+
     log.info(
       {
         elapsed_ms: latencyMs,
@@ -2973,6 +3647,15 @@ export async function handleEditGraph(
     if (llmResult.coaching?.summary) {
       textParts.push(scrubFragment(llmResult.coaching.summary));
     }
+    // P0: append the deterministic label-value divergence disclosure. It states
+    // that only the display text changed and the modelled value is unchanged,
+    // which overrides any optimistic "Updated … to $39" the LLM coaching may
+    // have led with — and it stands alone when coaching is absent. Built from
+    // node labels + the label's own numeric tokens; scrubbed for symmetry.
+    const divergenceNote = buildLabelValueDivergenceNote(labelValueDivergences);
+    if (divergenceNote) {
+      textParts.push(scrubFragment(divergenceNote));
+    }
     // P0 fix (2026-05): NEVER render PLoT repair / A5 enforcement reasons
     // into user-facing assistant_text. Repair `action` strings come from
     // operator-grade telemetry sources — e.g. graph-enforcement.ts:237
@@ -3033,11 +3716,19 @@ export async function handleEditGraph(
       }
     }
 
-    // T5: proposal-language guard. edit_graph emits patches with
-    // auto_apply: false (line 2215 above), so any completion-language phrase
-    // in the assistant text is a leak. Scan and replace with the corrective
-    // suffix when matched.
-    if (patchData.auto_apply === false && assistantText) {
+    // T5: proposal-language guard. edit_graph's GraphPatchBlock always
+    // reports auto_apply: false (block-shape contract, unrelated to whether
+    // the graph was actually committed — see GraphPatchBlockData docs), so
+    // `auto_apply === false` alone does NOT mean "not yet applied." This
+    // success branch is unreachable without a real `appliedGraph` (guarded
+    // above — "cannot reach success branch without appliedGraph"), i.e. the
+    // change IS already committed here. Gate on that so the guard only
+    // rewrites genuine pending-proposal narration (e.g. the no-op /
+    // low-confidence branches) — never truthful "Added X" / "I've added X"
+    // language on a turn that actually applied the edit (F3 — GM go-live
+    // acceptance evidence: applied+committed edit_graph turns were being
+    // mislabelled "Proposing to…", violating the four-state copy rule).
+    if (patchData.auto_apply === false && !appliedGraph && assistantText) {
       const guardResult = enforceProposalLanguage(assistantText, 'edit_graph');
       if (guardResult.leaked && guardResult.suffixed) {
         assistantText = guardResult.suffixed;
@@ -3053,6 +3744,11 @@ export async function handleEditGraph(
         role: 'facilitator',
       });
     }
+    // P0: offer the typed configure affordance for any label-value divergence
+    // so the user can actually change the modelled value (the configure-option
+    // chip's replayed message routes to the intervention-writing lane). This
+    // is the affordance the honest disclosure above points at.
+    suggestedActions.push(...buildLabelValueDivergenceActions(labelValueDivergences));
 
     return {
       blocks: [block],
@@ -3158,6 +3854,87 @@ function mapCodeToRejectionReason(code?: string): EditRejectionReason {
   }
 }
 
+/**
+ * POC-BOARD #6 — bounded refusal for an over-cap edit (CEE_EDIT_CAP_SPLIT ON).
+ *
+ * Distinct from {@link buildRejectionResult}'s `MAX_OPERATIONS_EXCEEDED` dead end
+ * in three ways, so a >15-op edit is never a bare dead end:
+ *   1. a DISTINCT rejection code (`MAX_OPERATIONS_SPLIT_SUGGESTED`) — downstream
+ *      consumers can tell a bounded split-suggestion apart from the old hard cap;
+ *   2. user-facing copy that offers a CONCRETE next step (make the change in a
+ *      couple of smaller passes) plus recovery chips the user can act on now —
+ *      not a static "reduce the scope" deflection;
+ *   3. the structured count/cap preserved in `rejection.reason` (the raw `msg`,
+ *      never surfaced to the user) so the turn trace still records exactly how far
+ *      over the cap the batch was.
+ *
+ * Nothing is applied: an arbitrary index-`maxOps` truncation of an LLM op array
+ * risks an incoherent partial batch (an `add_edge` whose `add_node` fell past the
+ * cut), so the honest, in-scope fix is the bounded refusal — the acceptance floor
+ * explicitly permits "a bounded refusal with a next step" as the alternative to a
+ * true split/continuation. The user-facing prose stays banned-token clean
+ * (no operation counts / schema language — see edit-rejection-text.test.ts).
+ */
+function buildOverCapSplitResult(
+  reason: string,
+  operations: PatchOperation[],
+  baseGraphHash: string,
+  turnId: string,
+  startTime: number,
+  attempts: number,
+  diagnostics: EditGraphTraceDiagnostics,
+): EditGraphResult {
+  const patchData: GraphPatchBlockData = {
+    patch_type: 'edit',
+    operations,
+    status: 'rejected',
+    base_graph_hash: baseGraphHash,
+    rejection: {
+      // Raw reason carries the count/cap for the turn trace; never user-surfaced.
+      reason,
+      code: 'MAX_OPERATIONS_SPLIT_SUGGESTED',
+      attempts,
+    },
+  };
+
+  const block = createGraphPatchBlock(patchData, turnId, undefined, undefined, 'tool:edit_graph');
+  const latencyMs = Date.now() - startTime;
+
+  log.warn(
+    { elapsed_ms: latencyMs, reason, code: 'MAX_OPERATIONS_SPLIT_SUGGESTED' },
+    'edit_graph over-cap — bounded split-suggestion refusal (no dead end)',
+  );
+
+  // Concrete next step for THIS batch: make the change in a couple of smaller
+  // passes. The chips route through the message-replay path (no action_type),
+  // matching the sibling rejection chips. Prose is banned-token clean.
+  const assistantText =
+    "That's more than I can change in a single step. Let's do it in a couple of " +
+    'smaller passes — tell me the change that matters most and we can take it from there.';
+  const suggestedActions: SuggestedAction[] = [
+    {
+      label: 'Start with the key change',
+      prompt: "Let's start with the single most important change.",
+      role: 'facilitator',
+    },
+    {
+      label: 'Split into smaller edits',
+      prompt: 'Help me break this into a few smaller edits.',
+      role: 'challenger',
+    },
+  ];
+
+  return {
+    blocks: [block],
+    assistantText,
+    latencyMs,
+    appliedGraph: null,
+    wasRejected: true,
+    suggestedActions,
+    diagnostics,
+  };
+}
+
 // ============================================================================
 // Path Normalisation
 // ============================================================================
@@ -3222,10 +3999,21 @@ function extractJson(text: string): unknown {
     // Fall through to regex extraction
   }
 
-  // Try to extract a JSON object
+  // Try to extract a JSON object.
+  //
+  // Lane CEE-D (edit-loop reliability): the greedy object extraction MUST
+  // NOT throw past the array fallback. A prose-wrapped legacy-array
+  // response with 2+ operations mis-extracts `{op1}, {op2}` (first `{` →
+  // last `}`), which is not valid JSON — previously the unguarded
+  // JSON.parse here threw a SyntaxError and the array branch below was
+  // never reached (live failure class: 2/3 LLM-path edit attempts failed).
   const objectMatch = cleaned.match(/\{[\s\S]*\}/);
   if (objectMatch) {
-    return JSON.parse(objectMatch[0]);
+    try {
+      return JSON.parse(objectMatch[0]);
+    } catch {
+      // Fall through to array extraction (legacy format).
+    }
   }
 
   // Try to extract a JSON array (legacy format)
@@ -3301,6 +4089,29 @@ export function parseEditGraphResponse(text: string): EditGraphLLMResult {
 
     // Validate required field
     if (!Array.isArray(obj.operations)) {
+      // Lane CEE-D (edit-loop reliability): a BARE SINGLE-OPERATION object
+      // — either emitted directly by the model, or produced by the greedy
+      // object extraction mis-slicing the first op out of a prose-wrapped
+      // single-op legacy array — previously died here with the live error
+      // 'v2 response missing required "operations" array'. When the object
+      // is unambiguously a patch operation (known `op` + string `path`),
+      // wrap it into `operations: [op]` and continue. Same safe coaching
+      // defaults as the legacy-array branch (non-empty ops case).
+      if (isBareSinglePatchOp(obj)) {
+        emit(TelemetryEvents.EditGraphBareSingleOpWrapped, {
+          op: obj.op as string,
+        });
+        log.info(
+          { event: 'edit_graph.bare_single_op_wrapped', op: obj.op },
+          'edit_graph wrapped bare single-operation object into operations array',
+        );
+        return {
+          operations: [normaliseOperation(obj)],
+          removed_edges: [],
+          warnings: [],
+          coaching: { summary: 'Proposed graph edit.', rerun_recommended: false },
+        };
+      }
       throw new Error('v2 response missing required "operations" array');
     }
 
@@ -3378,13 +4189,267 @@ export function nestDottedKeys(value: Record<string, unknown>): Record<string, u
   return result ?? value;
 }
 
+/** Ops whose Zod schemas require a `value` payload. */
+const VALUE_REQUIRING_OPS: ReadonlySet<string> = new Set([
+  'add_node',
+  'update_node',
+  'add_edge',
+  'update_edge',
+]);
+
+/** The full operation vocabulary (mirrors PatchOperation.op / _PatchOp). */
+const KNOWN_PATCH_OPS: ReadonlySet<string> = new Set([
+  'add_node',
+  'remove_node',
+  'update_node',
+  'add_edge',
+  'remove_edge',
+  'update_edge',
+]);
+
+/**
+ * Keys that belong to the OPERATION envelope, not the payload. Everything
+ * else on a raw op object is candidate inline payload.
+ */
+const RESERVED_OP_KEYS: ReadonlySet<string> = new Set([
+  'op',
+  'path',
+  'value',
+  'old_value',
+  'impact',
+  'rationale',
+]);
+
+/**
+ * Alternate keys models have used in place of `value`. Checked in
+ * declaration order; a lift only happens when EXACTLY ONE is present
+ * (ambiguity → leave the op alone and let Zod reject it into the repair
+ * loop).
+ */
+const ALTERNATE_VALUE_KEYS: readonly string[] = [
+  'new_value',
+  'newValue',
+  'updated_value',
+  'updatedValue',
+  'data',
+  'payload',
+  'node',
+  'edge',
+  'fields',
+  'updates',
+  'properties',
+  'changes',
+];
+
+/**
+ * Lane CEE-D (edit-loop reliability): a bare single-operation object —
+ * `{ op, path, ... }` with a known op — is unambiguously a patch
+ * operation, not a malformed v2 envelope. Used by parseEditGraphResponse
+ * to wrap it into `operations: [op]` instead of failing with the live
+ * 'v2 response missing required "operations" array' error.
+ */
+function isBareSinglePatchOp(obj: Record<string, unknown>): boolean {
+  return (
+    typeof obj.op === 'string' &&
+    KNOWN_PATCH_OPS.has(obj.op) &&
+    typeof obj.path === 'string' &&
+    obj.path.length > 0
+  );
+}
+
+/**
+ * Lane CEE-D (edit-loop reliability): lift inline / alternate-key payloads
+ * into `value` for value-requiring ops (add_node / update_node / add_edge /
+ * update_edge) where the payload location is UNAMBIGUOUS. Live failure:
+ * PatchOperationSchema requires `value` for these ops, but models sometimes
+ * put the payload under an alternate key (`new_value`, `data`, …) or inline
+ * at the top level of the op object — producing the zod 'value — Required'
+ * rejection and burning repair attempts.
+ *
+ * Lift rules (each lift is logged):
+ *   1. EXACTLY ONE alternate key present → lift its value into `value`.
+ *   2. NO alternate key, but non-reserved top-level keys present → lift
+ *      those keys as an inline payload record.
+ *   3. Anything ambiguous (2+ alternate keys) or absent → return the op
+ *      unchanged; Zod rejects it into the existing repair loop.
+ */
+function liftAlternateValuePayload(raw: Record<string, unknown>): Record<string, unknown> {
+  if (raw.value !== undefined) return raw;
+  const op = raw.op;
+  if (typeof op !== 'string' || !VALUE_REQUIRING_OPS.has(op)) return raw;
+
+  const presentAlternates = ALTERNATE_VALUE_KEYS.filter((k) => raw[k] !== undefined);
+  if (presentAlternates.length === 1) {
+    const key = presentAlternates[0]!;
+    const lifted: Record<string, unknown> = { ...raw, value: raw[key] };
+    delete lifted[key];
+    log.info(
+      { event: 'edit_graph.value_lifted', op, source: 'alternate_key', alternate_key: key },
+      `edit_graph lifted alternate-key payload "${key}" into value for ${op}`,
+    );
+    return lifted;
+  }
+  if (presentAlternates.length > 1) return raw; // ambiguous — leave for Zod + repair
+
+  const inlineKeys = Object.keys(raw).filter(
+    (k) => !RESERVED_OP_KEYS.has(k) && raw[k] !== undefined,
+  );
+  if (inlineKeys.length > 0) {
+    const payload: Record<string, unknown> = {};
+    for (const k of inlineKeys) payload[k] = raw[k];
+    const lifted: Record<string, unknown> = {};
+    for (const k of Object.keys(raw)) {
+      if (RESERVED_OP_KEYS.has(k)) lifted[k] = raw[k];
+    }
+    lifted.value = payload;
+    log.info(
+      { event: 'edit_graph.value_lifted', op, source: 'inline_payload', field_count: inlineKeys.length },
+      `edit_graph lifted ${inlineKeys.length} inline payload field(s) into value for ${op}`,
+    );
+    return lifted;
+  }
+
+  return raw;
+}
+
+/**
+ * Tier A #1 (edit-reliability, 2026-07-09): unwrap the v2 structured-outputs
+ * stringified `value` / `old_value` fields (see GRAMMAR BUDGET (v2) in
+ * anthropic-edit-graph-schema.ts) back into their real shape — object,
+ * scalar, or array — before any downstream consumer (alternate-key lifting,
+ * dotted-key restructuring, Zod) sees the field.
+ *
+ * Only touches a field that IS a string. `parseEditGraphResponse` has no
+ * reliable signal telling it whether THIS particular response came from a
+ * structured-outputs call or the prompt-only fallback (the adapter can fall
+ * back mid-call on a 400), so this function must not assume either mode —
+ * it treats a successful `JSON.parse` as proof-positive of the v2
+ * stringified-payload shape and leaves anything else untouched:
+ *
+ * - Structured mode: `value: "\"New\""` (JSON-encoded string) parses to the
+ *   scalar `"New"`. `value: "{\"id\":...}"` parses to the node/edge object.
+ * - Prompt-only mode (existing, pre-Tier-A#1 convention): `value: "New"` is
+ *   already the real scalar — `JSON.parse("New")` THROWS (bare text is not
+ *   valid JSON), so the catch branch below leaves it as the string "New",
+ *   IDENTICAL to today's behaviour. This is what makes the function safe to
+ *   run unconditionally on every response, not just structured-mode ones.
+ *
+ * On parse failure the field is left EXACTLY as received (never deleted) —
+ * deleting would silently break the prompt-only path's long-standing
+ * bare-scalar convention (e.g. a plain label rename), which is the dominant
+ * case today. A field that was genuinely meant as a stringified object/array
+ * (starts with `{`/`[`) but fails to parse still surfaces a warning for
+ * observability; Zod naturally rejects the wrong-shaped string downstream
+ * and drives the repair loop exactly as an omitted field would — enforcement
+ * is never worse than the status-quo prompt-only path.
+ *
+ * Deliberately does NOT apply the "unwrap one extra layer" double-encoding
+ * heuristic that `parseStringifiedAuxFields()` (adapters/llm/normalisation.ts,
+ * Lane 26) uses for coaching/causal_claims/topology_plan — those aux fields
+ * are ALWAYS objects/arrays, so a first-pass string result unambiguously
+ * means double-encoding. `value`/`old_value` can legitimately END in a bare
+ * string scalar (e.g. renaming a label to "Unit Price"), so a second parse
+ * pass would wrongly shred a valid string payload.
+ *
+ * @internal Exported for testing.
+ */
+export function parseStringifiedOperationPayload(rawInput: Record<string, unknown>): Record<string, unknown> {
+  if (typeof rawInput.value !== 'string' && typeof rawInput.old_value !== 'string') {
+    return rawInput;
+  }
+  const result = { ...rawInput };
+  for (const key of ['value', 'old_value'] as const) {
+    const raw = result[key];
+    if (typeof raw !== 'string') continue;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      result[key] = parsed;
+      log.info(
+        { event: 'edit_graph.stringified_payload_parsed', field: key, op: result.op },
+        `edit_graph parsed stringified JSON "${key}" field`,
+      );
+    } catch (err) {
+      // Leave the field UNTOUCHED — this is either the prompt-only path's
+      // ordinary bare-scalar convention (the common case; no signal here),
+      // or a genuinely malformed structured-mode encoding (Zod will reject
+      // it downstream and drive the repair loop either way).
+      const looksLikeIntendedPayload = raw.length > 0 && (raw[0] === '{' || raw[0] === '[');
+      if (looksLikeIntendedPayload) {
+        log.warn(
+          {
+            event: 'edit_graph.stringified_payload_parse_failed',
+            field: key,
+            op: result.op,
+            error: err instanceof Error ? err.message : String(err),
+            raw_preview: raw.slice(0, 120),
+          },
+          `edit_graph "${key}" field looked like a stringified object/array but was not valid JSON — left as-is; Zod will reject it and the repair loop takes over`,
+        );
+      }
+    }
+  }
+  return result;
+}
+
+const VALID_FACTOR_CATEGORIES: ReadonlySet<string> = new Set(FactorCategoryV3.options);
+
+/**
+ * ROADMAP 1.46 residual (task_97fbcb00) — the edit LLM can synthesise a
+ * node `category` value outside GraphV3's enum (e.g. "strategic"), which
+ * previously survived normalisation unchanged and failed the WHOLE edit
+ * at the final `GraphV3.safeParse` gate with SYNTHESIZED_GRAPH_INVALID —
+ * despite an otherwise well-formed op.
+ *
+ * Two-layer defence:
+ *   1. Constrained-at-source: `anthropic-edit-graph-schema.ts` declares a
+ *      real, grammar-enforced `category` enum directly on the operation
+ *      (a small side-channel next to the opaque stringified `value`
+ *      blob the grammar cannot look inside). When the model uses it, the
+ *      model literally cannot emit an invalid value — this wins over
+ *      whatever `value` may separately carry.
+ *   2. Coerced-with-disclosure: for the residual case where the model
+ *      still writes an out-of-enum `category` INSIDE the un-grammar-
+ *      checked `value` string, drop it rather than fail the entire edit
+ *      over one bad enum value — `category` is optional on GraphV3's
+ *      factor-node schema, so a node without it is still valid. Logged
+ *      at WARN so the drop is never silent.
+ *
+ * @internal Exported for testing.
+ */
+export function resolveNodeCategoryForOp(
+  raw: Record<string, unknown>,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const structuredCategory = raw.category;
+  if (typeof structuredCategory === 'string' && VALID_FACTOR_CATEGORIES.has(structuredCategory)) {
+    return { ...value, category: structuredCategory };
+  }
+  if (typeof value.category === 'string' && !VALID_FACTOR_CATEGORIES.has(value.category)) {
+    const { category: invalidCategory, ...rest } = value;
+    log.warn(
+      {
+        event: 'edit_graph.invalid_category_coerced',
+        op: raw.op,
+        path: raw.path,
+        invalid_category: invalidCategory,
+      },
+      'edit_graph dropped an out-of-enum node category from the stringified value payload rather than failing the whole edit',
+    );
+    return rest;
+  }
+  return value;
+}
+
 /**
  * Normalise a single raw operation from the LLM:
+ * - Unwrap v2 structured-outputs stringified value/old_value fields
+ * - Lift inline / alternate-key payloads into `value` (value-requiring ops)
  * - Convert v2 paths to pipeline format
  * - Restructure dotted keys (strength.mean → nested) for canonical format
  * - Preserve impact/rationale as extra fields (stripped later)
  */
-function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
+function normaliseOperation(rawInput: Record<string, unknown>): PatchOperation & { impact?: string; rationale?: string } {
+  const raw = liftAlternateValuePayload(parseStringifiedOperationPayload(rawInput));
   const { path: normalisedPath, field } = normalisePath(String(raw.path ?? ''));
 
   let value = raw.value as unknown;
@@ -3392,11 +4457,32 @@ function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { im
 
   // For field-level update ops (path had /field suffix), wrap scalar value into { field: value }
   // so the Zod update schemas (which expect a record) validate correctly.
+  //
+  // ROADMAP 2.11 / P0-2 — intervention OBJECT leaves are wrapped too. The
+  // edit prompt's option-configuration contract ("patch the whole
+  // intervention object at /nodes/<opt>/data/interventions/<factor_id>",
+  // its EXAMPLE 2) emits an OBJECT value `{value, raw_value, unit, cap}`.
+  // The scalar-only wrap dropped the field key for that shape, so the
+  // object was Object.assign-smeared onto the option node: the
+  // `<factor_id>` attribution was LOST, the referee saw unsanctioned
+  // node-field roots (`value`/`raw_value`/`unit`/`cap`) and REJECTED, and
+  // a multi-factor option could never be configured through chat (pinned
+  // by option-configure-apply-chain.test.ts hop 1). Scoped to the
+  // interventions subtree only: other object-valued field updates keep
+  // their long-standing spread semantics.
+  const isInterventionFieldPath =
+    typeof field === 'string' && /^data\/interventions\/.+$/.test(field);
   if (field && (raw.op === 'update_node' || raw.op === 'update_edge')) {
-    if (value !== undefined && (typeof value !== 'object' || value === null)) {
+    if (
+      value !== undefined &&
+      (typeof value !== 'object' || value === null || (isInterventionFieldPath && !Array.isArray(value)))
+    ) {
       value = { [field]: value };
     }
-    if (oldValue !== undefined && (typeof oldValue !== 'object' || oldValue === null)) {
+    if (
+      oldValue !== undefined &&
+      (typeof oldValue !== 'object' || oldValue === null || (isInterventionFieldPath && !Array.isArray(oldValue)))
+    ) {
       oldValue = { [field]: oldValue };
     }
   }
@@ -3408,6 +4494,16 @@ function normaliseOperation(raw: Record<string, unknown>): PatchOperation & { im
   }
   if (oldValue && typeof oldValue === 'object' && oldValue !== null) {
     oldValue = nestDottedKeys(oldValue as Record<string, unknown>);
+  }
+
+  // ROADMAP 1.46 residual (task_97fbcb00) — see resolveNodeCategoryForOp doc.
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    (raw.op === 'add_node' || raw.op === 'update_node')
+  ) {
+    value = resolveNodeCategoryForOp(raw, value as Record<string, unknown>);
   }
 
   return {
@@ -3532,11 +4628,10 @@ export function extractInterventionUpdates(
 // Patch Budget (cf-v11.1)
 // ============================================================================
 
-const MAX_NODE_OPS = 4;
-const MAX_EDGE_OPS = 8;
-/** Elevated edge budget for option-addition edits — adding an option naturally
- *  requires connecting to multiple factors, so the default 4-edge limit is too tight. */
-const OPTION_ADD_MAX_EDGE_OPS = 8;
+// ROADMAP 2.474 / A3 — the three budget numbers now live in a LEAF module
+// (`patch-budget-limits.ts`) so the structural-edit batch splitter can size a
+// part against the SAME numbers this function enforces, rather than mirroring
+// them (CLAUDE.md trap 12). They are imported at the top of this file.
 
 interface PatchBudgetResult {
   allowed: boolean;
@@ -3546,6 +4641,23 @@ interface PatchBudgetResult {
   breachedLimit?: 'incident' | 'unrelated' | 'node' | null;
   /** The effective max edge ops that was applied for the breached category. */
   effectiveMaxEdgeOps?: number;
+  /**
+   * ROADMAP 2.655 — the breach in the terms a USER can be told about, derived
+   * from the two allow/deny verdicts themselves rather than from bucket
+   * bookkeeping.
+   *
+   * ⚠ WHY NOT JUST READ `breachedLimit`. Measured at the bytes, that field
+   * cannot answer this question:
+   *   · a plain edge-only breach (no option addition) leaves it `null`, because
+   *     only the option-addition branch ever assigns an edge value;
+   *   · when node AND edge both breach under an option addition, the edge
+   *     bucket is assigned first and the `!nodeAllowed` clause is skipped, so
+   *     the node breach disappears from the report.
+   * Copy driven off it would therefore be silent, or wrong, in exactly the
+   * cases where it most needs to be right. `breachedLimit` is unchanged and
+   * keeps its existing meaning for its existing readers.
+   */
+  breachedDimensions: readonly PatchBudgetDimension[];
 }
 
 /**
@@ -3609,10 +4721,34 @@ function isEdgeIncidentTo(op: PatchOperation, nodeIds: Set<string>): boolean {
  * Implicit edge removals from remove_node do NOT count.
  *
  * When the operation set includes an option-addition (add_node with kind
- * 'option'/'intervention'), edge ops incident to the new option node(s) are
- * budgeted at the elevated OPTION_ADD_MAX_EDGE_OPS limit, while unrelated
- * edge ops stay under the standard MAX_EDGE_OPS cap. This prevents the
- * elevated budget from masking unrelated high-impact edge rewires.
+ * 'option'/'intervention'), edge ops are BUCKETED: those incident to the new
+ * option node(s) are budgeted at OPTION_ADD_MAX_EDGE_OPS, unrelated edge ops
+ * at MAX_EDGE_OPS, and both buckets must pass INDEPENDENTLY.
+ *
+ * ⚠ ROADMAP 2.624 — READ THIS WITH `patch-budget-limits.ts`, WHICH THIS
+ * COMMENT CONTRADICTED. The old wording ("this prevents the elevated budget
+ * from masking unrelated high-impact edge rewires") described only the
+ * unrelated bucket and left the reader believing the branch was no more
+ * permissive than the flat cap. It is more permissive, and a discriminating
+ * pair shows it:
+ *
+ *   [option add_node, 7 incident edges, 5 unrelated edges] → edgeOps 12, ALLOWED
+ *   CONTROL, the same 12 edge ops under a plain add_node → edgeOps 12, REFUSED
+ *
+ * Because the two buckets are checked independently, this branch admits up to
+ * MAX_EDGE_OPS + OPTION_ADD_MAX_EDGE_OPS (sixteen at today's values) against
+ * a flat cap of eight. The two constants are currently EQUAL, so it is the
+ * BUCKET SPLIT — not the constant — that is the elevation. Whether to raise
+ * OPTION_ADD_MAX_EDGE_OPS or delete the branch entirely is rowed, not decided
+ * here; what matters at this seam is that a reader is not told the opposite of
+ * what the code does.
+ *
+ * The structural-edit splitter is unaffected in either direction: it sizes
+ * parts against the strict FLAT cap, which is stricter than anything this
+ * branch admits, so a part it emits is legal here. That implication is no
+ * longer prose — it is executed by the property test in
+ * `orchestrator-v5/tools/__tests__/structural-edit-batch-split.test.ts`,
+ * which calls THIS function on every part the splitter produces.
  */
 export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResult {
   let nodeOps = 0;
@@ -3671,12 +4807,19 @@ export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResul
     breachedLimit = 'node';
   }
 
+  // ROADMAP 2.655 — derived from the verdicts, so it can never disagree with
+  // what was enforced and can never go silent on a dimension that breached.
+  const breachedDimensions: PatchBudgetDimension[] = [];
+  if (!nodeAllowed) breachedDimensions.push('node');
+  if (!edgeAllowed) breachedDimensions.push('edge');
+
   return {
     allowed: nodeAllowed && edgeAllowed,
     nodeOps,
     edgeOps,
     breachedLimit,
     effectiveMaxEdgeOps,
+    breachedDimensions,
   };
 }
 

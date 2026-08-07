@@ -185,6 +185,29 @@ function classifyExactLabelOrMessageMatch(
   return { kind: 'ambiguous', indexes: hits };
 }
 
+/**
+ * P0 held-proposal replay (2026-07-15, DGAI #340) — the indexes of every
+ * candidate whose rendered label OR rendered message exactly equals the
+ * user's input, under the SAME normalisation the pre-route matcher uses.
+ *
+ * Exposed for route-v2's proposal-replay resolution: the consent-clarity
+ * NAMED hold chip copy ("Add 'X', change 'Y' to 0.8 and link 'Z' to 'W'" —
+ * changeset honesty 1.134 enumerates every op) contains an edit
+ * verb by construction, so the route's edit-intent heuristic
+ * would otherwise claim the confirm turn before TurnExecutor's exact-match
+ * pre-route can resolve it. The route consults THIS helper — the identical
+ * matching rule — so the two layers cannot diverge on what counts as a
+ * replay of a proposal the user was shown.
+ */
+export function findExactProposalCopyMatchIndexes(
+  message: string,
+  candidateRenderCopy: readonly CandidateRenderCopy[],
+): readonly number[] {
+  const outcome = classifyExactLabelOrMessageMatch(message, candidateRenderCopy);
+  if (outcome === null) return [];
+  return outcome.kind === 'unique' ? [outcome.index] : outcome.indexes;
+}
+
 export function tryProposalOrdinalSelect(
   input: TryProposalOrdinalSelectInput,
 ): ProposalOrdinalSelectResult {

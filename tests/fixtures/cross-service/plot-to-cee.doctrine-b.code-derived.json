@@ -1,0 +1,324 @@
+{
+ "_provenance": {
+  "source": "CODE-DERIVED from plot-lite-service staging 524c488 (PRs #202/#203/#204/#205): src/routes/v2/run.ts buildResponse + buildConstraintFields, src/types/engine-v3.ts, src/routes/v2/robustness-display-verdict.ts",
+  "captured": "NOT a wire capture. Hand-assembled to exercise the post-doctrine-B vocabulary the 2025-12 staging capture predates: goal_fit_basis, CONSTRAINT_GOALFIT_MODELLED_BASIS, constraints_status, display_verdict/display_verdict_reason, zero_reason, evpi_status, plot_unified_* confidence_source.",
+  "note": "Replace with a live staging capture once a constraint-bearing doctrine-B run is captured; until then treat required-key assertions from this file as code-evidenced, not wire-evidenced."
+ },
+ "enrichment": {
+  "request_schema_version": "v3",
+  "endpoint_version": "v2/run",
+  "preflight_version": "2025-12-26",
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "analysis_status": "computed",
+  "option_comparison_status": "computed",
+  "robustness_status": "computed",
+  "drivers_status": "computed",
+  "constraints_status": "computed",
+  "constraint_results": [
+   {
+    "constraint_id": "constraint_goal_threshold",
+    "node_id": "goal_q3_delivery",
+    "operator": ">=",
+    "value": 20,
+    "probability": 0.62
+   }
+  ],
+  "conditional_probabilities": [],
+  "critiques": [],
+  "option_comparison": [
+   {
+    "option_id": "opt_a",
+    "option_label": "Option A",
+    "id": "opt_a",
+    "label": "Option A",
+    "outcome": {
+     "mean": 0.31,
+     "std": 0.2,
+     "p10": 0.02,
+     "p50": 0.3,
+     "p90": 0.55,
+     "n_samples": 1000,
+     "n_valid_samples": 1000,
+     "validity_ratio": 1
+    },
+    "status": "computed",
+    "win_probability": 0.71,
+    "probability_of_joint_goal": 0.62,
+    "constraint_probabilities": {
+     "constraint_goal_threshold": 0.62
+    },
+    "goal_fit_basis": {
+     "scored_from": "modelled_outcome_distribution",
+     "node_ids": [
+      "goal_q3_delivery"
+     ]
+    }
+   },
+   {
+    "option_id": "opt_b",
+    "option_label": "Option B",
+    "id": "opt_b",
+    "label": "Option B",
+    "outcome": {
+     "mean": 0.18,
+     "std": 0.22,
+     "p10": -0.08,
+     "p50": 0.17,
+     "p90": 0.44,
+     "n_samples": 1000,
+     "n_valid_samples": 1000,
+     "validity_ratio": 1
+    },
+    "status": "computed",
+    "win_probability": 0.29,
+    "probability_of_joint_goal": 0.41,
+    "constraint_probabilities": {
+     "constraint_goal_threshold": 0.41
+    },
+    "goal_fit_basis": {
+     "scored_from": "modelled_outcome_distribution",
+     "node_ids": [
+      "goal_q3_delivery"
+     ]
+    }
+   }
+  ],
+  "edge_sensitivity": [],
+  "edge_e_values": [
+   {
+    "edge_id": "fac_x::out_y",
+    "from_id": "fac_x",
+    "to_id": "out_y",
+    "from_label": "Factor X",
+    "to_label": "Outcome Y",
+    "e_value": 1.8,
+    "flip_direction": "decrease",
+    "current_mean": 0.4,
+    "flip_mean": 0.22
+   }
+  ],
+  "conditional_winners": [],
+  "factor_sensitivity": [
+   {
+    "factor_id": "fac_x",
+    "factor_label": "Factor X",
+    "influence_score": 1,
+    "influence_rank": 1,
+    "sensitivity_score": 0.41,
+    "elasticity": 0.9,
+    "direction": "positive",
+    "importance_rank": 1,
+    "value_of_information": 0.05,
+    "evpi_percentage_points": 3.1,
+    "evpi_method": "counterfactual",
+    "confidence": 0.55,
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "confidence_provenance": {
+     "computation_source": "plot_unified_from_isl_bootstrap",
+     "formula_version": "plot_unified_v3",
+     "is_provisional": true,
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "input_quality": "standard"
+    },
+    "confidence_components": {
+     "structural_certainty": 0.6,
+     "sampling_stability": 0.5
+    },
+    "source": "graph",
+    "flip_risk_category": "isolated",
+    "attribution_stability": "moderate",
+    "elasticity_std": 0.08,
+    "rank_flip_rate": 0.1,
+    "stability_method": "bootstrap_20",
+    "range_derivation_source": "extracted"
+   },
+   {
+    "factor_id": "fac_pinned",
+    "factor_label": "Option-pinned lever",
+    "influence_score": 0,
+    "influence_rank": 2,
+    "sensitivity_score": 0,
+    "zero_reason": "intervention_override",
+    "direction": "unknown",
+    "importance_rank": 2,
+    "confidence": 0.5,
+    "confidence_source": "plot_unified_from_graph",
+    "confidence_provenance": {
+     "computation_source": "plot_unified_from_graph",
+     "formula_version": "plot_unified_v2",
+     "is_provisional": true,
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "input_quality": "standard"
+    },
+    "source": "graph",
+    "evpi_status": "below_resolution"
+   }
+  ],
+  "factor_stability": [],
+  "inference_warnings": [
+   {
+    "code": "CONSTRAINT_GOALFIT_MODELLED_BASIS",
+    "message": "Goal-fit probabilities for 'goal_q3_delivery' were scored from the modelled outcome distribution because the node has no observed baseline value.",
+    "severity": "info"
+   }
+  ],
+  "m1_coaching": {
+   "story_headlines": {
+    "opt_a": "Option A leads under current assumptions."
+   },
+   "evidence_gaps": [
+    {
+     "factor_id": "fac_x",
+     "factor_label": "Factor X",
+     "voi_score": 0.44,
+     "confidence": 0.55,
+     "confidence_display": "55%",
+     "confidence_defaulted": false,
+     "influence": 1,
+     "influence_display": "100%",
+     "suggestion": "Gather data on \"Factor X\" to reduce uncertainty",
+     "notes": []
+    }
+   ],
+   "model_critiques": [],
+   "next_actions": [
+    {
+     "priority": 1,
+     "action": "Gather evidence on Factor X",
+     "rationale": "High impact, moderate confidence",
+     "target_type": "factor",
+     "target_id": "fac_x",
+     "target_label": "Factor X"
+    }
+   ],
+   "readiness": "close_call",
+   "headline_type": "moderate_winner",
+   "readiness_tone": "tempered",
+   "readiness_reasons": [
+    "NEAR_TIE"
+   ],
+   "coaching_version": "1.2.0",
+   "computed_at": "2026-07-07T12:00:00.000Z"
+  },
+  "confidence_tier": "fair",
+  "flip_thresholds": [
+   {
+    "factor_id": "fac_x",
+    "factor_label": "Factor X",
+    "current_value": 12,
+    "flip_value": 8.5,
+    "direction": "decrease",
+    "unit": "%",
+    "alternative_winner_id": "opt_b",
+    "alternative_winner_label": "Option B",
+    "flip_reason": "found",
+    "iterations_used": 7,
+    "probes_used": 12,
+    "margin_sensitivity": {
+     "movement": "weakened",
+     "value_scale": "display",
+     "strongest_probe_value": 9.1
+    }
+   }
+  ],
+  "flip_thresholds_status": "computed",
+  "flip_thresholds_margin_status": "computed",
+  "flip_thresholds_margin_coverage": {
+   "total": 1,
+   "with_margin": 1,
+   "without_margin": 0
+  },
+  "identifiability": {
+   "status": "identifiable",
+   "method": "backdoor",
+   "pairs_checked": 2,
+   "pairs_identifiable": 2
+  },
+  "robustness": {
+   "label": "moderate",
+   "fragile_edges": [
+    {
+     "edge_id": "fac_x->out_y",
+     "from_id": "fac_x",
+     "to_id": "out_y",
+     "from_label": "Factor X",
+     "to_label": "Outcome Y",
+     "switch_probability": 0.31,
+     "marginal_switch_probability": 0.06,
+     "alternative_winner_id": "opt_b",
+     "alternative_winner_label": "Option B",
+     "severity": "warning"
+    }
+   ],
+   "robust_edges": [],
+   "is_robust": false,
+   "level": "medium",
+   "confidence": 0.6,
+   "recommended_option_id": "opt_a",
+   "recommended_option_label": "Option A",
+   "near_tie": {
+    "is_tie": false,
+    "top_option_id": "opt_a",
+    "second_option_id": "opt_b",
+    "tied_option_ids": [],
+    "gap": 0.42,
+    "threshold": 0.1
+   },
+   "display_verdict": "moderate",
+   "display_verdict_reason": "some assumptions could shift this result"
+  },
+  "robustness_synthesis": null,
+  "auto_noise_applied": true,
+  "auto_noise_provenance": {
+   "applied": true,
+   "effect": "widens_outcome_and_risk_uncertainty",
+   "formula_version": "plot_auto_v1",
+   "multiplier": 1,
+   "noise_distribution": "normal_zero_mean_outcome_std",
+   "filter_scope": "outcome_and_risk_nodes",
+   "is_provisional": true,
+   "calibration_status": "provisional_pending_pilot_calibration"
+  },
+  "cee_status": "skipped",
+  "processing_time_ms": 2100.5,
+  "response_hash": "0000000000000000",
+  "review_cards": [],
+  "fact_objects": [],
+  "meta": {
+   "seed_used": "42",
+   "seed_source": "server_generated",
+   "n_samples": 1000,
+   "detail_level": "standard",
+   "latency_ms": 2100,
+   "computed_at": "2026-07-07T12:00:00.000Z"
+  }
+ },
+ "enrichment_suppressed_variant": {
+  "_note": "PR #205 (ROADMAP 1.26a): suppressed-unreliable target withholds the whole top-level constraint block; constraints_status 'unavailable' replaces fabricated 'computed'. Per-option probability_of_joint_goal / constraint_probabilities absent.",
+  "analysis_status": "computed",
+  "option_comparison_status": "computed",
+  "robustness_status": "computed",
+  "drivers_status": "computed",
+  "constraints_status": "unavailable",
+  "critiques": [],
+  "option_comparison": [
+   {
+    "option_id": "opt_a",
+    "option_label": "Option A",
+    "id": "opt_a",
+    "label": "Option A",
+    "status": "computed",
+    "win_probability": 0.71
+   }
+  ],
+  "inference_warnings": [
+   {
+    "code": "CONSTRAINT_TARGET_UNRELIABLE",
+    "message": "Constraint target 'goal_q3_delivery' is not decision-grade; goal-fit probabilities suppressed.",
+    "severity": "warning"
+   }
+  ],
+  "edge_e_values": [],
+  "flip_thresholds": []
+ }
+}

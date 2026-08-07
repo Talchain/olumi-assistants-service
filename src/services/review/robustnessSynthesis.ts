@@ -107,7 +107,16 @@ function detectFactorType(label: string): {
 // =============================================================================
 
 /**
- * Generate the headline from recommendation stability and recommended option
+ * Generate the headline from recommendation stability and the leading option.
+ *
+ * ROADMAP 2.725 — no-verdict doctrine. This headline used to read
+ * "{pct}% confident that {label} remains your best option" / "{pct}% confidence
+ * in the current recommendation": a system verdict on a route the V5 egress
+ * guard never scanned. The rewrite is LANGUAGE-ONLY — the stability percentage
+ * and the option label both survive; only the crowning goes.
+ *
+ * `recommendation_stability` / `recommended_option` are PLoT wire field names
+ * (schema-owned) and are deliberately unchanged.
  */
 function generateHeadline(data: PLoTRobustnessDataT): string | undefined {
   if (data.recommendation_stability === undefined) {
@@ -117,10 +126,10 @@ function generateHeadline(data: PLoTRobustnessDataT): string | undefined {
   const stabilityPct = Math.round(data.recommendation_stability * 100);
 
   if (data.recommended_option?.label) {
-    return `${stabilityPct}% confident that ${data.recommended_option.label} remains your best option`;
+    return `${data.recommended_option.label} stays in front in ${stabilityPct}% of tested scenarios`;
   }
 
-  return `${stabilityPct}% confidence in the current recommendation`;
+  return `The ranking holds in ${stabilityPct}% of tested scenarios`;
 }
 
 // =============================================================================
@@ -164,13 +173,32 @@ function generateContextualisedAssumptionExplanation(
   // Build the consequence phrase
   let consequencePhrase: string;
   if (alternativeWinner) {
+    // "could become the better choice" is DELIBERATELY kept. `become` is
+    // absent from DOCTRINE_FATAL pattern 1's copula set precisely so a
+    // conditional flip reading stays sayable — it describes what the analysis
+    // found could happen, it does not crown anything.
     consequencePhrase = `${alternativeWinner} could become the better choice`;
   } else {
-    consequencePhrase = "the recommendation could change";
+    // ROADMAP 2.725 — "the recommendation could change" → "the ranking could
+    // change".
+    consequencePhrase = "the ranking could change";
   }
 
-  // Generate contextualised explanation
-  return `The recommendation assumes ${fromLabel} significantly affects ${toLabel}. If ${uncertaintyPhrase}, ${consequencePhrase}.${likelihoodPhrase}`;
+  // ROADMAP 2.725 — "The recommendation assumes …" → "The ranking assumes …".
+  //
+  // ⚠ THIS PAIR WAS NOT IN THE 2026-08-06 AUDIT'S 19. It was found by the route
+  // -egress scanner this same row adds, firing on a real integration test's
+  // 200 response — which is the whole argument for extending the guard's
+  // coverage rather than only rewriting the strings the audit listed.
+  //
+  // REACHABILITY — this is the MOST reachable string in the row, not the least:
+  // this explanation is fed to `aggregateInsights`, and PLoT's
+  // `extractCeeResultsPanelFields()` copies `insights[].content` verbatim onto
+  // its own `/v2/run` body (plot-lite-service src/routes/v2/run.ts @ a825a789).
+  // The `robustness_synthesis.assumption_explanations` copy of it is dormant
+  // (PLoT rebuilds that field from a block key CEE does not emit); the
+  // `insights` copy is not.
+  return `The ranking assumes ${fromLabel} significantly affects ${toLabel}. If ${uncertaintyPhrase}, ${consequencePhrase}.${likelihoodPhrase}`;
 }
 
 /**
@@ -326,7 +354,9 @@ function generateInvestigationSuggestions(
 const FALLBACK_MESSAGES = {
   headline_no_stability: "Robustness analysis in progress",
   headline_no_option: "Analysis complete, awaiting option selection",
-  no_fragile_edges: "No critical assumptions identified that could change the recommendation",
+  // ROADMAP 2.725 — "…could change the recommendation" → "…could change the
+  // ranking". Also outside the audit's 19; same producer family.
+  no_fragile_edges: "No critical assumptions identified that could change the ranking",
   no_sensitive_factors: "All factors show stable influence on the outcome",
 };
 

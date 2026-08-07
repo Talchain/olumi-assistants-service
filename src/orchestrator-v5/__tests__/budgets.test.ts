@@ -10,8 +10,25 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getTurnExecutorBudgets } from '../budgets.js';
+import { config } from '../../config/index.js';
 
-const DEFAULT_TURN_MS = 180_000;
+/**
+ * The effective turn budget is the configured default CLAMPED to the
+ * browser-proxy deadline (2026-07-19), so CEE always emits its own typed error
+ * before the proxy emits a generic one. See `clampTurnBudgetToProxyDeadline`.
+ *
+ * DERIVED here, not restated as a literal: hard-coding the post-clamp number
+ * would recreate exactly the hand-maintained mirror the clamp exists to
+ * eliminate, and it would drift silently the moment BROWSER_PROXY_TIMEOUT_MS
+ * moves. These tests are about env-fallback semantics, not about pinning a
+ * particular millisecond count — the numeric ladder itself is pinned in
+ * `tests/unit/orchestrator-v5/budget-timeout-invariants.test.ts`.
+ */
+const TURN_RESPONSE_HEADROOM_MS = 10_000;
+const PROXY_CEILING_MS = config.proxy.browserProxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS;
+const effectiveTurnMs = (configuredMs: number): number => Math.min(configuredMs, PROXY_CEILING_MS);
+
+const DEFAULT_TURN_MS = effectiveTurnMs(180_000);
 const DEFAULT_LLM_MS = 60_000;
 
 const ENV_KEYS = ['TURN_BUDGET_MS', 'LLM_BUDGET_NARRATE_MS'] as const;
@@ -94,8 +111,19 @@ describe('getTurnExecutorBudgets — invalid env fallback', () => {
     process.env.TURN_BUDGET_MS = '120000';
     process.env.LLM_BUDGET_NARRATE_MS = 'bogus';
     const budgets = getTurnExecutorBudgets();
-    expect(budgets.turn_ms).toBe(120_000);
+    // 120s is ABOVE the proxy ceiling, so the clamp binds here — the point of
+    // this assertion is still the per-key independence (a bogus narrate value
+    // must not corrupt the turn value), which holds either way.
+    expect(budgets.turn_ms).toBe(effectiveTurnMs(120_000));
     expect(budgets.llm_narrate_ms).toBe(DEFAULT_LLM_MS);
+  });
+
+  it('an override BELOW the proxy ceiling is honoured verbatim (clamp is a ceiling, not an override)', () => {
+    // Guards the direction the clamp must NOT act in: it may only ever lower a
+    // too-large budget, never raise or rewrite a legitimate smaller one.
+    process.env.TURN_BUDGET_MS = '30000';
+    const budgets = getTurnExecutorBudgets();
+    expect(budgets.turn_ms).toBe(30_000);
   });
 });
 
@@ -132,16 +160,30 @@ describe('Budget independence (classifier and narrate get fresh windows)', () =>
     expect(narrateBudget).toBe(45_000);
   });
 
-  it('documents worst-case total inner budget = 2 × llm_narrate_ms, bounded by turn_ms', () => {
+  it('documents worst-case total inner budget = 2 × llm_narrate_ms, now PREEMPTED by the outer turn_ms', () => {
     process.env.TURN_BUDGET_MS = '120000';
     process.env.LLM_BUDGET_NARRATE_MS = '60000';
     const budgets = getTurnExecutorBudgets();
     const worstCaseTotal = 2 * budgets.llm_narrate_ms;
-    // If worstCaseTotal > turn_ms, the outer wall-clock abort fires first
-    // (constraint 7 guarantees BUDGET_EXCEEDED precedence in that case).
-    // Here: 2 × 60000 = 120000, equal to turn_ms — the boundary is exact
-    // and the outer timer will preempt any overrun.
-    expect(worstCaseTotal).toBe(budgets.turn_ms);
+
+    // BEHAVIOUR CHANGE, 2026-07-19 — stated plainly rather than silently
+    // re-baselined. This assertion used to read `toBe(budgets.turn_ms)`: at a
+    // 180s default clamped by nothing, 2 × 60s sat exactly ON the boundary.
+    // With turn_ms now clamped to the browser-proxy deadline, the worst-case
+    // inner total EXCEEDS the outer bound, so the outer wall-clock abort fires
+    // first and constraint 7 classifies the turn TURN_BUDGET_EXCEEDED.
+    //
+    // That is the intended ordering, not a regression. The old 180s ceiling was
+    // already unreachable in the deployed topology: a turn that actually ran
+    // 120s of LLM plus context-build and compose would have been killed by the
+    // 125s proxy, and the user would have received a generic proxy error. The
+    // pathological case now ends in CEE's own typed error instead. Observed
+    // narrate latency is ~7–22s, so this bound is theoretical, not routine.
+    expect(worstCaseTotal).toBeGreaterThan(budgets.turn_ms);
+
+    // The load-bearing guarantee: whatever the inner budgets are, the outer
+    // bound still resolves below the proxy deadline.
+    expect(budgets.turn_ms).toBeLessThan(config.proxy.browserProxyTimeoutMs);
   });
 
   it('no hidden shared counter: independent budget keys', () => {

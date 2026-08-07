@@ -37,7 +37,6 @@ vi.mock("../../src/config/index.js", () => ({
   config: {
     cee: {
       draftArchetypesEnabled: true,
-      draftStructuralWarningsEnabled: true,
       pipelineCheckpointsEnabled: false,
       verificationPipelineEnabled: true,
     },
@@ -125,7 +124,7 @@ vi.mock("../../src/cee/llm-output-store.js", () => ({
 }));
 
 vi.mock("../../src/context/context-pack.js", () => ({
-  assembleContextPack: vi.fn().mockReturnValue({ pipelinePath: "unified", context_hash: "test-hash" }),
+  assembleDraftProvenanceDescriptor: vi.fn().mockReturnValue({ pipelinePath: "unified", context_hash: "test-hash" }),
 }));
 
 vi.mock("../../src/version.js", () => ({
@@ -182,7 +181,6 @@ function makeCtx(coaching: unknown): any {
     checkpointsEnabled: false,
     validationSummary: undefined,
     structuralMeta: undefined,
-    clarifierResult: undefined,
     quality: undefined,
     archetype: undefined,
     draftWarnings: [],

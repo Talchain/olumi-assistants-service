@@ -13,8 +13,13 @@ describe("GET /v1/limits", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    // Configure API key and graph caps for deterministic tests
+    // Configure API key and graph caps for deterministic tests. LLM_PROVIDER
+    // must be stubbed too — the config default is "openai" (src/config/
+    // index.ts), and no OPENAI_API_KEY is present in this environment;
+    // without this, build() throws FATAL before reaching the routes under
+    // test (ROADMAP 1.30f investigation).
     vi.stubEnv("ASSIST_API_KEYS", "test-key-limits");
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
     vi.stubEnv("GRAPH_MAX_NODES", "50");
     vi.stubEnv("GRAPH_MAX_EDGES", "100");
     vi.stubEnv("RATE_LIMIT_RPM", "120");

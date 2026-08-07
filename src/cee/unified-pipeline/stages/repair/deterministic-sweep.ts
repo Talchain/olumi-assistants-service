@@ -18,12 +18,14 @@ import type { ValidationIssue } from "../../../../validators/graph-validator.typ
 import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { sweepNodePath, pathsNameNode } from "../../../../validators/violation-paths.js";
 import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
 import { fixStatusQuoConnectivity, findDisconnectedOptions } from "./status-quo-fix.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 import { log } from "../../../../utils/telemetry.js";
+import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
@@ -187,10 +189,18 @@ function fixStructuralEdgesNotCanonical(
     const isDecisionOption = fromKind === "decision" && toKind === "option";
     if (!isOptionFactor && !isDecisionOption) continue;
 
-    // Only canonicalise if not already canonical (format-aware check)
+    // Only canonicalise if not already canonical (format-aware check).
+    // MUST include effect_direction: the validator's canonical tuple
+    // (graph-validator.ts STRUCTURAL_EDGE_NOT_CANONICAL_ERROR) requires
+    // direction === "positive" in addition to the numerics. A numerics-only
+    // pre-check skipped edges with canonical numerics but missing/negative
+    // direction, so the violation survived the sweep and post-enforcement
+    // re-validation failed the request closed (CEE_GRAPH_INVALID → 422).
     const isCanonical = format === "LEGACY"
       ? (edge as Record<string, unknown>).weight === 1 && (edge as Record<string, unknown>).belief === 1
-      : edge.strength_mean === 1 && edge.strength_std === 0.01 && edge.belief_exists === 1;
+        && edge.effect_direction === "positive"
+      : edge.strength_mean === 1 && edge.strength_std === 0.01 && edge.belief_exists === 1
+        && edge.effect_direction === "positive";
 
     if (!isCanonical) {
       // decision→option: always fix proactively (LLMs frequently produce probability splits)
@@ -1056,6 +1066,13 @@ function canReachGoalViaAllowed(
 
     for (const edge of edges) {
       if (edge === excludeEdge) continue;
+      // Adopt the estate's directed-edge policy (`src/graph/reachability.ts`).
+      // A bidirected edge is an unmeasured common cause, not a causal path
+      // (`schemas/graph.ts:333-335`), so it must not vouch for an outcome
+      // "already having a valid path to goal" and thereby authorise deleting a
+      // forbidden shortcut. The kind whitelist below is a DELIBERATE extra
+      // narrowing and is retained; only the edge policy is shared.
+      if (!isDirectedEdge(edge)) continue;
       if (edge.from !== current) continue;
       const toKind = nodeKindMap.get(edge.to);
       if (!toKind) continue;
@@ -1574,13 +1591,17 @@ export function fixDisconnectedObservables(graph: GraphT): { repairs: Repair[]; 
         path: `nodes[${node.id}]`,
         action: `Removed ${node.category} factor "${node.label ?? node.id}" with zero edges`,
       });
-      // Per-node structured log (brief contract)
+      // Per-node structured log (brief contract). PII rule (14-Jul
+      // ruling): node ids are label-derived slugs and labels are user
+      // decision content — the log carries a correlation digest and the
+      // bounded category enum only; the raw id/label never reaches the
+      // message string (path-based redaction cannot clean interpolated
+      // prose, so the call site must not interpolate it).
       log.info({
         event: "cee.deterministic_sweep.observable_pruned",
-        node_id: node.id,
-        label: node.label ?? node.id,
+        node_id_digest: sha8(node.id),
         category: node.category,
-      }, `Pruned disconnected ${node.category} factor "${node.label ?? node.id}"`);
+      }, `Pruned disconnected ${node.category} factor with zero edges`);
     } else {
       keptNodes.push(node);
     }
@@ -2028,16 +2049,28 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   let proactiveDisconnected = false;
   if (disconnectedAfter.length > 0) {
     proactiveDisconnected = true;
-    // Add synthetic remaining violations for disconnected options not already flagged
-    const existingPaths = new Set(remainingErrors.filter((v) => v.code === "NO_PATH_TO_GOAL").map((v) => v.path));
+    // Add synthetic remaining violations for disconnected options not already flagged.
+    //
+    // The suppression test MUST be format-agnostic: the paths in this set are
+    // minted by graph-validator (`nodesById.<id>`) while the path we are about
+    // to push is minted by this sweep (`nodes[<id>]`). Comparing one literal
+    // against the other — as this guard used to — can never match, so every
+    // already-flagged option was reported twice. `pathsNameNode` derives both
+    // spellings from the shared builders instead of re-writing either literal
+    // here (platform trap 12: derive, don't mirror).
+    const existingPaths = new Set(
+      remainingErrors
+        .filter((v) => v.code === "NO_PATH_TO_GOAL")
+        .map((v) => v.path)
+        .filter((p): p is string => typeof p === "string"),
+    );
     for (const optId of disconnectedAfter) {
-      const path = `nodes[${optId}]`;
-      if (!existingPaths.has(path)) {
+      if (!pathsNameNode(existingPaths, optId)) {
         remainingErrors.push({
           code: "NO_PATH_TO_GOAL" as any,
           severity: "error" as any,
           message: `Option "${optId}" has no directed path to goal (proactive check)`,
-          path,
+          path: sweepNodePath(optId),
         });
       }
     }

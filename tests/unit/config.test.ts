@@ -50,11 +50,41 @@ describe("Configuration Module", () => {
       expect(config.features.grounding).toBe(false); // conservative default - opt-in for safety
       expect(config.features.critique).toBe(true);
       expect(config.features.clarifier).toBe(true);
-      expect(config.features.piiGuard).toBe(false);
+      expect(config.features.shareReview).toBe(false);
 
       // Performance defaults
       expect(config.performance.metricsEnabled).toBe(true);
       expect(config.performance.slowThresholdMs).toBe(5000);
+    });
+
+    it("defaults draft-graph extended thinking ON (no-dark-launches; plan-then-prune the cardinality bistability)", async () => {
+      process.env = {
+        NODE_ENV: "development",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      // Draft-graph thinking ships ON by default (the lever against sonnet-4-6's
+      // 50-100+ node runaways); orchestrator and edit-graph stay OFF.
+      expect(config.cee.thinking.draftGraphEnabled).toBe(true);
+      expect(config.cee.thinking.orchestratorEnabled).toBe(false);
+      expect(config.cee.thinking.editGraphEnabled).toBe(false);
+
+      // Budget is deliberately BELOW the affordable envelope (~8550) so it fits
+      // unclamped and leaves visible-output headroom — it must not gut healthy
+      // drafts, and must not ERROR the boot affordability assertion.
+      expect(config.cee.thinking.draftGraphBudget).toBe(4000);
+    });
+
+    it("CEE_DRAFT_GRAPH_THINKING=false remains a working kill switch over the ON default", async () => {
+      process.env = {
+        NODE_ENV: "development",
+        CEE_DRAFT_GRAPH_THINKING: "false",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.thinking.draftGraphEnabled).toBe(false);
     });
   });
 
@@ -77,7 +107,7 @@ describe("Configuration Module", () => {
       process.env = {
         GROUNDING_ENABLED: "false",
         CRITIQUE_ENABLED: "true",
-        PII_GUARD_ENABLED: "1",
+        SHARE_REVIEW_ENABLED: "1",
         REDIS_TLS: "0",
       };
 
@@ -85,7 +115,7 @@ describe("Configuration Module", () => {
 
       expect(config.features.grounding).toBe(false);
       expect(config.features.critique).toBe(true);
-      expect(config.features.piiGuard).toBe(true);
+      expect(config.features.shareReview).toBe(true);
       expect(config.redis.tls).toBe(false);
     });
   });
@@ -233,7 +263,7 @@ describe("Configuration Module", () => {
         // Features
         GROUNDING_ENABLED: "true",
         CRITIQUE_ENABLED: "true",
-        PII_GUARD_ENABLED: "true",
+        SHARE_REVIEW_ENABLED: "true",
 
         // Redis
         REDIS_URL: "redis://localhost:6379",
@@ -252,7 +282,7 @@ describe("Configuration Module", () => {
       expect(config.auth.assistApiKeys).toEqual(["prod-key-1", "prod-key-2"]);
       expect(config.llm.provider).toBe("anthropic");
       expect(config.llm.model).toBe("claude-3-5-sonnet-20241022");
-      expect(config.features.piiGuard).toBe(true);
+      expect(config.features.shareReview).toBe(true);
       expect(config.redis.url).toBe("redis://localhost:6379");
       expect(config.performance.slowThresholdMs).toBe(45000);
     });
@@ -514,65 +544,6 @@ describe("Configuration Module", () => {
       const { config } = await import("../../src/config/index.js");
 
       expect(config.server.port).toBe(10000);
-    });
-  });
-
-  describe("CLARIFIER_ENABLED deprecation forwarding", () => {
-    it("forwards CLARIFIER_ENABLED to cee.clarifierEnabled when CEE_CLARIFIER_ENABLED is unset", async () => {
-      vi.resetModules();
-      process.env = {
-        NODE_ENV: "test",
-        LLM_PROVIDER: "fixtures",
-        CLARIFIER_ENABLED: "true",
-        // CEE_CLARIFIER_ENABLED intentionally absent
-      };
-      delete process.env.CEE_CLARIFIER_ENABLED;
-
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.clarifierEnabled).toBe(true);
-    });
-
-    it("CEE_CLARIFIER_ENABLED takes precedence when both are set with different values", async () => {
-      vi.resetModules();
-      process.env = {
-        NODE_ENV: "test",
-        LLM_PROVIDER: "fixtures",
-        CLARIFIER_ENABLED: "false",
-        CEE_CLARIFIER_ENABLED: "true",
-      };
-
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.clarifierEnabled).toBe(true);
-    });
-
-    it("CEE_CLARIFIER_ENABLED=false overrides CLARIFIER_ENABLED=true", async () => {
-      vi.resetModules();
-      process.env = {
-        NODE_ENV: "test",
-        LLM_PROVIDER: "fixtures",
-        CLARIFIER_ENABLED: "true",
-        CEE_CLARIFIER_ENABLED: "false",
-      };
-
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.clarifierEnabled).toBe(false);
-    });
-
-    it("cee.clarifierEnabled defaults to false when neither env var is set", async () => {
-      vi.resetModules();
-      process.env = {
-        NODE_ENV: "test",
-        LLM_PROVIDER: "fixtures",
-      };
-      delete process.env.CLARIFIER_ENABLED;
-      delete process.env.CEE_CLARIFIER_ENABLED;
-
-      const { config } = await import("../../src/config/index.js");
-
-      expect(config.cee.clarifierEnabled).toBe(false);
     });
   });
 

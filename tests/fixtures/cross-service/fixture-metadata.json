@@ -55,5 +55,13 @@
     "build_hash": "N/A",
     "captured_at": "2026-04-30",
     "reason": "Synthetic; covers normalised shape with flip_threshold_data (factor_id, factor_label, current_value, flip_value, direction, unit), isl_results.factor_sensitivity, isl_results.fragile_edges, _meta.input_shape_version='v5-normalised', counts, margin, robustness_level."
+  },
+  "plot-to-cee.doctrine-b.code-derived.json": {
+    "source": "code_derived_mirror",
+    "endpoint": "PLoT /v2/run (envelope persisted as RunAnalysisHandlerFact.result.enrichment)",
+    "schema": "AnalysisEnrichmentSchema (@talchain/schemas >= 0.14.0 boundary)",
+    "build_hash": "plot-lite-service staging 524c488",
+    "captured_at": "2026-07-08",
+    "reason": "NOT a wire capture. Mirrored byte-for-byte from the olumi-schemas contract-test pack (main 5612e266, fixtures/enrichment/plot-to-cee.doctrine-b.code-derived.json). Hand-assembled from PLoT source (PRs #202-#205) to exercise the post-doctrine-B vocabulary the 2026-04 staging capture predates (goal_fit_basis, constraints_status, display_verdict, zero_reason, evpi_status, plot_unified_* confidence_source) plus the suppressed variant that withholds constraint numbers. Replace with a live staging capture once a constraint-bearing analysis is exercised on staging; full provenance embedded in the file's _provenance key."
   }
 }

@@ -26,6 +26,8 @@ import {
   RoutingError,
   routeWithToolUse,
   assertAnthropicMessageProtocol,
+  V5_ROUTING_MAX_OUTPUT_TOKENS,
+  V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY,
 } from '../route-with-tool-use.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -56,6 +58,7 @@ function textBlock(text: string): ToolResponseBlock {
 function mkResult(
   content: ToolResponseBlock[],
   stop: ChatWithToolsResult['stop_reason'] = 'tool_use',
+  reasoning?: string,
 ): ChatWithToolsResult {
   return {
     content,
@@ -68,6 +71,7 @@ function mkResult(
     } as unknown as ChatWithToolsResult['usage'],
     model: 'claude-sonnet-4-6',
     latencyMs: 123,
+    ...(reasoning !== undefined ? { reasoning } : {}),
   };
 }
 
@@ -417,9 +421,13 @@ describe('routeWithToolUse — error paths', () => {
     ).rejects.toBeInstanceOf(RoutingError);
   });
 
-  it('max_tokens stop reason → RoutingError{cause:"unexpected_stop_reason"}', async () => {
+  it('max_tokens on BOTH attempts → RoutingError{cause:"unexpected_stop_reason"} after ONE retry', async () => {
+    // Prompt-workstream fix (2026-07-08): the first max_tokens now triggers
+    // a single escalated-budget retry (V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY) before the unchanged error
+    // path. Both attempts truncating → the pre-existing RoutingError, with
+    // llmCallCount reflecting the extra call.
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(mkResult([textBlock('partial')], 'max_tokens')),
+      chatWithTools: vi.fn().mockResolvedValue(mkResult([textBlock('partial')], 'max_tokens')),
     };
 
     let caught: unknown;
@@ -430,6 +438,34 @@ describe('routeWithToolUse — error paths', () => {
     }
     expect(caught).toBeInstanceOf(RoutingError);
     expect((caught as RoutingError).cause).toBe('unexpected_stop_reason');
+    expect((caught as RoutingError).llmCallCount).toBe(2);
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+    // The retry escalates ONLY the output budget.
+    const firstArgs = adapter.chatWithTools.mock.calls[0]![0] as ChatWithToolsArgs;
+    const retryArgs = adapter.chatWithTools.mock.calls[1]![0] as ChatWithToolsArgs;
+    expect(firstArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
+    expect(retryArgs.messages).toEqual(firstArgs.messages);
+    expect(retryArgs.tools).toEqual(firstArgs.tools);
+  });
+
+  it('max_tokens then a clean tool call → routing succeeds via the single retry', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('partial')], 'max_tokens'))
+        .mockResolvedValueOnce(mkResult([toolCallBlock(VALID_EXECUTE_INPUT)])),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'run analysis', {
+      requestId: 'req-mx-retry',
+      adapter,
+    });
+
+    expect(result.type).toBe('tool_call');
+    // Two real chatWithTools invocations: truncated first attempt + retry.
+    expect(result.llmCallCount).toBe(2);
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
   });
 
   it('empty response (no text, no tool) → RoutingError{cause:"empty_response"}', async () => {
@@ -694,5 +730,83 @@ describe('assertAnthropicMessageProtocol', () => {
     expect(() => assertAnthropicMessageProtocol(messages)).toThrow(
       /tool_result tu-orphan.*has no matching tool_use/,
     );
+  });
+});
+
+// -----------------------------------------------------------------------
+// ROADMAP 1.42 — reasoning never leaks into orientationText / text
+// -----------------------------------------------------------------------
+// `ChatWithToolsResult.reasoning` (when the adapter's flag-gated capture is
+// on) rides through on `rawResult` unchanged, but MUST NOT contribute to
+// `orientationText` (tool_call path) or `text` (text_only path) — both are
+// derived solely from `content`'s text blocks. See route-with-tool-use.ts
+// buildRepairMessages / the joinedText derivation.
+describe('routeWithToolUse — reasoning capture never leaks into orientationText/text (ROADMAP 1.42)', () => {
+  const REASONING_TEXT = 'Internal chain of thought that must never reach the user.';
+
+  it('tool_call path: rawResult.reasoning is passed through but orientationText excludes it', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult(
+            [textBlock('Running analysis on your current scenario...'), toolCallBlock(VALID_EXECUTE_INPUT)],
+            'tool_use',
+            REASONING_TEXT,
+          ),
+        ),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'run analysis', {
+      requestId: 'req-reasoning-1',
+      adapter,
+    });
+
+    expect(result.type).toBe('tool_call');
+    if (result.type === 'tool_call') {
+      // The adapter's captured reasoning rides through on rawResult unchanged.
+      expect(result.rawResult.reasoning).toBe(REASONING_TEXT);
+      // But orientationText is derived only from content's text blocks.
+      expect(result.orientationText).toBe('Running analysis on your current scenario...');
+      expect(result.orientationText).not.toContain(REASONING_TEXT);
+    }
+  });
+
+  it('text_only path: rawResult.reasoning is passed through but text excludes it', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([textBlock('Hello — how can I help?')], 'end_turn', REASONING_TEXT),
+        ),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'hi', {
+      requestId: 'req-reasoning-2',
+      adapter,
+    });
+
+    expect(result.type).toBe('text_only');
+    if (result.type === 'text_only') {
+      expect(result.rawResult.reasoning).toBe(REASONING_TEXT);
+      expect(result.text).toBe('Hello — how can I help?');
+      expect(result.text).not.toContain(REASONING_TEXT);
+    }
+  });
+
+  it('no reasoning captured (flag off / no thinking): rawResult.reasoning is undefined, behaviour unchanged', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([textBlock('Hello!')], 'end_turn')),
+    };
+
+    const result = await routeWithToolUse(minimalContextPack(), 'hi', {
+      requestId: 'req-reasoning-3',
+      adapter,
+    });
+
+    expect(result.type).toBe('text_only');
+    expect(result.rawResult.reasoning).toBeUndefined();
   });
 });

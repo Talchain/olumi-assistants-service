@@ -19,9 +19,11 @@
  * resolver so load-failure tests can point at a missing file without
  * mutating the filesystem or destabilising unrelated module imports.
  *
- * Sanity range [18500, 20500] is a range check, not a correctness field.
- * Hash + version are the primary proof of installation. The check exists
- * to catch "wrong file copied" or "accidental truncation" at init.
+ * The sanity range (EXPECTED_SYSTEM_CHARS_MIN..MAX below — absolute values
+ * pinned by prompt-size-guard-absolute.test.ts) is a range check, not a
+ * correctness field. Hash + version are the primary proof of installation.
+ * The check exists to catch "wrong file copied" or "accidental truncation"
+ * at init.
  */
 
 import { readFileSync } from 'node:fs';
@@ -36,7 +38,7 @@ export const ROUTING_PROMPT_VERSION = 'v40';
  * / truncation disasters at module init.
  */
 export const EXPECTED_SYSTEM_CHARS_MIN = 18_500;
-export const EXPECTED_SYSTEM_CHARS_MAX = 22_000;
+export const EXPECTED_SYSTEM_CHARS_MAX = 29_000;
 
 export interface LoadedPrompt {
   readonly text: string;
@@ -125,6 +127,9 @@ import { mapSource, pmsResolveTaskId, resolvePublicVersion } from '../../prompts
 import { registerRoutingLiveStatusProvider } from '../../prompts/routing-live-status.js';
 import { recordPromptResolutionObservation } from '../../prompts/resolution-policy.js';
 import { getRuntimeEnv } from '../../config/env-resolver.js';
+// No import cycle: config/index.ts imports only zod + env-resolver, and
+// route-with-tool-use.ts (this module's consumer) already imports it.
+import { shouldUseStagingPrompts } from '../../config/index.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 // Module-init registration: ensure the 'routing' default is always available
@@ -225,7 +230,17 @@ async function doBuildRoutingPromptSnapshot(): Promise<RoutingPromptSnapshot> {
     );
   }
 
-  const loaded = await loadPrompt('routing', { trigger: 'startup' });
+  // Staged-rollout support (prompt-workstream fix, 2026-07-08): pass the
+  // prompt-environment flag exactly like the handler-prompt loader does
+  // (src/adapters/llm/prompt-loader.ts:325). Without it, `loadPrompt`
+  // defaulted `useStaging` to false, so setting the PMS `staging_version`
+  // pointer on the orchestrator row was a NO-OP for the routing snapshot —
+  // the documented staged-rollout path silently served the active version
+  // (live-proven via admin reload on 2026-07-08).
+  const loaded = await loadPrompt('routing', {
+    trigger: 'startup',
+    useStaging: shouldUseStagingPrompts(),
+  });
   const raw = loaded.content;
   const text = normaliseRoutingText(raw);
   const raw_hash = createHash('sha256').update(raw).digest('hex').slice(0, 16);
@@ -296,6 +311,38 @@ export function getRoutingPromptSnapshot(): RoutingPromptSnapshot {
     );
   }
   return cachedSnapshot;
+}
+
+/**
+ * Served routing-prompt identity for telemetry stamps (ROADMAP 1.32).
+ * Mirrors the fields lifecycle events already carry — `prompt_version`,
+ * `prompt_hash`/`sent_hash`, `system_chars` — plus `raw_hash` for the
+ * prompt-cache event's `source_hash`.
+ */
+export interface RoutingPromptIdentity {
+  readonly version: string;
+  readonly sent_hash: string;
+  readonly raw_hash: string;
+  readonly system_chars: number;
+}
+
+/**
+ * Synchronous, non-throwing accessor for the SERVED routing prompt identity
+ * (ROADMAP 1.32). Telemetry emit sites (turn-executor `obsPayload()`,
+ * route-with-tool-use `emitV5PromptCache()`) prefer this over the static
+ * repo-default constants so lifecycle events report the PMS snapshot
+ * actually sent to Anthropic (e.g. version 112 / 21,860 chars), not the
+ * bundled default (v40 / 21,439). Returns null before the snapshot is
+ * built (pre-boot) — callers fall back to the constants.
+ */
+export function getCachedRoutingPromptIdentity(): RoutingPromptIdentity | null {
+  if (!cachedSnapshot) return null;
+  return {
+    version: cachedSnapshot.version,
+    sent_hash: cachedSnapshot.sent_hash,
+    raw_hash: cachedSnapshot.raw_hash,
+    system_chars: cachedSnapshot.systemChars,
+  };
 }
 
 /**

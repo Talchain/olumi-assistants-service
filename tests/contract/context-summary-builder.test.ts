@@ -143,12 +143,16 @@ describe('buildV5ContextSummary — redaction + honest nullability', () => {
       [
         'analysis_state',
         'capabilities_present',
+        // Mission 1: constant hash-family label ('analysis_affecting') so
+        // consumers never read the summary hashes as graphIdentityHash.
+        'graph_hash_kind',
         'graph_counts',
         'recent_change_count',
         'recent_turn_count',
         'version',
       ].sort(),
     );
+    expect(summary.graph_hash_kind).toBe('analysis_affecting');
     // analysis_state key allowlist — counts/statuses/hashes/predicates only.
     expect(Object.keys(summary.analysis_state).sort()).toEqual(ANALYSIS_STATE_KEYS);
     expect(summary.analysis_state.freshness).toBe('fresh');

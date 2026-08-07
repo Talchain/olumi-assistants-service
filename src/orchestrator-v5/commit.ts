@@ -28,12 +28,21 @@
 import { createHash } from 'node:crypto';
 
 import type { OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
-import type { ConversationTurnClass, HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import type {
+  ConversationTurnClass,
+  HandlerFact,
+  RunAnalysisHandlerFact,
+  V5ActionType,
+} from '@talchain/schemas/orchestrator';
 
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
-import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
-import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
+import { projectGraphForPersistence } from './persisted-graph-projection.js';
+import {
+  checkPersistedGraphInvariants,
+  PersistedGraphInvariantError,
+  formatViolations,
+} from './persisted-graph-invariants.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -42,10 +51,20 @@ import type {
   PendingAction,
   PendingLifecycleSummary,
 } from './session/pending-action.js';
-import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
+import {
+  CONFIRMATION_EXPECTING_ACTION_TYPES,
+  isPendingActionExpired,
+  PENDING_ACTIONS_PER_TURN_CAP,
+} from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { emitContextTruncation } from './context/context-budget-telemetry.js';
+import { config } from '../config/index.js';
+import { getModelManagementService } from './model-management/index.js';
+import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
+import { recordDecisionRecordForCommit } from './decision-records/capture.js';
+import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -101,6 +120,18 @@ export interface CommitMetadata {
    * (frame stage, no draft yet).
    */
   readonly graph_hash?: string;
+  /**
+   * The graph as it stood BEFORE this turn, for the terminal invariant check's
+   * DELTA comparison. Structural violations already present here are absorbed
+   * and never refused — only what this turn INTRODUCED can fail the commit.
+   *
+   * Omit it and the check degrades to observe-only for this commit. That is the
+   * safe default: without a baseline there is no way to distinguish an
+   * introduced violation from an inherited one, and refusing on that guess
+   * would make an already-invalid scenario permanently uneditable (the failure
+   * mode `edit-graph.ts:2750-2755` exists to avoid).
+   */
+  readonly baseGraphForInvariants?: unknown;
   /**
    * V5 Signature Loop — pending proposals carried in from the PRIOR turn (the
    * caller's `most_recent_pending_actions`). `commitDirectAnswer` re-persists
@@ -165,6 +196,27 @@ export interface CommitMetadata {
    * graph here closes it for every turn that operates on a graph.
    */
   readonly contentGraph?: unknown;
+  /**
+   * A3 graph CAS observe-mode: expected-base identity hash (64-hex) captured
+   * at turn start from a SERVER-SIDE persisted-graph read. Threaded VERBATIM
+   * to `SessionTurnWrite.expectedGraphIdentityHash` — commit.ts performs no
+   * recomputation and no fallback derivation here.
+   *
+   * TRUSTED BASE RULE: callers must derive this only from a server read
+   * (`context.persistedGraph` via the turn-executor `commitTurn` wrapper, or
+   * edit-graph-dispatch's `loadPersistedGraphStrict` base). NEVER from
+   * request-supplied `graph_state`. `undefined` = not instrumented
+   * (`no_expected`, never a conflict); `null` = server base read but graph
+   * absent/unparseable. See graph-cas-conflict.ts.
+   */
+  readonly expectedGraphIdentityHash?: string | null;
+  /**
+   * A3 graph CAS observe-mode: expected-base analysis-affecting hash (16-hex)
+   * from the same server read as `expectedGraphIdentityHash`. Threaded
+   * verbatim to `SessionTurnWrite.expectedGraphAnalysisHash`. Same
+   * undefined/null convention.
+   */
+  readonly expectedGraphAnalysisHash?: string | null;
 }
 
 /**
@@ -180,12 +232,38 @@ export const CONVERSATION_TEXT_CAP = 2000;
 /**
  * Cap durable conversation text app-side. Returns `undefined` for nullish or
  * empty/whitespace-only input (→ persists NULL, never an empty string) and a
- * length-bounded string otherwise. Pure; no trimming of interior content.
+ * length-bounded string otherwise. No trimming of interior content.
+ *
+ * Context v2 S0 (ROADMAP 1.73): a cut here now emits `v5.context_truncation`
+ * — this was the platform's canonical SILENT slice (design pack 00 §broken
+ * seam 1). The persistence cap itself stays (storage bound, sane); only the
+ * observability changes. `disclosed` is always true: the pack projection
+ * unconditionally marks the cut turn `truncated:true`
+ * (projectConversation's at-cap inference), so downstream LLMs can see it.
+ *
+ * Exported for direct unit coverage of the emit contract (S0 tests); the
+ * `section` names the durable column the cut applies to.
  */
-function capConversationText(text: string | undefined | null): string | undefined {
+export function capConversationText(
+  text: string | undefined | null,
+  section: 'user_message' | 'assistant_message',
+): string | undefined {
   if (text == null) return undefined;
   if (text.trim().length === 0) return undefined;
-  return text.length > CONVERSATION_TEXT_CAP ? text.slice(0, CONVERSATION_TEXT_CAP) : text;
+  if (text.length > CONVERSATION_TEXT_CAP) {
+    emitContextTruncation({
+      site: 'commit.capConversationText',
+      section,
+      original_chars: text.length,
+      kept_chars: CONVERSATION_TEXT_CAP,
+      strategy: 'hard_slice',
+      // Disclosure is now unconditional: projectConversation always marks the
+      // at-cap turn `truncated:true`, so the downstream LLM sees this cut.
+      disclosed: true,
+    });
+    return text.slice(0, CONVERSATION_TEXT_CAP);
+  }
+  return text;
 }
 
 /**
@@ -266,6 +344,35 @@ export interface CommitResult {
    * with `priorCount: 0` on legacy callers that thread no prior pendings).
    */
   readonly pendingLifecycle: PendingLifecycleSummary;
+  /**
+   * §3.2 — the analysis hash of the bytes ACTUALLY WRITTEN to `scenarios.graph`,
+   * recomputed after every persist-site mutation. This is the only hash a
+   * caller may advertise for this turn: any hash a caller computed before
+   * calling `commitDirectAnswer` describes the graph as it was BEFORE the
+   * persist projection, which is not what the next turn will read back.
+   *
+   * `null` when this commit wrote no graph (there are no persisted bytes to
+   * hash) or when the graph was empty/unhashable.
+   */
+  readonly persistedAnalysisGraphHash: string | null;
+  /**
+   * The graph bytes ACTUALLY WRITTEN to `scenarios.graph` — the output of
+   * `projectGraphForPersistence`, not the caller's input.
+   *
+   * Exposed because `persistedAnalysisGraphHash` alone is not enough for a
+   * caller that must DERIVE something else from the committed state. The persist
+   * passes mutate `intercept`, node `interventions` and top-level `options[]`,
+   * and at least one downstream derivation reads exactly those:
+   * `computeStructuralReadiness` reads option nodes' merged interventions. A
+   * caller deriving readiness from its own pre-projection copy can therefore
+   * publish a readiness verdict describing a graph that was never stored —
+   * the same "advertised state != persisted state" class the hash field above
+   * exists to prevent, one field over.
+   *
+   * `null` when this commit wrote no graph. Do NOT treat it as a general
+   * read-back: it is this commit's own input after projection, not a re-read.
+   */
+  readonly persistedGraph: unknown | null;
 }
 
 /**
@@ -286,6 +393,9 @@ function pendingMatchKey(pa: PendingAction): string {
  * turn-count TTL decremented). A prior pending survives iff ALL hold:
  *   1. not consumed this turn (applied / dismissed — `consumedRefs`);
  *   2. not superseded by a this-turn pending with the same key (newer wins);
+ *      for `proposed_concept` supersession is KIND-level: ANY fresh
+ *      capture this turn supersedes every carried concept (single-slot
+ *      proposal memory — diagnosis D2a);
  *   3. not wall-clock expired (`expires_at_iso > nowMs`; malformed → expired);
  *   4. graph-hash precondition still matches `currentGraphHash` when BOTH are
  *      known (a mismatch = the graph moved underneath it → invalidated);
@@ -293,13 +403,28 @@ function pendingMatchKey(pa: PendingAction): string {
  *
  * Pure and deterministic (clock injected). This is the single place the
  * turn-count TTL is decremented — see the once-per-turn invariant in the
- * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md): only the
- * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, never the
- * route-level dispatchers.
+ * consumption-path matrix (Docs/v5/v5-signature-loop-reliability.md). The
+ * TurnExecutor `commitTurn` wrapper threads `priorPendingActions`, and — the
+ * HOLD-WIPE fix (task_2e1b8c87) — so do the edit/draft route dispatchers
+ * (via handlers/hold-thread-through.ts). Each turn commits exactly once, so
+ * the once-per-turn decrement invariant holds across all threading callers.
  */
 export interface SurvivingPriorPendingsResult {
   readonly survivors: readonly PendingAction[];
   readonly summary: PendingLifecycleSummary;
+  /**
+   * F-HELD fix 2b — the prior CONFIRMATION-EXPECTING pendings (kinds in
+   * `CONFIRMATION_EXPECTING_ACTION_TYPES`) dropped by the TURN-COUNT TTL in
+   * THIS pass. The carry-forward is the single turn-TTL decrement site, so
+   * this is the only place a consent-expecting lapse is observable; the
+   * commit seam reads it to attach the honest one-sentence lapse notice
+   * (previously the hold died silently). Wall-expiry, hash-invalidation,
+   * consumption and supersession are deliberately NOT reported here — they
+   * have their own surfaced outcomes (apply/dismiss receipts, divergence
+   * recoveries) or are wall-bounded staleness where re-offering copy risks
+   * contradicting a much older conversation state.
+   */
+  readonly lapsedConfirmationExpecting: readonly PendingAction[];
 }
 
 /**
@@ -320,7 +445,28 @@ export function computeSurvivingPriorPendingsDetailed(
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
+  // Diagnosis D2a (live 2026-07-10 stale-resume specimen): proposal memory
+  // is a SINGLE-SLOT store — when this turn's assistant text produced a
+  // capturable offer (a fresh `proposed_concept` entry in `thisTurn`),
+  // every CARRIED `proposed_concept` is superseded by it, kind-level.
+  // Key-level supersession alone can never fire for this kind: each
+  // capture mints a fresh UUID chip_id, so a carried stale concept used
+  // to survive alongside the fresh one and (with the old end-first read)
+  // even win over it.
+  const thisTurnHasFreshProposedConcept = thisTurn.some(
+    (pa) => pa.action.kind === 'proposed_concept',
+  );
+  // ROADMAP 2.63 C3/C4 — the draft/redraft offer is likewise a SINGLE-SLOT
+  // store: each guard re-fire / graph-present decline mints a fresh offer
+  // with a fresh chip_id, so key-level supersession can never fire for the
+  // kind and a carried stale offer would otherwise survive alongside the
+  // fresh one (two live `draft_graph` pendings, ambiguous resume target).
+  // Any fresh offer this turn supersedes every carried one.
+  const thisTurnHasFreshDraftOffer = thisTurn.some(
+    (pa) => pa.action.kind === 'draft_graph',
+  );
   const survivors: PendingAction[] = [];
+  const lapsedConfirmationExpecting: PendingAction[] = [];
   let consumedCount = 0;
   let supersededCount = 0;
   let expiredWallCount = 0;
@@ -329,7 +475,11 @@ export function computeSurvivingPriorPendingsDetailed(
   for (const pa of prior) {
     const key = pendingMatchKey(pa);
     if (consumed.has(key)) { consumedCount += 1; continue; } // 1. applied / dismissed
-    if (thisTurnKeys.has(key)) { supersededCount += 1; continue; } // 2. superseded
+    if (
+      thisTurnKeys.has(key)
+      || (pa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
+      || (pa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
+    ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept/offer capture)
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
     // 4. graph-hash invalidation — only when both hashes are known.
@@ -346,11 +496,21 @@ export function computeSurvivingPriorPendingsDetailed(
     }
     // 5. turn-count TTL — decrement once per carried turn; drop when exhausted.
     const nextTurnCount = pa.expires_at_turn_count - 1;
-    if (nextTurnCount <= 0) { expiredTurnsCount += 1; continue; }
+    if (nextTurnCount <= 0) {
+      expiredTurnsCount += 1;
+      // F-HELD fix 2b: a consent-expecting pending lapsing by turn-TTL is
+      // the silent-drop case the lapse notice closes. Turn-TTL drops ONLY —
+      // see the field doc on SurvivingPriorPendingsResult.
+      if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
+        lapsedConfirmationExpecting.push(pa);
+      }
+      continue;
+    }
     survivors.push({ ...pa, expires_at_turn_count: nextTurnCount });
   }
   return {
     survivors,
+    lapsedConfirmationExpecting,
     summary: {
       priorCount: prior.length,
       consumedCount,
@@ -413,6 +573,132 @@ export function finaliseLifecycleAgainstCap(
 }
 
 /**
+ * F-HELD fix 3a (steer-don't-bind, design option a) — the SUGGESTION-CLASS
+ * run_analysis chip ids that must not be minted while a confirmation-expecting
+ * pending is live. These are the generic "re-run analysis" offers the
+ * chip-generator (and its deterministic siblings) attach to ordinary answers —
+ * exactly the competing consent offer that hijacked the bare "yes" in wire
+ * capture 13c→14c.
+ *
+ * Scope discipline: ERROR/RECOVERY chips are NEVER suppressed. Every recovery
+ * mint carries a dedicated id ('chip_action_run_analysis_retry',
+ * 'chip_action_retry_analysis', 'chip_action_run_analysis_after_expiry',
+ * 'chip_action_run_analysis_after_chip_no_pending',
+ * 'chip_action_rerun_analysis_gm_stale', 'chip_clarify_pending_N') — none of
+ * them appear in this set, so their affordances survive intact.
+ *
+ * Documented residual — COMPLETE manifest of mints sharing the generic
+ * 'chip_action_rerun_analysis' id (round-2 FIXUP 5b), all suppressed for the
+ * duration of a live hold; each keeps its re-run guidance in assistant_text:
+ *   - compose/chip-generator.ts (suggestion mints — the intended targets);
+ *   - routing/run-comparison-gate.ts RERUN_CHIP (stale/unconfirmed
+ *     "what changed?" recovery — can co-occur with a live hold);
+ *   - routing/stale-rerun-guard.ts RERUN_ACTION (stale-rerun guard, ALSO
+ *     re-used by the coaching degrade path; the degrade's own hold case is
+ *     handled upstream by the held-aware template, F-HELD 3b);
+ *   - routing/post-analysis-label-intercept.ts RERUN_ANALYSIS_CHIP
+ *     (post-analysis label-click chip set);
+ *   - turn-executor.ts what_would_flip stale-resume recovery (cannot
+ *     co-occur with a live hold after the consent-priority fix: the hold
+ *     wins the bare-confirm pick, and chip clicks are intent-scoped).
+ * Steer-don't-bind accepts the one-click-affordance loss on the sharers
+ * while the hold is unresolved.
+ */
+const SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS: ReadonlySet<string> = new Set([
+  'chip_action_rerun_analysis',
+  'chip_action_rerun_analysis_after_mutation',
+]);
+
+/**
+ * Exported (ROADMAP 2.622) so a chip-minting seam can ASK whether the chip it
+ * is about to emit survives a live hold, instead of a downstream reader having
+ * to re-derive the answer from this module's private set. The structural-edit
+ * split disclosure mints a re-run chip on exactly the condition that arms this
+ * suppression; its spec binds to this predicate so a change to the set moves
+ * the pin with it rather than leaving a test describing a behaviour that has
+ * gone. Pure, no side effects, safe to call from anywhere.
+ */
+export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
+  return (
+    chip.action_type === 'run_analysis' &&
+    SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS.has(chip.id)
+  );
+}
+
+/**
+ * F-HELD fix 2b — the deterministic one-sentence lapse notice attached when a
+ * confirmation-expecting pending is turn-TTL-dropped by THIS commit's
+ * carry-forward pass.
+ *
+ * SEAM CHOICE (documented per the fix brief): the notice is injected at the
+ * commit chokepoint itself, onto the response being committed, NOT via a
+ * next-turn deterministic-line channel. Rationale: (a) the carry-forward
+ * inside `commitDirectAnswer` is the SINGLE turn-TTL decrement site, so the
+ * lapse is only observable here; (b) the response being committed IS the
+ * next user-visible message after the last turn on which the hold was
+ * resumable — deferring one more turn would need new durable state for
+ * strictly later delivery; (c) appending before the durable
+ * `assistant_message` derivation keeps stored copy == wire copy (the
+ * recent_changes / coaching-state style seams are read-side projections and
+ * have no deterministic line-injection path into assistant_text today, so
+ * none could carry this without a new channel).
+ *
+ * RESIDUAL CLOSED for edit/draft (HOLD-WIPE fix, task_2e1b8c87): this
+ * notice (and the whole TTL/carry-forward lifecycle) fires only on commits
+ * that thread `priorPendingActions` — previously the TurnExecutor
+ * `commitTurn` wrapper alone, so edit- and draft-classified dispatch
+ * commits silently WIPED live holds. Both dispatchers now thread priors
+ * (handlers/hold-thread-through.ts) and additionally handle
+ * mutation-caused invalidation honestly at their own seam (a hold whose
+ * pinned base the mutation moved is validated against the new graph and
+ * either re-pinned or lapsed with a notice + telemetry BEFORE this
+ * carry-forward runs — hash-rule drops here stay notice-less by design,
+ * because consent holds can no longer reach rule 4 with a stale pin from
+ * those paths). REMAINING wipe sharers (out of that lane's scope):
+ * chip-click dispatch and system-event dispatch thread no priors.
+ */
+function buildHeldLapseNotice(pa: PendingAction): string {
+  const a = pa.action;
+  const label =
+    (a.kind === 'apply_proposed_change' || a.kind === 'proposed_concept') &&
+    typeof a.public_label === 'string' &&
+    a.public_label.trim().length > 0
+      ? a.public_label.trim()
+      : null;
+  // F-HELD round 2 (FIXUP 2): comma, not an em dash — this string is
+  // injected AFTER every sanitise seam, so it must satisfy house style
+  // (no em dash in user-facing copy) directly.
+  return label !== null
+    ? `The held change '${label}' has lapsed, say the word if you still want it.`
+    : 'A held change has lapsed, say the word if you still want it.';
+}
+
+/**
+ * True when `metadata.graph` counts as "a graph was provided for this
+ * commit" — MM hygiene batch fix (ROADMAP 1.25 MM P1 set, item 1).
+ *
+ * Deliberately `!= null` (excludes BOTH `undefined` AND `null`), not the
+ * `!== undefined` check this used to be. `CommitMetadata.graph` is typed
+ * `unknown`, so a caller CAN pass an explicit `null` (e.g. a handler outcome
+ * typed `GraphStateIngress | null | undefined` — turn-executor.ts's
+ * `outcome.mutatedGraph` cast). `null !== undefined` is `true`, so the old
+ * check let an explicit `null` through as if a graph had been persisted:
+ *   - the Lane 8 MM version hook fired with `graph: null`, and
+ *     `computeGraphIdentityHash` treats `null` as identity-empty, so MM
+ *     logged/returned an `empty_graph` fault for a commit that never even
+ *     tried to write a graph — a spurious warning, not a real MM failure;
+ *   - `graphPersisted` was returned `true` even though nothing was
+ *     written — contradicting the `empty_graph` signal from the same
+ *     commit and telling the caller it's safe to advance
+ *     `stage_indicator='analyse'` on a turn with no graph.
+ * `!= null` makes both a no-op: an explicit `null` is now treated exactly
+ * like an omitted graph (`undefined`) always was.
+ */
+export function graphWasProvided(graph: unknown): boolean {
+  return graph != null;
+}
+
+/**
  * Slice B commit: persist the turn via the session store, return the
  * unchanged response. Throws `StateCommitFailedError` on RPC failure;
  * TurnExecutor's existing catch handles the mapping to `STATE_COMMIT_FAILED`.
@@ -444,6 +730,44 @@ export async function commitDirectAnswer(
 
   const store = sessionStore ?? getSessionStore();
 
+  // ── THE PERSISTED FORM, RESOLVED FIRST (design §3.2 closure) ──────────────
+  // `graphForStore` is the exact object that will be written to
+  // `scenarios.graph`. It is resolved HERE, before anything derives a decision
+  // from a graph hash, because the three persist passes it applies
+  // (`repairGraphForPersistence`, `normaliseOptionInterventionContract`,
+  // `reconcileTopLevelOptionsFromNodes`) mutate `intercept`, node
+  // `interventions` and top-level `options[]` — all three inside
+  // `computeAnalysisAffectingGraphHash`'s projection.
+  //
+  // These passes used to run just above `store.append`, AFTER the pending
+  // re-pin and the carry-forward had already been decided against
+  // `metadata.graph_hash` — a hash of the PRE-pass graph. Whenever any pass
+  // fired, freshness, the pending's re-pin and the held thread were all decided
+  // against a graph we did not store. Ordering is the whole fix: project first,
+  // then derive every hash-dependent decision from the projected bytes.
+  const graphForStore = projectGraphForPersistence(metadata.graph, {
+    scenarioId: metadata.scenario_id,
+    turnId: metadata.turn_id,
+    turnClass: metadata.turn_class,
+    source: metadata.handler_id ?? undefined,
+  });
+
+  // The authoritative hash for this turn: RECOMPUTED on the bytes above, never
+  // the caller's advertised value. Callers compute their hash before the
+  // projection is knowable, so a supplied `graph_hash` is only trusted on a
+  // commit that writes NO graph (where there are no persisted bytes to hash
+  // and the caller's value refers to the unchanged stored graph).
+  const persistedInvariants = checkPersistedGraphInvariants(graphForStore, {
+    baseGraph: metadata.baseGraphForInvariants,
+  });
+  const writesGraph = graphWasProvided(metadata.graph);
+  const persistedAnalysisGraphHash = writesGraph
+    ? persistedInvariants.analysisGraphHash
+    : null;
+  const effectiveGraphHash = writesGraph
+    ? (persistedAnalysisGraphHash ?? undefined)
+    : metadata.graph_hash;
+
   // Atomic-emit contract: every chip whose action_type is in the resumable
   // set produces exactly one matching pending action, written in the same
   // `append_turn_atomic` call.
@@ -458,17 +782,81 @@ export async function commitDirectAnswer(
   // duplicate / over-budget) can never leave an orphaned resumable pending that
   // a later "yes" short-confirm could resume — the "persisted pending ⟹
   // rendered chip" invariant is structural at every derivation site.
-  const chipDerivedPending =
+  const nowMsForPendings = Date.now();
+  const initialChipDerivedPending =
     metadata.pending_actions === undefined
       ? derivePendingActionsFromFinalizedChips(
           (response.suggested_actions ?? []) as readonly SuggestedAction[],
           {
             scenario_id: metadata.scenario_id,
             emitted_at_iso: new Date().toISOString(),
-            graph_hash: metadata.graph_hash,
+            // §3.2: pin this turn's chips to the graph we are STORING.
+            graph_hash: effectiveGraphHash,
           },
         )
       : metadata.pending_actions;
+
+  // F-HELD fix 3a (steer-don't-bind): while a confirmation-expecting pending
+  // remains live AFTER this commit, do not mint competing run_analysis
+  // SUGGESTION chips (or their derived pendings). "Live after this commit" =
+  // a live confirmation-expecting pending among THIS turn's own pendings
+  // (e.g. a GM hold emitted this turn) OR among the carry-forward SURVIVORS
+  // (so a hold that is consumed / lapsing / hash-invalidated this very
+  // commit does NOT suppress — the chips return as the hold dies).
+  //
+  // The preliminary carry-forward below is recomputed after suppression:
+  // removing a chip-derived run_analysis pending can only change
+  // SAME-KEY supersession of a prior run_analysis pending, never the
+  // confirmation-expecting outcomes (their keys are proposal refs, not chip
+  // ids, and concept supersession is kind-level) — so the hold verdict and
+  // the lapse list are identical between the two pure passes.
+  const hasLiveConfirmationExpecting = (list: readonly PendingAction[]): boolean =>
+    list.some(
+      (pa) =>
+        CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
+        !isPendingActionExpired(pa, nowMsForPendings),
+    );
+  const prelimCarryForward = computeSurvivingPriorPendingsDetailed(
+    metadata.priorPendingActions ?? [],
+    initialChipDerivedPending,
+    metadata.consumedPendingRefs ?? [],
+    effectiveGraphHash,
+    nowMsForPendings,
+  );
+  const holdLiveAfterCommit =
+    hasLiveConfirmationExpecting(initialChipDerivedPending) ||
+    hasLiveConfirmationExpecting(prelimCarryForward.survivors);
+
+  let responseForCommit = response;
+  let chipDerivedPending = initialChipDerivedPending;
+  if (holdLiveAfterCommit) {
+    const chips = (responseForCommit.suggested_actions ??
+      []) as readonly SuggestedAction[];
+    const suppressedIds = new Set(
+      chips.filter(isCompetingRunAnalysisSuggestionChip).map((c) => c.id),
+    );
+    if (suppressedIds.size > 0) {
+      responseForCommit = {
+        ...responseForCommit,
+        suggested_actions: chips.filter(
+          (c) => !isCompetingRunAnalysisSuggestionChip(c),
+        ),
+      };
+      // Keep the "persisted pending ⟹ rendered chip" invariant: any pending
+      // riding a suppressed chip (derived OR pre-supplied) is dropped with it.
+      chipDerivedPending = initialChipDerivedPending.filter(
+        (pa) => !(pa.action.kind === 'run_analysis' && suppressedIds.has(pa.chip_id)),
+      );
+      log.info(
+        {
+          scenario_id: metadata.scenario_id,
+          turn_id: metadata.turn_id,
+          suppressed_chip_ids: [...suppressedIds],
+        },
+        'V5 commit — competing run_analysis suggestion chips suppressed while a confirmation-expecting pending is live (F-HELD steer-don\'t-bind)',
+      );
+    }
+  }
 
   // V5 Signature Loop — carry forward the prior turn's surviving pendings so a
   // single non-consuming turn (which commits an empty `chipDerivedPending`)
@@ -479,25 +867,97 @@ export async function commitDirectAnswer(
     metadata.priorPendingActions ?? [],
     chipDerivedPending,
     metadata.consumedPendingRefs ?? [],
-    metadata.graph_hash,
-    Date.now(),
+    effectiveGraphHash,
+    nowMsForPendings,
   );
   const survivingPrior = carryForward.survivors;
-  const finalPendings: readonly PendingAction[] = [
+  // Adversarial round-3 concern 3 — consent-priority cap fill. The plain
+  // fresh-first slice could silently EVICT a validly-threaded live consent
+  // hold (a CONFIRMATION_EXPECTING pending awaiting the user's explicit yes)
+  // whenever this turn's own pendings filled the cap — the same silent-wipe
+  // class the hold-thread-through fix closes at the dispatch seam. Within
+  // the cap, live consent holds now win over non-consent pendings; original
+  // relative order (this turn's own pendings first, so a FRESH consent hold
+  // still beats a carried one) is preserved among the kept entries. A
+  // non-consent pending dropped this way loses only its short-confirm
+  // resumability — its chip still renders (the persisted-pending ⟹
+  // rendered-chip invariant is one-directional). A consent hold that STILL
+  // cannot fit (all-consent overflow) lapses with the honest F-HELD 2b
+  // notice below, never silently.
+  const combinedPendings: readonly PendingAction[] = [
     ...chipDerivedPending,
     ...survivingPrior,
-  ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+  ];
+  let finalPendings: readonly PendingAction[];
+  let capEvictedConsentHolds: readonly PendingAction[] = [];
+  if (combinedPendings.length <= PENDING_ACTIONS_PER_TURN_CAP) {
+    finalPendings = combinedPendings;
+  } else {
+    const isLiveConsentHold = (pa: PendingAction): boolean =>
+      CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
+      !isPendingActionExpired(pa, nowMsForPendings);
+    const keep = new Set<PendingAction>();
+    for (const pa of combinedPendings) {
+      if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
+      if (isLiveConsentHold(pa)) keep.add(pa);
+    }
+    for (const pa of combinedPendings) {
+      if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
+      if (!isLiveConsentHold(pa)) keep.add(pa);
+    }
+    finalPendings = combinedPendings.filter((pa) => keep.has(pa));
+    capEvictedConsentHolds = combinedPendings.filter(
+      (pa) => isLiveConsentHold(pa) && !keep.has(pa),
+    );
+  }
 
-  // Track 2 — finalise the lifecycle tally against the cap. This turn's own
-  // pendings occupy the head of `finalPendings`, so the eligible survivors that
-  // actually persisted = whatever tail remains after them. `survivedCount` is
-  // corrected to that persisted count and the evicted remainder is attributed
-  // to `capDroppedCount`, so the diagnostic reflects what was WRITTEN, not
+  // F-HELD fix 2b — honest lapse notice. When THIS commit's carry-forward
+  // turn-TTL-dropped a confirmation-expecting pending — or (round-3
+  // concern 3) the consent-priority cap fill above still could not seat a
+  // live consent hold — attach ONE deterministic sentence to the response
+  // being committed (see `buildHeldLapseNotice` for the seam-choice
+  // rationale). One sentence even if several lapse at once (cap is 3): the
+  // first in prior order — the read side places the freshest offer first —
+  // names the lapse; re-offering machinery stays out of scope here
+  // (say-the-word re-consent is the ruled posture, not silent re-arming).
+  const lapsedHolds = [
+    ...carryForward.lapsedConfirmationExpecting,
+    ...capEvictedConsentHolds,
+  ];
+  if (lapsedHolds.length > 0) {
+    const notice = buildHeldLapseNotice(lapsedHolds[0]!);
+    const baseText =
+      typeof responseForCommit.assistant_text === 'string'
+        ? responseForCommit.assistant_text
+        : '';
+    responseForCommit = {
+      ...responseForCommit,
+      assistant_text:
+        baseText.trim().length > 0 ? `${baseText}\n\n${notice}` : notice,
+    };
+    log.info(
+      {
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        lapsed_kinds: lapsedHolds.map((pa) => pa.action.kind),
+      },
+      'V5 commit — confirmation-expecting pending lapsed (turn TTL or consent-priority cap overflow); deterministic lapse notice attached (F-HELD)',
+    );
+  }
+
+  // Track 2 — finalise the lifecycle tally against the cap. Counted by
+  // IDENTITY against the survivor list (the consent-priority fill above can
+  // seat a survivor by evicting one of this turn's own pendings, so the old
+  // head/tail arithmetic no longer holds). `survivedCount` is corrected to
+  // the persisted count and the evicted remainder is attributed to
+  // `capDroppedCount`, so the diagnostic reflects what was WRITTEN, not
   // pre-cap eligibility (Track 3 may read this as persisted survivor truth).
-  const persistedSurvivorCount = Math.max(
-    0,
-    finalPendings.length - chipDerivedPending.length,
-  );
+  // A cap-evicted pending of THIS turn's own stays outside the partition —
+  // the seven-fate tally covers prior pendings only.
+  const survivorIdentity = new Set<PendingAction>(survivingPrior);
+  const persistedSurvivorCount = finalPendings.filter((pa) =>
+    survivorIdentity.has(pa),
+  ).length;
   const pendingLifecycle = finaliseLifecycleAgainstCap(
     carryForward.summary,
     persistedSurvivorCount,
@@ -515,40 +975,119 @@ export async function commitDirectAnswer(
   // NULL (system-event turns, blank answers, and the draft_graph path whose
   // provisional response carries empty assistant_text — its narrative is
   // reconstructable from the persisted graph in context).
-  const userMessage = capConversationText(metadata.userMessage);
+  const userMessage = capConversationText(metadata.userMessage, 'user_message');
+  // F-HELD: derived from `responseForCommit` (not the raw input response) so
+  // the durable copy includes the lapse notice / excludes suppressed chips'
+  // context exactly as the wire will — stored copy == wire copy.
   const assistantMessage = capConversationText(
-    durablePublicAssistantText(response.assistant_text, parseContentGraph(metadata.contentGraph)),
+    durablePublicAssistantText(
+      responseForCommit.assistant_text,
+      parseContentGraph(metadata.contentGraph),
+    ),
+    'assistant_message',
   );
 
-  // Track S 0.13c-4: persist-site intercept repair. This is the single chokepoint
-  // for scenarios.graph writes (store.append's only caller). Strip any duplicate
-  // observed-root intercept (intercept === observed_state.value) before the write,
-  // closing the non-draft reintroduction path (set_factor_value / edit_graph /
-  // proposal-apply) that the boundary repair and run_analysis guard do not cover.
-  // No-op when no graph is written (system events, chip clicks, non-graph turns);
-  // idempotent on already-repaired draft graphs. Reuses the #263/#269 predicate.
-  const graphToPersist = repairGraphForPersistence(metadata.graph, {
-    scenarioId: metadata.scenario_id,
-    turnId: metadata.turn_id,
-    turnClass: metadata.turn_class,
-    source: metadata.handler_id ?? undefined,
-  });
-
-  // V5 edit_graph P0: normalise edit-added option interventions to the canonical
-  // top-level OptionV3 contract before the write. An option from client-supplied
-  // graph_state can persist interventions under node.data.interventions, which
-  // GraphV3.safeParse strips on read (NodeV3 has no `data` field) — so the option
-  // reaches run_analysis/PLoT with zero interventions (422 / options_not_configured).
-  // Promoting them here makes the persisted record match draft-created options.
-  // Runs alongside (independent of) the Track S intercept repair above: that
-  // operates on factor observed-root intercepts, this on option intervention
-  // bundles. No-op on draft/already-canonical options; fail-open; idempotent.
-  const graphForStore = normaliseOptionInterventionContract(graphToPersist, {
-    scenarioId: metadata.scenario_id,
-    turnId: metadata.turn_id,
-    turnClass: metadata.turn_class,
-    source: metadata.handler_id ?? undefined,
-  });
+  // ── D — THE TERMINAL INVARIANT CHECK (design §8/§13 step 1) ──────────────
+  // The graph was projected into its persisted form at the TOP of this
+  // function (see `graphForStore` above), because every hash-dependent
+  // decision this turn makes had to be derived from the bytes we store rather
+  // than from the caller's pre-projection graph (§3.2). The three passes it
+  // applies keep their original relative order and their original semantics:
+  //   repairGraphForPersistence          — Track S 0.13c-4 intercept repair
+  //   normaliseOptionInterventionContract — V5 edit_graph P0 option contract
+  //   reconcileTopLevelOptionsFromNodes   — Lane C3 / decision ③ options mirror
+  //
+  // What runs HERE is the check, and it runs LAST: nothing mutates the graph
+  // between this line and `store.append`, so this validates the ACTUAL
+  // PERSISTED BYTES. Because `store.append` below is the single
+  // `scenarios.graph` writer in the service, this covers EVERY lane — edit,
+  // draft, chip-click, clarify, system-event, route-v2 add-option — by
+  // construction rather than by a hand-listed set of call sites (trap #12).
+  //
+  // FAIL-CLOSED, NEVER A SILENT REPAIR. Repairing here would put a mutation
+  // AFTER the hash was computed and recreate the exact defect this closes, so
+  // a violation refuses the commit and names what was wrong. The refusal is a
+  // throw: the caller's existing commit-failure catch ladder already maps it
+  // to a typed failure and, on the edit lane, reports the graph as NOT
+  // persisted — which is now true, rather than a graph silently stored corrupt.
+  if (persistedInvariants.status === 'violated') {
+    log.error(
+      {
+        event: 'v5.graph_persist.invariant_violation',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+        introduced: persistedInvariants.violations.map((v) => ({
+          code: v.code,
+          count: v.count,
+          entity_ids: v.entity_ids,
+        })),
+        inherited_count: persistedInvariants.inheritedViolations.length,
+      },
+      '[commit] REFUSING the write — this turn INTRODUCED a structural violation into the graph',
+    );
+    throw new PersistedGraphInvariantError(persistedInvariants.violations);
+  }
+  // Inherited corruption is absorbed, NOT refused (a legacy/migration-era graph
+  // must stay editable — `edit-graph.ts:2750-2755`), but it is still surfaced:
+  // a violation nobody can see is one nobody will ever fix.
+  if (writesGraph && persistedInvariants.inheritedViolations.length > 0) {
+    log.warn(
+      {
+        event: 'v5.graph_persist.invariant_inherited',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+        had_baseline: metadata.baseGraphForInvariants !== undefined,
+        inherited: persistedInvariants.inheritedViolations.map((v) => ({
+          code: v.code,
+          count: v.count,
+          entity_ids: v.entity_ids,
+        })),
+      },
+      '[commit] pre-existing structural violation carried through this write (absorbed, not refused) — ' +
+        formatViolations(persistedInvariants.inheritedViolations),
+    );
+  }
+  // Non-fatal findings are surfaced rather than swallowed. These are the
+  // invariants NOT yet demonstrated to hold on real traffic, so they are
+  // reported and the commit proceeds — an honest "we saw this and did not
+  // enforce it", never a silent pass.
+  if (writesGraph && persistedInvariants.observations.length > 0) {
+    log.warn(
+      {
+        event: 'v5.graph_persist.invariant_observation',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+        observations: persistedInvariants.observations.map((v) => ({
+          code: v.code,
+          count: v.count,
+          entity_ids: v.entity_ids,
+        })),
+      },
+      '[commit] persisted-graph invariant OBSERVED but not enforced — ' +
+        formatViolations(persistedInvariants.observations),
+    );
+  }
+  // A graph whose top-level shape the structural invariants are undefined for
+  // is recorded as UNCHECKED rather than counted as a pass — an absence claim
+  // about this check must not be read wider than the graphs it can evaluate.
+  if (writesGraph && persistedInvariants.status === 'unshaped') {
+    log.warn(
+      {
+        event: 'v5.graph_persist.invariant_unchecked',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+      },
+      '[commit] persisted-graph invariants NOT evaluated — the graph has no nodes/edges arrays',
+    );
+  }
 
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
@@ -566,6 +1105,10 @@ export async function commitDirectAnswer(
     coaching_state: metadata.coaching_state,
     userMessage,
     assistantMessage,
+    // A3 graph CAS: verbatim pass-through of the caller's server-read
+    // expected-base hashes (undefined when the path is not instrumented).
+    expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
+    expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
   });
 
   // Post-success observability. The turn's state is now durably committed; the
@@ -651,14 +1194,265 @@ export async function commitDirectAnswer(
     );
   }
 
-  const graphPersisted = metadata.graph !== undefined;
+  // Lane 8 — Model Management version hook (CEE_MODEL_VERSIONS_ENABLED).
+  // Fires ONLY after the durable append succeeded AND a graph was persisted
+  // this commit. Fire-and-forget under the version-event-sink non-blocking
+  // contract: any MM failure logs and NEVER affects the turn result. Flag
+  // off ⇒ byte-identical commit path (no service construction, no env reads
+  // — pinned by commit-model-version-hook.test.ts). The graph handed to MM
+  // is `graphForStore` — the EXACT object the store just persisted — so the
+  // Group A identity envelope MM computes (computeGraphIdentityHash inside
+  // ModelManagementService.saveVersion) matches the store's own identity
+  // read of scenarios.graph.
+  if (config.cee.modelVersionsEnabled === true && graphWasProvided(metadata.graph)) {
+    void recordModelVersionForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      turnClass: metadata.turn_class,
+      handlerId: metadata.handler_id,
+      graph: graphForStore,
+      persistedRowId,
+      // MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): thread the SAME
+      // server-read expected-base hash the A3 graph-CAS observe hook uses,
+      // verbatim (null/undefined both collapse to "no expectation" —
+      // service.saveVersion only accepts a string). See
+      // recordModelVersionForCommit's doc comment for the bootstrap caveat.
+      expectedGraphIdentityHash: metadata.expectedGraphIdentityHash ?? undefined,
+      sessionStore: store,
+    });
+  }
+
+  // ROADMAP 3.1 (CEE half) — decision-record capture hook
+  // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). Fires ONLY after
+  // the durable append succeeded AND this commit carries a successful
+  // (non-noop) run_analysis fact — which covers BOTH producers (the routed
+  // turn-executor path and chip-click run_analysis funnel through this
+  // commit seam). Fire-and-forget under the same non-blocking contract as
+  // the MM hook above: any capture failure logs and NEVER affects the turn
+  // result. No qualifying fact ⇒ byte-identical commit path (no store
+  // construction, no env reads —
+  // pinned by commit-decision-record-hook.test.ts). The record's
+  // graph_hash is the fact's OWN `graph_hash_at_run` (aag_v1-prefixed) —
+  // the hash the handler computed from the exact snapshot the analysis ran
+  // against (PR #411 object-identity discipline; no re-read, no re-hash).
+  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE deleted (was
+  // live `true` on staging); capture now runs whenever the qualifying fact exists.
+  const decisionRecordFact = metadata.handler_facts.find(
+    (f): f is RunAnalysisHandlerFact => f.fact_type === 'run_analysis' && f.noop === false,
+  );
+  if (decisionRecordFact !== undefined) {
+    void recordDecisionRecordForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      persistedRowId,
+      fact: decisionRecordFact,
+      // Guest pre-check reads scenarios.user_id via the store's optional
+      // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
+      // the SessionStore import surface at its declared three files).
+      sessionStore: store,
+    });
+  }
+
+  // Context Architecture v2 — S4 rolling conversation summary. Fires after
+  // the durable append, off the turn path, on EVERY commit — UNCONDITIONAL
+  // since the O-2 activation (2026-07-20; the CEE_ROLLING_SUMMARY flag is
+  // DELETED per the no-dark-launches ruling — rollback = code revert).
+  // Fire-and-forget under the same non-blocking contract as the MM /
+  // decision-record hooks above: every failure — store construction, RPC
+  // error, summariser model timeout — is caught and logged; NOTHING
+  // propagates to the turn result (pinned by
+  // commit-rolling-summary-hook.test.ts). The summariser reads the FULL
+  // persisted history via the store's readRecent (unclamped) and writes only
+  // scenarios.rolling_summary via a MONOTONIC RPC (out-of-order writes no-op).
+  // Concurrent commits for one scenario do NOT stampede: the maintainer is
+  // per-scenario single-flight with latest-wins coalescing (Codex r2 fix 4b),
+  // so a burst of commits runs one pass plus at most one rerun.
+  void maintainRollingSummaryForCommit({
+    scenarioId: metadata.scenario_id,
+    turnId: metadata.turn_id,
+    persistedRowId,
+    // The store satisfies ConversationHistoryReader structurally (readRecent);
+    // the rolling-summary module never imports SessionStore, keeping the
+    // state-write-invariant import surface bounded.
+    historyReader: store,
+    // Best-effort deterministic-floor input: the brief supplied on this turn,
+    // if any. Absent on most turns — the floor then degrades to the latest
+    // user message, never empty.
+    briefText: metadata.briefText,
+  });
+
+  const graphPersisted = writesGraph;
   return {
-    response,
+    persistedAnalysisGraphHash,
+    persistedGraph: writesGraph ? graphForStore : null,
+    // F-HELD: the committed response (lapse notice attached / competing
+    // suggestion chips suppressed when those seams fired; the SAME object as
+    // the input on the untouched fast path). Callers that consume
+    // `CommitResult.response` (the TurnExecutor commitTurn wrapper — the only
+    // caller that threads `priorPendingActions`) surface it on the wire, so
+    // wire copy == durable copy.
+    response: responseForCommit,
     performed: true,
     persisted_row_id: persistedRowId,
     graphPersisted,
     pendingLifecycle,
   };
+}
+
+/**
+ * MM P1 (ROADMAP 1.25 hygiene batch, item 2): true when a `saveVersion`
+ * result is the EXPECTED "guest scenario, no version history" outcome
+ * (SQLSTATE MV001 / error code `sign_in_required`) rather than a genuine MM
+ * fault.
+ *
+ * `sign_in_required` fires on EVERY commit for an unowned (guest) scenario
+ * — `scenarios.user_id IS NULL` (D3 Branch A, "guests refused" — see
+ * `supabase/migrations/20260705120000_v5_model_versions.sql`). That is the
+ * DESIGNED, EXPECTED outcome for guest traffic, not a fault: logging it at
+ * `warn` meant every guest commit logged a warning for behaviour working
+ * exactly as specified, drowning out genuine MM faults (`store_error`, real
+ * CAS conflicts). `recordModelVersionForCommit` uses this to demote that
+ * one case to `debug` — every other error/conflict status stays `warn`
+ * (still actionable).
+ */
+export function isExpectedGuestVersionRefusal(
+  result: ModelManagementResult<VersionWriteOutcome>,
+): boolean {
+  return result.status === 'error' && result.error.code === 'sign_in_required';
+}
+
+/**
+ * Lane 8 — commit-seam Model Management version hook (flag-gated caller).
+ *
+ * Non-blocking contract (mirrors version-event-sink.ts): every failure —
+ * service construction (missing SUPABASE_* env), RPC error, telemetry fault
+ * — is caught and logged at warn (except the expected guest-refusal case,
+ * see `isExpectedGuestVersionRefusal`); nothing propagates to the turn
+ * result. Idempotency: `event_id` is DETERMINISTIC on the turn id, so a
+ * retried turn (same scenario_id + turn_id) re-drives the same journey
+ * event, which the RPC dedupes by event_id; an identical graph additionally
+ * no-op-dedupes against the current head inside the RPC.
+ *
+ * MM P1 (ROADMAP 1.25, item 2 completion — Brief H guest pre-check): before
+ * spending the `saveVersion` RPC, do a plain read of `scenarios.user_id`
+ * (`SessionStore.getScenarioOwner`, when the store implements it) and skip
+ * the RPC entirely when the scenario is unowned (guest). `saveVersion`
+ * ALWAYS fails `sign_in_required` (MV001) for a guest scenario — this was
+ * previously a wasted RPC round trip on every guest commit. The pre-check
+ * is best-effort: a missing implementation, a read failure, or a scenario
+ * row that no longer exists all fail OPEN to the pre-fix behaviour (attempt
+ * the write; let the RPC answer MV001 authoritatively) rather than silently
+ * skip a version write that might actually be owned.
+ *
+ * MM P1 (ROADMAP 1.25, item 4 — racing-pointer fix): when the caller
+ * threaded an `expectedGraphIdentityHash` (the SAME server-read pre-turn
+ * base the A3 graph-CAS observe hook uses), pass it through to
+ * `saveVersion`'s optional write-time CAS. The RPC then rejects the write
+ * with a `cas_conflict` (MV409) if the scenario's current MM version head
+ * no longer matches that base — catching two concurrent commits racing the
+ * `current_model_version_id` pointer forward from the same starting point.
+ * KNOWN BOOTSTRAP CAVEAT (documented, not fixed here — a DB-migration-class
+ * change, out of scope for this hygiene batch): the RPC's CAS compares
+ * against the scenario's MM version HEAD, not `scenarios.graph` itself; for
+ * a scenario with pre-existing graph history whose FIRST MM-tracked commit
+ * carries a non-empty expected hash, the RPC sees no head yet (`v_head IS
+ * NULL`) and raises the same MV409 — a false conflict, not a real race.
+ * This degrades exactly like any other non-ok status here: logged at warn,
+ * turn result unaffected, no version row written for that turn. Filed as a
+ * residual for a future MM-hardening lane (mirrors ROADMAP 2.17).
+ */
+async function recordModelVersionForCommit(args: {
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly turnClass: ConversationTurnClass;
+  readonly handlerId: V5ActionType | null;
+  readonly graph: unknown;
+  readonly persistedRowId: string;
+  readonly expectedGraphIdentityHash?: string;
+  readonly sessionStore: SessionStore;
+}): Promise<void> {
+  try {
+    if (typeof args.sessionStore.getScenarioOwner === 'function') {
+      try {
+        const owner = await args.sessionStore.getScenarioOwner(args.scenarioId);
+        if (owner === null) {
+          log.debug(
+            { scenario_id: args.scenarioId, turn_id: args.turnId },
+            'ModelManagement — commit-seam saveVersion skipped pre-emptively (guest scenario, sign-in required; expected, not a fault)',
+          );
+          return;
+        }
+      } catch (precheckErr) {
+        // Fail OPEN: an unreadable owner is not evidence of guest status —
+        // fall through to the real RPC, which answers authoritatively.
+        log.debug(
+          {
+            scenario_id: args.scenarioId,
+            turn_id: args.turnId,
+            err: precheckErr instanceof Error ? precheckErr.message : String(precheckErr),
+          },
+          'ModelManagement — guest pre-check read failed; proceeding to saveVersion (fail-open)',
+        );
+      }
+    }
+    const service = getModelManagementService();
+    const result = await service.saveVersion({
+      scenario_id: args.scenarioId,
+      graph: args.graph,
+      // Content-free label from turn context (handler id / turn class only).
+      label: `commit:${args.handlerId ?? args.turnClass}`,
+      provenance: 'commit',
+      event_id: `model_version_created_turn_${args.turnId}`,
+      ...(args.expectedGraphIdentityHash !== undefined
+        ? { expected_graph_identity_hash: args.expectedGraphIdentityHash }
+        : {}),
+    });
+    emit(TelemetryEvents.V5ModelVersionCreated, {
+      scenario_id: args.scenarioId,
+      turn_id: args.turnId,
+      turn_row_id: args.persistedRowId,
+      status:
+        result.status === 'ok'
+          ? result.value.deduped
+            ? 'deduped'
+            : 'ok'
+          : result.status,
+      version_number: result.status === 'ok' ? result.value.version_number : null,
+      graph_identity_hash_prefix:
+        result.status === 'ok' ? result.value.graph_identity_hash.slice(0, 16) : null,
+      error_code: result.status === 'error' ? result.error.code : null,
+      provenance: 'commit',
+    });
+    if (result.status === 'error' || result.status === 'conflict') {
+      const isExpectedGuestRefusal = isExpectedGuestVersionRefusal(result);
+      const logPayload = {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        status: result.status,
+        error_code: result.status === 'error' ? result.error.code : 'cas_conflict',
+      };
+      if (isExpectedGuestRefusal) {
+        log.debug(
+          logPayload,
+          'ModelManagement — commit-seam saveVersion skipped (guest scenario, sign-in required; expected, not a fault)',
+        );
+      } else {
+        log.warn(
+          logPayload,
+          'ModelManagement — version event sink emit failed (commit-seam saveVersion returned non-ok; turn result unaffected)',
+        );
+      }
+    }
+  } catch (err) {
+    log.warn(
+      {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'ModelManagement — version event sink emit failed (commit-seam version hook threw; turn result unaffected)',
+    );
+  }
 }
 
 /**

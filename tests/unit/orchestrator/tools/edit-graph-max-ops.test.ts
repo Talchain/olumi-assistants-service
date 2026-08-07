@@ -27,6 +27,12 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
               if (ceeProp === "maxPatchOperations") return mockMaxPatchOperations;
               if (ceeProp === "patchPreValidationEnabled") return false;
               if (ceeProp === "patchBudgetEnabled") return false;
+              // CEE_EDIT_CAP_SPLIT went DEFAULT-ON 18 Jul (Paul-ratified). This
+              // suite isolates the configurable-cap MECHANISM via the legacy bare
+              // MAX_OPERATIONS_EXCEEDED rejection, so it pins the split flag OFF
+              // (the kill-switch path). The default-ON split behaviour is covered
+              // by trust-spine-red-edit-cap-split.test.ts.
+              if (ceeProp === "editCapSplitEnabled") return false;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });

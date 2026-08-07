@@ -276,8 +276,15 @@ function extractNodeFactorType(raw: RawNodeShape): string | undefined {
  * any non-numeric character. The regex matches strings composed
  * exclusively of an optional sign, digits, commas (thousands
  * separators), and an optional fractional part.
+ *
+ * EXPORTED (2026-07-31, ROADMAP 2.205 practical resolution): the flip-point
+ * display licence in `./format-analysis-for-context.ts` applies the SAME
+ * predicate to the flip display strings it admits. Shared rather than copied —
+ * a second hand-kept copy of a safety rule is the dominant defect class
+ * (CLAUDE.md trap 12), and these are the two display projections that face the
+ * same prompt with the same float cage.
  */
-function looksLikeRawDecimal(value: string): boolean {
+export function looksLikeRawDecimal(value: string): boolean {
   return /^-?[\d,]+(?:\.\d+)?$/.test(value);
 }
 

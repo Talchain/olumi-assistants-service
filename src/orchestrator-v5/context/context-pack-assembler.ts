@@ -30,19 +30,33 @@ import type { SessionTurnWithContent } from '../session/conversation-content.js'
 import type { QuantityExtractionResult } from './cqe/schema-types.js';
 
 import type {
-  AnalysisResponseSummary,
   DriverSummary,
+  FlipThreshold,
   OptionSummary,
 } from '../../orchestrator/context/analysis-compact.js';
 import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
+import { sha8 } from '../../utils/logger-config.js';
+import {
+  applyContextBudgetToAssemblyInputs,
+  type ContextBudgetDisclosure,
+} from './context-budget-enforcement.js';
+import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
+import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
+import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import {
   formatAnalysisForContext,
   type DisplaySafeAnalysis,
 } from '../format/format-analysis-for-context.js';
+import type {
+  AnalysisResponseSummaryWithSignals,
+  OptionGoalFitSignal,
+  OptionOutcomeSignal,
+  TippingPointSignal,
+} from './analysis-signals.js';
 import {
   formatGraphForContext,
   type DisplaySafeGraph,
@@ -53,7 +67,11 @@ import {
   type CqeExtractionSummary,
 } from './cqe/extract-quantities.js';
 import { config, isProduction, isTest } from '../../config/index.js';
-import { ContextPackSchema } from './context-pack-schema.js';
+import {
+  CONTEXT_PACK_BRIEF_CHAR_CAP,
+  CONTEXT_PACK_RECENT_TURNS_CAP,
+  ContextPackSchema,
+} from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 import { computeAnalysisAffectingGraphHash } from './graph-hash.js';
 import { extractGraphOptionIds } from './option-identity.js';
@@ -65,9 +83,21 @@ import {
   type CoachingStatePack,
 } from './canonical-analysis-state.js';
 
-// Recent turns cap for the conversation projection. Spec §10 bounds this at
-// five for token budget. Any trim beyond is caller's concern.
-export const CONTEXT_PACK_RECENT_TURNS_CAP = 5;
+// Recent turns cap for the conversation projection — the verbatim memory window.
+// SINGLE SOURCE is now `context-pack-schema.ts` (FINAL-SWEEP F4); re-exported here
+// so existing importers (context-pack-assembler.test.ts, context-budget-
+// enforcement.test.ts) keep their import path, and POLICY_VERBATIM_TURNS derives
+// from the same constant — no hand-mirror to move in lockstep.
+export { CONTEXT_PACK_RECENT_TURNS_CAP } from './context-pack-schema.js';
+
+/**
+ * Context v2 S1: mirror of commit.ts `CONVERSATION_TEXT_CAP` (the persist-
+ * time hard slice) used to infer per-turn `truncated` flags at projection —
+ * the original length is not persisted, so at-cap is the only sound signal.
+ * Declared locally (not imported) to keep this module free of a commit.ts
+ * import edge; equality is pinned by tests/unit/context-disclosure-v2.test.ts.
+ */
+export const PERSISTED_MESSAGE_CAP = 2000;
 
 export const CONTEXT_PACK_VERSION = '2.0' as const;
 
@@ -96,6 +126,36 @@ export interface ContextPackGraph {
 export interface ContextPackAnalysisOption {
   readonly label: string;
   readonly probability: number;
+  /**
+   * Lane 30 — this option's goal-fit value: the modelled probability the
+   * option meets the user's target(s), sourced from the per-option
+   * `enrichment.option_comparison[].probability_of_joint_goal` (PLoT #204)
+   * via the `option_goal_fits` signal. RAW [0,1] float — handler-facing
+   * only; the display formatter renders it as an integer-percent
+   * `target_fit` string, clearly distinguished from `win_probability`.
+   * Absent when the producer scored no goal fit for this option.
+   */
+  readonly goal_fit_probability?: number;
+  /**
+   * Lane 30 fix 3 — this option's modelled-outcome mean, sourced from the
+   * per-option `enrichment.option_comparison[].outcome.mean` via the
+   * `option_outcomes` signal (NEVER from `OptionSummary.outcome_mean`,
+   * whose upstream default of 0 cannot be distinguished from an honest
+   * zero). RAW float — the display formatter bands it (`outcome_band`)
+   * with the shared influence-band vocabulary. Absent when the producer
+   * reported no outcome distribution for this option.
+   */
+  readonly outcome_mean?: number;
+  /**
+   * Trust-spine board #1 (CEE half). Literal `true` when this option is the
+   * flagged constraint-infeasible WINNER (CEE_CONSTRAINT_INFEASIBLE_GATE ON;
+   * the flag is set upstream by `compactAnalysis` via
+   * constraint-feasibility.ts and threaded through here — adversarial-review
+   * P1: `projectOption` previously field-picked the flag away, so the coach
+   * egress never saw it). ABSENT otherwise (never `false`), matching the
+   * pack's key-absence style, so flag-off packs are byte-identical.
+   */
+  readonly constraint_infeasible?: true;
 }
 
 export interface ContextPackAnalysisDriver {
@@ -106,6 +166,50 @@ export interface ContextPackAnalysisDriver {
 export interface ContextPackAnalysisFragileEdge {
   readonly from_label: string;
   readonly to_label: string;
+}
+
+/**
+ * Lane 21 (P0-A) — raw tipping-point projection entry. Values are raw
+ * floats (handler-facing); the display formatter bands them into
+ * decision-language phrases and never surfaces the numbers.
+ * `no_flip_within_bounds` carries the producer-attested "no flip point
+ * exists in the tested range" fact (staging `flip_reason:
+ * 'no_effect_within_bounds'`).
+ */
+export interface ContextPackAnalysisFlipThreshold {
+  readonly factor_label: string;
+  readonly current_value: number | null;
+  readonly flip_value: number | null;
+  readonly unit: string | null;
+  readonly no_flip_within_bounds: boolean;
+  /**
+   * ROADMAP 2.205 practical resolution (2026-07-31) — the DISPLAY LICENCE.
+   * The producer's own display strings for this factor's current/flip values,
+   * present exactly when those digits are already on the user's screen for
+   * this analysis (chain traced at
+   * `./analysis-signals.ts` → {@link deriveFlipDisplayLicences}). Both keys or
+   * neither. ABSENT when unlicensed — key-absence doctrine, so an unlicensed
+   * pack stays byte-identical to today's.
+   *
+   * Strings, never floats: `"40000 GBP"`, not `0.4`. The float cage is
+   * enforced downstream at `../format/format-analysis-for-context.ts`, which
+   * is the boundary that owns it, using the SAME `looksLikeRawDecimal`
+   * predicate the display-graph projection applies to `display_value`.
+   */
+  readonly current_display?: string;
+  readonly flip_display?: string;
+}
+
+/** Lane 21 — raw evidence-gap (VOI) projection entry. `voi_score` ∈ [0,1]. */
+export interface ContextPackAnalysisEvidenceGap {
+  readonly factor_label: string;
+  readonly voi_score: number;
+}
+
+/** Lane 21 — goal-fit scoring provenance (PLoT #204). Fact + basis only. */
+export interface ContextPackAnalysisGoalFit {
+  readonly scored: boolean;
+  readonly basis: string | null;
 }
 
 export interface ContextPackAnalysis {
@@ -123,6 +227,58 @@ export interface ContextPackAnalysis {
    * structured access without parsing.
    */
   readonly fragile_edges: readonly ContextPackAnalysisFragileEdge[];
+  /**
+   * Lane 21 (P0-A) breadth widening. The four fields below are OPTIONAL on
+   * the interface (one legacy call site — chip-click-dispatch — hand-builds
+   * a narrow projection for `buildAnalysisProjectionSummary` and does not
+   * carry them) but the routed `projectAnalysis` path ALWAYS populates them
+   * so the LLM-facing display projection can represent the whole analysis:
+   *
+   *  - `options`: EVERY scale-guard-valid option (label + raw probability),
+   *    sorted by win probability descending — not just the leading pair.
+   *    Bounded by {@link MAX_PROJECTED_OPTIONS}.
+   *  - `flip_thresholds`: tipping-point entries (top-level staging signals
+   *    when attached, else the per-option `summary.flip_thresholds`).
+   *  - `fragile_edge_count`: the UNCAPPED count behind the capped
+   *    `fragile_edges` label list. Fail-closed under lever suppression:
+   *    when any edge is suppressed the count collapses to the filtered
+   *    list length rather than repeating the producer count.
+   *  - `evidence_gaps` / `goal_fit`: VOI + goal-fit provenance signals
+   *    (see `./analysis-signals.ts`), raw here, banded by the formatter.
+   */
+  readonly options?: readonly ContextPackAnalysisOption[];
+  readonly flip_thresholds?: readonly ContextPackAnalysisFlipThreshold[];
+  readonly fragile_edge_count?: number;
+  readonly evidence_gaps?: readonly ContextPackAnalysisEvidenceGap[];
+  /**
+   * ROADMAP 2.54 (b) — literal `true` when the Lane 30 (#369 audit P1)
+   * lever suppression removed at least one entry from `evidence_gaps`
+   * (including fail-closed drops of unattributable entries while levers
+   * exist). ABSENT otherwise (never `false`), matching the pack's
+   * key-absence style. Carries the suppression FACT to the display
+   * formatter so an emptied VOI section is disclosed honestly ("excluded
+   * by design — options-set factors are not uncertainties to investigate")
+   * rather than as "not scored". NOT a new lever-identity source: it is
+   * set exactly where `filterLeverControlledFactorEntries` (the reviewed
+   * #308-union structural authority) fires.
+   */
+  readonly evidence_gaps_lever_suppressed?: true;
+  readonly goal_fit?: ContextPackAnalysisGoalFit | null;
+  /**
+   * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
+   * 'strong' | 'fair' | 'needs_work'; kept as a string because the
+   * enrichment passthrough is untyped). Null when the producer reported
+   * none. Rendered as prose by the display formatter.
+   */
+  readonly confidence_tier?: string | null;
+  /**
+   * Trust-spine board #1 (CEE half). The honest constraint note produced by
+   * `compactAnalysis` when the leading option violates (or is in tension
+   * with) a hard constraint — threaded through verbatim so the display
+   * projection can surface it to the coach LLM. ABSENT when the gate is off
+   * or the winner is feasible (byte-identity by key absence).
+   */
+  readonly constraint_infeasible_note?: string;
   // V5 state-trust: `staleness_reason` removed from the prompt-visible
   // analysis section — freshness is now a deterministic verdict on the
   // wire (`analysis_ready.freshness`) and a telemetry signal
@@ -135,6 +291,21 @@ export interface ContextPackAnalysis {
   // This is a deliberate divergence from spec §10:436 of
   // `Docs/v5/olumi-v5-architecture-design-specification-v3_2.md`. See
   // `Docs/v5-state-trust-phase0.md` for the design record.
+}
+
+/**
+ * Lane 28 — brief pipeline: the user's decision brief as projected into the
+ * ContextPack. `text` is the persisted `scenarios.brief_text` (the user's own
+ * words — no display-safety banding applies, unlike model-derived analysis
+ * prose) bounded at {@link CONTEXT_PACK_BRIEF_CHAR_CAP}. Truncation is
+ * DISCLOSED, never silent: `truncated` flags it and `original_chars` carries
+ * the pre-truncation length so no consumer can mistake the bounded text for
+ * the whole brief.
+ */
+export interface ContextPackBrief {
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly original_chars: number;
 }
 
 export interface ContextPackConversationTurn {
@@ -151,12 +322,53 @@ export interface ContextPackConversationTurn {
   readonly user_message: string | null;
   /** The final public assistant answer for this prior turn; null when none. */
   readonly assistant_message: string | null;
+  /**
+   * Context v2 (02 §Disclosure): present-and-true when a message on this
+   * turn sits AT the persistence cap ({@link PERSISTED_MESSAGE_CAP}) and was
+   * therefore hard-sliced at commit time. ABSENT (never `false`) otherwise.
+   * Disclosure is unconditional, so the key appears whenever a projected
+   * turn is at the cap.
+   */
+  readonly truncated?: true;
 }
 
 export interface ContextPackConversation {
   readonly recent_turns: readonly ContextPackConversationTurn[];
   readonly turn_count: number;
   readonly last_tool_used: string | null;
+  /**
+   * Context v2 (02 §Disclosure fix 2): how many prior turns the window shows
+   * vs how many the read returned — discloses that history exists beyond the
+   * window. Emitted unconditionally by projectConversation; optional on the
+   * type so partial/legacy fixtures still assign.
+   *
+   * `summarised` (#536 marker extension, O-2 activation): how many of the
+   * not-shown turns arrive via the `conversation_summary` block instead of
+   * vanishing. Present IFF a summary section was injected this turn — 0 is
+   * an honest value there (a floor / withheld block absorbs nothing);
+   * absent means no summary layer entered this prompt at all.
+   */
+  readonly window?: {
+    readonly shown: number;
+    /**
+     * How many turns the conversation ACTUALLY has — the store's pre-cap
+     * count, not the length of the read window. Until 2026-07-25 this was
+     * `priorTurns.length`, i.e. the window's own size, so a 78-turn
+     * conversation reported `available: 20` and the coach told the user its
+     * total was 20.
+     */
+    readonly available: number;
+    readonly summarised?: number;
+    /**
+     * The one in-band disclosure line, present IFF turns exist that this pack
+     * does not show verbatim. Code-owned and emitted by the same function that
+     * computes the numbers, so it cannot drift from them (the estate's
+     * `HISTORY_CAP_DISCLOSURE` / decision-record `[INCOMPLETE …]` pattern).
+     * A number alone leaves the coach free to describe the visible turns as
+     * the whole conversation; this says not to, in words.
+     */
+    readonly notice?: string;
+  };
   /**
    * Boolean flag indicating that the next user turn is expected to confirm
    * or dismiss a pending change. Diverges from spec §10:444, which defines
@@ -184,6 +396,20 @@ export interface ContextPack {
    */
   readonly scenario_id: string;
   readonly stage: string;
+  /**
+   * Lane 28 — brief pipeline (dossier gap G2): the user's persisted decision
+   * brief, projected via {@link projectBrief} (size-bounded, disclosed
+   * truncation). Serialised into the routing prompt automatically by
+   * `buildUserMessage` (route-with-tool-use.ts) — the LLM finally knows what
+   * the decision is about on every turn after the draft, not just via graph
+   * labels.
+   *
+   * OMITTED (key absent) when no brief has been persisted for this scenario
+   * — the assembler never emits `brief: null`, so a no-brief pack serialises
+   * no `brief` field into the prompt. The type keeps `| null` only for
+   * tolerant reading of hand-built packs.
+   */
+  readonly brief?: ContextPackBrief | null;
   readonly graph: ContextPackGraph;
   /**
    * Raw, handler-facing analysis projection. Carries float probabilities
@@ -215,6 +441,37 @@ export interface ContextPack {
    */
   readonly display_graph: DisplaySafeGraph;
   readonly conversation: ContextPackConversation;
+  /**
+   * Context v2 S4-INJECT (ROADMAP 1.73; design pack 01 §2, 04 §3): the
+   * rolling conversation summary, projected by the injector
+   * (`rolling-summary/inject.ts`) from `scenarios.rolling_summary`.
+   * Unconditional since the O-2 activation (CEE_ROLLING_SUMMARY deleted):
+   * present ONLY when the conversation extends beyond the verbatim window
+   * AND a stored summary exists for the scenario; ABSENT otherwise — key
+   * absence is the byte-identity guarantee at the prompt seam.
+   *
+   * Adjacent to `conversation` here (01 §2); in the SERIALISED routing
+   * prompt `buildUserMessage` re-appends it after the ground-truth
+   * `analysis`/`graph` sections so the LLM reads it BELOW structured state
+   * (04 §3.1 — facts beat summary), alongside the code-owned precedence
+   * instruction.
+   *
+   * NOTE: `conversation_summary` also names a V4 prompt-zones registry
+   * entry (src/orchestrator/prompt-zones/*) — unrelated; grep/telemetry
+   * key on this V5 pack path.
+   */
+  readonly conversation_summary?: ContextPackConversationSummary;
+  /**
+   * Knowledge-over-time (ROADMAP 1.199, P6): a bounded, disclosed projection of
+   * the scenario's prior DECISION RECORDS (not just prior turns) — one line per
+   * recorded decision `[date] Chose "<option>": <rationale>`. Populated by the
+   * turn-executor's fire-safe decision-records loader and bounded to
+   * {@link POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET}. The key is ABSENT when the
+   * scenario has no records (byte-identity for record-less scenarios). Placed
+   * among hard structured state (above the rolling summary) so durable facts
+   * beat the summary — the CONTEXT_POLICY declares it `enforced`/model-facing.
+   */
+  readonly older_relevant_facts?: string;
   /**
    * Curated summary of the most recent successful mutations from
    * `prior_facts`, in newest-first order. Capped at three entries with
@@ -276,14 +533,28 @@ export interface ContextPack {
   /**
    * Coaching Context Pack v1 — the hash-free, prompt-safe projection of the
    * canonical analysis state the LLM may RECEIVE for coaching (never author).
-   * Present ONLY when `CEE_COACHING_CONTEXT_PROMPT_ENABLED` is on (the
-   * turn-executor supplies it via `AssembleContextPackInput.coachingContext`);
-   * absent otherwise, so flag-off `buildUserMessage` output is byte-identical.
+   * Present whenever a freshness verdict was derived this turn (the
+   * turn-executor supplies it via `AssembleContextPackInput.coachingContext`
+   * — UNCONDITIONAL since 2026-07-20, O-7 wave 2:
+   * CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted); absent when no verdict.
    * Unlike `analysis_state` (stripped from the prompt for its graph-hash
    * digests) this projection carries no hashes/indices/values/units/labels/text,
    * so it is the ONLY canonical-state surface allowed to reach the prompt.
    */
   readonly coaching_context?: CoachingStatePack;
+  /**
+   * O-3 — context-size budget disclosure. Present ONLY when the budget
+   * module (`enforceContextBudget`) trimmed the compacted graph and/or the
+   * analysis summary at assembly; ABSENT otherwise (key-absence doctrine —
+   * an under-budget pack is byte-identical to an unbudgeted one). Carries
+   * one `{section, original_chars, kept_chars}` record per trimmed
+   * section. Serialised into the routing prompt by `buildUserMessage`
+   * (rides the `...rest` spread), so the LLM SEES that detail was reduced
+   * — the same in-band mechanism as `conversation.window` ("N of M turns
+   * included", #536). The turn-executor's routing `v5.context_budget`
+   * event derives its `truncations` records from this marker.
+   */
+  readonly context_budget?: ContextBudgetDisclosure;
 }
 
 export interface AssembleContextPackInput {
@@ -295,6 +566,17 @@ export interface AssembleContextPackInput {
   // LLM. SessionTurnWithContent ⊇ SessionTurn.
   readonly priorTurns: readonly SessionTurnWithContent[];
   /**
+   * How many turns the scenario ACTUALLY has (`EnrichedTurnContext.
+   * prior_turns_total`) — the store's pre-cap count. `priorTurns` above is a
+   * window capped at `SESSION_READ_WINDOW_TURNS` (default 20), so its length
+   * is NOT the conversation's length.
+   *
+   * `null`/absent = unknown (count read failed, or a legacy/test store). The
+   * projection then states the shortfall WITHOUT a number instead of falling
+   * back to the window length — that fallback is the defect.
+   */
+  readonly priorTurnsTotal?: number | null;
+  /**
    * Prior handler facts (newest-first), used to project the
    * `recent_changes` summary into the LLM-facing ContextPack. Optional
    * for backwards-compat with callers (and tests) that don't yet wire
@@ -303,6 +585,16 @@ export interface AssembleContextPackInput {
    * follow-up state-queries can be grounded.
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
+   * scenario, threaded by the turn-executor from
+   * `EnrichedTurnContext.scenarioBriefText` (loaded once per turn by
+   * `buildTurnContext` via `loadGraphAndBriefText`). Optional for
+   * backwards-compat with callers/tests that don't wire it; absent/null/
+   * whitespace-only means the pack carries NO `brief` key at all (the
+   * assembler omits it — a null is never serialised into the prompt).
+   */
+  readonly brief?: string | null;
   readonly graph?: GraphWithOptions | null;
   /**
    * V5 Task 1.2: pre-compacted graph projection. When present, the assembler
@@ -323,7 +615,13 @@ export interface AssembleContextPackInput {
    * compact path. Passthrough only — assembler does not introspect.
    */
   readonly compactedConstraints?: readonly unknown[] | null;
-  readonly analysis?: AnalysisResponseSummary | null;
+  /**
+   * The compact analysis summary, optionally carrying the Lane 21 signal
+   * extensions (tipping points / evidence-gap VOI / goal-fit provenance —
+   * see `./analysis-signals.ts`). Plain `AnalysisResponseSummary` values
+   * remain assignable; the extensions are additive and optional.
+   */
+  readonly analysis?: AnalysisResponseSummaryWithSignals | null;
   /**
    * V5 Task 1.4: when the analysis came from a server-side fallback
    * (prior handler facts, not this request's body), the caller supplies a
@@ -361,14 +659,42 @@ export interface AssembleContextPackInput {
    */
   readonly canonicalState?: CanonicalAnalysisState;
   /**
-   * Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). The
-   * hash-free, prompt-safe `CoachingStatePack` the turn-executor projects from
-   * the live `deriveAnalysisFreshness` verdict for coaching turns. When
-   * present, it is surfaced verbatim as `ContextPack.coaching_context` (and
-   * thereby into the LLM routing prompt). Omitted when the flag is off / no
-   * freshness was derived → the field is absent → flag-off byte-identity.
+   * Coaching Context Pack v1 (unconditional since 2026-07-20 — O-7 wave 2:
+   * CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted). The hash-free, prompt-safe
+   * `CoachingStatePack` the turn-executor projects from the live
+   * `deriveAnalysisFreshness` verdict for coaching turns. When present, it is
+   * surfaced verbatim as `ContextPack.coaching_context` (and thereby into the
+   * LLM routing prompt). Omitted when no freshness was derived.
    */
   readonly coachingContext?: CoachingStatePack;
+  /**
+   * Context v2 S4-INJECT: the pre-projected rolling-summary section, built
+   * by `loadConversationSummaryForInjection` (rolling-summary/inject.ts) in
+   * the turn-executor — the loader owns the activation condition (beyond-
+   * window only, since the O-2 flag deletion), the store read, the lag
+   * computation, and the staleness disclosure; the assembler stays
+   * synchronous and only places the section. Omitted (undefined) when the
+   * conversation fits the verbatim window or no stored summary exists →
+   * the field is absent → byte-identity with pre-S4 packs.
+   */
+  readonly conversationSummary?: ContextPackConversationSummary;
+  /**
+   * #536 marker extension (O-2): the loader's `summarisedTurns` — how many
+   * not-shown window turns the injected block absorbs. Stamped onto
+   * `conversation.window.summarised` ONLY when `conversationSummary` is
+   * also supplied (a coverage number without its block would be a marker
+   * that discloses nothing). Null/undefined → marker unchanged.
+   */
+  readonly summarisedTurns?: number | null;
+  /**
+   * Knowledge-over-time (P6): the pre-projected `older_relevant_facts` section
+   * text, built by the turn-executor's fire-safe decision-records loader
+   * (loadOlderRelevantFactsSection) — mirroring how `conversationSummary` is
+   * pre-loaded. The assembler stays synchronous and only PLACES it. Omitted
+   * (undefined) when the scenario has no records or the read failed → the pack
+   * key is absent → byte-identity for record-less scenarios.
+   */
+  readonly olderRelevantFacts?: string;
 }
 
 /**
@@ -403,6 +729,51 @@ export interface AssembleContextPackResult {
 
 export function assembleContextPack(input: AssembleContextPackInput): ContextPack {
   return assembleContextPackWithSummary(input).contextPack;
+}
+
+/**
+ * Lane 28 — brief pipeline: project the persisted decision brief into the
+ * ContextPack shape.
+ *
+ * Rules (mirrors the write-side `normaliseBriefText` discipline — trim first,
+ * bound second, disclose always):
+ *   - null / undefined / whitespace-only → null (no brief persisted; the
+ *     assembler then OMITS the `brief` key from the pack entirely — a null
+ *     is never serialised into the routing prompt).
+ *   - trimmed length ≤ {@link CONTEXT_PACK_BRIEF_CHAR_CAP} → verbatim
+ *     (trimmed) text, `truncated: false`.
+ *   - trimmed length >  cap → hard slice at the cap, `truncated: true`,
+ *     with `original_chars` carrying the full trimmed length — DISCLOSED
+ *     truncation, never a silent slice (contrast `CONVERSATION_TEXT_CAP`'s
+ *     documented hard-slice in commit.ts, which this deliberately does not
+ *     repeat).
+ *
+ * Pure and total; exported for direct unit coverage.
+ */
+export function projectBrief(
+  briefText: string | null | undefined,
+): ContextPackBrief | null {
+  if (briefText == null) return null;
+  const trimmed = briefText.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length <= CONTEXT_PACK_BRIEF_CHAR_CAP) {
+    return { text: trimmed, truncated: false, original_chars: trimmed.length };
+  }
+  // Context v2 S0: the slice was already DISCLOSED in-pack (truncated +
+  // original_chars); it now also lands on the truncation telemetry stream.
+  emitContextTruncation({
+    site: 'context-pack-assembler.projectBrief',
+    section: 'brief',
+    original_chars: trimmed.length,
+    kept_chars: CONTEXT_PACK_BRIEF_CHAR_CAP,
+    strategy: 'hard_slice',
+    disclosed: true,
+  });
+  return {
+    text: trimmed.slice(0, CONTEXT_PACK_BRIEF_CHAR_CAP),
+    truncated: true,
+    original_chars: trimmed.length,
+  };
 }
 
 /**
@@ -464,43 +835,119 @@ export function assembleContextPackWithSummary(
 ): AssembleContextPackResult {
   const compound = detectCompound(input.payload.message);
   const extraction = runExtraction(input.payload.message);
+  // O-3 — context-size budget (graceful degradation). Applied BEFORE
+  // projection so both the handler-facing slots and the LLM-facing
+  // display projections are built from the budgeted objects. Under
+  // budget this returns the inputs by reference (byte-identity, pinned
+  // by test); over budget it degrades per the budget module's own
+  // policy and returns the `context_budget` disclosure stamped onto the
+  // pack below. The conversation window is NOT budgeted here (O-2's
+  // surface). The raw-graph fallback path (`input.graph`) is outside
+  // the budget module's compact-shape domain and passes through
+  // unbudgeted, as before.
+  const budgeted = applyContextBudgetToAssemblyInputs({
+    compactedGraph: input.compactedGraph ?? null,
+    analysis: input.analysis ?? null,
+    scenarioId: input.payload.scenario_id ?? null,
+  });
   // Compute the raw analysis projection ONCE — it is shared between the
   // handler-facing `analysis` slot and the LLM-facing `display_analysis`
   // wrapper. Calling projectAnalysis twice would double-emit
   // analysis_projection_invalid_probability telemetry on bad inputs.
   const rawAnalysis = projectAnalysis(
-    input.analysis ?? null,
+    budgeted.analysis,
     input.analysisStalenessReason ?? null,
     input.interventionControlledFactorIds,
   );
-  const projectedGraph: ContextPackGraph = input.compactedGraph
-    ? projectCompactGraph(input.compactedGraph, input.compactedConstraints ?? null)
+  const projectedGraph: ContextPackGraph = budgeted.compactedGraph
+    ? projectCompactGraph(budgeted.compactedGraph, input.compactedConstraints ?? null)
     : projectGraph(input.graph ?? null);
   const analysisStateSummary = deriveContextPackAnalysisState(input);
+  // Lane 28 — the persisted decision brief (size-bounded, disclosed
+  // truncation). Projected once; when no brief exists the key is OMITTED
+  // entirely (never `brief: null`) so no-brief packs serialise no `brief`
+  // field into the routing prompt — prompt hygiene: don't make the LLM read
+  // a null. When present it is placed early in the literal so the serialised
+  // prompt surfaces "what this decision is about" before the graph/analysis
+  // detail.
+  const projectedBrief = projectBrief(input.brief);
+  // #536 marker extension (O-2 activation): when a summary section is
+  // injected, the "N of M turns included" window marker additionally says
+  // how many of the not-shown turns arrive as the summary (`summarised`).
+  // The count comes from the loader (the only component that knows whether
+  // the block is a real four-slot summary, a floor, or a withheld refusal
+  // — the latter two stamp an honest 0). No section ⇒ marker unchanged ⇒
+  // byte-identity with pre-S4 packs.
+  const projectedConversation = projectConversation(
+    input.priorTurns,
+    input.pendingConfirmation ?? false,
+    input.priorTurnsTotal,
+  );
+  const conversation =
+    input.conversationSummary !== undefined &&
+    input.summarisedTurns != null &&
+    projectedConversation.window !== undefined
+      ? {
+          ...projectedConversation,
+          window: { ...projectedConversation.window, summarised: input.summarisedTurns },
+        }
+      : projectedConversation;
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
     stage: input.payload.stage,
+    ...(projectedBrief !== null ? { brief: projectedBrief } : {}),
     graph: projectedGraph,
     analysis: rawAnalysis,
     // Display-safe analysis projection — what Sonnet actually sees.
     // Sources structured fragile-edge labels off the raw projection
     // (no longer needs the upstream summary as a second argument).
-    display_analysis: formatAnalysisForContext(rawAnalysis),
+    // AMENDMENT A1(a) — thread the live freshness verdict so the flip-point
+    // display licence can fail closed on a stale turn, where compose ships NO
+    // review cards and the digits are therefore on no screen.
+    // No `?? null` default here, deliberately: the option is optional and the
+    // formatter treats undefined and null IDENTICALLY (both fail closed), so a
+    // coalescing default would add a science-field fallback the
+    // forbidden-boundary gate rightly flags, while changing nothing.
+    display_analysis: formatAnalysisForContext(rawAnalysis, {
+      analysisFreshness: input.coachingContext?.freshness,
+    }),
     // Display-safe graph projection — what Sonnet actually sees in
     // place of the raw graph. Edge `strength` floats become decision-
     // language `relationship` phrases; `exists` and `plain_interpretation`
     // are dropped; node numeric fields stripped. Raw `graph` above is
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
-    conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
+    conversation,
+    // Context v2 S4-INJECT: placed adjacent to `conversation` (01 §2).
+    // Conditional spread — when the caller supplies nothing the key is
+    // ABSENT (never null/undefined-valued), preserving off/maintain
+    // byte-identity of the serialised pack.
+    ...(input.conversationSummary !== undefined
+      ? { conversation_summary: input.conversationSummary }
+      : {}),
     recent_changes: projectRecentChanges(input.priorFacts),
+    // Knowledge-over-time (P6): the decision-records read slice. Placed with the
+    // hard structured state (above the rolling summary, which buildUserMessage
+    // re-appends LAST) so durable prior DECISIONS beat the summary. Conditional
+    // spread — key ABSENT when the loader supplied nothing (no records / read
+    // failed) so record-less scenarios serialise byte-identically to pre-P6.
+    ...(input.olderRelevantFacts !== undefined
+      ? { older_relevant_facts: input.olderRelevantFacts }
+      : {}),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,
     parsed_quantities: extraction.results,
     system_event: input.systemEvent ?? null,
     analysis_state: analysisStateSummary,
+    // O-3 — in-band budget disclosure. Key ABSENT when nothing was
+    // trimmed (never `context_budget: null`), so under-budget packs stay
+    // byte-identical; when present the LLM sees the reduction via
+    // buildUserMessage's `...rest` spread (#536 marker pattern).
+    ...(budgeted.disclosure !== null
+      ? { context_budget: budgeted.disclosure }
+      : {}),
   };
   const withSegments =
     compound.detected && compound.segments
@@ -628,13 +1075,23 @@ function isProbabilityValid(
   context: { call_site: string; option_label?: string | null; option_id?: string | null },
 ): value is number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    // PII rule (14-Jul ruling): option labels are user decision content
+    // and option ids are label-derived slugs; the raw `value` is analysis
+    // output. The log carries a correlation digest of the id plus a
+    // bounded violation enum only — never the label or the raw value.
+    const violation =
+      typeof value !== 'number'
+        ? 'not_a_number'
+        : !Number.isFinite(value)
+          ? 'not_finite'
+          : 'out_of_range';
     log.warn(
       {
         event: 'analysis_projection_invalid_probability',
         call_site: context.call_site,
-        option_label: context.option_label ?? null,
-        option_id: context.option_id ?? null,
-        value: typeof value === 'number' ? value : String(value),
+        option_id_digest:
+          context.option_id != null ? sha8(context.option_id) : null,
+        violation,
       },
       'context-pack-assembler: dropping option with invalid win_probability',
     );
@@ -644,6 +1101,23 @@ function isProbabilityValid(
 }
 
 const TOP_DRIVER_CAP = 3;
+
+/**
+ * Lane 21 (P0-A): the ROUTED ContextPack projection carries up to five
+ * drivers — parity with the top-5 derivation in `compactAnalysis` and the
+ * five factors the UI renders. The chip-click dispatch keeps the legacy
+ * default cap of {@link TOP_DRIVER_CAP}; ordering/sign logic is shared via
+ * `projectTopDrivers` so only the breadth differs.
+ */
+export const CONTEXT_PACK_TOP_DRIVER_CAP = 5;
+
+/**
+ * Lane 21 (P0-A): bound on the widened all-options projection so a
+ * degenerate many-option graph cannot blow the prompt budget. Realistic
+ * graphs carry ≤ 8 options; options beyond the cap are truncated at the
+ * slice below (no overflow disclosure reaches the formatter today).
+ */
+export const MAX_PROJECTED_OPTIONS = 12;
 
 /**
  * P0b-1 — source-only fragile-edge lever suppression, shared by `projectAnalysis`
@@ -680,13 +1154,80 @@ export function filterLeverSourcedFragileEdges<E extends { from_id?: string; fro
 }
 
 /**
+ * Lane 30 (#369 audit P1) — factor-keyed lever suppression for the tipping
+ * (`flip_thresholds`, section 5) and evidence-gap (`evidence_gaps`, section
+ * 7) projections. Before this lane, `projectAnalysis` filtered top_drivers
+ * and fragile_edges by the intervention-controlled set but NOT these two
+ * sections — an option-controlled lever excluded from the driver list could
+ * still surface as a tipping point ("a small decrease in X could flip the
+ * result") or an evidence gap ("gather data on X"), both of which imply the
+ * user can independently tune / validate the lever. Same doctrine as
+ * {@link filterLeverSourcedFragileEdges}:
+ *
+ *   - authority is STRUCTURAL `factor_id` membership ONLY — never the label
+ *     (labels collide; #308);
+ *   - FAIL-CLOSED: when any lever exists, an entry with no resolvable
+ *     `factor_id` cannot be proven non-lever and is dropped;
+ *   - empty / absent controlled set ⇒ no-op (fail-safe);
+ *   - producer values are never mutated — a suppressed entry is simply not
+ *     surfaced.
+ *
+ * A fired suppression is logged under the EXISTING
+ * `v5.intervention_controlled_driver_suppressed` event (frozen telemetry
+ * registry — no new event names) with a section-specific `source`.
+ */
+export function filterLeverControlledFactorEntries<
+  E extends { factor_id?: string | null; factor_label: string },
+>(
+  entries: readonly E[],
+  controlledFactorIds: ReadonlySet<string> | undefined,
+  source: string,
+): E[] {
+  if (controlledFactorIds === undefined || controlledFactorIds.size === 0) {
+    return entries.slice();
+  }
+  const kept: E[] = [];
+  const suppressedIds: string[] = [];
+  for (const entry of entries) {
+    const id = typeof entry.factor_id === 'string' ? entry.factor_id.trim() : '';
+    if (id.length === 0) {
+      // Fail-closed: unattributable entry while levers exist.
+      suppressedIds.push('<no_factor_id>');
+      continue;
+    }
+    if (controlledFactorIds.has(id)) {
+      suppressedIds.push(id);
+      continue;
+    }
+    kept.push(entry);
+  }
+  if (suppressedIds.length > 0) {
+    // EVIDENCE THE PRODUCER FIX (Science/PLoT Lane A1) IS STILL REQUIRED —
+    // never a sign it is closed. factor_ids are internal identifiers (not
+    // user-facing prose), safe to log.
+    log.warn(
+      {
+        event: 'v5.intervention_controlled_driver_suppressed',
+        source,
+        suppressed_count: suppressedIds.length,
+        suppressed_factor_ids: suppressedIds,
+        producer_fix_required: true,
+      },
+      'V5 Lane 30: suppressed option-controlled lever from analysis projection (producer fix still required)',
+    );
+  }
+  return kept;
+}
+
+/**
  * Project `DriverSummary[]` into the display-safe ContextPack driver shape —
  * the single rule shared by `projectAnalysis` (routed path) and the chip-click
  * dispatch so the two sign-reattachment sites cannot drift:
  *   1. drop non-finite magnitudes;
  *   2. re-attach the sign via `toSignedInfluenceValue` (`neutral` → 0);
  *   3. sort by absolute signed value, descending;
- *   4. cap at `TOP_DRIVER_CAP`.
+ *   4. cap at `cap` (default `TOP_DRIVER_CAP`; the routed ContextPack path
+ *      passes `CONTEXT_PACK_TOP_DRIVER_CAP` — Lane 21 breadth widening).
  * Because the sort runs AFTER `neutral` is zeroed, a no-effect driver is always
  * demoted (and usually capped out) in both paths — it can never lead a "would
  * shift the most" claim on one path while being demoted on the other.
@@ -694,6 +1235,7 @@ export function filterLeverSourcedFragileEdges<E extends { from_id?: string; fro
 export function projectTopDrivers(
   drivers: readonly DriverSummary[],
   controlledFactorIds?: ReadonlySet<string>,
+  cap: number = TOP_DRIVER_CAP,
 ): ContextPackAnalysisDriver[] {
   // Spine A backstop: drop any driver whose factor is option-controlled BEFORE
   // the projection strips `factor_id` (the structural match key). Authority is
@@ -730,19 +1272,142 @@ export function projectTopDrivers(
       sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
     }))
     .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
-    .slice(0, TOP_DRIVER_CAP);
+    .slice(0, cap);
 }
 
-function projectAnalysis(
-  analysis: AnalysisResponseSummary | null,
+/**
+ * Map a per-option `FlipThreshold` (compactAnalysis derivation — always a
+ * complete numeric pair) into the widened tipping-point projection shape.
+ */
+function tippingFromFlipThreshold(entry: FlipThreshold): ContextPackAnalysisFlipThreshold {
+  return {
+    factor_label: entry.factor_label,
+    current_value: entry.current_value,
+    flip_value: entry.flip_value,
+    unit: entry.unit,
+    no_flip_within_bounds: false,
+  };
+}
+
+function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipThreshold {
+  // ROADMAP 2.205 — carry the display licence through, both keys or neither.
+  // `factor_id` is still stripped here (internal match key only); the licence
+  // was already resolved against it upstream.
+  const currentDisplay =
+    typeof entry.current_display === 'string' && entry.current_display.length > 0
+      ? entry.current_display
+      : null;
+  const flipDisplay =
+    typeof entry.flip_display === 'string' && entry.flip_display.length > 0
+      ? entry.flip_display
+      : null;
+  return {
+    factor_label: entry.factor_label,
+    current_value: entry.current_value,
+    flip_value: entry.flip_value,
+    unit: entry.unit,
+    no_flip_within_bounds: entry.no_flip_within_bounds,
+    ...(currentDisplay !== null && flipDisplay !== null
+      ? { current_display: currentDisplay, flip_display: flipDisplay }
+      : {}),
+  };
+}
+
+/** Finite [0,1] check for goal-fit values (no telemetry — the derivation
+ *  already guards; this is defence for hand-built signal inputs). */
+function isValidGoalFitProbability(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Lane 30 — option-identity-keyed lookup over a per-option signal array.
+ * Match authority: STRUCTURAL `option_id` first (labels are not identity —
+ * the fallback path relabels options from the current graph); label matching
+ * ONLY for signals that carried no id at all.
+ */
+function buildOptionSignalLookup<S extends { option_id: string | null; option_label: string }>(
+  signals: readonly S[] | undefined,
+  readValue: (signal: S) => number,
+  isValid: (value: unknown) => value is number,
+): (option: OptionSummary) => number | undefined {
+  const byId = new Map<string, number>();
+  const byLabelIdless = new Map<string, number>();
+  for (const s of signals ?? []) {
+    const value = readValue(s);
+    if (!isValid(value)) continue;
+    if (typeof s.option_id === 'string' && s.option_id.trim().length > 0) {
+      if (!byId.has(s.option_id)) byId.set(s.option_id, value);
+    } else if (typeof s.option_label === 'string' && s.option_label.trim().length > 0) {
+      if (!byLabelIdless.has(s.option_label)) byLabelIdless.set(s.option_label, value);
+    }
+  }
+  return (option: OptionSummary): number | undefined => {
+    const viaId = byId.get(option.option_id);
+    if (viaId !== undefined) return viaId;
+    return byLabelIdless.get(option.option_label);
+  };
+}
+
+/**
+ * Lane 30 — per-option goal-fit resolver: the option's own
+ * `probability_of_goal` wins when a producer path populates it (that field
+ * is only ever set from real data, never defaulted), then the
+ * `option_goal_fits` signal lookup. Returns undefined when no valid value
+ * resolves — the projected option then omits `goal_fit_probability` and the
+ * display formatter renders the explicit "target-fit not scored" disclosure
+ * instead.
+ */
+function buildGoalFitResolver(
+  signals: readonly OptionGoalFitSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  const lookup = buildOptionSignalLookup(
+    signals,
+    (s) => s.probability_of_joint_goal,
+    isValidGoalFitProbability,
+  );
+  return (option: OptionSummary): number | undefined => {
+    if (isValidGoalFitProbability(option.probability_of_goal)) {
+      return option.probability_of_goal;
+    }
+    return lookup(option);
+  };
+}
+
+/** Finite check for outcome means (any sign, any magnitude). */
+function isFiniteOutcomeMean(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Lane 30 fix 3 — per-option outcome-mean resolver. SIGNALS ONLY: the
+ * `OptionSummary.outcome_mean` field is deliberately never read because its
+ * upstream default of 0 is indistinguishable from an honest zero (banding a
+ * fabricated 0 as "roughly neutral" would be a false claim).
+ */
+function buildOutcomeResolver(
+  signals: readonly OptionOutcomeSignal[] | undefined,
+): (option: OptionSummary) => number | undefined {
+  return buildOptionSignalLookup(signals, (s) => s.outcome_mean, isFiniteOutcomeMean);
+}
+
+export function projectAnalysis(
+  analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
   controlledFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
-  // 1. Filter options by probability scale guard, then sort desc.
-  //    F.6 passthrough: we only filter+sort; we do not transform values.
+  // 1. Status gate FIRST: a FAILED / skipped option (per-option ISL status)
+  //    must never surface as the leading or runner-up coaching option — the
+  //    same rule the direct receipt (run-analysis.ts) and compactAnalysis
+  //    apply, routed through the ONE shared isRecommendableOption predicate.
+  //    `OptionSummary` now RETAINS `status` (it used to be dropped here, which
+  //    is exactly why this projection could not previously gate on it). Absent
+  //    status stays recommendable, so status-less inputs are unaffected.
+  //    Then the probability scale guard, then sort desc. F.6 passthrough: we
+  //    only filter+sort; we do not transform values.
   const validOptions: OptionSummary[] = analysis.options
+    .filter(isRecommendableTypedOption)
     .filter((o) =>
       isProbabilityValid(o.win_probability, {
         call_site: 'projectAnalysis.options',
@@ -756,11 +1421,43 @@ function projectAnalysis(
   const leadingSrc = validOptions[0];
   const runnerUpSrc = validOptions[1];
 
+  // Lane 30 — per-option goal-fit + outcome carriage. Resolvers shared by
+  // the leading pair and the full option list so the same option can never
+  // show a value in one slot and not the other.
+  const goalFitFor = buildGoalFitResolver(analysis.option_goal_fits);
+  const outcomeFor = buildOutcomeResolver(analysis.option_outcomes);
+  // Trust-spine board #1 (CEE half, adversarial-review P1): the upstream
+  // compactAnalysis winner flag was previously field-picked away here, so the
+  // coach egress never carried it. Thread it through: the flagged winner's
+  // structural option_id (never the label — labels collide) marks the same
+  // option wherever it appears (leading_option AND the ranked options list —
+  // the same option must never show the flag in one slot and not the other).
+  // No config re-check here: the upstream field is only ever set when
+  // CEE_CONSTRAINT_INFEASIBLE_GATE is ON, so flag-off packs carry no key and
+  // stay byte-identical (key-absence doctrine).
+  const flaggedInfeasibleWinnerId =
+    analysis.winner.constraint_infeasible === true && analysis.winner.option_id.length > 0
+      ? analysis.winner.option_id
+      : null;
+  const projectOption = (o: OptionSummary): ContextPackAnalysisOption => {
+    const goalFit = goalFitFor(o);
+    const outcomeMean = outcomeFor(o);
+    return {
+      label: o.option_label,
+      probability: o.win_probability,
+      ...(goalFit !== undefined ? { goal_fit_probability: goalFit } : {}),
+      ...(outcomeMean !== undefined ? { outcome_mean: outcomeMean } : {}),
+      ...(flaggedInfeasibleWinnerId !== null && o.option_id === flaggedInfeasibleWinnerId
+        ? { constraint_infeasible: true as const }
+        : {}),
+    };
+  };
+
   const leading: ContextPackAnalysisOption | null = leadingSrc
-    ? { label: leadingSrc.option_label, probability: leadingSrc.win_probability }
+    ? projectOption(leadingSrc)
     : null;
   const runnerUp: ContextPackAnalysisOption | null = runnerUpSrc
-    ? { label: runnerUpSrc.option_label, probability: runnerUpSrc.win_probability }
+    ? projectOption(runnerUpSrc)
     : null;
 
   // margin_pp is pre-computed upstream in compactAnalysis — passthrough.
@@ -773,9 +1470,12 @@ function projectAnalysis(
   // 2. Top drivers — shared with the chip-click dispatch via projectTopDrivers:
   //    filter non-finite, re-attach sign (neutral → 0), sort by |signed value|,
   //    cap. Keeping both reattachment sites on one helper prevents drift.
+  //    Lane 21: the routed path carries up to five drivers (UI parity); the
+  //    chip path keeps the legacy default cap.
   const topDrivers: ContextPackAnalysisDriver[] = projectTopDrivers(
     analysis.top_drivers,
     controlledFactorIds,
+    CONTEXT_PACK_TOP_DRIVER_CAP,
   );
 
   // 3. Robustness band: null when source is unknown / empty; do not fabricate.
@@ -783,6 +1483,82 @@ function projectAnalysis(
   const robustnessBand =
     typeof rawBand === 'string' && rawBand.trim().length > 0 && rawBand !== 'unknown'
       ? rawBand
+      : null;
+
+  // 4. Lane 21 breadth: every valid option (F.6 passthrough — filter + sort
+  //    only, values untouched), bounded by MAX_PROJECTED_OPTIONS. Lane 30:
+  //    each entry additionally carries its goal-fit value when one resolves.
+  const allOptions: ContextPackAnalysisOption[] = validOptions
+    .slice(0, MAX_PROJECTED_OPTIONS)
+    .map(projectOption);
+
+  // 5. Lane 21 tipping points: prefer the attached top-level staging signals
+  //    (see analysis-signals.ts — the per-option derivation is structurally
+  //    empty on staging); fall back to the per-option summary.flip_thresholds.
+  //    Lane 30 (#369 audit P1): BOTH sources are filtered by the
+  //    intervention-controlled set BEFORE factor_id is stripped — an
+  //    option-controlled lever must not surface as a tipping point.
+  const tippingSignals = analysis.tipping_points ?? [];
+  const flipThresholds: ContextPackAnalysisFlipThreshold[] =
+    tippingSignals.length > 0
+      ? filterLeverControlledFactorEntries(
+          tippingSignals,
+          controlledFactorIds,
+          'projectAnalysis.flip_thresholds',
+        ).map(tippingFromSignal)
+      : filterLeverControlledFactorEntries(
+          analysis.flip_thresholds ?? [],
+          controlledFactorIds,
+          'projectAnalysis.flip_thresholds',
+        ).map(tippingFromFlipThreshold);
+
+  // 6. P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
+  //    validation surfaces (explain_results, explanation-fallback, advice gate —
+  //    all read this same projection). Source-only; the output shape is unchanged
+  //    ({from_label,to_label}), so the strict ContextPack schema is unaffected.
+  const sourceFragile = analysis.top_fragile_edges ?? [];
+  const filteredFragile = filterLeverSourcedFragileEdges(sourceFragile, controlledFactorIds);
+  // Lane 21: uncapped count behind the capped list. FAIL-CLOSED under lever
+  // suppression: once any edge is suppressed the producer's uncapped count can
+  // no longer be attested (it may include other lever-sourced edges beyond the
+  // capped list), so collapse to the filtered list length.
+  const suppressionFired = filteredFragile.length < sourceFragile.length;
+  const fragileEdgeCount = suppressionFired
+    ? filteredFragile.length
+    : Math.max(
+        typeof analysis.fragile_edge_count === 'number' &&
+          Number.isFinite(analysis.fragile_edge_count) &&
+          analysis.fragile_edge_count >= 0
+          ? analysis.fragile_edge_count
+          : 0,
+        filteredFragile.length,
+      );
+
+  // 7. Lane 21 signal passthrough — raw values; banding is the formatter's
+  //    job. Lane 30 (#369 audit P1): filtered by the intervention-controlled
+  //    set BEFORE factor_id is stripped — a lever must not surface as an
+  //    evidence gap the user is invited to gather data on.
+  const rawEvidenceGaps = analysis.evidence_gaps ?? [];
+  const keptEvidenceGaps = filterLeverControlledFactorEntries(
+    rawEvidenceGaps,
+    controlledFactorIds,
+    'projectAnalysis.evidence_gaps',
+  );
+  // ROADMAP 2.54 (b) — carry the suppression FACT (not a re-derivation) so
+  // the display formatter can disclose an emptied VOI section honestly.
+  const evidenceGapsLeverSuppressed = keptEvidenceGaps.length < rawEvidenceGaps.length;
+  const evidenceGaps: ContextPackAnalysisEvidenceGap[] = keptEvidenceGaps
+    .filter((g) => Number.isFinite(g.voi_score) && g.voi_score >= 0)
+    .map((g) => ({ factor_label: g.factor_label, voi_score: g.voi_score }));
+  const goalFit: ContextPackAnalysisGoalFit | null = analysis.goal_fit
+    ? { scored: analysis.goal_fit.scored, basis: analysis.goal_fit.basis }
+    : null;
+
+  // Lane 30 fix 3 — ordinal confidence tier passthrough (string token; the
+  // formatter renders prose). Null when the producer reported none.
+  const confidenceTier =
+    typeof analysis.confidence_tier === 'string' && analysis.confidence_tier.trim().length > 0
+      ? analysis.confidence_tier
       : null;
 
   // stalenessReason is intentionally not threaded into the projection —
@@ -798,17 +1574,26 @@ function projectAnalysis(
     margin_pp: marginPp,
     robustness_band: robustnessBand,
     top_drivers: topDrivers,
-    // P0b-1: drop lever-SOURCED fragile edges before they reach the prose /
-    // validation surfaces (explain_results, explanation-fallback, advice gate —
-    // all read this same projection). Source-only; the output shape is unchanged
-    // ({from_label,to_label}), so the strict ContextPack schema is unaffected.
-    fragile_edges: filterLeverSourcedFragileEdges(
-      analysis.top_fragile_edges ?? [],
-      controlledFactorIds,
-    ).map((e) => ({
+    fragile_edges: filteredFragile.map((e) => ({
       from_label: e.from_label,
       to_label: e.to_label,
     })),
+    options: allOptions,
+    flip_thresholds: flipThresholds,
+    fragile_edge_count: fragileEdgeCount,
+    evidence_gaps: evidenceGaps,
+    // ROADMAP 2.54 (b) — key absent (never `false`) when nothing was
+    // suppressed.
+    ...(evidenceGapsLeverSuppressed ? { evidence_gaps_lever_suppressed: true as const } : {}),
+    goal_fit: goalFit,
+    confidence_tier: confidenceTier,
+    // Trust-spine board #1 (CEE half): the honest constraint note, verbatim
+    // from compactAnalysis. Key absent when unset (flag off / feasible winner)
+    // → byte-identical projection.
+    ...(typeof analysis.constraint_infeasible_note === 'string' &&
+    analysis.constraint_infeasible_note.length > 0
+      ? { constraint_infeasible_note: analysis.constraint_infeasible_note }
+      : {}),
   };
 }
 
@@ -816,10 +1601,36 @@ function isFiniteSensitivity(value: unknown): value is number {
   return typeof value === 'number' && !Number.isNaN(value) && value !== Infinity && value !== -Infinity;
 }
 
-function projectConversation(
+/**
+ * Exported so `dispatchEditGraph` (ROADMAP 1.33 — edit-lane conversation
+ * starvation) can reuse the exact same 5-turn conversation-slice projection
+ * the coaching/draft LLM path uses, rather than assembling a second,
+ * divergent slice. The V4 edit-graph dispatch runs entirely outside
+ * `assembleContextPackWithSummary`'s call site (see `turn-executor.ts`), so
+ * it calls this directly against its own `loadRecentConversationTurns`
+ * read; `pendingConfirmation` is irrelevant to that caller and is passed as
+ * `false`.
+ */
+export function projectConversation(
   priorTurns: readonly SessionTurnWithContent[],
   pendingConfirmation: boolean,
+  /**
+   * The scenario's PRE-CAP turn total. `priorTurns` is a read window
+   * (`SESSION_READ_WINDOW_TURNS`, default 20) — its length is the window's
+   * size, never the conversation's. Omitted/`null` = unknown; the disclosure
+   * then states the shortfall without a number rather than substituting the
+   * window length, which is the falsehood this parameter removes.
+   *
+   * Optional so the edit-graph dispatch call site (which reads only
+   * `recent_turns`) is unchanged.
+   */
+  totalStored?: number | null,
 ): ContextPackConversation {
+  // Context v2 (02 §Disclosure fix 2): window + per-turn `truncated`
+  // disclosure is now UNCONDITIONAL — the pack always tells the LLM how much
+  // history exists beyond the window and which projected turns were sliced.
+  // The pack is JSON.stringified into the routing prompt.
+
   // priorTurns arrives ordered by created_at DESC (most recent first) from
   // SessionStore.readRecent. We cap at five. `last_tool_used` is the most
   // recent handler invocation — scan the full prior_turns to find it even
@@ -830,24 +1641,131 @@ function projectConversation(
   // words of recent turns, not content-free stubs. This flows into the prompt
   // automatically via route-with-tool-use's `JSON.stringify(contextPack)` —
   // no prompt-template change needed. Null stays null.
-  const recent = priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).map((turn) => ({
-    turn_id: turn.turn_id,
-    turn_class: turn.turn_class,
-    handler_id: turn.handler_id,
-    created_at: turn.created_at,
-    // `?? null`: content is optional on SessionTurnWithContent for fixture
-    // assignability; the DB read path always sets a string|null, so this only
-    // normalises legacy/test turns that omit the fields.
-    user_message: turn.user_message ?? null,
-    assistant_message: turn.assistant_message ?? null,
-  }));
+  const recent = priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).map((turn) => {
+    const projected: ContextPackConversation['recent_turns'][number] = {
+      turn_id: turn.turn_id,
+      turn_class: turn.turn_class,
+      handler_id: turn.handler_id,
+      created_at: turn.created_at,
+      // `?? null`: content is optional on SessionTurnWithContent for fixture
+      // assignability; the DB read path always sets a string|null, so this only
+      // normalises legacy/test turns that omit the fields.
+      user_message: turn.user_message ?? null,
+      assistant_message: turn.assistant_message ?? null,
+    };
+    // Per-message disclosure (now unconditional): a message AT the
+    // persistence cap was (in all real cases) hard-sliced by
+    // commit.capConversationText — the original length is not persisted, so
+    // at-cap is the only sound inference (a naturally-exactly-2,000-char
+    // message false-positives; an actually-truncated one never
+    // false-negatives). Key added only when at-cap — never a noisy
+    // `truncated:false`.
+    if (
+      (projected.user_message?.length ?? 0) >= PERSISTED_MESSAGE_CAP ||
+      (projected.assistant_message?.length ?? 0) >= PERSISTED_MESSAGE_CAP
+    ) {
+      return { ...projected, truncated: true as const };
+    }
+    return projected;
+  });
 
   const lastTool = priorTurns.find((t) => t.turn_class === 'handler' && t.handler_id !== null);
 
+  // Context v2 S0: the window slice becomes observable. Char accounting is
+  // over the projected conversation CONTENT (user/assistant message text) —
+  // the thing the LLM loses when a turn falls out of the window.
+  // `disclosed` is now always true — the `{shown, available}` window
+  // disclosure below renders unconditionally.
+  if (priorTurns.length > CONTEXT_PACK_RECENT_TURNS_CAP) {
+    const contentChars = (turns: readonly SessionTurnWithContent[]): number =>
+      turns.reduce(
+        (sum, t) => sum + (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0),
+        0,
+      );
+    emitContextTruncation({
+      site: 'context-pack-assembler.projectConversation',
+      section: 'conversation',
+      original_chars: contentChars(priorTurns),
+      kept_chars: contentChars(priorTurns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP)),
+      strategy: 'window_slice',
+      disclosed: true,
+    });
+  }
+
+  // Window disclosure (02 §Disclosure fix 2, now unconditional): the LLM
+  // learns how much history exists beyond the window, so "earlier in this
+  // conversation" can be said honestly instead of hallucinating certainty.
+  //
+  // `available` and `turn_count` are the CONVERSATION's length, from the
+  // store's pre-cap count. They used to be `priorTurns.length` — the READ
+  // WINDOW's length — which made both numbers false past the window and made
+  // them false CONSISTENTLY (shown + summarised summed to them exactly), so
+  // no cross-field check could catch it. Live on build `f00b8ef`, a 78-turn
+  // scenario produced "Total turn count on record for this conversation is
+  // 20". Unknown total ⇒ fall back to the window length for the numbers but
+  // NEVER let the disclosure claim it is the whole conversation.
+  const totalKnown =
+    typeof totalStored === 'number' && Number.isFinite(totalStored) && totalStored >= 0;
+  // A total below the window length is incoherent (rows cannot vanish between
+  // the two reads in a way that shrinks history) — most likely a stale or
+  // wrong count. Take the larger: never report FEWER turns than are visibly
+  // present in this very pack.
+  const total = totalKnown ? Math.max(totalStored as number, priorTurns.length) : priorTurns.length;
+  const notice = conversationWindowNotice({
+    shown: recent.length,
+    total,
+    totalKnown,
+    windowCapped: priorTurns.length > recent.length,
+  });
   return {
     recent_turns: recent,
-    turn_count: priorTurns.length,
+    turn_count: total,
     last_tool_used: lastTool?.handler_id ?? null,
     pending_confirmation: pendingConfirmation,
+    window: {
+      shown: recent.length,
+      available: total,
+      ...(notice !== null ? { notice } : {}),
+    },
   };
+}
+
+/**
+ * The one in-band conversation-window disclosure, or `null` when this pack
+ * genuinely shows the whole conversation.
+ *
+ * Code-owned and computed by the same call that computes `shown`/`available`,
+ * so the sentence and the numbers cannot drift apart — the estate's
+ * `HISTORY_CAP_DISCLOSURE` / decision-record `[INCOMPLETE …]` pattern, applied
+ * to the cap that did not disclose. It states BOTH numbers for the same reason
+ * the decision-record line does: a disclosure that only says "some turns are
+ * not shown" still leaves the coach free to count the visible turns and assert
+ * that as the total, which is the failure it replaces.
+ */
+function conversationWindowNotice(args: {
+  readonly shown: number;
+  readonly total: number;
+  readonly totalKnown: boolean;
+  readonly windowCapped: boolean;
+}): string | null {
+  const { shown, total, totalKnown, windowCapped } = args;
+  if (!totalKnown) {
+    // The count read failed. We still know history was cut whenever the read
+    // window itself over-ran the projected slice — say so WITHOUT a number
+    // rather than passing off the window length as the total.
+    if (!windowCapped) return null;
+    return (
+      `[INCOMPLETE — the ${shown} most recent turns are shown above and earlier turns exist that ` +
+      `are not shown. The true total could not be read this turn. Do not describe the turns above ` +
+      `as the whole conversation, and do not state a total number of turns or exchanges.]`
+    );
+  }
+  if (total <= shown) return null;
+  const notShown = total - shown;
+  return (
+    `[INCOMPLETE — ${total} turns are on record for this conversation; the ${shown} most recent ` +
+    `are shown above and ${notShown} earlier ${notShown === 1 ? 'one is' : 'ones are'} not shown. ` +
+    `Do not describe the turns above as the whole conversation; if asked how many turns or ` +
+    `exchanges are on record, the true total is ${total}.]`
+  );
 }

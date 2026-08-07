@@ -14,7 +14,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { enforceAnthropicSchemaCompliance } from "../../src/adapters/llm/anthropic-schema-compliance.js";
+import {
+  enforceAnthropicSchemaCompliance,
+  UNSUPPORTED_KEYWORDS,
+  MIN_ITEMS_ALLOWED_VALUES,
+} from "../../src/adapters/llm/anthropic-schema-compliance.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 
@@ -84,14 +88,25 @@ function assertNoUnsupportedKeywords(
 ): void {
   if (!node || typeof node !== "object" || Array.isArray(node)) return;
 
-  const unsupported = [
-    "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems",
-    "pattern", "format", "minProperties", "maxProperties", "uniqueItems",
-    "exclusiveMinimum", "exclusiveMaximum", "default",
-  ];
-
-  for (const keyword of unsupported) {
+  // `minItems` is NOT in this list — it is PARTIALLY supported (0 or 1 only).
+  // Live-probed against claude-sonnet-4-6, 2026-07-19: minItems 4 -> HTTP 400
+  // "values other than 0 or 1 are not supported"; minItems 1 -> accepted and
+  // genuinely ENFORCED (a model that should have returned `[]` returned `[""]`).
+  // See MIN_ITEMS_ALLOWED_VALUES in src/adapters/llm/anthropic-schema-compliance.ts.
+  // The old blanket ban is what left the draft grammar unable to require a
+  // non-empty interventions array — the 2026-07-19 OPTIONS_IDENTICAL outage.
+  // IMPORTED from the normaliser — see UNSUPPORTED_KEYWORDS there. A local copy
+  // of this list is a hand-maintained mirror: it reads green while diverging.
+  for (const keyword of UNSUPPORTED_KEYWORDS) {
     expect(node, `${path}: must not contain "${keyword}"`).not.toHaveProperty(keyword);
+  }
+
+  // minItems is allowed through, but only with an API-accepted value.
+  if ("minItems" in node) {
+    expect(
+      [...MIN_ITEMS_ALLOWED_VALUES],
+      `${path}.minItems = ${String(node.minItems)} — API accepts only 0 or 1`,
+    ).toContain(node.minItems);
   }
 
   // Recurse
@@ -251,10 +266,33 @@ describe("enforceAnthropicSchemaCompliance", () => {
     expect(props.count.exclusiveMinimum).toBeUndefined();
     expect(props.count.exclusiveMaximum).toBeUndefined();
 
-    // Array keywords
-    expect(props.items.minItems).toBeUndefined();
+    // Array keywords. `minItems: 1` is KEPT — it is API-accepted and enforced,
+    // and it is the only lever that stops the model satisfying a required array
+    // with `[]` (the 2026-07-19 OPTIONS_IDENTICAL outage). Values >= 2 are still
+    // stripped because the API 400s the whole request on those — asserted below.
+    expect(props.items.minItems).toBe(1);
     expect(props.items.maxItems).toBeUndefined();
     expect(props.items.uniqueItems).toBeUndefined();
+  });
+
+  it("strips minItems >= 2 but keeps 0 and 1 (API accepts only those)", () => {
+    // Positive control for the strip path: the keep-assertion above would pass
+    // just as happily against a normaliser that had stopped touching minItems
+    // entirely, so prove the discriminator actually fires on a bad value.
+    const build = (minItems: number) => ({
+      type: "object",
+      properties: { xs: { type: "array", items: { type: "string" }, minItems } },
+    });
+    for (const good of [0, 1]) {
+      const r = enforceAnthropicSchemaCompliance(build(good));
+      const p = r.properties as Record<string, Record<string, unknown>>;
+      expect(p.xs.minItems, `minItems: ${good} must survive`).toBe(good);
+    }
+    for (const bad of [2, 10]) {
+      const r = enforceAnthropicSchemaCompliance(build(bad));
+      const p = r.properties as Record<string, Record<string, unknown>>;
+      expect(p.xs, `minItems: ${bad} must be stripped`).not.toHaveProperty("minItems");
+    }
   });
 
   it("inlines $ref from $defs", () => {

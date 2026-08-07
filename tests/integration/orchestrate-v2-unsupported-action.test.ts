@@ -87,23 +87,18 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 }));
 
 // Session store mock — passes pre-flight so the turn reaches TurnExecutor.
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-    storeDraftGraph: async () => undefined,
-    loadGraph: async () => null,
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
-
-let v5Enabled = true;
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore(),
+    resetSessionStoreForTests: () => {},
+  };
+});
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -113,7 +108,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -136,7 +130,12 @@ function buildRequest() {
     scenario_id: SCENARIO_ID,
     message: 'what are the tradeoffs here',
     turn_class: 'frame' as const,
-    stage: 'frame' as const,
+    // ROADMAP 1.148 C4: stage 'analyse', NOT 'frame'. The frame-stage
+    // no-brief guard (PR #203/#484) answers brief-less frame turns
+    // deterministically BEFORE the routing LLM ever runs; this suite's
+    // mocked tool_use (unsupported handler_id) needs the turn to reach
+    // ORIENT for the graceful-fallback contract to be exercised at all.
+    stage: 'analyse' as const,
     source: 'composer' as const,
   };
 }
@@ -147,7 +146,6 @@ describe('POST /orchestrate/v2/turn — unsupported-action graceful fallback', (
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();

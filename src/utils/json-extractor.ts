@@ -10,6 +10,7 @@
  */
 
 import { log, emit, TelemetryEvents } from "./telemetry.js";
+import { contentDigest } from "./redaction.js";
 
 /**
  * Result of JSON extraction
@@ -201,7 +202,8 @@ export function extractJsonFromResponse(
             extraction_method: extractionMethod,
             preamble_length: preambleLength,
             suffix_length: suffixLength,
-            preamble_preview: preamblePreview,
+            // Digest model preamble — never place model output on the wire verbatim (see contentDigest).
+            preamble_preview: contentDigest(preamblePreview),
             candidates_tried: candidates.indexOf(candidate) + 1,
             total_candidates: candidates.length,
           },
@@ -309,4 +311,189 @@ function extractJsonWithBracketMatching(
  */
 export function extractJson(content: string, options?: JsonExtractionOptions): unknown {
   return extractJsonFromResponse(content, options).json;
+}
+
+/**
+ * SALVAGE a JSON document that was cut off mid-stream (a max_tokens truncation).
+ *
+ * 2026-07-23 firefight: when a draft generation hits the derived token budget,
+ * the tail is unparseable — the stream stops mid-object/array/string. This
+ * recovers the largest STRUCTURALLY-COMPLETE prefix by:
+ *   1. single-pass scanning to the last byte offset where every open container
+ *      is "between elements" (an object after a complete `"key": value` pair, an
+ *      array after a complete element, or a freshly-opened empty container) — a
+ *      point where appending the open containers' closers yields valid JSON;
+ *   2. dropping the incomplete trailing element and any trailing comma;
+ *   3. appending the closing `}` / `]` for every still-open container.
+ *
+ * It is deliberately CONSERVATIVE — it never fabricates keys or values, only
+ * closes containers around already-complete data. It returns `null` when there
+ * is no recoverable prefix (e.g. truncated before the first complete value). The
+ * caller MUST re-validate the result against the real schema: a partial that is
+ * missing required fields (e.g. a draft cut inside `nodes`, before `edges`) will
+ * parse as JSON but fail schema validation, and must be rejected there. This
+ * function only guarantees SYNTACTIC validity, never semantic completeness.
+ *
+ * @param content Raw (possibly preamble-wrapped) LLM text that failed to parse.
+ * @returns A syntactically-valid JSON string, or `null` if nothing is recoverable.
+ */
+export function closeTruncatedJson(content: string): string | null {
+  const trimmed = content.trim();
+  // Locate the first structural opener; tolerate conversational preamble.
+  const startIndex = (() => {
+    for (let i = 0; i < trimmed.length; i++) {
+      if (trimmed[i] === "{" || trimmed[i] === "[") return i;
+    }
+    return -1;
+  })();
+  if (startIndex === -1) return null;
+
+  type Frame = {
+    container: "{" | "[";
+    // 'empty'  — freshly opened, no element yet (closable)
+    // 'value'  — last element complete, awaiting ',' or close (closable)
+    // 'key'    — object: after a complete key string, before ':'   (NOT closable)
+    // 'colon'  — object: after ':', before the value               (NOT closable)
+    // 'element'— array/object: expecting the next element after ',' (NOT closable)
+    state: "empty" | "value" | "key" | "colon" | "element";
+  };
+
+  const stack: Frame[] = [];
+  let inString = false;
+  let escape = false;
+  let inLiteral = false; // number / true / false / null
+  let safeEnd = -1; // exclusive offset of the last complete-element boundary
+  let safeStack: ("{" | "[")[] = []; // container closers owed at safeEnd
+
+  // The TOP frame is closable only "between elements" (empty / value). Every
+  // NON-top frame is always closable: its pending slot ('colon' → value,
+  // 'element' → next element) is filled by the child frame(s) above it, which
+  // are closed first. So only the top frame's state gates a safe boundary.
+  const topClosable = (): boolean => {
+    const top = stack[stack.length - 1];
+    return !!top && (top.state === "empty" || top.state === "value");
+  };
+
+  // Record a safe boundary at the completion of a COMPLETE element. Two callers:
+  //  - a container POP (`}` / `]`): the whole object/array element just closed —
+  //    always a clean boundary, so `mark()` is called unconditionally.
+  //  - a SCALAR value: only a complete element when it is a DIRECT array element.
+  //    A scalar that is an OBJECT FIELD value (e.g. a node's `"id"` before its
+  //    `kind`/`label`) is NOT a complete element — closing there would append a
+  //    half-built object (`{"id":"c"}`) that then fails schema validation and
+  //    sinks an otherwise-salvageable graph. `markScalar()` gates on that.
+  // Never marked right after an opener (would append a junk empty `{}` / `[]`).
+  const mark = (endExclusive: number): void => {
+    if (!inString && !inLiteral && topClosable()) {
+      safeEnd = endExclusive;
+      safeStack = stack.map((f) => f.container);
+    }
+  };
+  const markScalar = (endExclusive: number): void => {
+    const top = stack[stack.length - 1];
+    if (top && top.container === "[") mark(endExclusive);
+  };
+
+  // Called when a scalar/container VALUE just completed inside the current frame.
+  const completeValueInCurrentFrame = (): void => {
+    const top = stack[stack.length - 1];
+    if (!top) return; // top-level scalar — not a draft shape; mark won't fire
+    top.state = "value";
+  };
+
+  for (let i = startIndex; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+        // A closed string is either an object KEY or a VALUE, per frame state.
+        const top = stack[stack.length - 1];
+        if (top && top.container === "{" && (top.state === "empty" || top.state === "element")) {
+          top.state = "key";
+        } else {
+          completeValueInCurrentFrame();
+          markScalar(i + 1);
+        }
+      }
+      continue;
+    }
+
+    if (inLiteral) {
+      // Literal ends at any structural/whitespace terminator; finalise, then
+      // REPROCESS the terminator char below by NOT continuing.
+      if (
+        ch === "," || ch === "}" || ch === "]" ||
+        ch === " " || ch === "\n" || ch === "\r" || ch === "\t"
+      ) {
+        inLiteral = false;
+        completeValueInCurrentFrame();
+        markScalar(i); // literal ended at the char BEFORE this terminator
+        // fall through to handle `ch` as a normal structural char
+      } else {
+        continue; // still consuming the literal
+      }
+    }
+
+    if (ch === '"') {
+      inString = true;
+      escape = false;
+      continue;
+    }
+
+    if (ch === "{" || ch === "[") {
+      stack.push({ container: ch, state: "empty" });
+      continue;
+    }
+
+    if (ch === "}" || ch === "]") {
+      // Close the current container; it becomes a completed value in its parent.
+      stack.pop();
+      completeValueInCurrentFrame();
+      mark(i + 1); // a popped container is always a complete element
+      continue;
+    }
+
+    if (ch === ":") {
+      const top = stack[stack.length - 1];
+      if (top && top.state === "key") top.state = "colon";
+      continue;
+    }
+
+    if (ch === ",") {
+      const top = stack[stack.length - 1];
+      if (top) top.state = "element";
+      continue;
+    }
+
+    if (ch === " " || ch === "\n" || ch === "\r" || ch === "\t") {
+      continue;
+    }
+
+    // Start of a bare literal (number, true, false, null). The frame is now
+    // mid-value until the literal terminates.
+    inLiteral = true;
+  }
+
+  // A literal running right up to the truncation point is complete IFF the model
+  // stopped cleanly — which for a max_tokens cut it did not. Treat a dangling
+  // literal as incomplete: only positions recorded in `safeEnd` are trusted.
+  if (safeEnd === -1) return null;
+
+  const closers = safeStack
+    .slice()
+    .reverse()
+    .map((c) => (c === "{" ? "}" : "]"))
+    .join("");
+  const candidate = trimmed.slice(startIndex, safeEnd) + closers;
+  try {
+    JSON.parse(candidate);
+    return candidate;
+  } catch {
+    return null;
+  }
 }

@@ -97,12 +97,38 @@ describe('run_analysis precondition', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('P0-1: rejects ENTITY_KIND_MISMATCH when proposal.kind differs from graph kind', () => {
-    // LLM hallucination guard: if Sonnet proposes kind='option' but the id
-    // resolves to a factor, validator must reject with ENTITY_KIND_MISMATCH.
-    // (Here we use a 'goal' proposed kind with an option id, to hit the cross-
-    // check without accepted_entity_kinds also rejecting it — run_analysis
-    // accepts both option and goal.)
+  it('P0-1: rejects ENTITY_KIND_MISMATCH when the GRAPH-RESOLVED kind is one the handler cannot target', () => {
+    // LLM hallucination guard, stated in its original terms: Sonnet proposes
+    // kind='option' but the id resolves to a factor. run_analysis accepts
+    // ['option','goal'], the graph says 'node', so it is refused — and it is
+    // refused on what the entity ACTUALLY is, not on the disagreement.
+    const graph = mkGraph([
+      { id: 'opt_a', kind: 'option', label: 'A' },
+      { id: 'fac_x', kind: 'factor', label: 'Some factor' },
+    ]);
+    const lookup = lookupFor(graph);
+    const result = validateToolCall(
+      runAnalysisProposal('fac_x', 'option'), // proposed option, graph says factor→node
+      lookup,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
+      expect(result.error.details?.proposed_kind).toBe('option');
+      expect(result.error.details?.resolved_kind).toBe('node');
+    }
+  });
+
+  it('P0-1 (repair): a mislabelled kind on a target the handler CAN serve is corrected, not refused', () => {
+    // Was: "proposed goal against an option id → ENTITY_KIND_MISMATCH".
+    // The graph is the authority on kind, and run_analysis accepts 'option',
+    // so the correct outcome is to adopt the graph's answer and proceed. The
+    // guard's purpose — never let a hallucinated kind aim a handler at the
+    // wrong node class — is preserved and strengthened: the handler receives
+    // 'option' because that is what `opt_a` IS, not because Sonnet said so.
+    // See routing/__tests__/entity-kind-repair.test.ts for the live evidence
+    // (20 staging refusals) that motivated this.
     const graph = mkGraph([{ id: 'opt_a', kind: 'option', label: 'A' }]);
     const lookup = lookupFor(graph);
     const result = validateToolCall(
@@ -110,11 +136,19 @@ describe('run_analysis precondition', () => {
       lookup,
       HANDLER_VALIDATION_REGISTRY,
     );
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-      expect(result.error.details?.proposed_kind).toBe('goal');
-      expect(result.error.details?.resolved_kind).toBe('option');
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.proposal.entity.kind).toBe('option');
+      expect(result.proposal.entity.id).toBe('opt_a');
+      expect(result.kind_repair).toEqual({
+        handler_id: 'run_analysis',
+        entity_id: 'opt_a',
+        proposed_kind: 'goal',
+        resolved_kind: 'option',
+        // Kind AND label were both wrong on this fixture — resolved-label
+        // adoption overrode both, and the record discloses which.
+        repaired_attributes: ['kind', 'label'],
+      });
     }
   });
 
@@ -344,5 +378,48 @@ describe('run_analysis confirmation_template forwarder', () => {
 
   it('falls back when assistant_text is the empty string', () => {
     expect(fwd({ assistant_text: '' })).toBe(FALLBACK);
+  });
+});
+
+// Review fix B6 (17 Jul) — honesty floor: a rejected composed summary that
+// carried a scaffold disclosure must NOT lose the disclosure in the fallback.
+import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
+
+describe('B6 — fallback preserves the scaffold disclosure', () => {
+  const template = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+  if (typeof template !== 'function') {
+    throw new Error('expected function-form confirmation_template');
+  }
+
+  it('allowlist-rejected summary WITH a disclosure → fallback + disclosure (never undisclosed)', () => {
+    const disclosure = buildScaffoldDisclosureSuffix([
+      { option_id: 'opt_new', label: 'New option', factor_ids: ['fac_a'], value_defaulted: true },
+    ]);
+    expect(disclosure).not.toBe('');
+    // A headline that fails the allowlist (raw decimal in free text) with the
+    // valid disclosure appended — pre-fix the WHOLE string was replaced by
+    // the bare fallback, silently dropping the disclosure.
+    const rejected = `Leading option sits at 0.6234 exactly.${disclosure}`;
+    const out = template({ assistant_text: rejected });
+    expect(out).toContain('Placeholder values were used');
+    expect(out).not.toContain('0.6234');
+  });
+
+  it('a POISONED disclosure-shaped slice (decimal inside the label slot) is NOT smuggled — bare fallback', () => {
+    // The grammar's label slot accepts digits; the backstop must re-check
+    // the combined output, not trust disclosure-shaped structure.
+    const poisoned =
+      "Leading option sits at 0.6234 exactly. Placeholder values were used for 'Option at 0.6234' " +
+      'because it has no values set — ' +
+      'the whole comparison is illustrative until you configure it. ' +
+      "To set real values, say 'Help me configure Option at 0.6234.'";
+    const out = template({ assistant_text: poisoned });
+    expect(out).toBe('Ran analysis on your current scenario.');
+    expect(out).not.toContain('0.6234');
+  });
+
+  it('allowlist-rejected summary WITHOUT a disclosure → bare fallback (unchanged)', () => {
+    const out = template({ assistant_text: 'Leading option sits at 0.6234 exactly.' });
+    expect(out).toBe('Ran analysis on your current scenario.');
   });
 });

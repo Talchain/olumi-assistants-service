@@ -851,9 +851,11 @@ describe("observability", () => {
       ],
       unreachable_factors: { reclassified: ["fac_x"], marked_droppable: [] },
       status_quo: { fixed: false, marked_droppable: false },
-      llm_repair_called: false,
-      llm_repair_brief_included: false,
-      llm_repair_skipped_reason: "deterministic_sweep_sufficient",
+      // llm_repair_called / llm_repair_brief_included /
+      // llm_repair_skipped_reason were deleted with the draft path's LLM
+      // repair (ROADMAP 2.731/2.732). llm_repair_needed survives as the
+      // sweep's own Bucket-C diagnostic.
+      llm_repair_needed: false,
       remaining_violations_count: 0,
       remaining_violation_codes: [],
       edge_format_detected: "V1_FLAT",
@@ -862,7 +864,7 @@ describe("observability", () => {
 
     expect(repairSummary.deterministic_repairs_count).toBe(3);
     expect(repairSummary.unreachable_factors.reclassified).toContain("fac_x");
-    expect(repairSummary.llm_repair_called).toBe(false);
+    expect(repairSummary.llm_repair_needed).toBe(false);
     expect(repairSummary.edge_format_detected).toBe("V1_FLAT");
     expect(repairSummary.graph_delta.nodes_before).toBe(7);
   });
@@ -1643,6 +1645,50 @@ describe("fixFactorGoalEdges", () => {
 // =============================================================================
 
 describe("fixDisconnectedObservables", () => {
+  it("PII (14-Jul ruling): the pruned-node log carries a digest + category only — never the raw label or id (sentinel-proven)", async () => {
+    const SENTINEL_LABEL = "SENTINEL-7d2e91bc Relocate HQ To Lisbon";
+    const SENTINEL_ID = "fac_sentinel_relocate_hq_to_lisbon";
+    const { log } = await import("../../src/utils/telemetry.js");
+    const infoMock = log.info as ReturnType<typeof vi.fn>;
+    infoMock.mockClear();
+
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: SENTINEL_ID, kind: "factor", label: SENTINEL_LABEL, category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    // POSITIVE CONTROL: the sentinel IS visible in the product repair
+    // record (returned data, not a log) — the harness can see presences.
+    expect(JSON.stringify(result.repairs)).toContain(SENTINEL_LABEL);
+
+    // The LOG must carry neither the label nor the raw id — path-based
+    // logger redaction cannot clean interpolated message strings, so
+    // this call site must emit digests/enums only.
+    const prunedCalls = infoMock.mock.calls.filter((call) =>
+      JSON.stringify(call).includes("observable_pruned"),
+    );
+    expect(prunedCalls.length).toBeGreaterThan(0);
+    for (const call of prunedCalls) {
+      const serialized = JSON.stringify(call);
+      expect(serialized).not.toContain(SENTINEL_LABEL);
+      expect(serialized).not.toContain(SENTINEL_ID);
+      expect(serialized).toMatch(/sha8:[0-9a-f]{8}/);
+    }
+  });
+
   it("prunes observable factor with zero edges", () => {
     const graph = makeGraph({
       nodes: [

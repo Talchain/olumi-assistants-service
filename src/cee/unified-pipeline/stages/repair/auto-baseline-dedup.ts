@@ -86,6 +86,7 @@
 
 import type { StageContext } from "../../types.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
+import { readIsBaseline } from "../../../baseline-identity.js";
 
 // Heuristic baseline tokens — used ONLY by `looksHeuristicallyLikeBaseline`
 // (diagnostic-only path) so operators can see when the LLM produces an
@@ -98,7 +99,7 @@ import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 const BASELINE_LABELS = new Set(["status quo", "baseline", "do nothing", "no change"]);
 const BASELINE_ID_SUFFIXES = ["_status_quo", "_baseline"];
 
-interface OptionLike {
+export interface OptionLike {
   readonly id?: string;
   readonly kind?: string;
   readonly label?: string;
@@ -106,13 +107,18 @@ interface OptionLike {
   // checked. The Anthropic adapter normalises one to the other at parse
   // time but downstream stages occasionally see either, so be permissive.
   readonly is_baseline?: boolean;
+  /** `extractionType` may live at the node level (repaired factors) or
+   *  under data — read by the graceful-dedup consumer to detect
+   *  from_brief-marked options. */
+  readonly extractionType?: string;
   readonly data?: {
     readonly is_baseline?: boolean;
     readonly interventions?: Record<string, unknown>;
+    readonly extractionType?: string;
   };
 }
 
-interface EdgeLike {
+export interface EdgeLike {
   readonly from?: string;
   readonly to?: string;
 }
@@ -121,8 +127,12 @@ interface EdgeLike {
  * Build a stable intervention signature matching the validator's
  * implementation at src/validators/graph-validator.ts:241-246. Two options
  * with the same signature will trigger OPTIONS_IDENTICAL.
+ *
+ * Exported for reuse by the OPTIONS_IDENTICAL graceful dedup
+ * (options-identical-graceful-dedup.ts) so both dedup substeps group by
+ * the SAME signature the validator uses.
  */
-function buildSignature(interventions: Record<string, unknown> | undefined): string | null {
+export function buildSignature(interventions: Record<string, unknown> | undefined): string | null {
   if (!interventions) return null;
   const entries: [string, number][] = [];
   for (const [factorId, raw] of Object.entries(interventions)) {
@@ -166,12 +176,14 @@ function buildSignature(interventions: Record<string, unknown> | undefined): str
  * collision. Heuristic-only collisions flow to PR #202's OPTIONS_IDENTICAL
  * bypass, which emits a typed clarification the user can act on.
  *
- * Canonical read path per src/adapters/llm/anthropic.ts:852: prefer
- * `data.is_baseline`, fall back to node-level. Both surfaces are checked
- * because the Anthropic adapter normalisation occasionally leaves the
- * flag at one level or the other depending on schema version.
+ * Read path: an explicit `true` on EITHER surface (`data.is_baseline` or
+ * node-level `is_baseline`) qualifies — see `readIsBaseline`'s truth table.
+ * Both surfaces are checked because the Anthropic adapter normalisation
+ * occasionally leaves the flag at one level or the other depending on
+ * schema version, and the draft LLM has been measured emitting the two
+ * surfaces DISAGREEING (node:true + data:false) on the same option.
  */
-function isExplicitBaseline(o: OptionLike): boolean {
+export function isExplicitBaseline(o: OptionLike): boolean {
   return readIsBaseline(o) === true;
 }
 
@@ -186,7 +198,7 @@ function isExplicitBaseline(o: OptionLike): boolean {
  * Mirrors the heuristic logic in src/routes/assist.v1.graph-readiness.ts
  * to keep the classification vocabulary aligned across surfaces.
  */
-function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
+export function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
   if (readIsBaseline(o) === true) return false; // explicit flag wins; heuristic only relevant when flag absent
   const id = (o.id ?? "").toLowerCase();
   const label = (o.label ?? "").toLowerCase().trim();
@@ -194,11 +206,12 @@ function looksHeuristicallyLikeBaseline(o: OptionLike): boolean {
   return BASELINE_ID_SUFFIXES.some((s) => id.endsWith(s));
 }
 
-function readIsBaseline(o: OptionLike): boolean | undefined {
-  if (typeof o.data?.is_baseline === "boolean") return o.data.is_baseline;
-  if (typeof o.is_baseline === "boolean") return o.is_baseline;
-  return undefined;
-}
+// Effective is_baseline reader now lives in the shared
+// `src/cee/baseline-identity.ts` (SINGLE SOURCE OF TRUTH) so this dedup, the
+// schema-v3 DISPLAY/analysis-ready path, and any other baseline-identity
+// consumer reconcile the two flag surfaces identically (explicit `true` on
+// EITHER surface wins — the split-field truth table). See that module's
+// doc-block for the full table and the SPLIT-FIELD HARDENING rationale.
 
 export interface AutoBaselineDedupReport {
   readonly dropped_option_ids: readonly string[];

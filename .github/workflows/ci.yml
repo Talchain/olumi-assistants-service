@@ -17,6 +17,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL history: the promotion-gate SHRINK GUARD below derives its
+          # reference from `git merge-base HEAD <base>` and reads the gate's
+          # files out of the object store at that commit. A shallow checkout has
+          # no merge-base.
+          #
+          # ⚠ This line is LOAD-BEARING, and the coupling is ENFORCED, not
+          # documented. As first shipped the claim below was FALSE: deleting
+          # this line made the guard resolve no base ref, collapse that into
+          # "the gate did not exist at the merge-base", print a reassuring
+          # "first landing" note and exit 0 — over a real gated-set shrink.
+          # `requireBaseRef` now FAILS CLOSED on unreadable history, so removing
+          # this line REDs this required job instead of silently disabling the
+          # guard; a test in promotion-gate-shrink-guard.test.ts additionally
+          # derives this job from the workflow and asserts the depth (so moving
+          # the step to a job without it also REDs).
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -29,16 +46,59 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - name: Assert pnpm overrides are readable by the installing pnpm
+        # ARMED LANDMINE GUARD. pnpm <10 reads dependency overrides from
+        # `package.json`; pnpm >=10 reads them from `pnpm-workspace.yaml` and
+        # ignores the package.json field with only a [WARN]. So bumping any
+        # INSTALL job to pnpm 11 while the overrides still live in package.json
+        # drops all 39 of them — including the security floors — with no error
+        # and nothing red. That is the failure mode this repo keeps getting
+        # bitten by: the break reads as green.
+        #
+        # This script derives BOTH halves (where the overrides are, and which
+        # pnpm each installing job pins) from the actual files, so it cannot go
+        # stale the way a checklist would. It fails in either direction, and is
+        # deliberately in the REQUIRED job so the transition blocks merge.
+        run: node scripts/ci/assert-pnpm-overrides-readable.mjs
+      - name: Assert every rate-limit errorResponseBuilder returns an Error
+        # DERIVED GUARD (ROADMAP 2.181). @fastify/rate-limit THROWS whatever the
+        # builder RETURNS (index.js:333). A builder that returns a plain object
+        # gets that object thrown; this app's custom setErrorHandler receives a
+        # non-Error and answers 500 INTERNAL while the limiter's own headers
+        # still say 429. All nine builders shipped that way and survived months
+        # of green CI — the break reads as green, again.
+        #
+        # Neither existing gate can catch it: the plugin types the return as
+        # `object`, so a raw builder typechecks clean (proven), and lint reddens
+        # on a REVERT only incidentally (unused import) and on a brand-new tenth
+        # builder not at all.
+        #
+        # The script DERIVES its sites from the source tree — no hand-list to go
+        # stale — and hard-fails if it is blinded (zero files / zero plugin
+        # references / zero registrations / zero builders), so it can never pass
+        # by finding nothing. Deliberately in the REQUIRED job.
+        run: node scripts/ci/assert-rate-limit-builders-return-error.mjs
       - name: Generate OpenAPI types
         run: pnpm openapi:generate
       - name: Lint
         run: pnpm lint
-      - name: Typecheck (src/build, blocking gate)
-        # Source-only typecheck (tsconfig.build.json excludes tests). The full
-        # src+test `tsc --noEmit` runs in the separate non-required
-        # "Typecheck Drift (ratchet)" job, so pre-existing test-file type drift
-        # no longer blocks this required check or masks the unit-test result.
-        run: pnpm typecheck:src
+      - name: Typecheck via build (blocking gate; emits dist)
+        # Same honest gate as before — tsc over tsconfig.build.json (source-only;
+        # tests are excluded) plus the explicit assertion that @talchain/schemas
+        # resolves from THIS checkout at the pinned version — but the tsc pass now
+        # EMITS instead of `--noEmit` (`pnpm build`; measured delta ~2-3s). Why:
+        # the compiled-boot test (prompt-loader.test.ts, "compiled dist module
+        # boots") is `it.skipIf(!dist exists)` and this job never built, so it
+        # DETERMINISTICALLY skipped in the required gate — an always-skipping
+        # check is theatre. With dist present, `pnpm test:required` below actually
+        # executes it. (`pnpm check:schemas-resolution` is run explicitly because
+        # it lived in `pretypecheck`, which `pnpm build` does not trigger; build
+        # itself re-runs openapi:generate, which is idempotent here.)
+        # The full src+test `tsc --noEmit` is deliberately NOT this gate — it
+        # carries ~466 pre-existing test-file errors and lives behind the honest
+        # name `pnpm typecheck:all-including-known-broken-tests`, run by the
+        # separate non-required "Typecheck Drift (ratchet)" job.
+        run: pnpm check:schemas-resolution && pnpm build
       - name: Validate config defaults
         run: pnpm config:validate
         env:
@@ -51,12 +111,69 @@ jobs:
         # this job; it only blocks MERGE once `staging` branch protection
         # requires the `CI / Lint, TypeCheck, Unit Tests` status check.
         run: bash scripts/check-forbidden-boundary-patterns.sh
+      - name: Prompt regression gate (orchestrator-eval)
+        # REQUIRED, hermetic check. `pnpm eval:orchestrator:test`
+        # (vitest run tools/orchestrator-eval) is the durable regression gate for
+        # the CEE orchestrator prompt. It is deterministic and recorded-fixture
+        # based: the suite installs a fetch-counter that throws on any network call
+        # (with a positive-control probe) and stubs a dummy ANTHROPIC_API_KEY, so it
+        # needs NO secrets and makes ZERO paid/live calls. Runs in this required job
+        # so a prompt-behaviour regression blocks merge rather than being advisory.
+        #
+        # Placed BEFORE `test:required` on purpose: vitest.required.config.ts sets
+        # no `include` and does not exclude tools/orchestrator-eval, so test:required
+        # already sweeps these same *.test.ts files. If this focused step ran after
+        # it, a prompt-fixture regression would redden test:required first and this
+        # step would be skipped — a shadowed gate that could never independently go
+        # RED. Running it first makes it the attributable signal for prompt drift.
+        run: pnpm eval:orchestrator:test
+
+      - name: Eval-pass promotion gate
+        # REQUIRED, hermetic check (Harness H2). Makes an eval PASS a structural
+        # precondition of promoting a prompt version: for every prompt with an
+        # eval pack (DERIVED from the filesystem pack markers, never hand-listed),
+        # a commit that promotes it — i.e. changes the served hash in
+        # Prompts/canonical/manifest.json + the canonical export — must carry a
+        # committed, in-date, HASH-MATCHED, floor-PASSING promotion report, or the
+        # merge is blocked. Prompts with no pack promote as today but are marked
+        # UNGATED (visible, not silent). Pre-gate promotions with no passing eval
+        # are grandfathered at their exact hash by promotion-gate-baseline.json (a
+        # shrink-only ratchet); a bump voids the grandfather and re-requires a
+        # passing eval. Reads only committed git state — ZERO network / LLM calls.
+        #
+        # ⚠ This gates the GIT source-of-truth. A live-only staging promotion via
+        # the admin API that never regenerates+commits the manifest is not visible
+        # here — closing that hole is the runtime seam in src/routes/admin.prompts.ts
+        # (sequenced separately). See tools/orchestrator-eval/src/promotion-gate.
+        run: pnpm eval:promotion-gate
+
+      - name: Promotion-gate shrink guard
+        # REQUIRED (Harness H2, review amendment A3). The gate above answers
+        # "may this promotion land?". It structurally cannot answer "is the gate
+        # still gating what it gated yesterday?" — and BOTH ways of switching it
+        # off were silent, proven against the unamended gate:
+        #   · delete a task's promotion-pack.ts marker (or its manifest row) and
+        #     a GATED-PASS becomes UNGATED / disappears, exit 0;
+        #   · hand-add a promotion-gate-baseline.json entry and a real BLOCK
+        #     (exit 1) becomes a tolerated GRANDFATHERED row, exit 0.
+        # This step derives both sets from GIT at the merge-base (never a
+        # hand-pinned list, trap 12) and FAILS unless the shrink/widen is
+        # recorded in promotion-gate-acknowledgments.json in the SAME diff.
+        # Needs the full history fetched above — and FAILS CLOSED if it is not
+        # there, rather than reporting a vacuous pass (see the checkout note).
+        run: pnpm eval:promotion-gate:shrink-guard
+
       - name: Run required test subset
-        # Deterministic, in-process suite that is currently green (see
-        # vitest.required.config.ts). The full suite + coverage and the
-        # service-like integration suite run in the non-required
-        # "Full Test Suite (advisory)" / "Integration Tests (advisory)" jobs
-        # below, so all broader failures stay visible and nothing is hidden.
+        # Deterministic, in-process suite (see vitest.required.config.ts).
+        # Since O-6 this INCLUDES the ~155 in-process tests/integration files —
+        # only the finite, self-checking REQUIRED_GATE_INTEGRATION_EXCLUSIONS
+        # list (vitest.shared.ts: real Supabase/Postgres, live LLM, staging
+        # HTTP) is excluded, so a change that breaks an in-process integration
+        # test turns THIS required check red (the old `tests/integration/**`
+        # category glob let PR #539 report "0 failed" while breaking two).
+        # The full suite + coverage and the external-dependent files still run
+        # in the non-required "Full Test Suite (advisory)" / "Integration
+        # Tests (advisory)" jobs below, so nothing is hidden.
         run: pnpm test:required
 
       - name: Check for quarantined tests
@@ -90,8 +207,10 @@ jobs:
 
   # Full Test Suite (advisory): the complete `pnpm test -- --coverage` + Codecov
   # upload, relocated verbatim from the required job. NON-REQUIRED — surfaces the
-  # full baseline (currently 64 failing files / 274 failing tests) and coverage
-  # without blocking merges. Nothing here is skipped or weakened.
+  # full suite (all test files green since #493) and coverage without blocking
+  # merges. Coverage thresholds are a regression RATCHET at the measured
+  # baseline (see vitest.config.ts), so a red here means a REAL regression —
+  # new test failures or a coverage drop — not a stale aspiration.
   full-test-suite:
     name: Full Test Suite (advisory)
     runs-on: ubuntu-latest
@@ -116,6 +235,16 @@ jobs:
       - name: Upload coverage reports
         uses: codecov/codecov-action@v3
         if: always()
+        # NON-BLOCKING: tokenless v3 uploads are rate-limited by codecov.io
+        # (observed: exit 255, "429 Rate limit reached. Please upload with the
+        # Codecov repository upload token", run 29550676845) and no
+        # CODECOV_TOKEN secret exists in this repo, so this step fails on most
+        # runs regardless of test/coverage health. continue-on-error keeps the
+        # upload attempt (it sometimes lands) and keeps the failure VISIBLE as
+        # a step annotation, without letting upload flake redden the suite
+        # signal. To make it reliable: add a CODECOV_TOKEN secret and pass
+        # `token:` (and upgrade the action) — then remove this escape hatch.
+        continue-on-error: true
         with:
           files: ./coverage/coverage-final.json
           fail_ci_if_error: true
@@ -181,35 +310,89 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
-      - name: Use Node.js 20
+          # pnpm 11+ REQUIRED here (other jobs stay on 9): npmjs.org retired the
+          # legacy quick-audit endpoint (/-/npm/v1/security/audits{,/quick}) and
+          # now returns 410. pnpm <=10.x still calls it, so `pnpm audit` below
+          # errored on EVERY run (ERR_PNPM_AUDIT_BAD_RESPONSE 410). Since v11
+          # pnpm audit uses the bulk advisory endpoint
+          # (/-/npm/v1/security/advisories/bulk). Do NOT downgrade to 9 — that
+          # re-breaks this alarm. See pnpm/pnpm#11265, pnpm/pnpm#11268.
+          version: 11
+      - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+          # pnpm 11 requires Node >=22.13 (it uses the node:sqlite builtin); on
+          # Node 20 the pnpm binary itself crashes. Only this audit job moves to
+          # 22 — the other jobs stay on Node 20.
+          node-version: 22
+      # NOTE: deliberately NO `pnpm install` here, and that is load-bearing, not
+      # just an optimisation. `pnpm audit` reads pnpm-lock.yaml directly (it does
+      # not need node_modules), so the install is unnecessary — and skipping it is
+      # what keeps this job's pnpm 11 compatible with overrides that still live in
+      # package.json. Both halves are MEASURED, not predicted (2026-07-27, this
+      # lockfile, pnpm 9.15.9 / pnpm 11.13.1):
+      #   - pnpm 11 + overrides in package.json  -> audit fine, but any
+      #     `--frozen-lockfile` install would drop all 39 overrides (pnpm 11 only
+      #     logs `[WARN] The "pnpm" field in package.json is no longer read`).
+      #   - overrides moved to pnpm-workspace.yaml -> pnpm 11 installs cleanly with
+      #     a byte-identical lockfile, but EVERY pnpm-9 install job then fails with
+      #     ERR_PNPM_LOCKFILE_CONFIG_MISMATCH (pnpm <10 cannot read that key).
+      # So the move is safe ONLY as part of moving the installing jobs to pnpm >=10
+      # (18 of them, all currently pinned to 9) — it cannot land on its own. Until
+      # then the `Assert pnpm overrides are readable by the installing pnpm` step in
+      # the unit-tests job blocks the half-migration in either direction.
+      # Auditing from the committed lockfile needs no NPM_PACKAGES_TOKEN.
       - name: Check for duplicate files (prevents drift from shadow copies)
-        run: |
-          # Fail if any duplicate-pattern files exist in tracked files
-          # Only match delimited patterns to avoid false positives (e.g., "deepcopy.ts" is legitimate)
-          PATTERNS=('* 2.ts' '* 2.js' '* copy.ts' '* copy.js' '*_copy.ts' '*_copy.js' '*-copy.ts' '*-copy.js')
-          FOUND_FILES=""
-          for pattern in "${PATTERNS[@]}"; do
-            MATCHES=$(git ls-files "$pattern" 2>/dev/null || true)
-            if [ -n "$MATCHES" ]; then
-              FOUND_FILES="$FOUND_FILES$MATCHES"$'\n'
-            fi
-          done
-          if [ -n "$FOUND_FILES" ]; then
-            echo "ERROR: Duplicate files detected (shadow copies create drift risk):"
-            echo "$FOUND_FILES"
-            exit 1
-          fi
+        # ROADMAP 2.660. This used to be eight inline globs — '* 2.ts', '* 2.js',
+        # '* copy.*', '*_copy.*', '*-copy.*' — under a comment claiming they were
+        # "delimited patterns to avoid false positives". A hyphen is NOT a
+        # delimiter inside a kebab-case filename, and kebab-case is this repo's
+        # dominant convention, so '*-copy.ts' convicted any module whose SUBJECT
+        # is user-facing copy. It hard-failed PR #835 on
+        # `structural-edit-decline-copy.ts`; that PR renamed the module (63bdd0f4)
+        # to route around a guard that was simply wrong about it. '*_copy.*' had
+        # the identical defect for snake_case.
+        #
+        # The script replaces the pattern list with the property a shadow copy
+        # actually has: its basename minus a duplication suffix names an EXISTING
+        # TRACKED SIBLING in the same directory. It derives the file list from
+        # `git ls-files -z` (NUL-safe — this repo carries NUL-bearing sources),
+        # and it is STRICTLY STRONGER than what it replaces: it scans every
+        # tracked file rather than a .ts/.js allowlist (most of both real
+        # cleanups here were .md/.json/.yml), catches extensionless artefacts and
+        # ` copy 2` chains, and hard-fails if it ever reads zero tracked files
+        # rather than reporting a clean tree. Full derivation of what actually
+        # happened in this repo — 228 artefact path-events, all of them the
+        # macOS/Finder `<name> 2.<ext>` shape, none ever `-copy`/`_copy` — is in
+        # the script header, with the orphan trade-off stated.
+        #
+        # Node-builtins only, no deps: this job deliberately runs NO pnpm install.
+        run: node scripts/ci/assert-no-shadow-copies.mjs
+      - name: Assert the shadow-copy guard still discriminates
+        # The guard's own positive AND negative controls, on synthetic fixtures
+        # in a temp dir. Each control runs the FROZEN historical glob logic and
+        # the current mechanism over the same fixture, so the pair proves both
+        # halves in one place: the #835 name fires on the old guard and passes on
+        # the new one (the narrowing landed), and every genuine shadow pair fires
+        # on BOTH (the narrowing was not a weakening). A guard whose only
+        # measured behaviour is false positives gets disabled; this step is the
+        # standing evidence that this one bites on the real thing.
+        run: node scripts/ci/assert-no-shadow-copies.mjs --self-test
       - name: Run security audit
+        # This is the always-on, blocking dependency-vuln alarm. It is NOT made
+        # redundant by security-scanning.yml: Snyk there is gated on SNYK_TOKEN
+        # (skipped when unset) and Dependency Review is continue-on-error + PR-only
+        # + needs the Dependency Graph enabled. This step runs on push and PR with
+        # no token, so keep it working rather than removing it.
         run: pnpm audit --audit-level=high
+
+      # The "Assert audit suppression is still necessary" step that used to
+      # follow was removed 2026-08-04 together with the suppression it guarded
+      # (pnpm-workspace.yaml auditConfig.ignoreGhsas: GHSA-mh99-v99m-4gvg),
+      # exactly as that step's own failure message directed: patched
+      # brace-expansion 1.x/2.x lines now exist (1.1.17/2.1.3; this tree
+      # resolves 1.1.18/2.1.4), the 1.1.16/2.1.2 resolutions left the lockfile,
+      # and the audit above now runs with an EMPTY ignore list.
 
   # Job C: Spec v04 compliance (already exists as separate workflow, keeping here for visibility)
   # See .github/workflows/spec-v04-audit.yml

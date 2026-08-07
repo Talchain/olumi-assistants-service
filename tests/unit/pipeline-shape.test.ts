@@ -15,7 +15,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── Hoisted state (available inside vi.mock factories) ──────────────────────
 
 const { mockConfig } = vi.hoisted(() => ({
-  mockConfig: { cee: { pipelineCheckpointsEnabled: false as boolean } },
+  // features.diagnosticTraceEnabled is read unconditionally by
+  // runUnifiedPipeline (src/cee/unified-pipeline/index.ts) to gate stage
+  // timing capture. Missing here throws "Cannot read properties of
+  // undefined (reading 'diagnosticTraceEnabled')" — a stale mock shape
+  // that predates that field (default false in real config, see
+  // src/config/index.ts CEE_DIAGNOSTIC_TRACE_ENABLED).
+  mockConfig: {
+    cee: { pipelineCheckpointsEnabled: false as boolean },
+    features: { diagnosticTraceEnabled: false as boolean },
+  },
 }));
 
 // ── Mock all stage modules ──────────────────────────────────────────────────

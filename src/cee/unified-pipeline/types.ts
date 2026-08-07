@@ -9,7 +9,7 @@ import type { FastifyRequest } from "fastify";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
 import type { PipelineCheckpoint } from "../pipeline-checkpoints.js";
-import type { ContextPackV1 } from "../../context/context-pack.js";
+import type { DraftProvenanceDescriptor } from "../../context/context-pack.js";
 import type { EdgeFieldStash } from "./edge-identity.js";
 import type { RiskCoefficientCorrection } from "../transforms/risk-normalisation.js";
 import type { EdgeFormat } from "./utils/edge-format.js";
@@ -35,7 +35,95 @@ export interface UnifiedPipelineOpts {
   forceDefault?: boolean;
   signal?: AbortSignal;
   requestStartMs?: number;
+  /**
+   * ROADMAP 1.204 M1 — the staged-emission seam (the never-built D-M Option C
+   * `onStage`, now with a consumer: the staged SSE sibling route).
+   *
+   * ABSENT (every pre-existing caller: the buffered /assist/v1/draft-graph
+   * route, the 2-frame /assist/v1/draft-graph/stream route, and the V5
+   * orchestrator's draft_graph tool) ⇒ the pipeline runs BYTE-IDENTICALLY to
+   * before. Every emission site is guarded on this field being set, so the
+   * OFF path pays one `undefined` check per stage boundary and nothing else.
+   *
+   * PRESENT ⇒ the pipeline calls it at stage boundaries that ALREADY EXIST.
+   * It is a PURE OBSERVER: no stage is added, removed, or reordered, and the
+   * emitter can neither change the response body nor fail the draft. That is
+   * what makes the staged route's terminal frame byte-equivalent to the
+   * buffered route's body BY CONSTRUCTION rather than by assertion.
+   *
+   * DELIBERATELY SYNCHRONOUS AND `void`-RETURNING. The pipeline never awaits
+   * the consumer, so a slow or dead SSE socket can never stall or fail an
+   * in-flight draft — the transport degrades to a plain buffered completion
+   * (M3 snapshot/resume is out of scope). Throws are swallowed at the call
+   * site (see `emitStageEvent` in ./index.ts).
+   */
+  onStage?: PipelineStageEmitter;
 }
+
+// ---------------------------------------------------------------------------
+// Staged emission seam (ROADMAP 1.204 M1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mid-flight progress, derived from the draft adapter's ALREADY-EXISTING token
+ * accumulator (`acc` in adapters/llm/anthropic.ts) — the same character stream
+ * the runaway detector and `time_to_edges_ms` are computed from. Carries node
+ * LABELS ONLY: no strengths, no rationales, no coaching, no claims.
+ */
+export interface PipelineProgressEvent {
+  kind: "PROGRESS";
+  /** Node labels seen in the partial draft so far, in stream order. */
+  labels: string[];
+  /** Which region of the draft the accumulator has reached. */
+  phase: "nodes" | "edges";
+  elapsed_ms: number;
+}
+
+/**
+ * The validated graph, emitted the moment Stage 4 (Repair) + the validation
+ * pipeline complete and BEFORE the ~20 s coaching pass — i.e. at the point the
+ * live probe measured as ~33 s of a ~53 s draft.
+ *
+ * Structure only. At this point in `runUnifiedPipeline`, `ctx.coaching` and
+ * `ctx.causalClaims` are still `undefined` (the coaching pass has not run), so
+ * this frame cannot carry a leader designation, a recommendation, or any
+ * analysis claim — not by filtering, but because the claim-bearing fields do
+ * not yet exist. See the claim-safety pin in
+ * tests/integration/staged-draft-sse.test.ts.
+ */
+export interface PipelineGraphReadyEvent {
+  kind: "GRAPH_READY";
+  /**
+   * The repaired + validated graph, ALREADY PROJECTED into the negotiated
+   * schema vocabulary (`schema_version` below) so its node ids and labels are
+   * byte-equal to the terminal frame's. Emitting the raw V1 graph here would
+   * hand the client one set of ids at ~33 s and a different set at ~53 s —
+   * see staged-graph-projection.ts.
+   */
+  graph: unknown;
+  /** The vocabulary `graph` is expressed in — the negotiated schema version. */
+  schema_version: "v1" | "v2" | "v3";
+  elapsed_ms: number;
+}
+
+/**
+ * The coaching pass has settled (completed, degraded, or budget-skipped).
+ * Carries only its STATUS — the coaching prose itself rides the terminal
+ * COMPLETE frame, which is the byte-identical buffered body, so coaching
+ * reaches the client through exactly one path and one shape.
+ */
+export interface PipelineCoachingReadyEvent {
+  kind: "COACHING_READY";
+  coaching_status: CoachingStatus;
+  elapsed_ms: number;
+}
+
+export type PipelineStageEvent =
+  | PipelineProgressEvent
+  | PipelineGraphReadyEvent
+  | PipelineCoachingReadyEvent;
+
+export type PipelineStageEmitter = (event: PipelineStageEvent) => void;
 
 // ---------------------------------------------------------------------------
 // Pipeline Result
@@ -81,7 +169,6 @@ export interface StageContext {
   draftAdapter: any;
   llmMeta: any;
   confidence: number | undefined;
-  clarifierStatus: string | undefined;
   effectiveBrief: string;
   edgeFieldStash: EdgeFieldStash | undefined;
   skipRepairDueToBudget: boolean;
@@ -110,6 +197,19 @@ export interface StageContext {
   // ── Stage 3 (Enrich) outputs ───────────────────────────────────────────
   enrichmentResult: any;
   hadCycles: boolean;
+  /**
+   * ROADMAP 2.281 — ids of goal nodes whose `goal_threshold` the ENRICHER
+   * minted this run, recorded at the mint site and consumed by Stage 4b.
+   *
+   * This is an ATTESTATION, not a heuristic: Stage 4b's "round raw + digit-free
+   * label ⇒ possibly model-inferred" rule cannot distinguish a fabricated
+   * number from a user-stated one by inspecting the number, and post-#789 the
+   * enricher is the only draft mint — so without this record the sweep could
+   * only ever delete targets the user actually supplied.
+   *
+   * Absent/empty ⇒ Stage 4b behaves exactly as it did before.
+   */
+  enricherMintedGoalIds?: Set<string>;
   enrichmentTrace?: {
     called_count: number;
     extraction_mode: string;
@@ -124,9 +224,6 @@ export interface StageContext {
   goalConstraints: any;
   /** Late STRP result (Stage 4 substep 6 — Rules 3,5 with goalConstraints context) */
   constraintStrpResult: any;
-  repairCost: number;
-  repairFallbackReason: string | undefined;
-  clarifierResult: any;
   structuralMeta: any;
   validationSummary: any;
   orchestratorRepairUsed?: boolean;
@@ -138,16 +235,21 @@ export interface StageContext {
   // `context` carries validator-specific structured detail when available
   // (e.g. OPTIONS_IDENTICAL → { optionIds, signature }). Optional and
   // additive — existing consumers that destructure {code,path,message} are
-  // unaffected. Consumed by the pre-LLM-repair fail-fast gate in
-  // stages/repair/index.ts for OPTIONS_IDENTICAL.
+  // unaffected. Consumed by the OPTIONS_IDENTICAL fail-fast gate in
+  // stages/repair/index.ts (substep 1.5).
   remainingViolations?: Array<{
     code: string;
     path?: string;
     message?: string;
     context?: Record<string, unknown>;
   }>;
+  /** Set by the deterministic sweep: Bucket-C violations survived the sweep
+   *  (and PLoT validation is needed). Since ROADMAP 2.731 removed the draft
+   *  path's LLM repair, this no longer triggers any repair call — it remains
+   *  a truthful sweep diagnostic (predicts the post-enforcement 422 when the
+   *  deterministic normalisation cannot clear the violations) and still
+   *  gates substep 1b's defer-vs-422 decision. */
   llmRepairNeeded?: boolean;
-  llmRepairBriefIncluded?: boolean;
   detectedEdgeFormat?: EdgeFormat;
 
   // ── Stage 4b (Threshold Sweep) outputs ──────────────────────────────
@@ -187,7 +289,7 @@ export interface StageContext {
   fieldDeletions?: FieldDeletionEvent[];
 
   // ── ContextPack v1 (Stream C — assembled in Stage 5 Package) ──
-  contextPack?: ContextPackV1;
+  contextPack?: DraftProvenanceDescriptor;
 
   // ── Pipeline outcome (Track 1: progressive degradation) ──
   pipelineOutcome: PipelineOutcome;
@@ -199,7 +301,14 @@ export interface StageContext {
 
 export type SoftGateStatus = 'passed' | 'skipped' | 'failed_degraded';
 export type EnrichmentStatus = 'complete' | 'partial' | 'skipped';
-export type CoachingStatus = 'complete' | 'partial' | 'failed_degraded';
+// 'skipped_budget' (Lane C2, 2026-07-23): the post-draft coaching pass was
+// SKIPPED because the request budget remaining after a successful draft could
+// not fit the pass to completion — coaching is canonical-empty and A2's async
+// coaching-ingest lane fills it. Surfaced on `_pipeline_outcome.coaching_status`
+// so probes and the async-ingest lane can count budget-skips (distinct from a
+// pass that ran and completed → 'complete', or one that ran and errored →
+// 'failed_degraded'). A drafted graph with empty coaching beats a 504.
+export type CoachingStatus = 'complete' | 'partial' | 'failed_degraded' | 'skipped_budget';
 
 export interface PipelineWarning {
   stage: string;
@@ -308,7 +417,7 @@ export interface PlanAnnotationCheckpoint {
   open_questions: string[];
   /**
    * DEPRECATED: Remove after Stream D Review Pass ships (target: v1.14).
-   * Use context_hash from ContextPackV1 (provenance.context_hash) instead.
+   * Use context_hash from DraftProvenanceDescriptor (provenance.context_hash) instead.
    *
    * Legacy hash of input context (brief + seed only — incomplete).
    * Renamed from `context_hash` to make migration grep-able.

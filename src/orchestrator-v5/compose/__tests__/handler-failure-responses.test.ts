@@ -218,3 +218,81 @@ describe('composeHandlerFailure — shape and safety', () => {
     expect(err.details.handler_id).toBe('run_analysis');
   });
 });
+
+describe('composeHandlerFailure — PLoT typed failure codes (code-keyed honest copy)', () => {
+  it('plot_error + GRAPH_TOO_COMPLEX → simplify copy + simplify chip, not "on our end"/retry', () => {
+    const err = build('plot_error', true, {
+      plot_primary_code: 'GRAPH_TOO_COMPLEX',
+      plot_critique_codes: ['GRAPH_TOO_COMPLEX'],
+    });
+    const { response, template_id, chip_type } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe('plot_error_graph_too_complex');
+    expect(response.assistant_text).toContain('too complex');
+    expect(response.assistant_text).not.toContain('This is on our end');
+    expect(response.suggested_actions[0]?.label).toBe('Simplify my model');
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+    expect(chip_type).toBe('text_prompt');
+    assertStyle(response.assistant_text);
+  });
+
+  it('analysis_blocked + GRAPH_TOO_COMPLEX → same honest copy through the recoverable branch', () => {
+    const err = build('analysis_blocked', false, {
+      plot_primary_code: 'GRAPH_TOO_COMPLEX',
+    });
+    const { response, template_id } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe('analysis_blocked_graph_too_complex');
+    expect(response.assistant_text).toContain('too complex');
+    assertStyle(response.assistant_text);
+  });
+
+  it.each([
+    ['ISL_TIMEOUT', 'timed out'],
+    ['ISL_NETWORK_ERROR', 'reach'],
+    ['ISL_ERROR', 'engine'],
+    ['PLOT_INTERNAL_ERROR', 'on our side'],
+  ] as const)('analysis_failed + %s → honest per-class copy with retry chip', (code, fragment) => {
+    const err = build('analysis_failed', true, { plot_primary_code: code });
+    const { response, template_id, chip_type } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe(`analysis_failed_${code.toLowerCase()}`);
+    expect(response.assistant_text.toLowerCase()).toContain(fragment);
+    expect(response.suggested_actions[0]?.action_type).toBe('run_analysis');
+    expect(chip_type).toBe('action');
+    assertStyle(response.assistant_text);
+  });
+
+  it('analysis_failed + ISL_REJECTED → adjust-the-model copy, no retry action chip', () => {
+    const err = build('analysis_failed', true, { plot_primary_code: 'ISL_REJECTED' });
+    const { response, template_id, chip_type } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe('analysis_failed_isl_rejected');
+    expect(response.assistant_text.toLowerCase()).toContain('adjust');
+    expect(response.suggested_actions[0]?.action_type).toBeUndefined();
+    expect(chip_type).toBe('text_prompt');
+    assertStyle(response.assistant_text);
+  });
+
+  it('plot_error with UNKNOWN code → byte-identical generic copy (conscious-promotion doctrine)', () => {
+    const err = build('plot_error', true, { plot_primary_code: 'SOME_FUTURE_CODE' });
+    const { response, template_id, chip_type } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe('plot_error');
+    expect(response.assistant_text).toBe('The analysis service encountered an error. This is on our end.');
+    expect(response.suggested_actions[0]?.label).toBe('Try again in a moment');
+    expect(chip_type).toBe('text_prompt');
+  });
+
+  it('plot_error with NO code → byte-identical generic copy (absent-code fallback)', () => {
+    const err = build('plot_error', true);
+    const { response, template_id } = composeHandlerFailure(err, CTX, 'frame');
+    expect(template_id).toBe('plot_error');
+    expect(response.assistant_text).toBe('The analysis service encountered an error. This is on our end.');
+  });
+
+  it('PLoT-authored plot_user_message is never rendered (diagnostics carry only)', () => {
+    const err = build('plot_error', true, {
+      plot_primary_code: 'GRAPH_TOO_COMPLEX',
+      plot_user_message: 'UNSAFE upstream prose with fac_1a2b3c4d id leak',
+    });
+    const { response } = composeHandlerFailure(err, CTX, 'frame');
+    expect(response.assistant_text).not.toContain('UNSAFE upstream prose');
+    expect(response.assistant_text).not.toContain('fac_1a2b3c4d');
+  });
+});

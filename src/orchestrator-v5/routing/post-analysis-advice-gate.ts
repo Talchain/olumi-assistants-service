@@ -54,21 +54,29 @@ import {
   MUTATION_SIGNAL_PATTERNS,
 } from './analytical-intent.js';
 import { classifyStructuralClaim } from './mutation-language.js';
+// ROADMAP 2.278 — the single owner of "may copy claim this could flip?".
+import type { FlipClaimPosture } from '../context/flip-threshold-rows.js';
 import {
   formatPercentagePoints,
   formatProbability,
 } from '../format/format-analysis-value.js';
-import { formatSensitivityDirection } from '../format/sensitivity-phrases.js';
+import {
+  formatSensitivityDirection,
+  hasMaterialInfluence,
+} from '../format/sensitivity-phrases.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import {
   closenessLead,
   describeRobustnessBand,
-  isNearTieByMargin,
-  isRawFragile,
   nearTieReasonByMargin,
   quoteLabel,
   type RawRobustnessSignals,
 } from '../coaching/robustness-honesty.js';
+import {
+  composeRobustnessVerdict,
+  type RobustnessVerdict,
+  type RobustnessVerdictMode,
+} from '../tools/handlers/explanation-fallback.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import {
   describeValidationPriority,
@@ -78,23 +86,62 @@ import {
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 /**
- * Thin advice-gate wrappers around the shared margin-based helpers in
- * `coaching/robustness-honesty.ts`. Kept in this file so the existing
- * `AdviceGateAnalysis`-typed callsites below stay unchanged and the
- * single source of truth for the threshold/labels lives in one place.
+ * S4 ROUND 4 — the ONE routing seam for every free-text composer in this file.
+ *
+ * Round 3 unified the two deterministic explanation FALLBACKS behind
+ * `composeRobustnessVerdict`. It missed these composers, which are the LIVE
+ * free-text surfaces, and they went on deriving their own verdict from
+ * `isNearTieByMargin` + `isRawFragile` + a bare `robustness_band` read. That
+ * re-derivation drifted in a specific, user-visible way: they treated a
+ * NEAR-TIE as evidence of FRAGILITY, so a `near_tie x stable` result was
+ * answered "The picture appears fragile" while the fallbacks — reading the same
+ * fields through the shared composer — called the same result a genuine dead
+ * heat whose individual scores are steady. Two live surfaces, one analysis,
+ * opposite verdicts.
+ *
+ * Margin and stability are ORTHOGONAL axes. A tiny gap says nothing about
+ * whether each option's own score is steady. Only the shared composer is
+ * allowed to decide either axis; this adapter is how that decision reaches a
+ * surface whose SENTENCES are its own.
+ *
+ * What may vary per surface: the wording, its length, and its voice. What may
+ * NOT vary: `margin_category` and `stability_category`. Every branch below
+ * reads them from the returned verdict; none re-derives them.
  */
-function isNearTie(
+function robustnessVerdictFor(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
-): boolean {
-  return isNearTieByMargin(analysis.margin_pp, rawRobustness);
+  mode: RobustnessVerdictMode,
+): RobustnessVerdict {
+  return composeRobustnessVerdict(
+    {
+      leading_option: analysis.leading_option,
+      runner_up: analysis.runner_up ?? null,
+      margin_pp: analysis.margin_pp,
+      robustness_band: analysis.robustness_band,
+    },
+    rawRobustness ?? null,
+    mode,
+  );
 }
 
-function nearTieReason(
+/**
+ * Which near-tie WORDING to use, once the shared verdict has already ruled that
+ * this IS a near-tie. `'margin'` supports the concrete "separated by one
+ * percentage point or less" phrasing; `'override'` must stay generic because
+ * the real gap may be wider than the threshold.
+ *
+ * This is a phrasing sub-discriminator, NOT a second verdict: it is only ever
+ * consulted when `verdict.margin_category === 'near_tie'`, and it can never
+ * turn a near-tie off or on.
+ */
+function nearTieWording(
+  verdict: RobustnessVerdict,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
 ): 'margin' | 'override' | null {
-  return nearTieReasonByMargin(analysis.margin_pp, rawRobustness);
+  if (verdict.margin_category !== 'near_tie') return null;
+  return nearTieReasonByMargin(analysis.margin_pp, rawRobustness) ?? 'override';
 }
 
 export interface AdviceGateAnalysisOption {
@@ -218,6 +265,26 @@ export interface AdviceGateInput {
    */
   readonly rawRobustness?: RawRobustnessSignals | null | undefined;
   /**
+   * ROADMAP 2.278 — the selected run_analysis fact's OWN answer to "may this
+   * copy claim the result could flip?", derived from `enrichment.flip_thresholds[]`
+   * by `readFlipClaimPosture` and threaded by the turn-executor via
+   * `pickLatestFlipClaimPosture` (the same canonical selector family as
+   * `pickLatestRawRobustness` / `pickLatestDecisionReview`, so every grounding
+   * layer reads from ONE fact).
+   *
+   * WHY IT HAS TO BE THREADED AT ALL: this gate's composers see only the narrow
+   * {@link AdviceGateAnalysis} projection, which carries `robustness_band` and
+   * `fragile_edges` — robustness MARGINALS — but no flip evidence. That is the
+   * whole defect: two composers assert the result could change while the
+   * producer had attested it cannot. `explanation-fallback.ts` already gates its
+   * own version of these clauses; this brings the gate to parity.
+   *
+   * Absent / undefined is safe and is the backward-compatible default: composers
+   * emit their pre-2.278 copy byte-identically unless this says
+   * `attested_no_flip`.
+   */
+  readonly flipClaimPosture?: FlipClaimPosture | null | undefined;
+  /**
    * AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED). Canonical
    * analysis-state usability predicates, threaded by the turn-executor ONLY
    * when the post-analysis-loop flag is on. When present AND `usableForProse`
@@ -245,11 +312,14 @@ export type AdviceGateUnmatchedReason =
   | 'data_unavailable_for_class';
 
 /**
- * Action chip emitted alongside a matched advice-gate response. Shape
- * mirrors `FreshAnalysisFollowupSuggestedAction` in
- * `fresh-analysis-followup-guard.ts` exactly so the turn-executor's
- * `composeDirectAnswerResponse` call site consumes both surfaces with
- * identical spread semantics. `action_type` is constrained to chips
+ * Action chip emitted alongside a matched advice-gate response.
+ *
+ * ⚠ ROADMAP 2.229 — this doc comment used to say the shape "mirrors
+ * `FreshAnalysisFollowupSuggestedAction` in `fresh-analysis-followup-guard.ts`
+ * exactly". That guard was retired by founder ruling and its module deleted,
+ * so there is no longer a sibling to mirror: this declaration is now the sole
+ * definition of the shape, consumed by the turn-executor's
+ * `composeDirectAnswerResponse` call site. `action_type` is constrained to chips
  * whose handlers run deterministically via `dispatchDeterministicChipClick`
  * (no LLM call); no new action types are introduced here.
  */
@@ -893,13 +963,21 @@ export function hasRenderableTopDriverLabel(
 }
 
 /**
- * True when a renderable SECOND driver exists. Used by the evidence-gap
- * fallback to name the two highest-leverage factors (where more evidence
- * matters most) instead of one, when the projection carries them. Same
- * non-empty-label contract as {@link hasRenderableTopDriver}.
+ * DGAI #341 claim guard: the drivers the COMPOSERS may NAME in superlative
+ * claims ("the strongest sensitivity is on …", "the factor with the most
+ * influence …", "driven by …", "the order could shift with movement on …").
+ * A driver whose finite `sensitivity_value` sits below the shared near-zero
+ * threshold renders as "has little effect on the lead" — pairing that band
+ * with a superlative is the live #341 self-contradiction. Such drivers are
+ * omitted from prose; drivers WITHOUT a value stay nameable (no materiality
+ * verdict on missing data). Deliberately NOT used by the per-class
+ * availability requirements (`missing_inputs`) or the copy-source
+ * diagnostics — routing is unchanged; only what the copy asserts is gated.
  */
-function hasRenderableSecondDriver(analysis: AdviceGateAnalysis): boolean {
-  return hasNonEmptyLabel(analysis.top_drivers[1]?.factor_label);
+function nameableTopDrivers(
+  analysis: AdviceGateAnalysis,
+): readonly AdviceGateAnalysisDriver[] {
+  return analysis.top_drivers.filter((d) => hasMaterialInfluence(d.sensitivity_value));
 }
 
 /**
@@ -1076,7 +1154,9 @@ export function tryPostAnalysisAdviceGate(
   }
 
   const leadingLabel = analysis.leading_option?.label ?? '';
-  const topDriverLabel = analysis.top_drivers[0]?.factor_label ?? null;
+  // DGAI #341: the composers bill this label as "the factor with the most
+  // influence here" — only a materially-influential driver may carry it.
+  const topDriverLabel = nameableTopDrivers(analysis)[0]?.factor_label ?? null;
 
   const composeInput: ComposeInput = {
     leadingLabel,
@@ -1085,6 +1165,7 @@ export function tryPostAnalysisAdviceGate(
     analysisReady: input.analysisReady ?? undefined,
     decisionReview: input.decisionReview ?? undefined,
     rawRobustness: input.rawRobustness ?? undefined,
+    flipClaimPosture: input.flipClaimPosture ?? undefined,
   };
   const assistantText = composeForClass(matchedClass, composeInput);
   const { copy_source, coaching_fields_used } = describeCopySource(matchedClass, composeInput);
@@ -1354,6 +1435,8 @@ interface ComposeInput {
   readonly analysisReady: AnalysisReadyPayload | undefined;
   readonly decisionReview: Record<string, unknown> | undefined;
   readonly rawRobustness: RawRobustnessSignals | null | undefined;
+  /** ROADMAP 2.278 — see {@link AdviceGateInput.flipClaimPosture}. */
+  readonly flipClaimPosture: FlipClaimPosture | undefined;
 }
 
 function composeForClass(cls: AdviceClass, input: ComposeInput): string {
@@ -1361,13 +1444,20 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
     case 'advice':
     case 'next_step':
     case 'update_advice':
-      return composeAdvice(input.leadingLabel, input.topDriverLabel, input.analysis);
+      return composeAdvice(
+        input.leadingLabel,
+        input.topDriverLabel,
+        input.analysis,
+        input.rawRobustness,
+        input.flipClaimPosture,
+      );
     case 'improvement':
       return composeImprovement(
         input.leadingLabel,
         input.topDriverLabel,
         input.analysis,
         input.rawRobustness,
+        input.flipClaimPosture,
       );
     case 'meaning':
       return composeMeaning(
@@ -1375,6 +1465,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.topDriverLabel,
         input.analysis,
         input.rawRobustness,
+        input.flipClaimPosture,
       );
     case 'readiness':
       return composeReadiness(input.analysisReady);
@@ -1385,6 +1476,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.leadingLabel,
         input.analysis,
         input.rawRobustness,
+        input.flipClaimPosture,
       );
     case 'what_would_flip_free_text':
       return composeWhatWouldFlip(
@@ -1498,7 +1590,14 @@ function composeAdvice(
   leadingLabel: string,
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
+  rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  // A3 ruling: GATED, not consciously left. "it could change the result" is the
+  // same claim class as the rest of this family, and leaving one composer
+  // un-gated after a review flagged the family is the partial-sweep error the
+  // family exists to close.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Readability sectioning: opener + margin form the lead paragraph; the
   // closing actionable sentence is lifted into a `What to check next`
   // bullet so the scannable next-step lands on its own line. The phrase
@@ -1508,13 +1607,23 @@ function composeAdvice(
   const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
+  // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
+  // sentence, so the margin axis is the shared composer's call here too. On a
+  // near-tie, "It sits ahead of B by 0.1 percentage points" is literally true
+  // yet frames a dead heat as a standing — and it contradicted the sibling
+  // surfaces calling the same run effectively tied. State the tie instead.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
   const marginClause =
-    margin && runnerLabel
-      ? ` It sits ahead of ${runnerLabel} by ${margin}.`
-      : '';
+    runnerLabel && verdict.margin_category === 'near_tie'
+      ? ` It is effectively tied with ${runnerLabel}.`
+      : margin && runnerLabel
+        ? ` It sits ahead of ${runnerLabel} by ${margin}.`
+        : '';
   const lead = `${opener}${marginClause}`;
   const nextStep = topDriverLabel
-    ? `The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`
+    ? noFlip
+      ? `The biggest thing to examine next is ${topDriverLabel}, because it carries more of the margin than anything else.`
+      : `The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`
     : "Let me know which factor you'd like to look at next.";
   return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
@@ -1524,7 +1633,9 @@ function composeImprovement(
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Readability sectioning: opener + robustness qualifier form the lead
   // paragraph; the "most useful thing to examine" sentence is lifted
   // into a `What to check next` bullet. Phrase wording is unchanged so
@@ -1532,24 +1643,40 @@ function composeImprovement(
   // matching.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
-  // Suppress the "smaller adjustments may not move the picture much"
-  // stability claim when the result is a near-tie or raw robustness is
-  // fragile — on such results, smaller adjustments WOULD move the
-  // picture, and the original copy reads as misleading confidence.
-  const nearTie = isNearTie(analysis, rawRobustness);
-  const rawFragile = isRawFragile(rawRobustness);
+  // ROUND 4: routed through the shared composer. `improvement` is the one
+  // surface with NO closeness sentence of its own — its opener states the
+  // leader flatly — so on a near-tie this slot is the ONLY place honesty can
+  // land. Before round 4 it landed as "The picture appears fragile", which
+  // over-claimed fragility on a genuinely stable dead heat AND disagreed with
+  // the fallback narrating the same run. It now names the closeness (true on
+  // every near-tie cell) and reserves the fragility word for the stability axis.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
   // Plain-language stability sentence — never the raw band token or the
   // phrase "robustness band". The hedged "may not move the picture much" line
-  // is acceptable for stable / moderate bands; fragile is handled above and a
-  // canonical fragile band is excluded here so it never reads as a stability
-  // claim.
+  // is earned only when the verdict says the lead is not a near-tie AND the
+  // stability axis is stable or moderate.
   const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
-  const robustness =
-    nearTie || rawFragile
-      ? ' The picture appears fragile, so even small adjustments could shift it.'
-      : stabilityPhrase !== null && analysis.robustness_band !== 'fragile'
-        ? ` This result looks ${stabilityPhrase}, so smaller adjustments may not move the picture much.`
-        : '';
+  let robustness = '';
+  if (verdict.stability_category === 'fragile') {
+    // ROADMAP 2.278: the fragility CAVEAT is true (the robustness signal really
+    // is weak) but "could shift it" is a flippability claim. On an
+    // attested-no-flip run the instability is in the MARGIN, not the ranking.
+    robustness = noFlip
+      ? ' The picture appears fragile, so the size of the gap is sensitive to small adjustments — though no single factor we tested would change the order on its own.'
+      : ' The picture appears fragile, so even small adjustments could shift it.';
+  } else if (verdict.margin_category === 'near_tie') {
+    robustness =
+      verdict.stability_category === 'stable'
+        ? " The result is effectively tied, and each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates."
+        : noFlip
+          ? ' The result is effectively tied, so the order rests on a fine margin — though no single factor we tested would change which option leads on its own.'
+          : ' The result is effectively tied, so smaller adjustments could change which option leads.';
+  } else if (
+    stabilityPhrase !== null
+    && (verdict.stability_category === 'stable' || verdict.stability_category === 'moderate')
+  ) {
+    robustness = ` This result looks ${stabilityPhrase}, so smaller adjustments may not move the picture much.`;
+  }
   const lead = `${opener}${robustness}`;
   const nextStep = topDriverLabel
     ? `To improve confidence here, the most useful thing to examine is ${topDriverLabel}, because it has the most influence on the result.`
@@ -1564,7 +1691,11 @@ function composeMeaning(
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  // A3: the posture was never threaded here, so "The order could shift with
+  // movement on X" shipped un-gated beside the gated fragility caveat.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Vocabulary aligns with the workstream brief — "currently favours"
   // opener and "appears to be driven by" attribution avoid the
   // winner/leader-adjacent framing the previous wording carried.
@@ -1578,7 +1709,12 @@ function composeMeaning(
   // sentence is itself the "what to check"), so `meaning` stays interpretive —
   // no `What to check next` action block. The closing meta-statement remains
   // its own paragraph.
-  const tieReason = nearTieReason(analysis, rawRobustness);
+  // ROUND 4: the near-tie verdict comes from the shared composer. `meaning`
+  // composes no stability sentence of its own, so routing it is about the
+  // MARGIN axis: it must not describe as a lead what the other surfaces are
+  // simultaneously calling a tie.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
+  const tieReason = nearTieWording(verdict, analysis, rawRobustness);
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
@@ -1589,7 +1725,11 @@ function composeMeaning(
   if (closeness !== null) {
     sentences.push(closeness);
     if (topDriverLabel) {
-      sentences.push(`The order could shift with movement on ${quoteLabel(topDriverLabel)}.`);
+      sentences.push(
+        noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(topDriverLabel)} moves the margin most.`
+          : `The order could shift with movement on ${quoteLabel(topDriverLabel)}.`,
+      );
     }
   } else {
     const marginSentence =
@@ -1664,7 +1804,12 @@ function composeEvidenceGap(
       );
     }
   }
-  if (gaps.length === 0 && hasRenderableTopDriver(analysis)) {
+  // DGAI #341: superlative fallback ("the strongest sensitivity is on …")
+  // may only name materially-influential drivers — a near-zero driver would
+  // be billed as where "more evidence would change the analysis the most"
+  // while its own band reads "has little effect on the lead".
+  const evidenceDrivers = nameableTopDrivers(analysis);
+  if (gaps.length === 0 && hasNonEmptyLabel(evidenceDrivers[0]?.factor_label)) {
     // Fallback: name where evidence matters most. The first sentence is
     // byte-identical to the historical single-driver copy (gated on
     // `hasRenderableTopDriver` so a whitespace-only label can't emit
@@ -1678,12 +1823,12 @@ function composeEvidenceGap(
     // whitespace, and the dedup compare below operates on clean labels.
     // `hasRenderable*Driver` already rejects whitespace-only labels, so the
     // trimmed value is always non-empty here.
-    const top = analysis.top_drivers[0]!.factor_label.trim();
+    const top = evidenceDrivers[0]!.factor_label.trim();
     gaps.push(
       `the strongest sensitivity is on ${top}, so that's where more evidence would change the analysis the most`,
     );
-    if (hasRenderableSecondDriver(analysis)) {
-      const second = analysis.top_drivers[1]!.factor_label.trim();
+    if (hasNonEmptyLabel(evidenceDrivers[1]?.factor_label)) {
+      const second = evidenceDrivers[1]!.factor_label.trim();
       // Defensive: skip the second-driver line when it would name the same
       // factor twice. Compare case-folded (labels already trimmed) so
       // whitespace / case variants of the same display label are caught. The
@@ -1782,7 +1927,9 @@ function composeExplainResults(
   leadingLabel: string,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up, margin,
   // robustness, per-driver sensitivity and fragile edges are optional and
   // degrade gracefully. Numerics are pass-through only — F.6 invariant.
@@ -1798,11 +1945,17 @@ function composeExplainResults(
   // assertion and the confident stability claim. The margin path states the
   // inclusive sub-1pp phrasing; the override path stays generic ("treats them
   // as a near-tie") so we never claim a sub-1pp gap we cannot back.
-  const tieReason = nearTieReason(analysis, rawRobustness);
-  const nearTie = tieReason !== null;
-  const rawFragile = isRawFragile(rawRobustness);
-  const driverA = analysis.top_drivers[0];
-  const driverB = analysis.top_drivers[1];
+  // ROUND 4: the verdict comes from the shared composer, never from a local
+  // re-derivation. `tieReason` below only selects which near-tie SENTENCE to
+  // use once the verdict has already ruled that this is a near-tie.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
+  const tieReason = nearTieWording(verdict, analysis, rawRobustness);
+  const nearTie = verdict.margin_category === 'near_tie';
+  // DGAI #341: "driven by …" / "could shift with movement on …" / "the
+  // most-weighted factor" may only name materially-influential drivers.
+  const interpretationDrivers = nameableTopDrivers(analysis);
+  const driverA = interpretationDrivers[0];
+  const driverB = interpretationDrivers[1];
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
   const topEdge = renderableFragileEdges(analysis)[0];
@@ -1831,16 +1984,25 @@ function composeExplainResults(
   }
 
   // 3. Why it leads — drivers (quoted). Near-tie softens "driven by" to "could shift".
+  // ROADMAP 2.278 amendment A3 — this beat is the FOURTH unconsulted surface,
+  // and it is in the same function as the fragility caveat above: shipped
+  // together, un-gated, one answer said "no single factor would change which
+  // option leads" and the next sentence said "the order could shift with
+  // movement on X". `noFlip` was already bound here and simply not used.
   if (driverA && driverB) {
     sentences.push(
       nearTie
-        ? `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, or on ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`
+        ? noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)} and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)} move the margin most.`
+          : `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, or on ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`
         : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`,
     );
   } else if (driverA) {
     sentences.push(
       nearTie
-        ? `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`
+        ? noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)} moves the margin most.`
+          : `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`
         : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`,
     );
   }
@@ -1862,23 +2024,44 @@ function composeExplainResults(
   }
 
   // Robustness caveat — a conditional aside between beats 5 and 6 (not one of
-  //    the numbered rhetorical beats): prefer the raw fragile signal over the
-  //    projected band; suppress confident stability copy on near-tie / raw-fragile.
-  if (nearTie || rawFragile) {
+  //    the numbered rhetorical beats). ROUND 4: every branch is selected by the
+  //    SHARED verdict's two categories. The ladder is ordered stability-first
+  //    precisely so fragility can never be inferred from the margin:
+  //
+  //      fragile band/raw   → the fragility warning (the most specific claim)
+  //      near-tie + stable  → the honest dual-axis reading: the GAP is inside
+  //                           noise, yet each option's OWN score is steady.
+  //                           Before round 4 this cell said "appears fragile",
+  //                           contradicting the fallback on the same analysis.
+  //      near-tie + other   → no stability sentence; the closeness line above
+  //                           already carries the caveat, and neither a
+  //                           fragility claim nor a reassurance is earned.
+  //      clear/indeterminate→ the band's own reassurance, honest only because
+  //                           the lead is NOT a near-tie.
+  if (verdict.stability_category === 'fragile') {
+    // ROADMAP 2.278 — see the sibling branch in composeImprovement. Same rule,
+    // same evidence, different voice.
     sentences.push(
-      'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
+      noFlip
+        ? 'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change which option leads on its own.'
+        : 'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
     );
+  } else if (nearTie) {
+    if (verdict.stability_category === 'stable') {
+      sentences.push(
+        "Each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates.",
+      );
+    }
   } else {
-    // Plain-language stability copy sourced from the SSOT describeRobustnessBand.
-    // Bind once and omit the sentence if it is unexpectedly null. Fragile /
-    // unknown bands produce no sentence here.
+    // Plain-language stability copy sourced from the SSOT describeRobustnessBand;
+    // WHICH line fires is the shared verdict's call, not a local band read.
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
     if (stabilityPhrase !== null) {
-      if (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable') {
+      if (verdict.stability_category === 'stable') {
         sentences.push(
           `This result looks ${stabilityPhrase}, so this view should hold under reasonable variation.`,
         );
-      } else if (analysis.robustness_band === 'moderate') {
+      } else if (verdict.stability_category === 'moderate') {
         sentences.push(
           `This result looks ${stabilityPhrase}, but it is worth checking the main assumptions before deciding.`,
         );
@@ -1961,16 +2144,23 @@ function composeWhatWouldFlip(
   // worth checking → (3) an optional, provenance-safe flip-threshold pointer →
   // (4) exactly ONE consolidated caveat → (5) a re-run nudge that never
   // implies a single change flips the result.
-  const tieReason = nearTieReason(analysis, rawRobustness);
-  const nearTie = tieReason !== null;
-  const rawFragile = isRawFragile(rawRobustness);
-  // A canonicalised 'fragile' band is itself the upstream's fragility verdict
-  // even when the raw signal is absent on older facts.
-  const fragileSignal = nearTie || rawFragile || analysis.robustness_band === 'fragile';
+  // ROUND 4: routed through the shared composer in its `flip` voice — the same
+  // voice `composeWhatWouldFlipFallback` uses, so the chip-click fallback and
+  // the free-text answer to "what would flip this?" cannot disagree about
+  // either axis. `fragileSignal` still merges the two axes because this
+  // surface's single consolidated caveat covers "the lead is not safe" for
+  // BOTH reasons — but each axis is now the shared verdict's call, and the
+  // word "fragile" is never spoken off the margin axis.
+  const verdict = robustnessVerdictFor(analysis, rawRobustness, 'flip');
+  const tieReason = nearTieWording(verdict, analysis, rawRobustness);
+  const nearTie = verdict.margin_category === 'near_tie';
+  const fragileSignal = nearTie || verdict.stability_category === 'fragile';
   const runnerLabel = analysis.runner_up?.label;
   const margin = marginPpString(analysis.margin_pp);
   const topEdge = renderableFragileEdges(analysis)[0];
-  const driverA = analysis.top_drivers[0];
+  // DGAI #341: "the factor with the most influence on the result" may only
+  // name a materially-influential driver.
+  const driverA = nameableTopDrivers(analysis)[0];
   const flip = deriveFlipStatus(decisionReview);
   const sentences: string[] = [];
 
@@ -2034,10 +2224,7 @@ function composeWhatWouldFlip(
     );
   } else {
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
-    if (
-      stabilityPhrase !== null
-      && (analysis.robustness_band === 'stable' || analysis.robustness_band === 'highly_stable')
-    ) {
+    if (stabilityPhrase !== null && verdict.stability_category === 'stable') {
       sentences.push(
         `This result looks ${stabilityPhrase}, so smaller changes are unlikely to change which option leads.`,
       );

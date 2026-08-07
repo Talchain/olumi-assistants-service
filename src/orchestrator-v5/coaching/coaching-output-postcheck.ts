@@ -3,7 +3,48 @@
  *
  * This is the HARD enforcement of the lane's core boundary: deterministic code
  * owns truth; the LLM only expresses it. The flag-gated prompt instruction
- * (route-with-tool-use.ts) is soft guidance — this module is the guarantee.
+ * (route-with-tool-use.ts) is soft guidance — for the STATE-CONDITIONAL rules
+ * (an existing result presented as current) this module is the enforcement
+ * backstop.
+ *
+ * ## Known limitations (honesty — review r3, FIX 5)
+ *
+ * The PRE-ANALYSIS `fabricated_result_reference` rule is BEST-EFFORT
+ * deterministic mitigation, NOT a complete guarantee. Regex disqualifiers are
+ * brittle against paraphrase (the ROADMAP 1.81 dossier finding); a semantic
+ * check is the phase-② candidate. Accepted-miss classes, deliberately not
+ * pattern-chased further:
+ *   - "your model shows X wins" — 'model' collides with legitimate structure
+ *     talk ("your decision model"), so it is not a result-noun here;
+ *   - bare comparative result language with no attribution anchor — "higher
+ *     expected value", "the stronger play";
+ *   - a bare unattributed figure — "there is a 72% probability X is right" —
+ *     lexically indistinguishable from the user's own echoed framing
+ *     ("that 30% chance of churn"), so it ships (r3 FIX 1 chose the
+ *     over-suppression direction as the greater harm: it recreates the
+ *     conversational dead-end #450 fixes);
+ *   - paraphrased attribution via pronouns or novel verbs outside the
+ *     alternations ("it points that way", "the numbers lean enterprise");
+ *   - modal/future-bridged attribution — "the analysis will/would/should/…
+ *     show X" — is EXCLUDED BY DESIGN (2026-07-14 live re-verify: the
+ *     tense-blind bridge false-fired on ~43% of genuine pre-analysis answers;
+ *     a modal bridge usually describes a future run, the honest coaching
+ *     #450 protects). The residue this exclusion ACCEPTS — shapes that fired
+ *     pre-exclusion and now ship (adversarial review of PR #451, executed
+ *     against both builds): modal + that-clause directional assertion ("the
+ *     analysis will show that X wins"); hedged-present claims ("our
+ *     simulation would suggest Enterprise"); modal-perfect with a listed
+ *     verb ("the analysis may/would have found that churn dominates");
+ *     capability framing ("the analysis can show us that X wins"). All are
+ *     directional-without-number — the bare-comparative class above — and a
+ *     specific NUMBER stays caught by arm (d) ("wins with N%" / attributed
+ *     "N% probability") regardless of tense. Re-catch the epistemic-perfect
+ *     sub-class ("may/might/could have <listed-verb>") only if observed
+ *     live, not pre-widened. (The counterfactual "would have shown that X
+ *     won" also ships, but that was a miss BEFORE this exclusion too —
+ *     "shown" is not a listed verb.)
+ * The screened arms also accept hypothetical / offer / user-own-analysis
+ * contexts by design (r3 FIX 4), which a determined paraphrase could exploit.
  *
  * It inspects LLM-authored coaching prose (the `coach` / `text_only`→converse
  * compose branches) against the SAME canonical `CoachingStatePack` the prompt
@@ -39,11 +80,20 @@
 
 import type { CoachingStatePack } from '../context/canonical-analysis-state.js';
 import {
+  filterLivePendingActions,
+  type PendingAction,
+} from '../session/pending-action.js';
+import {
   buildAnalysisAbsentTemplate,
   buildAnalysisDegradedTemplate,
   buildAnalysisStaleTemplate,
   buildAnalysisUnconfirmedTemplate,
 } from '../tools/handlers/no-op-helpers.js';
+import {
+  RENDER_SAFE_LABEL_FALLBACK,
+  sanitisePublicCopyOrFallback,
+} from '../compose/proposed-change.js';
+import { hasFabricatedResultReference } from '../routing/fabricated-result-reference.js';
 import {
   RERUN_ACTION,
   type StaleRerunSuggestedAction,
@@ -56,7 +106,13 @@ export type CoachingViolation =
   | 'value_change_narration'
   | 'unsupported_evidence_or_confidence_claim'
   | 'confident_advice_under_unsafe_state'
-  | 'stale_presented_as_fresh';
+  | 'stale_presented_as_fresh'
+  // Pre-analysis fabricated RESULT: the prose attributes a result to an
+  // analysis / simulation that has not run (no successful fact exists). The
+  // fabricated-result honesty guarantee — distinct from `stale_presented_as_fresh`,
+  // which is about an EXISTING result presented as current. See
+  // FABRICATED_RESULT_REFERENCE_PATTERNS and checkCoachingOutput.
+  | 'fabricated_result_reference';
 
 export interface CoachingPostcheckResult {
   readonly safe: boolean;
@@ -373,6 +429,15 @@ const STALENESS_SIGNAL_PATTERN =
   /\b(?:stale|out[- ]of[- ]date|re[- ]?run|refresh|since\s+(?:the\s+)?(?:last\s+|latest\s+)?analysis|may\s+be\s+out\s+of\s+date|model\s+has\s+changed|no\s+longer\s+reflects?|can(?:'|’)?t\s+confirm|cannot\s+confirm)\b/i;
 
 /**
+ * Pre-analysis fabricated-RESULT reference (review r2) — the detector now
+ * lives in `../routing/fabricated-result-reference.js` so the explanation
+ * validator polices the SAME class with the SAME rules (it previously had no
+ * fabricated-result policing at all). Behaviour here is unchanged: it stays an
+ * ALWAYS-ON rule that fires ONLY when no analysis result exists. See that
+ * module for the arms, the #450 narrowing and the r3 screens.
+ */
+
+/**
  * Is the deterministic state unsafe for confident current-result coaching?
  * Stale / unknown ("unconfirmed") / absent / blocked / not chip-usable, OR a
  * rerun is required. Mirrors the live `deriveAnalysisFreshness` verdict carried
@@ -442,7 +507,43 @@ export function checkCoachingOutput(
   // State-conditional rules: only when the analysis is not safe to present as
   // current. When state IS fresh + usable, directional advice and result
   // presentation are allowed — ordinary coaching is never degraded.
-  if (isStateUnsafe(pack)) {
+  //
+  // These rules protect the integrity of an EXISTING analysis RESULT — they
+  // stop the model presenting a stale / unknown / blocked / unusable result as
+  // though it were current. They are meaningful ONLY when a successful analysis
+  // actually exists. PRE-ANALYSIS (no successful run_analysis fact —
+  // `!analysis_present` / freshness 'none') there is no result to misrepresent:
+  // ordinary early-conversation coaching legitimately weighs the options, names
+  // the risks, and echoes the user's own numbers ("your ~3% churn"). Degrading
+  // that here produced the conversational dead-end where a genuine coaching
+  // answer — the model WAS invoked (converse/coach path) — was clobbered by the
+  // canned "No analysis has been run… run the analysis?" nudge
+  // (behavioural-retest T1/T2). So gate the state-conditional rules on a result
+  // actually existing. The always-unsafe rules above still fire pre-analysis,
+  // so a fabricated evidence / confidence / mutation / value claim is still
+  // caught by construction; a user who explicitly asks to explain a not-yet-run
+  // analysis is still nudged by the explanation handler / no-analysis guard,
+  // which is a different code path, not this post-check.
+  const analysisResultExists = pack.analysis_present && pack.freshness !== 'none';
+
+  // Always-on (pre-analysis) — no fabricated RESULT reference (review r2).
+  // The #450 narrowing above must NOT let the model attribute a result to an
+  // analysis / simulation that never ran. Fires only pre-analysis (no result
+  // exists to legitimately present); attribution-anchored so it never trips on
+  // the user's own echoed figures. Placed AFTER the always-unsafe rules so a
+  // genuine mutation / value / evidence claim keeps its more-specific verdict.
+  if (!analysisResultExists && hasFabricatedResultReference(text)) {
+    return { safe: false, violation: 'fabricated_result_reference' };
+  }
+
+  // State-conditional rules protect an EXISTING analysis result from being
+  // presented as current. They fire when such a result exists AND is unsafe
+  // (stale / unknown / blocked / unusable). The `|| pack.blocked` restores the
+  // guard for a FAILED-run / FACT-LOSS state — `analysis_present` is false yet
+  // the scenario/UI still asserts a (blocked, unusable) result — which the bare
+  // `analysisResultExists` gate would have wrongly disarmed. Genuine
+  // pre-analysis (freshness 'none', not blocked) stays exempt (the #450 fix).
+  if ((analysisResultExists || pack.blocked) && isStateUnsafe(pack)) {
     if (
       isDirectionalOptionAdvice(text) ||
       (labelDet !== null && isLabelDirectionalAdvice(text, labelDet))
@@ -464,14 +565,145 @@ export function checkCoachingOutput(
   return { safe: true };
 }
 
+/**
+ * F-HELD fix 3b — the live held offer the degrade path must restate instead
+ * of stomping it with a competing analysis offer. Copy fields are the
+ * pending's persisted PUBLIC copy (emit-time safety-filtered); `chip_id` is
+ * the proposal ref so the re-rendered chip replays exactly the offer the
+ * bare-confirm resumer (consent-priority) resolves.
+ */
+export interface HeldOfferForDegrade {
+  readonly chip_id: string;
+  readonly label: string;
+  readonly message: string;
+}
+
+/** Minimal chip shape for the held confirm re-offer (assignable to SuggestedAction). */
+export interface HeldConfirmSuggestedAction {
+  readonly id: string;
+  readonly label: string;
+  readonly message: string;
+  /**
+   * Deliberately absent: the held confirm chip is a plain replay chip ("Yes")
+   * that the bare-confirm resumer resolves via consent-priority — it must
+   * NOT carry an executable action_type of its own. Declared (as undefined)
+   * so the union with StaleRerunSuggestedAction stays discriminable by
+   * property access.
+   */
+  readonly action_type?: undefined;
+}
+
 export interface CoachingDegradeResponse {
   readonly assistant_text: string;
-  readonly suggested_actions: readonly StaleRerunSuggestedAction[];
+  readonly suggested_actions: ReadonlyArray<
+    StaleRerunSuggestedAction | HeldConfirmSuggestedAction
+  >;
 }
 
 export interface BuildCoachingDegradeOptions {
   /** Graph option count, for the "no analysis yet" absent copy. Defaults to 0. */
   readonly optionCount?: number;
+  /**
+   * F-HELD fix 3b — when a live confirmation-expecting hold exists, the
+   * state-unsafe degrade restates the held offer + its confirm chip instead
+   * of the #298 trust template + rerun chip. Wire capture 13c is the RED
+   * fixture: the absent template stomped a direct answer to the assistant's
+   * own disambiguation question AND minted the competing run_analysis offer
+   * that the next bare "yes" bound to — hijacking the consent flow. Omit for
+   * the unchanged no-hold behaviour.
+   */
+  readonly liveHold?: HeldOfferForDegrade;
+}
+
+/**
+ * F-HELD fix 3b — deterministic held-aware degrade copy. Mirrors the swept
+ * GM_HELD_ASSISTANT_TEXT wording ("holding … Nothing in the model moves
+ * until you confirm") so the copy family stays within the
+ * provisional_doctrine_v0 language that edit-graph-referee-gate.test.ts
+ * already sweeps against the egress guards. No values, hashes, labels or
+ * internal tokens; no LLM text.
+ */
+export const HELD_AWARE_DEGRADE_TEXT =
+  "I'm still holding a change to your model rather than applying it straight " +
+  'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
+  'with it, or tell me what to adjust instead.';
+
+/**
+ * CONSENT-CLARITY AMENDMENT (Paul, 2026-07-11) — doctrine (a): the degrade
+ * RE-ASK names the hold it restates. The hold's persisted public label is
+ * render-sanitised first; a label that sanitises away, or one of the
+ * generic legacy/fallback labels (which would read "the change to continue
+ * with this change"), falls back to the unnamed swept copy above.
+ */
+export function buildHeldAwareDegradeText(label: string | null | undefined): string {
+  const safe = sanitisePublicCopyOrFallback(label ?? undefined, '');
+  if (
+    safe.length === 0 ||
+    safe === RENDER_SAFE_LABEL_FALLBACK ||
+    // Legacy GM hold chip label (edit-graph-referee-gate GM_HELD_CHIP_LABEL,
+    // stated literally to keep this module referee-gate-free).
+    safe === 'Continue with this change'
+  ) {
+    return HELD_AWARE_DEGRADE_TEXT;
+  }
+  const subject = safe.charAt(0).toLowerCase() + safe.slice(1);
+  return (
+    `I'm still holding the change to ${subject} rather than applying it straight ` +
+    'away. Nothing in the model moves until you confirm. Reply yes to continue ' +
+    'with it, or tell me what to adjust instead.'
+  );
+}
+
+/**
+ * F-HELD round 2 (FIXUP 3) — select the live hold the degrade may restate.
+ *
+ * Selection rules:
+ *   - live per the shared read-time liveness predicate (wall TTL + turn TTL);
+ *   - `expires_at_turn_count > 1` REQUIRED: a hold read at 1 lapses at THIS
+ *     turn's commit (the carry-forward decrements 1 → 0), so restating it
+ *     with a confirm chip in the SAME message that carries the lapse notice
+ *     would contradict itself and ship a dead chip;
+ *   - standard variant with persisted public copy only (a legacy no-copy
+ *     hold has nothing safe to restate);
+ *   - newest emitted wins when several qualify (the read side places the
+ *     freshest offer first; the sort makes it order-independent).
+ *
+ * Pure; clock injected. Lives here (not in the TurnExecutor closure) so the
+ * same-commit-lapse contradiction guard is unit-testable next to the
+ * degrade template it feeds.
+ */
+export function selectLiveHoldForDegrade(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): HeldOfferForDegrade | undefined {
+  const holds = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) =>
+      pa.action.kind === 'apply_proposed_change' &&
+      pa.expires_at_turn_count > 1 &&
+      typeof pa.action.public_label === 'string' &&
+      pa.action.public_label.length > 0 &&
+      typeof pa.action.public_message === 'string' &&
+      pa.action.public_message.length > 0,
+  );
+  if (holds.length === 0) return undefined;
+  const newest = [...holds].sort(
+    (a, b) => Date.parse(b.emitted_at_iso) - Date.parse(a.emitted_at_iso),
+  )[0]!;
+  const action = newest.action;
+  // Redundant with the filter above, but keeps this branch cast-free and
+  // fail-closed under future refactors.
+  if (
+    action.kind !== 'apply_proposed_change' ||
+    typeof action.public_label !== 'string' ||
+    typeof action.public_message !== 'string'
+  ) {
+    return undefined;
+  }
+  return {
+    chip_id: newest.chip_id,
+    label: action.public_label,
+    message: action.public_message,
+  };
 }
 
 /**
@@ -503,9 +735,30 @@ export function buildCoachingDegradeResponse(
   opts: BuildCoachingDegradeOptions = {},
 ): CoachingDegradeResponse {
   // Fresh + usable: the violation was an always-on prose issue, NOT a state
-  // problem. Do not claim the analysis is stale / missing / degraded.
+  // problem. Do not claim the analysis is stale / missing / degraded. This
+  // outranks the held-aware branch: with a fine analysis there is no
+  // competing rerun offer to suppress, and neutral copy misstates nothing.
   if (!isStateUnsafe(pack)) {
     return { assistant_text: NEUTRAL_DEGRADE_TEXT, suggested_actions: [] };
+  }
+  // F-HELD fix 3b — a live hold outranks every state-unsafe trust template.
+  // Rationale: each of those templates ships the rerun chip, which mints the
+  // competing consent offer (13c). While the user has an unanswered hold, the
+  // honest degrade is to restate that offer and its confirm chip; the trust
+  // language returns as soon as the hold resolves or lapses.
+  if (opts.liveHold !== undefined) {
+    return {
+      // CONSENT-CLARITY AMENDMENT — the re-ask names the hold it restates
+      // (falls back to the unnamed swept copy for legacy/fallback labels).
+      assistant_text: buildHeldAwareDegradeText(opts.liveHold.label),
+      suggested_actions: [
+        {
+          id: opts.liveHold.chip_id,
+          label: opts.liveHold.label,
+          message: opts.liveHold.message,
+        },
+      ],
+    };
   }
   const optionCount = opts.optionCount ?? 0;
   let assistant_text: string;

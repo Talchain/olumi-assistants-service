@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
 import { listDraftFailureBundles, getDraftFailureBundleById } from '../cee/draft-failures/store.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -23,10 +24,13 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `draft_failures:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: () => ({
-      error: 'rate_limit_exceeded',
-      message: 'Too many requests. Please try again later.',
-    }),
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
+    errorResponseBuilder: (_req, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many requests. Please try again later.',
+      ),
   });
 
   app.get('/admin/v1/draft-failures', async (request: FastifyRequest, reply: FastifyReply) => {

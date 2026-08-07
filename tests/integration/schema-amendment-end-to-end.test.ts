@@ -89,7 +89,6 @@ function buildPostParseContext(overrides: Record<string, unknown> = {}): any {
     checkpointsEnabled: false,
     validationSummary: undefined,
     structuralMeta: undefined,
-    clarifierResult: undefined,
     quality: undefined,
     draftWarnings: [],
     ceeResponse: undefined,

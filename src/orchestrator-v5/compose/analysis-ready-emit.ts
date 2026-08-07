@@ -21,9 +21,44 @@
  */
 
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
-import type { FreshnessDerivation } from '../context/freshness.js';
+import type { FreshnessDerivation, FreshnessReason } from '../context/freshness.js';
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+
+/**
+ * Freshness reasons for which the finaliser may synthesise a
+ * freshness-only analysis_ready block when the dispatch path produced no
+ * structural readiness payload (Mission 3 transport recovery).
+ *
+ * Deliberately ONLY the two legacy/unparseable-graph reload reasons.
+ * Other 'unknown' producers (edit_graph `derivation_failed`, the
+ * `invariant_failed` defence fallback) and the analogous
+ * stale-without-readiness drop stay un-synthesised: on those mid-session
+ * paths the UI may hold populated readiness state, and replacing it with
+ * an empty blocked block is a product decision that has not been taken.
+ * Widening this set is a separate user/product decision, not assumed
+ * future behaviour.
+ */
+export const FRESHNESS_ONLY_SYNTHESIS_REASONS: ReadonlySet<FreshnessReason> = new Set<FreshnessReason>([
+  'legacy_fact_missing_hash',
+  'current_graph_hash_unavailable',
+]);
+
+/**
+ * Minimal freshness-only analysis_ready payload (transport recovery,
+ * Tier-1 status content). Emitted by the response finaliser when a turn
+ * derived an honest 'unknown' freshness verdict for a
+ * FRESHNESS_ONLY_SYNTHESIS_REASONS reason but no structural readiness
+ * exists (legacy or unparseable graph on reload). The block is a carrier
+ * for the freshness wire fields stamped by `attachComputedAt` at the
+ * call site — it carries NO science content: no bias findings, no
+ * blockers, no model adjustments, no user questions, no options.
+ * `status: 'blocked'` follows the CEE schema's documented semantics
+ * ("validation failure prevents analysis — invalid graph structure").
+ */
+export function synthesiseFreshnessOnlyAnalysisReady(): AnalysisReadyPayload {
+  return { status: 'blocked', goal_node_id: '', options: [], bias_findings: [] };
+}
 
 /**
  * Attach computed_at and (optional) freshness fields to the payload

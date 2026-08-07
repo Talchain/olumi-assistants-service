@@ -67,6 +67,10 @@ config.auth.hmacSecret      // CEE_HMAC_SECRET ?? HMAC_SECRET
 config.auth.hmacMaxSkewMs   // HMAC_MAX_SKEW_MS (default: 300000)
 config.auth.islApiKey       // ISL_API_KEY
 config.auth.shareSecret     // CEE_SHARE_SECRET ?? SHARE_SECRET
+config.auth.requireUserJwt  // CEE_REQUIRE_USER_JWT (default: false — login 3.4 CEE-half, ships dark)
+config.auth.supabaseJwtSecret // SUPABASE_JWT_SECRET (legacy HS256 secret for user-JWT verification)
+config.auth.supabaseJwksUrl // SUPABASE_JWKS_URL (JWKS endpoint for asymmetric signing keys)
+config.auth.supabaseUrl     // SUPABASE_URL (used only to derive the default JWKS URL)
 ```
 
 ### LLM Configuration
@@ -86,7 +90,6 @@ config.llm.providersConfigPath // PROVIDERS_CONFIG_PATH
 config.features.grounding      // CEE_GROUNDING_ENABLED ?? GROUNDING_ENABLED (default: false)
 config.features.critique       // CRITIQUE_ENABLED (default: true)
 config.features.clarifier      // CLARIFIER_ENABLED (default: true)
-config.features.piiGuard       // PII_GUARD_ENABLED (default: false)
 config.features.shareReview    // SHARE_REVIEW_ENABLED (default: false)
 config.features.enableLegacySSE // ENABLE_LEGACY_SSE (default: false)
 ```

@@ -81,7 +81,6 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return true;
               if (featProp === 'pipelineV4Enabled') return false;
               return Reflect.get(featTarget, featProp);
             },
@@ -473,6 +472,72 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.details.recovery).toBeDefined();
   });
 
+  it('typed mapping: 422 CEE_GRAPH_INVALID with producer-declared retryable:true → wire retryable=true (Test 6c2, ROADMAP 2.718)', async () => {
+    // The EXACT witnessed envelope (golden-journey 20260806T142014Z-failed-
+    // draft-39cf53, request 41152fb5): the post-enforcement gate fail-closed
+    // a stochastic goal-less draft with `retryable: true` + retry-first copy,
+    // and the wire delivered `retryable: false` beside that copy. This test
+    // binds to the enforcement emitter's identity: its 422 status, its
+    // pinned recovery copy, and the producer-declared retryable threaded as
+    // `pipelineRetryable`.
+    const recovery = {
+      suggestion:
+        'Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.',
+      hints: [
+        'Retrying the same brief usually succeeds',
+        'If it keeps happening, state the outcome you are optimising for explicitly',
+        'Naming how each consideration affects that outcome helps the model connect them',
+      ],
+    };
+    const err = Object.assign(new Error('CEE_GRAPH_INVALID'), {
+      pipelineStatusCode: 422,
+      pipelineErrorCode: 'CEE_GRAPH_INVALID',
+      pipelineRetryable: true,
+      pipelineRecovery: recovery,
+      pipelineDetails: {
+        validation_error_codes: ['MISSING_BRIDGE', 'NO_PATH_TO_GOAL', 'NO_EFFECT_PATH'],
+        last_phase: 'deterministic_enforcement',
+      },
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111c02',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    // HTTP 500 preserved (Strategy B): no DGAI status-code change.
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
+    // THE FIX: the producer declared this failure retryable (stochastic
+    // topology, not a bad brief) — the wire must agree with the copy it
+    // carries, at BOTH levels.
+    expect(body.details.retryable).toBe(true);
+    expect(body.retryable).toBe(true);
+    // The retry-first copy survives untouched, with its pinned flat mirror.
+    expect(body.details.recovery).toEqual(recovery);
+    expect(body.details.recovery_suggestion).toBe(recovery.suggestion);
+    expect(body.details.pipeline_error_code).toBe('CEE_GRAPH_INVALID');
+    // Diagnosability (2.718): the validator codes that blocked packaging are
+    // on the wire — today they were only recoverable from Render logs.
+    expect(body.details.validation_error_codes).toEqual([
+      'MISSING_BRIDGE',
+      'NO_PATH_TO_GOAL',
+      'NO_EFFECT_PATH',
+    ]);
+    expect(body.details.last_phase).toBe('deterministic_enforcement');
+    expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
+  });
+
   it('typed mapping: 400 CEE_VALIDATION_FAILED → generic validation reason + retryable=false (Test 6d)', async () => {
     const err = Object.assign(new Error('CEE_VALIDATION_FAILED'), {
       pipelineStatusCode: 400,
@@ -754,8 +819,22 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
         expectDispatch: true,
       },
       {
-        label: 'positive: ends with ?',
+        // ⚠ FLIPPED BY ROADMAP 2.715 (INV-Q), DELIBERATELY AND AT THE ROW'S
+        // CORE. This case existed to pin the `\?$` arm of
+        // DRAFT_GRAPH_DECISION_BRIEF_REGEX — the arm that made EVERY >=30-char
+        // question draft-shaped, and the reason a typed coaching question got
+        // modelled as a decision on an empty canvas. "Is this a reasonable
+        // plan…?" names no options and no choice: it asks the assistant for an
+        // assessment. It now reaches the frame-stage no-brief guard, which asks
+        // for a decision question and offers the model behind an explicit tap.
+        // The legitimate half of the `\?$` arm stays pinned by the case below.
+        label: 'negative (2.715): a question TO the assistant, not a brief',
         message: 'Is this a reasonable plan for the next six months of growth?',
+        expectDispatch: false,
+      },
+      {
+        label: 'positive: ends with ? AND names a choice',
+        message: 'Should we open a second warehouse in Poland or expand the Leeds site?',
         expectDispatch: true,
       },
       {

@@ -64,7 +64,9 @@ interface PreflightIssue {
 type CEEErrorCode =
   | 'CEE_VALIDATION_FAILED'
   | 'CEE_CLARIFICATION_REQUIRED'
-  | 'CEE_RATE_LIMIT'
+  | 'CEE_RATE_LIMIT'       // RPM throttle
+  | 'CEE_COST_CAP'         // spend cap (per-request USD / daily token budget)
+  | 'CEE_BUDGET_EXCEEDED'  // elapsed-time deadline breach
   | 'CEE_TIMEOUT'
   | 'CEE_INTERNAL_ERROR'
   | 'CEE_SERVICE_UNAVAILABLE'
@@ -80,7 +82,9 @@ type CEEErrorCode =
 | `CEE_VALIDATION_FAILED` | 400 | Input fails schema validation | Show field errors |
 | `CEE_VALIDATION_FAILED` | 400 | `rejection_reason: "preflight_rejected"` | Show `suggested_questions` inline |
 | `CEE_CLARIFICATION_REQUIRED` | 400 | Clarification rounds required | Prompt user to use clarification endpoint |
-| `CEE_RATE_LIMIT` | 429 | Too many requests | Show countdown timer using `retry_after_seconds` |
+| `CEE_RATE_LIMIT` | 429 | Too many requests (RPM throttle) | Show countdown timer using `retry_after_seconds` |
+| `CEE_COST_CAP` | 429 | Spend cap: per-request USD guard or daily token budget | Same as above — treat as retry-later |
+| `CEE_BUDGET_EXCEEDED` | 429 | Request exceeded its elapsed-time budget | Same as above — treat as retry-later |
 | `CEE_TIMEOUT` | 504 | Upstream timeout | Allow retry with exponential backoff |
 | `CEE_INTERNAL_ERROR` | 500 | Server error | Generic error message, suggest retry |
 
@@ -260,8 +264,16 @@ async function handleDraftRequest(brief: string, options?: DraftOptions) {
       };
     }
 
-    // Handle rate limit
-    if (body.code === 'CEE_RATE_LIMIT') {
+    // Handle the 429 family. All three are retry-later with the same
+    // client-side handling; they differ only in CAUSE (throttle / spend cap /
+    // elapsed-time deadline), which matters for CEE on-call, not for the
+    // client. Match all three — the draft pipeline emits CEE_COST_CAP and
+    // CEE_BUDGET_EXCEEDED as well as CEE_RATE_LIMIT.
+    if (
+      body.code === 'CEE_RATE_LIMIT' ||
+      body.code === 'CEE_COST_CAP' ||
+      body.code === 'CEE_BUDGET_EXCEEDED'
+    ) {
       return {
         type: 'rate_limited',
         retryAfter: body.details.retry_after_seconds,

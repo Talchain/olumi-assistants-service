@@ -28,8 +28,17 @@ import {
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
   buildReviewCardBlocks,
+  buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
 } from '../phase3-blocks.js';
+import {
+  GUIDANCE_SIGNAL_CODES,
+  PRIORITY_BY_CATEGORY,
+  evidenceSignals,
+  guidanceSignalsForCoachingKind,
+  guidanceSignalsForSeverity,
+  reviewCardSignals,
+} from '../guidance-signals.js';
 
 // ============================================================================
 // Fixtures
@@ -866,8 +875,9 @@ describe('suggested_technique formatting (Codex correction #2)', () => {
 // Banned-copy and raw-ID drift guard (Codex correction #6) across every block
 // ============================================================================
 
-describe('banned-copy and raw-ID drift guard (Codex correction #6)', () => {
-  const RICH_DR = {
+// Rich decision_review producing a block of every kind — shared by the
+// banned-copy drift guard and the wave-2 guidance-signal pins below.
+const RICH_DR = {
     narrative_summary: 'Hire two senior engineers locally is currently ahead by a narrow lead.',
     story_headlines: { opt_a: 'A wins because…', opt_b: 'B would lead if…' },
     robustness_explanation: {
@@ -926,6 +936,7 @@ describe('banned-copy and raw-ID drift guard (Codex correction #6)', () => {
     },
   };
 
+describe('banned-copy and raw-ID drift guard (Codex correction #6)', () => {
   const fact = makeFact({
     decisionReview: RICH_DR,
     graphNodes: STANDARD_GRAPH_NODES,
@@ -1133,7 +1144,13 @@ describe('Round-3 fail-closed lookup-miss invariants', () => {
     expect(flip?.title).not.toContain('Different LLM Label');
   });
 
-  it('pre_mortem: emits with empty target_refs when grounded_in is absent (no claim, no harm)', () => {
+  // DGAI #342(1): REPLACES the former "no claim, no harm" pin. The harm was
+  // real — downstream surfaces re-render this body verbatim (the Decision-
+  // overview framing-question slot), so an unanchored canned narrative reads
+  // as a statement about the user's decision with no model context. Fully
+  // context-free ⇒ dropped; prose that names a graph node still emits with
+  // honest empty target_refs (the LLM made no grounding claim).
+  it('pre_mortem: DROPS when grounded_in is absent and the prose names no graph node (context_unanchored, DGAI #342)', () => {
     const fact = makeFact({
       decisionReview: {
         pre_mortem: {
@@ -1143,9 +1160,26 @@ describe('Round-3 fail-closed lookup-miss invariants', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    expect(blocks.filter((b) => b.card_kind === 'pre_mortem')).toHaveLength(0);
+  });
+
+  it('pre_mortem: emits with empty target_refs when grounded_in is absent but the prose names a graph node', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: {
+          failure_scenario: 'Cost overrun risk was underestimated from the start.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
     const pm = blocks.find((b) => b.card_kind === 'pre_mortem');
     expect(pm).toBeDefined();
     expect(pm?.target_refs).toEqual([]);
+    // DGAI #342(1) BIND rule: the body stands alone as a hypothetical.
+    expect(pm?.body).toBe(
+      'Imagine this decision has failed: Cost overrun risk was underestimated from the start.',
+    );
   });
 
   it('pre_mortem: drops the card when grounded_in was provided but EVERY entry misses lookup (P1.2)', () => {
@@ -1215,7 +1249,12 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     ['fac_delivery_risk', 'low'],
   ]);
 
-  it('narrative card drops when narrative_summary contains banned recommendation language', () => {
+  // RC4 (2026-07-15 session RCA): banned RECOMMENDATION/WINNER language is a
+  // REWRITABLE lexicon offence — the proportionate remedy is a deterministic
+  // terminology substitution (prompt TERMINOLOGY map), not a block drop. The
+  // previous versions of these tests pinned the drop remedy; they now pin the
+  // rewrite. Non-rewritable offences (raw decimals, raw ids) keep the drop.
+  it('narrative card survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         narrative_summary: 'Our recommendation is to launch immediately.',
@@ -1223,7 +1262,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+    const narrative = blocks.filter((b) => b.card_kind === 'narrative');
+    expect(narrative).toHaveLength(1);
+    expect(narrative[0]!.body).toBe('Our leading option is to launch immediately.');
   });
 
   it('narrative card drops when narrative_summary contains a raw decimal probability', () => {
@@ -1248,7 +1289,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
   });
 
-  it('bias card drops when description contains banned "winning option" language', () => {
+  it('bias card survives with banned "winning option" language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         bias_findings: [
@@ -1263,7 +1304,11 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'bias')).toHaveLength(0);
+    const bias = blocks.filter((b) => b.card_kind === 'bias');
+    expect(bias).toHaveLength(1);
+    expect(bias[0]!.body).toBe(
+      'The model favours the leading option without sufficient evidence.',
+    );
   });
 
   it('robustness card drops when summary contains a raw decimal sensitivity value', () => {
@@ -1279,7 +1324,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.card_kind === 'robustness')).toHaveLength(0);
   });
 
-  it('flip_threshold card drops when narrative contains banned recommendation language', () => {
+  it('flip_threshold card survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         flip_thresholds: [
@@ -1295,7 +1340,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'flip_threshold')).toHaveLength(0);
+    const flips = blocks.filter((b) => b.card_kind === 'flip_threshold');
+    expect(flips).toHaveLength(1);
+    expect(flips[0]!.body).toBe('The leading option hinges on delivery risk staying low.');
   });
 
   it('assumption card drops when key_assumption text contains an entity-id-shaped token', () => {
@@ -1309,7 +1356,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.card_kind === 'assumption')).toHaveLength(0);
   });
 
-  it('scenario_context card drops when trigger/consequence prose contains a banned phrase', () => {
+  it('scenario_context card survives with a banned (rewritable) phrase rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         scenario_contexts: {
@@ -1322,10 +1369,14 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
+    const scenarios = blocks.filter((b) => b.card_kind === 'scenario_context');
+    expect(scenarios).toHaveLength(1);
+    expect(scenarios[0]!.body).toBe(
+      'If delivery risk spikes. the leading option flips to overseas.',
+    );
   });
 
-  it('coaching assumption_check drops when assumption text contains banned recommendation language', () => {
+  it('coaching assumption_check survives with banned recommendation language rewritten', () => {
     const fact = makeFact({
       decisionReview: {
         key_assumptions: ['Our recommendation assumes market growth continues.'],
@@ -1333,7 +1384,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       graphNodes: STANDARD_GRAPH_NODES,
     });
     const blocks = buildCoachingBlocks(fact, cleanLookup, CTX);
-    expect(blocks.filter((b) => b.coaching_kind === 'assumption_check')).toHaveLength(0);
+    const checks = blocks.filter((b) => b.coaching_kind === 'assumption_check');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.body).toContain('Our leading option assumes market growth continues');
   });
 
   it('coaching calibration_prompt drops when question prose contains a raw decimal', () => {
@@ -1352,7 +1405,7 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
     expect(blocks.filter((b) => b.coaching_kind === 'calibration_prompt')).toHaveLength(0);
   });
 
-  it('evidence block drops when rationale contains banned "the winner" prescriptive phrasing', () => {
+  it('evidence block survives with banned "the winner" prescriptive phrasing rewritten (RC4)', () => {
     const fact = makeFact({
       decisionReview: {
         evidence_enhancements: {
@@ -1368,7 +1421,9 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
     });
     const blocks = buildEvidenceBlocks(fact, cleanLookup, cleanConf, CTX);
-    expect(blocks).toHaveLength(0);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.evidence_gap).toBe('This evidence picks the leading option cleanly.');
+    expect(blocks[0]!.evidence_gap).not.toMatch(/\bthe\s+winners?\b/i);
   });
 
   it('evidence block drops when impact_if_gathered contains a raw decimal sensitivity value', () => {
@@ -1491,9 +1546,12 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
   });
 
   it('logs full-token matched substring for forbidden-phrase drops (safe — generic vocabulary)', () => {
+    // RC4: the fixture must be a NON-rewritable (fatal-class) phrase —
+    // rewritable lexicon offences ("recommendation") no longer drop; they
+    // are rewritten in place and logged via v5.phase3.block_rewritten.
     const fact = makeFact({
       decisionReview: {
-        narrative_summary: 'Our recommendation is to launch.',
+        narrative_summary: 'Our validator confirms the launch plan holds.',
       },
       graphNodes: STANDARD_GRAPH_NODES,
     });
@@ -1507,8 +1565,44 @@ describe('Round-4 raw-ID telemetry redaction (P1.2)', () => {
     // Forbidden-phrase samples are generic banned vocabulary; logging
     // them is the operator signal for what to chase.
     expect((call![0] as Record<string, unknown>).sample).toMatch(
-      /recommendation/i,
+      /validator/i,
     );
+  });
+
+  it('RC4: a rewritable lexicon hit is VISIBLE via v5.phase3.block_rewritten telemetry, not a drop', () => {
+    const infoSpy = vi.spyOn(log, 'info').mockImplementation(() => log);
+    try {
+      const fact = makeFact({
+        decisionReview: {
+          narrative_summary: 'Our recommendation is to launch.',
+        },
+        graphNodes: STANDARD_GRAPH_NODES,
+      });
+      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+      // No drop fired for this block… (`call` not destructured — the spy's
+      // calls are `any[]`, and a destructured binding would add a TS7031 to
+      // the typecheck-drift census.)
+      const dropCall = warnSpy.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as Record<string, unknown>).drop_reason ===
+          'prose_guard_forbidden_phrase',
+      );
+      expect(dropCall).toBeUndefined();
+      // …and the rewrite is visible with gate id + term.
+      const rewriteCall = infoSpy.mock.calls.find(
+        ([payload]) =>
+          typeof payload === 'object' &&
+          payload !== null &&
+          (payload as Record<string, unknown>).event ===
+            'v5.phase3.block_rewritten',
+      );
+      expect(rewriteCall).toBeDefined();
+      const payload = rewriteCall![0] as Record<string, unknown>;
+      expect(payload.block_type).toBe('review_card');
+      expect(JSON.stringify(payload.terms)).toMatch(/recommendation/i);
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 });
 
@@ -1650,5 +1744,674 @@ describe('Round-4 realistic graph shape — edges under graph.edges', () => {
     expect(lookup.has('edge_drift')).toBe(false);
     const blocks = buildReviewCardBlocks(fact, lookup, CTX);
     expect(blocks.filter((b) => b.card_kind === 'scenario_context')).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Doctrine D-U F2 (ROADMAP): critique/coaching must NOT name an option-set
+// LEVER as a thing to "investigate / gather evidence on". A factor that a
+// decision option intervenes on is a decision variable being SET, not an
+// uncertain external factor to strengthen evidence about. The intervention-
+// controlled (union-lever) set is threaded into the evidence surfaces so a
+// lever-identity factor is dropped from the "investigate this" naming — the
+// critique CHANNEL stays open (non-lever gaps still ship). Suppression is
+// display-only: no producer number is read or changed.
+// ============================================================================
+describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces', () => {
+  function evidenceFactWithLever(): RunAnalysisHandlerFact {
+    return makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'Pull on-time delivery rate from the last two releases.',
+            rationale: 'Delivery rate is the largest variance driver here.',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'Estimate first, then look at data.',
+          },
+          fac_cost_overrun: {
+            specific_action: 'Talk to the finance team about historical overruns.',
+            rationale: 'Cost variance is the second-largest driver.',
+            evidence_type: 'expert_input',
+            decision_hygiene: 'Assign someone to argue the cost will not overrun.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [
+        { factor_id: 'fac_delivery_risk', confidence: 0.2 },
+        { factor_id: 'fac_cost_overrun', confidence: 0.6 },
+      ],
+    });
+  }
+
+  it('buildEvidenceBlocks drops the lever-named block, keeps the non-lever block', () => {
+    const fact = evidenceFactWithLever();
+    // fac_delivery_risk is a lever (an option intervenes on it).
+    const levers = new Set(['fac_delivery_risk']);
+    const blocks = buildEvidenceBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      buildFactorConfidenceLookup(fact),
+      CTX,
+      levers,
+    );
+    expect(blocks.map((b) => b.factor_ref.id)).toEqual(['fac_cost_overrun']);
+    // channel preserved: the surviving non-lever block re-ranks to priority 1.
+    expect(blocks[0].priority_rank).toBe(1);
+  });
+
+  it('buildEvidenceBlocks without a lever set is unchanged (both named)', () => {
+    const fact = evidenceFactWithLever();
+    const blocks = buildEvidenceBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      buildFactorConfidenceLookup(fact),
+      CTX,
+    );
+    expect(blocks.map((b) => b.factor_ref.id)).toEqual([
+      'fac_delivery_risk',
+      'fac_cost_overrun',
+    ]);
+  });
+
+  it('evidence_priority card skips a lever top entry and promotes the next non-lever gap', () => {
+    const fact = evidenceFactWithLever();
+    const levers = new Set(['fac_delivery_risk']);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      levers,
+    );
+    const ep = blocks.find((b) => b.card_kind === 'evidence_priority');
+    expect(ep).toBeDefined();
+    expect(ep?.target_refs[0].id).toBe('fac_cost_overrun');
+    // The lever must never be NAMED as the highest-leverage evidence gap.
+    expect(ep?.title).not.toContain('Delivery risk');
+  });
+
+  it('evidence_priority card is dropped when the only gap is a lever (channel stays honest)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'Pull on-time delivery rate.',
+            rationale: 'Delivery rate is the largest variance driver here.',
+            evidence_type: 'internal_data',
+            decision_hygiene: 'Estimate first, then look at data.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+    });
+    const blocks = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_delivery_risk']),
+    );
+    expect(blocks.find((b) => b.card_kind === 'evidence_priority')).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// Doctrine D-U F2 (assumption surface, PR #444 residual): the SAME ruling one
+// surface further. `key_assumptions` prose is emitted as FREE TEXT with no
+// factor_id, yet it still NAMES option-set levers — e.g. "Equity Offered to CTO
+// has a direct relationship with their decision to accept" (action=confirm_
+// factor) on live staging. A lever is a decision variable being SET, not a
+// load-bearing UNCERTAINTY to confirm, so it must not be named as an assumption
+// to check. Membership stays STRUCTURAL (factor_id in the union set, resolved
+// to its label via the same lookup); the label is used ONLY to detect the
+// naming in the free text. Whole-phrase boundary match — a shared bare token
+// (the live "CTO" collision) must NOT over-suppress a non-lever assumption.
+// Channel stays open (non-lever assumptions still ship); empty set ⇒ unchanged.
+// ============================================================================
+describe('D-U F2 lever-identity filter on assumption "confirm this" surfaces', () => {
+  // fac_delivery_risk (label "Delivery risk") is the lever; fac_cost_overrun
+  // (label "Cost overrun risk") is a NON-lever factor — it must still ship.
+  const ASSUMPTIONS = [
+    'Delivery risk is understood and controlled by the chosen option.', // lever → drop
+    'Cost overrun risk is accurately estimated.', // non-lever factor → ship
+    'Delivery timelines stay predictable through the launch window.', // token-only "Delivery", NOT the whole lever phrase → ship
+    'Market conditions persist through the launch window.', // no factor named → ship
+  ] as const;
+
+  function assumptionFact(): RunAnalysisHandlerFact {
+    return makeFact({
+      decisionReview: { key_assumptions: [...ASSUMPTIONS] },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+  }
+
+  it('buildReviewCardBlocks drops the lever-named assumption card, keeps every non-lever assumption', () => {
+    const fact = assumptionFact();
+    const blocks = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_delivery_risk']),
+    );
+    const bodies = blocks
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual([
+      'Cost overrun risk is accurately estimated.',
+      'Delivery timelines stay predictable through the launch window.',
+      'Market conditions persist through the launch window.',
+    ]);
+  });
+
+  it('buildCoachingBlocks drops the lever-named assumption_check, keeps every non-lever one', () => {
+    const fact = assumptionFact();
+    const blocks = buildCoachingBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_delivery_risk']),
+    );
+    const bodies = blocks
+      .filter((b) => b.coaching_kind === 'assumption_check')
+      .map((b) => b.body);
+    expect(bodies).toEqual([
+      'Cost overrun risk is accurately estimated.',
+      'Delivery timelines stay predictable through the launch window.',
+      'Market conditions persist through the launch window.',
+    ]);
+  });
+
+  it('without a lever set both surfaces are byte-identical (every assumption ships)', () => {
+    const fact = assumptionFact();
+    const lookup = buildGraphNodeLookup(fact);
+    const review = buildReviewCardBlocks(fact, lookup, CTX)
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    const coaching = buildCoachingBlocks(fact, lookup, CTX)
+      .filter((b) => b.coaching_kind === 'assumption_check')
+      .map((b) => b.body);
+    expect(review).toEqual([...ASSUMPTIONS]);
+    expect(coaching).toEqual([...ASSUMPTIONS]);
+  });
+});
+
+// ============================================================================
+// Finding 5 (Codex): the free-text lever matcher UNDER- and OVER-suppresses.
+//   (a) UNDER: "Time-to-market" (hyphenated lever label) fails to match the
+//       spaced prose "Time to market" because punctuation was not normalised.
+//   (b) OVER: the generic single-word label "Cost" suppresses a NON-lever
+//       assumption ("Implementation cost estimates are uncertain") that merely
+//       uses the word — a bare generic token must require stronger identity.
+// Structural factor_id suppression is unaffected; only the free-text NAME scan
+// is corrected. Fail-closed: err toward keeping an honest surface.
+// ============================================================================
+describe('Finding 5 — free-text lever matcher normalisation', () => {
+  const TTM_FACTOR = { id: 'fac_ttm', label: 'Time-to-market', kind: 'factor' };
+  const COST_FACTOR = { id: 'fac_cost', label: 'Cost', kind: 'factor' };
+
+  it('UNDER-suppress fix: hyphenated lever label "Time-to-market" matches spaced prose "Time to market"', () => {
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: [
+          'Time to market is correctly estimated.', // names the lever (punctuation differs) → drop
+          'Market conditions persist through the launch window.', // non-lever → ship
+        ],
+      },
+      graphNodes: [TTM_FACTOR],
+    });
+    const bodies = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_ttm']),
+    )
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual(['Market conditions persist through the launch window.']);
+  });
+
+  it('OVER-suppress fix: generic single-word lever "Cost" does NOT drop a non-lever assumption using the word', () => {
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: ['Implementation cost estimates are uncertain.'],
+      },
+      graphNodes: [COST_FACTOR],
+    });
+    const bodies = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_cost']),
+    )
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual(['Implementation cost estimates are uncertain.']);
+  });
+
+  it('a distinctive single-word lever label still suppresses (generic guard is narrow)', () => {
+    const KUBERNETES = { id: 'fac_k8s', label: 'Kubernetes', kind: 'factor' };
+    const fact = makeFact({
+      decisionReview: {
+        key_assumptions: ['Kubernetes is the right platform for this workload.'],
+      },
+      graphNodes: [KUBERNETES],
+    });
+    const bodies = buildReviewCardBlocks(
+      fact,
+      buildGraphNodeLookup(fact),
+      CTX,
+      new Set(['fac_k8s']),
+    )
+      .filter((b) => b.card_kind === 'assumption')
+      .map((b) => b.body);
+    expect(bodies).toEqual([]); // distinctive token → suppressed
+  });
+});
+
+// ============================================================================
+// Finding 1 (Codex): the D-U lever-naming guard must cover EVERY free-text
+// decision-review surface — narrative, pre-mortem, scenario, and calibration
+// question — not just the evidence + assumption surfaces (#444/#445). A lever
+// named as an uncertainty on any of these leaks the same D-U integrity defect.
+// Display/suppression only: no producer number is read; a suppressed item is
+// ABSENT, and non-lever items on the same channel still ship.
+// ============================================================================
+describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
+  const LEVERS = new Set(['fac_delivery_risk']); // label "Delivery risk"
+
+  it('narrative naming the lever is dropped; a non-lever narrative ships', () => {
+    const named = makeFact({
+      decisionReview: {
+        narrative_summary: 'The outcome hinges on Delivery risk, which stays deeply uncertain.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(named, buildGraphNodeLookup(named), CTX, LEVERS)
+        .find((b) => b.card_kind === 'narrative'),
+    ).toBeUndefined();
+
+    const clean = makeFact({
+      decisionReview: {
+        narrative_summary: 'The outcome hinges on market timing, which stays uncertain.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(clean, buildGraphNodeLookup(clean), CTX, LEVERS)
+        .find((b) => b.card_kind === 'narrative'),
+    ).toBeDefined();
+  });
+
+  // ⚠ INVERTED BY RULING (2026-07-31). This test used to assert the pre_mortem
+  // card was DROPPED when its failure prose named a lever, and it was correct
+  // for the doctrine as then scoped. The guard was then MEASURED against the
+  // walk's real captured bytes (fix-2211-lens-emission.md §1.1-1.4) and found
+  // to be eating 2 of the 4 turns where the producer emitted anything — a 50%
+  // loss rate on this card from a guard written for a different surface.
+  //
+  // RULING: a pre-mortem names the lever as a failure WATCH-POINT ("imagine the
+  // option you chose did not pay off"), which is coaching, not steering. The
+  // ban is scoped out of THIS surface only; every sibling assertion in this
+  // describe block is unchanged and still passing, which is what keeps the
+  // ruling narrow. Full scope pins live in `pre-mortem-lever-ruling.test.ts`.
+  it('pre_mortem whose failure prose names the lever now SHIPS (lever ban scoped out of this surface)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        pre_mortem: { failure_scenario: 'The project fails because Delivery risk was mismanaged.' },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const card = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+      .find((b) => b.card_kind === 'pre_mortem');
+    expect(card).toBeDefined();
+    expect(card?.body).toContain('Delivery risk');
+  });
+
+  it('scenario_context whose trigger/consequence names the lever is skipped', () => {
+    const fact = makeFact({
+      decisionReview: {
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If Delivery risk spikes',
+            consequence: 'the launch slips badly.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    expect(
+      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+        .find((b) => b.card_kind === 'scenario_context'),
+    ).toBeUndefined();
+  });
+
+  it('calibration_prompt question naming the lever is dropped; non-lever prompts ship', () => {
+    const fact = makeFact({
+      decisionReview: {
+        decision_quality_prompts: [
+          { question: 'How confident are you about Delivery risk?', principle: 'Calibration' },
+          { question: 'Have you considered the base rate?', principle: 'Base rates' },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const bodies = buildCoachingBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+      .filter((b) => b.coaching_kind === 'calibration_prompt')
+      .map((b) => b.body);
+    expect(bodies).toEqual(['Have you considered the base rate?']);
+  });
+
+  it('without a lever set every free-text surface ships (byte-identical)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'The outcome hinges on Delivery risk, which stays deeply uncertain.',
+        pre_mortem: { failure_scenario: 'The project fails because Delivery risk was mismanaged.' },
+        scenario_contexts: {
+          edge_delivery_goal: {
+            trigger_description: 'If Delivery risk spikes',
+            consequence: 'the launch slips badly.',
+          },
+        },
+        decision_quality_prompts: [
+          { question: 'How confident are you about Delivery risk?', principle: 'Calibration' },
+        ],
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    const cards = buildReviewCardBlocks(fact, lookup, CTX); // no lever set
+    expect(cards.find((b) => b.card_kind === 'narrative')).toBeDefined();
+    expect(cards.find((b) => b.card_kind === 'pre_mortem')).toBeDefined();
+    expect(cards.find((b) => b.card_kind === 'scenario_context')).toBeDefined();
+    const cal = buildCoachingBlocks(fact, lookup, CTX)
+      .filter((b) => b.coaching_kind === 'calibration_prompt');
+    expect(cal).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// RC4 proportionate remedies — REWRITE-DON'T-DROP for the prescriptive
+// lexicon. Live evidence (2026-07-15 session RCA): the robustness review
+// card was DROPPED at egress for containing the word "recommendation"
+// (`prose_guard_forbidden_phrase`, sample "recommendation") on every review
+// emission — generated coaching destroyed by its own guard. The remedy for
+// a REWRITABLE lexicon offence is now a deterministic terminology
+// substitution (prompt TERMINOLOGY map: "recommendation" → "leading
+// option"); the block SURVIVES with the term rewritten. Fatal classes
+// (denial phrases, raw decimals, raw ids, lever-naming, lookup misses)
+// keep their drop remedy — pinned below.
+// ============================================================================
+
+describe('RC4 rewrite-don\'t-drop — rewritable lexicon offences survive rewritten', () => {
+  const cleanLookup = buildGraphNodeLookup(
+    makeFact({ graphNodes: STANDARD_GRAPH_NODES }),
+  );
+
+  it('robustness card SURVIVES with "recommendation" rewritten to "leading option" (tonight\'s live kill)', () => {
+    const fact = makeFact({
+      decisionReview: {
+        robustness_explanation: {
+          summary:
+            'The recommendation is robust: it holds across most plausible scenarios, and only a large shift in delivery risk would overturn it.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    const robustness = blocks.filter((b) => b.card_kind === 'robustness');
+    expect(robustness).toHaveLength(1);
+    expect(robustness[0]!.body).toBe(
+      'The leading option is robust: it holds across most plausible scenarios, and only a large shift in delivery risk would overturn it.',
+    );
+    expect(robustness[0]!.body).not.toMatch(/\brecommendations?\b/i);
+  });
+
+  // ── FATAL classes keep the drop remedy — do NOT weaken. ──────────────────
+
+  it('still DROPS when a denial phrase (fatal class) accompanies a rewritable term', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary:
+          'Nothing changed on the model, so the recommendation stands as before.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+
+  it('still DROPS on a raw decimal even when a rewritable term is also present', () => {
+    const fact = makeFact({
+      decisionReview: {
+        robustness_explanation: {
+          summary: 'The recommendation is sensitive at the 0.42 threshold.',
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'robustness')).toHaveLength(0);
+  });
+
+  it('still DROPS on an internal-jargon phrase with no safe rewrite', () => {
+    const fact = makeFact({
+      decisionReview: {
+        narrative_summary: 'The validator confirmed the launch plan is coherent.',
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+    });
+    const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
+    expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Wave-2 ask 1 (UI-SEM-085, 0.19.0): producer-owned category + priority on
+// EVERY guidance block CEE emits. Before this, the UI invented both on 10/10
+// live blocks. The pins below run the REAL builders over the rich fixture and
+// assert (a) presence on every block, (b) coherence with the single
+// guidance-signals source — a build site that hand-rolls its own values, or a
+// new site that forgets the fields, goes red here.
+// ============================================================================
+
+describe('wave-2 guidance signals — every emitted block carries coherent category + priority', () => {
+  const fact = makeFact({
+    decisionReview: RICH_DR,
+    graphNodes: STANDARD_GRAPH_NODES,
+    factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+  });
+  const lookup = buildGraphNodeLookup(fact);
+  const conf = buildFactorConfidenceLookup(fact);
+
+  const review = buildReviewCardBlocks(fact, lookup, CTX);
+  const coaching = buildCoachingBlocks(fact, lookup, CTX);
+  const evidence = buildEvidenceBlocks(fact, lookup, conf, CTX);
+  const stale = buildStaleRerunCoachingBlock(CTX);
+
+  it('positive control: the fixture produces blocks of every family', () => {
+    expect(review.length).toBeGreaterThan(0);
+    expect(coaching.length).toBeGreaterThan(0);
+    expect(evidence.length).toBeGreaterThan(0);
+    expect(stale).not.toBeNull();
+  });
+
+  it('every ReviewCard carries category+priority derived from ITS severity', () => {
+    for (const b of review) {
+      const expected = guidanceSignalsForSeverity(b.severity);
+      expect(b.category, `${b.card_kind} category`).toBe(expected.category);
+      expect(b.priority, `${b.card_kind} priority`).toBe(expected.priority);
+    }
+  });
+
+  it('every EvidenceBlock carries category+priority derived from ITS severity', () => {
+    for (const b of evidence) {
+      const expected = guidanceSignalsForSeverity(b.severity);
+      expect(b.category).toBe(expected.category);
+      expect(b.priority).toBe(expected.priority);
+    }
+  });
+
+  it('every CoachingBlock carries category+priority derived from ITS coaching_kind', () => {
+    for (const b of [...coaching, stale!]) {
+      const expected = guidanceSignalsForCoachingKind(b.coaching_kind);
+      expect(b.category, `${b.coaching_kind} category`).toBe(expected.category);
+      expect(b.priority, `${b.coaching_kind} priority`).toBe(expected.priority);
+    }
+  });
+
+  it('the stale-rerun nudge is should_fix — the UI can filter housekeeping out of the framing slot', () => {
+    expect(stale!.coaching_kind).toBe('orientation');
+    expect(stale!.category).toBe('should_fix');
+  });
+
+  it('priority is ALWAYS the 1:1 category derivation (the stated 0.19.0 contract)', () => {
+    for (const b of [...review, ...coaching, ...evidence, stale!]) {
+      expect(b.category).toBeDefined();
+      expect(b.priority).toBe(PRIORITY_BY_CATEGORY[b.category!]);
+    }
+  });
+});
+
+// ============================================================================
+// ROADMAP 1.120 residual (UI-SEM-085, @talchain/schemas 0.20.0/0.21.0):
+// producer-owned `signal_code` (+ `signal` where deterministic) on EVERY
+// guidance block. Before this, the UI INVENTED signal_code from `block.type`
+// on 10/10 live blocks — matching no real detector code. The pins below run
+// the REAL builders over the rich fixture and assert (a) presence on every
+// block, (b) the code is derived from the block's OWN kind via the single
+// guidance-signals source, (c) the exact vocabulary values (the mutation
+// target — flipping a code in the map turns these red), and (d) the negative
+// control: no block ever re-invents its code from its `type`.
+// ============================================================================
+
+describe('1.120 signal provenance — every emitted block carries a coherent signal_code', () => {
+  const fact = makeFact({
+    decisionReview: RICH_DR,
+    graphNodes: STANDARD_GRAPH_NODES,
+    factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+  });
+  const lookup = buildGraphNodeLookup(fact);
+  const conf = buildFactorConfidenceLookup(fact);
+
+  const review = buildReviewCardBlocks(fact, lookup, CTX);
+  const coaching = buildCoachingBlocks(fact, lookup, CTX);
+  const evidence = buildEvidenceBlocks(fact, lookup, conf, CTX);
+  const stale = buildStaleRerunCoachingBlock(CTX);
+  const all = [...review, ...coaching, ...evidence, stale!];
+
+  // Positive control: the absence/negative assertions below are only
+  // meaningful if the fixture actually produces blocks to inspect.
+  it('positive control: the fixture produces review, coaching and evidence blocks', () => {
+    expect(review.length).toBeGreaterThan(0);
+    expect(coaching.length).toBeGreaterThan(0);
+    expect(evidence.length).toBeGreaterThan(0);
+    expect(stale).not.toBeNull();
+  });
+
+  it('every emitted block carries a non-empty signal_code', () => {
+    for (const b of all) {
+      expect(b.signal_code, `${b.type} signal_code present`).toBeDefined();
+      expect(typeof b.signal_code).toBe('string');
+      expect((b.signal_code ?? '').length).toBeGreaterThan(0);
+    }
+  });
+
+  it('every ReviewCard signal_code is derived from ITS card_kind (single source)', () => {
+    for (const b of review) {
+      const expected = reviewCardSignals(b.card_kind, b.severity).signal_code;
+      expect(b.signal_code, `${b.card_kind} signal_code`).toBe(expected);
+    }
+  });
+
+  it('every CoachingBlock signal_code is derived from ITS coaching_kind (single source)', () => {
+    for (const b of [...coaching, stale!]) {
+      const expected = guidanceSignalsForCoachingKind(b.coaching_kind).signal_code;
+      expect(b.signal_code, `${b.coaching_kind} signal_code`).toBe(expected);
+    }
+  });
+
+  it('every EvidenceBlock signal_code is derived from the evidence detector (single source)', () => {
+    for (const b of evidence) {
+      expect(b.signal_code).toBe(evidenceSignals(b.severity).signal_code);
+    }
+  });
+
+  // The vocabulary pin — the mutation target. Flipping any entry in the
+  // guidance-signals code maps turns exactly this test red.
+  it('pins the exact signal_code vocabulary per card_kind', () => {
+    const expectedByCardKind: Record<string, string> = {
+      narrative: GUIDANCE_SIGNAL_CODES.ANALYSIS_NARRATIVE,
+      pre_mortem: GUIDANCE_SIGNAL_CODES.PRE_MORTEM,
+      flip_threshold: GUIDANCE_SIGNAL_CODES.FLIP_THRESHOLD,
+      bias: GUIDANCE_SIGNAL_CODES.COGNITIVE_BIAS,
+      robustness: GUIDANCE_SIGNAL_CODES.FRAGILE_RESULT,
+      evidence_priority: GUIDANCE_SIGNAL_CODES.EVIDENCE_GAP,
+      assumption: GUIDANCE_SIGNAL_CODES.ASSUMPTION_CHECK,
+      scenario_context: GUIDANCE_SIGNAL_CODES.SCENARIO_CONTEXT,
+    };
+    for (const b of review) {
+      expect(b.signal_code, `${b.card_kind} → code`).toBe(expectedByCardKind[b.card_kind]);
+    }
+  });
+
+  it('pins the exact signal_code vocabulary per coaching_kind + the evidence code', () => {
+    const expectedByCoachingKind: Record<string, string> = {
+      orientation: GUIDANCE_SIGNAL_CODES.STALE_ANALYSIS,
+      bias_signal: GUIDANCE_SIGNAL_CODES.COGNITIVE_BIAS,
+      assumption_check: GUIDANCE_SIGNAL_CODES.ASSUMPTION_CHECK,
+      calibration_prompt: GUIDANCE_SIGNAL_CODES.CALIBRATION_PROMPT,
+    };
+    for (const b of [...coaching, stale!]) {
+      expect(b.signal_code, `${b.coaching_kind} → code`).toBe(
+        expectedByCoachingKind[b.coaching_kind],
+      );
+    }
+    for (const b of evidence) {
+      expect(b.signal_code).toBe(GUIDANCE_SIGNAL_CODES.EVIDENCE_GAP);
+    }
+  });
+
+  // The card `assumption` and the coaching `assumption_check` read the SAME
+  // decision_review source (key_assumptions), so they MUST share one code — a
+  // deliberate unification (never two names for one meaning).
+  it('unifies the two assumption surfaces under one code', () => {
+    const cardAssumption = review.find((b) => b.card_kind === 'assumption');
+    const coachAssumption = coaching.find((b) => b.coaching_kind === 'assumption_check');
+    expect(cardAssumption).toBeDefined();
+    expect(coachAssumption).toBeDefined();
+    expect(cardAssumption!.signal_code).toBe(GUIDANCE_SIGNAL_CODES.ASSUMPTION_CHECK);
+    expect(coachAssumption!.signal_code).toBe(cardAssumption!.signal_code);
+  });
+
+  // Negative control: the ORIGINAL defect was signal_code invented from
+  // block.type ('review_card' / 'coaching' / 'evidence'). Prove no block
+  // reproduces that, and that every code is a known registry member.
+  it('never re-invents signal_code from block.type, and every code is a known registry member', () => {
+    const known = new Set<string>(Object.values(GUIDANCE_SIGNAL_CODES));
+    for (const b of all) {
+      expect(b.signal_code).not.toBe(b.type);
+      expect(known.has(b.signal_code as string), `${b.signal_code} is a registry code`).toBe(true);
+    }
+  });
+
+  // `signal` (display line) is emitted only where deterministic: the
+  // stale-rerun nudge. Everything else is code-only (NEVER fabricate).
+  it('emits the deterministic signal line on the stale-rerun nudge, code-only elsewhere', () => {
+    expect(stale!.signal_code).toBe(GUIDANCE_SIGNAL_CODES.STALE_ANALYSIS);
+    expect(stale!.signal).toBe('Graph changed since the last analysis');
+    for (const b of [...review, ...coaching, ...evidence]) {
+      expect(b.signal, `${b.type} is code-only`).toBeUndefined();
+    }
+  });
+
+  // Any emitted signal line respects the 140-char wire bound and is non-empty.
+  it('every emitted signal line is within the wire bound', () => {
+    for (const b of all) {
+      if (b.signal !== undefined) {
+        expect(b.signal.length).toBeGreaterThan(0);
+        expect(b.signal.length).toBeLessThanOrEqual(140);
+      }
+    }
   });
 });

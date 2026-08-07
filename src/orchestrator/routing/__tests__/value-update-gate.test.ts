@@ -15,7 +15,11 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { isValueUpdatePhrasing, __testOnly } from '../value-update-gate.js';
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+  __testOnly,
+} from '../value-update-gate.js';
 
 interface Case {
   readonly label: string;
@@ -39,6 +43,66 @@ const SUPPRESS_CASES: ReadonlyArray<Case> = [
       'All of our developers are middleweight, so please update the existing team maturity to be mid-weight developers',
     expect: true,
   },
+  // Clause C — goal-target phrasings (lane 20). The live staging leak
+  // (scenario 55df6984…, turn fac8dc19…, 2026-07-07): "set a success
+  // target OF …" carries no " to ", missed clause A, dispatched to
+  // edit_graph, and the edit LLM wrote non-contract fields onto the
+  // goal node under a false "Success target … set" receipt. Goal-target
+  // registration is add_constraint's contract (the only writer of
+  // goal_threshold_raw/_unit/_cap/goal_threshold), so these phrasings
+  // must reach the TurnExecutor tool-use path.
+  {
+    label: 'goal target "of" (live leak, verbatim)',
+    message:
+      'Set a success target of a 15% cost reduction on the goal Reduce Operating Costs',
+    expect: true,
+  },
+  {
+    label: 'goal target "of" without goal name',
+    message: 'Set a success target of a 15% cost reduction',
+    expect: true,
+  },
+  {
+    label: 'goal target "to" (lane-15 dead-end phrasing)',
+    message: 'Set the success target to a 15% increase',
+    expect: true,
+  },
+  { label: 'goal target raise',                 message: 'Raise the success target to 20%',                                expect: true },
+  { label: 'goal target update at',             message: 'Update our success target at 90% retention',                     expect: true },
+
+  // Clause D — constraint phrasings (add_constraint dead-letter fix).
+  // PR #464 shipped an honest refusal for value-edits on non-factor nodes
+  // whose closing sentence promises "ask me to add a constraint on it" and
+  // renders a `chip_prompt_refuse_constraint` chip replaying
+  // "Add a constraint on <label>." That text hit EDIT_GRAPH_POSITIVE_REGEX
+  // via `add`, was NOT caught by any clause here (`add` is excluded from
+  // clauses A/B as structural), dispatched to the V4 edit_graph LLM — which
+  // has NO constraint operation — and no-opped into the
+  // buildEditClarifyFallbackParts clarifier. Live-proven: 3 probes, 0 blocks,
+  // exit_path edit_graph, no constraint EVER added, INCLUDING a fully
+  // specified probe (so under-specification was never the cause).
+  // `add_constraint` is registered (registry.ts) and the router tool-schema
+  // teaches it, so these phrasings MUST reach the TurnExecutor tool-use path.
+  {
+    label: 'constraint — the refusal chip verbatim (under-specified)',
+    message: 'Add a constraint on Key Talent Attrition.',
+    expect: true,
+  },
+  {
+    label: 'constraint — fully specified (live probe 2, verbatim)',
+    message: 'Add a constraint on Key Talent Attrition of at most 0.5.',
+    expect: true,
+  },
+  {
+    label: 'constraint on a factor (live probe 3, verbatim)',
+    message: 'Add a constraint on Office Rent Cost of at most 0.5.',
+    expect: true,
+  },
+  { label: 'constraint — bare add',             message: 'Add a constraint',                                               expect: true },
+  { label: 'constraint — plural',               message: 'Add constraints on Office Rent Cost',                            expect: true },
+  { label: 'constraint — "put a constraint"',   message: 'Put a constraint on the cost factor',                            expect: true },
+  { label: 'constraint — "apply a constraint"', message: 'Apply a constraint to Key Talent Attrition below 0.5',           expect: true },
+  { label: 'constraint — "place a constraint"', message: 'Place a hard constraint on headcount',                           expect: true },
 ];
 
 const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
@@ -72,6 +136,10 @@ const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
   // Trivial non-edits
   { label: 'meta question',                     message: 'What about team dynamics?',                                      expect: false },
   { label: 'plain greeting',                    message: 'Hello',                                                          expect: false },
+  // Goal-target NON-edits (lane 20) — questions/descriptions about the
+  // target carry no gate verb driving the noun, and must not be swept.
+  { label: 'goal target question',              message: 'What is our success target?',                                    expect: false },
+  { label: 'goal target explain',               message: 'Explain the success target',                                     expect: false },
 
   // Meta-noun guard — model-quality requests with "the model" / "the
   // graph" / "the diagram" as the verb's object are whole-graph
@@ -88,6 +156,54 @@ const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
   { label: 'plural kind "to be risks"',         message: 'set X to be risks',                                              expect: false },
   { label: 'plural kind "to become options"',   message: 'update nodes to become options',                                 expect: false },
   { label: 'plural kind "to be factors"',       message: 'set the goals to be factors',                                    expect: false },
+
+  // Clause D negatives — the constraint clause must stay NARROW.
+  // The clause requires a constraint-INTENT verb driving the noun within a
+  // tight window. Removal is NOT add_constraint's contract (the handler
+  // only adds), so `remove`/`delete` MUST stay on the edit_graph route —
+  // routing them to TurnExecutor would trade one dead end for another.
+  { label: 'constraint removal stays on edit_graph',   message: 'Remove the constraint on Office Rent Cost',               expect: false },
+  { label: 'constraint deletion stays on edit_graph',  message: 'Delete the constraint on churn',                          expect: false },
+  // `set` is EXCLUDED from clause D and this row is the lock.
+  // Suppressing edit_graph sends the message to TurnExecutor, whose first
+  // stop is the deterministic value-update pre-route. That module's
+  // EDIT_VERB_PATTERN contains `set` but NOT `add` (measured), and the
+  // module has no notion of "constraint"/"at most" — so a suppressed
+  // "Set a constraint on churn of at most 5%" would satisfy its
+  // verb + quantity + factor-candidate predicates and silently set
+  // churn's VALUE to 5% instead of registering a 5% CEILING. A wrong
+  // mutation is strictly worse than the dead end clause D fixes. Keeping
+  // this false leaves the phrasing exactly where it is today.
+  // Re-admitting `set` REQUIRES teaching the deterministic pre-route to
+  // stand down on constraint phrasings first — if you flip this row,
+  // that work is your precondition, not an afterthought.
+  { label: '"set a constraint" excluded (deterministic pre-route collision)', message: 'Set a constraint on churn of at most 5%', expect: false },
+  // Questions / descriptions about constraints carry no constraint-intent
+  // verb driving the noun and must not be swept into the gate.
+  { label: 'constraint question',               message: 'What constraints do I have?',                                    expect: false },
+  { label: 'constraint explain',                message: 'Explain the constraint on churn',                                expect: false },
+  { label: 'constraint describe',               message: 'Describe the constraints in my model',                           expect: false },
+  // Distant co-occurrence — the noun is not the verb's object. The tight
+  // token window keeps these out (mirrors clause C's rationale).
+  {
+    label: 'constraint distant co-occurrence',
+    message: 'Update the model and then tell me how you would describe the constraint',
+    expect: false,
+  },
+  // Structural `add` requests WITHOUT the constraint noun must be
+  // untouched — these are add_node territory and are pinned by
+  // route-v2-edit-lifecycle test #5.
+  { label: 'add risk (structural, unchanged)',  message: 'Add a risk for coordination overhead',                           expect: false },
+  { label: 'add factor (structural, unchanged)', message: 'add market competition as a factor',                            expect: false },
+  // Structural `add_node` requests that merely CONTAIN "constraint" as
+  // part of the new node's NAME. Clause D requires the constraint noun to
+  // be the verb's DIRECT OBJECT precisely so these are not stolen from
+  // edit_graph: a first-draft clause D using clause C's looser
+  // `(?:\s+\S+){0,4}?` token window matched BOTH of these (measured), which
+  // would have silently broken structural add_node for any node whose label
+  // ends in "constraint". Locked here so a future widening fails loudly.
+  { label: 'add factor NAMED "...constraint"',  message: 'Add a factor for budget constraint',                             expect: false },
+  { label: 'add risk NAMED "...constraint"',    message: 'Add a risk called supply constraint',                            expect: false },
 ];
 
 describe('isValueUpdatePhrasing — table-driven gate behaviour', () => {
@@ -117,6 +233,59 @@ describe('isValueUpdatePhrasing — table-driven gate behaviour', () => {
     it('is case-insensitive', () => {
       expect(isValueUpdatePhrasing('SET CHURN TO 5%')).toBe(true);
       expect(isValueUpdatePhrasing('Set Churn To 5%')).toBe(true);
+    });
+  });
+
+  describe('shouldSuppressEditDispatchForValueUpdate — part-accounting stand-down (2026-07-20)', () => {
+    it('suppresses a PURE value update exactly as isValueUpdatePhrasing does', () => {
+      expect(shouldSuppressEditDispatchForValueUpdate('set churn to 5%')).toBe(true);
+      expect(shouldSuppressEditDispatchForValueUpdate('increase price by 10%')).toBe(true);
+    });
+
+    it("suppresses #549's value+value compound (no structural part — the batch lane owns it)", () => {
+      // NB: labels must not contain a literal kind keyword ('Factor X'),
+      // or the PRE-EXISTING kind-change lookahead already keeps the
+      // message on the edit lane — that behaviour is untouched.
+      expect(
+        shouldSuppressEditDispatchForValueUpdate(
+          'Set Marketing Budget to 0.6 and Sales Budget to 0.8',
+        ),
+      ).toBe(true);
+    });
+
+    // POSITIVE CONTROL (mutation-checked 2026-07-20). Each case below FIRST
+    // asserts `isValueUpdatePhrasing` is TRUE, so the stand-down is provably
+    // the thing that flips the suppressor to false. Without that control the
+    // assertion is VACUOUS: the obvious phrasing
+    // "...and add a new factor called Shipping costs" puts the kind noun
+    // 'factor' inside the gate's OWN kind-change scan window, so the gate
+    // already returns false and `toBe(false)` passes for the wrong reason
+    // (reverting the stand-down left this suite green — the defect that
+    // prompted this control).
+    const REACHABLE_MIXED = [
+      'Increase Support cost by 10 and add a new factor called Shipping costs',
+      'Set Support cost to 30 and create one called Shipping costs',
+      'Set Support cost to 30 and remove the Localisation factor',
+      'Set Support cost to 30 and link it to Gross margin',
+      'Add a new factor called Shipping costs and set Support cost to 30',
+    ] as const;
+
+    it.each(REACHABLE_MIXED)(
+      'STANDS DOWN for a mixed value+structural message so the edit lane serves both halves: %s',
+      (message) => {
+        // Positive control: the gate itself DOES fire on this phrasing...
+        expect(isValueUpdatePhrasing(message)).toBe(true);
+        // ...and the stand-down is what releases it to the edit lane.
+        // Pre-fix, this suppressed edit dispatch and the deterministic lane
+        // silently swallowed the structural half (rehearsal defect A class).
+        expect(shouldSuppressEditDispatchForValueUpdate(message)).toBe(false);
+      },
+    );
+
+    it('never suppresses what isValueUpdatePhrasing never suppressed (structural-only messages)', () => {
+      expect(
+        shouldSuppressEditDispatchForValueUpdate('add a new factor called Shipping costs'),
+      ).toBe(false);
     });
   });
 

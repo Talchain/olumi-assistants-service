@@ -85,7 +85,12 @@ const LABEL_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)/g;
 // Regex to extract compound number expressions like "£200k", "$1.5m", "3bn" from labels.
 // Captures: (number)(multiplier suffix). Supports "bn" as a two-letter billion suffix.
 const COMPOUND_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)\s*(bn|[kmb])\b/gi;
-const MULTIPLIER_MAP: Record<string, number> = { k: 1_000, m: 1_000_000, b: 1_000_000_000, bn: 1_000_000_000 };
+// ⚠ EXPORTED SOLELY SO THE CANONICAL ALPHABET'S UNION GUARD CAN READ IT
+// (ROADMAP 2.330). See the note on `MULTIPLIERS` in
+// `src/cee/extraction/numeric-parser.ts`: a sibling magnitude list that cannot
+// be imported is a sibling that cannot be compared, and an uncomparable
+// sibling is exactly where a key goes missing.
+export const MULTIPLIER_MAP: Record<string, number> = { k: 1_000, m: 1_000_000, b: 1_000_000_000, bn: 1_000_000_000 };
 
 /**
  * Extract numeric tokens from a label string (e.g. winner.label, option_label).
@@ -261,8 +266,13 @@ const DESCRIPTIVE_FIELD_KEYS: ReadonlyArray<string> = [
   'pre_mortem',
 ];
 
-/** Recursively collect string values from an unknown value. */
-function collectStrings(value: unknown): string[] {
+/**
+ * Recursively collect string VALUES (never object keys) from an unknown value.
+ * Exported so the POST-parse contract gate (`contract-gate.ts`) reuses the SAME
+ * walker for its fabricated-continuity phrase scan instead of maintaining a
+ * second recursive string collector that could drift (derive-don't-mirror).
+ */
+export function collectStrings(value: unknown): string[] {
   if (typeof value === 'string') return [value];
   if (Array.isArray(value)) return value.flatMap(collectStrings);
   if (typeof value === 'object' && value !== null) {

@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractCompoundGoals,
   toGoalConstraints,
+  normaliseConstraintUnits,
   remapConstraintTargets,
   generateConstraintNodes,
   generateConstraintEdge,
@@ -1488,5 +1489,111 @@ describe("subject-optional constraint extraction", () => {
 
     expect(result.primaryGoal).toBeDefined();
     expect(result.isCompound).toBe(true);
+  });
+});
+
+// ============================================================================
+// ROADMAP 1.52 — goal-fit sign inversion: reduction-framed ("by") extraction
+// ============================================================================
+//
+// "reduce/decrease/cut/lower/shrink X by N%" states a CHANGE amount, not
+// an absolute level. Before this fix these verbs matched NO pattern at
+// all (silently dropped) OR — worse, at the LLM/add_constraint layer —
+// got read as the naive positive "at_least +N%", which structurally
+// inverts the claim whenever the constrained metric is itself a signed
+// delta (6B capture: displayed ~0%, honest ~97-99%). The extractor's
+// job here is the deterministic backstop: emit the flipped `<=`/negative
+// encoding, never the naive positive reading.
+describe("reduction-framed ('by') constraint extraction — ROADMAP 1.52", () => {
+  it("extracts 'reduce X by N%' as operator <= with a NEGATIVE value (the flipped, correct encoding)", () => {
+    const brief = "Reduce cost of living by 15% by relocating to Manchester or staying in London.";
+    const result = extractCompoundGoals(brief);
+
+    const costConstraint = result.constraints.find((c) =>
+      c.targetName.toLowerCase().includes("cost")
+    );
+    expect(costConstraint).toBeDefined();
+    expect(costConstraint?.operator).toBe("<=");
+    // The naive/buggy reading would be operator ">=", value +0.15 — this
+    // pins the corrected encoding from the traced 6B bug.
+    expect(costConstraint?.value).toBeCloseTo(-0.15);
+    expect(costConstraint?.unit).toBe("%");
+  });
+
+  it("extracts 'decrease/cut/lower/shrink X by N' with the same flipped sign", () => {
+    const cases = [
+      ["decrease churn by 5%", "churn", -0.05],
+      ["cut marketing spend by £2000", "marketing spend", -2000],
+      ["lower headcount by 3", "headcount", -3],
+      ["shrink the budget by 10%", "the budget", -0.1],
+    ] as const;
+
+    for (const [brief, targetSubstring, expectedValue] of cases) {
+      const result = extractCompoundGoals(brief);
+      const c = result.constraints.find((c) =>
+        c.targetName.toLowerCase().includes(targetSubstring.toLowerCase())
+      );
+      expect(c, `expected a constraint for "${brief}"`).toBeDefined();
+      expect(c?.operator).toBe("<=");
+      expect(c?.value).toBeCloseTo(expectedValue);
+    }
+  });
+
+  it("extracts 'while reducing X by Y' as a subordinate compound-goal constraint", () => {
+    const brief = "Grow revenue to £2M while reducing marketing spend by 20%.";
+    const result = extractCompoundGoals(brief);
+
+    expect(result.primaryGoal).toBeDefined();
+    const spendConstraint = result.constraints.find((c) =>
+      c.targetName.toLowerCase().includes("marketing spend")
+    );
+    expect(spendConstraint).toBeDefined();
+    expect(spendConstraint?.operator).toBe("<=");
+    expect(spendConstraint?.value).toBeCloseTo(-0.2);
+  });
+
+  it("does NOT extract an absolute-level restatement ('reduce X to Y') as a reduction constraint", () => {
+    // "to" states a level, not a change — deliberately left unmatched by
+    // the reduction patterns (conservative: no verb+"by", no guess).
+    const brief = "Reduce cost of living to £40k.";
+    const result = extractCompoundGoals(brief);
+
+    // ROADMAP 2.653: bound by SHAPE (a reduction is the only `<=` carrying a
+    // negative value), not by a label substring. The old predicate keyed on the
+    // machine-suffix label "… reduction target"; that name is gone, and a
+    // predicate on display copy would have gone quietly vacuous the moment it
+    // changed — passing while a reduction constraint really was emitted.
+    const flippedMatch = result.constraints.find(
+      (c) => c.operator === "<=" && c.value < 0
+    );
+    expect(flippedMatch).toBeUndefined();
+  });
+
+  it("bare form 'reduce by N%' (no named target) still flips sign, targetName unspecified", () => {
+    const result = extractCompoundGoals("Reduce by 15% please.");
+    // ROADMAP 2.653: same re-binding as above — shape, not display copy.
+    const c = result.constraints.find((c) => c.operator === "<=" && c.value < 0);
+    expect(c).toBeDefined();
+    expect(c?.targetName).toBe("unspecified");
+    expect(c?.operator).toBe("<=");
+    expect(c?.value).toBeCloseTo(-0.15);
+  });
+
+  it("toGoalConstraints round-trips the flipped negative value untouched", () => {
+    const result = extractCompoundGoals("Reduce cost by 15%.");
+    const goalConstraints = toGoalConstraints(result.constraints);
+    const cost = goalConstraints.find((c) => c.operator === "<=" && c.value < 0);
+    expect(cost).toBeDefined();
+    expect(cost?.value).toBeCloseTo(-0.15);
+  });
+});
+
+describe("normaliseConstraintUnits — sign-agnostic fractional relabel (ROADMAP 1.52)", () => {
+  it("relabels a NEGATIVE fractional '%' value to 'fraction' (not just positive ones)", () => {
+    const result = extractCompoundGoals("Reduce cost by 15%.");
+    const normalised = normaliseConstraintUnits(result.constraints);
+    const cost = normalised.find((c) => c.value < 0);
+    expect(cost).toBeDefined();
+    expect(cost?.unit).toBe("fraction");
   });
 });

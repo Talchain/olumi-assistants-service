@@ -36,13 +36,11 @@ vi.mock("../../src/config/index.js", () => ({
 
 describe("Anthropic adapter — currency instruction in prompts", () => {
   let buildDraftPrompt: any;
-  let buildRepairPrompt: any;
   let buildClarifyPrompt: any;
 
   beforeEach(async () => {
     const mod = await import("../../src/adapters/llm/anthropic.js");
     buildDraftPrompt = (mod as any).__test_only.buildDraftPrompt;
-    buildRepairPrompt = (mod as any).__test_only.buildRepairPrompt;
     buildClarifyPrompt = (mod as any).__test_only.buildClarifyPrompt;
   });
 
@@ -67,17 +65,9 @@ describe("Anthropic adapter — currency instruction in prompts", () => {
     expect(result.userContent).not.toContain("[CURRENCY_CONTEXT]");
   });
 
-  it("buildRepairPrompt includes currencyInstruction in user content", async () => {
-    const instruction = buildCurrencyInstruction({ symbol: "$", code: "USD" });
-    const result = await buildRepairPrompt({
-      graph: { nodes: [], edges: [] },
-      violations: ["test violation"],
-      brief: "Test brief",
-      currencyInstruction: instruction,
-    });
-    expect(result.userContent).toContain("[CURRENCY_CONTEXT]");
-    expect(result.userContent).toContain("$ (USD)");
-  });
+  // "buildRepairPrompt includes currencyInstruction" REMOVED — ROADMAP 2.763
+  // deleted the repair prompt builder with the capability. Currency wiring on
+  // the surviving prompt builders is still covered above and below.
 
   it("buildClarifyPrompt includes currencyInstruction in user content", async () => {
     const instruction = buildCurrencyInstruction({ symbol: "€", code: "EUR" });

@@ -30,6 +30,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 import type { HandlerFactWithTurn } from './types/handler-fact.js';
 import type { SessionTurnWithContent } from './session/conversation-content.js';
+import type { GraphWriteFailureDisclosure } from './session/store.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
@@ -45,7 +46,8 @@ import {
   summaryIsNoteworthy,
   type InterventionConversion,
 } from './tools/plot-intervention-scale.js';
-import { assessAnalysisReadiness, AnalysisNotReadyError } from './tools/handlers/analysis-ready-core.js';
+import { assessAnalysisReadiness, AnalysisNotReadyError, type ReadinessResult } from './tools/handlers/analysis-ready-core.js';
+import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from './coaching/coaching-state-snapshot.js';
@@ -61,9 +63,34 @@ import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
-import { SessionReadError, type SessionStore } from './session/store.js';
+import { SessionReadError, GraphStaleWriteError, type SessionStore } from './session/store.js';
+// F4 — re-exported so turn-executor can detect a CAS conflict at its commit
+// boundary WITHOUT importing session/store directly (the state-write-invariant
+// guard bounds that import surface to session/, commit.ts, build-turn-context).
+export { GraphStaleWriteError };
 import { getSessionStore } from './session/index.js';
 import type { PendingAction } from './session/pending-action.js';
+
+/**
+ * F2 (Codex deep-review) — discriminated canonical graph-read state.
+ *
+ * `persistedGraph: null` used to conflate two very different facts: "the
+ * canonical read SUCCEEDED and no graph is stored" (adopt-on-first-touch is
+ * SAFE) versus "the canonical read FAILED / degraded" (adopting the client's
+ * `graph_state` would CLOBBER a real server model we simply could not see).
+ * The adopt chokepoint derived `hasServerModel` from the nullable value, so a
+ * transient read failure masqueraded as "no server model" and let Row A / Row B
+ * overwrite authoritative state.
+ *
+ * This explicit state removes the conflation:
+ *   - `ok_present` — read succeeded, a graph exists (carries it).
+ *   - `ok_absent`  — read succeeded, no graph stored (first-touch adopt SAFE).
+ *   - `degraded`   — the read threw; the true state is UNKNOWN (fail closed).
+ */
+export type CanonicalGraphReadState =
+  | { readonly status: 'ok_present'; readonly graph: unknown }
+  | { readonly status: 'ok_absent' }
+  | { readonly status: 'degraded'; readonly errorCode: string };
 
 export interface EnrichedTurnContext extends TurnContext {
   /**
@@ -79,6 +106,52 @@ export interface EnrichedTurnContext extends TurnContext {
    * so fact-loading and other consumers that read only metadata are unaffected.
    */
   readonly prior_turns: readonly SessionTurnWithContent[];
+  /**
+   * How many conversation turns EXIST for this scenario — the store's pre-cap
+   * count, not `prior_turns.length`.
+   *
+   * `prior_turns` is a WINDOW (`SESSION_READ_WINDOW_TURNS`, default 20). Its
+   * length was being reported to the LLM as the conversation's total length,
+   * so on a 78-turn scenario the coach said "Total turn count on record for
+   * this conversation is 20" (live probe, build `f00b8ef`, 2026-07-25).
+   *
+   * `null` means UNKNOWN — the count read failed or the store predates
+   * `countTurns` (test mocks). Consumers must then suppress any total rather
+   * than substituting `prior_turns.length`; substituting it is the defect.
+   *
+   * Optional on the type so the many hand-constructed test contexts keep
+   * compiling (mirrors `most_recent_pending_actions`); production
+   * `buildTurnContext` always sets it.
+   */
+  readonly prior_turns_total?: number | null;
+  /**
+   * The SCENARIO's newest non-noop `run_analysis` fact — read past the window,
+   * `WHERE scenario_id = … ORDER BY created_at DESC LIMIT 1`.
+   *
+   * `prior_facts` below is a WINDOW: its facts are fetched by an `IN` over the
+   * 20 turn rows `readRecent` returned. The T1 claim-safety permission was
+   * read off that array, so a `run_analysis` fact whose parent turn had aged
+   * out was invisible and the "no analysis ⇒ nothing to withhold" branch fired
+   * on a scenario that DOES have a withheld analysis. This field is what lets
+   * the permission describe the scenario. Consumed ONLY through
+   * `readMayNameLeadingOptionVerdict` — never read directly, or it becomes a
+   * second derivation.
+   *
+   * `null` = the scenario has no such fact, OR the read did not run; those two
+   * are told apart by `newest_analysis_fact_read_ok`, never by this field.
+   *
+   * Optional on the type so hand-constructed test contexts keep compiling
+   * (mirrors `prior_turns_total`); production `buildTurnContext` always sets it.
+   */
+  readonly newest_analysis_fact?: HandlerFact | null;
+  /**
+   * Did the scenario-scoped analysis-fact read execute and succeed?
+   *
+   * `false` covers a thrown read AND a store that does not implement the
+   * method. It is the ONLY input that arms the fail-closed truncation guard,
+   * and it can only make the permission more restrictive — never less.
+   */
+  readonly newest_analysis_fact_read_ok?: boolean;
   /**
    * Handler facts for prior_turns (V5 Group 1: used by coaching-cache
    * reader to resolve decision_review enrichment and last coaching signal).
@@ -131,6 +204,21 @@ export interface EnrichedTurnContext extends TurnContext {
    * scenarioBriefText behaviour).
    */
   readonly persistedGraph: unknown | null;
+  /**
+   * F2 (Codex deep-review) — the discriminated result of the canonical
+   * `scenarios.graph` read that produced {@link persistedGraph}. Consumed by
+   * the graph-commit chokepoint (turn-executor `graphForCommit`) so that a
+   * DEGRADED read is never treated as "no server model" (which would let
+   * adopt-on-first-touch clobber authoritative state). `persistedGraph` stays
+   * as-is (null on degraded) for the read-only projections (DecisionContext,
+   * coaching, freshness) that legitimately degrade to "no graph".
+   *
+   * Optional on the type (mirrors `most_recent_pending_actions`) so the many
+   * hand-constructed test contexts keep compiling; production `buildTurnContext`
+   * always sets it, and the chokepoint derives a safe fallback from
+   * `persistedGraph` when it is absent.
+   */
+  readonly persistedGraphRead?: CanonicalGraphReadState;
   /**
    * V5 Wave 2: pending actions emitted by the most recent prior turn.
    * Populated from `SessionStore.readMostRecentPendingActions`. Empty
@@ -260,6 +348,16 @@ export interface RunAnalysisScenarioSnapshot {
    * and `goal_node_id`.
    */
   readonly rawPersistedGraph: unknown;
+  /**
+   * Lane 28 — brief pipeline: the persisted `scenarios.brief_text`,
+   * loaded on the SAME round trip as the graph (via
+   * `loadPersistedScenarioStateStrict` → `store.loadGraphAndBriefText`).
+   * Absent (not null) when no brief is persisted — the construction
+   * site spreads the key conditionally. Mirrors the optional
+   * `briefText` on run-analysis.ts's `RunAnalysisScenarioSnapshot`
+   * (the handler-side declaration of this same snapshot shape).
+   */
+  readonly briefText?: string;
 }
 
 // v0.7.0 schema note: the ingress `OrchestratorTurnPayload` is a discriminated
@@ -295,7 +393,19 @@ export async function buildTurnContext(
   };
 
   const store = options.sessionStore ?? tryGetSessionStore(requestId, payload.scenario_id);
-  const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
+  // The window and its true size are read CONCURRENTLY — the count must not
+  // add a serial round-trip to the turn's critical path. `fetchPriorTurns`
+  // returns a window capped at SESSION_READ_WINDOW_TURNS; `fetchPriorTurnsTotal`
+  // returns how many turns actually exist (or null when unknown).
+  // The third read joins the same concurrent batch for the same reason: the T1
+  // claim-safety permission must describe the SCENARIO, and `priorTurns` is a
+  // 20-turn window. Concurrent ⇒ it costs the batch's max latency, not a
+  // serial addition.
+  const [priorTurns, priorTurnsTotal, newestAnalysisFactRead] = await Promise.all([
+    fetchPriorTurns(payload.scenario_id, requestId, store),
+    fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
+    fetchNewestAnalysisFact(payload.scenario_id, requestId, store),
+  ]);
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
   // turn PROVABLY continues a prior conversation — the chip can only exist if a
   // prior assistant turn rendered it — so zero prior turns under this scenario_id
@@ -483,10 +593,14 @@ export async function buildTurnContext(
   return {
     ...baseContext,
     prior_turns: priorTurns,
+    prior_turns_total: priorTurnsTotal,
+    newest_analysis_fact: newestAnalysisFactRead.fact,
+    newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
     prior_facts: priorFacts,
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
+    persistedGraphRead: scenarioState.read,
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
@@ -617,6 +731,72 @@ export async function loadMostRecentPendingActions(
 }
 
 /**
+ * ROADMAP 1.33 — public load helper for the prior-conversation-turns read.
+ *
+ * Standalone variant of `fetchPriorTurns` for callers that need just the
+ * recent turns (for the same 5-turn conversation-slice projection
+ * `context-pack-assembler.ts`'s `projectConversation` already builds for
+ * the coaching/draft LLM path) without paying the cost of a full
+ * `buildTurnContext` load. Used by `dispatchEditGraph` — the V4 edit-graph
+ * dispatch runs entirely outside `buildTurnContext`/`turn-executor.ts`'s
+ * ORIENT step (see route-v2.ts), so it has no other route to this read.
+ *
+ * Resolves the session store inline via `tryGetSessionStore` so the
+ * state-write-invariant pre-push guard stays satisfied (SessionStore
+ * imports are restricted to session/, commit.ts, and this module).
+ *
+ * Graceful degradation: store-factory failure or read failure both
+ * resolve to an empty array — never throws. Telemetry on
+ * read-degradation is emitted at the store layer (via `fetchPriorTurns`).
+ */
+export async function loadRecentConversationTurns(
+  scenarioId: string,
+  requestId: string,
+): Promise<readonly SessionTurnWithContent[]> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  return fetchPriorTurns(scenarioId, requestId, store);
+}
+
+/**
+ * Context Architecture v2 S2 (ROADMAP 1.199) — standalone
+ * `scenarios.brief_text` read for callers outside `buildTurnContext`'s
+ * ORIENT step. Used by `dispatchEditGraph` (UNCONDITIONALLY — S2 shipped ON,
+ * no-dark-launches) to thread the persisted decision brief into
+ * the edit/repair LLM context — the V4 edit dispatch runs entirely outside
+ * `buildTurnContext` (see route-v2.ts), so, like
+ * {@link loadRecentConversationTurns}, it has no other route to this read.
+ *
+ * Lives here so the state-write-invariant pre-push guard stays satisfied
+ * (SessionStore imports are restricted to session/, commit.ts, and this
+ * module). Delegates to `SessionStore.loadGraphAndBriefText` (the one-round-
+ * trip scenarios read) and discards the graph.
+ *
+ * Graceful degradation: store-factory failure or read failure resolve to
+ * `null` (no brief) — an edit turn must never fail over a brief read.
+ */
+export async function loadScenarioBriefText(
+  scenarioId: string,
+  requestId: string,
+): Promise<string | null> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store) return null;
+  try {
+    const { briefText } = await store.loadGraphAndBriefText(scenarioId);
+    return briefText;
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'loadScenarioBriefText degraded to null (edit-lane brief read failure)',
+    );
+    return null;
+  }
+}
+
+/**
  * V5 Signature Loop — STRICT variant of {@link loadMostRecentPendingActions}.
  *
  * Unlike the swallowing variant (which returns `[]` on any failure and so
@@ -675,14 +855,133 @@ export async function loadHasPriorTurns(
   }
 }
 
+/**
+ * ROADMAP 2.709 invariant 3 — bounded "does another ADMITTED turn exist on
+ * this scenario?" read for the continuation guard. The fence table holds a
+ * row from ADMISSION, ~50 s before the turn's commit can land, so this is
+ * what lets a mid-draft question classify as a continuation instead of being
+ * intake-captured as a fresh brief while the draft's atomic commit is still
+ * in flight (the fresh-journey P0's S2). Failure-marked rows are excluded by
+ * the store read so the post-loss state classifies fresh.
+ *
+ * Degrades to `false` on a missing store, an unimplemented method (legacy
+ * mocks), or a read failure — identical posture to {@link loadHasPriorTurns}:
+ * an uncertain read keeps today's behaviour rather than suppressing a
+ * genuine new decision. (The fail-open direction of BOTH loaders is rowed
+ * separately as 2.717; this loader deliberately matches the incumbent.)
+ */
+export async function loadHasOtherAdmittedLiveTurn(
+  scenarioId: string,
+  excludeTurnId: string,
+  requestId: string,
+): Promise<boolean> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.hasOtherAdmittedLiveTurn) return false;
+  try {
+    return await store.hasOtherAdmittedLiveTurn(scenarioId, excludeTurnId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — hasOtherAdmittedLiveTurn failed; degrading to false (do not suppress draft/frame)',
+    );
+    return false;
+  }
+}
+
+/**
+ * ROADMAP 2.709 invariant 6 — bounded "does a draft loss stand?" read: a
+ * fence row carries a graph-write failure mark AND the scenario holds no
+ * committed graph. Consumed by the route's loss-notice surface and the
+ * draft-shortcut unstranding term. Degrades to `false` (no notice, no
+ * unstrand) on a missing store / method / read failure — the notice is a
+ * disclosure and must never fail a turn.
+ */
+export async function loadDraftLossStands(
+  scenarioId: string,
+  requestId: string,
+): Promise<boolean> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.scenarioDraftLossStands) return false;
+  try {
+    return await store.scenarioDraftLossStands(scenarioId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — scenarioDraftLossStands failed; degrading to false (no notice this turn)',
+    );
+    return false;
+  }
+}
+
+/**
+ * ROADMAP 2.709 invariant 6 — leave the failure trace for a draft turn whose
+ * graph commit did not land (either 500 exit: commitPerformed=false, or the
+ * pipeline threw after admission). Best-effort and tolerant of stores that
+ * lack the method (legacy mocks): the turn is already failing; the trace
+ * must never change the response. `turnId` is the INGRESS identity
+ * (payload.turn_id — the fence row's key).
+ *
+ * ROADMAP 2.735 — `disclosure` is a REQUIRED argument, deliberately. It says
+ * whether this failure destroyed something the USER had (`draft_loss`) or
+ * merely killed a turn that never got as far as producing a graph
+ * (`turn_dead_only`). Only the former is disclosed to the user on their next
+ * turn. Making it required means a future marking site cannot become a
+ * disclosure by accident — which is exactly how the false claim shipped: one
+ * catch block covering every failure class, marking them all identically.
+ */
+export async function markDraftGraphWriteFailed(
+  scenarioId: string,
+  turnId: string,
+  reason: string,
+  requestId: string,
+  disclosure: GraphWriteFailureDisclosure,
+): Promise<void> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.markGraphWriteFailed) return;
+  try {
+    await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — markGraphWriteFailed threw; the 500 is unchanged but the loss trace is missing',
+    );
+  }
+}
+
 async function fetchPersistedScenarioState(
   scenarioId: string,
   requestId: string,
   store: SessionStore | undefined,
-): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
-  if (!store) return { graph: null, briefText: null };
+): Promise<{
+  readonly graph: unknown | null;
+  readonly briefText: string | null;
+  readonly read: CanonicalGraphReadState;
+}> {
+  // No store: nothing is (or can be) persisted for this scenario, and the
+  // commit path cannot run without a store, so this is a genuine ABSENT read
+  // for adopt purposes — never a degraded read that could mask a server model.
+  if (!store) return { graph: null, briefText: null, read: { status: 'ok_absent' } };
   try {
-    return await store.loadGraphAndBriefText(scenarioId);
+    const result = await store.loadGraphAndBriefText(scenarioId);
+    // ok_present only when a graph is actually stored; a null graph (row
+    // absent or graph column null) is a SUCCESSFUL read of an absent graph.
+    const read: CanonicalGraphReadState =
+      result.graph != null
+        ? { status: 'ok_present', graph: result.graph }
+        : { status: 'ok_absent' };
+    return { graph: result.graph, briefText: result.briefText, read };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -696,7 +995,15 @@ async function fetchPersistedScenarioState(
       error_code: errorCode ?? 'unknown',
       severity: 'warning',
     });
-    return { graph: null, briefText: null };
+    // F2 — a DEGRADED read must NOT collapse to "no graph" at the adopt
+    // chokepoint. `graph`/`briefText` stay null for the read-only projections
+    // (they legitimately degrade), but `read` carries the true `degraded`
+    // state so the write path fails closed instead of clobbering.
+    return {
+      graph: null,
+      briefText: null,
+      read: { status: 'degraded', errorCode: errorCode ?? 'unknown' },
+    };
   }
 }
 
@@ -762,6 +1069,95 @@ async function fetchPriorTurns(
       severity: 'warning',
     });
     return [];
+  }
+}
+
+/**
+ * How many conversation turns EXIST for this scenario (pre-cap), or `null`
+ * when that cannot be established.
+ *
+ * `null` is the honest "I don't know" — the ContextPack projection suppresses
+ * the total rather than substituting the window length. Substituting the
+ * window length is precisely the falsehood this read exists to remove, so the
+ * degraded path must NOT be assume-good; it is telemetered like every other
+ * session-read degradation and the pack falls back to a numberless disclosure.
+ */
+async function fetchPriorTurnsTotal(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<number | null> {
+  // Absent method = a test mock predating countTurns. Production
+  // SupabaseSessionStore always implements it, so this is not a live path;
+  // it degrades to "unknown", never to a fabricated total.
+  if (!store?.countTurns) return null;
+  try {
+    return await store.countTurns(scenarioId);
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: session.countTurns failed — conversation total will be reported as unknown',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return null;
+  }
+}
+
+/**
+ * The SCENARIO's newest non-noop `run_analysis` fact, plus whether the read
+ * actually happened.
+ *
+ * WHY IT IS A SEPARATE READ FROM `fetchPriorFacts`. `fetchPriorFacts` loads
+ * facts by an `IN` over the WINDOWED turn row ids — so past
+ * `SESSION_READ_WINDOW_TURNS` (default 20) turns, the scenario's analysis fact
+ * is simply not there. The T1 claim-safety permission was read off that array
+ * while the channels it gates read the whole scenario (rolling summary
+ * `LIMIT 1000`; decision records scenario-wide), so on a long conversation a
+ * WITHHELD scenario shipped an ungated summary. This read makes the
+ * permission's scope match the content's scope. Same shape of fix, and the
+ * same justification, as `fetchPriorTurnsTotal`.
+ *
+ * ⚠ `readOk` IS NOT COSMETIC — it is what separates "the scenario has no
+ * analysis" from "I could not look". The first is an honest `true`; the second
+ * must not be allowed to masquerade as one, and it is the input that arms the
+ * fail-closed guard in `readMayNameLeadingOptionVerdict`. A store without the
+ * method (test mocks) is `readOk: false` for the same reason: absence of
+ * evidence is not evidence of absence.
+ *
+ * Never throws: a degraded fact read must not fail the turn. It degrades to
+ * `{fact: null, readOk: false}`, which is strictly MORE restrictive than the
+ * pre-fix behaviour, never less.
+ */
+async function fetchNewestAnalysisFact(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<{ readonly fact: HandlerFact | null; readonly readOk: boolean }> {
+  if (!store?.readNewestAnalysisFactFor) return { fact: null, readOk: false };
+  try {
+    const fact = await store.readNewestAnalysisFactFor(scenarioId);
+    return { fact, readOk: true };
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: session.readNewestAnalysisFactFor failed — claim-safety falls back to the window and may fail CLOSED',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return { fact: null, readOk: false };
   }
 }
 
@@ -886,22 +1282,48 @@ async function fetchPriorFacts(
  *
  * Behaviour matrix:
  *
- *   userId PRESENT (authenticated UI path):
- *     - RPC INSERTs row if missing, no-ops if present, returns
- *       authoritative user_id. Match → `{ ok: true }`.
- *     - Returned user_id differs from caller's → cross-tenant attempt;
- *       `{ ok: false, reason: 'scenario_owned_by_other_user' }` and the
- *       route emits 422.
- *     - RPC errors (network, DB down, permission) → treated as skipped
- *       and the turn proceeds. `append_turn_atomic` is the last line of
- *       defence and will still surface a genuine missing-scenario as
- *       STATE_COMMIT_FAILED.
+ * Ownership is keyed on the STORED owner (the RPC's authoritative user_id),
+ * never on whether the caller happened to supply one — that distinction is
+ * what closes the IDOR-class hole (a caller omitting user_id must NOT skip
+ * the check on an owned scenario).
  *
- *   userId ABSENT (guest mode — VITE_AUTH_MODE=guest):
- *     - RPC is STILL called. scenarios.user_id is nullable; the row is
- *       created with user_id = NULL. Ownership check is skipped (no
- *       ownership concept in guest mode). Returns `{ ok: true }`.
- *     - RPC errors → same fail-open behaviour as the authenticated path.
+ *   Stored owner NON-null (an owned scenario):
+ *     - Caller == owner → `{ ok: true }`.
+ *     - Caller is a DIFFERENT user → cross-tenant attempt;
+ *       `{ ok: false, reason: 'scenario_owned_by_other_user' }`, route 422.
+ *     - Caller ABSENT (no user_id) → IDOR fail-closed;
+ *       `{ ok: false, reason: 'scenario_requires_authenticated_owner' }`,
+ *       route 422. An anonymous caller is not the owner.
+ *
+ *   Stored owner NULL (a guest scenario — VITE_AUTH_MODE=guest):
+ *     - Any caller (anonymous or identified) → `{ ok: true }`. There is no
+ *       ownership concept for an unowned scenario.
+ *       ⚠ This openness is a deliberate product decision AND a real
+ *       disclosure/mutation surface: anyone holding a guest scenario's UUID
+ *       can read its conversation and append turns to it. It is NOT closed
+ *       here because nothing on the guest wire distinguishes the legitimate
+ *       guest from any other caller — the guest journey carries no cookie,
+ *       no token and no header. Closing it needs a client-side credential
+ *       (a UI change), not a CEE change. Do not re-describe this as "a
+ *       product feature, not a leak": it is both, and the second half is
+ *       what an earlier version of this comment taught readers to skip.
+ *
+ *   Store NOT CONFIGURED (`getSessionStore()` throws — no Supabase in this
+ *   environment), any caller:
+ *     - Skipped, turn proceeds (`{ ok: true, skipped }`). There is no
+ *       persistence here, therefore no stored owner to protect.
+ *
+ *   Ownership RPC FAILS against a CONFIGURED store, any caller:
+ *     - Fail CLOSED (`{ ok: false, reason: 'scenario_ownership_unverifiable' }`,
+ *       route 422). We asked who owns this scenario and could not find out;
+ *       proceeding would grant access we cannot justify.
+ *       This previously failed OPEN, on the stated grounds that
+ *       "`append_turn_atomic` is the last line of defence". That premise is
+ *       false for ownership: append_turn_atomic (v1/v2/v3) reads `user_id`
+ *       FROM the scenarios row to denormalise it onto the turn and never
+ *       compares it to any caller identity — it guards scenario EXISTENCE,
+ *       not ownership. So the open path removed the ownership check with
+ *       nothing behind it, and did so exactly when the DB was unhealthy.
  *
  * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
  * on SessionStore and the migration file header for the production-
@@ -909,7 +1331,14 @@ async function fetchPriorFacts(
  */
 export type PreflightResult =
   | { readonly ok: true; readonly skipped?: boolean }
-  | { readonly ok: false; readonly reason: 'scenario_owned_by_other_user' };
+  | {
+      readonly ok: false;
+      readonly reason:
+        | 'scenario_owned_by_other_user'
+        | 'scenario_requires_authenticated_owner'
+        /** The store is configured but could not tell us who owns the row. */
+        | 'scenario_ownership_unverifiable';
+    };
 
 export async function preflightEnsureScenario(
   scenarioId: string,
@@ -917,11 +1346,15 @@ export async function preflightEnsureScenario(
   requestId: string,
   sessionStore?: SessionStore,
 ): Promise<PreflightResult> {
-  let authoritativeUserId: string | null;
+  // Resolving the store and QUERYING it are separated on purpose: they are
+  // different failures with opposite correct answers. "No store configured"
+  // means this environment has no persistence and therefore no stored owner
+  // to protect — skipping is right. "Store configured but the query failed"
+  // means the ownership oracle is unavailable — skipping there would silently
+  // delete the ownership check for the duration of the incident.
+  let store: SessionStore;
   try {
-    const store = sessionStore ?? getSessionStore();
-    const result = await store.ensureScenarioExists(scenarioId, userId);
-    authoritativeUserId = result.user_id;
+    store = sessionStore ?? getSessionStore();
   } catch (e) {
     log.debug(
       {
@@ -930,23 +1363,87 @@ export async function preflightEnsureScenario(
         err_name: e instanceof Error ? e.name : 'unknown',
         err_message: e instanceof Error ? e.message : String(e),
       },
-      'V5 pre-flight ensureScenarioExists skipped (store unavailable or RPC error)',
+      'V5 pre-flight ensureScenarioExists skipped (no session store configured)',
     );
     return { ok: true, skipped: true };
   }
 
-  // Skip ownership check in guest mode (either side null means no auth identity).
-  if (userId !== null && authoritativeUserId !== null && authoritativeUserId !== userId) {
+  // NO structural `typeof store.ensureScenarioExists === 'function'` probe
+  // here, deliberately. A store that is PRESENT but cannot answer the
+  // ownership question is the oracle-unavailable case, not the
+  // no-persistence case: something was injected, it simply is not the thing
+  // that can answer. Skipping it would restore — for that store shape only —
+  // the exact fail-open the catch below exists to remove, and it would do so
+  // for a shape the interface forbids (`ensureScenarioExists` is REQUIRED on
+  // SessionStore), so the compiler offers no warning and only a DI
+  // mis-wiring produces it in production. The missing-method TypeError
+  // therefore falls into the same catch as an RPC failure and refuses the
+  // turn. Test doubles get completeness from `createMockSessionStore()`
+  // (tests/utils/mock-session-store.ts), which is typed
+  // `Required<SessionStore>` and fails the typecheck loudly on drift — that
+  // is where double-completeness belongs, not in a production branch.
+  let authoritativeUserId: string | null;
+  try {
+    const result = await store.ensureScenarioExists(scenarioId, userId);
+    authoritativeUserId = result.user_id;
+  } catch (e) {
+    // Fail CLOSED. Logged at WARN, not DEBUG: a control that has stopped
+    // functioning is an operational event, not a debugging detail.
     log.warn(
       {
         request_id: requestId,
         scenario_id: scenarioId,
-        caller_user_id_prefix: userId.slice(0, 8),
-        owner_user_id_prefix: authoritativeUserId.slice(0, 8),
+        caller_identified: userId !== null,
+        err_name: e instanceof Error ? e.name : 'unknown',
+        err_code: e instanceof SessionReadError ? e.code : undefined,
+        err_message: e instanceof Error ? e.message : String(e),
       },
-      'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
+      'V5 pre-flight: ownership oracle unavailable (ensureScenarioExists failed) — refusing turn (fail closed)',
     );
-    return { ok: false, reason: 'scenario_owned_by_other_user' };
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: e instanceof SessionReadError ? (e.code ?? 'unknown') : 'unknown',
+      severity: 'error',
+    });
+    return { ok: false, reason: 'scenario_ownership_unverifiable' };
+  }
+
+  // Ownership is enforced ONLY when the scenario has a stored owner. A null
+  // stored owner means a guest (unowned) scenario, which by design any caller
+  // may act on — that carve-out is a product feature (VITE_AUTH_MODE=guest),
+  // NOT the either-null skip that opened the IDOR hole below.
+  if (authoritativeUserId !== null) {
+    if (userId === null) {
+      // IDOR fail-closed: the scenario has a non-null owner but the caller
+      // presented NO identity. The previous `userId !== null &&` guard skipped
+      // the whole check here, so any request that simply omitted user_id could
+      // act on any owned scenario. Refuse — an anonymous caller is not the
+      // owner. (The JWT-derivation half — making identity un-spoofable on
+      // browser paths — is tracked separately in user-identity.ts.)
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: scenarioId,
+          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
+        },
+        'V5 pre-flight: anonymous caller (no user_id) on an owned scenario — refusing turn (fail closed)',
+      );
+      return { ok: false, reason: 'scenario_requires_authenticated_owner' };
+    }
+
+    if (authoritativeUserId !== userId) {
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: scenarioId,
+          caller_user_id_prefix: userId.slice(0, 8),
+          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
+        },
+        'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
+      );
+      return { ok: false, reason: 'scenario_owned_by_other_user' };
+    }
   }
 
   return { ok: true };
@@ -1016,12 +1513,83 @@ export async function loadPersistedGraph(
  * integration points: session/, commit.ts, build-turn-context.ts.
  * The pre-push `state-write-invariant` check enforces that boundary.
  */
+/**
+ * Prior handler facts for a scenario, best-effort.
+ *
+ * Added for the `factor_value_edit` system-event dispatch (ROADMAP 1.346), which
+ * needs `prior_facts` to decide whether `set_factor_value` appends its staleness
+ * narrative ("This makes the last analysis stale."). It lives HERE, beside the
+ * other persisted-read helpers, because the state-write invariant
+ * (`scripts/ci/check-state-write-invariant.sh`) allows `SessionStore` imports in
+ * exactly three places — `session/`, `commit.ts` and this file — and a dispatch
+ * module reaching for the store directly is precisely what that gate exists to
+ * stop. Keeping the read on this side of the chokepoint is the point.
+ *
+ * BEST-EFFORT ON PURPOSE, and the failure mode is bounded: the worst case of a
+ * failed read is a receipt missing one sentence, so this degrades to `[]` and
+ * logs rather than throwing. It must never be used where a fact read is
+ * load-bearing for a decision — for that, read through a path that fails closed.
+ */
+export async function loadPriorFactsQuietly(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<readonly HandlerFact[]> {
+  try {
+    const store = sessionStore ?? getSessionStore();
+    const recent = await store.readRecent(scenarioId);
+    const rowIds = recent
+      .map((t) => t.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (rowIds.length === 0) return [];
+    return await store.readFactsFor(rowIds);
+  } catch (err) {
+    log.warn(
+      {
+        event: 'v5.prior_facts.read_failed',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'Prior-fact read failed; proceeding without prior facts',
+    );
+    return [];
+  }
+}
+
 export async function loadPersistedGraphStrict(
   scenarioId: string,
   sessionStore?: SessionStore,
 ): Promise<unknown | null> {
   const store = sessionStore ?? getSessionStore();
   return await store.loadGraph(scenarioId);
+}
+
+/**
+ * Strict variant of {@link loadPersistedScenarioState} that does NOT swallow
+ * errors — the combined-read sibling of {@link loadPersistedGraphStrict}.
+ *
+ * Same single-round-trip `scenarios.graph` + `scenarios.brief_text` read via
+ * `SessionStore.loadGraphAndBriefText`, but propagates `SessionReadError`
+ * instead of collapsing to nulls, so callers can distinguish "store
+ * reachable, nothing stored" (null fields) from "store unreachable / RPC
+ * threw" (throws). Lane 28 — brief pipeline: added so
+ * `loadScenarioSnapshotForRunAnalysis` can carry the persisted brief on the
+ * snapshot without a second round trip AND without weakening its existing
+ * strict-read error contract (`scenario_read_failed` vs `analysis_not_ready`
+ * — see the call-site comment below).
+ *
+ * Lives in this module so the `SessionStore` import surface stays bounded to
+ * the three declared integration points: session/, commit.ts,
+ * build-turn-context.ts (enforced by the pre-push `state-write-invariant`
+ * check).
+ */
+export async function loadPersistedScenarioStateStrict(
+  scenarioId: string,
+  sessionStore?: SessionStore,
+): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
+  const store = sessionStore ?? getSessionStore();
+  return await store.loadGraphAndBriefText(scenarioId);
 }
 
 export async function loadScenarioSnapshotForRunAnalysis(
@@ -1034,10 +1602,19 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // `loadPersistedGraph` collapses store errors into null (loadPersistedScenarioState
   // catches and degrades), which would let the NULL-graph recovery below misclassify a
   // transient outage as `analysis_not_ready` ("draft a model first" 200) — masking the
-  // infra failure and dropping retry guidance. `loadPersistedGraphStrict` returns null
-  // ONLY when the store is reachable and no graph is stored (the genuine no-model
-  // case); it throws SessionReadError on a DB/RPC failure.
-  const persistedGraph = await loadPersistedGraphStrict(scenarioId, sessionStore);
+  // infra failure and dropping retry guidance. `loadPersistedScenarioStateStrict`
+  // returns null fields ONLY when the store is reachable and nothing is stored (the
+  // genuine no-model case); it throws SessionReadError on a DB/RPC failure.
+  //
+  // Lane 28 — brief pipeline: the combined strict read also carries the persisted
+  // `scenarios.brief_text` in the SAME round trip (the store's loadGraph already
+  // delegated to loadGraphAndBriefText and discarded the brief), so the snapshot
+  // can surface it for the flag-gated run_analysis → PLoT brief leg with no extra
+  // DB traffic and identical error semantics.
+  const { graph: persistedGraph, briefText } = await loadPersistedScenarioStateStrict(
+    scenarioId,
+    sessionStore,
+  );
   // `== null` (not a truthy check): scope the recovery to a GENUINELY absent graph
   // (null/undefined). A present-but-corrupt falsy value (e.g. `0` / `""`) is malformed,
   // not missing — it falls through to GraphV3.safeParse below and fails into
@@ -1079,8 +1656,72 @@ export async function loadScenarioSnapshotForRunAnalysis(
     graphForSnapshot = verdict.canonicalGraph ?? persistedGraph;
   }
 
-  const parsedGraph = GraphV3.safeParse(graphForSnapshot);
+  // W2E-2 round 4 — persisted-sigma floor, BEFORE the GraphV3 parse that
+  // used to kill the turn. `EdgeStrengthV3.std` is `z.number().positive()`,
+  // but the live UI writer floors at ZERO (`Math.max(0, strengthStdValue)`),
+  // so persisted `std = 0` is continuously produced and has an unambiguous
+  // safe reading ("no uncertainty stated"). Constraint order (rounds 1–3):
+  //   (1) never brick a persisted scenario → repair, don't reject;
+  //   (2) never fork graph identity → the floor is COPY-ON-WRITE and applies
+  //       ONLY to the compute projection parsed below. `rawPersistedGraph`
+  //       (the graph_hash_at_run input, run-analysis.ts) and the persisted
+  //       object stay byte-identical to what every freshness hash site reads.
+  //       Round 3 placed this floor inside PLoTClient.run, where the parse
+  //       below had already thrown before it could ever execute (dead code on
+  //       every live path — the only other plotClient.run caller hangs off
+  //       the 410 V1 route / unregistered V4 pipeline).
+  //   (3) never let bad numerics reach computation → repaired sigma is
+  //       contract-valid; anything still out of range refuses honestly below.
+  // Telemetry is code-keyed: field path + floor written, never the offending
+  // value, never a label (PII rule).
+  const sigmaFloor = floorGraphSigmaForCompute(graphForSnapshot);
+  for (const repair of sigmaFloor.repairs) {
+    emit(TelemetryEvents.ComputeSigmaFloor, {
+      path: repair.path,
+      kind: repair.kind,
+      repaired_to: repair.repaired_to,
+      request_id: requestId,
+    });
+  }
+
+  const parsedGraph = GraphV3.safeParse(sigmaFloor.graph);
   if (!parsedGraph.success) {
+    // Numeric range violations with NO safe reading (exists_probability
+    // outside [0,1] — we cannot know whether 1.4 meant 1.0 or 0.14) must be
+    // an HONEST refusal: a typed AnalysisNotReadyError that run_analysis maps
+    // to `analysis_not_ready` (non-retryable, actionable next step), not the
+    // generic `scenario_read_failed, retryable: true` — which promises a
+    // retry that can never succeed. Persisted values are NOT repaired here:
+    // rewriting a hash-projected field on a persisted graph forks its
+    // identity from every token minted off the unrepaired bytes (round-2
+    // regression). The user self-heals by fixing the value on the canvas.
+    // Zod's too_small/too_big with type 'number' is exactly the
+    // range-violation class; shape/structural failures stay on the existing
+    // scenario_read_failed path (a user who HAS a graph must never be told
+    // to "draft a model first").
+    const numericRangeIssues = parsedGraph.error.issues.filter(
+      (issue) =>
+        (issue.code === 'too_small' || issue.code === 'too_big') &&
+        'type' in issue &&
+        issue.type === 'number',
+    );
+    if (numericRangeIssues.length > 0) {
+      const verdict: ReadinessResult = {
+        status: 'unrecoverable',
+        reasonCodes: ['SCHEMA_INVALID'],
+        reasonCategory: 'numeric_integrity',
+        deterministicRecovery: false,
+        safeToAnalyse: false,
+        safeToPersist: false,
+        userActionRequired: true,
+        canonicalGraph: null,
+        // User-safe: names the violation class only — never the offending
+        // value, never a node/edge label (PII rule).
+        nextStep:
+          'A probability or uncertainty value in this model is outside its valid range. Fix the value on the canvas, then run the analysis again.',
+      };
+      throw new AnalysisNotReadyError(verdict);
+    }
     throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
 
@@ -1089,26 +1730,20 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
 
-  // CEE → PLoT value-scale egress net (Tier 0, Phase 1) — flag-gated, default OFF.
+  // CEE → PLoT value-scale egress net (Tier 0, Phase 1) — UNCONDITIONAL since
+  // 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted,
+  // live-true on staging).
   //
   // PLoT consumes intervention input `value` as RAW user-scale and normalises
   // internally using the target factor node's `observed_state.cap` (re-verified
   // clean on PLoT staging `78aea76`, 2026-06-18). CEE historically projected the
   // normalised `[0,1]` convention, which double-normalises capped interventions
-  // (e.g. sends 0.25 where PLoT expects 25000). When `cee.plotEgressScaleNetEnabled`
-  // is ON we canonicalise the OUTBOUND interventions here — the single egress
-  // projection point — via the evidence-gated rule in `plot-intervention-scale.ts`
-  // (no silent corruption, double-conversion-safe). When OFF this is a
-  // byte-identical no-op (the legacy numeric projection). Read-only either way:
-  // the persisted graph is never mutated; only the outbound PLoT projection changes.
-  const options = config.cee.plotEgressScaleNetEnabled
-    ? projectOptionsToRawScale(parsedGraph.data.nodes, readiness.options, requestId, scenarioId)
-    : readiness.options.map((option) => ({
-        id: option.option_id,
-        option_id: option.option_id,
-        label: option.label,
-        interventions: normaliseNumericInterventions(option.interventions),
-      }));
+  // (e.g. sends 0.25 where PLoT expects 25000). We therefore canonicalise the
+  // OUTBOUND interventions here — the single egress projection point — via the
+  // evidence-gated rule in `plot-intervention-scale.ts` (no silent corruption,
+  // double-conversion-safe). Read-only: the persisted graph is never mutated;
+  // only the outbound PLoT projection changes.
+  const options = projectOptionsToRawScale(parsedGraph.data.nodes, readiness.options, requestId, scenarioId);
 
   return {
     graph: parsedGraph.data,
@@ -1123,6 +1758,12 @@ export async function loadScenarioSnapshotForRunAnalysis(
     ...(parsedGraph.data.goal_constraints !== undefined
       ? { goal_constraints: parsedGraph.data.goal_constraints }
       : {}),
+    // Lane 28 — brief pipeline: the persisted decision brief, loaded above in
+    // the same round trip as the graph. Omitted when null (no brief persisted
+    // / whitespace-coerced) so PLoT's `no_brief` skip stays honest — the
+    // handler only forwards it behind `config.cee.sendBriefToPlot`
+    // (default OFF, doctrine ask D5 Paul-gated).
+    ...(briefText !== null ? { briefText } : {}),
   };
 }
 
@@ -1183,24 +1824,6 @@ function projectOptionsToRawScale(
   return projected;
 }
 
-function normaliseNumericInterventions(
-  interventions: Record<string, unknown>,
-): Record<string, number> {
-  const entries: Array<[string, number]> = [];
-  for (const [factorId, rawValue] of Object.entries(interventions)) {
-    const numeric = extractNumericInterventionValue(rawValue);
-    if (numeric !== null) entries.push([factorId, numeric]);
-  }
-  return Object.fromEntries(entries);
-}
-
-function extractNumericInterventionValue(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  const candidate = (value as Record<string, unknown>).value;
-  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
-}
+// normaliseNumericInterventions deleted 2026-07-20 (O-7 wave 2): it was the
+// legacy [0,1]-convention projection used only by the egress-scale-net OFF
+// branch, which no longer exists (the net is unconditional above).

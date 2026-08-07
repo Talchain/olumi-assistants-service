@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { extractJsonFromResponse, extractJson } from "../../src/utils/json-extractor.js";
+import { extractJsonFromResponse, extractJson, closeTruncatedJson } from "../../src/utils/json-extractor.js";
 
 // Mock telemetry to prevent actual emissions during tests
 vi.mock("../../src/utils/telemetry.js", () => ({
@@ -461,5 +461,107 @@ describe("extractJson convenience function", () => {
     const json = extractJson(content);
 
     expect(json).toEqual({ extracted: true });
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// closeTruncatedJson — 2026-07-23 firefight: salvage a max_tokens-truncated
+// draft by closing its structurally-complete prefix. Syntactic validity ONLY;
+// the caller re-validates against the real schema.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("closeTruncatedJson — salvage a truncated draft", () => {
+  const parseOk = (s: string | null): any => {
+    expect(s).not.toBeNull();
+    return JSON.parse(s as string);
+  };
+
+  it("recovers a graph truncated AFTER nodes+edges (mid-coaching) → valid graph WITH nodes and edges", () => {
+    // The salvageable case: nodes and edges are both complete; the cut lands in
+    // a later optional field. This is exactly what the adapter schema-accepts.
+    const truncated =
+      '{"nodes":[{"id":"dec","kind":"decision","label":"Pick"},' +
+      '{"id":"opt_a","kind":"option","label":"A"}],' +
+      '"edges":[{"from":"opt_a","to":"dec","strength":{"mean":0.5,"std":0.1}}],' +
+      '"coaching":"You should consider the trade-off between speed and c';
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(Array.isArray(recovered.nodes)).toBe(true);
+    expect(recovered.nodes).toHaveLength(2);
+    expect(Array.isArray(recovered.edges)).toBe(true);
+    expect(recovered.edges).toHaveLength(1);
+    // The incomplete trailing field was dropped, not fabricated.
+    expect(recovered.coaching).toBeUndefined();
+  });
+
+  it("drops the incomplete trailing array ELEMENT (cut mid-object) and keeps the complete ones", () => {
+    const truncated =
+      '{"nodes":[{"id":"a","kind":"factor","label":"A"},' +
+      '{"id":"b","kind":"factor","label":"B"},' +
+      '{"id":"c","kind":"fact'; // cut mid-key of the 3rd element
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(recovered.nodes).toHaveLength(2);
+    expect(recovered.nodes.map((n: any) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("SAFETY: a graph cut INSIDE nodes (before edges emitted) salvages to syntactically-valid JSON that LACKS edges — the caller's schema gate must reject it", () => {
+    // Proves the salvager never fabricates the missing required field; it only
+    // closes complete data. `edges` is absent → the adapter's
+    // AnthropicDraftResponse.safeParse (edges required) rejects it.
+    const truncated =
+      '{"nodes":[{"id":"a","kind":"factor","label":"A"},{"id":"b","kind":"opt';
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(recovered.nodes).toHaveLength(1);
+    expect(recovered.edges).toBeUndefined();
+  });
+
+  it("drops an incomplete trailing NUMBER literal (could have been 0.7 or 0.75 — unknowable)", () => {
+    const truncated = '{"edges":[{"from":"a","to":"b","strength":{"mean":0.5,"std":0.1}}],"score":0.7';
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(recovered.edges).toHaveLength(1);
+    // The dangling `0.7` (which may have been mid-emission) is not trusted.
+    expect(recovered.score).toBeUndefined();
+  });
+
+  it("handles escaped quotes and structural chars INSIDE string values without miscounting depth", () => {
+    const truncated =
+      '{"nodes":[{"id":"a","kind":"factor","label":"He said \\"go\\" — cost {high}, risk [low]"}],' +
+      '"edges":[{"from":"a","to":"b","strength":{"mean":0.5,"std":0.1}}],"next":"';
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(recovered.nodes[0].label).toContain('"go"');
+    expect(recovered.edges).toHaveLength(1);
+  });
+
+  it("closes deeply-nested still-open containers in the right order", () => {
+    const truncated = '{"a":{"b":{"c":[1,2,3';
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(recovered).toEqual({ a: { b: { c: [1, 2] } } });
+  });
+
+  it("tolerates conversational preamble before the JSON", () => {
+    const truncated = 'Here is your graph: {"nodes":[{"id":"a","kind":"decision","label":"X"}],"edges":[{"from":"a","to":"a"';
+    const recovered = parseOk(closeTruncatedJson(truncated));
+    expect(recovered.nodes).toHaveLength(1);
+    // The last COMPLETE-element boundary is the closed nodes array; the edges
+    // array had opened but held no complete element yet, so the salvage stops at
+    // nodes. `{nodes}` with no edges then fails the schema gate downstream —
+    // safe (no fabricated edges), just not a useful graph.
+    expect(recovered.edges).toBeUndefined();
+  });
+
+  it("returns a byte-identical parse of ALREADY-complete JSON (idempotent on non-truncated input)", () => {
+    const complete = '{"nodes":[{"id":"a","kind":"decision","label":"X"}],"edges":[]}';
+    const recovered = parseOk(closeTruncatedJson(complete));
+    expect(recovered).toEqual(JSON.parse(complete));
+  });
+
+  it("returns null when there is NO recoverable prefix (truncated before the first complete value)", () => {
+    expect(closeTruncatedJson('{"nodes":[{"id":"a","kind":"dec')).toBeNull(); // no complete element yet
+    expect(closeTruncatedJson('{"nodes":')).toBeNull(); // colon with no value
+    expect(closeTruncatedJson('{"nodes')).toBeNull(); // mid-key
+  });
+
+  it("returns null for input with no JSON structure at all", () => {
+    expect(closeTruncatedJson("I could not build a graph.")).toBeNull();
+    expect(closeTruncatedJson("")).toBeNull();
   });
 });

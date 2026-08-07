@@ -33,18 +33,18 @@ vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({
 }));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
-vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: appendMock,
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore({ append: appendMock }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 vi.mock('../../../src/adapters/llm/router.js', () => ({
   getAdapter: () => ({
@@ -86,7 +86,6 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return true;
               if (featProp === 'pipelineV4Enabled') return false;
               return Reflect.get(featTarget, featProp);
             },
@@ -162,7 +161,26 @@ describe('POST /orchestrate/v2/turn — frame-stage no-brief guard', () => {
 
     // No graph, no analysis surfaced (none exists pre-draft).
     expect(body.blocks).toEqual([]);
-    expect(body.suggested_actions).toEqual([]);
+    // ROADMAP 1.148 C7 re-pin (was `toEqual([])`): ROADMAP 2.63 C3
+    // (PR #484/#488) — a guard-firing message that carries a usable brief
+    // seed now gets a deterministic "Build the model" draft-offer chip,
+    // and the offer is COMMITTED as a draft_graph pending action so the
+    // next turn's chip click / typed "yes" resumes deterministically.
+    expect(body.suggested_actions).toHaveLength(1);
+    expect(body.suggested_actions[0]).toMatchObject({
+      label: 'Build the model',
+      message: 'Yes, build the model from what I have shared.',
+    });
+    expect(String(body.suggested_actions[0].id)).toMatch(/^draft-offer-/);
+    // The offer's consent must be resumable: the guard committed the turn
+    // with the draft_graph pending action (chip without commit would be
+    // guarantee-theatre — see the guard's own in-code note).
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    const committedWrite = appendMock.mock.calls[0]![0] as {
+      pending_actions?: Array<{ action: { kind: string } }>;
+    };
+    expect(committedWrite.pending_actions).toHaveLength(1);
+    expect(committedWrite.pending_actions![0]!.action.kind).toBe('draft_graph');
     expect(body.insights).toEqual([]);
   });
 
@@ -218,6 +236,15 @@ describe('POST /orchestrate/v2/turn — frame-stage no-brief guard', () => {
         message: 'Should we hire a tech lead or two developers to improve delivery speed?',
         turn_class: 'frame',
         source: 'composer',
+        // #539 deleted CEE_CLARIFY_V2_ENABLED, so clarify v2 now runs
+        // unconditionally and would intercept this brief with its round-1
+        // rubric before dispatch is reached. `generate_model` is an EXPLICIT
+        // instruction to draft: tryClarifyV2Turn returns null for it, so the
+        // route dispatches bit-identically to the old flag-off path. That
+        // isolates this test from the clarify rubric, which is not its
+        // subject — the subject is that the frame-no-brief guard must not
+        // shadow draft_graph.
+        generate_model: true,
       },
     });
 
@@ -322,6 +349,66 @@ describe('POST /orchestrate/v2/turn — frame-stage no-brief guard', () => {
       expect(body.assistant_text).toContain('decision question');
       // Stays in frame stage — user remains on graph-creation path.
       expect(body.stage_indicator).toBe('frame');
+    }
+  });
+
+  // ROADMAP 1.148 C3 companion pin — the guard's DETERMINISTIC answer for
+  // brief-less frame inputs, pinned explicitly against the exact message
+  // shapes the retired A1/A2 fixtures used to send. Those fixtures now
+  // exercise the LLM path at stage 'analyse' (orchestrate-v2-a1/-a2); the
+  // guard's takeover of their OLD inputs is intentional behaviour
+  // (PR #203/#484) and gets its own pin here rather than being re-copied
+  // into the timeout/budget suites.
+  it('former A1/A2 fixture-shaped brief-less frame inputs get the deterministic guard answer (no TurnExecutor, no draft)', async () => {
+    const formerFixtureMessages = [
+      // A1 direct-answer-happy
+      'Give me a short framing for this decision.',
+      // A2 clarify-happy / clarify-contamination / clarify-llm-timeout
+      'help me',
+      'not sure',
+      'can you?',
+    ];
+    let i = 0;
+    for (const message of formerFixtureMessages) {
+      runTurnExecutorMock.mockReset();
+      dispatchDraftGraphMock.mockReset();
+      appendMock.mockClear();
+      const idx = (i++).toString(16).padStart(2, '0');
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: `55555555-5555-4555-8555-5555fa11ce${idx}`,
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          message,
+          turn_class: 'frame',
+          source: 'composer',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      // Deterministic: neither the routing LLM nor draft_graph ran.
+      expect(runTurnExecutorMock).not.toHaveBeenCalled();
+      expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+      const body = JSON.parse(res.body);
+      // The guard's canonical framing copy (see route-v2.ts
+      // frame_no_brief_guard) — corrective, with concrete examples.
+      expect(body.assistant_text).toContain('I need a single decision question to start.');
+      expect(body.stage_indicator).toBe('frame');
+      // Seed-bearing messages (≥ DRAFT_GRAPH_MIN_BRIEF_LENGTH after
+      // normalisation) additionally get the committed "Build the model"
+      // draft offer; short ones stay chip-less and commit-less.
+      const seedBearing = message.length >= 30;
+      if (seedBearing) {
+        expect(body.suggested_actions).toHaveLength(1);
+        expect(body.suggested_actions[0]).toMatchObject({ label: 'Build the model' });
+        expect(appendMock).toHaveBeenCalledTimes(1);
+      } else {
+        expect(body.suggested_actions).toEqual([]);
+        expect(appendMock).not.toHaveBeenCalled();
+      }
     }
   });
 });

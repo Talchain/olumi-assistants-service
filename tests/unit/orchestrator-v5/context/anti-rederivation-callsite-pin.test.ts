@@ -32,11 +32,17 @@
  * file — commit or remove it, or update EXPECTED if the caller is intended.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+
+import {
+  stripComments,
+  stripCommentsFile,
+  GUARD_WALK_TIMEOUT_MS,
+} from '../../../../scripts/ci/strip-source-comments.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SCAN_ROOT = 'src';
@@ -48,15 +54,22 @@ const EXCLUDED: readonly RegExp[] = [
   /^src\/_archive\//,
 ];
 
-// Comment-only filter — mirrors scripts/check-forbidden-boundary-patterns.sh
-// scope_filter: a line whose first non-space token opens or continues a
-// comment is not a reference. (A code line with a trailing comment still
-// counts — the false-positive direction is the safe one.)
-const COMMENT_ONLY = /^\s*(\/\/|\/\*|\*)/;
+// Comment handling: references are counted in the COMMENT-STRIPPED view of
+// each file (scripts/ci/strip-source-comments.mjs, the shared literal-aware
+// tokeniser — same mechanism as scripts/check-forbidden-boundary-patterns.sh).
+// The per-line first-token filter this replaces could not see a TRAILING
+// comment on a code line, so an accurate design note like
+// `const x = 1; // freshness comes from deriveAnalysisFreshness` counted as a
+// reference and broke the pin (positive-controlled 2026-07-20). With
+// stripping, EXPECTED below counts exactly the code references — imports,
+// calls, definitions — never documentation.
+function countReferencesInStripped(stripped: string, ident: string): number {
+  const re = new RegExp(`\\b${ident}\\b`);
+  return stripped.split('\n').filter((l) => re.test(l)).length;
+}
 
 export function countReferences(source: string, ident: string): number {
-  const re = new RegExp(`\\b${ident}\\b`);
-  return source.split('\n').filter((l) => !COMMENT_ONLY.test(l) && re.test(l)).length;
+  return countReferencesInStripped(stripComments(source), ident);
 }
 
 function walk(relDir: string, out: string[]): void {
@@ -76,7 +89,7 @@ function scanRepo(ident: string): Record<string, number> {
   const result: Record<string, number> = {};
   for (const rel of files.sort()) {
     if (EXCLUDED.some((re) => re.test(rel))) continue;
-    const count = countReferences(readFileSync(join(REPO_ROOT, rel), 'utf-8'), ident);
+    const count = countReferencesInStripped(stripCommentsFile(join(REPO_ROOT, rel)), ident);
     if (count > 0) result[rel] = count;
   }
   return result;
@@ -92,9 +105,60 @@ const EXPECTED: Record<string, Record<string, number>> = {
     'src/orchestrator-v5/context/freshness.ts': 1, // authority (definition)
     'src/orchestrator-v5/build-turn-context.ts': 2, // approved seam (routing/coaching freshness)
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 2, // approved seam (canonical-state composition)
-    'src/orchestrator-v5/turn-executor.ts': 3, // approved assembly seam (frozen file)
-    'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 3, // TOLERATED ad-hoc debt — do not add more
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 2, // TOLERATED ad-hoc debt — do not add more
+    // 2026-07-08 lane-34: +1 — the GM held-execute resume re-derives wire
+    // freshness against the POST-APPLY graph hash after its mid-turn commit
+    // (the pre-derived frame value is stale by definition once the confirmed
+    // mutation persists; mirrors edit-graph-dispatch's blocked-path
+    // re-derivation). Deliberate, reviewed; migrate with the frame-consumer
+    // audit, do not add more.
+    // 2026-07-11 consent-clarity: +1 — `commitGmHeldResumeAll` ("all of
+    // them" over multiple GM holds) re-derives wire freshness against the
+    // FINAL post-apply graph hash after its sequential mid-turn applies,
+    // for exactly the lane-34 reason above (same seam, plural form).
+    // Deliberate, reviewed; migrate with the frame-consumer audit, do not
+    // add more.
+    'src/orchestrator-v5/turn-executor.ts': 5, // approved assembly seam (frozen file)
+    // 2026-07-22 dead-noop deletion: 3 → 2 — the deterministic no-op explanation
+    // chip-click dispatch (`buildProjectionInputs`, removed as dead code
+    // post-#619) held one of the three references (its own ad-hoc freshness
+    // re-derivation). Deleting it drops a TOLERATED site; the surviving two are
+    // the import + the live run_analysis path's re-derivation. Reduction, not
+    // growth — the debt shrank.
+    'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 2, // TOLERATED ad-hoc debt — do not add more
+    // 2026-07-07 lane-8: +2 — the GM referee gate's pre-edit freshness
+    // re-projection (strict persisted-base frame authority for the referee's
+    // R2 stale gate; see edit-graph-referee-gate.ts + lane-8 evidence report).
+    // Deliberate, reviewed; still ad-hoc debt — migrate with the frame-consumer
+    // audit, do not add more.
+    // 2026-07-09 overnight-review F5+F6: +1 — the goal-target receipt
+    // guard's swap-withheld branch re-derives freshness against
+    // `gmFrameBase` (the PRE-edit persisted base — what actually still
+    // persists when the write is withheld), mirroring the existing
+    // GM-blocked branch's own re-derivation a few lines above for the
+    // identical reason (freshness must never reflect a graph that never
+    // persisted; wire previously carried `graph: null` alongside a phantom
+    // post-edit hash the client could never observe). Deliberate, reviewed;
+    // still ad-hoc debt — migrate with the frame-consumer audit, do not add
+    // more.
+    // 2026-07-20 part-accounting conservation law: +1 — the defect-B
+    // substitution fail-closed branch re-derives freshness against
+    // `gmFrameBase` (the PRE-edit persisted base). Identical reason and
+    // identical shape to the GM-blocked and swap-withheld branches above:
+    // when the law blocks a named-target substitution, NOTHING persists, so
+    // the wire must not carry a post-edit hash for a graph that never
+    // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
+    // frame-consumer audit, do not add more.
+    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
+    // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
+    // transaction pre-route derives the PRE-edit frame freshness for its
+    // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
+    // (the SAME hash the referee frame + the held pending's `graph_hash`
+    // precondition use), exactly mirroring edit-graph-dispatch's own
+    // pre-edit frame re-derivation for the free-text edit gate. Consistent by
+    // construction; reusing build-turn-context's decision-context freshness
+    // would derive against a DIFFERENT hash. Deliberate, reviewed; still
+    // ad-hoc debt — migrate with the frame-consumer audit, do not add more.
+    'src/orchestrator/route-v2.ts': 2,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
@@ -118,8 +182,8 @@ Do NOT re-derive freshness / canonical state / recent changes at your call site:
   - read the value from the CanonicalContextFrame / turn context you already hold, or
   - thread it from build-turn-context / the context-pack assembler.
 
-The pre-existing ad-hoc sites (chip-click-dispatch.ts x2 call sites,
-edit-graph-dispatch.ts x1 call site) are FROZEN as tolerated debt pending the
+The pre-existing ad-hoc sites (chip-click-dispatch.ts x1 call site,
+edit-graph-dispatch.ts x2 call sites) are FROZEN as tolerated debt pending the
 turn-executor frame-threading migration (see
 Docs/t4/context-frame-consumer-migration-audit.md). They are not precedent.
 
@@ -132,18 +196,29 @@ describe('anti-rederivation call-site pin', () => {
   for (const [ident, expected] of Object.entries(EXPECTED)) {
     it(`\`${ident}\` is referenced only by the pinned files, with pinned per-file counts`, () => {
       expect(scanRepo(ident), guidance(ident)).toEqual(expected);
-    });
+    }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
   }
 
   // Scanner self-tests (mirrors the shell ratchet's --self-test philosophy):
   // prove the detector fires on code and NOT on comments, and that the word
   // boundary keeps `projectRecentChanges` from matching its Frame projection.
-  it('scanner fires on code lines and ignores comment-only lines', () => {
+  it('scanner fires on code references and ignores comments (including trailing ones)', () => {
     expect(countReferences('const x = deriveAnalysisFreshness([], null);', 'deriveAnalysisFreshness')).toBe(1);
     expect(countReferences("import { deriveAnalysisFreshness } from './freshness.js';", 'deriveAnalysisFreshness')).toBe(1);
-    expect(countReferences(' * see deriveAnalysisFreshness for details', 'deriveAnalysisFreshness')).toBe(0);
     expect(countReferences('// deriveAnalysisFreshness', 'deriveAnalysisFreshness')).toBe(0);
     expect(countReferences('/* deriveAnalysisFreshness */', 'deriveAnalysisFreshness')).toBe(0);
+    expect(
+      countReferences('/**\n * see deriveAnalysisFreshness for details\n */', 'deriveAnalysisFreshness'),
+    ).toBe(0);
+    // The case the old first-token line filter could NOT see — a trailing
+    // comment on a code line (the source-scanning-guard footgun):
+    expect(
+      countReferences('const x = 1; // freshness comes from deriveAnalysisFreshness', 'deriveAnalysisFreshness'),
+    ).toBe(0);
+    // …while a code reference sharing its line with a trailing comment counts:
+    expect(
+      countReferences('const y = deriveAnalysisFreshness([], null); // frame seam', 'deriveAnalysisFreshness'),
+    ).toBe(1);
   });
 
   it('word boundary: projectRecentChangesToFrame is NOT a projectRecentChanges reference', () => {

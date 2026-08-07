@@ -43,17 +43,6 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async repairGraph(args: any, _opts: CallOpts): Promise<any> {
-    if (this.shouldFail) {
-      throw new Error(`${this.name} failed`);
-    }
-    return {
-      graph: args.graph,
-      rationales: [],
-      usage: { input_tokens: 10, output_tokens: 20 },
-    };
-  }
-
   async clarifyBrief(args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
@@ -206,6 +195,45 @@ describe("FailoverAdapter", () => {
     }
   });
 
+  // M4 (Codex r2 pre-merge review): a client / budget abort mid-failover must
+  // NOT trigger a paid cross-provider retry. RED against the pre-fix code: the
+  // fallback WAS invoked (and succeeded), so the promise resolved and the
+  // fallback spy recorded a call.
+  it("does NOT fail over to the next provider when the client signal is aborted (M4)", async () => {
+    const primary = new MockAdapter("primary", "model-v1", true); // fails
+    const fallback = new MockAdapter("fallback", "model-v2", false); // would succeed
+    const fallbackSpy = vi.spyOn(fallback, "draftGraph");
+
+    const failover = new FailoverAdapter([primary, fallback], "draft_graph");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      failover.draftGraph(
+        { brief: "Test brief", seed: 17 },
+        { requestId: "test-abort", timeoutMs: 30000, signal: controller.signal },
+      ),
+    ).rejects.toThrow(/primary failed/);
+    // The paid cross-provider retry was suppressed — the fallback never ran.
+    expect(fallbackSpy).not.toHaveBeenCalled();
+  });
+
+  it("still fails over normally when the signal is present but NOT aborted", async () => {
+    const primary = new MockAdapter("primary", "model-v1", true); // fails
+    const fallback = new MockAdapter("fallback", "model-v2", false); // succeeds
+    const fallbackSpy = vi.spyOn(fallback, "draftGraph");
+
+    const failover = new FailoverAdapter([primary, fallback], "draft_graph");
+    const controller = new AbortController(); // NOT aborted
+
+    const result = await failover.draftGraph(
+      { brief: "Test brief", seed: 17 },
+      { requestId: "test-live", timeoutMs: 30000, signal: controller.signal },
+    );
+    expect(result.graph.nodes[0].label).toBe("Test brief");
+    expect(fallbackSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("should work with suggestOptions method", async () => {
     const adapters = [
       new MockAdapter("primary", "model-v1", true), // Will fail
@@ -222,28 +250,8 @@ describe("FailoverAdapter", () => {
     expect(result.options[0].id).toBe("opt_1");
   });
 
-  it("should work with repairGraph method", async () => {
-    const adapters = [
-      new MockAdapter("primary", "model-v1", true),
-      new MockAdapter("fallback", "model-v2", false),
-    ];
-
-    const failover = new FailoverAdapter(adapters, "repair_graph");
-    const testGraph = {
-      version: "1",
-      default_seed: 17,
-      nodes: [],
-      edges: [],
-      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
-    };
-
-    const result = await failover.repairGraph(
-      { graph: testGraph, violations: ["test"] },
-      defaultOpts
-    );
-
-    expect(result.graph).toBeDefined();
-  });
+  // "should work with repairGraph method" REMOVED — ROADMAP 2.763 retired the
+  // capability; the failover decorator no longer has a repairGraph limb.
 
   it("should work with clarifyBrief method", async () => {
     const adapters = [

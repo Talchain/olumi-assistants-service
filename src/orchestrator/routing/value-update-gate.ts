@@ -7,7 +7,7 @@
  * `edit_graph` LLM JSON path. The gate is intentionally narrow — when in
  * doubt, the message stays on the existing edit_graph route.
  *
- * Three layers of protection:
+ * Four layers of protection:
  *
  *   1. META-NOUN GUARD — if the verb's object is "model" / "graph" /
  *      "diagram" (e.g. "update the model to ..."), the request is a
@@ -24,14 +24,25 @@
  *      the meta-noun guard (no kind/structural ambiguity exists with
  *      `by`).
  *
+ *   4. CONSTRAINT DIRECT-OBJECT CLAUSE (clause D) — `add/apply/put/place`
+ *      + optional article/adjective + `constraint(s)` is an unambiguous
+ *      `add_constraint` intent. Required because the V4 edit_graph lane
+ *      has no constraint operation whatsoever. `set` is excluded on
+ *      purpose (deterministic pre-route collision — see
+ *      CONSTRAINT_INTENT_VERBS).
+ *
  *   Matches (suppressed → routed to TurnExecutor):
  *     "set churn to 5%"
  *     "update existing team maturity to mid-weight developers"
  *     "update the existing team maturity to be mid-weight developers"
  *     "increase price by 10%"
  *     "decrease the cost by half"
+ *     "add a constraint on Key Talent Attrition"            (clause D)
+ *     "place a hard constraint on headcount"                (clause D)
  *
  *   Does NOT match (kept on the edit_graph LLM route):
+ *     "add a factor for budget constraint"   (add_node; label ≠ intent)
+ *     "remove the constraint on churn"       (add_constraint cannot remove)
  *     "update the model to include market dynamics"
  *     "update the model to also include market dynamics"   (filler)
  *     "update the model to better reflect market dynamics"  (filler)
@@ -44,10 +55,15 @@
  *     "set X to be risks"                                  (plural kind)
  *     "update nodes to become options"                     (plural kind)
  *
- * Verbs deliberately excluded from this gate:
+ * Verbs deliberately excluded from clauses A/B:
  *   - `add` and `remove`: structural (add_node / remove_node).
  *   - `change`: ambiguous (could be value or kind change).
  *   - `tweak` / `modify` / `edit`: too vague to determine intent.
+ *
+ * NOTE: clause D (constraint phrasings) re-admits `add` ONLY when its
+ * direct object is the noun "constraint" — an unambiguous add_constraint
+ * intent, never an add_node one. The exclusion above still holds for every
+ * other `add` shape.
  *
  * Failure modes handled:
  *   - "set X to Y" with no resolvable factor → Sonnet returns a
@@ -58,6 +74,8 @@
  * Both are preferable to the legacy edit_graph LLM JSON-parse failure
  * + "Something went wrong" UX.
  */
+
+import { decomposeEditMessage } from '../../orchestrator-v5/routing/edit-part-decomposition.js';
 
 // ---------------------------------------------------------------------------
 // Tunable subpatterns (table-driven so future edits are localised).
@@ -201,10 +219,145 @@ const NUMERIC_BY_PATTERN_SOURCE =
   String.raw`\b(?:${VALUE_UPDATE_VERBS_BY.join('|')})\s+${ARTICLE_PREFIX}` +
   `${OBJECT_WINDOW_BY}\\s+by\\s+\\S`;
 
+/**
+ * Clause C — goal-target phrasings (lane 20). Verbs that may drive the
+ * explicit "success target" noun phrase. Broader than the clause-A verb set
+ * (the noun disambiguates: "raise the success target" is unambiguously a
+ * value intent, unlike bare "raise X").
+ */
+const GOAL_TARGET_VERBS: ReadonlyArray<string> = Object.freeze([
+  ...VALUE_UPDATE_VERBS_TO,
+  ...VALUE_UPDATE_VERBS_BY,
+  'change',
+  'adjust',
+  'make',
+]);
+
+/**
+ * Clause C — `<verb> … success target …` (lane 20).
+ *
+ * The live staging leak (scenario 55df6984…, turn fac8dc19…, 2026-07-07):
+ * "Set a success target OF a 15% cost reduction …" carries no ` to `, so
+ * clause A never fired, the message dispatched to the edit_graph LLM, and
+ * the edit stamped non-contract fields (`value`/`type`/`description`) onto
+ * the goal node under a false "Success target … set" receipt — while the
+ * canonical goal-threshold contract (`goal_threshold_raw`/`_unit`/`_cap`/
+ * `goal_threshold`, the ONLY fields `has_goal_target` / the UI goal chip /
+ * PLoT's explicit-threshold path read) stayed unwritten. Goal-target
+ * registration is `add_constraint`'s contract (router tool-schema teaches
+ * it; validation-registry accepts entity kind 'goal'; the lane-15 join
+ * stamps the quad in the same validated write), so these phrasings MUST
+ * reach the TurnExecutor tool-use path.
+ *
+ * Shape: gate verb, then at most 4 tokens (articles/adjectives — "a new",
+ * "our", "the current"), then the literal noun phrase. The tight token
+ * window keeps figurative distant co-occurrence ("update the model and
+ * describe the success target") out of the gate; the preposition is
+ * deliberately unconstrained (of/to/at/…) — that variance is exactly what
+ * clause A missed.
+ */
+const GOAL_TARGET_PATTERN_SOURCE =
+  String.raw`\b(?:${GOAL_TARGET_VERBS.join('|')})\b(?:\s+\S+){0,4}?\s+success\s+target\b`;
+
+/**
+ * Clause D — constraint phrasings (add_constraint dead-letter closure).
+ *
+ * Verbs that drive an ADD-a-constraint intent.
+ *
+ * Excludes `remove` / `delete`: `add_constraint` only adds (there is no
+ * remove_constraint handler), so routing a removal to the TurnExecutor
+ * tool-use path would trade one dead end for another. Removals keep their
+ * existing edit_graph route.
+ *
+ * Excludes `set` — DELIBERATELY, and this exclusion is load-bearing.
+ * Suppressing edit_graph routes the message to TurnExecutor, whose FIRST
+ * stop is the deterministic value-update pre-route
+ * (`orchestrator-v5/routing/deterministic-value-update.ts`). That module's
+ * `EDIT_VERB_PATTERN` is `increase|decrease|reduce|raise|lower|set|change|
+ * update|make|adjust` — it contains `set` but NOT `add`/`apply`/`put`/
+ * `place` (measured) — and it has NO notion of "constraint" / "at most" /
+ * "at least" anywhere in the module. So "Set a constraint on churn of at
+ * most 5%" would satisfy its verb + quantity (5%) + factor-candidate
+ * (churn) predicates and be claimed as a VALUE update, silently setting
+ * churn's value to 5% when the user asked for a 5% CEILING. That is a
+ * wrong mutation — strictly worse than the dead end this clause exists to
+ * fix. `add` (the verb the #464 refusal actually promises, and the verb
+ * its `chip_prompt_refuse_constraint` chip replays) does not collide, so
+ * it falls through to the tool-use path and reaches `add_constraint`.
+ * Omitting `set` leaves "set a constraint …" exactly where it is today
+ * (edit_graph) — no regression, no new harm. Re-admitting `set` here
+ * REQUIRES teaching the deterministic pre-route to stand down on
+ * constraint phrasings first.
+ */
+const CONSTRAINT_INTENT_VERBS: ReadonlyArray<string> = Object.freeze([
+  'add',
+  'apply',
+  'put',
+  'place',
+]);
+
+/**
+ * Adjectives tolerated between the article and the constraint noun
+ * ("a hard constraint", "an upper constraint"). A closed list rather than
+ * an open token window — see CONSTRAINT_PATTERN_SOURCE.
+ */
+const CONSTRAINT_ADJECTIVES: ReadonlyArray<string> = Object.freeze([
+  'hard',
+  'soft',
+  'new',
+  'additional',
+  'upper',
+  'lower',
+  'maximum',
+  'minimum',
+  'max',
+  'min',
+]);
+
+/**
+ * Clause D — `<add-intent verb> [article] [adjective] constraint(s)`.
+ *
+ * The live dead letter (3 probes, 2026-07-15, all `exit_path: edit_graph`,
+ * 0 blocks, no constraint EVER added): PR #464 ships an honest refusal for
+ * value-edits on non-factor nodes whose closing sentence promises "If you
+ * want to hold <label> to a limit, ask me to add a constraint on it" and
+ * renders a `chip_prompt_refuse_constraint` chip replaying "Add a
+ * constraint on <label>." That text matches EDIT_GRAPH_POSITIVE_REGEX via
+ * `add`, is caught by NO clause here (`add` is excluded from clauses A/B as
+ * structural — see "Verbs deliberately excluded" above), and so dispatches
+ * to the V4 edit_graph LLM. That lane has NO constraint operation at all:
+ * it no-ops and emits `buildEditClarifyFallbackParts`' "factor, edge,
+ * option, or value" clarifier — whose vocabulary tellingly has no
+ * "constraint" in it. A fully specified probe ("...of at most 0.5")
+ * returned byte-identical copy, proving under-specification was never the
+ * cause. #464 thus fixed a 1-hop dead end and shipped a 2-hop one.
+ *
+ * Everything downstream already exists and is tested: `add_constraint` is
+ * registered (`tools/registry.ts`), the router tool-schema teaches it
+ * (`orchestrator-v5/routing/tool-schema.ts`), and risk-kind targets are in
+ * `ALLOWED_TARGET_KINDS` with proven PLoT forwarding
+ * (`add-constraint-risk-forwarding.test.ts`). ONLY the route was missing —
+ * the same defect, in the same file, as clause C above, which exists
+ * verbatim because "Goal-target registration is add_constraint's contract
+ * ... so these phrasings MUST reach the TurnExecutor tool-use path".
+ *
+ * Shape — DIRECT OBJECT, not a token window. Clause C's looser
+ * `(?:\s+\S+){0,4}?` window was tried first and measured to match "Add a
+ * factor for budget constraint" / "Add a risk called supply constraint" —
+ * structural add_node requests whose NEW NODE merely has "constraint" in
+ * its label. Stealing those from edit_graph would be a fresh defect, so
+ * clause D requires the constraint noun to be the verb's direct object
+ * (optional article + closed adjective list only). Locked by the
+ * `NON_SUPPRESS_CASES` regression rows.
+ */
+const CONSTRAINT_PATTERN_SOURCE =
+  String.raw`\b(?:${CONSTRAINT_INTENT_VERBS.join('|')})\s+${ARTICLE_PREFIX}` +
+  `(?:(?:${CONSTRAINT_ADJECTIVES.join('|')})\\s+){0,2}constraints?\\b`;
+
 // Whole-regex with the meta-noun guard at position 0. Use the multi-line
 // `String.raw` literal-free composition so the structure is auditable.
 const VALUE_UPDATE_REGEX = new RegExp(
-  `${META_NOUN_GUARD}(?:${SET_UPDATE_TO_PATTERN_SOURCE}|${NUMERIC_BY_PATTERN_SOURCE})`,
+  `${META_NOUN_GUARD}(?:${SET_UPDATE_TO_PATTERN_SOURCE}|${NUMERIC_BY_PATTERN_SOURCE}|${GOAL_TARGET_PATTERN_SOURCE}|${CONSTRAINT_PATTERN_SOURCE})`,
   'i',
 );
 
@@ -231,6 +384,36 @@ export function isValueUpdatePhrasing(message: string): boolean {
 }
 
 /**
+ * Route-v2's ACTUAL suppression predicate (part-accounting conservation
+ * law, rehearsal defect A, 2026-07-20).
+ *
+ * `isValueUpdatePhrasing` alone suppressed edit_graph dispatch for ANY
+ * message containing a value-update clause — including MIXED messages
+ * ("Set Support cost to 30 and add a new factor called Shipping costs")
+ * whose structural half the deterministic value lane then silently
+ * swallowed: the single-substring auto-dispatch consumed the whole
+ * message, applied the value part, and the add-factor part terminated
+ * NOWHERE. That is the same silent half-drop class the 2026-07-20
+ * rehearsal exposed on the LLM lane.
+ *
+ * The fix stands the suppressor DOWN when intake decomposition finds a
+ * value part mixed with a structural/link part: the whole message then
+ * reaches the edit_graph lane — the only lane that can serve both halves
+ * in one batch — where the part-accounting law (edit-graph-dispatch.ts)
+ * guarantees every part terminates visibly. Pure value updates (including
+ * #549's value+value compounds) and single-part messages are unchanged:
+ * `decomposeEditMessage` reports mixedValueStructural=false for them.
+ *
+ * NOTE: `isValueUpdatePhrasing` itself is deliberately untouched — its
+ * other consumer (vague-edit-guard) must keep seeing mixed messages as
+ * value-bearing so it never claims them as vague edits.
+ */
+export function shouldSuppressEditDispatchForValueUpdate(message: string): boolean {
+  if (!isValueUpdatePhrasing(message)) return false;
+  return !decomposeEditMessage(message).mixedValueStructural;
+}
+
+/**
  * Test-only export of the composed regex and frozen keyword arrays so
  * unit tests can also assert directly on the regex without invoking the
  * predicate. Production code should call `isValueUpdatePhrasing`.
@@ -245,4 +428,7 @@ export const __testOnly = Object.freeze({
   META_NOUNS,
   VALUE_UPDATE_VERBS_TO,
   VALUE_UPDATE_VERBS_BY,
+  GOAL_TARGET_VERBS,
+  CONSTRAINT_INTENT_VERBS,
+  CONSTRAINT_ADJECTIVES,
 });

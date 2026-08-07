@@ -39,9 +39,11 @@ import {
   assembleCeeProvenance,
 } from "../../pipeline-checkpoints.js";
 import { buildLLMRawTrace } from "../../llm-output-store.js";
+import { buildLlmMetadataProjection } from "../llm-metadata-projection.js";
 import { SERVICE_VERSION } from "../../../version.js";
-import { assembleContextPack } from "../../../context/context-pack.js";
+import { assembleDraftProvenanceDescriptor } from "../../../context/context-pack.js";
 import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
+import { enforceCoachingContract } from "../../../adapters/llm/coaching-contract-conformance.js";
 import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
@@ -240,7 +242,6 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 2: Quality computation (canonical) ──────────────────────────────
-  // Canonical quality — substep 9's was a clarifier precondition only
   ctx.quality = computeQuality({
     graph: ctx.graph!,
     confidence: ctx.confidence ?? 0.7,
@@ -312,20 +313,26 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     }
   }
 
-  // ── Step 2c: Default missing strengthen_item fields ───────────────────────
-  // LLM structured output schema does not include action_type, but the Zod
-  // response schema (DraftGraphOutput) requires it. v0.11.0 schema
-  // amendment: `StrengthenItemActionType` canonical enum is
-  // `add_option | add_constraint | add_risk | reframe_goal`. Pre-v0.11.0
-  // default `"improve"` was outside the canonical enum and would fail the
-  // tightened Zod parse. Default to `"add_constraint"` — the most generic
-  // canonical action when the LLM gives no signal.
-  if (ctx.coaching && Array.isArray((ctx.coaching as any).strengthen_items)) {
-    for (const item of (ctx.coaching as any).strengthen_items) {
-      if (!item.action_type) {
-        item.action_type = "add_constraint";
-      }
-    }
+  // ── Step 2c: Force coaching onto the declared contract ────────────────────
+  // THE seam every coaching producer passes through — the post-draft coaching
+  // pass, the draft-LLM fallback path, and the status-quo item injected just
+  // above — so one call covers all of them.
+  //
+  // Was: a missing-`action_type` default only. That let a PRESENT but
+  // off-contract value straight through, which is how the live draft-graph
+  // response came to violate `CEEDraftGraphResponseV1Schema` on 8 of 9
+  // successful drafts (`verification_status: failed_degraded`, day-3 matrix
+  // 2026-07-24). The coaching pass's prompt vocabulary had drifted from
+  // `StrengthenItemActionType` / `BiasType` and nothing checked it.
+  //
+  // `enforceCoachingContract` subsumes the old default (a missing action_type
+  // still resolves to the generic canonical member) and additionally rejects
+  // off-contract values — coercing action categories, DROPPING unnameable bias
+  // labels rather than fabricating a different bias. Membership is derived from
+  // the contract enums, not mirrored. See the module header for the full
+  // rationale.
+  if (ctx.coaching) {
+    enforceCoachingContract(ctx.coaching, ctx.requestId);
   }
 
   // ── Step 3: Validate causal claims against post-STRP graph (Phase 2B) ────
@@ -453,16 +460,43 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     ...(Array.isArray(ctx.topologyPlan) ? { topology_plan: ctx.topologyPlan } : {}),
   };
 
+  // ── F6 (2026-07-24): coaching_status honesty — decide from VALIDATED counts ──
+  // The coaching pass (Stage 4.5) marks `attached=true` for ANY non-null
+  // container — including `{"coaching":{},"causal_claims":[{}]}`, which Stage 5
+  // narrows to canonical-empty coaching and drops the invalid claim. Deciding the
+  // terminal status from pre-validation presence then wrongly stamped 'complete'.
+  // Own the complete-vs-degraded call HERE, from the SAME validators Stage 5 uses
+  // (hasMeaningfulCoaching + validateCausalClaims) — deriving, never a second
+  // mirror of the narrowing. When the pass ATTACHED content that validates to
+  // nothing usable, the honest status is 'failed_degraded'. Scope-tight: fires
+  // ONLY when the pass attached (so a never-ran / budget-skipped / no-adapter path
+  // is untouched — index.ts stamps those), and never clobbers 'skipped_budget'.
+  const coachingPassAttached =
+    (ctx.coaching !== undefined && ctx.coaching !== null) || ctx.causalClaims !== undefined;
+  const coachingUsable =
+    (sanitisedCoaching != null && hasMeaningfulCoaching(sanitisedCoaching)) ||
+    validatedCausalClaims.length > 0;
+  if (
+    coachingPassAttached &&
+    !coachingUsable &&
+    ctx.pipelineOutcome &&
+    ctx.pipelineOutcome.coaching_status !== 'skipped_budget'
+  ) {
+    ctx.pipelineOutcome.coaching_status = 'failed_degraded';
+  }
+
   // ── Step 4: Apply response caps ──────────────────────────────────────────
   const { cappedPayload, limits } = applyResponseCaps(payload);
 
   // ── Step 5: (STRP trace merged onto trace variable in Step 9b below) ─────
 
   // ── Step 6: Structural warnings ──────────────────────────────────────────
+  // UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+  // CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED deleted, live-true on staging).
   let draftWarnings: any[] | undefined;
   let confidenceFlags: Record<string, unknown> | undefined;
 
-  if (config.cee.draftStructuralWarningsEnabled) {
+  {
     const structural = detectStructuralWarnings(ctx.graph as any, ctx.structuralMeta);
     if (structural.warnings.length > 0) {
       draftWarnings = structural.warnings;
@@ -634,15 +668,19 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       deterministic_sweep_version: sweepTrace?.sweep_version ?? "unknown",
       bucket_summary: sweepTrace ? (sweepTrace.bucket_summary ?? null) : null,
       status_quo_action: deriveStatusQuoAction(sweepTrace),
+      // Post-2.731 semantics: Bucket-C violations survived the deterministic
+      // sweep. No LLM repair exists to be "needed" any more — this is the
+      // sweep's own diagnostic and predicts the post-enforcement 422 when
+      // the deterministic normalisation cannot clear the violations.
+      // (llm_repair_called / llm_repair_brief_included /
+      // llm_repair_skipped_reason were DELETED with the call — ROADMAP
+      // 2.732; leaving them would have made them constant-wrong.)
       llm_repair_needed: ctx.llmRepairNeeded ?? false,
       // Existing fields
       deterministic_repairs_count: repairs.length,
       deterministic_repairs: repairs,
       unreachable_factors: sweepTrace?.unreachable_factors ?? { reclassified: [], marked_droppable: [] },
       status_quo: sweepTrace?.status_quo ?? { fixed: false, marked_droppable: false },
-      llm_repair_called: ctx.llmRepairNeeded ?? false,
-      llm_repair_brief_included: ctx.llmRepairBriefIncluded ?? false,
-      llm_repair_skipped_reason: ctx.llmRepairNeeded === false ? "deterministic_sweep_sufficient" : undefined,
       remaining_violations_count: ctx.remainingViolations?.length ?? 0,
       remaining_violation_codes: [...new Set((ctx.remainingViolations ?? []).map((v) => v.code))],
       edge_format_detected: ctx.detectedEdgeFormat ?? "NONE",
@@ -667,10 +705,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 10: Clarifier status ────────────────────────────────────────────
-  let clarifierStatus: string | undefined;
-  if (!ctx.clarifierResult?.clarifier) {
-    clarifierStatus = ctx.clarifierResult?.convergenceStatus ?? "complete";
-  }
+  // Stage-4 clarifier RETIRED 2026-07-16 (ROADMAP 1.94 Option A). The wire
+  // field is kept for client compatibility at its only observed live value:
+  // the retired stage converged round-1 with status "complete" on 100% of
+  // firings (and "complete" was also the disabled-flag fallback).
+  const clarifierStatus = "complete";
 
   // ── Step 11: Assemble V1 response ────────────────────────────────────────
   const ceeResponse: any = {
@@ -685,7 +724,6 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     draft_warnings: draftWarnings,
     confidence_flags: confidenceFlags,
     guidance,
-    clarifier: ctx.clarifierResult?.clarifier,
     clarifier_status: clarifierStatus,
     goal_connectivity: goalConnectivity,
     model_quality_factors: modelQualityFactors,
@@ -761,27 +799,10 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       risk_coefficient_corrections: ctx.riskCoefficientCorrections.length,
       corrections: ctx.riskCoefficientCorrections.length > 0 ? ctx.riskCoefficientCorrections : undefined,
     },
-    llm_metadata: ctx.llmMeta
-      ? {
-          model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
-          prompt_version: ctx.llmMeta.prompt_version,
-          prompt_text_version: ctx.llmMeta.prompt_text_version,
-          prompt_hash: ctx.llmMeta.prompt_hash,
-          duration_ms: ctx.llmMeta.provider_latency_ms,
-          finish_reason: ctx.llmMeta.finish_reason,
-          response_chars: ctx.llmMeta.raw_llm_text?.length,
-          token_usage: ctx.llmMeta.token_usage,
-          temperature: ctx.llmMeta.temperature,
-          max_tokens: ctx.llmMeta.max_tokens,
-          seed: ctx.llmMeta.seed,
-          reasoning_effort: ctx.llmMeta.reasoning_effort,
-          instance_id: ctx.llmMeta.instance_id,
-          cache_age_ms: ctx.llmMeta.cache_age_ms,
-          cache_status: ctx.llmMeta.cache_status,
-          use_staging_mode: ctx.llmMeta.use_staging_mode,
-          structured_outputs_used: ctx.llmMeta.structured_outputs_used,
-        }
-      : { model: ctx.draftAdapter?.model },
+    // ONE projection, shared with the error surface in unified-pipeline/index.ts
+    // — see llm-metadata-projection.ts for why this stopped being written out by
+    // hand (the two keep-lists had drifted and both dropped runaway_abort_count).
+    llm_metadata: buildLlmMetadataProjection(ctx.llmMeta, ctx.draftAdapter?.model),
     validation_summary: ctx.validationSummary,
     transforms: ctx.transforms.length > 0 ? ctx.transforms : undefined,
     corrections: ctx.collector.hasCorrections() ? ctx.collector.getCorrections() : undefined,
@@ -886,7 +907,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       ? Number(rawSeed)
       : undefined;
 
-  const contextPack = assembleContextPack({
+  const contextPack = assembleDraftProvenanceDescriptor({
     capability: "draft_graph",
     brief: ctx.effectiveBrief,
     seedGraph: (ctx.input as any).previous_graph,
@@ -908,7 +929,11 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       enforceSingleGoal: config.cee.enforceSingleGoal,
       draftArchetypesEnabled: config.cee.draftArchetypesEnabled,
       clarificationEnforced: config.cee.clarificationEnforced,
-      clarifierEnabled: config.cee.clarifierEnabled,
+      // Stage-4 clarifier retired (2026-07-16, ROADMAP 1.94 Option A). The
+      // field stays in the ContextPack config fingerprint at its permanent
+      // truth (no in-pipeline clarifier) so context_hash provenance remains
+      // stable for configs that never enabled it.
+      clarifierEnabled: false,
     },
     clarificationRound: (ctx.input as any).clarification_rounds_completed,
     clarificationAnswers: (ctx.input as any).conversation_history?.map(

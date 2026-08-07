@@ -52,6 +52,53 @@ import { QuantityExtractionResultSchema } from './cqe/schema-types.js';
  */
 export const CONTEXT_PACK_VERSION_LITERAL = '2.0' as const;
 
+/**
+ * Lane 28 — brief pipeline: size bound for the projected decision brief.
+ *
+ * The brief is the user's OWN text (no display-safety banding applies — it is
+ * not model output), but it is prompt-budget-bounded here so a pathological
+ * 8,000-char persisted brief (the `scenarios.brief_text` DB CHECK ceiling)
+ * cannot claim an unbounded share of the ~30k-char routing prompt. Truncation
+ * is DISCLOSED, never silent: the projection carries a `truncated` flag and
+ * the `original_chars` count (see `projectBrief` in
+ * `./context-pack-assembler.ts`), so downstream consumers — and the LLM —
+ * can see that the text is bounded.
+ *
+ * Lives in this module (not the assembler) because the schema enforces the
+ * bound and the assembler imports the schema — the reverse import would
+ * cycle.
+ */
+export const CONTEXT_PACK_BRIEF_CHAR_CAP = 2000;
+
+/**
+ * Verbatim conversation memory window — the number of most-recent turns the
+ * ContextPack carries in full (turns beyond it are folded into the rolling
+ * summary). Raised 5 → 8 per the D-59-11 "S5 flip" (2026-07-24).
+ *
+ * SINGLE SOURCE OF TRUTH (FINAL-SWEEP, 2026-07-24; Codex quality F4). Previously
+ * this literal was hand-typed in BOTH the assembler (CONTEXT_PACK_RECENT_TURNS_CAP)
+ * and the policy (POLICY_VERBATIM_TURNS) with a "move both together" comment and a
+ * conformance test pinning them equal — the exact hand-mirror trap-12 hazard. It
+ * now lives in this cycle-safe leaf (both the assembler and the policy already
+ * import from here) and both derive from it, so it CANNOT drift.
+ */
+export const CONTEXT_PACK_RECENT_TURNS_CAP = 8;
+
+/**
+ * Lane 28 — the projected decision brief carried on the ContextPack. Strict:
+ * `text` is non-empty and hard-bounded at {@link CONTEXT_PACK_BRIEF_CHAR_CAP}
+ * (the bound is enforced, not advisory); `truncated` + `original_chars`
+ * disclose any truncation. Exported so brief-projection tests can validate
+ * the shape without assembling a whole pack.
+ */
+export const ContextPackBriefSchema = z
+  .object({
+    text: z.string().min(1).max(CONTEXT_PACK_BRIEF_CHAR_CAP),
+    truncated: z.boolean(),
+    original_chars: z.number().int().positive(),
+  })
+  .strict();
+
 const ContextPackGraphSchema = z
   .object({
     nodes: z.array(z.unknown()).readonly(),
@@ -73,6 +120,25 @@ const ContextPackAnalysisOptionSchema = z
   .object({
     label: z.string(),
     probability: z.number().min(0).max(1),
+    /**
+     * Lane 30 — the option's goal-fit value (modelled probability the option
+     * meets the user's target; PLoT #204 `probability_of_joint_goal`).
+     * Optional: absent when the producer scored no goal fit for the option.
+     */
+    goal_fit_probability: z.number().min(0).max(1).optional(),
+    /**
+     * Lane 30 fix 3 — the option's modelled-outcome mean (raw float, banded
+     * by the display formatter). Absent when the producer reported no
+     * outcome distribution for the option.
+     */
+    outcome_mean: z.number().finite().optional(),
+    /**
+     * Trust-spine board #1 (CEE half) — literal `true` when this option is
+     * the flagged constraint-infeasible winner
+     * (CEE_CONSTRAINT_INFEASIBLE_GATE ON). ABSENT otherwise (never `false`),
+     * matching the pack's key-absence style.
+     */
+    constraint_infeasible: z.literal(true).optional(),
   })
   .strict();
 
@@ -90,10 +156,51 @@ const ContextPackAnalysisFragileEdgeSchema = z
   })
   .strict();
 
+/** Lane 21 — raw tipping-point entry (see ContextPackAnalysisFlipThreshold). */
+const ContextPackAnalysisFlipThresholdSchema = z
+  .object({
+    factor_label: z.string(),
+    current_value: z.number().finite().nullable(),
+    flip_value: z.number().finite().nullable(),
+    unit: z.string().nullable(),
+    no_flip_within_bounds: z.boolean(),
+    /**
+     * ROADMAP 2.205 practical resolution (2026-07-31) — the display licence
+     * (see `ContextPackAnalysisFlipThreshold`). Optional and ABSENT when
+     * unlicensed, so an unlicensed pack is byte-identical to today's. Kept
+     * `.strict()`-compatible deliberately: a stray display key on an entry
+     * that never earned one must still fail the schema.
+     */
+    current_display: z.string().min(1).optional(),
+    flip_display: z.string().min(1).optional(),
+  })
+  .strict();
+
+/** Lane 21 — raw evidence-gap (VOI) entry. */
+const ContextPackAnalysisEvidenceGapSchema = z
+  .object({
+    factor_label: z.string(),
+    voi_score: z.number().finite().nonnegative(),
+  })
+  .strict();
+
+/** Lane 21 — goal-fit scoring provenance (fact + basis, never values). */
+const ContextPackAnalysisGoalFitSchema = z
+  .object({
+    scored: z.boolean(),
+    basis: z.string().nullable(),
+  })
+  .strict();
+
 /**
  * Strict on contract fields. Notably: `staleness_reason` is intentionally
  * NOT permitted here (state-trust removed it from the prompt-visible
  * projection — see `Docs/v5-state-trust-phase0.md`).
+ *
+ * Lane 21 (P0-A): `options` / `flip_thresholds` / `fragile_edge_count` /
+ * `evidence_gaps` / `goal_fit` are optional in shape (the chip-click
+ * dispatch hand-builds a narrow projection without them) but the routed
+ * `projectAnalysis` path always emits them.
  */
 const ContextPackAnalysisSchema = z
   .object({
@@ -104,6 +211,35 @@ const ContextPackAnalysisSchema = z
     robustness_band: z.string().nullable(),
     top_drivers: z.array(ContextPackAnalysisDriverSchema).readonly(),
     fragile_edges: z.array(ContextPackAnalysisFragileEdgeSchema).readonly(),
+    options: z.array(ContextPackAnalysisOptionSchema).readonly().optional(),
+    flip_thresholds: z
+      .array(ContextPackAnalysisFlipThresholdSchema)
+      .readonly()
+      .optional(),
+    fragile_edge_count: z.number().int().nonnegative().optional(),
+    evidence_gaps: z
+      .array(ContextPackAnalysisEvidenceGapSchema)
+      .readonly()
+      .optional(),
+    // ROADMAP 2.54 (b) — literal `true` when the Lane 30 lever suppression
+    // removed at least one evidence-gap entry; ABSENT otherwise (never
+    // `false`), matching the pack's key-absence style (cf. conversation
+    // `truncated`).
+    evidence_gaps_lever_suppressed: z.literal(true).optional(),
+    goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
+    /**
+     * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
+     * 'strong' | 'fair' | 'needs_work'; kept as a string because the
+     * enrichment passthrough is untyped). Null when the producer reported
+     * none; optional so the chip-click narrow projection stays valid.
+     */
+    confidence_tier: z.string().nullable().optional(),
+    /**
+     * Trust-spine board #1 (CEE half) — the honest constraint note from
+     * `compactAnalysis`, threaded verbatim. Absent when the gate is off or
+     * the winner is feasible.
+     */
+    constraint_infeasible_note: z.string().optional(),
   })
   .strict();
 
@@ -119,6 +255,11 @@ const ContextPackConversationTurnSchema = z
     // (system-event turns, pre-migration rows).
     user_message: z.string().nullable(),
     assistant_message: z.string().nullable(),
+    // Context v2 (02 §Disclosure): literal `true` when a message on this
+    // turn was hard-sliced at the persistence cap. ABSENT otherwise (never a
+    // noisy `false`). Disclosure is unconditional, so the key appears
+    // whenever a projected turn sits at the cap.
+    truncated: z.literal(true).optional(),
   })
   .strict();
 
@@ -128,6 +269,29 @@ const ContextPackConversationSchema = z
     turn_count: z.number().int().nonnegative(),
     last_tool_used: z.string().nullable(),
     pending_confirmation: z.boolean(),
+    // Context v2 (02 §Disclosure fix 2): window disclosure — how many
+    // prior turns are shown vs available, so the LLM knows history exists
+    // beyond the window. Emitted unconditionally by projectConversation;
+    // optional here so partial/legacy pack fixtures still validate.
+    // `summarised` (#536 extension, O-2 activation): how many not-shown
+    // turns arrive via `conversation_summary` instead of vanishing —
+    // present IFF a summary section was injected (0 there is honest: a
+    // floor / withheld block absorbs nothing).
+    // `available` is the conversation's PRE-CAP length (the store's exact
+    // count), NOT the length of the read window — it was the latter until
+    // 2026-07-25, which made a 78-turn conversation report 20.
+    // `notice` is the code-owned in-band disclosure emitted by
+    // `projectConversation` whenever turns exist that the pack does not show;
+    // it travels with the numbers it describes so it cannot drift from them.
+    window: z
+      .object({
+        shown: z.number().int().nonnegative(),
+        available: z.number().int().nonnegative(),
+        summarised: z.number().int().nonnegative().optional(),
+        notice: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -239,7 +403,8 @@ const AnalysisStateSummarySchema = z
   .strict();
 
 /**
- * Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). The
+ * Coaching Context Pack v1 (unconditional since 2026-07-20 — O-7 wave 2:
+ * CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted). The
  * hash-free, prompt-safe projection of the canonical analysis state the LLM
  * may RECEIVE for coaching (never author). Strictly narrower than
  * `AnalysisStateSummarySchema`: closed enums / booleans / one count only — no
@@ -269,16 +434,90 @@ const CoachingStatePackSchema = z
   })
   .strict();
 
+/**
+ * Context v2 S4-INJECT (ROADMAP 1.73; design pack 01 §2/§4): the rolling
+ * conversation summary section. `.strict()` so no field can silently join
+ * the prompt-facing block without review (same posture as
+ * CoachingStatePackSchema). `note` is the in-band staleness disclosure —
+ * present IFF `stale` (never silently stale, 01 §4). `stale` is lag-derived
+ * (lag ≥ window depth) EXCEPT for a generator:'floor' summary, where the
+ * injector forces it true regardless of lag — a floor absorbed no
+ * conversation history, so lag-freshness is vacuous for it (1.73-pre b).
+ * Doctrine P: `text` is summariser prose (no raw floats by the summariser's
+ * own contract).
+ *
+ * NOTE: `conversation_summary` also names a V4 prompt-zones registry entry
+ * (src/orchestrator/prompt-zones/*) — unrelated; this is the V5 pack path.
+ */
+const ContextPackConversationSummarySchema = z
+  .object({
+    text: z.string(),
+    current_to_turn_id: z.string(),
+    lag_turns: z.number().int().nonnegative(),
+    stale: z.boolean(),
+    note: z.string().optional(),
+  })
+  .strict();
+
+/**
+ * O-3 — context-size budget disclosure (`ContextPack.context_budget`).
+ * One record per section the budget module trimmed at assembly. `.strict()`
+ * so no field can silently join the prompt-facing marker without review
+ * (same posture as CoachingStatePackSchema); `min(1)` because the assembler
+ * OMITS the key entirely when nothing was trimmed — an empty marker would
+ * be a disclosure that discloses nothing.
+ */
+const ContextBudgetTrimRecordSchema = z
+  .object({
+    section: z.enum(['graph', 'analysis']),
+    original_chars: z.number().int().nonnegative(),
+    kept_chars: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const ContextBudgetDisclosureSchema = z
+  .object({
+    truncations: z.array(ContextBudgetTrimRecordSchema).min(1).readonly(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
     scenario_id: z.string().min(1),
     stage: z.string(),
+    /**
+     * Lane 28 — brief pipeline: the user's persisted decision brief
+     * (`scenarios.brief_text`), size-bounded with disclosed truncation.
+     * OMITTED (key absent) when no brief has been persisted for the
+     * scenario (or the persisted value is whitespace-only) — the assembler
+     * never emits `brief: null`, so a no-brief pack serialises no `brief`
+     * field into the routing prompt. `.nullable()` is kept only for
+     * tolerant validation of hand-built packs. This is the field that
+     * closes dossier gap G2 — before it, the brief reached no LLM after
+     * the draft turn.
+     */
+    brief: ContextPackBriefSchema.nullable().optional(),
     graph: ContextPackGraphSchema,
     analysis: ContextPackAnalysisSchema.nullable(),
     display_analysis: DisplaySafeAnalysisSchema,
     display_graph: DisplaySafeGraphSchema,
     conversation: ContextPackConversationSchema,
+    /**
+     * Context v2 S4-INJECT (unconditional since the O-2 activation —
+     * CEE_ROLLING_SUMMARY deleted): present ONLY when the conversation
+     * extends beyond the verbatim window AND a stored summary exists (key
+     * absent otherwise — byte-identity with pre-S4 packs).
+     */
+    conversation_summary: ContextPackConversationSummarySchema.optional(),
+    /**
+     * Knowledge-over-time (ROADMAP 1.199, P6): the pre-projected, bounded,
+     * disclosed decision-records read slice. Present ONLY when the scenario has
+     * prior decision records (key absent otherwise — byte-identity for
+     * record-less scenarios). A plain string (the loader owns projection +
+     * truncation disclosure).
+     */
+    older_relevant_facts: z.string().optional(),
     recent_changes: z.array(RecentMutationSchema).readonly(),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),
@@ -302,13 +541,19 @@ export const ContextPackSchema = z
      */
     analysis_state: AnalysisStateSummarySchema.nullable(),
     /**
-     * Coaching Context Pack v1 (additive, flag-gated by
-     * CEE_COACHING_CONTEXT_PROMPT_ENABLED). Present ONLY when the behaviour
-     * flag is on; absent otherwise (flag-off byte-identity). Unlike
-     * `analysis_state` this projection IS prompt-safe (hash-free), so it is
-     * the only canonical-state surface allowed to reach the LLM.
+     * Coaching Context Pack v1 (additive; unconditional since 2026-07-20 —
+     * O-7 wave 2: CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted). Present
+     * whenever a freshness verdict was derived. Unlike `analysis_state` this
+     * projection IS prompt-safe (hash-free), so it is the only
+     * canonical-state surface allowed to reach the LLM.
      */
     coaching_context: CoachingStatePackSchema.optional(),
+    /**
+     * O-3 — context-size budget disclosure. Present ONLY when the budget
+     * module trimmed the graph and/or analysis at assembly; the assembler
+     * omits the key entirely otherwise (key-absence byte-identity).
+     */
+    context_budget: ContextBudgetDisclosureSchema.optional(),
   })
   // Allow additive fields without immediate schema bumps — tighten later
   // by switching to `.strict()` once the contract is fully fixed.

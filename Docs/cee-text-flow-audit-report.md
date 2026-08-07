@@ -95,7 +95,15 @@ The **decision_review** endpoint is the highest LLM-text-density path — nearly
 |---|-------|---------------|----------|-------|
 | 1 | `graph.nodes[]` / `graph.edges[]` | PASSED THROUGH | ctx.graph replacement | Normalised, baseline-filled, capped, dangling-edge filtered, sorted. |
 | 2 | `rationales[].violation_code/action` | CONSUMED INTERNALLY | Adapter return | Logged if missing; not surfaced to API. |
-| 3 | `usage` | CONSUMED INTERNALLY | Telemetry | Accumulated into `ctx.repairCost`. |
+| 3 | `usage` | CONSUMED INTERNALLY | Telemetry | ~~Accumulated into `ctx.repairCost`.~~ **No longer produced** — the accumulator field was deleted (ROADMAP 2.754) once its last writer went. |
+
+> ⚠ **The `repair_graph` prompt is no longer sent.** Both callers were removed:
+> the draft-path/substep-2 LLM repair (ROADMAP 2.731) and substep 1b's
+> orchestrator-validation limb (ROADMAP 2.740a). The entry point named above,
+> `orchestrator-validation.ts`, still runs but is now a **deterministic**
+> validator — it makes no model call, so none of the three fields in this table
+> is produced at runtime any more. The row is retained as a record of what the
+> prompt returned when it was live.
 
 ### 1.4 validate_graph
 

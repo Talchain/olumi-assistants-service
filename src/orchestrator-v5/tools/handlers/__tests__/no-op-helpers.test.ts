@@ -126,20 +126,28 @@ describe('buildAnalysisAbsentTemplate', () => {
     expect(text).toContain('Would you like me to run the analysis?');
   });
 
-  it('uses "options still need to be set up" copy when readinessStatus === "needs_user_input"', () => {
+  // ROADMAP 2.308 / S3 — these three used to assert the tail
+  // "still need to be set up", which the head clause "N options set up "
+  // contradicted in the same sentence. They now assert the per-status copy
+  // that replaced it. The contradiction itself is pinned as a property in
+  // `analysis-absent-template-contradiction.test.ts`.
+  it('says what needs_user_input actually means — too few options to compare', () => {
     const text = buildAnalysisAbsentTemplate(2, 'needs_user_input');
-    expect(text).toContain('still need to be set up');
+    expect(text).toContain('at least two to compare');
     expect(text).not.toContain('ready to analyse');
+    expect(text).not.toContain('still need to be set up');
   });
 
-  it('uses "options still need to be set up" copy when readinessStatus === "needs_user_mapping"', () => {
+  it('says the options have no effect values when readinessStatus === "needs_user_mapping"', () => {
     const text = buildAnalysisAbsentTemplate(2, 'needs_user_mapping');
-    expect(text).toContain('still need to be set up');
+    expect(text).toContain('no effect values yet');
+    expect(text).not.toContain('still need to be set up');
   });
 
-  it('uses "options still need to be set up" copy when readinessStatus === "needs_encoding"', () => {
+  it('says the options have no effect values when readinessStatus === "needs_encoding"', () => {
     const text = buildAnalysisAbsentTemplate(2, 'needs_encoding');
-    expect(text).toContain('still need to be set up');
+    expect(text).toContain('no effect values yet');
+    expect(text).not.toContain('still need to be set up');
   });
 
   it('falls back to "ready to analyse" wording when readinessStatus is undefined', () => {

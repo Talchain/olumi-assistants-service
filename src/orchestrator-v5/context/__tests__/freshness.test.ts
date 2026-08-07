@@ -10,6 +10,7 @@ import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
   enforceInvariants,
+  selectDegradedRunAnalysisFact,
 } from '../freshness.js';
 import type { FreshnessDerivation } from '../freshness.js';
 import { setTestSink } from '../../../utils/telemetry.js';
@@ -249,6 +250,52 @@ describe('deriveAnalysisFreshness — unknown', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The DEGRADED selector rides the ONE shared ordering.
+//
+// It used to carry a byte-identical private copy of the computed_at-desc /
+// nulls-last comparator, held in step with the canonical one by a comment —
+// the fourth copy of one rule, in the file whose docstring claimed there was
+// one. These tests are the drift guard on that: they fail if the comparator is
+// ever re-privatised AND diverges, which a comment cannot do.
+// ---------------------------------------------------------------------------
+describe('selectDegradedRunAnalysisFact — ordering is the shared one', () => {
+  const degraded = (computed_at: string | null, status: string) =>
+    mkRunAnalysisFact({
+      status,
+      ...(computed_at === null ? {} : { computed_at }),
+      graph_hash_at_run: 'h',
+    });
+
+  it('picks the newest degraded fact by computed_at, not by array position', () => {
+    const older = degraded('2026-04-01T00:00:00.000Z', 'partial');
+    const newer = degraded('2026-04-30T00:00:00.000Z', 'blocked');
+    // Insertion order says `older`; computed_at says `newer`.
+    const r = selectDegradedRunAnalysisFact([older, newer]);
+    expect(r).not.toBeNull();
+    expect(r!.fact).toBe(newer);
+    expect(r!.status).toBe('blocked');
+  });
+
+  it('puts a degraded fact with NO computed_at last, like the canonical sort', () => {
+    const untimestamped = degraded(null, 'partial');
+    const timestamped = degraded('2026-04-30T00:00:00.000Z', 'blocked');
+    const r = selectDegradedRunAnalysisFact([untimestamped, timestamped]);
+    expect(r!.fact).toBe(timestamped);
+  });
+
+  it('CONTROL: successful and legacy-no-status facts are still not "degraded"', () => {
+    // Non-vacuity for the filter half — the ordering change must not have
+    // widened what counts as degraded.
+    const ok = mkRunAnalysisFact({ status: 'computed', computed_at: '2026-05-01T00:00:00.000Z' });
+    const legacy = mkRunAnalysisFact({ computed_at: '2026-05-02T00:00:00.000Z' });
+    expect(selectDegradedRunAnalysisFact([ok, legacy])).toBeNull();
+    // …and a real degraded fact among them IS found.
+    const bad = degraded('2026-04-01T00:00:00.000Z', 'failed');
+    expect(selectDegradedRunAnalysisFact([ok, bad, legacy])!.fact).toBe(bad);
+  });
+});
+
 describe('deriveAnalysisFreshness — selection ordering', () => {
   it('mixes legacy and 0.10.0 facts; picks newest by computed_at when present', () => {
     const legacy = mkRunAnalysisFact({
@@ -340,7 +387,7 @@ describe('enforceInvariants — hard invariant violations', () => {
   // exercising the fallback so a future code change that breaks the
   // exhaustive tree fails this test rather than shipping bad freshness.
 
-  it('both hashes present + freshness=unknown → coerced to unknown / invariant_failed', () => {
+  it('both hashes present and DIFFERENT + freshness=unknown → coerced to unknown / invariant_failed', () => {
     // This is the impossible state: if both hashes are present the
     // derivation must produce fresh or stale, never unknown. Force it.
     const violating: FreshnessDerivation = {
@@ -348,7 +395,7 @@ describe('enforceInvariants — hard invariant violations', () => {
       reason: 'graph_hash_match', // pretend the decision tree produced this
       selected_fact_index: 0,
       graph_hash_at_run: 'aaaa1111bbbb2222',
-      current_graph_hash: 'aaaa1111bbbb2222',
+      current_graph_hash: 'cccc3333dddd4444',
       computed_at: '2026-04-30T00:00:00.000Z',
     };
     const enforced = enforceInvariants(violating);
@@ -357,8 +404,42 @@ describe('enforceInvariants — hard invariant violations', () => {
     // Other fields untouched
     expect(enforced.selected_fact_index).toBe(0);
     expect(enforced.graph_hash_at_run).toBe('aaaa1111bbbb2222');
-    expect(enforced.current_graph_hash).toBe('aaaa1111bbbb2222');
+    expect(enforced.current_graph_hash).toBe('cccc3333dddd4444');
     expect(enforced.computed_at).toBe('2026-04-30T00:00:00.000Z');
+  });
+
+  it('IDENTICAL hashes + freshness=stale → coerced to FRESH / invariant_failed (F10 backstop)', () => {
+    // The F10 invariant: a run's own response can never be stale versus the
+    // hash it just analysed. If any future code path (a re-introduced
+    // fresh-path guard, a new override) produces 'stale' with equal non-null
+    // hashes, the enforcer must structurally coerce it back to 'fresh'.
+    const violating: FreshnessDerivation = {
+      freshness: 'stale',
+      reason: 'analysed_options_diverged', // the exact live F10 state
+      selected_fact_index: 0,
+      graph_hash_at_run: '595d1a7b7ec9272b',
+      current_graph_hash: '595d1a7b7ec9272b',
+      computed_at: '2026-07-16T00:00:00.000Z',
+    };
+    const enforced = enforceInvariants(violating);
+    expect(enforced.freshness).toBe('fresh');
+    expect(enforced.reason).toBe('invariant_failed');
+    expect(enforced.graph_hash_at_run).toBe('595d1a7b7ec9272b');
+    expect(enforced.current_graph_hash).toBe('595d1a7b7ec9272b');
+  });
+
+  it('IDENTICAL hashes + freshness=unknown → coerced to FRESH, not unknown (hashes prove freshness)', () => {
+    const violating: FreshnessDerivation = {
+      freshness: 'unknown',
+      reason: 'graph_hash_match',
+      selected_fact_index: 0,
+      graph_hash_at_run: 'aaaa1111bbbb2222',
+      current_graph_hash: 'aaaa1111bbbb2222',
+      computed_at: '2026-04-30T00:00:00.000Z',
+    };
+    const enforced = enforceInvariants(violating);
+    expect(enforced.freshness).toBe('fresh');
+    expect(enforced.reason).toBe('invariant_failed');
   });
 
   it('valid fresh derivation passes through unchanged', () => {
@@ -639,15 +720,20 @@ describe('deriveAnalysisFreshness — option-identity guard', () => {
     expect(r.reason).toBe('graph_hash_match');
   });
 
-  it('RECOVERED-SESSION REPRO: hashes match but analysed X/Y/C (leader X) vs current A/B/C → stale', () => {
-    // Isolate the option-identity signal: force the hash path to "fresh" by
-    // making the hashes equal, then prove option divergence overrides to stale.
+  it('RECOVERED-SESSION REPRO (corrected for F10): the divergence signal fires on the HASH-IMPOSSIBLE path, not the fresh path', () => {
+    // HISTORY: this test originally forced the hash path to "fresh" by making
+    // the hashes equal "to isolate the option-identity signal" — a test
+    // contrivance that ratified the F10 defect (a run's own response stamped
+    // stale with identical hashes). The real recovered-session case is
+    // hash-IMPOSSIBLE (legacy fact with no graph_hash_at_run, or current hash
+    // unavailable). Equal hashes now prove freshness by construction; the
+    // divergence signal remains decisive where the hash cannot speak.
     const fact = mkFactWithOptions({
-      graphHash: 'same-hash',
+      graphHash: null, // recovered-session: hash comparison impossible
       leader: 'X',
       optionIds: ['X', 'Y', 'C'],
     });
-    const r = deriveAnalysisFreshness([fact], 'same-hash', ['A', 'B', 'C']);
+    const r = deriveAnalysisFreshness([fact], 'current-hash', ['A', 'B', 'C']);
     expect(r.freshness).toBe('stale');
     expect(r.reason).toBe('analysed_options_diverged');
     // The verdict must NOT be classified fresh/current for current-model claims.
@@ -685,6 +771,61 @@ describe('deriveAnalysisFreshness — option-identity guard', () => {
     const r = deriveAnalysisFreshness([], 'h1', ['A', 'B', 'C']);
     expect(r.freshness).toBe('none');
     expect(r.reason).toBe('no_successful_run_analysis_fact');
+  });
+
+  // ── F10 root / ROADMAP 1.133 — identical-hash ⇒ fresh, by construction ──
+  //
+  // Live failure (verified 16 Jul from the staging debug bundle): a run's OWN
+  // response was stamped STALE with IDENTICAL hashes on both sides
+  // (595d1a7b7ec9272b == 595d1a7b7ec9272b, verdict analysed_options_diverged).
+  // Root cause: the guard also ran "defence-in-depth" on the `fresh` path,
+  // comparing PLoT-enrichment option identifiers
+  // (enrichment.option_comparison[].option_id / leading_option_id) against
+  // graph option IDs — two identifier NAMESPACES that can legitimately differ
+  // on byte-identical input. The analysis-affecting graph hash already covers
+  // options[].id, so when both hashes are present and equal the option set is
+  // provably unchanged and the guard has nothing to add. The UI fact-gate
+  // accepts only 'fresh', so the false 'stale' fired both banners and told the
+  // user their just-computed result was out of date.
+  it('F10 LIVE REPRO: identical hashes (595d1a7b7ec9272b) + enrichment identifiers absent from graph IDs → MUST be fresh', () => {
+    const fact = mkFactWithOptions({
+      graphHash: '595d1a7b7ec9272b',
+      // PLoT enrichment carries identifiers in its own namespace — e.g.
+      // labels or synthetic ids — none of which appear as graph option IDs.
+      leader: 'Option A',
+      optionIds: ['Option A', 'Option B'],
+    });
+    const r = deriveAnalysisFreshness([fact], '595d1a7b7ec9272b', [
+      'node_opt_1',
+      'node_opt_2',
+    ]);
+    expect(r.freshness).toBe('fresh');
+    expect(r.reason).toBe('graph_hash_match');
+    expect(r.graph_hash_at_run).toBe('595d1a7b7ec9272b');
+    expect(r.current_graph_hash).toBe('595d1a7b7ec9272b');
+  });
+
+  it('identical hashes + analysed set diverged (subset/superset) → fresh in every divergence shape', () => {
+    // leader_absent, analysed_option_absent, current_option_added — all three
+    // comparator fail modes must be unreachable when the hashes are identical.
+    const shapes: Array<{ leader: string | null; optionIds: readonly string[]; current: readonly string[] }> = [
+      { leader: 'X', optionIds: ['X', 'A', 'B'], current: ['A', 'B'] }, // leader_absent
+      { leader: 'A', optionIds: ['A', 'Y'], current: ['A', 'B'] }, // analysed_option_absent
+      { leader: 'A', optionIds: ['A'], current: ['A', 'B'] }, // current_option_added
+    ];
+    for (const s of shapes) {
+      const fact = mkFactWithOptions({ graphHash: 'same-hash', leader: s.leader, optionIds: s.optionIds });
+      const r = deriveAnalysisFreshness([fact], 'same-hash', s.current);
+      expect(r.freshness).toBe('fresh');
+      expect(r.reason).toBe('graph_hash_match');
+    }
+  });
+
+  it('hash DIVERGENCE is still caught: differing hashes → stale/graph_hash_diverged regardless of option identity', () => {
+    const fact = mkFactWithOptions({ graphHash: 'h1', leader: 'A', optionIds: ['A', 'B'] });
+    const r = deriveAnalysisFreshness([fact], 'h2', ['A', 'B']);
+    expect(r.freshness).toBe('stale');
+    expect(r.reason).toBe('graph_hash_diverged');
   });
 
   it('telemetry: analysed_options_diverged on a hash-impossible path emits options_diverged AND preserves graph_hash_missing', () => {

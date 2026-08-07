@@ -8,6 +8,7 @@ import {
   MAX_HEADLINE_CHARS,
 } from '../analysis-result-headline.js';
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../../tools/handlers/run-analysis.js';
+import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 
 const HIRING_FULL: Record<string, unknown> = {
   results: [
@@ -15,8 +16,8 @@ const HIRING_FULL: Record<string, unknown> = {
     { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.38 },
   ],
   factor_sensitivity: [
-    { label: 'Technical Leadership in Place', elasticity: 0.6, confidence: 0.8 },
-    { label: 'Hiring and Salary Cost', elasticity: -0.3, confidence: 0.7 },
+    { label: 'Technical Leadership in Place', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
+    { label: 'Hiring and Salary Cost', elasticity: -0.3, confidence: 0.7, influence_score: 0.3 },
   ],
   robustness: {
     level: 'moderate',
@@ -284,7 +285,7 @@ describe('buildAnalysisResultHeadline', () => {
       results: [
         { option_id: 'opt_a', option_label: longWinner, win_probability: 0.62 },
       ],
-      factor_sensitivity: [{ label: 'Driver', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Driver', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: {
         level: 'low',
         fragile_edges: [{ from_label: 'X', switch_probability: 0.5 }],
@@ -298,14 +299,21 @@ describe('buildAnalysisResultHeadline', () => {
     expect(out).toBeNull();  // both Case A and Case B exceed 220
   });
 
-  it('multiple drivers — strongest selected by sensitivity_score when present', () => {
+  // DGAI #341: the two tests below REPLACE the former heuristic pins
+  // ("strongest selected by sensitivity_score when present" / "falls back to
+  // abs(elasticity) * confidence when sensitivity_score absent"). Those
+  // pinned the defect: on an intervention_override board the
+  // sensitivity/elasticity artifacts invert the ranking, and the headline
+  // named the LEAST influential factor. The driver claim now derives from
+  // influence_score ONLY.
+  it('multiple drivers — strongest selected by influence_score, even when sensitivity_score/elasticity rank the other way (DGAI #341)', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
-        { label: 'Weak Factor', elasticity: 0.9, confidence: 0.9, sensitivity_score: 0.1 },
-        { label: 'Strong Factor', elasticity: 0.1, confidence: 0.1, sensitivity_score: 0.9 },
+        { label: 'Artifact Factor', elasticity: 0.9, confidence: 0.9, sensitivity_score: 0.9, influence_score: 0.1 },
+        { label: 'True Driver', elasticity: 0.1, confidence: 0.1, sensitivity_score: 0.1, influence_score: 0.9 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -313,17 +321,18 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Strong Factor is the strongest driver');
+    expect(out).toContain('True Driver is the strongest driver');
+    expect(out).not.toContain('Artifact Factor');
   });
 
-  it('multiple drivers — falls back to abs(elasticity) * confidence when sensitivity_score absent', () => {
+  it('multiple drivers — NEVER falls back to the elasticity heuristic: no influence_score anywhere ⇒ no driver clause (DGAI #341)', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
         { label: 'Driver Low', elasticity: 0.2, confidence: 0.3 },
-        { label: 'Driver High', elasticity: -0.8, confidence: 0.9 },  // abs * conf wins
+        { label: 'Driver High', elasticity: -0.8, confidence: 0.9 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -331,7 +340,8 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Driver High is the strongest driver');
+    expect(out).not.toBeNull();
+    expect(out).not.toContain('strongest driver');
   });
 
   it('fragile edge picks highest switch_probability', () => {
@@ -421,8 +431,8 @@ describe('buildAnalysisResultHeadline', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
-        { label: 'fac_price', factor_id: 'fac_price', elasticity: 0.9, confidence: 0.9 },
-        { label: 'Quality Index', factor_id: 'fac_quality', elasticity: 0.4, confidence: 0.7 },
+        { label: 'fac_price', factor_id: 'fac_price', elasticity: 0.9, confidence: 0.9, influence_score: 0.9 },
+        { label: 'Quality Index', factor_id: 'fac_quality', elasticity: 0.4, confidence: 0.7, influence_score: 0.4 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -465,7 +475,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
       ],
       factor_sensitivity: [
-        { label: 'Delivery Capacity', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Delivery Capacity', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
       robustness: {
         level: 'low',
@@ -477,7 +487,11 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' now appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Option A currently leads. The result is not yet robust — small changes could flip it.',
+    );
     // The strong-case clauses must NOT appear.
     expect(out).not.toContain('because');
     expect(out).not.toContain('sensitive to');
@@ -491,7 +505,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -522,7 +536,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.20 },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -549,7 +563,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_a', option_label: 'Option A' /* no win_probability */ },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
       robustness: {
         level: 'low',
@@ -574,7 +588,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.20 },
       ],
       factor_sensitivity: [
-        { label: 'Strong Driver', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Strong Driver', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -593,7 +607,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.25 },
       ],
       factor_sensitivity: [
-        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -614,7 +628,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
       factor_sensitivity: [
-        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -631,7 +645,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 1.5 },
       ],
       factor_sensitivity: [
-        { label: 'Driver', elasticity: 0.5, confidence: 0.8 },
+        { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -774,15 +788,17 @@ describe('resolveWinner — same-source label + probability invariant', () => {
 
   it('runner-up probability comes from the same source as the winner', () => {
     // The first accepted source provides BOTH probabilities together.
-    // The second source has mismatched numbers — a near-tie that would
-    // otherwise gate out the lead via the margin guard. The headline
-    // must use the first source's numbers (62% / 38%, margin 24pp).
+    // (Priority is CURRENT-first since the decompose-hardening lane:
+    // option_comparison is walked before legacy results.) The second
+    // source has mismatched numbers — a near-tie that would otherwise
+    // gate out the lead via the margin guard. The headline must use
+    // the first source's numbers (62% / 38%, margin 24pp).
     const enrichment: Record<string, unknown> = {
-      results: [
+      option_comparison: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.62 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.38 },
       ],
-      option_comparison: [
+      results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.50 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.49 },
       ],
@@ -805,13 +821,14 @@ describe('resolveWinner — same-source label + probability invariant', () => {
     // cherry-pick a later source's wider margin — that would be a
     // different form of cross-source mixing on the maths side. Pins
     // "first acceptable source wins" so the guards apply to a single
-    // coherent set of numbers.
+    // coherent set of numbers. (First source = option_comparison since
+    // the current-first reorder in the decompose-hardening lane.)
     const enrichment: Record<string, unknown> = {
-      results: [
+      option_comparison: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.41 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.40 },
       ],
-      option_comparison: [
+      results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.80 },
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.20 },
       ],
@@ -821,8 +838,9 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // Near-tie effectively-tied output (1pp). Crucially the 80% from
-    // option_comparison must NOT leak — the same-source invariant still holds.
+    // Near-tie effectively-tied output (1pp). Crucially the 80% from the
+    // later legacy results source must NOT leak — the same-source invariant
+    // still holds.
     expect(out).toBe('Hire X is currently only fractionally ahead, so the options are effectively tied.');
     expect(out).not.toContain('80%');
     expect(out).not.toMatch(/\d+%/);
@@ -1097,7 +1115,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
       factor_sensitivity: [
-        { label: 'Cost', elasticity: 0.6, confidence: 0.8 },
+        { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
       robustness: {
         level: 'low',
@@ -1109,7 +1127,11 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire X currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Hire X currently leads. The result is not yet robust — small changes could flip it.',
+    );
   });
 
   it('Case E preserves partial status suffix', () => {
@@ -1523,7 +1545,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.41 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
-      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Risk', switch_probability: 0.5 }] },
     };
     const out = buildAnalysisResultHeadline({
@@ -1531,7 +1553,11 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A is currently only fractionally ahead, so the options are effectively tied.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the near-tie line itself is unchanged.
+    expect(out).toBe(
+      'Option A is currently only fractionally ahead, so the options are effectively tied. The result is not yet robust — small changes could flip it.',
+    );
     // No driver / fragility / probability / margin number at a near-tie.
     expect(out!).not.toContain('because');
     expect(out!).not.toContain('sensitive to');
@@ -1572,7 +1598,11 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
     );
   });
 
-  it('designated leader not actually ahead (margin <= 0) -> null (locked template), no false lead', () => {
+  it('designated leader not actually ahead (margin <= 0) -> Doctrine D-W honest disambiguation, no false lead', () => {
+    // Superseded by Doctrine D-W (ROADMAP 2.52): the declared leader (opt_a,
+    // 0.40) trails the raw-odds argmax (opt_b, 0.45) by a marginal 5pp. Instead
+    // of the bland locked template (the pre-D-W null), emit the honest copy —
+    // still NO false "currently leads", now with the recommendation disclosed.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.40 },
@@ -1584,7 +1614,11 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe(
+      'Option A leads overall, though Option B has marginally better raw probability.',
+    );
+    expect(out).not.toContain('currently leads');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
   it('near-tie (<=1pp) with a label too long for the tied sentence returns null, not the Case E confident floor', () => {
@@ -1632,7 +1666,7 @@ describe('buildAnalysisResultHeadline — driver / fragility de-duplication', ()
         { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.62 },
         { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.38 },
       ],
-      factor_sensitivity: [{ label: 'Delivery Speed', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Delivery Speed', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: {
         level: 'moderate',
         fragile_edges: [{ from_label: 'Delivery Speed', switch_probability: 0.5 }],
@@ -1805,7 +1839,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_d', option_label: 'Outsource', win_probability: 0.21 },
       ],
       factor_sensitivity: [
-        { label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9 },
+        { label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9, influence_score: 0.7 },
       ],
       robustness: {
         level: 'low',
@@ -1818,8 +1852,10 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       status_kind: 'ok',
     });
     // Fragility is preferred over the driver as the single named sensitivity.
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence after the caution shape.
     expect(out).toBe(
-      'Hire Contractor currently leads by 14 percentage points, but treat this as provisional: the result is sensitive to Overtime Intensity.',
+      'Hire Contractor currently leads by 14 percentage points, but treat this as provisional: the result is sensitive to Overtime Intensity. The result is not yet robust — small changes could flip it.',
     );
     expect(out).not.toContain('because'); // never the confident driver framing
     // Descriptor reports the enriched case (NOT 'E'), so the handler does not
@@ -1845,7 +1881,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.22 },
         { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.20 },
       ],
-      factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
     };
     const out = buildAnalysisResultHeadline({
       enrichment,
@@ -1884,7 +1920,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
       ],
-      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }],
+      factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }] },
     };
     const out = buildAnalysisResultHeadline({
@@ -1892,7 +1928,11 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Option A currently leads. The result is not yet robust — small changes could flip it.',
+    );
     expect(out).not.toContain('sensitive to');
   });
 
@@ -1904,7 +1944,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         { option_id: 'opt_c', option_label: 'Status Quo', win_probability: 0.21 },
         { option_id: 'opt_d', option_label: 'Outsource', win_probability: 0.19 },
       ],
-      factor_sensitivity: [{ label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9 }],
+      factor_sensitivity: [{ label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9, influence_score: 0.7 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Overtime Intensity', switch_probability: 0.5 }] },
     };
     const out = buildAnalysisResultHeadline({
@@ -1925,7 +1965,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
   // Two-floor structure: [0.30, 0.40) is the soft-confidence enriched band;
   // below 0.30 even a real margin + driver/fragility reverts to bare Case E.
 
-  const driver = [{ label: 'Cost', elasticity: 0.6, confidence: 0.8 }];
+  const driver = [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }];
 
   it('winner exactly 0.30 (boundary, inclusive) + 5pp margin + driver — qualifies for SC', () => {
     const enrichment: Record<string, unknown> = {
@@ -2024,7 +2064,11 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
     const out = buildAnalysisResultHeadline(input);
-    expect(out).toBe('Option A currently leads.');
+    // provisional_doctrine_v0 (Mission B): level 'low' appends the
+    // robustness-honesty sentence; the Case E floor itself is unchanged.
+    expect(out).toBe(
+      'Option A currently leads. The result is not yet robust — small changes could flip it.',
+    );
     expect(out).not.toContain('percentage points');
     expect(out).not.toContain('sensitive to');
     expect(describeAnalysisHeadline(input).case).toBe('E');
@@ -2040,8 +2084,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.38 },
     ],
     factor_sensitivity: [
-      { factor_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
-      { factor_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+      { factor_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
+      { factor_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1, influence_score: 0.4 },
     ],
     robustness: { level: 'moderate' }, // no fragility → Case B driver clause
   };
@@ -2069,8 +2113,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
-        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
-        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.4, confidence: 1, influence_score: 0.4 },
       ],
       robustness: { level: 'moderate' },
     };
@@ -2088,8 +2132,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
-        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.9, confidence: 1 },
-        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.4, confidence: 1 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.4, confidence: 1, influence_score: 0.4 },
       ],
       robustness: { level: 'moderate' },
     };
@@ -2112,8 +2156,8 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     const enrichment: Record<string, unknown> = {
       results: ENRICH_CONTROLLED.results,
       factor_sensitivity: [
-        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.7, confidence: 1 },
-        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.7, confidence: 1 },
+        { node_id: 'fac_market', label: 'Market Demand', elasticity: 0.7, confidence: 1, influence_score: 0.7 },
+        { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.7, confidence: 1, influence_score: 0.7 },
       ],
       robustness: { level: 'moderate' },
     };
@@ -2142,7 +2186,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       enrichment: {
         results: ENRICH_CONTROLLED.results,
         factor_sensitivity: [
-          { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1 },
+          { node_id: 'fac_capacity', label: 'Engineering Capacity', elasticity: 0.9, confidence: 1, influence_score: 0.9 },
         ],
         robustness: { level: 'moderate' },
       },
@@ -2154,5 +2198,224 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     expect(out).not.toBeNull();
     expect(out!).not.toContain('Engineering Capacity');
     expect(out!).not.toContain('strongest driver');
+  });
+});
+
+describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY disclosure)', () => {
+  const REDUCED_SUFFIX =
+    ' Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
+  const CASE_A_BASE =
+    'Hire One Senior Technical Lead currently leads by 24 percentage points, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
+
+  it('samples_reduced: true appends the reduced-samples suffix to the emitted headline', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      samples_reduced: true,
+    });
+    expect(out).toBe(`${CASE_A_BASE}${REDUCED_SUFFIX}`);
+  });
+
+  it('suffixed headline passes isAllowedRunAnalysisAssistantText', () => {
+    expect(isAllowedRunAnalysisAssistantText(`${CASE_A_BASE}${REDUCED_SUFFIX}`)).toBe(true);
+  });
+
+  it('reduced suffix composes BEFORE the status suffix (grammar order)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'partial',
+      samples_reduced: true,
+    });
+    expect(out).toBe(
+      `${CASE_A_BASE}${REDUCED_SUFFIX} The run was flagged as partial — treat as provisional.`,
+    );
+    expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
+  });
+
+  it('flag absent or false → headline unchanged (default posture)', () => {
+    const withoutFlag = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    const withFalse = buildAnalysisResultHeadline({
+      enrichment: HIRING_FULL,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+      samples_reduced: false,
+    });
+    expect(withoutFlag).toBe(CASE_A_BASE);
+    expect(withFalse).toBe(CASE_A_BASE);
+  });
+
+  it('REDUCED_SAMPLES locked template is registered in the mirror set and allowed', () => {
+    const template =
+      'Ran analysis on your current scenario. Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
+    expect(RUN_ANALYSIS_LOCKED_TEMPLATES.has(template)).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(template)).toBe(true);
+    expect(RUN_ANALYSIS_ASSISTANT_TEMPLATES.REDUCED_SAMPLES).toBe(template);
+  });
+});
+
+// ============================================================================
+// Doctrine D-W (ROADMAP 2.52): declared leader ≠ argmax raw win_probability.
+// PLoT can recommend an option for robustness/stability reasons even when a
+// rival edges it on RAW win probability. The honest copy must name the
+// recommended option AND disclose the runner-up's marginally-better raw odds —
+// never a false "currently leads" and never the bland locked template that
+// silently drops the disambiguation. Fires ONLY when the declared leader is
+// present + usable AND a runner-up's win_probability is STRICTLY higher (leader
+// ≠ argmax) AND the raw-odds gap is small enough that "marginally" is truthful.
+// Copy/display only — no producer number is read, changed, or emitted.
+// ============================================================================
+describe('D-W leader-trails-argmax honest disambiguation copy', () => {
+  // opt_a is the raw-odds leader (0.55) but opt_b is the DECLARED leader (0.45)
+  // — a 10 percentage-point raw-odds gap PLoT's recommendation overrides.
+  const LEADER_TRAILS: Record<string, unknown> = {
+    results: [
+      { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+      { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.45 },
+    ],
+  };
+
+  it('names the recommended option AND the runner-up with better raw odds (sign-correct)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: LEADER_TRAILS,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBe(
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+    );
+    // SIGN GUARD (anti sign-inversion, ref 77a4d577f): the runner-up — the
+    // higher raw-probability option — is the one credited with "better raw
+    // probability"; the trailing declared leader must NEVER be.
+    expect(out).toContain('Hire One Senior Technical Lead has marginally better raw probability');
+    expect(out).not.toContain('Defer Hiring has marginally better raw probability');
+    // Never a false "currently leads" for a leader that trails on raw odds.
+    expect(out).not.toContain('currently leads');
+    expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
+    expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+  });
+
+  it('leader == argmax → unchanged (branch does not fire; normal lead copy)', () => {
+    // opt_a is BOTH the declared leader and the raw-odds argmax → the honest
+    // disambiguation must NOT fire; the ordinary "currently leads" copy stands.
+    const out = buildAnalysisResultHeadline({
+      enrichment: LEADER_TRAILS,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toContain('currently leads');
+    expect(out).not.toContain('leads overall');
+  });
+
+  it('leader trails by a NON-marginal gap → no false "marginally"/"leads" claim (neutral floor)', () => {
+    const WIDE_GAP: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.72 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.28 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: WIDE_GAP,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    // A 44pp gap is not "marginal" — never claim it is, and never assert the
+    // trailing leader "currently leads". Fall back to the neutral locked
+    // template (null from the builder).
+    expect(out).toBeNull();
+  });
+
+  // Finding 7 (D-W unrounded gate): the marginal-gap gate must read the TRUE
+  // raw-odds gap, not the gap rounded to whole percentage points. Rounding
+  // admitted a sub-1pp gap that rounds UP to 1pp and a >10pp gap that rounds
+  // DOWN to 10pp — both false "marginally better" claims.
+  it('leader trails by a sub-1pp gap that ROUNDS to 1pp → tie, neutral floor (no false marginal claim)', () => {
+    // 0.55 − 0.5449 = 0.51pp. The buggy gate rounds this to 1pp and emits the
+    // "marginally better" copy; the true gap is a tie, so the honest output is
+    // the neutral locked-template floor (null).
+    const NEAR_TIE: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.5449 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: NEAR_TIE,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('leader trails by a >10pp gap that ROUNDS to 10pp → not marginal, neutral floor', () => {
+    // 0.55 − 0.4451 = 10.49pp. The buggy gate rounds this to 10pp and emits the
+    // "marginally better" copy; >10pp is beyond the marginal bound, so the
+    // honest output is the neutral locked-template floor (null).
+    const OVER_MARGIN: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.4451 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: OVER_MARGIN,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('leader trails by exactly 10pp → still marginal (float-noise must not exclude the bound)', () => {
+    // 0.55 − 0.45 evaluates to 0.10000000000000003 in IEEE-754; the epsilon in
+    // the gate keeps this on-bound case inside the marginal window.
+    const EXACT_BOUND: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.45 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment: EXACT_BOUND,
+      leading_option_id: 'opt_b',
+      status_kind: 'ok',
+    });
+    expect(out).toBe(
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+    );
+  });
+
+  it('the disambiguation sentence is accepted by the registry allowlist', () => {
+    const sanctioned =
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';
+    expect(isAllowedRunAnalysisAssistantText(sanctioned)).toBe(true);
+    // Defence-in-depth still bites: an internal id in a slot is rejected.
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        'opt_b leads overall, though opt_a has marginally better raw probability.',
+      ),
+    ).toBe(false);
+  });
+
+  it('the disambiguation copy survives the turn-executor egress forbidden-phrase guard', () => {
+    // The run_analysis summary becomes response.assistant_text, which the
+    // finaliser sweeps against FORBIDDEN_USER_FACING_PHRASES and REPLACES the
+    // whole response on a hit. The chosen wording ("leads overall") must carry
+    // NO banned phrase — a regression to "recommended overall" would be swapped
+    // out at egress and never reach the user.
+    const sanctioned =
+      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';
+    expect(findForbiddenPhraseHit(sanctioned)).toBeNull();
+    // The banned literal Paul ruled would be swapped at egress — pin the reason
+    // the surface-adapted wording is used instead.
+    expect(
+      findForbiddenPhraseHit(
+        'Defer Hiring is recommended overall, though X has marginally better raw probability.',
+      ),
+    ).not.toBeNull();
   });
 });

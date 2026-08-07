@@ -50,9 +50,23 @@ import type { SuggestedAction } from './types.js';
 import type { HandlerValidationRegistry } from '../routing/validator.js';
 import { curatedHandlerChips } from './helpers.js';
 import type { ContextPackAnalysis } from '../context/context-pack-assembler.js';
+// D-ask-1 (2.11 P0-1): configure chip for scaffolded-placeholder runs —
+// derives from #487's single configure-chip copy source.
+import { buildScaffoldConfigureChip } from '../coaching/scaffold-disclosure.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
+// ROADMAP 2.308 / S2(b) — the "Set values for options" chip copy is DERIVED,
+// never re-typed. All four sites below (the readiness floor, which fires on
+// `needs_encoding` — the 2.308 blocked state — plus the three stage
+// fallbacks) previously carried a hand-typed literal that was blocked twice:
+// NO_MATCH at `detectConfigureOptionIntent` AND a hit on
+// EDIT_GRAPH_NEGATIVE_REGEX's "set up". `configure-option-product-copy-routes.test.ts`
+// pins `generateChips` OUTPUT, not just the constant.
+import {
+  SET_OPTION_VALUES_CHIP_LABEL,
+  SET_OPTION_VALUES_CHIP_MESSAGE,
+} from '../configure-option-chip-text.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -126,6 +140,32 @@ export interface ChipGeneratorInput {
    * M2 ships the mechanism + the unit-level convergence proof.
    */
   readonly canonicalState?: import('../context/canonical-analysis-state.js').CanonicalAnalysisState;
+  /**
+   * ROADMAP 1.20(b) — chip-sameness guard. Chip ids offered on the
+   * IMMEDIATELY PRIOR turn (call site derives this from
+   * `context.most_recent_pending_actions`, the same single-prior-turn
+   * authority every other pending-action consumer in turn-executor
+   * reads — see that field's doc comment). When every candidate chip
+   * this turn computes is already in this set, `generateChips` ships an
+   * empty array instead of repeating the identical offer — closing the
+   * live defect where 5/5 consecutive turns offered IDENTICAL chips
+   * regardless of what the turns were actually about. Optional +
+   * additive: omitted → zero behaviour change (every existing call site
+   * and test is byte-identical).
+   */
+  readonly recentlyOfferedChipIds?: ReadonlySet<string>;
+  /**
+   * D-ask-1 (ROADMAP 2.11 P0-1) — options the CURRENT turn's run_analysis
+   * scaffolded with disclosed placeholder interventions (threaded from
+   * `HandlerOutcome.__scaffolded_options` by the turn-executor execute path
+   * and the chip-click dispatch). When non-empty on a run_analysis success
+   * turn, the configure chip for the scaffolded option is offered FIRST —
+   * claim-safety (get real values in) beats exploration follow-ups.
+   * Optional + additive: omitted/empty → byte-identical chips.
+   */
+  readonly scaffoldedOptions?: ReadonlyArray<
+    import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
+  >;
 }
 
 const MAX_CHIPS = 3;
@@ -208,8 +248,34 @@ export function validateAndFilterChips(
  */
 export function generateChips(input: ChipGeneratorInput): readonly SuggestedAction[] {
   const filtered = validateAndFilterChips(generateChipsRaw(input), input.validationRegistry);
-  if (filtered.length > 0) return filtered;
-  return applyChipFloor(input);
+  const primary = filtered.length > 0 ? filtered : applyChipFloor(input);
+  return excludeRecentlyOfferedChips(primary, input.recentlyOfferedChipIds);
+}
+
+/**
+ * ROADMAP 1.20(b) — chip-sameness guard. See `ChipGeneratorInput.recentlyOfferedChipIds`.
+ * Only suppresses a chip whose id was offered on the immediately prior
+ * turn; when that removes EVERY candidate, ships `[]` rather than a
+ * partially-filtered set that could look arbitrary — an honest empty
+ * turn, same philosophy as `applyChipFloor`'s `no_safe_floor` branch.
+ * When nothing is filtered, returns the input array unchanged (no new
+ * allocation) so byte-identical output is preserved for every call site
+ * that doesn't thread `recentlyOfferedChipIds`.
+ */
+function excludeRecentlyOfferedChips(
+  chips: readonly SuggestedAction[],
+  recentlyOfferedChipIds: ReadonlySet<string> | undefined,
+): readonly SuggestedAction[] {
+  if (!recentlyOfferedChipIds || recentlyOfferedChipIds.size === 0 || chips.length === 0) {
+    return chips;
+  }
+  const next = chips.filter((c) => !recentlyOfferedChipIds.has(c.id));
+  if (next.length === chips.length) return chips;
+  emit(TelemetryEvents.V5ChipsRecentlyOfferedSuppressed, {
+    suppressed_ids: chips.filter((c) => recentlyOfferedChipIds.has(c.id)).map((c) => c.id),
+    survived_count: next.length,
+  });
+  return next;
 }
 
 /**
@@ -383,8 +449,8 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
     return [
       promptChip(
         'floor_set_option_values',
-        'Set values for options',
-        'Help me set up the options for this decision so the analysis can run.',
+        SET_OPTION_VALUES_CHIP_LABEL,
+        SET_OPTION_VALUES_CHIP_MESSAGE,
       ),
     ];
   }
@@ -467,7 +533,22 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // answered deterministically (0 LLM calls). `cap` caps at MAX_CHIPS
   // so the new chip is suppressed if the slot budget is already full.
   if (handlerJustRan === 'run_analysis') {
-    const chips: SuggestedAction[] = [
+    const chips: SuggestedAction[] = [];
+    // D-ask-1 (2.11 P0-1): a scaffolded run completed on PLACEHOLDER values
+    // for at least one option — the configure route is the honest first
+    // offer. Chip copy derives from #487's single configure-chip source
+    // (buildScaffoldConfigureChip), so message and deterministic route
+    // cannot drift apart. Prompt chip (no action_type): the message text
+    // routes through the configure-option gate.
+    if (input.scaffoldedOptions !== undefined && input.scaffoldedOptions.length > 0) {
+      const configureChip = buildScaffoldConfigureChip(input.scaffoldedOptions);
+      chips.push({
+        id: configureChip.id,
+        label: configureChip.label,
+        message: configureChip.message,
+      });
+    }
+    chips.push(
       {
         id: 'chip_action_explain_results',
         label: 'Explain the result',
@@ -480,7 +561,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         message: 'What could change the outcome of this analysis?',
         action_type: 'what_would_flip',
       },
-    ];
+    );
     if (currentTurnCarriesUsableValidationGuidance(input.handlerFacts)) {
       chips.push({
         id: 'chip_prompt_validate_decision',
@@ -721,8 +802,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     return cap([
       promptChip(
         'set_option_values',
-        'Set values for options',
-        'Help me set up the options for this decision so the analysis can run.',
+        SET_OPTION_VALUES_CHIP_LABEL,
+        SET_OPTION_VALUES_CHIP_MESSAGE,
       ),
     ]);
   }
@@ -755,8 +836,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
       return cap([
         promptChip(
           'set_option_values',
-          'Set values for options',
-          'Help me set up the options for this decision so the analysis can run.',
+          SET_OPTION_VALUES_CHIP_LABEL,
+          SET_OPTION_VALUES_CHIP_MESSAGE,
         ),
       ]);
     }
@@ -773,8 +854,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
       return cap([
         promptChip(
           'set_option_values',
-          'Set values for options',
-          'Help me set up the options for this decision so the analysis can run.',
+          SET_OPTION_VALUES_CHIP_LABEL,
+          SET_OPTION_VALUES_CHIP_MESSAGE,
         ),
       ]);
     }

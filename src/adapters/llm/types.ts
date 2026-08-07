@@ -9,6 +9,7 @@ import type { GraphT } from "../../schemas/graph.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
 import type { ObservabilityCollector } from "../../cee/observability/index.js";
+import type { BuiltDraftAttachment } from "./draft-attachment.js";
 
 /**
  * Usage metrics returned by LLM calls for cost tracking and telemetry.
@@ -46,10 +47,30 @@ export interface DraftGraphArgs {
    */
   currencyInstruction?: string;
   /**
+   * System-side corrective directive appended to the draft prompt OUTSIDE the
+   * untrusted-user-content markers (system authority, not user text). Used by
+   * the lean-retry backstop and the strength-default nudge. Threaded here —
+   * rather than concatenated into `brief` — so it lands after the
+   * `[END_UNTRUSTED_USER_CONTENT]` marker at the adapter (#595 review P2: a
+   * corrective instruction spliced into the brief rides INSIDE the untrusted
+   * markers, telling the model to treat its own retry instruction as untrusted
+   * user input). Undefined on a normal first attempt.
+   */
+  systemDirective?: string;
+  /**
    * Extended thinking configuration. Anthropic only — non-Anthropic adapters ignore this.
    * When enabled, temperature is automatically set to 1 and structured outputs are disabled.
    */
   thinking?: ThinkingConfig;
+  /**
+   * Native document attachment (model-native doc-attach slice, D-59-7). A
+   * user-attached PDF/text carried as a native Anthropic `document` content
+   * block, ALREADY built + validated + size-capped by the pipeline (fail-closed
+   * at the boundary → 4xx). Anthropic only — non-Anthropic adapters ignore it
+   * (the block is Anthropic-native; the default draft model is Claude). When
+   * absent, the draft user message is a plain string (byte-identical to before).
+   */
+  attachment?: BuiltDraftAttachment;
 }
 
 /**
@@ -97,6 +118,30 @@ export interface DraftGraphResult {
     };
     finish_reason?: string;
     provider_latency_ms?: number;
+
+    // 2026-07-23 firefight: true when this draft was recovered from a max_tokens
+    // truncation by closing the partial JSON (salvage) instead of re-drafted.
+    salvaged_from_truncation?: boolean;
+
+    // Lane C (2026-07-23): the Anthropic draft call is STREAMED with early
+    // runaway detection + cheap abort-retry. runaway_abort_count = how many
+    // doomed attempts were aborted before this draft succeeded (0 on a clean
+    // first try); time_to_edges_ms = stream time to the first edge, which
+    // validates the runaway-detection deadline live.
+    streamed?: boolean;
+    runaway_abort_count?: number;
+    /**
+     * WHICH gates fired, oldest first (2026-07-25, per-string-value guard).
+     * `"string"` = one JSON string value passed DRAFT_RUNAWAY_MAX_STRING_CHARS
+     * (the per-value runaway class) · `"chars"` = the total nodes-phase volume
+     * gate (the cardinality class) · `"stall"` · `"time"`. The count alone
+     * cannot distinguish these, and the distinction IS the diagnosis.
+     * Typed as `readonly string[]` rather than the adapter's `DraftRunawayTrigger`
+     * union: this is a cross-provider result bag, and narrowing it here would
+     * make the shared type depend on one provider's trigger set.
+     */
+    runaway_abort_triggers?: readonly string[];
+    time_to_edges_ms?: number | null;
 
     // Safe diagnostics
     node_kinds_raw_json?: string[];
@@ -187,38 +232,9 @@ export interface ExplainDiffResult {
   usage: UsageMetrics;
 }
 
-/**
- * Arguments for repairing a graph that failed validation.
- */
-export interface RepairGraphArgs {
-  graph: GraphT;
-  violations: string[];
-  brief?: string;
-  docs?: DocPreview[];
-  /** Pre-formatted currency context instruction to append to repair prompt. */
-  currencyInstruction?: string;
-}
-
-/**
- * Rationale entry from the repair prompt (repair_graph_v8+).
- * Different from draft rationales ({target, why}) — repair rationales
- * describe which violation was fixed and how.
- */
-export interface RepairRationale {
-  violation_code: string;
-  node_or_edge: string;
-  action: string;
-  elements_changed: number;
-}
-
-/**
- * Result from repairing a graph.
- */
-export interface RepairGraphResult {
-  graph: GraphT;
-  rationales?: RepairRationale[];
-  usage: UsageMetrics;
-}
+// `RepairGraphArgs` / `RepairRationale` / `RepairGraphResult` were REMOVED by
+// ROADMAP 2.763 together with `LLMAdapter.repairGraph`. They had no consumer
+// outside that method's signature.
 
 /**
  * A clarification question to refine the brief.
@@ -320,6 +336,38 @@ export interface ChatArgs {
    * Non-Anthropic adapters ignore this field.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Text appended to `userMessage` ONLY when `outputSchema` is actually
+   * active (flag on + model in the structured-outputs allowlist + thinking
+   * disabled) — the caller decides whether structured mode needs extra
+   * instruction (e.g. "emit these fields as JSON-encoded strings") without
+   * the adapter needing to know per-call-site schema semantics.
+   *
+   * ⚠ CORRECTED 2026-07-25 (F7). This used to cite
+   * `STRUCTURED_OUTPUTS_AUX_STRING_REMINDER` "already used by the draft_graph
+   * path" as the established precedent. That identifier does not exist: the
+   * draft reminder became a no-op under the v12 lean-draft contract and was
+   * deleted on 2026-07-24. The only live user of this field is
+   * `EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER`
+   * (orchestrator/tools/edit-graph.ts). Non-Anthropic adapters ignore this
+   * field.
+   */
+  structuredOutputsUserReminder?: string;
+  /**
+   * Per-call EXTENSION of the structured-outputs model allowlist: models the
+   * CALLER has verified as structured-outputs-capable, consulted for this
+   * call only. Exists so one call path (the V6 dual-draft M2 review, which is
+   * structured-outputs-only by design) can use structured outputs on a model
+   * that is deliberately kept OUT of the adapter's shared allowlist —
+   * shared-set membership is also consulted by strict tool calling
+   * (buildStrictAnthropicTools) for every live /orchestrate/v2/turn with NO
+   * env gate, and flips the edit_graph/draft prompt-only fallbacks when
+   * CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. This field changes NOTHING for
+   * call sites that do not pass it. Still subject to
+   * CEE_ANTHROPIC_STRUCTURED_OUTPUTS and the thinking-disabled requirement.
+   * Non-Anthropic adapters ignore this field.
+   */
+  structuredOutputsAdditionalModels?: readonly string[];
 }
 
 /**
@@ -355,8 +403,30 @@ export interface CallOpts {
   signal?: AbortSignal;
   bypassCache?: boolean; // Bypass prompt cache: invalidates cache and forces fresh load from Supabase (?supa=1 or X-CEE-Refresh-Prompt header)
   forceDefault?: boolean; // Force use of hardcoded default prompt instead of store prompt (?default=1 URL param)
+  /**
+   * Upper bound on the draft call's derived max_tokens (the "runaway sentinel").
+   * When set, the adapter caps the timeout-derived affordable budget at this
+   * value (`resolveDraftMaxTokens` ceiling arg) — it can only ever LOWER the
+   * budget, never raise it past what the timeout affords. Anthropic draft path
+   * only; other adapters ignore it. See DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL.
+   */
+  maxTokensCeiling?: number;
   collector?: CorrectionCollector; // Graph corrections tracking
   observabilityCollector?: ObservabilityCollector; // LLM call observability tracking
+  /**
+   * ROADMAP 1.204 M1 — mid-draft progress from the streaming accumulator.
+   *
+   * ABSENT ⇒ the streaming loop is byte-identical to before (one `undefined`
+   * check per attempt; the scanner is never constructed and never fed).
+   * PRESENT ⇒ called with node labels as they COMPLETE in the partial stream,
+   * so the canvas can show real structure ~10-16 s into a ~53 s draft.
+   *
+   * Anthropic draft path only — other adapters ignore it, exactly as they
+   * ignore `maxTokensCeiling`. Synchronous, `void`-returning, and never
+   * awaited: a progress consumer can neither delay nor fail a draft. Throws
+   * are swallowed by the caller.
+   */
+  onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
 }
 
 /**
@@ -400,15 +470,14 @@ export interface LLMAdapter {
    */
   suggestOptions(args: SuggestOptionsArgs, opts: CallOpts): Promise<SuggestOptionsResult>;
 
-  /**
-   * Repair a graph that failed validation (cycles, missing nodes, etc.).
-   *
-   * @param args - Graph, violations, optional context (brief, docs)
-   * @param opts - Request ID, timeout, abort signal
-   * @returns Repaired graph with rationales and usage metrics
-   * @throws Error on timeout or API failure
-   */
-  repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult>;
+  // NOTE: `repairGraph` was REMOVED by ROADMAP 2.763. The LLM graph-repair
+  // capability had zero originating callers left after 2.731 (#846, draft
+  // path) and 2.740a (#851, substep 1b) — the only `.repairGraph(` sites in
+  // `src/` were four decorators delegating to each other. Its measured
+  // efficacy was 0 successes in 12 invocations over a full 7-day window.
+  // The DETERMINISTIC repair (`simpleRepair`, src/services/repair.ts) is the
+  // surviving, live half — it still runs in Stage 3 and substep 2.
+  // Do NOT re-add this method: see tests/unit/llm-repair-graph-retired.test.ts.
 
   /**
    * Optional: Stream draft graph generation for SSE endpoints.
@@ -512,6 +581,27 @@ export type ToolResponseBlock =
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
 
 /**
+ * ROADMAP 1.55(b) — a VERBATIM extended-thinking block captured for
+ * API-BOUND REPLAY ONLY.
+ *
+ * Anthropic's extended-thinking + tool-use protocol requires the complete,
+ * unmodified thinking block(s) to be echoed on the assistant message that
+ * carries the tool_use when tool_results are returned (400
+ * invalid_request_error otherwise — "`thinking` or `redacted_thinking`
+ * blocks in the latest assistant message cannot be modified"). The
+ * REPAIR_ONCE path prepends these to the API-bound repair message.
+ *
+ * `signature` / `data` are Anthropic's opaque replay tokens — NOT reasoning
+ * content. These blocks must NEVER be pushed into
+ * {@link ChatWithToolsResult.content}, joined into orientationText /
+ * assistant_text, or serialised onto any client-facing wire. The only legal
+ * destination is the `messages` array of a follow-up Anthropic call.
+ */
+export type ReplayThinkingBlock =
+  | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'redacted_thinking'; data: string };
+
+/**
  * Arguments for chat with native tool calling.
  */
 /**
@@ -527,8 +617,14 @@ export interface SystemCacheBlock {
 export interface ChatWithToolsArgs {
   /** System prompt for the conversation */
   system: string;
-  /** Full message history (multi-turn) */
-  messages: Array<{ role: 'user' | 'assistant'; content: string | ToolResponseBlock[] }>;
+  /**
+   * Full message history (multi-turn). Assistant-message content may carry
+   * {@link ReplayThinkingBlock}s ONLY when echoing a prior thinking-bearing
+   * Anthropic response (REPAIR_ONCE protocol replay — ROADMAP 1.55b). The
+   * Anthropic adapter passes them through verbatim; non-Anthropic adapters
+   * skip unknown block types.
+   */
+  messages: Array<{ role: 'user' | 'assistant'; content: string | Array<ToolResponseBlock | ReplayThinkingBlock> }>;
   /** Tool definitions available to the model */
   tools: ToolDefinition[];
   /** Tool choice strategy */
@@ -565,6 +661,33 @@ export interface ChatWithToolsResult {
   model: string;
   /** Provider-side latency in milliseconds */
   latencyMs: number;
+  /**
+   * ROADMAP 1.42 — captured extended-thinking text, VERBATIM, when
+   * CEE_REASONING_CAPTURE_ENABLED is on and the model emitted `thinking`
+   * blocks. Never populated with `signature` or `redacted_thinking`
+   * content. Absent (undefined) when the flag is off or no thinking
+   * blocks were emitted — existing drop+warn behaviour is unchanged.
+   *
+   * Deliberately NOT part of `content` / `ToolResponseBlock`: `content` is
+   * echoed back to Anthropic on the REPAIR_ONCE path (see
+   * route-with-tool-use.ts buildRepairMessages) and joined into
+   * orientationText. Putting reasoning there would recreate the #385 leak
+   * and risk a protocol-echo 400 from Anthropic (thinking blocks require a
+   * signature to be replayed validly).
+   */
+  reasoning?: string;
+  /**
+   * ROADMAP 1.55(b) — VERBATIM thinking / redacted_thinking blocks from the
+   * response, captured UNCONDITIONALLY (no flag) for API-BOUND REPLAY ONLY.
+   * The REPAIR_ONCE path prepends these to the assistant echo so the repair
+   * call satisfies Anthropic's thinking-with-tool-use protocol.
+   *
+   * Contains `signature` (opaque replay token) — this field must never be
+   * serialised to any client-facing surface (assistant_text, orientation
+   * text, SSE frames, debug wire payloads). See {@link ReplayThinkingBlock}.
+   * Absent when the response carried no thinking blocks.
+   */
+  replay_thinking_blocks?: ReplayThinkingBlock[];
 }
 
 /**

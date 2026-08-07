@@ -22,7 +22,16 @@ import {
 
 // ---- shared token fragments -------------------------------------------------
 
-const NUM = String.raw`(?:-|minus\s+)?\d+(?:\.\d+)?`;
+/**
+ * Exported as `CQE_NUMERIC_SOURCE` for the same reason as
+ * `CURRENCY_SYMBOL_SOURCE` / `NUMERIC_SUFFIX_SOURCE` below: a consumer
+ * outside CQE that needs to locate a numeric token in the user's message
+ * (the calibration threshold anchor, `routing/calibration-semantics.ts`)
+ * must share this grammar rather than re-implement it. Every previous
+ * local copy of a CQE fragment drifted (bare-`b` suffix, `¥` currency).
+ */
+export const CQE_NUMERIC_SOURCE = String.raw`(?:-|minus\s+)?\d+(?:\.\d+)?`;
+const NUM = CQE_NUMERIC_SOURCE;
 const APPROX = String.raw`roughly|about|approximately|around|nearly|circa`;
 const DIRECTION_UP_VERB = String.raw`increas(?:e|ing|es|ed)|rais(?:e|ing|es|ed)|grow(?:ing|s)?|grew|boost(?:ing|s|ed)?|add(?:ing|s|ed)?`;
 const DIRECTION_DOWN_VERB = String.raw`reduc(?:e|ing|es|ed)|cut(?:ting|s)?|lower(?:ing|s|ed)?|decreas(?:e|ing|es|ed)|drop(?:ping|s|ped)?|bring(?:ing|s)?(?:\s+(?:down|it\s+down))?`;
@@ -38,6 +47,28 @@ export const CURRENCY_SYMBOL_SOURCE = String.raw`£|\$|€`;
 const CURRENCY_SYMBOL = CURRENCY_SYMBOL_SOURCE;
 const CURRENCY_CODE = String.raw`GBP|USD|EUR`;
 const CURRENCY_COLLOQUIAL = String.raw`grand|quid`;
+/**
+ * The colloquial tokens that also carry a MAGNITUDE, and what they multiply by
+ * (ROADMAP 2.330).
+ *
+ * `CURRENCY_COLLOQUIAL` above admits exactly `grand|quid`. Both imply GBP (see
+ * `normaliseCurrencyUnit`), but only `grand` is also a magnitude: "five grand"
+ * is 5,000, "five quid" is 5. That fact used to live as an inline ternary in
+ * rule P8 — the only statement of `grand` → ×1000 anywhere in `src/`, and
+ * therefore invisible to the canonical alphabet's union guard, which is how
+ * `$50 grand` extracted as 50 on the goal-card path while this rule read the
+ * same words as 50,000.
+ *
+ * A token absent from this map carries no magnitude and multiplies by 1. That
+ * is a real statement about `quid`, not a silent fallback: the regex admits no
+ * third token, and `COLLOQUIAL_MAGNITUDE_TOKENS_ARE_KNOWN` in the union guard
+ * REDs if `CURRENCY_COLLOQUIAL` ever grows one this map has not ruled on.
+ */
+export const COLLOQUIAL_MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
+  grand: 1_000,
+};
+/** The colloquial currency tokens P8 admits, as data — see the map above. */
+export const CURRENCY_COLLOQUIAL_SOURCE = CURRENCY_COLLOQUIAL;
 const TIME_UNIT = String.raw`months?|weeks?|days?|years?|hours?|minutes?`;
 const METRIC_UNIT = String.raw`kg|km|miles?`;
 // Suffix tokens MUST be followed by a non-letter (word boundary via
@@ -329,8 +360,31 @@ function scanAllExec(text: string, regex: RegExp): RegExpExecArray[] {
 
 // ---- P3 comparator_value ---------------------------------------------------
 
-const COMPARATOR_ATMOST = String.raw`at\s+most|no\s+more\s+than|up\s+to|under|less\s+than|maximum(?:\s+of)?|max(?:\s+of)?`;
-const COMPARATOR_ATLEAST = String.raw`at\s+least|no\s+less\s+than|over|more\s+than|minimum(?:\s+of)?|min(?:\s+of)?`;
+/**
+ * ⭐ EXPORTED (2026-08-05) so the calibration semantic layer can assert a
+ * UNION property against them rather than keeping a second hand-written
+ * copy — CLAUDE.md trap 12d: deriving a guard from a list moves the risk,
+ * so the routing-side threshold-marker list must be a SUPERSET of these,
+ * checked by an importable assertion.
+ *
+ * ⚠ MEASURED GAP, and it is the mechanism of the 5 Aug calibration defect:
+ * `below` and `above` are ABSENT here. `extractQuantities('...staying
+ * below 3%...')` therefore returns `comparator: null`, while the identical
+ * sentence with `under` returns `comparator: 'at_most'`. The threshold
+ * marker in the WITNESSED prompt was invisible to CQE, so `3%` arrived at
+ * routing indistinguishable from a plain value and was stored as one.
+ *
+ * The gap is deliberately NOT closed here. Adding words to this lexicon
+ * moves which rule claims the span (P3 vs P6/P6b), which changes
+ * `raw_text` and span offsets for every downstream consumer of a shape
+ * that has been stable for months. The calibration layer instead carries
+ * its own SUPERSET and this export makes the superset property provable.
+ * Closing the CQE gap itself is a separate, rowed change.
+ */
+export const COMPARATOR_ATMOST_SOURCE = String.raw`at\s+most|no\s+more\s+than|up\s+to|under|less\s+than|maximum(?:\s+of)?|max(?:\s+of)?`;
+export const COMPARATOR_ATLEAST_SOURCE = String.raw`at\s+least|no\s+less\s+than|over|more\s+than|minimum(?:\s+of)?|min(?:\s+of)?`;
+const COMPARATOR_ATMOST = COMPARATOR_ATMOST_SOURCE;
+const COMPARATOR_ATLEAST = COMPARATOR_ATLEAST_SOURCE;
 const P3_REGEX = new RegExp(
   `\\b(?<cmp>${COMPARATOR_ATMOST}|${COMPARATOR_ATLEAST})\\s+(?<currSym>${CURRENCY_SYMBOL})?(?<num>${NUM})(?:\\s*(?<suffix>${SUFFIX}))?(?:\\s*(?<unit>${UNIT}))?`,
   'gi',
@@ -474,7 +528,37 @@ const rule_P6: PatternRule = {
 };
 
 // ---- P6b directional_absolute ----------------------------------------------
-
+//
+// PERCENTAGE OWNERSHIP — read before touching the trailing `(?!\s*%)`.
+//
+// The lookahead was evidently written to keep percentages out of P6b and
+// leave them to P6, per CQE Design v1.1 §4.2's "Must NOT contain % (P6
+// territory)" guard. IT DOES NOT DO THAT, because it sits AFTER the optional
+// `(${UNIT})` group and UNIT itself includes `%`. When UNIT consumes the `%`
+// the lookahead is evaluated past it, is trivially satisfied, and P6b matches
+// the percentage anyway. (It is not entirely inert — it still rejects a
+// doubled "5%%" — so it is left in place rather than deleted on a
+// coverage-only argument.)
+//
+// P6b therefore DOES own a real slice of percentage territory, and the fix is
+// to normalise rather than to decline, because P6 cannot take that slice:
+// P6_REGEX requires a mandatory `\s+by\s+`, whereas P6b's `by` is optional.
+// So "grew 5%" / "raise it 5%" / "grow revenue 5%" are outside P6 by
+// construction, and P9's guard (see rule_P9) explicitly refuses any `N%`
+// preceded by a direction verb. Making the lookahead work as intended would
+// hand those strings to the compromise backstop, which returns the right
+// NUMBER but drops `operator` and `direction` and downgrades `source` to
+// 'compromise' — the exact "lower-fidelity substitute re-claims the span"
+// failure that extract-quantities.ts §5 exists to prevent. Measured both
+// ways; see PR for the table.
+//
+// CONVENTION (uniform across every rule that emits `unit: 'percentage'`):
+// the VALUE is always stored as a FRACTION and `unit` is metadata. The
+// consumer depends on this — `mapCqeQuantityToProposalValue` in
+// routing/deterministic-value-update.ts multiplies by 100 to recover user
+// units ("CQE pre-divides by 100"). `percentage_points` is the deliberate
+// exception and stays a raw count; the same consumer passes it through
+// unscaled.
 const P6B_REGEX = new RegExp(
   `\\b(${DIRECTION_UP_VERB}|${DIRECTION_DOWN_VERB})(?:\\s+[a-z][a-z\\s-]{0,30}?)?\\s+(?:by\\s+)?(?:(?:${APPROX})\\s+)?(?:(${CURRENCY_SYMBOL}))?(${NUM})\\s*(${SUFFIX})?(?:\\s*(${UNIT}))?(?!\\s*%)`,
   'gi',
@@ -495,7 +579,14 @@ const rule_P6b: PatternRule = {
       if (direction === 'set') return null;
       let unit = normaliseUnit(rawUnit);
       if (currSym) unit = normaliseCurrencyUnit(currSym);
-      const value = applySuffix(num, suffix);
+      let value = applySuffix(num, suffix);
+      // Fraction convention, as every sibling that can emit `percentage`
+      // does (P1, P2, P3, P6, P7, P7c, P9, P11, P12). P6b was the only
+      // rule emitting `unit: 'percentage'` with an un-normalised value —
+      // a silent 100x that survived into `parsed_quantities` and was
+      // deterministically appliable to the user's graph. NOT applied to
+      // `percentage_points`, which is a raw count by design.
+      if (unit === 'percentage') value = value / 100;
       const isCut = direction === 'down';
       const verbLower = verb.toLowerCase();
       const isAddVerb = /^add/i.test(verbLower);
@@ -695,7 +786,7 @@ const rule_P8: PatternRule = {
       const num = parseNum(m[1]);
       const colloquial = m[2].toLowerCase();
       if (!Number.isFinite(num)) continue;
-      const value = colloquial === 'grand' ? num * 1000 : num;
+      const value = num * (COLLOQUIAL_MAGNITUDE_MULTIPLIERS[colloquial] ?? 1);
       const unit = 'GBP';
       out.push(
         emit(

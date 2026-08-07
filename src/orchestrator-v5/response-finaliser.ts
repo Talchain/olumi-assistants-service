@@ -84,6 +84,8 @@ import { config } from '../config/index.js';
 
 import {
   attachComputedAt,
+  FRESHNESS_ONLY_SYNTHESIS_REASONS,
+  synthesiseFreshnessOnlyAnalysisReady,
   type AnalysisReadyPayload,
 } from './compose/analysis-ready-emit.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
@@ -148,11 +150,16 @@ export interface FinaliserContext {
    *                         invalidated for now; documented in dispatch
    *                         result type.
    *
-   * Undefined ⇒ no analysis_ready stamped on the response. The body still
-   * gets the brand and the WeakSet membership — those signal "the helper
-   * ran", independent of whether readiness was set. The UI's null-as-
-   * unknown handling treats absence as "no fresh readiness this turn",
-   * not as a blocker.
+   * Undefined ⇒ no analysis_ready stamped on the response, with ONE
+   * exception (Mission 3 transport recovery): when `ctx.freshness`
+   * carries an honest 'unknown' verdict for a legacy/unparseable-graph
+   * reason (FRESHNESS_ONLY_SYNTHESIS_REASONS), the finaliser synthesises
+   * a minimal freshness-only block so the already-computed verdict is not
+   * dropped at the wire. All other undefined cases still omit the block —
+   * the body still gets the brand and the WeakSet membership; those
+   * signal "the helper ran", independent of whether readiness was set.
+   * The UI's null-as-unknown handling treats absence as "no fresh
+   * readiness this turn", not as a blocker.
    */
   readonly analysisReady?: AnalysisReadyPayload;
   /**
@@ -215,11 +222,42 @@ export function finaliseV5Response(
   const scrubbed = debugEnabled
     ? ceeTraceClean
     : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null);
-  const stamped: OlumiResponse = ctx.analysisReady
-    ? { ...scrubbed, analysis_ready: attachComputedAt(ctx.analysisReady, ctx.freshness) }
+  // Mission 3 transport recovery: a legacy/unparseable graph reload derives
+  // an honest 'unknown' freshness verdict but builds no structural readiness
+  // payload, and freshness can only ride the wire inside analysis_ready.
+  // Synthesise a minimal science-free carrier for exactly those reasons;
+  // every other no-readiness case (none/fresh/stale, other unknown reasons)
+  // keeps the omit behaviour.
+  const payloadForStamp: AnalysisReadyPayload | undefined =
+    ctx.analysisReady ??
+    (ctx.freshness?.freshness === 'unknown' &&
+    FRESHNESS_ONLY_SYNTHESIS_REASONS.has(ctx.freshness.reason)
+      ? synthesiseFreshnessOnlyAnalysisReady()
+      : undefined);
+  const stamped: OlumiResponse = payloadForStamp
+    ? { ...scrubbed, analysis_ready: attachComputedAt(payloadForStamp, ctx.freshness) }
     : { ...scrubbed };
-  FINALISED_RESPONSES.add(stamped);
-  return stamped as FinalisedV5Response;
+  // ROADMAP 1.192 leg κ(a) — AUTHORITATIVE top-level graph_hash. The egress
+  // sanitiser sets graph_hash from the GraphV3-parsed per-turn graph as a
+  // FALLBACK, but that projection can diverge from the RAW analysis-affecting
+  // hash after the commit-time options normalisation
+  // (normaliseOptionInterventionContract) — which would make graph_hash
+  // disagree with an analysis block's `computed_against_hash` on a FRESH
+  // analysis (a FALSE GRAPH_DIVERGED, live-proven: effectiveGraph
+  // 7367714928030768 vs persisted b3ebb23cfb03df1d). `freshness.current_graph_hash`
+  // is the SAME canonical hash run_analysis stamps as `graph_hash_at_run` /
+  // `computed_against_hash` (both `computeAnalysisAffectingGraphHash` over the
+  // raw persisted/authoritative graph), so when present it is the authoritative
+  // value — prefer it over the sanitiser fallback. On a STALE turn it is the
+  // CURRENT graph's hash (≠ the analysed hash) — the honest divergence signal
+  // the handshake exists to carry. Turns with no freshness keep the sanitiser
+  // fallback (coverage), where there is no analysis block to mismatch.
+  const withGraphHash: OlumiResponse =
+    ctx.freshness?.current_graph_hash != null
+      ? { ...stamped, graph_hash: ctx.freshness.current_graph_hash }
+      : stamped;
+  FINALISED_RESPONSES.add(withGraphHash);
+  return withGraphHash as FinalisedV5Response;
 }
 
 function sanitiseEnrichmentBlocks(
@@ -253,7 +291,15 @@ function sanitiseEnrichmentBlocks(
     // are absent, and the walker is the only path that covers
     // review_cards / factor_sensitivity / gaps / robustness /
     // m1_review / m1_coaching / improvement_guidance.
-    const result = sanitiseEnrichment(enrichment, null, analysisReady);
+    // WIRE BACKSTOP (Tier-3 cage): this is the LAST seam before the
+    // response ships, so transport-banned Tier-3 subtrees are DELETED
+    // here (dropTier3TransportBanned) — an unknown prose field inside
+    // them must not reach users. The enricher/fact path deliberately
+    // does NOT set this option (the m1 adapter reads m1_coaching's
+    // structured enums for the v11 prompt).
+    const result = sanitiseEnrichment(enrichment, null, analysisReady, {
+      dropTier3TransportBanned: true,
+    });
     mutated = true;
     return { ...b, enrichment: result.enrichment };
   });

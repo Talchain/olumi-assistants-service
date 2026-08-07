@@ -1,0 +1,210 @@
+{
+  "id": "07-single-option",
+  "description": "runner_up null (single-option decision) with NO fragile edges. Pins two branches nothing else reaches: the assembler's \"runner_up: null (single-option decision)\" line, and the scenario-contexts rule when there is no fragile-edge corpus to key on.",
+  "provenance": {
+    "origin": "graph-evaluator-revival",
+    "source": "tools/graph-evaluator/fixtures/decision-review/05-runner-up-null.json (committed 11078d28, 2026-03-06)",
+    "note": "Revived; edge id added. Kept deliberately sparse — an empty fragile_edges array is the input state that makes the scenario-context dimension report \"no corpus\" instead of passing vacuously."
+  },
+  "input": {
+    "brief": "Should we renew the data warehouse contract for another year?",
+    "brief_hash": "beefcafe12345678",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_warehouse",
+          "kind": "decision",
+          "label": "Warehouse Contract Renewal"
+        },
+        {
+          "id": "opt_renew",
+          "kind": "option",
+          "label": "Renew for One Year"
+        },
+        {
+          "id": "fac_query_load",
+          "kind": "factor",
+          "label": "Query Load Growth"
+        },
+        {
+          "id": "out_cost",
+          "kind": "outcome",
+          "label": "Platform Cost"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_load_cost",
+          "from": "fac_query_load",
+          "to": "out_cost",
+          "effect_direction": "positive"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_renew",
+          "option_label": "Renew for One Year",
+          "win_probability": 0.77,
+          "outcome": {
+            "mean": 0.71,
+            "p10": 0.5,
+            "p90": 0.9
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_query_load",
+          "factor_label": "Query Load Growth",
+          "elasticity": 0.49,
+          "confidence": 0.68
+        }
+      ],
+      "fragile_edges": [],
+      "robustness": {
+        "level": "high",
+        "recommendation_stability": 0.88,
+        "overall_confidence": 0.74
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "clear_winner",
+      "readiness": "ready",
+      "evidence_gaps": [
+        {
+          "factor_id": "fac_query_load",
+          "factor_label": "Query Load Growth",
+          "voi": 0.11,
+          "confidence": 0.68
+        }
+      ],
+      "model_critiques": []
+    },
+    "winner": {
+      "id": "opt_renew",
+      "label": "Renew for One Year",
+      "win_probability": 0.77,
+      "outcome_mean": 0.71
+    },
+    "runner_up": null
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "One headline, no comparative framing, no scenario_contexts. Should PASS.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Renew for One Year comes out ahead in about 77% of simulations. Query load growth is the input that could move platform cost against it.",
+        "story_headlines": {
+          "opt_renew": "Holds up in most runs, sensitive to query load growth"
+        },
+        "robustness_explanation": {
+          "summary": "The result holds in about 88% of runs.",
+          "primary_risk": "Query load growth could push platform cost above the level assumed.",
+          "stability_factors": [
+            "Query load growth is the only input shaping cost, and it is reasonably supported."
+          ],
+          "fragility_factors": []
+        },
+        "readiness_rationale": "Nothing here is close, so the main thing to watch is query load growth.",
+        "evidence_enhancements": {
+          "fac_query_load": {
+            "why": "Query load growth is the only input shaping cost.",
+            "expected_gain": "Would firm up the cost path."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Query load growth stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "At what query load growth would renewal stop making sense?",
+            "technique": "threshold test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "wrong_headline_keys",
+      "note": "Emits a headline for an option id the run never contained.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Renew for One Year comes out ahead in about 77% of simulations. Query load growth is the input that could move platform cost against it.",
+        "story_headlines": {
+          "opt_renew": "Holds up in most runs",
+          "opt_switch": "An option the run never contained"
+        },
+        "robustness_explanation": {
+          "summary": "The result holds in about 88% of runs.",
+          "primary_risk": "Query load growth could push platform cost above the level assumed.",
+          "stability_factors": [
+            "Query load growth is the only input shaping cost, and it is reasonably supported."
+          ],
+          "fragility_factors": []
+        },
+        "readiness_rationale": "Nothing here is close, so the main thing to watch is query load growth.",
+        "evidence_enhancements": {
+          "fac_query_load": {
+            "why": "Query load growth is the only input shaping cost.",
+            "expected_gain": "Would firm up the cost path."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Query load growth stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "At what query load growth would renewal stop making sense?",
+            "technique": "threshold test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "missing_required_fields",
+      "note": "Drops readiness_rationale and decision_quality_prompts — the runtime shape check must reject it.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Renew for One Year comes out ahead in about 77% of simulations. Query load growth is the input that could move platform cost against it.",
+        "story_headlines": {
+          "opt_renew": "Holds up in most runs, sensitive to query load growth"
+        },
+        "robustness_explanation": {
+          "summary": "The result holds in about 88% of runs.",
+          "primary_risk": "Query load growth could push platform cost above the level assumed.",
+          "stability_factors": [
+            "Query load growth is the only input shaping cost, and it is reasonably supported."
+          ],
+          "fragility_factors": []
+        },
+        "evidence_enhancements": {
+          "fac_query_load": {
+            "why": "Query load growth is the only input shaping cost.",
+            "expected_gain": "Would firm up the cost path."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Query load growth stays inside the range examined."
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "wrong_headline_keys": false,
+    "missing_required_fields": false
+  },
+  "expectedFailedDimensions": {
+    "wrong_headline_keys": [
+      "story_headlines_match_options"
+    ],
+    "missing_required_fields": [
+      "shape_valid"
+    ]
+  }
+}

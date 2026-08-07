@@ -74,8 +74,8 @@
  *   4. B1 egress validator → 200 + OlumiResponse (success OR schema-drift
  *      fallback), else 500 + BoundaryError.
  *
- * Route registration is gated on config.features.orchestratorV5. When the
- * flag is off, this route is not registered and the endpoint returns 404.
+ * Route registration is UNCONDITIONAL (server.ts) since 2026-07-20 — the
+ * ENABLE_V5_ORCHESTRATOR flag was deleted in O-7 wave 2.
  *
  * Transport invariant: buffered JSON only (no raw-stream writes, no SSE
  * Content-Type). Enforced by scripts/validate-transport-invariants.sh in CI.
@@ -89,9 +89,23 @@ import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/b
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
-import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings.js';
-import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemetry/turn-timings.js';
+import type {
+  V5DiagnosticExitPath,
+  V5DiagnosticTrace,
+} from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import {
+  GRAPH_CONFLICT_RECOVERY_KEYS,
+  GRAPH_CONFLICT_RECOVERY_COPY_MODE,
+} from '../orchestrator-v5/graph-conflict-recovery-keys.js';
+// ROADMAP 1.233 — the Layer-2 gate's own reason type. Imported so the
+// `claim_safety.withheld_projection_reason` stamp below is checked against the
+// REAL union at compile time: the diagnostics module declares that member as a
+// string literal union to stay dependency-free, and this import is what makes
+// the two fail `pnpm typecheck` together if either drifts (CLAUDE.md trap #12 —
+// a mirror must break at build time, not silently).
+import type { WithheldExplanationReason } from '../orchestrator-v5/compose/withheld-explanation-answer.js';
 import {
   canonicalStateFromFreshness,
   type CanonicalAnalysisState,
@@ -111,9 +125,24 @@ import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+// ROADMAP 2.735 — did THIS turn hand the client a graph to render? The one
+// fact that separates a lost model from a draft that never existed.
+import { graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
+import type { MayNameLeadingOptionProvenance } from '../orchestrator-v5/context/claim-safety-read.js';
+import { createTurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-claim-safety.js';
+import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-claim-safety.js';
+// T1 claim safety, LAYER 3 — armed ONCE at the send point (1.272 E1). It used
+// to be called from inside `sanitiseOlumiResponseForEgress`, which this file
+// re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
+import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
+import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import {
+  deriveAnswerTextFromShape,
+  synthesiseAnswerShapeFromText,
+} from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
@@ -121,28 +150,71 @@ import {
   dispatchDeterministicChipClick,
   isDeterministicChipClickActionType,
 } from '../orchestrator-v5/handlers/chip-click-dispatch.js';
-import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../schemas/assist.js';
+import {
+  DRAFT_GRAPH_MIN_BRIEF_LENGTH,
+  isDraftShapedText,
+} from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
+import { admitCurrentTurnFence, turnFencePreHandler } from './turn-fence-prehandler.js';
+import { recordExplicitTurnStop } from '../routes/turn-stop.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import {
+  buildTurnContext,
+  loadDraftLossStands,
+  loadHasOtherAdmittedLiveTurn,
   loadHasPriorTurns,
+  markDraftGraphWriteFailed,
+  loadMostRecentPendingActions,
   loadMostRecentPendingActionsStrict,
   loadPersistedGraphStrict,
+  loadPersistedScenarioStateStrict,
+  loadRecentConversationTurns,
 } from '../orchestrator-v5/build-turn-context.js';
+import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
+import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
+import { buildHeldSupersessionNotice } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
+import { appendLapseNotice } from '../orchestrator-v5/handlers/hold-thread-through.js';
+import type { FrameFreshness } from '../orchestrator-v5/graph-management/types.js';
+import {
+  assembleExplicitGenerateBrief,
+  type AssembledExplicitGenerateBrief,
+} from '../orchestrator-v5/routing/assemble-explicit-generate-brief.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { composeEditClarifyResponse } from '../orchestrator-v5/compose/edit-clarify-response.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
-import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
-import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
+import type {
+  PendingAction,
+  PendingActionAction,
+} from '../orchestrator-v5/session/pending-action.js';
+import {
+  isPendingActionExpired,
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+} from '../orchestrator-v5/session/pending-action.js';
+import { randomUUID } from 'node:crypto';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  computeSurvivingPriorPendings,
+} from '../orchestrator-v5/commit.js';
+import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
+import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
   SHORT_CONFIRM_PATTERN,
 } from '../orchestrator-v5/routing/deterministic-short-confirm.js';
+import { findExactProposalCopyMatchIndexes } from '../orchestrator-v5/routing/proposal-ordinal-select.js';
+import { resolveProposalRenderCopy } from '../orchestrator-v5/compose/proposed-change.js';
 import { isStateQueryQuestionShape } from '../orchestrator-v5/routing/state-query-guard.js';
+import {
+  projectOptionLabels,
+  resolveConfigureOptionIntent,
+} from '../orchestrator-v5/routing/configure-option-intent.js';
+import { detectStructuralRestructureIntent } from '../orchestrator-v5/routing/structural-restructure-intent.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
 import {
@@ -150,7 +222,19 @@ import {
   tryPostAnalysisLabelIntercept,
 } from '../orchestrator-v5/routing/post-analysis-label-intercept.js';
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
-import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
+// L16 / N16 — deterministic remedy for a bare configure-option turn.
+import { tryConfigureOptionClarify } from '../orchestrator-v5/routing/configure-option-clarify.js';
+import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
+import {
+  isProcessMetaIntake,
+  composeProcessMetaIntakeResponse,
+} from '../orchestrator-v5/routing/process-meta-intake.js';
+import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
+import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from './routing/edit-graph-intent-regex.js';
 
 // ───────────────────────────────────────────────────────────────────
 // Chip-click resume-intent detector
@@ -180,6 +264,351 @@ export function detectChipClickResumeIntent(
 }
 
 // ───────────────────────────────────────────────────────────────────
+// F2 CHANGE A — forced explanation-intent detector (typed analytical pill)
+// ───────────────────────────────────────────────────────────────────
+//
+// `explain_results` and `what_would_flip` are no longer in the
+// deterministic-chip whitelist (chip-click-dispatch.ts) — they must reach the
+// conversation-aware coach. This pure detector maps a typed analytical
+// chip_click to the FORCED explanation handler threaded into
+// `runTurnExecutor` as `chipClickForcedIntent`. TurnExecutor passes it to
+// `routeWithToolUse` (thinking disabled, tool forced, handler pinned) so the
+// pill answer sees the loaded conversation window and the coach cannot
+// re-route the typed intent.
+//
+// HAZARD 3 (the `explain_result` singular alias): the alias is NOT a
+// registered handler id (`resolveHandler(registry, 'explain_result')` is null),
+// so letting it reach the coach as a proposed handler_id would surface
+// HANDLER_NOT_FOUND / UNSUPPORTED_ACTION — a broken pill. We canonicalise it to
+// `explain_results` HERE, at the typed door, so the alias is pinned to the real
+// handler and never 400s.
+//
+// F2 CHANGE B — `what_changed` is a THIRD forced analytical intent. Unlike the
+// two explanation intents it does NOT route to an explanation handler; it owns
+// the run-comparison mechanism (freshness fail-closed + the real two-run
+// `RunDelta` via `compareRuns`), answered DETERMINISTICALLY by `composeComparison`
+// (0-LLM) in EVERY case — the confirmed-fresh compared delta and the fail-closed
+// verdicts alike. Coach-narration of the confirmed-fresh delta is DEFERRED to its
+// own review: its precondition is registering `what_changed` as a PINNED
+// explanation-class handler + threading the `RunDelta` as ground truth, with
+// `composeComparison` kept as the fallback. TurnExecutor branches on this value BEFORE the generic
+// forced-explanation `routeWithToolUse` call, so `forcedExplanationHandlerId` is
+// NEVER set to `what_changed` (it is not an explanation handler id). Typing the
+// pill is the point: it reaches the comparison mechanism WITHOUT depending on
+// the free-text `classifyAnalyticalIntent` regex (which is for typed-chat only).
+//
+// A chip_click of any OTHER typed action_type returns undefined and reaches
+// TurnExecutor unforced (Sonnet routes it normally / UNSUPPORTED_ACTION).
+export function detectChipClickForcedIntent(
+  ingress: OrchestratorTurnPayload,
+): 'explain_results' | 'what_would_flip' | 'what_changed' | undefined {
+  if (ingress.kind !== 'message') return undefined;
+  if (ingress.source !== 'chip_click') return undefined;
+  const actionType = ingress.chip?.action_type;
+  if (actionType === 'explain_results' || actionType === 'explain_result') {
+    return 'explain_results';
+  }
+  if (actionType === 'what_would_flip') return 'what_would_flip';
+  if (actionType === 'what_changed') return 'what_changed';
+  return undefined;
+}
+
+// ───────────────────────────────────────────────────────────────────
+// ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer
+// ───────────────────────────────────────────────────────────────────
+//
+// `draft_graph` is not in the wire ActionType enum, so the offer chip is a
+// plain text-replay chip and the pending action is server-only (explicit
+// `CommitMetadata.pending_actions`, mirroring `proposed_concept`). The offer
+// resumes HERE at the route (never in TurnExecutor, which cannot draft) via
+// the SAME primitives as the existing consent machinery: the persisted
+// public copy exact-match (`findExactProposalCopyMatchIndexes` — the
+// held-proposal replay matcher) and `SHORT_CONFIRM_PATTERN` (the
+// deterministic short-confirm pattern), with the shared read-time liveness
+// authority (`isPendingActionExpired`). Fixed copy, British English, no em
+// dashes (house style — this text bypasses no sanitise seam but must not
+// depend on one either).
+
+/**
+ * C3 — frame-guard offer chip (no action_type: text-replay chip).
+ *
+ * EXPORTED so route-level tests can bind to the chip by IDENTITY rather than
+ * retyping the copy (CLAUDE.md trap 12 — a hand-copied constant is a mirror
+ * that drifts silently, and trap 19 — an assertion must name its object).
+ * `route-v2-no-persisted-graph-fallthrough.test.ts` is the current consumer.
+ */
+export const DRAFT_OFFER_CHIP_LABEL = 'Build the model';
+export const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have shared.';
+
+/**
+ * ROADMAP 2.709 invariant 6 — the draft-loss disclosure. Prepended by
+ * `sendFinalised200` to any graph-less 200 on a scenario whose draft loss
+ * STANDS (an UNRESOLVED, DISCLOSABLE loss mark + no committed graph), because
+ * the client that lost the draft may be gone — this is the receipt channel
+ * that does not depend on the socket the client aborted. Every clause is true
+ * by construction of the gate that fires it: the loss is proven by the trace,
+ * the emptiness by the graph read, and the redraft promise is kept by the
+ * draft-shortcut unstranding term. Exported for the route test and for the
+ * UI, which may key on this copy arriving as ordinary assistant text (no
+ * wire-shape change — schema-skew hazard 1 avoided by construction).
+ *
+ * ⚠ 2.735 REMOVED the clause "— the graph you saw was never saved", and the
+ *   reason is the second half of the same defect. Even with the marking gate
+ *   fixed, a `draft_loss` can be marked on a turn whose commit was attempted
+ *   WITHOUT any preview ever reaching a client (a buffered turn streams no
+ *   GRAPH_READY frame at all). "The graph you saw" was therefore false for a
+ *   whole class of genuine losses. Gating the marking and softening the copy
+ *   are not alternatives: the first stops us disclosing non-events, the
+ *   second stops us describing real events wrongly. What remains asserts only
+ *   what the gate proves — a draft did not save, and nothing is stored.
+ */
+export const DRAFT_LOSS_NOTICE =
+  "Heads-up: your last draft didn't save, so no model is stored for this " +
+  "conversation yet. Send your decision brief again and I'll redraft it.";
+/**
+ * C3 — appended to the frame-guard copy ONLY when a usable brief seed was
+ * captured (so the offer is never made with nothing to build from). The
+ * guard's original first sentence is preserved verbatim: existing tests and
+ * dashboards key on it.
+ *
+ * P1-1 (adversarial review, #488): the ", or just reply yes" clause is
+ * DERIVED from the pendings state (`willDraftOfferBeSoleLivePending`), never
+ * asserted unconditionally — see that helper's doc for the mechanism.
+ */
+function draftOfferGuardSentence(offerWillBeSoleLive: boolean): string {
+  const base =
+    "Or I can draft a first model from what you've shared so far: choose 'Build the model' below";
+  return offerWillBeSoleLive ? `${base}, or just reply yes.` : `${base}.`;
+}
+
+/** C4 — graph-present decline offer chip (text-replay chip). */
+const REDRAFT_OFFER_CHIP_LABEL = 'Redraft the model';
+const REDRAFT_OFFER_CHIP_MESSAGE = 'Yes, redraft the model from my brief.';
+/**
+ * C4 — alternate replay copy, used when the INCOMING message already equals
+ * the standard copy (a hash-changed re-offer answering the user's own click
+ * of the previous offer chip). The egress looping-chip guard rightly drops
+ * any text-replay chip whose message normalise-equals the user's message
+ * (no-dead-end invariant); alternating the copy keeps the re-offer clickable
+ * without weakening that guard. Equality is checked with the guard's OWN
+ * `normaliseReplayMessage` — never a hand-mirrored predicate.
+ */
+const REDRAFT_OFFER_CHIP_MESSAGE_ALT = 'Yes, start the redraft from my brief.';
+/**
+ * C4 — deterministic decline for an explicit generate on a scenario that
+ * already has a graph (request `graph_state` or persisted). Ratified
+ * doctrine (Paul, 16 Jul): decline-with-redraft-offer, consistent with the
+ * held-proposal consent posture (never a silent replace, never a silent
+ * ignore). Consenting to the offer chip / replying yes REPLACES the model.
+ *
+ * P1-1 (adversarial review, #488): the "or reply yes" clause is DERIVED from
+ * the pendings state (`willDraftOfferBeSoleLivePending`), never asserted
+ * unconditionally — see that helper's doc for the mechanism.
+ */
+function explicitGenerateGraphPresentText(offerWillBeSoleLive: boolean): string {
+  return (
+    'This decision already has a model, so I have not replaced it. ' +
+    (offerWillBeSoleLive
+      ? "If you want a fresh draft instead, choose 'Redraft the model' below or reply yes, " +
+        'and I will rebuild it from your brief. '
+      : "If you want a fresh draft instead, choose 'Redraft the model' below and I will " +
+        'rebuild it from your brief. ') +
+    'Otherwise tell me what to change and I will edit the existing model.'
+  );
+}
+
+/**
+ * P1-1 (adversarial review, #488) — will the freshly-minted draft/redraft
+ * offer be the SOLE live pending after this commit?
+ *
+ * `resolveDraftOfferResume` accepts a bare confirmation ("yes") ONLY when the
+ * offer is the sole live pending; with any other live pending (a
+ * chip-suggestion `run_analysis` / `what_would_flip`, TTL 2 turns, which
+ * SURVIVES this commit's carry-forward) the next turn's "yes" falls to the
+ * deterministic-short-confirm machinery's RESUMABLE_KINDS and executes THAT
+ * action instead — so copy promising "reply yes" would promise the wrong
+ * action (reproduced in review: dispatchDraftGraph 0 calls, analysis ran).
+ *
+ * MECHANISM (ratified direction — derive the promise from the state, never
+ * mirror it): reuse the commit seam's OWN carry-forward
+ * (`computeSurvivingPriorPendings`) with the same inputs the emit site's
+ * `commitDirectAnswer` call will pass (no consumed refs, no
+ * `metadata.graph_hash` at either offer-emit site), so the survivor set here
+ * IS the set the next turn's resume will read. Any survivor is
+ * non-`draft_graph` by construction (a fresh offer supersedes carried offers
+ * kind-level), so zero survivors ⟺ the offer stands alone. This also covers
+ * the live `proposed_concept` case (review P2-a): a surviving concept hold
+ * suppresses the "reply yes" clause the same way.
+ *
+ * Error direction is safe by construction: a survivor counted here that
+ * wall-expires before the next read (or is cap-evicted at persist) only makes
+ * the copy OMIT "reply yes" where it would in fact have worked — the named
+ * chip route always works.
+ */
+function willDraftOfferBeSoleLivePending(
+  priorPendings: readonly PendingAction[],
+  offer: PendingAction,
+  nowMs: number,
+): boolean {
+  return (
+    computeSurvivingPriorPendings(priorPendings, [offer], [], undefined, nowMs)
+      .length === 0
+  );
+}
+
+/**
+ * P1-2 (adversarial review, #488) — is the ingress `graph_state` a POPULATED
+ * graph? `GraphStateIngressSchema` accepts `{nodes:[],edges:[]}` (a
+ * structurally-valid EMPTY canvas), and the C4 arms must treat that as "no
+ * model": declining with "This decision already has a model" over zero nodes
+ * is false, and the redraft offer it seeds would target a model that does not
+ * exist. LOCAL twin of `isPopulatedGraphCandidate` (#473's run_analysis
+ * adopt-on-empty lane — same judgement: plain object with a non-empty `nodes`
+ * array), not importable while that lane is unmerged; when both land, keep
+ * one and delete the other.
+ */
+function isPopulatedIngressGraph(g: unknown): boolean {
+  return (
+    g !== null &&
+    typeof g === 'object' &&
+    !Array.isArray(g) &&
+    Array.isArray((g as { nodes?: unknown }).nodes) &&
+    (g as { nodes: unknown[] }).nodes.length > 0
+  );
+}
+
+type DraftOfferAction = Extract<PendingActionAction, { readonly kind: 'draft_graph' }>;
+
+interface DraftOfferResume {
+  readonly pending: PendingAction;
+  readonly action: DraftOfferAction;
+  readonly trigger: 'copy_replay' | 'bare_confirm';
+}
+
+/**
+ * Most-recent draft_graph offer among the prior turn's pendings, or null.
+ * Presence (regardless of expiry) is the structural MARKER that the last
+ * committed turn was a draft/redraft offer turn — used to un-strand the
+ * brief-shape heuristic and to let the frame guard re-fire on continuation
+ * scenarios it created. LIVENESS (non-expired) additionally gates CONSENT
+ * (bare confirm / copy replay actually dispatching a draft).
+ */
+function findDraftOfferPending(
+  pendings: readonly PendingAction[],
+): PendingAction | null {
+  const offers = pendings.filter((pa) => pa.action.kind === 'draft_graph');
+  if (offers.length === 0) return null;
+  if (offers.length === 1) return offers[0]!;
+  const emittedMs = (pa: PendingAction): number => {
+    const ms = Date.parse(pa.emitted_at_iso);
+    return Number.isFinite(ms) ? ms : 0;
+  };
+  return [...offers].sort((a, b) => emittedMs(b) - emittedMs(a))[0]!;
+}
+
+/**
+ * Resolve whether this message CONSENTS to a live draft/redraft offer.
+ *
+ *   1. Exact replay of the offer's persisted public copy (our chip click, or
+ *      the same text typed) names the target: resumes regardless of other
+ *      live pendings — same posture as the held-proposal replay pre-route.
+ *   2. A bare short-confirmation ("yes", "ok", "go ahead") resumes ONLY when
+ *      the draft offer is the SOLE live pending kind. With any other live
+ *      pending (a consent hold, a chip suggestion) the message falls through
+ *      untouched, so the existing short-confirm machinery keeps owning it —
+ *      the F-HELD consent-priority and consent-clarity rulings are never
+ *      shadowed from here.
+ *
+ * Expired offers never consent (the caller's re-offer paths own recovery).
+ */
+function resolveDraftOfferResume(
+  message: string,
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): DraftOfferResume | null {
+  const offer = findDraftOfferPending(pendings);
+  if (offer === null || isPendingActionExpired(offer, nowMs)) return null;
+  const action = offer.action as DraftOfferAction;
+  const copyMatches = findExactProposalCopyMatchIndexes(message, [
+    { label: action.public_label, message: action.public_message },
+  ]);
+  if (copyMatches.length > 0) {
+    return { pending: offer, action, trigger: 'copy_replay' };
+  }
+  const otherLivePendingExists = pendings.some(
+    (pa) => pa.action.kind !== 'draft_graph' && !isPendingActionExpired(pa, nowMs),
+  );
+  if (!otherLivePendingExists && SHORT_CONFIRM_PATTERN.test(message)) {
+    return { pending: offer, action, trigger: 'bare_confirm' };
+  }
+  return null;
+}
+
+/**
+ * Capture a brief seed from the offering turn's message: typed sources only
+ * (a chip_click's canned text carries zero decision content — same rule as
+ * C2's `message_unshaped` bar), normalised and length-floored. Undefined
+ * when unusable — the offer is then not made (C3) or made without a seed
+ * (C4, where the persisted brief usually exists).
+ */
+function deriveDraftOfferSeed(
+  message: string,
+  source: string,
+): string | undefined {
+  if (source === 'chip_click') return undefined;
+  const value = normaliseBriefText(message).value ?? '';
+  if (value.length < DRAFT_GRAPH_MIN_BRIEF_LENGTH) return undefined;
+  // Never seed a TYPED replay of an offer's own copy: "Yes, build the model
+  // from what I have shared." is long enough to pass the floor but is a
+  // consent phrase, not decision content — seeding it would make a later
+  // resume draft a model ABOUT the confirmation sentence.
+  const normalised = normaliseReplayMessage(value);
+  if (
+    normalised === normaliseReplayMessage(DRAFT_OFFER_CHIP_MESSAGE) ||
+    normalised === normaliseReplayMessage(REDRAFT_OFFER_CHIP_MESSAGE) ||
+    normalised === normaliseReplayMessage(REDRAFT_OFFER_CHIP_MESSAGE_ALT)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function buildDraftOfferPending(input: {
+  readonly scenarioId: string;
+  readonly chipId: string;
+  readonly publicLabel: string;
+  readonly publicMessage: string;
+  readonly briefSeed?: string;
+  readonly redraft?: boolean;
+  readonly graphHash?: string | null;
+  readonly nowMs: number;
+}): PendingAction {
+  return {
+    id: randomUUID(),
+    scenario_id: input.scenarioId,
+    chip_id: input.chipId,
+    action: {
+      kind: 'draft_graph',
+      ...(input.briefSeed !== undefined ? { brief_seed: input.briefSeed } : {}),
+      ...(input.redraft === true ? { redraft: true } : {}),
+      public_label: input.publicLabel,
+      public_message: input.publicMessage,
+    },
+    // The redraft offer pins the persisted graph's analysis-affecting hash
+    // (when computable) so the commit carry-forward's existing hash rule
+    // invalidates the offer if an edit lands between offer and consent —
+    // consent must never silently cover a graph the user changed since.
+    preconditions:
+      typeof input.graphHash === 'string' && input.graphHash.length > 0
+        ? { graph_hash: input.graphHash }
+        : {},
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+    expires_at_iso: new Date(input.nowMs + PENDING_ACTION_DEFAULT_WALL_TTL_MS).toISOString(),
+    emitted_at_iso: new Date(input.nowMs).toISOString(),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Commit-failure BoundaryError helper
 // ───────────────────────────────────────────────────────────────────
 //
@@ -202,13 +631,13 @@ export function detectChipClickResumeIntent(
 // matters for JSON.stringify determinism — the UI parser and contract
 // fixtures depend on it.
 
-type V5ExitPath =
-  | 'system_event'
-  | 'chip_click'
-  | 'draft_graph'
-  | 'edit_graph'
-  | 'frame_no_brief_guard'
-  | 'turn_executor';
+// DERIVED from the diagnostics union (ROADMAP 2.63: this was a hand-synced
+// twin of V5DiagnosticExitPath minus its error member — a silent-drift
+// hazard). `draft_graph_error` is the only diagnostics-only member: it tags
+// the 500 BoundaryError trace path, never a 200-OK exit through
+// sendFinalised200. Adding a new 200-OK exit path now happens ONCE, in
+// v5-diagnostic-trace.ts.
+type V5ExitPath = Exclude<V5DiagnosticExitPath, 'draft_graph_error'>;
 
 /**
  * V5 200-OK exit helper — the SOLE sanctioned `reply.code(200).send` site
@@ -237,7 +666,7 @@ type V5ExitPath =
  * computed_at to be ISO-formatted) catches drift in the finaliser itself
  * rather than letting bad timestamps through.
  */
-function sendFinalised200(
+async function sendFinalised200(
   reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
   requestId: string,
   exitPath: V5ExitPath,
@@ -291,6 +720,26 @@ function sendFinalised200(
      */
     readonly coachingDelivery?: import('../orchestrator-v5/diagnostics/v5-diagnostic-trace.js').V5CoachingDelivery;
     /**
+     * V5 per-stage turn timings threaded by the turn_executor path from
+     * `run.turnTimings`. Folded into the flag-gated minimal diagnostic trace
+     * below so `_diagnostic_trace.llm_calls` carries the turn's REAL routing
+     * call (model, tokens, wall-clock) instead of the empty array the minimal
+     * builder emitted when this input was omitted. Undefined for paths that do
+     * not capture per-stage timings; the builder then emits an empty
+     * `llm_calls[]` honestly. Never reaches the wire body outside the trace.
+     */
+    readonly turnTimings?: V5TurnTimings;
+    /**
+     * S3-L6 / F-5 — edit-lane LLM call attribution threaded by the edit_graph
+     * path from `eg.editLlmCall`. Folded into the flag-gated minimal
+     * diagnostic trace below so an edit turn's `_diagnostic_trace.llm_calls[]`
+     * carries the edit LLM call (model, tokens, wall-clock) instead of the
+     * empty array the minimal builder emitted before. Undefined on
+     * deterministic (no-LLM) edits; the builder then records nothing for it.
+     * Never reaches the wire body outside the trace.
+     */
+    readonly editLlmCall?: import('../orchestrator-v5/diagnostics/v5-diagnostic-trace.js').EditGraphLlmCallTelemetry;
+    /**
      * V5 canonical analysis state for the redacted `_context_summary`
      * surface. When a dispatch path threads the FULL verdict (with degraded
      * detection — M5, turn-executor), it is used verbatim. Otherwise the
@@ -315,8 +764,145 @@ function sendFinalised200(
      * behaviour; do not introduce such a caller.
      */
     readonly frame?: CanonicalContextFrame;
+    /**
+     * ROADMAP 1.42 — VERBATIM Sonnet-5 extended-thinking reasoning, threaded
+     * from `run.reasoning` (turn-executor). Populated only when
+     * `config.features.reasoningCaptureEnabled` (env
+     * `CEE_REASONING_CAPTURE_ENABLED=true`) is set AND the model emitted
+     * thinking blocks. Attached to the wire body as `_reasoning` AFTER
+     * egress validation — same re-attach mechanic as `_context_summary` /
+     * `_diagnostic_trace` — and NEVER on the fallback envelope. Paul ruling
+     * (ROADMAP 1.42): VERBATIM reasoning bypasses the egress claim-safety /
+     * forbidden-phrase cage by design; containment is flag-default-off +
+     * collapsed-default UI + explicit label, not a wire-level scrub.
+     */
+    readonly reasoning?: string;
+    /**
+     * ROADMAP 1.132 (F2) — validated coach/converse answer shape, threaded
+     * from `run.answerShape` (turn-executor; fail-closed capture — only
+     * present when the final assistant_text IS the shape-derived text).
+     * Attached to the wire body as `_answer_shape` AFTER egress validation
+     * (UNCONDITIONAL since the F1 flag deletion) — same re-attach mechanic as
+     * `_reasoning` — and NEVER on the fallback envelope.
+     */
+    readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
+    /**
+     * ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification driving the
+     * egress answer-shape synthesiser below. EGRESS-DEFAULT INVERSION (fourth F1
+     * fix): the synthesiser now shapes UNLESS `answerKind === 'functional'`, so
+     * a substantive / unclassified / explanation-handler answer shapes BY
+     * DEFAULT. Threaded from `run.answerKind` (turn_executor, re-verified
+     * fail-closed against the FINAL text at the finalise seam — its default is
+     * `'substantive'`, so a NEW executor answer path shapes without per-site
+     * wiring) and `cc.answerKind` (chip_click). CONSEQUENCE OF THE INVERSION:
+     * every OTHER dispatch family that is functional copy (edit_graph /
+     * clarify_v2 / readiness_intake / system_event / declines / guards / the
+     * draft_graph intro) MUST now EXPLICITLY thread `answerKind: 'functional'` at
+     * its `sendFinalised200` callsite — omission means SHAPE (the inverted
+     * default), not skip. A functional site that forgets its mark ships one long
+     * message behind Show-more (mild, and caught by the functional-marking
+     * fail-loud guard — `route-egress-functional-marking.drift.test.ts`), never a
+     * substantive answer silently un-shaped. See `responseCarriesDraftGraphBlock`
+     * for the block-primary (draft_graph) exclusion.
+     */
+    readonly answerKind?: import('../orchestrator-v5/compose.js').AnswerKind;
+    /**
+     * The user's message for THIS turn, verbatim, or `null` when the turn
+     * carries none (system events). Threaded to the egress sanitiser's
+     * looping-chip guard, which drops any pure-text-replay chip that would
+     * re-submit this exact message — the no-dead-end invariant (see
+     * `orchestrator-v5/compose/looping-chip-guard.ts`).
+     *
+     * REQUIRED, deliberately: every dispatch path that can emit chips must
+     * state what the user said, so no path can opt out of the guard by
+     * omission. `null` is the honest value when there is no user message.
+     */
+    readonly userMessage: string | null;
+    /**
+     * T1 claim safety, LAYER 3 — may THIS turn name a leading option?
+     *
+     * `false` means the constraint verdict withheld the claim, so any copy on
+     * the envelope naming or presuming a leader contradicts the turn's own
+     * confirmation. Threaded straight to the egress sanitiser, which reports it
+     * (observe-only) — see `orchestrator-v5/compose/leading-option-egress-guard.ts`.
+     *
+     * REQUIRED, same rationale as `userMessage` above: every dispatch path must
+     * state the permission, so no path can disarm the guard by omission.
+     *
+     * ⚠ THE SENTENCE THAT USED TO SIT HERE IS NOW FALSE AND IS REPLACED RATHER
+     * THAN QUIETLY DELETED (CLAUDE.md trap #14). It read: "Paths that ran no
+     * analysis pass `true` — the honest 'nothing was withheld on this turn'."
+     * That is the exact premise ROADMAP 1.233's finish-line criterion 2
+     * refuted: the permission belongs to the fact the response DISPLAYS, not
+     * to the work this turn performed, and an edit turn displays the prior
+     * analysis. Seventeen exits shipped that `true` and thereby handed the
+     * Layer-3 guard an explicit licence not to look.
+     *
+     * EVERY exit now READS it — never a literal:
+     *   - `turn_executor` from `run.mayNameLeadingOption` (the verdict the
+     *     run_analysis handler stamped, re-read post-dispatch by #737),
+     *   - `chip_click` from `cc.mayNameLeadingOption`,
+     *   - every other exit from the turn-entry resolver
+     *     (`context/turn-claim-safety.ts`), which calls the SAME canonical
+     *     `readMayNameLeadingOptionVerdict`.
+     * Never re-derived here (CLAUDE.md trap #12).
+     */
+    readonly mayNameLeadingOption: boolean;
+    /**
+     * WHERE the permission above came from (2026-07-27).
+     *
+     * ⚠ ALSO CORRECTED. It used to read: "Optional and absent on the
+     * hardcoded-`true` exits by design: those turns consulted no analysis, so
+     * `null` at the wire is the honest statement." There are no hardcoded
+     * exits left, so that rationale describes nothing — and while it stood it
+     * made a `null` provenance look principled at exactly the exits whose
+     * permission was fabricated. Optional only so the two 500-adjacent
+     * fallback shapes keep compiling; every 200 exit now carries a real one.
+     * Threaded from the read, never re-derived here (CLAUDE.md trap #12).
+     */
+    // Derived from the source union, not re-listed — see the note in
+    // v5-diagnostic-trace.ts. Two hand-typed copies of this union existed and
+    // both went stale the moment a provenance state was added.
+    readonly mayNameLeadingOptionProvenance?: MayNameLeadingOptionProvenance;
+    /**
+     * ROADMAP 1.233 — which branch the Layer-2 withheld-explanation gate took,
+     * when the dispatch family HAS that gate and it ran. Optional and absent
+     * everywhere else: the turn-executor is the only producer today, and an
+     * absent value is stamped as `null` ("did not run"), which is honest for
+     * every other family rather than a fabricated `'unchanged'`.
+     *
+     * Diagnostic only — it reaches the wire solely inside the flag-gated
+     * `_diagnostic_trace.claim_safety`, never `response`.
+     */
+    readonly withheldExplanationReason?: WithheldExplanationReason;
   },
-): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+): Promise<import('fastify').FastifyReply<{ Reply: V5RouteReply }>> {
+  // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
+  // Persistence failure is never dark: when a scenario carries a
+  // failure-marked fence row and no committed graph (the phantom state's
+  // server half), every graph-less 200 tells the user plainly, because the
+  // client that triggered the loss may have aborted its socket and gone.
+  // Gated OFF for: system events (no user is reading), exits that carry a
+  // graph (the loss just healed — `ctx.graph` is the committed graph of
+  // THIS turn), and exits without a scenario id. The read degrades to
+  // no-notice on any failure (loadDraftLossStands). This is the ONE async
+  // step of this finaliser; every call site already `return`s it from an
+  // async handler.
+  let candidateForFinalise = candidate;
+  if (exitPath !== 'system_event' && ctx.graph == null && ctx.scenarioId !== undefined) {
+    const lossStands = await loadDraftLossStands(ctx.scenarioId, requestId);
+    if (lossStands) {
+      candidateForFinalise = {
+        ...candidate,
+        assistant_text: `${DRAFT_LOSS_NOTICE}\n\n${candidate.assistant_text ?? ''}`.trimEnd(),
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      emit(TelemetryEvents.V5DraftLossNoticeSurfaced, {
+        request_id: requestId,
+        scenario_id: ctx.scenarioId,
+        exit_path: exitPath,
+      });
+    }
+  }
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
   // `reply.code(200).send(<non-branded>)` a tsc error. To satisfy that,
   // `wireBody` MUST be the finaliser's output. There's a subtle wrinkle:
@@ -340,7 +926,7 @@ function sendFinalised200(
   // egress validation + re-attach + send. Flag-off cost is one
   // `Date.now()` call — the value is discarded if no trace is built.
   const finaliseStart = Date.now();
-  const candidateFinalised = finaliseV5Response(candidate, ctx);
+  const candidateFinalised = finaliseV5Response(candidateForFinalise, ctx);
   // Fix 4 (observability) + V5 diagnostic trace (Phase A): pluck out the
   // optional `_timings` and `_diagnostic_trace` blocks before egress
   // validation. OlumiResponseSchema is `.strict()` — unknown keys would
@@ -372,7 +958,19 @@ function sendFinalised200(
     // copy (defence-in-depth: the route's flag gate is the sole authority,
     // and the strict OlumiResponseSchema must not see an unknown key).
     const hasContextSummary = '_context_summary' in asRecord;
-    if (!hasTimings && !hasTrace && !hasContextSummary) {
+    // ROADMAP 1.42 — `_reasoning` is threaded via `ctx`, never body-attached
+    // by any dispatch path today. Stripped defensively anyway (same
+    // defence-in-depth posture as `_context_summary`): the route's flag
+    // gate at the re-attach block below is the sole authority, and the
+    // strict `OlumiResponseSchema` must not see an unknown key.
+    const hasReasoning = '_reasoning' in asRecord;
+    // ROADMAP 1.132 — `_answer_shape` is threaded via `ctx`, never
+    // body-attached by any dispatch path today. Stripped defensively anyway
+    // (same defence-in-depth posture as `_reasoning`): the re-attach block
+    // below is the sole authority, and the strict `OlumiResponseSchema` must
+    // not see an unknown key.
+    const hasAnswerShape = '_answer_shape' in asRecord;
+    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning && !hasAnswerShape) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
     const cloned = { ...asRecord };
@@ -381,6 +979,8 @@ function sendFinalised200(
     delete cloned._timings;
     delete cloned._diagnostic_trace;
     delete cloned._context_summary;
+    delete cloned._reasoning;
+    delete cloned._answer_shape;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -408,7 +1008,14 @@ function sendFinalised200(
           requestId,
           exitPath,
           graph: ctx.graph,
+          // Thread the turn's real per-stage timings so the minimal trace
+          // records the routing LLM call in `llm_calls[]` (previously always
+          // empty — the sole production call site omitted this input).
+          ...(ctx.turnTimings ? { turnTimings: ctx.turnTimings } : {}),
           ...(ctx.coachingDelivery ? { coachingDelivery: ctx.coachingDelivery } : {}),
+          // S3-L6 / F-5: thread the edit-lane LLM call so the edit turn's trace
+          // records it in `llm_calls[]` (previously always empty on this path).
+          ...(ctx.editLlmCall ? { editLlmCall: ctx.editLlmCall } : {}),
         })
       : undefined;
   const diagnosticTraceForWire: unknown =
@@ -418,15 +1025,17 @@ function sendFinalised200(
     graph: ctx.graph,
     requestId,
     exitPath,
+    userMessage: ctx.userMessage,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
   });
   const egress = validateEgress(candidateSanitised, requestId);
   let wireBody = egress.ok
     ? finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath }),
+        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       )
     : finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath }),
+        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       );
   if (!egress.ok) {
@@ -476,7 +1085,7 @@ function sendFinalised200(
       _timings: timingsBlock,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       ctx,
     );
   }
@@ -511,13 +1120,43 @@ function sendFinalised200(
         ...traceForWire.correlation_ids,
         response_hash: computeResponseHash(wireBody),
       },
+      // ROADMAP 1.233 — T1 claim safety, made readable by an HTTP acceptance
+      // walk. Stamped HERE because this is the ONE place every dispatch
+      // family's trace passes through on its way to the wire; wiring it into
+      // each builder instead would be the per-site enumeration that CLAUDE.md
+      // trap #12 (and this file's own EGRESS-DEFAULT INVERSION comment) says
+      // always misses a sibling.
+      //
+      // NOT a second derivation: `may_name_leading_option` is the SAME
+      // `ctx.mayNameLeadingOption` handed to `sanitiseOlumiResponseForEgress`
+      // on the lines above and below, so the trace cannot disagree with the
+      // guard it reports on. `withheld_projection_reason` is the gate's own
+      // returned `reason`, threaded through the run result — not re-inferred
+      // from the text.
+      claim_safety: {
+        may_name_leading_option: ctx.mayNameLeadingOption,
+        // The provenance discriminator (2026-07-27). Same single-derivation
+        // rule as the boolean beside it: threaded from the exit's own read,
+        // never re-inferred here — the trace must not be able to disagree with
+        // the read it reports on.
+        //
+        // ⚠ THE `null` RATIONALE THAT USED TO SIT HERE IS GONE WITH THE THING
+        // IT DESCRIBED. It said `null` was honest "on the exits that hand the
+        // route a hardcoded permission rather than a read one … those turns
+        // did not consult a fact". Every 200 exit now consults one, so a
+        // `null` here no longer means "nothing to report" — it means an exit
+        // reached this stamp without a provenance, which is a defect worth
+        // seeing rather than a state worth explaining away.
+        verdict_provenance: ctx.mayNameLeadingOptionProvenance ?? null,
+        withheld_projection_reason: ctx.withheldExplanationReason ?? null,
+      },
     };
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _diagnostic_trace: stampedTrace,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       ctx,
     );
   }
@@ -587,13 +1226,365 @@ function sendFinalised200(
         _context_summary: contextSummary,
       };
       wireBody = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       );
     }
   }
-  logFinalisedResponse(requestId, exitPath, wireBody, egress.ok);
+  // Re-attach `_reasoning` post-validation on the success path AND only
+  // when `config.features.reasoningCaptureEnabled` is set (ROADMAP 1.42,
+  // same single-flag re-attach shape as `_context_summary` /
+  // `_diagnostic_trace` above). `ctx.reasoning` is threaded from
+  // `run.reasoning` (turn-executor) — VERBATIM Sonnet-5 extended-thinking
+  // text, never derived or re-composed here. The fallback envelope never
+  // carries it; an upstream body-attach with the flag off was dropped by
+  // the strip step above. Spreading breaks WeakSet membership (finaliser
+  // brand), so we re-finalise the augmented body for the preSerialization
+  // hook, same as the other debug surfaces.
+  if (egress.ok && config.features.reasoningCaptureEnabled && ctx.reasoning) {
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _reasoning: ctx.reasoning,
+    };
+    wireBody = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      ctx,
+    );
+  }
+  // Re-attach `_answer_shape` post-validation on the success path (ROADMAP
+  // 1.132, same re-attach shape as `_reasoning` above; UNCONDITIONAL since
+  // the F1 flag deletion). `ctx.answerShape` is threaded from
+  // `run.answerShape` (turn-executor) — the VALIDATED coach/converse shape
+  // whose derived text was the final assistant_text when the executor
+  // finalised. The fallback envelope never carries it; an upstream
+  // body-attach was dropped by the strip step above. Re-finalise for WeakSet
+  // membership, same as the other surfaces.
+  //
+  // Stale-sidecar fail-closed (P1 hardening): the tie between the shape and the
+  // text the user actually receives is verified HERE — covering every rewriter
+  // between the executor's compose-time capture and this point (the executor's
+  // own STEP 6.6 / goal-receipt / backstop / finaliser guards are re-checked in
+  // finalizeRun; THIS check additionally covers the route-level
+  // sanitiseOlumiResponseForEgress entity-id scrub). Mismatch ⇒ ship the body
+  // WITHOUT the sidecar, never a shape describing text the user never sees. The
+  // comparison runs on the POST-sanitise augmented body.
+  //
+  // ⚠ THIS BLOCK IS NO LONGER "THE LAST BODY MUTATION BEFORE SEND" — corrected
+  // 2026-07-31, and the old sentence is quoted rather than deleted (CLAUDE.md
+  // trap #14) because it was load-bearing for the argument above: it read
+  // *"this block is the LAST body mutation before send, so the tie … is verified
+  // HERE, at the true final egress"*. ROADMAP 2.149 added the claim-safety wire
+  // gate DOWNSTREAM of both shape passes, and that gate can rewrite
+  // `assistant_text`. The tie check here is therefore no longer sufficient on
+  // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
+  // it edits the answer rather than relying on this comparison to notice.
+  // Neither guard is now the last word alone; read them together.
+  if (egress.ok && ctx.answerShape) {
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _answer_shape: ctx.answerShape,
+    };
+    const withShape = finaliseV5Response(
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+      ctx,
+    );
+    const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
+    const finalText =
+      typeof withShape.assistant_text === 'string' ? withShape.assistant_text : '';
+    if (finalText === derivedText) {
+      wireBody = withShape;
+    } else {
+      emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+        request_id: requestId,
+        exit_path: exitPath,
+        dispatch_path: 'route_egress',
+        final_text_length: finalText.length,
+        derived_text_length: derivedText.length,
+      });
+    }
+  }
+  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). Progressive
+  // disclosure for long ANSWER prose. The previous three fixes SCOPED shaping to
+  // sites explicitly declared `answerKind === 'substantive'` and each MISSED a
+  // sibling substantive site (advice gate, then the LLM EXPLANATION HANDLER
+  // answers — explain_results / what_would_flip: d9ac487d "bottom line" /
+  // 86654fd0 "pre-mortem" — which compose via `composeToolCallResponse` and were
+  // never declared substantive). Each miss passed every test yet shipped
+  // un-shaped on the live wire. This ends the whack-a-mole by INVERTING the
+  // default: shape ANY answer UNLESS it is explicitly FUNCTIONAL.
+  //
+  // GATE — shape when ALL hold:
+  //   1. `ctx.answerKind !== 'functional'` — substantive/unclassified/
+  //      explanation-handler/any-new answer path shapes BY DEFAULT (fails toward
+  //      the goal). Only the small, stable FUNCTIONAL set (clarify questions,
+  //      add-option / edit receipts, declines, recovery copy, and the
+  //      edit_graph / clarify_v2 / readiness_intake / system_event dispatch
+  //      families) is marked `'functional'` and stays plain. `answerKind` is
+  //      threaded from `run.answerKind` (turn_executor, re-verified fail-closed
+  //      at the finalise seam), `cc.answerKind` (chip_click), and the explicit
+  //      functional mark on every other dispatch family's `sendFinalised200`.
+  //   2. NO `draft_graph` block — a draft-graph response's user-facing artifact
+  //      is the GRAPH, not the prose; its brief intro must not be reshaped. This
+  //      is the ONE block type that means "the block is the answer". Phase-3
+  //      lifecycle blocks (review_card / coaching / evidence / analysis_result)
+  //      ACCOMPANY a substantive prose answer — the explanation handlers carry
+  //      them on a fresh post-analysis turn — and MUST NOT suppress shaping, so
+  //      the guard is draft_graph-specific, NOT "any non-empty blocks".
+  //   3. no `_answer_shape` already present (the executor/chip already shaped it).
+  //   4. non-blank assistant_text; and `synthesiseAnswerShapeFromText` returns a
+  //      shape only when there is a remainder after the first sentence — a terse
+  //      single-sentence functional one-liner is skipped (returns null).
+  //
+  // Byte-equality is preserved BY CONSTRUCTION (approach b): we SET
+  // `assistant_text := deriveAnswerTextFromShape(synth)`, so the tie the
+  // sidecar contract requires holds by identity. Approach (a) — find a shape
+  // whose derive() equals the ORIGINAL bytes — is provably impossible for the
+  // hard case (single-paragraph prose has zero `\n\n`, but every derived text
+  // joins a non-blank headline and detail with `\n\n`), so (b) is the only
+  // general solution.
+  //
+  // Fail-closed net: the shape is synthesised BEFORE the egress sanitiser,
+  // then we re-verify the tie on the POST-sanitise body. If the sanitiser
+  // perturbed the derived text (entity-id scrub), we REVERT to the original
+  // `wireBody` entirely — never ship a mutated assistant_text without its
+  // matching sidecar.
+  if (
+    egress.ok &&
+    ctx.answerKind !== 'functional' &&
+    !responseCarriesDraftGraphBlock(wireBody) &&
+    !('_answer_shape' in (wireBody as Record<string, unknown>)) &&
+    typeof wireBody.assistant_text === 'string' &&
+    wireBody.assistant_text.trim().length > 0
+  ) {
+    const synth = synthesiseAnswerShapeFromText(wireBody.assistant_text);
+    if (synth !== null) {
+      const derived = deriveAnswerTextFromShape(synth);
+      const augmented: OlumiResponseWithDebugFields = {
+        ...wireBody,
+        assistant_text: derived,
+        _answer_shape: synth,
+      };
+      const withSynth = finaliseV5Response(
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
+        ctx,
+      );
+      const synthFinalText =
+        typeof withSynth.assistant_text === 'string' ? withSynth.assistant_text : '';
+      if (synthFinalText === derived) {
+        wireBody = withSynth;
+        emit(TelemetryEvents.V5AnswerShapeEmitted, {
+          request_id: requestId,
+          exit_path: exitPath,
+          source: 'route_egress_synthesised',
+          headline_length: synth.headline.length,
+          bullet_count: synth.bullets.length,
+          detail_length: synth.detail.length,
+        });
+      } else {
+        // Sanitiser perturbed the derived text — fail closed, keep the
+        // un-shaped prose rather than ship a sidecar describing text the
+        // user never sees.
+        emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+          request_id: requestId,
+          exit_path: exitPath,
+          dispatch_path: 'route_egress_synthesised',
+          final_text_length: synthFinalText.length,
+          derived_text_length: derived.length,
+        });
+      }
+    }
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // T1 claim safety — ENFORCEMENT AT THE WIRE. (ROADMAP 2.149.)
+  //
+  // THE POPULATION. Eighteen of this file's nineteen `sendFinalised200` call
+  // sites return BEFORE `runTurnExecutor` (`:4427`), so eighteen never pass
+  // through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is
+  // a function NESTED inside `runTurnExecutor`, closed over run-local state, and
+  // therefore not callable from here even deliberately. Three of the eighteen
+  // can carry model-authored text (`chip_click` ok, `draft_graph`, and the MAIN
+  // edit exit), and the main edit exit is where the 28 Jul live confirmation
+  // caught a withheld leader claim shipping at HTTP 200.
+  //
+  // WHY HERE AND NOT PER-EXIT. Eighteen per-exit edits is eighteen places for
+  // the nineteenth exit to be forgotten — the hand-maintained mirror
+  // (CLAUDE.md trap #12). This is the file's SOLE `reply.code(200).send`, it is
+  // type-branded and grep-gated, and every exit already threads a REAL verdict
+  // (#737 / ROADMAP 1.233 — no literal survives, pinned by
+  // `claim-safety-non-execute-exits-route-level.test.ts`'s drift guard). So the
+  // guard consumes `ctx.mayNameLeadingOption` and covers every exit by
+  // construction, including exits that do not exist yet.
+  //
+  // ORDERING — THREE CONSTRAINTS, ALL SATISFIED AT THIS LINE:
+  //   1. AFTER every pass that can edit user-facing prose. `compose/
+  //      terminology-rewrite.ts` MANUFACTURES "leading option"; a gate upstream
+  //      of it reads clean prose and passes the banned string through.
+  //   2. AFTER both `_answer_shape` passes above, which rewrite
+  //      `assistant_text` wholesale. Hence the sidecar drop below.
+  //   3. BEFORE the Layer-3 alarm, and that is deliberate — see the alarm's own
+  //      block, which now explains why.
+  //
+  // BYTE-NEUTRAL WHEN PERMITTED. `enforceLeadingOptionClaimsAtWire` returns the
+  // input BY REFERENCE on a permitted turn and on a withheld turn whose prose
+  // designates nothing, so `wireBody` is not even reassigned. Over-suppression
+  // is a failure here, not a safe default (#755's first cut destroyed an honest
+  // receipt); the PERMIT-WINS arms in the route-level suite are what pin it.
+  //
+  // NO RE-SANITISE. The projection only REMOVES text and substitutes one fixed,
+  // module-load-probed constant, so it cannot introduce the entity-ID leak
+  // `sanitiseOlumiResponseForEgress` exists to catch. Re-finalising is still
+  // required: the spread breaks WeakSet membership (the finaliser brand).
+  // ═══════════════════════════════════════════════════════════════════════════
+  const wireEnforcement = enforceLeadingOptionClaimsAtWire(wireBody, {
+    requestId,
+    exitPath,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Read ONLY for the option ROSTER — "which options exist", never "which one
+    // leads". The gate enters only when the prose NAMES one of this scenario's
+    // own options, which is what spares "sales leads improved" and every other
+    // ordinary use of the shared vocabulary. `null` here disarms the gate for
+    // this turn and is REPORTED, not silent — see the opts docstring.
+    graph: ctx.graph,
+  });
+  if (wireEnforcement.changed) {
+    let projected: import('@talchain/schemas/boundary').OlumiResponse =
+      wireEnforcement.response;
+    // ⚠ THE SIDECAR MUST GO WITH THE EDIT, and this is the whole reason the
+    // guard can sit downstream of the shape passes. `_answer_shape`
+    // RECONSTRUCTS the answer verbatim (`deriveAnswerTextFromShape` rejoins
+    // headline + bullets + detail). Left attached after a claim-safety edit it
+    // would (a) describe text the user never sees and (b) carry the removed
+    // designation in its own fields — the suppression would be undone by its
+    // own sidecar. The two exact-equality checks above fail closed on a
+    // mismatch, but neither is a test and neither knows about this edit, so the
+    // drop is explicit here rather than inherited from another guard's
+    // unpinned invariant. Pinned by the route-level suite: `_answer_shape` must
+    // be ABSENT from the wire body whenever this gate edited the ANSWER.
+    //
+    // SCOPED TO `assistant_text`, deliberately. The sidecar describes THAT
+    // field and no other, so a `framing_question`-only edit leaves a sidecar
+    // that is still exactly true — dropping it there would be over-suppression
+    // of a debug surface for no honesty gain.
+    if (wireEnforcement.editedFields.includes('assistant_text')) {
+      const { _answer_shape: droppedShape, ...withoutShape } =
+        wireEnforcement.response as OlumiResponseWithDebugFields;
+      if (droppedShape !== undefined) {
+        emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+          request_id: requestId,
+          exit_path: exitPath,
+          dispatch_path: 'route_egress_claim_safety',
+          final_text_length: wireEnforcement.response.assistant_text.length,
+          derived_text_length: deriveAnswerTextFromShape(droppedShape).length,
+        });
+      }
+      projected = withoutShape;
+    }
+    wireBody = finaliseV5Response(projected, ctx);
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
+  //
+  // Placed here, and only here, for two reasons — one of which is correctness
+  // and was not the reason the move was proposed:
+  //
+  //   1. THIS IS THE ONLY POSITION THAT SCANS WHAT THE USER RECEIVES. The scan
+  //      used to live inside `sanitiseOlumiResponseForEgress`, but every call
+  //      to that function is WRAPPED in `finaliseV5Response(...)`, which then
+  //      deletes transport-banned enrichment members, rewrites enrichment prose
+  //      and overrides `graph_hash`. The alarm therefore reported on a
+  //      pre-finalise draft, never on the wire bytes. And the `_answer_shape`
+  //      and synthesised-shape re-attach passes can FAIL CLOSED and DISCARD the
+  //      object that was scanned last, so the final scan was not even
+  //      guaranteed to be of a live envelope. `wireBody` on this line is the
+  //      exact object handed to `reply.send`.
+  //   2. It runs ONCE. `sendFinalised200` re-enters the sanitiser 2–8 times per
+  //      response (1 validate pass + 1 of {validated, fallback} + up to 6
+  //      conditional re-attach passes), and the guard fired on every pass that
+  //      found hits — so `hit_count` on the dashboard carried an undeclared
+  //      multiplier that varied with which debug surfaces were enabled.
+  //
+  // ORDERING: the guard must sit after every pass that can edit user-facing
+  // prose, because `compose/terminology-rewrite.ts` MANUFACTURES the banned
+  // vocabulary ("recommendation" → "leading option"). Nothing edits prose
+  // between here and `reply.send`, so this satisfies that rule strictly better
+  // than the old position did.
+  //
+  // OBSERVE-ONLY (`enforce: false`): it reports and returns the response
+  // unchanged, and the return value is discarded. It cannot alter a single wire
+  // byte — which is why this move is byte-neutral by construction, not merely
+  // by test.
+  //
+  // `ctx.mayNameLeadingOption` is the SAME value that was previously handed to
+  // every sanitiser call on this path (it is passed to each of them from this
+  // ctx, unmodified), so the permission the alarm is armed with is unchanged.
+  //
+  // ⚠ WHAT THIS ALARM MEASURES CHANGED ON 2026-07-31 (ROADMAP 2.149), AND THE
+  // CHANGE IS RECORDED HERE RATHER THAN LEFT FOR A DASHBOARD READER TO DISCOVER
+  // AS A DROP IN THE GRAPH.
+  //
+  // The ENFORCING wire gate now runs immediately above, so this scan reports
+  // the RESIDUE THAT STILL SHIPS, not everything the producers emitted. The
+  // enforcer covers `assistant_text` and `framing_question`; block prose,
+  // enrichment blobs and structured key designations are producer-owned
+  // (`compose/withheld-claim-projection.ts`) and are NOT edited here — so a hit
+  // on this alarm after 2.149 names a surface the wire gate does not cover, or
+  // a phrasing the wide ALARM reader sees and the narrow ENFORCER reader
+  // deliberately spares. Both are real signal; neither is the old signal.
+  //
+  // WHY THE ALARM RUNS SECOND AND NOT FIRST. Two reasons, and only the first is
+  // about doctrine:
+  //   1. E1's position pin (`compose/__tests__/single-pass-egress-byte-
+  //      identity.test.ts`) requires this scan to sit after the LAST `wireBody`
+  //      write and immediately before the send, because that is the only
+  //      position that scans the bytes the user receives. An enforcing pass
+  //      downstream of the alarm would make the alarm's report a report about
+  //      an object that no longer ships.
+  //   2. The ordering rule this block states above — "after every pass that can
+  //      edit user-facing prose" — is about passes that can MANUFACTURE the
+  //      banned vocabulary (terminology-rewrite). The wire gate is
+  //      monotone-REMOVING and its replacement copy is module-load-probed
+  //      leader-free under BOTH readers, so it cannot introduce a claim for
+  //      this scan to miss.
+  // ═══════════════════════════════════════════════════════════════════════════
+  guardLeadingOptionClaimsAtEgress(wireBody, {
+    requestId,
+    exitPath,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    enforce: false,
+  });
+  logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
+}
+
+/**
+ * ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION block-primary guard.
+ *
+ * True when the response carries a `draft_graph` block — the one block type
+ * whose user-facing artifact IS the block (the drafted decision graph), not the
+ * `assistant_text` prose. A draft-graph turn's prose is a brief intro that must
+ * NOT be reshaped behind progressive disclosure, so the egress synthesiser skips
+ * it (the draft_graph dispatch is ALSO functional-marked; this is defence in
+ * depth against a future path that emits a draft_graph block without a mark).
+ *
+ * DELIBERATELY draft_graph-ONLY, not "any non-empty blocks": the Phase-3
+ * lifecycle blocks (review_card / coaching / evidence / analysis_result /
+ * graph_patch / comparison / flip_analysis) ACCOMPANY a substantive prose answer
+ * — the explanation handlers (explain_results / what_would_flip) carry them on a
+ * fresh post-analysis turn — and that prose IS the F1 target. A broad
+ * "blocks-empty" gate would wrongly exclude exactly the d9ac487d / 86654fd0
+ * answers this fix must shape.
+ */
+function responseCarriesDraftGraphBlock(
+  response: import('@talchain/schemas/boundary').OlumiResponse,
+): boolean {
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks)) return false;
+  return blocks.some(
+    (b) =>
+      b !== null &&
+      typeof b === 'object' &&
+      (b as { type?: unknown }).type === 'draft_graph',
+  );
 }
 
 /**
@@ -686,9 +1677,13 @@ function logFinalisedResponse(
   exitPath: V5ExitPath,
   finalisedResponse: unknown,
   egressOk: boolean,
+  freshnessOnlySynthesised: boolean,
 ): void {
-  const ar = (finalisedResponse as { analysis_ready?: { status?: string; computed_at?: string } } | undefined)
-    ?.analysis_ready;
+  const ar = (
+    finalisedResponse as
+      | { analysis_ready?: { status?: string; computed_at?: string; freshness?: string; freshness_reason?: string } }
+      | undefined
+  )?.analysis_ready;
   log.info(
     {
       event: 'v5.response.finalised',
@@ -697,6 +1692,15 @@ function logFinalisedResponse(
       analysis_ready_emitted: ar != null,
       analysis_ready_status: ar?.status ?? null,
       computed_at: ar?.computed_at ?? null,
+      // Mission 3 transport recovery observability. Enum/reason code +
+      // boolean only — no graph hashes or content values. Preserves the
+      // pre-recovery "should be carrying readiness but isn't" signal that
+      // `analysis_ready_emitted: false` used to give on unknown turns.
+      // forbidden-exempt: freshness VERDICT enum (fresh|stale|unknown|none), Tier-1 status transport — honest null when no analysis_ready ships, not a science-value fallback
+      analysis_ready_freshness: ar?.freshness ?? null,
+      // forbidden-exempt: freshness REASON code (stable debug/telemetry string), honest null when absent — not a science-value fallback
+      analysis_ready_freshness_reason: ar?.freshness_reason ?? null,
+      analysis_ready_freshness_only_synthesised: freshnessOnlySynthesised && ar != null,
       egress_ok: egressOk,
     },
     'V5 response finalised',
@@ -742,17 +1746,62 @@ export function buildCommitFailureBoundaryError(params: {
  * the catch block in dispatchDraftGraph).
  *
  * Category source: `buildCeeErrorResponse` in src/cee/validation/pipeline.ts
- * — the canonical field is `body.code`. Eight known CEE codes are emitted
+ * — the canonical field is `body.code`. Ten known CEE codes are emitted
  * across the codebase: CEE_LLM_VALIDATION_FAILED, CEE_TIMEOUT,
- * CEE_LLM_UPSTREAM_ERROR, CEE_RATE_LIMIT, CEE_INTERNAL_ERROR,
- * CEE_GRAPH_INVALID, CEE_VALIDATION_FAILED, CEE_SERVICE_UNAVAILABLE.
+ * CEE_LLM_UPSTREAM_ERROR, CEE_RATE_LIMIT, CEE_COST_CAP,
+ * CEE_BUDGET_EXCEEDED, CEE_INTERNAL_ERROR, CEE_GRAPH_INVALID,
+ * CEE_VALIDATION_FAILED, CEE_SERVICE_UNAVAILABLE.
  */
 export function mapDraftGraphPipelineReason(
   pipelineStatusCode: number,
   pipelineErrorCode: string,
+  pipelineReason?: string | null,
+  // ROADMAP 2.718 — the pipeline body's OWN top-level `retryable`, threaded
+  // by handleDraftGraph as `pipelineRetryable`. `null` = producer silent
+  // (or a pre-2.718 caller): the static map below decides alone.
+  producerRetryable?: boolean | null,
+): { reason: string; retryable: boolean } {
+  const mapped = mapDraftGraphPipelineReasonStatic(
+    pipelineStatusCode,
+    pipelineErrorCode,
+    pipelineReason,
+  );
+  // Producer-authoritative promotion (ROADMAP 2.718). An emitter that
+  // EXPLICITLY declares `retryable: true` on its error body is believed —
+  // this map is a hand-maintained mirror of producer semantics and had
+  // drifted: the post-enforcement gate declares its CEE_GRAPH_INVALID
+  // retryable (stochastic model topology — the same brief drafts cleanly on
+  // rerun; see graph-enforcement.ts "HONEST RETRY", 2026-07-24) while this
+  // map said "retrying reproduces" and flipped it to false on the wire,
+  // beside recovery copy reading "Try again" (witnessed 2026-08-06, runs
+  // de79da/39cf53). Promotion is MONOTONE: an explicit producer `false` is
+  // indistinguishable from buildCeeErrorResponse's omission default, so it
+  // never demotes a mapped true (a timeout stays retryable even when its
+  // body carries the default false).
+  if (producerRetryable === true && !mapped.retryable) {
+    return { ...mapped, retryable: true };
+  }
+  return mapped;
+}
+
+function mapDraftGraphPipelineReasonStatic(
+  pipelineStatusCode: number,
+  pipelineErrorCode: string,
+  pipelineReason?: string | null,
 ): { reason: string; retryable: boolean } {
   switch (pipelineErrorCode) {
     case 'CEE_LLM_VALIDATION_FAILED':
+      // Sub-case split off by the pipeline body's typed `details.reason`
+      // (2026-07-23 firefight): a max_tokens TRUNCATION is transient model
+      // over-generation, not a bad brief — RETRY is the honest lever, so it is
+      // retryable even though the parent code otherwise is not. Telling a
+      // truncation user to refine the brief drives output-token demand UP and
+      // reproduces the failure (the cruel inversion). All other
+      // CEE_LLM_VALIDATION_FAILED causes (vague/nonsensical brief, schema
+      // mismatch) stay non-retryable — retrying the same input reproduces them.
+      if (pipelineReason === 'llm_truncated_max_tokens') {
+        return { reason: 'draft_graph_cee_llm_validation_failed', retryable: true };
+      }
       // Client-actionable: brief was too vague or LLM output didn't validate.
       // Not retryable without changing the input.
       return { reason: 'draft_graph_cee_llm_validation_failed', retryable: false };
@@ -760,7 +1809,18 @@ export function mapDraftGraphPipelineReason(
       return { reason: 'draft_graph_cee_timeout', retryable: true };
     case 'CEE_LLM_UPSTREAM_ERROR':
       return { reason: 'draft_graph_cee_llm_upstream_error', retryable: true };
+    // ── 429 family — one shared wire reason, three distinct causes ───────
+    // CEE_COST_CAP (spend cap) and CEE_BUDGET_EXCEEDED (elapsed-time
+    // deadline) were split out of CEE_RATE_LIMIT on 2026-07-20 so on-call
+    // can tell a throttle from a budget breach. They deliberately share
+    // this case arm: the wire `reason` must stay byte-identical to what
+    // consumers already handle, so the rename is observable in CEE logs
+    // and telemetry only, never on the wire. Pinned by
+    // tests/unit/cee.error-code-taxonomy.test.ts — the raw code is still
+    // available to dashboards via `details.pipeline_error_code`.
     case 'CEE_RATE_LIMIT':
+    case 'CEE_COST_CAP':
+    case 'CEE_BUDGET_EXCEEDED':
       return { reason: 'draft_graph_cee_rate_limit', retryable: true };
     case 'CEE_INTERNAL_ERROR':
       // Pipeline catch-all — likely a true internal bug. Retryable so the user
@@ -768,10 +1828,17 @@ export function mapDraftGraphPipelineReason(
       return { reason: 'draft_graph_cee_internal_error', retryable: true };
     case 'CEE_GRAPH_INVALID':
       // Emitted when enrichment or repair determines the LLM produced a
-      // graph that cannot be made structurally valid (see
-      // unified-pipeline/index.ts:523, orchestrator-validation.ts).
-      // Client must refine the brief — retrying with the same input
-      // reproduces.
+      // graph that cannot be made structurally valid. ⚠ CORRECTED 2026-08-06
+      // (ROADMAP 2.718): this arm previously asserted "retrying with the
+      // same input reproduces" — FALSE for two of the code's emitters. The
+      // post-enforcement gate (graph-enforcement.ts) and the
+      // OPTIONS_IDENTICAL bypass both fail on STOCHASTIC model topology and
+      // declare `retryable: true` with retry-first recovery copy; the
+      // witnessed 2026-08-06 runs drafted the SAME brief cleanly in
+      // neighbouring runs of the same hour. `false` here is only the FLOOR
+      // for emitters that declare nothing (enrichment crash, structural
+      // parse) — an explicit producer `retryable: true` promotes it via the
+      // wrapper above.
       return { reason: 'draft_graph_cee_graph_invalid', retryable: false };
     case 'CEE_VALIDATION_FAILED':
       // Generic validation failure surface (graph-enforcement and orchestrator
@@ -823,27 +1890,70 @@ export function mapDraftGraphPipelineReason(
 export const EDIT_GRAPH_RECOVERY_TEXT =
   "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.";
 
+/**
+ * ⚠ ROADMAP 2.388 — `'no_persisted_graph'` IS NOW REACHABLE ONLY OFF THE FRAME
+ * STAGE, and that narrowing is the fix, not a side effect.
+ *
+ * "There is no graph yet" is not a failure to recover from — it is an empty
+ * canvas, and this copy ("…I couldn't access the current graph. Please try
+ * again in a moment.") told users to retry the one thing that could not work.
+ * At `stage: 'frame'` — which is what the UI sends on a first message, and
+ * where every MEASURED dead end arrived — that branch now falls through to the
+ * frame-no-brief guard's coaching instead.
+ *
+ * It stays in this union because the `analyse`-stage case is deliberately NOT
+ * changed: the frame guard cannot catch a turn there, so falling through would
+ * hand the turn to a broad TurnExecutor LLM call and break the edit-lane
+ * routing contract. See the SCOPE 2 note at the branch.
+ *
+ * The other two are genuinely transient: the session store was unreachable, or
+ * the stored graph could not be parsed. For those, "try again in a moment" is
+ * honest advice at every stage.
+ */
 type EditGraphRecoveryReason =
   | 'no_persisted_graph'
   | 'persisted_graph_invalid'
   | 'session_store_failed';
 
-function sendEditGraphRecovery(
+async function sendEditGraphRecovery(
   reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
   requestId: string,
   scenarioId: string,
   stage: import('@talchain/schemas/boundary').StageType,
   reason: EditGraphRecoveryReason,
-): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+  userMessage: string | null,
+  claimSafety: TurnClaimSafetyResolver,
+  turnId: string,
+  routeStartedAt: number,
+): Promise<import('fastify').FastifyReply<{ Reply: V5RouteReply }>> {
   emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
     request_id: requestId,
     scenario_id: scenarioId,
     reason,
   });
   return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
+    answerKind: 'functional',
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
-  }), { graph: null });
+  }), {
+    graph: null,
+    answerKind: 'functional',
+    userMessage,
+    // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+    // the permission belongs to the fact this response DISPLAYS, not to
+    // whether this turn ran an analysis. See turn-claim-safety.ts.
+    ...(await claimSafety.forExit()),
+    // ⚠ THE TRACE INPUTS ARE NEW, AND THEY ARE NOT COSMETIC. Without them the
+    // minimal-trace builder never runs, so this exit shipped NO
+    // `_diagnostic_trace` at all — which meant its claim-safety permission was
+    // UNOBSERVABLE at the wire and no acceptance walk could falsify it. An
+    // exit whose guarantee cannot be measured is the guarantee-theatre shape
+    // this workstream exists to remove, so the stamp and its instrument land
+    // together. Flag-gated exactly like every other family's.
+    requestStartedAt: routeStartedAt,
+    scenarioId,
+    turnId,
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -913,40 +2023,16 @@ function isPriorAnalysisFreshFromRequest(
 // inside the request handler would rebuild RegExp objects on every turn).
 // ────────────────────────────────────────────────────────────────────
 
-/**
- * Positive decision-brief regex for draft_graph dispatch. Matches common
- * decision verbs or a trailing question mark. See
- * `tests/integration/orchestrator/route-v2-draft-graph.test.ts` for
- * regression cases including known false negatives.
- */
-const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
-  /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+// Positive decision-brief regex for draft_graph dispatch — canonical
+// definition now lives in src/schemas/assist.ts (ROADMAP 2.63: was a
+// module-local twin of derive-brief-seed's BRIEF_SEED_DECISION_REGEX;
+// both now derive from the single export). Imported above alongside
+// DRAFT_GRAPH_MIN_BRIEF_LENGTH.
 
-/** Positive edit-intent regex for edit_graph dispatch. */
-const EDIT_GRAPH_POSITIVE_REGEX =
-  /\b(change|update|edit|modify|remove|delete|add|adjust|set|reduce|increase|decrease|tweak|raise|lower)\b/i;
-
-/**
- * Negative guard for edit_graph dispatch. If a message contains any of
- * these phrases it is a meta-question or conversational/figurative use of
- * an edit verb, NOT an edit command, and must NOT dispatch even if a
- * positive edit-verb also appears. Mutating the graph on a meta-question
- * is the worst failure mode.
- *
- * Pattern groups:
- *   1. Meta-question markers: "explain", "compare", "what would", "flip",
- *      "why", "how does", "tell me", "show me", "describe".
- *   2. Phrasal verbs that turn an edit verb into a non-mutation: "set up",
- *      "set aside" (procedural framing / deprioritisation, not delete).
- *   3. Figurative / idiomatic uses of edit verbs: "add context",
- *      "remove doubt", "change my mind", "reduce complexity",
- *      "delete this thread", "update our approach", "modify thinking".
- *      These were exposed when the frame-stage gate was removed —
- *      conversational discourse at frame stage previously fell through
- *      to Sonnet only because the stage gate blocked dispatch entirely.
- */
-const EDIT_GRAPH_NEGATIVE_REGEX =
-  /\b(?:explain|compare|what would|flip|why|how does|tell me|show me|describe|set up|set aside|add (?:some |any |more )?(?:context|information|detail|details|background)|remove (?:any |the )?(?:doubt|confusion|uncertainty|ambiguity)|change (?:my |our |their )?mind|reduce (?:complexity|scope|noise|clutter)|delete (?:this |the )?(?:thread|conversation|chat|message)|update (?:my |our |their |the )?(?:approach|thinking|understanding|view|perspective)|modify (?:my |our |their )?(?:view|mind|thinking|approach))\b/i;
+// The two edit-intent regexes now live in
+// `src/orchestrator/routing/edit-graph-intent-regex.ts` (ROADMAP 2.308 / S2)
+// so the product's own chip and prompt copy can be tested against the gates it
+// must pass without importing this module. Imported at the top of the file.
 
 // Value-update negative gate (P0 fix, 2026-05) lives in
 // `src/orchestrator/routing/value-update-gate.ts` as a dedicated module
@@ -973,7 +2059,28 @@ type ProposalConfirmResolution =
   | {
       readonly kind: 'clarify';
       readonly outcome: 'clarify_none' | 'clarify_expired' | 'clarify_hash_mismatch';
+    }
+  | {
+      /**
+       * P0 held-proposal replay (2026-07-15, DGAI #340) — replay-candidate
+       * path only: the message did not exactly match any proposal the user
+       * was shown, so this is NOT a confirmation. Edit routing proceeds
+       * untouched (an unrelated edit-verb chip label or a fresh
+       * affirmative-prefixed edit command must never be hijacked by a live
+       * hold, and must never get the no-live-proposal clarification).
+       */
+      readonly kind: 'pass';
+      readonly outcome: 'replay_no_match';
     };
+
+/**
+ * P0 held-proposal replay (2026-07-15, DGAI #340) — affirmative-prefixed
+ * message shapes ("Yes, add 'Wasted time' and update 'Marketing'.") that a user
+ * may type, or that a hold chip's MESSAGE replays. Prefix-anchored only:
+ * the exact-match against the proposal's rendered copy is the real gate;
+ * this pattern merely bounds which messages pay the pendings read.
+ */
+const AFFIRMATIVE_PREFIX_PATTERN = /^\s*(?:yes|yeah|yep|ok(?:ay)?|sure|confirm)\b/i;
 
 /**
  * Resolve whether a confirmation-shaped message should SUPPRESS edit routing
@@ -989,6 +2096,18 @@ async function resolveProposalConfirmAtRoute(
   scenarioId: string,
   requestId: string,
   requestGraphState: GraphStateIngress | null,
+  /**
+   * P0 held-proposal replay (2026-07-15, DGAI #340): non-null on the
+   * REPLAY-CANDIDATE path — a message that is NOT confirmation-shaped but
+   * could be a proposal-copy replay (a chip_click ingress, or an
+   * affirmative-prefixed reply). The message must then EXACTLY match a
+   * proposal's rendered label or message (the same strings + normalisation
+   * TurnExecutor's pass-7 pre-route matches) for edit routing to be
+   * suppressed; no match returns `pass` and edit routing proceeds
+   * untouched. `null` keeps the original confirmation-shaped behaviour
+   * byte-identical.
+   */
+  replayMessage: string | null = null,
 ): Promise<ProposalConfirmResolution> {
   let pendings: readonly PendingAction[];
   try {
@@ -1009,6 +2128,43 @@ async function resolveProposalConfirmAtRoute(
     return { kind: 'suppress', outcome: 'suppressed_read_failed', liveCount: 0 };
   }
   const proposals = pendings.filter((pa) => pa.action.kind === 'apply_proposed_change');
+  // ── P0 held-proposal replay path (2026-07-15, DGAI #340) ──────────────
+  // The message is edit-verb-bearing and NOT confirmation-shaped, but came
+  // from a chip click or starts with an affirmative. It counts as a
+  // confirmation ONLY if it exactly matches a live proposal's rendered
+  // copy — the strings the user was actually shown. On a match, suppress
+  // edit routing so TurnExecutor's exact-match pre-route resolves the SAME
+  // proposal (GM holds via the dedicated held-execute resume). The
+  // graph-hash precondition is deliberately NOT filtered here: the
+  // executor's resume path re-checks it like-for-like and owns the honest
+  // superseded recovery — filtering here would misdirect a hash-diverged
+  // replay into the edit LLM instead.
+  if (replayMessage !== null) {
+    if (proposals.length === 0) {
+      return { kind: 'pass', outcome: 'replay_no_match' };
+    }
+    const replayNowMs = Date.now();
+    const liveProposals = proposals.filter((pa) => !isPendingActionExpired(pa, replayNowMs));
+    const liveMatches = findExactProposalCopyMatchIndexes(
+      replayMessage,
+      liveProposals.map((pa) => resolveProposalRenderCopy(pa.action)),
+    );
+    if (liveMatches.length > 0) {
+      return { kind: 'suppress', outcome: 'suppressed_live', liveCount: liveMatches.length };
+    }
+    // Honest expiry: the exact copy of a DEAD hold must resolve to the
+    // deterministic clarification, never a silent edit-LLM redraft that
+    // pretends the offer never existed.
+    const expiredProposals = proposals.filter((pa) => isPendingActionExpired(pa, replayNowMs));
+    const expiredMatches = findExactProposalCopyMatchIndexes(
+      replayMessage,
+      expiredProposals.map((pa) => resolveProposalRenderCopy(pa.action)),
+    );
+    if (expiredMatches.length > 0) {
+      return { kind: 'clarify', outcome: 'clarify_expired' };
+    }
+    return { kind: 'pass', outcome: 'replay_no_match' };
+  }
   if (proposals.length === 0) {
     return { kind: 'clarify', outcome: 'clarify_none' };
   }
@@ -1068,14 +2224,20 @@ const NO_LIVE_PROPOSAL_TEXT =
  *   - `reply.code(500).send(boundaryError)` — OK
  *   - `reply.send(raw)` (default 200)       — type error: 200 wants brand
  *
- * The pre-flight 422 path uses `pre.status` which is typed as the
- * pre-flight failure status. The `400 | 422 | 500: BoundaryError` mapping
- * covers every possible pre-status output (per buildBoundaryError /
- * runPreFlight definitions).
+ * The pre-flight 401/422 path uses `pre.status` which is typed as the
+ * pre-flight failure status. The `400 | 401 | 422 | 500: BoundaryError`
+ * mapping covers every possible pre-status output (per buildBoundaryError /
+ * runPreFlight definitions; 401 is the flag-gated sign_in_required refusal
+ * from the CEE_REQUIRE_USER_JWT identity step — login 3.4 CEE-half).
  */
 export type V5RouteReply = {
   200: FinalisedV5Response;
   400: BoundaryError;
+  401: BoundaryError;
+  // F4 — a graph CAS write conflict (GRAPH_DIVERGED) returns 409, not the
+  // uniform 500, so the UI can branch to refresh-and-reconfirm rather than a
+  // generic infra-failure retry.
+  409: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
 };
@@ -1130,7 +2292,37 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   // and the cost (one URL comparison per non-V5 send) is negligible.
   app.addHook('preSerialization', v5FinaliserPreSerializationHook);
 
-  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
+  // ══════════════════════════════════════════════════════════════════════════
+  // POST /orchestrate/v2/turn/stop — the service-key ingress for the explicit
+  // user Stop. Auth is the file's global hook, exactly as for the buffered turn.
+  //
+  // Reached by the UI's Netlify edge rung: the UI derives its stop URL as
+  // `<buffered endpoint>/stop`, and when VITE_V5_ENDPOINT is not baked the
+  // buffered endpoint is `/bff/orchestrate/v2/turn`, which the edge function
+  // rewrites onto this route with the service key injected. The browser-facing
+  // twin is `/proxy/v5/turn/stop`. They differ ONLY in ingress; the handler is
+  // `recordExplicitTurnStop`, once — see src/routes/turn-stop.ts.
+  //
+  // NOT fenced by turnFencePreHandler: a stop request is not a turn and must
+  // never claim a generation of its own.
+  // ══════════════════════════════════════════════════════════════════════════
+  app.post('/orchestrate/v2/turn/stop', async (req, reply) => {
+    const requestId =
+      (typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : null) ??
+      randomUUID();
+    const result = await recordExplicitTurnStop(req, requestId);
+    return reply.code(result.status).send(result.body as never);
+  });
+
+  // V5 TURN FENCE (Codex P0) — claim this turn's place in the scenario's start
+  // order BEFORE any dispatch, and run the whole request inside the fence
+  // context so the commit chokepoint can read it ~50 s later. Route-scoped
+  // rather than app-wide: this is the only ingress that writes scenarios.graph,
+  // and app.inject() from the proxy/streamed routes runs this hook too, so
+  // every graph-writing lane is covered by construction. See
+  // turn-fence-prehandler.ts (why a hook, why callback style) and turn-fence.ts
+  // (the defect, and the arrival enumeration).
+  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', { preHandler: turnFencePreHandler }, async (req, reply) => {
     // V5 diagnostic trace (Phase A) — route-handler wall-clock baseline.
     // Threaded into `sendFinalised200` via `ctx.requestStartedAt` so the
     // minimal-trace builder can compute `total_duration_ms` from a
@@ -1148,10 +2340,51 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const pre = await runPreFlight(req);
     if (!pre.ok) {
       // 4xx: pre-flight failure — request never reached dispatch, no graph
-      // state to compute readiness from; no analysis_ready stamped.
+      // state to compute readiness from; no analysis_ready stamped. The
+      // fence was NOT claimed for this request (see admission below), so a
+      // rejected request is fence-neutral: it cannot supersede a live turn
+      // and it grows no fence rows.
       return reply.code(pre.status).send(pre.error);
     }
+    // V5 TURN FENCE — ADMISSION (2.174 fix b). The request has passed auth,
+    // B1 validation and the scenario upsert, so NOW it claims its place in
+    // the scenario's start order. This is the single claim call site; it
+    // sits BEHIND the admission gate by construction, which is what makes
+    // 401/422-bound requests unable to advance the fence. Before any
+    // dispatch branch, so the whole ~50 s of work runs with the admitted
+    // handle bound. See turn-fence-prehandler.ts.
+    await admitCurrentTurnFence();
     const { requestId, ingress, extensions } = pre.context;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⭐ T1 CLAIM SAFETY — THE TURN-ENTRY READ (ROADMAP 1.233 finish-line
+    // criterion 2 / 1.349 P1-2). Constructed HERE, before the first dispatch
+    // branch, so EVERY exit below can inherit ONE answer.
+    //
+    // Until this landed, seventeen exits handed the finaliser a hardcoded
+    // permission of `true` on the premise that "this path runs no
+    // analysis, so it withheld no claim". That premise is false: the
+    // permission belongs to the fact the response DISPLAYS, not to the work
+    // this turn performed — and an edit turn is handed the prior analysis as
+    // context. Live-confirmed 28 Jul (a withheld analysis, then an edit turn
+    // that came back `true`). Because the Layer-3 guard short-circuits on
+    // `true`, that literal was an explicit licence for the alarm not to look.
+    //
+    // LAZY: the resolver reads nothing until an exit asks. The `turn_executor`
+    // path never asks (it carries its own post-dispatch verdict via
+    // `run.mayNameLeadingOption`), so the hot path is unchanged.
+    //
+    // `null` for system events, and that is DERIVED rather than chosen:
+    // `buildTurnContext` is typed `MessageTurnPayload` and reads
+    // `payload.message`, which the `system_event` union member does not have —
+    // which is itself why this file dispatches that family before the
+    // TurnExecutor. The resolver answers `false` /
+    // `fail_closed_no_turn_context` there: we could not look, so we withhold.
+    // ═══════════════════════════════════════════════════════════════════════
+    const claimSafety: TurnClaimSafetyResolver = createTurnClaimSafetyResolver(
+      ingress.kind === 'message' ? ingress : null,
+      requestId,
+    );
 
     // v0.7.0 schema: ingress is a discriminated union on `kind`. System events
     // (patch_accepted / patch_dismissed / direct_graph_edit / chip_click /
@@ -1195,9 +2428,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
         graph: sysResult.graph,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: system-event copy is
+        // functional (receipts/notices) and must ship plain (omission now shapes).
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+        // System events carry no user message (the ingress union's
+        // 'system_event' variant has no `message` field), so the
+        // looping-chip guard has nothing to compare against and is
+        // explicitly inert here rather than accidentally omitted.
+        userMessage: null,
       });
     }
 
@@ -1249,9 +2494,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
             graph: cc.graph,
+            // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+            // the permission belongs to the fact this response DISPLAYS, not to
+            // whether this turn ran an analysis. See turn-claim-safety.ts.
+            ...(await claimSafety.forExit()),
+            // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: chip-click recovery
+            // copy is functional and must ship plain (omission would now SHAPE).
+            answerKind: 'functional',
             requestStartedAt: routeStartedAt,
             scenarioId: ingress.scenario_id,
             turnId: ingress.turn_id,
+          userMessage: ingress.message,
           });
         }
         if (cc.outcome === 'handler_failure') {
@@ -1294,10 +2547,47 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
           analysisReady: cc.analysisReady,
           graph: cc.graph,
+          // T1 claim safety — READ off the chip dispatch's own run_analysis fact
+          // stamp (see DispatchChipClickRunAnalysisResult).
+          //
+          // ⚠ THE `?? true` THAT USED TO BE HERE IS GONE (WALK-2026-07-27-FINAL
+          // §11.6). It was an instance of the default an exit falls into when
+          // it cannot read a verdict: it shipped `true` to the Layer-3 guard,
+          // which then had
+          // an explicit permission to ignore whatever the response said. The
+          // ⚠ AND THE SENTENCE THAT CALLED THIS "the LAST surviving instance"
+          // WAS FALSE WHEN IT WAS WRITTEN — corrected here rather than
+          // deleted, because it is this file's own instance of CLAUDE.md trap
+          // #12. It claimed the ROADMAP 1.233 hoist "removed [the default]
+          // everywhere else"; the hoist had in fact only ever covered the
+          // turn_executor path, and SEVENTEEN other exits still hardcoded
+          // `true` at that moment. A good-faith status line about a sibling's
+          // work became the reason nobody re-checked the siblings. It is true
+          // NOW, and it is true because the exits DERIVE rather than because
+          // this comment says so.
+          //
+          // The field is REQUIRED on the `ok` outcome, so this exit carries the
+          // producer's real answer and a future `ok` producer that forgets to
+          // derive one fails to compile instead of failing open.
+          mayNameLeadingOption: cc.mayNameLeadingOption,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
+          // answer's declared kind, DEFAULTING to 'functional' when the dispatch
+          // did not declare one. Post-inversion an omitted kind would SHAPE, so a
+          // chip path that returns no answerKind (today every chip answer,
+          // including the deferred-functional explain_results / what_would_flip
+          // explanations) must stay plain by default; a chip site that later opts
+          // into shaping sets `answerKind: 'substantive'` explicitly.
+          answerKind: cc.answerKind ?? 'functional',
+          // ROADMAP 2.73 Fix C — decision_review call attribution from the
+          // chip dispatch (present only when the call returned under an
+          // enabled timings/trace gate). The minimal-trace builder folds it
+          // into `_diagnostic_trace.llm_calls`, matching the routed path.
+          ...(cc.turnTimings ? { turnTimings: cc.turnTimings } : {}),
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       } catch (err) {
         log.error(
@@ -1318,6 +2608,312 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         });
         // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // S2-L1 — typed readiness/coaching pre-heuristic arm + §2g totality
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // Runs immediately AFTER the deterministic-chip-click block and BEFORE the
+    // entire heuristic ladder (resume-intent, draft dispatch, clarify gate,
+    // process-meta answer, frame guard). This is the correct pre-route
+    // insertion point: a typed chip_click is routed by its TYPE, ahead of every
+    // string/shape heuristic.
+    //
+    // It cannot shadow the held-proposal / short-confirm / value-update text
+    // ladders: those key on composer TEXT (AFFIRMATIVE_PREFIX_PATTERN +
+    // rendered-copy match, SHORT_CONFIRM_PATTERN, deterministic-value-update)
+    // and run inside / just ahead of TurnExecutor. This arm keys on
+    // `source==='chip_click'` + a typed `action_type` — a disjoint
+    // discriminant. It also does not collide with the what_would_flip
+    // chip-click resume below (gated on `action_type==='what_would_flip'`, a
+    // whitelisted literal that already returned above).
+    //
+    // By the time control reaches here, every WHITELISTED chip_click
+    // (`DETERMINISTIC_CHIP_ACTION_TYPES`) has already returned from the block
+    // above. What remains, for `source==='chip_click'` with a defined typed
+    // `action_type`, is: `analysis_readiness` (→ the readiness arm) and every
+    // other valid-but-non-whitelisted type (→ TurnExecutor via the §2g
+    // totality below).
+    const isTypedChipClick =
+      ingress.source === 'chip_click' && chipActionType !== undefined;
+    const isReadinessChipClick =
+      isTypedChipClick && chipActionType === 'analysis_readiness';
+    // §2g fix (fold-in): a typed chip_click with a defined action_type that was
+    // neither deterministically dispatched (returned above) nor claimed by the
+    // readiness arm. The #575 commit message always intended these to reach
+    // TurnExecutor ("the rest belong to TurnExecutor"); today the chip_click
+    // exclusion forces draftShapedTurn=false and the frame-stage no-brief guard
+    // wrongly CLAIMS a draft-shaped one with the canned framing prompt
+    // (documented + test-pinned as a live misfire). This flag makes the
+    // chip_click region TOTAL over typed chip clicks: whitelisted →
+    // deterministic; analysis_readiness → readiness arm; every other valid type
+    // → TurnExecutor. It is threaded as an exclusion into the process-meta
+    // answer branch and the frame-stage no-brief guard below so neither claims
+    // it, and control falls through to the single runTurnExecutor call site.
+    // ROADMAP 1.203 R2(a) / A2-ASKS 1.193a — executor-door widening to INTENT-only
+    // chips. An `add_option` chip carries `chip.intent='add_option'` and NO
+    // `action_type`, so `isTypedChipClick` is false and the door guard would not
+    // see it. When the deterministic add-option transaction DECLINES a chip (a
+    // stale / diverged baseline → the structural referee fails closed and the
+    // add-option arm falls through with `fell_through:not_held`), the declined chip
+    // would then be CLAIMED by the free-text edit LLM lane (`editIntentDetected`
+    // below, 13.6s, `llm_calls:['edit_graph']`) rather than reaching TurnExecutor —
+    // because the 1.187 door guard keys on `action_type` only, which is undefined
+    // for an intent-only chip (A2 Lane-U evidence: stale req b3c552bf took the LLM
+    // edit lane, fresh req 19ba5dd1 took the 1.7s deterministic transaction).
+    // Widening the guard to the intent-only add_option chip routes a
+    // declined/fell-through add_option to the executor, not the LLM edit lane.
+    // Safe across all three consumers (editIntentDetected · process-meta-intake ·
+    // frame-no-brief) — each uses this flag as an executor-routing EXCLUSION; and
+    // the held/fresh add_option path RETURNS in the add-option arm below before
+    // reaching any of them, so only the decline/fall-through path is affected.
+    const isAddOptionIntentChip =
+      (ingress.source === 'chip_click' || ingress.source === 'chip') &&
+      ingress.chip?.intent === 'add_option';
+    // egress-F1 (2026-07-24) — NARROW the #658 door widening. Routing a
+    // fell-through add_option to the executor is correct ONLY for the
+    // stale/diverged referee decline (`fell_through:not_held`): the executor has
+    // no add-option capability, so for the gm_off / commit_failed / malformed-spec
+    // / turn-context-read-failure legs the executor is a DEAD END — those legs
+    // regain their pre-#658 fallback, the free-text edit LLM lane. `let` so the
+    // add-option arm below can promote it to `true` for the `not_held` leg only.
+    // A typed action_type chip click stays unconditionally executor-bound.
+    let isNonReadinessTypedChipClickForExecutor =
+      isTypedChipClick && !isReadinessChipClick;
+
+    if (isReadinessChipClick) {
+      // Read the PERSISTED scenario graph (the same authority the run_analysis
+      // chip uses — never the HTTP body). A store/RPC failure degrades to the
+      // honest fresh-canvas answer (persistedGraph=null path) rather than a
+      // 500: a readiness coaching turn should not brick on a transient read.
+      let persistedGraph: unknown | null = null;
+      try {
+        const state = await loadPersistedScenarioStateStrict(ingress.scenario_id);
+        persistedGraph = state.graph;
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'S2-L1 readiness arm — persisted-graph read failed; degrading to fresh-canvas answer',
+        );
+      }
+      const readiness = composeReadinessIntakeResponse(persistedGraph, ingress.stage);
+      log.info(
+        {
+          event: 'v5.readiness_intake',
+          request_id: requestId,
+          outcome: readiness.outcome,
+          message_length: ingress.message.length,
+        },
+        'S2-L1 typed readiness/coaching arm fired — answering by type, not by the string mirror',
+      );
+      emit(TelemetryEvents.V5ReadinessIntakeArm, {
+        request_id: requestId,
+        outcome: readiness.outcome,
+        message_length: ingress.message.length,
+      });
+      // No commit: parity with the process-meta intake answer (no chip, no
+      // commit, scenario stays fresh). graph:null — the composed text carries
+      // option LABELS (via summariseReadiness), never raw node ids, so the
+      // egress label sanitiser has nothing to resolve.
+      return sendFinalised200(reply, requestId, 'readiness_intake', readiness.response, {
+        graph: null,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: readiness-intake copy is
+        // functional (receipt / question) and must ship plain.
+        answerKind: 'functional',
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
+        userMessage: ingress.message,
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // S3 §5 / Lane C3 — typed add-option compound transaction
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // A typed `add_option` intent (`chip.intent='add_option'`, schemas 0.22.0)
+    // carries a pre-resolved spec in `chip.parameters`. Route it on its TYPE
+    // into the atomic add-option transaction (option node + parent/factor edges
+    // + effect VALUES as ONE held proposal) HERE — BEFORE the message-text
+    // `editIntentDetected` below can claim the same turn for the free-text edit
+    // LLM (Fable residual i, preemption). `add_option` is an `Intent`, not an
+    // `ActionType`, so it is not caught by the typed-chip-click arms above.
+    //
+    // The transaction reuses the SAME referee gate + `graph_management_held_v1`
+    // pending + `executeGmHeldResume` confirm the free-text edit uses. The
+    // fall-through destination is per-leg (egress-F1, 2026-07-24): a
+    // stale/diverged referee decline (`fell_through:not_held`) routes to the
+    // EXECUTOR (the #658 intent — an LLM edit against a diverged frame is unsafe),
+    // set via `isNonReadinessTypedChipClickForExecutor` below; every other leg
+    // (GM not live, missing/malformed/unresolved spec, turn-context read failure,
+    // failed commit) falls through to the existing free-text EDIT path — its
+    // only working fallback, since the executor cannot add an option. Never a
+    // silent coercion, never a dead end.
+    const isTypedAddOptionChip = isAddOptionIntentChip;
+    if (isTypedAddOptionChip) {
+      const addOptionGmMode = config.features.graphManagementMode;
+      if (addOptionGmMode === 'off') {
+        emit(TelemetryEvents.V5AddOptionTransaction, {
+          request_id: requestId,
+          outcome: 'fell_through:gm_off',
+        });
+      } else {
+        // Frame authority = the PERSISTED graph (the same authority
+        // run_analysis/readiness use), so the held pending's `graph_hash`
+        // precondition matches the persisted graph at confirm time. A read
+        // failure degrades to an unreadable frame → the handler skips.
+        let addOptionFrameGraph: unknown = null;
+        let addOptionGraphHash: string | null = null;
+        let addOptionFreshness: FrameFreshness = 'unknown';
+        // Prior live consent holds — threaded into the commit's carry-forward so
+        // a fresh add-option hold NEVER silently retires an earlier consent hold
+        // (the store reads pendings from only the latest turn row).
+        let addOptionPriorPendings: readonly PendingAction[] = [];
+        try {
+          const turnContext = await buildTurnContext(ingress, requestId);
+          addOptionFrameGraph = turnContext.persistedGraph;
+          addOptionPriorPendings = turnContext.most_recent_pending_actions ?? [];
+          try {
+            addOptionGraphHash = computeAnalysisAffectingGraphHash(
+              addOptionFrameGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            addOptionGraphHash = null;
+          }
+          addOptionFreshness = deriveAnalysisFreshness(
+            turnContext.prior_facts,
+            addOptionGraphHash,
+          ).freshness;
+        } catch (err) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S3-C3 add-option — turn-context read failed; deferring to the edit path',
+          );
+        }
+        const addOptionOutcome = dispatchAddOptionTransaction({
+          parameters: ingress.chip?.parameters,
+          currentGraph: addOptionFrameGraph,
+          currentGraphHash: addOptionGraphHash,
+          freshness: addOptionFreshness,
+          mode: addOptionGmMode,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          requestId,
+          stage: ingress.stage,
+        });
+        if (addOptionOutcome.kind === 'held') {
+          // Honest supersession (edit-graph-dispatch precedent): a fresh hold
+          // minted while an earlier consent hold is still live must SAY what
+          // happens to the earlier one (same target → retired by the carry-
+          // forward; different target → both stay live, named). Appended BEFORE
+          // the commit so the stored copy == the wire copy.
+          let addOptionResponse = addOptionOutcome.response;
+          const supersessionNotice = buildHeldSupersessionNotice(
+            addOptionOutcome.pendingActions[0]!,
+            addOptionPriorPendings,
+            Date.now(),
+          );
+          if (supersessionNotice !== null) {
+            addOptionResponse = {
+              ...addOptionResponse,
+              assistant_text: appendLapseNotice(
+                addOptionResponse.assistant_text,
+                supersessionNotice,
+              ),
+            };
+          }
+          let addOptionCommitted = false;
+          let addOptionWire = addOptionResponse;
+          try {
+            const commitResult = await commitDirectAnswer(addOptionResponse, {
+              scenario_id: ingress.scenario_id,
+              turn_id: ingress.turn_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(ingress),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - routeStartedAt,
+              handler_facts: [],
+              pending_actions: [...addOptionOutcome.pendingActions],
+              // Thread prior live holds so the commit carry-forward retires the
+              // same-target hold / keeps a different-target one — never a silent
+              // consent wipe (the hold-wipe class).
+              priorPendingActions: addOptionPriorPendings,
+              coaching_state: null,
+              userMessage: ingress.message,
+            });
+            addOptionWire = commitResult.response;
+            addOptionCommitted = true;
+          } catch (err) {
+            // The held pending could not be persisted — the confirm turn would
+            // have nothing to resume. Do NOT ship an un-resumable held
+            // proposal; fall through to the existing edit path instead.
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+              },
+              'S3-C3 add-option — held-pending commit failed; deferring to the edit path',
+            );
+          }
+          if (addOptionCommitted) {
+            emit(TelemetryEvents.V5AddOptionTransaction, {
+              request_id: requestId,
+              outcome: 'held',
+              configured: addOptionOutcome.configured,
+            });
+            return sendFinalised200(reply, requestId, 'add_option_transaction', addOptionWire, {
+              graph: null,
+              // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+              // the permission belongs to the fact this response DISPLAYS, not to
+              // whether this turn ran an analysis. See turn-claim-safety.ts.
+              ...(await claimSafety.forExit()),
+              // ROADMAP 1.132 (F1) — held-proposal copy is functional
+              // (a receipt/question) and must ship plain.
+              answerKind: 'functional',
+              requestStartedAt: routeStartedAt,
+              scenarioId: ingress.scenario_id,
+              turnId: ingress.turn_id,
+              userMessage: ingress.message,
+            });
+          }
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            outcome: 'fell_through:commit_failed',
+          });
+          // commit_failed keeps its pre-#658 fallback: the free-text edit path
+          // (leave the executor-door flag false).
+        } else {
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            outcome: `fell_through:${addOptionOutcome.reason}`,
+          });
+          // Route ONLY the stale/diverged referee decline (`not_held`) to the
+          // executor (egress-F1): an LLM edit against a diverged frame is the
+          // exact unsafe case #658 closed. Every other skip reason (gm_not_live,
+          // no_graph_hash, unreadable_graph, malformed/unresolved spec) keeps its
+          // pre-#658 fallback — the free-text edit lane — so it is not stranded at
+          // the executor, which has no add-option capability.
+          if (addOptionOutcome.reason === 'not_held') {
+            isNonReadinessTypedChipClickForExecutor = true;
+          }
+          // else: fall through to the existing edit path below.
+        }
       }
     }
 
@@ -1354,7 +2950,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // only to short-confirm "yes" resumptions of pending actions —
     // chip clicks themselves no longer reach this point for whitelisted
     // action_types.
-    const chipClickResumeIntent = detectChipClickResumeIntent(ingress);
+    // F2 CHANGE A — a typed analytical pill (`explain_results` /
+    // `what_would_flip` / the `explain_result` alias) forces its explanation
+    // intent through the coach. This MUST take precedence over the
+    // `what_would_flip` resume-intent: with those two action_types removed from
+    // the deterministic-chip whitelist, a `what_would_flip` chip_click now
+    // reaches `detectChipClickResumeIntent` (which was dead for chip clicks
+    // while they were whitelisted) and would otherwise be diverted to the
+    // deterministic short-confirm "yes" resume instead of the coach. Suppressing
+    // the resume-intent when a forced intent is present keeps the pill on the
+    // coach path; the resume-intent stays live for its real caller (typed "yes"
+    // short-confirm, which is not a chip_click and so never sets a forced
+    // intent).
+    const chipClickForcedIntent = detectChipClickForcedIntent(ingress);
+    const chipClickResumeIntent = chipClickForcedIntent
+      ? undefined
+      : detectChipClickResumeIntent(ingress);
 
     // ────────────────────────────────────────────────────────────────────
     // Draft_graph pre-Sonnet dispatch (v5-handler-surface brief Task 2)
@@ -1398,13 +3009,34 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // new-decision / reset / template / import flows likewise allocate a fresh
     // scenario_id, so they are unaffected.
     const frameStageNoGraph = ingress.stage === 'frame' && extensions.graphState == null;
+    // ROADMAP 2.709 invariant 3 — continuation detection must SEE in-flight
+    // turns. Committed rows alone cannot: a draft turn's atomic commit lands
+    // ~50-80 s after admission, and the fresh-journey P0's S2 was exactly a
+    // question arriving inside that window being intake-captured as a NEW
+    // brief (zero committed rows, phantom state). The fence table holds the
+    // draft's ADMITTED claim from the first seconds, so it is consulted as
+    // the second disjunct — only when the committed-rows answer is false,
+    // which is precisely the phantom-shaped state. Failure-marked rows are
+    // excluded by the read so a scenario whose only draft LOST its commit
+    // classifies fresh and a re-sent brief can redraft.
     const isContinuationScenario = frameStageNoGraph
-      ? await loadHasPriorTurns(ingress.scenario_id, requestId)
+      ? (await loadHasPriorTurns(ingress.scenario_id, requestId)) ||
+        (await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId))
       : false;
+    // ROADMAP 2.709 invariant 6 — the draft-shortcut UNSTRANDING term. While
+    // a draft loss stands (a failure-marked fence row + no committed graph),
+    // the loss notice tells the user "send your decision brief again and
+    // I'll redraft it" — so a shaped brief must be ALLOWED to draft even on
+    // a continuation scenario (e.g. the mid-draft interrupt committed a
+    // conversational row). Same unstranding pattern as the C3 draft-offer
+    // marker. Read only on frame-stage continuation turns; heals itself the
+    // moment any graph commits.
+    const draftLossRedraftUnstrand =
+      frameStageNoGraph && isContinuationScenario
+        ? await loadDraftLossStands(ingress.scenario_id, requestId)
+        : false;
     if (isContinuationScenario) {
-      const wouldDraft =
-        ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-        DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
+      const wouldDraft = isDraftShapedText(ingress.message);
       emit(TelemetryEvents.V5ContinuationGuardApplied, {
         request_id: requestId,
         scenario_id: ingress.scenario_id,
@@ -1412,15 +3044,586 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         prior_turns_present: true,
       });
     }
-    const isDraftGraphShape =
+    // ────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.63 C3/C4 — draft-offer pre-route: narrow pendings read.
+    // ────────────────────────────────────────────────────────────────────
+    // Paid ONLY by (a) frame-stage no-graph CONTINUATION turns — the state
+    // a committed C3/C4 offer turn creates; a FRESH scenario cannot carry
+    // an offer, so the hot first-turn path is unchanged — and (b) turns
+    // whose message shape could consent to a C4 redraft offer: chip clicks,
+    // bare short-confirms and affirmative-prefixed replies, the same
+    // classes that already pay the held-proposal replay pendings read
+    // (see AFFIRMATIVE_PREFIX_PATTERN's field note). Degrades to [] on a
+    // read failure (store-layer telemetry fires): every draft-offer
+    // behaviour then falls back to the pre-C3 routing — no silent draft,
+    // no swallowed turn.
+    const couldCarryDraftOffer =
+      (frameStageNoGraph && isContinuationScenario) ||
+      ingress.source === 'chip_click' ||
+      SHORT_CONFIRM_PATTERN.test(ingress.message) ||
+      AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message);
+    let draftOfferPendingsLoaded = false;
+    let draftOfferPriorPendings: readonly PendingAction[] = [];
+    if (couldCarryDraftOffer) {
+      draftOfferPriorPendings = await loadMostRecentPendingActions(
+        ingress.scenario_id,
+        requestId,
+      );
+      draftOfferPendingsLoaded = true;
+    }
+    /** Lazy variant for paths that commit but did not pay the read above. */
+    const ensureDraftOfferPriorPendings = async (): Promise<readonly PendingAction[]> => {
+      if (!draftOfferPendingsLoaded) {
+        draftOfferPriorPendings = await loadMostRecentPendingActions(
+          ingress.scenario_id,
+          requestId,
+        );
+        draftOfferPendingsLoaded = true;
+      }
+      return draftOfferPriorPendings;
+    };
+    // Presence marker (any liveness) vs consent resume (live only) — see
+    // the helper docs above the route handler.
+    const draftOfferMarker = findDraftOfferPending(draftOfferPriorPendings);
+    const draftOfferResume =
+      draftOfferMarker !== null
+        ? resolveDraftOfferResume(ingress.message, draftOfferPriorPendings, Date.now())
+        : null;
+    // ────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.63 C1+C2 — explicit-generate wire flag.
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // `generate_model` / `explicit_generate` are boolean fields on
+    // MessageTurnPayload at the 0.16.0 pin (both parse through B1 ingress —
+    // zero contract change) that until now NO live V5 code read: their only
+    // consumers were the dead V4 pipeline (request-normalization.ts /
+    // turn-contract.ts). The stage-2 "Generate model" intent therefore never
+    // crossed the wire in any form, and the confirm-chip flow was
+    // structurally unable to draft (2.63 diagnosis, live-reproduced P1–P5).
+    //
+    // C1 — the flag is a DETERMINISTIC draft trigger. Unlike the
+    // shape-heuristic below it bypasses the brief-keyword regex AND the
+    // continuation guard: an explicit generate on a no-graph continuation
+    // scenario is precisely the stage-2 "converse → confirm → generate"
+    // flow the continuation guard otherwise strands (Finding 3 corollary).
+    // It fires ONLY when no graph exists anywhere — neither on the request
+    // (`extensions.graphState`) nor persisted server-side.
+    //
+    // C2 — the message on a confirm click is canned chip text, not the
+    // brief, so the brief is assembled server-side (persisted
+    // scenarios.brief_text → recent user turns → the message itself; see
+    // assemble-explicit-generate-brief.ts for the priority order). When
+    // nothing usable exists the turn gets a deterministic HONEST decline
+    // naming what is missing — never a silent fall-through to
+    // frame_no_brief_guard or the routing LLM. Like frame_no_brief_guard,
+    // the decline commits no turn, so the scenario stays draftable.
+    //
+    // C4 (ROADMAP 2.63, Paul-ratified 16 Jul — decline-with-redraft-offer):
+    // when the flag arrives on a scenario that ALREADY has a graph (request
+    // graph_state or persisted), the turn gets a deterministic decline that
+    // says a model already exists and OFFERS the redraft route — a
+    // "Redraft the model" chip plus a persisted `draft_graph` pending with
+    // `redraft: true`, so the consent click / a typed yes on the NEXT turn
+    // resumes through the draft-offer pre-route above into this same
+    // deterministic dispatch, REPLACING the model with the user's explicit
+    // consent (held-proposal consent doctrine: never a silent replace,
+    // never a silent ignore). On a failed persisted-state read graph
+    // presence is unknown, so today's routing is preserved (the flag path
+    // must neither draft over an unknown graph nor claim one exists).
+    const explicitGenerateRequested =
+      ingress.generate_model === true || ingress.explicit_generate === true;
+    let explicitGenerateBrief: AssembledExplicitGenerateBrief | null = null;
+    let explicitGenerateDraft = false;
+    let explicitGenerateDeclined = false;
+    /**
+     * C4 — non-null when this turn must get the deterministic
+     * graph-present decline (+ redraft offer seed). Carries the graph the
+     * offer's hash precondition pins.
+     */
+    let explicitGenerateGraphPresent: { readonly graphForHash: unknown } | null = null;
+    /** C3/C4 — offer pending honoured by this turn's draft (consumed at commit). */
+    let draftOfferConsumedRefs: readonly string[] | undefined;
+    if (explicitGenerateRequested) {
+      let outcome:
+        | 'dispatch_draft'
+        | 'declined_no_brief'
+        | 'declined_graph_present'
+        | 'state_read_failed_fallthrough';
+      // P1-2 — a zero-node request graph_state is ABSENT here: the schema
+      // accepts {nodes:[],edges:[]} and declining over an empty canvas would
+      // be false ("already has a model"). The persisted read below still
+      // decides graph presence server-side.
+      if (isPopulatedIngressGraph(extensions.graphState)) {
+        outcome = 'declined_graph_present';
+        explicitGenerateGraphPresent = { graphForHash: extensions.graphState };
+      } else {
+        try {
+          // STRICT read, deliberately: the swallowing variant collapses a
+          // store outage into "no graph", which would let the flag path
+          // draft over an existing graph during an outage — C4 territory.
+          // On a read failure we preserve today's routing instead.
+          const persisted = await loadPersistedScenarioStateStrict(ingress.scenario_id);
+          if (persisted.graph != null) {
+            outcome = 'declined_graph_present';
+            explicitGenerateGraphPresent = { graphForHash: persisted.graph };
+          } else {
+            explicitGenerateBrief = assembleExplicitGenerateBrief({
+              message: ingress.message,
+              source: ingress.source,
+              persistedBriefText: persisted.briefText,
+              recentTurns: [],
+            });
+            if (
+              explicitGenerateBrief === null ||
+              explicitGenerateBrief.source === 'message_unshaped'
+            ) {
+              // Only read the conversation chain when the message and the
+              // persisted brief cannot settle it — a prior user turn may
+              // carry the brief (and ranks above the unshaped message).
+              const recentTurns = await loadRecentConversationTurns(
+                ingress.scenario_id,
+                requestId,
+              );
+              explicitGenerateBrief =
+                assembleExplicitGenerateBrief({
+                  message: ingress.message,
+                  source: ingress.source,
+                  persistedBriefText: persisted.briefText,
+                  recentTurns,
+                }) ?? explicitGenerateBrief;
+            }
+            if (explicitGenerateBrief !== null) {
+              explicitGenerateDraft = true;
+              outcome = 'dispatch_draft';
+            } else {
+              explicitGenerateDeclined = true;
+              outcome = 'declined_no_brief';
+            }
+          }
+        } catch (err) {
+          outcome = 'state_read_failed_fallthrough';
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'V5 explicit-generate — persisted-state read failed; preserving pre-flag routing',
+          );
+        }
+      }
+      emit(TelemetryEvents.V5ExplicitGenerateReceived, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        message_length: ingress.message.length,
+        continuation: isContinuationScenario,
+        had_chip: ingress.chip != null,
+        source: ingress.source,
+        outcome,
+        brief_source: explicitGenerateBrief?.source ?? null,
+      });
+    } else if (draftOfferResume !== null) {
+      // ────────────────────────────────────────────────────────────────
+      // ROADMAP 2.63 C3/C4 — consent turn for a prior draft/redraft offer.
+      // ────────────────────────────────────────────────────────────────
+      // The user clicked the offer chip (its copy replays verbatim) or
+      // typed a bare confirmation while the offer was the sole live
+      // pending. Same deterministic posture as the flag path: dispatch,
+      // honest decline, or honest re-offer — never a silent LLM
+      // fall-through once the consent named this offer. A persisted-state
+      // read failure falls back to the pre-offer routing (fail-safe: never
+      // draft without knowing whether a graph exists).
+      const offerAction = draftOfferResume.action;
+      const isRedraftOffer = offerAction.redraft === true;
+      let resumeOutcome:
+        | 'dispatch_draft'
+        | 'declined_no_brief'
+        | 'reoffered_graph_changed'
+        | 'reoffered_graph_present'
+        | 'state_read_failed_fallthrough';
+      try {
+        const persisted = await loadPersistedScenarioStateStrict(ingress.scenario_id);
+        // P1-2 — same emptiness rule as the flag arm above: a zero-node
+        // request graph_state never counts as a present model here.
+        const graphNow: unknown = isPopulatedIngressGraph(extensions.graphState)
+          ? extensions.graphState
+          : persisted.graph ?? null;
+        const assembleResumeBrief = async (): Promise<AssembledExplicitGenerateBrief | null> => {
+          let assembled = assembleExplicitGenerateBrief({
+            message: ingress.message,
+            source: ingress.source,
+            persistedBriefText: persisted.briefText,
+            pendingBriefSeed: offerAction.brief_seed ?? null,
+            recentTurns: [],
+          });
+          if (assembled === null || assembled.source === 'message_unshaped') {
+            const recentTurns = await loadRecentConversationTurns(
+              ingress.scenario_id,
+              requestId,
+            );
+            assembled =
+              assembleExplicitGenerateBrief({
+                message: ingress.message,
+                source: ingress.source,
+                persistedBriefText: persisted.briefText,
+                pendingBriefSeed: offerAction.brief_seed ?? null,
+                recentTurns,
+              }) ?? assembled;
+          }
+          return assembled;
+        };
+        if (graphNow == null) {
+          // First draft. (A redraft offer whose graph has since vanished
+          // reduces to the same action — nothing exists to replace.)
+          explicitGenerateBrief = await assembleResumeBrief();
+          if (explicitGenerateBrief !== null) {
+            explicitGenerateDraft = true;
+            draftOfferConsumedRefs = [draftOfferResume.pending.chip_id];
+            resumeOutcome = 'dispatch_draft';
+          } else {
+            explicitGenerateDeclined = true;
+            resumeOutcome = 'declined_no_brief';
+          }
+        } else if (!isRedraftOffer) {
+          // A build-offer consent arriving AFTER a graph appeared (e.g. a
+          // parallel tab drafted meanwhile): never silently replace on a
+          // consent that predates the graph — re-offer as a redraft.
+          explicitGenerateGraphPresent = { graphForHash: graphNow };
+          resumeOutcome = 'reoffered_graph_present';
+        } else {
+          // Redraft consent with a graph present — verify the offer's hash
+          // precondition against the CURRENT graph when both are known.
+          // The commit carry-forward already invalidates a hash-diverged
+          // offer at the intervening edit's own commit; this is
+          // belt-and-braces for writes that bypassed it.
+          const offerHash = draftOfferResume.pending.preconditions.graph_hash;
+          const currentHash = ((): string | null => {
+            try {
+              return computeAnalysisAffectingGraphHash(
+                graphNow as GraphStateIngress | null | undefined,
+              );
+            } catch {
+              return null;
+            }
+          })();
+          if (
+            typeof offerHash === 'string' &&
+            offerHash.length > 0 &&
+            typeof currentHash === 'string' &&
+            currentHash.length > 0 &&
+            offerHash !== currentHash
+          ) {
+            // The model moved between offer and consent — decline and
+            // re-offer against the graph as it stands now.
+            explicitGenerateGraphPresent = { graphForHash: graphNow };
+            resumeOutcome = 'reoffered_graph_changed';
+          } else {
+            explicitGenerateBrief = await assembleResumeBrief();
+            if (explicitGenerateBrief !== null) {
+              explicitGenerateDraft = true;
+              draftOfferConsumedRefs = [draftOfferResume.pending.chip_id];
+              resumeOutcome = 'dispatch_draft';
+            } else {
+              explicitGenerateDeclined = true;
+              resumeOutcome = 'declined_no_brief';
+            }
+          }
+        }
+      } catch (err) {
+        resumeOutcome = 'state_read_failed_fallthrough';
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'V5 draft-offer resume — persisted-state read failed; preserving pre-offer routing',
+        );
+      }
+      emit(TelemetryEvents.V5DraftOfferResumed, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        trigger: draftOfferResume.trigger,
+        redraft: isRedraftOffer,
+        outcome: resumeOutcome,
+        brief_source: explicitGenerateBrief?.source ?? null,
+      });
+    }
+    if (explicitGenerateDeclined) {
+      // C2 honest decline — deterministic, zero LLM calls, no commit. Names
+      // what is missing (a decision brief) and how to proceed. Deliberately
+      // NOT the frame_no_brief_guard copy: the user explicitly asked to
+      // generate, so "I need a single decision question to start" would
+      // misread their intent as a first-time framing turn.
+      const declineText =
+        "You asked me to build the model, but I don't have a decision brief to build it from yet — " +
+        'nothing in this conversation contains one. ' +
+        'Tell me the decision in one sentence, including the options you are comparing — for example: ' +
+        '“Should we hire a tech lead or two developers?” — and I will draft the model from that.';
+      const declineResponse: import('@talchain/schemas/boundary').OlumiResponse = {
+        response_version: 2,
+        assistant_text: declineText,
+        blocks: [],
+        suggested_actions: [],
+        insights: [],
+        stage_indicator: 'frame',
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      return sendFinalised200(reply, requestId, 'explicit_generate_no_brief', declineResponse, {
+        graph: null,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: decline copy is
+        // functional and must ship plain.
+        answerKind: 'functional',
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
+        userMessage: ingress.message,
+      });
+    }
+    if (explicitGenerateGraphPresent !== null) {
+      // ────────────────────────────────────────────────────────────────
+      // C4 — deterministic graph-present decline + redraft offer.
+      // ────────────────────────────────────────────────────────────────
+      // Zero LLM calls. Unlike the no-brief decline this turn COMMITS: the
+      // redraft offer's `draft_graph` pending must persist for the consent
+      // turn to resume (pendings live on committed turn rows). The chip is
+      // only rendered when the pending persisted — a chip whose consent
+      // cannot resume would be guarantee-theatre — so on a commit failure
+      // the decline is sent chip-less and the user can simply re-click
+      // Generate.
+      const offerNowMs = Date.now();
+      const offerSeed = deriveDraftOfferSeed(ingress.message, ingress.source);
+      const offerGraphHash = ((): string | null => {
+        try {
+          return computeAnalysisAffectingGraphHash(
+            explicitGenerateGraphPresent.graphForHash as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          return null;
+        }
+      })();
+      const offerChip = {
+        id: `redraft-offer-${randomUUID()}`,
+        label: REDRAFT_OFFER_CHIP_LABEL,
+        // See REDRAFT_OFFER_CHIP_MESSAGE_ALT: a re-offer answering the
+        // user's own click of the previous offer chip must not replay the
+        // exact message they just sent, or the egress looping-chip guard
+        // (correctly) strips it and the offer becomes type-only.
+        message:
+          normaliseReplayMessage(ingress.message) ===
+          normaliseReplayMessage(REDRAFT_OFFER_CHIP_MESSAGE)
+            ? REDRAFT_OFFER_CHIP_MESSAGE_ALT
+            : REDRAFT_OFFER_CHIP_MESSAGE,
+      };
+      const offerPending = buildDraftOfferPending({
+        scenarioId: ingress.scenario_id,
+        chipId: offerChip.id,
+        publicLabel: offerChip.label,
+        publicMessage: offerChip.message,
+        ...(offerSeed !== undefined ? { briefSeed: offerSeed } : {}),
+        redraft: true,
+        graphHash: offerGraphHash,
+        nowMs: offerNowMs,
+      });
+      // P1-1 — read the carried pendings BEFORE composing the copy: the
+      // "or reply yes" promise is derived from the very set this commit's
+      // carry-forward will persist (the same array is threaded to the
+      // commit below, so copy and state cannot diverge).
+      const offerPriorPendings = await ensureDraftOfferPriorPendings();
+      const offerWillBeSoleLive = willDraftOfferBeSoleLivePending(
+        offerPriorPendings,
+        offerPending,
+        offerNowMs,
+      );
+      const declineCandidate: import('@talchain/schemas/boundary').OlumiResponse = {
+        response_version: 2,
+        assistant_text: explicitGenerateGraphPresentText(offerWillBeSoleLive),
+        blocks: [],
+        suggested_actions: [offerChip],
+        insights: [],
+        stage_indicator: ingress.stage,
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      let wireResponse = declineCandidate;
+      let offerPersisted = false;
+      try {
+        const commitResult = await commitDirectAnswer(declineCandidate, {
+          scenario_id: ingress.scenario_id,
+          turn_id: ingress.turn_id,
+          turn_class: 'clarify',
+          handler_id: null,
+          request_hash: computeRequestHash(ingress),
+          llm_calls_used: 0,
+          duration_ms: Date.now() - routeStartedAt,
+          handler_facts: [],
+          pending_actions: [offerPending],
+          // Never wipe live holds: thread the prior pendings through this
+          // commit's carry-forward (HOLD-WIPE fix pattern). Same array the
+          // copy derivation above consumed (read lazily there — a composer
+          // flag turn may not have paid the pre-route read).
+          priorPendingActions: offerPriorPendings,
+          coaching_state: null,
+          userMessage: ingress.message,
+          contentGraph: explicitGenerateGraphPresent.graphForHash,
+        });
+        // Carry-forward may have attached a lapse notice — send what was
+        // committed (stored copy == wire copy).
+        wireResponse = commitResult.response;
+        offerPersisted = true;
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'V5 explicit-generate graph-present decline — offer commit failed; sending chip-less decline',
+        );
+        wireResponse = {
+          ...declineCandidate,
+          suggested_actions: [],
+        } as import('@talchain/schemas/boundary').OlumiResponse;
+      }
+      emit(TelemetryEvents.V5DraftOfferSeeded, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        site: 'explicit_generate_graph_present',
+        redraft: true,
+        had_seed: offerSeed !== undefined,
+        graph_hash_pinned: offerGraphHash !== null,
+        persisted: offerPersisted,
+      });
+      return sendFinalised200(
+        reply,
+        requestId,
+        'explicit_generate_graph_present',
+        wireResponse,
+        {
+          graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: this decline/offer
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        },
+      );
+    }
+    // 1.152(i) maintained-twin fix: the stage / continuation / text-shape
+    // terms are computed ONCE here; `isDraftGraphShape` adds the no-graph
+    // NULLNESS term, and the clarify-v2 gate below applies its POPULATION
+    // judgement instead (A5) — previously it hand-duplicated all four
+    // terms minus nullness.
+    const draftShapedTurn =
       ingress.stage === 'frame' &&
-      extensions.graphState == null &&
       // V5 Signature Loop — a scenario with prior committed turns is a
       // continuation, not a first brief; let it reach TurnExecutor's memory.
-      !isContinuationScenario &&
-      ingress.message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
-      DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(ingress.message);
-    if (isDraftGraphShape) {
+      // ROADMAP 2.63 C3 — EXCEPT when the last committed turn was a
+      // draft-offer turn (the marker): the guard's own committed turns must
+      // not strand the very reply they asked for ("here is my decision
+      // question" after the framing prompt). Marker presence, not liveness:
+      // drafting a full shaped brief the user just typed carries no consent
+      // risk, so a wall-expired offer still un-strands it.
+      // ROADMAP 2.709 — AND except while a draft loss stands (third
+      // disjunct): the loss notice promises "send your brief again and I'll
+      // redraft it", and a promise the classifier does not keep is a
+      // dead-end. Self-limiting — the term is false again the moment a
+      // graph commits.
+      (!isContinuationScenario || draftOfferMarker !== null || draftLossRedraftUnstrand) &&
+      // META-DECISION-DIAGNOSIS-2026-07-20 — a chip_click carries EXPLICIT
+      // product-intent metadata; the draft heuristic exists to classify
+      // anonymous free text and must never capture product-authored canned
+      // text. Whitelisted action_types were dispatched upstream; the rest
+      // belong to TurnExecutor (Sonnet ORIENT / typed unsupported-action),
+      // never to a graph drafted ABOUT the chip's own wording. (`source:
+      // 'chip'` — inline chip metadata without an action_type — is NOT
+      // excluded here: the wire's 0.19.0 action_type enum has no coaching
+      // intent value yet, so spark taps arrive that way and are handled by
+      // the narrower process-meta guard below.)
+      ingress.source !== 'chip_click' &&
+      isDraftShapedText(ingress.message) &&
+      // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta guard:
+      // a question TO the assistant about the process ("What should I
+      // check before running the first analysis?" — the product's own
+      // pre-analysis spark) is never a decision brief. The clarify RESUME
+      // path already refuses to fold such questions into the working brief
+      // (CLARIFY_V2_QUESTION_REPLY_PATTERN); this term gives round-1
+      // intake the same protection, and (via `clarifyDraftShaped` below)
+      // bars a mid-round meta-question from REPLACING a live round's
+      // working brief. Deflected turns are ANSWERED by the deterministic
+      // process-meta branch ahead of the frame guard — never captured,
+      // never silently dropped.
+      !isProcessMetaIntake(ingress.message);
+    const isDraftGraphShape = extensions.graphState == null && draftShapedTurn;
+    // ── Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
+    // CEE_CLARIFY_V2_ENABLED (default off; flag-off skips the import
+    // entirely, same containment as V6 dual-draft). Two deterministic
+    // claims, zero LLM calls: (1) draft preflight — a thin brief gets up to
+    // 3 tap-able clarifying questions instead of the draft; (2) resume — a
+    // live clarify_v2_round pending claims the user's answer and either
+    // asks a follow-up or proceeds to the ordinary draft dispatch below
+    // with the answer-augmented briefOverride. Fail-open: any internal
+    // failure returns null and this turn routes exactly as with the flag
+    // off. See handlers/clarify-v2-dispatch.ts.
+    let clarifyV2DraftBrief: string | null = null;
+    // Review fix A5 (17 Jul): an EMPTY canvas ({nodes:[],edges:[]}) passes
+    // ingress as non-null but is 'no model' by this file's own predicate —
+    // gate on POPULATION, not nullness, so clarify v2 engages for exactly
+    // the empty-canvas users it was built for.
+    // NO-DARK-LAUNCH (Paul, 19 Jul): clarify v2 runs unconditionally; the
+    // former CEE_CLARIFY_V2_ENABLED gate is deleted (was live `true` on staging).
+    if (!isPopulatedIngressGraph(extensions.graphState)) {
+      const { tryClarifyV2Turn } = await import(
+        '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
+      );
+      // A5 completion (1.152 behavioural pin): `isDraftGraphShape` collapses
+      // to false whenever ANY graph_state object is on the wire (its own
+      // `== null` term), so with only the gate fix above an EMPTY canvas
+      // still defeated round 1 via draftShaped:false — the pin went RED on
+      // exactly the target audience. Inside this flag-gated block the shape
+      // judgement is `draftShapedTurn` WITHOUT the nullness term — the
+      // enclosing `!isPopulatedIngressGraph` gate already made the
+      // POPULATION judgement; the flag-off wire (and `isDraftGraphShape`
+      // itself) is untouched. (1.152(i): previously a hand-maintained
+      // re-derivation of the same four terms.)
+      const clarifyDraftShaped = draftShapedTurn;
+      const cv2 = await tryClarifyV2Turn({
+        payload: ingress,
+        requestId,
+        draftShaped: clarifyDraftShaped,
+        explicitGenerateBrief:
+          explicitGenerateDraft && explicitGenerateBrief !== null
+            ? explicitGenerateBrief.brief
+            : null,
+      });
+      if (cv2 !== null && cv2.kind === 'respond') {
+        return sendFinalised200(reply, requestId, 'clarify_v2', cv2.response, {
+          graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a clarify QUESTION is
+          // functional and must ship plain, never behind progressive disclosure.
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        });
+      }
+      if (cv2 !== null && cv2.kind === 'draft') {
+        clarifyV2DraftBrief = cv2.briefOverride;
+      }
+    }
+    if (isDraftGraphShape || explicitGenerateDraft || clarifyV2DraftBrief !== null) {
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -1429,8 +3632,56 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           payload: ingress,
           requestId,
           request: req,
+          // Review-576 condition 2: the draft retry-affordability gate and
+          // the Step-11 budget guard measure elapsed time from THIS baseline
+          // (request start), not from LLM start — pre-LLM turn time (routing
+          // tool-use call, context assembly) now counts against the budget.
+          requestStartMs: routeStartedAt,
+          // C2 — on the explicit-generate path the pipeline drafts from the
+          // server-assembled brief, not the (possibly canned-chip) wire
+          // message. The committed turn's user_message stays verbatim
+          // (`payload.message`) — the override redirects only the brief
+          // consumers inside the dispatcher. Absent on the heuristic path:
+          // behaviour there is bit-identical to before. Clarify v2's
+          // answer-augmented brief (flag-gated resume) takes precedence —
+          // when set, it already incorporates the explicit-generate brief.
+          ...(clarifyV2DraftBrief !== null
+            ? { briefOverride: clarifyV2DraftBrief }
+            : explicitGenerateDraft && explicitGenerateBrief !== null
+              ? { briefOverride: explicitGenerateBrief.brief }
+              : {}),
+          // ROADMAP 2.63 C3/C4 — a draft retires any outstanding draft
+          // offer: the honoured pending on a consent resume, or the stale
+          // marker when a shaped brief drafted alongside one. Without this
+          // the offer survives its own fulfilment and a later bare "yes"
+          // re-triggers a draft (zombie re-offer).
+          ...(draftOfferConsumedRefs !== undefined
+            ? { consumedPendingRefs: draftOfferConsumedRefs }
+            : draftOfferMarker !== null
+              ? { consumedPendingRefs: [draftOfferMarker.chip_id] }
+              : {}),
         });
         if (!dg.commitPerformed) {
+          // ROADMAP 2.709 invariant 6 — the trace, BEFORE the 500. The
+          // client that triggered this failure may have aborted the socket
+          // (the streamed-preempt path delivers this 500 to a closed
+          // connection), so the loss must be readable by the scenario's
+          // NEXT turn, whichever client sends it.
+          //
+          // 2.735 disclosure — `draft_loss`, and it is DERIVED from the
+          // dispatcher's contract rather than assumed: `commitPerformed:
+          // false` is returned only from the catch that wraps the commit
+          // block, i.e. the pipeline had produced its result and the append
+          // was attempted. A model existed and was being saved when it was
+          // lost, so the user is owed the disclosure whether or not they had
+          // been shown a preview.
+          await markDraftGraphWriteFailed(
+            ingress.scenario_id,
+            ingress.turn_id,
+            'draft_graph_commit_failed',
+            requestId,
+            'draft_loss',
+          );
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
             reason: 'draft_graph_commit_failed',
@@ -1444,11 +3695,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a draft-graph turn's
+          // artifact is the GRAPH (draft_graph block), not the intro prose. Mark
+          // functional AND rely on the draft_graph block-primary egress guard.
+          answerKind: 'functional',
           ...(dg.freshness ? { freshness: dg.freshness } : {}),
           ...(dg.diagnosticTrace ? { diagnosticTrace: dg.diagnosticTrace } : {}),
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
@@ -1464,6 +3724,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const meta = err as {
           readonly pipelineStatusCode?: number;
           readonly pipelineErrorCode?: string | null;
+          readonly pipelineReason?: string | null;
+          readonly pipelineRetryable?: boolean | null;
           readonly pipelineRecovery?: Record<string, unknown> | null;
           readonly pipelineDetails?: Record<string, unknown> | null;
         };
@@ -1471,6 +3733,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           typeof meta.pipelineStatusCode === 'number' ? meta.pipelineStatusCode : null;
         const pipelineErrorCode =
           typeof meta.pipelineErrorCode === 'string' ? meta.pipelineErrorCode : null;
+        const pipelineReason =
+          typeof meta.pipelineReason === 'string' ? meta.pipelineReason : null;
+        // ROADMAP 2.718 — the producer's own retryability declaration.
+        // Strict boolean; anything else = producer silent (null).
+        const pipelineRetryable =
+          typeof meta.pipelineRetryable === 'boolean' ? meta.pipelineRetryable : null;
         const pipelineRecovery =
           meta.pipelineRecovery && typeof meta.pipelineRecovery === 'object'
             ? meta.pipelineRecovery
@@ -1495,8 +3763,48 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 draft_graph pipeline threw — returning 500 BoundaryError',
         );
+        // ROADMAP 2.709 invariant 6, CORRECTED BY 2.735 — the second
+        // draft-500 entry fault.
+        //
+        // ⚠ THIS SITE SHIPPED A FALSE CLAIM TO THE USER, and the shape of the
+        //   mistake is worth keeping visible. `dispatchDraftGraph` rethrows
+        //   EVERY unified-pipeline failure through here: a provider rate
+        //   limit, an LLM timeout, a parse failure, a brief that never
+        //   reached the model — as well as the case this comment used to name
+        //   (CEE_GRAPH_INVALID after GRAPH_READY has already streamed). One
+        //   `catch`, one mark, one disclosure. So the scenario's next turn
+        //   greeted a user whose draft had died at the FIRST LLM call with
+        //   "your last draft didn't save … the graph you saw was never
+        //   saved" — a graph they had never been shown, described as lost.
+        //   Found by an external audit (Codex, 2026-08-08) after our own
+        //   review passed it; it was dark only because the migration that
+        //   creates the columns has not executed.
+        //
+        // The disclosure is now DERIVED FROM WHAT THE CLIENT ACTUALLY
+        // RECEIVED: `graphPreviewEmitted()` is true iff this turn streamed a
+        // GRAPH_READY frame, recorded at the emission itself (see
+        // stage-stream-context.ts). Not an allowlist of "late" error codes —
+        // that would be a hand-maintained mirror (trap 12) whose first stale
+        // entry re-opens exactly this defect. A buffered turn streams no
+        // frames at all, so it reads false, which is the honest answer: no
+        // client saw a preview from it.
+        const previewWasStreamed = graphPreviewEmitted();
+        await markDraftGraphWriteFailed(
+          ingress.scenario_id,
+          ingress.turn_id,
+          previewWasStreamed
+            ? 'draft_graph_pipeline_threw_after_preview'
+            : 'draft_graph_pipeline_threw_before_preview',
+          requestId,
+          previewWasStreamed ? 'draft_loss' : 'turn_dead_only',
+        );
         const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
-          ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode)
+          ? mapDraftGraphPipelineReason(
+              pipelineStatusCode,
+              pipelineErrorCode,
+              pipelineReason,
+              pipelineRetryable,
+            )
           : { reason: 'draft_graph_pipeline_threw', retryable: true };
         // Build postStageExtras additively: recovery (when present), the
         // raw CEE category code (when present), AND any allowlisted
@@ -1510,6 +3818,27 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const postStageExtras: Record<string, unknown> = {};
         if (pipelineDetails) Object.assign(postStageExtras, pipelineDetails);
         if (pipelineRecovery) postStageExtras.recovery = pipelineRecovery;
+        // PINNED FLAT MIRROR (2026-07-25). `/assist/v1/draft-graph` already ships
+        // `recovery_suggestion` at the top level of its error body — the field
+        // name pinned by @talchain/schemas 0.19.0 (Wave-2 ask 7, DGAI #383) so
+        // consumers stop passthrough-sniffing fallback names for the one
+        // user-facing sentence. The turn route carried the nested
+        // `details.recovery` object but NOT that pinned name, so a consumer
+        // implemented against the assist contract found nothing here. Same
+        // sentence, same field name, both routes — derived from `recovery`, not
+        // restated, so the two cannot drift.
+        //
+        // ⚠ WHAT THIS DOES NOT FIX, stated plainly: this route still answers a
+        // failed draft with HTTP 500 + a BoundaryError, which has no
+        // `assistant_text` — so the copy is on the wire but the user sees
+        // nothing until DGAI renders it. Making the failure speak in the
+        // conversation is a UI-side render change (or a turn-committing
+        // direct_answer 200 here, which would need the turn/state commit this
+        // path deliberately skips on failure); both are outside this lane's
+        // write slot and are NOT claimed as done.
+        if (pipelineRecovery && typeof pipelineRecovery.suggestion === 'string') {
+          postStageExtras.recovery_suggestion = pipelineRecovery.suggestion;
+        }
         if (pipelineErrorCode) postStageExtras.pipeline_error_code = pipelineErrorCode;
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'draft_graph_pipeline',
@@ -1644,13 +3973,142 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // proposal), and lets an edit-verb-bearing state-query fall through to the
     // recent-changes-grounded state-query guard.
     // ────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+    // ROADMAP 2.308 / S1 — ONE persisted-graph read per turn, shared.
+    //
+    // Two sites now need `scenarios.graph`: the configure-option label anchor
+    // (immediately below) and the edit-lane graphState reload (~340 lines
+    // down). Memoised here so the pair costs ONE Supabase round-trip, not two
+    // — the diagnosis's explicit instruction was "re-use the loaded value …
+    // one read per turn, not two".
+    //
+    // The memo caches the FAILURE as well as the value, deliberately: the
+    // label-anchor caller swallows errors (a labels read must never fail a
+    // turn that would otherwise succeed), while the edit-lane reload below
+    // re-throws the SAME error and produces the SAME typed recovery it
+    // produced before this change. Caching the rejection is what keeps those
+    // two policies from becoming two reads with two different outcomes.
+    // ────────────────────────────────────────────────────────────────
+    let persistedGraphMemo:
+      | { readonly ok: true; readonly value: unknown }
+      | { readonly ok: false; readonly error: unknown }
+      | null = null;
+    const loadPersistedGraphOnce = async (): Promise<unknown> => {
+      if (persistedGraphMemo === null) {
+        try {
+          persistedGraphMemo = {
+            ok: true,
+            // `loadPersistedGraphStrict` (vs the swallowing
+            // `loadPersistedGraph`) lets the edit-lane consumer distinguish
+            // `session_store_failed` from `no_persisted_graph`.
+            value: await loadPersistedGraphStrict(ingress.scenario_id),
+          };
+        } catch (err) {
+          persistedGraphMemo = { ok: false, error: err };
+        }
+      }
+      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
+      return persistedGraphMemo.value;
+    };
     const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
-    const valueUpdatePhrasingHit = isValueUpdatePhrasing(ingress.message);
+    // Part-accounting conservation law (2026-07-20): the suppressor stands
+    // DOWN for mixed value+structural messages so both halves reach the
+    // edit_graph lane together — see shouldSuppressEditDispatchForValueUpdate.
+    const valueUpdatePhrasingHit = shouldSuppressEditDispatchForValueUpdate(ingress.message);
+    // ROADMAP 2.11 / P0-2 (deterministic half) — configure-option intent
+    // ("configure {option}", "set {option}'s {factor} intervention to X",
+    // and the system's OWN options_not_configured recovery-chip message)
+    // must reach the edit lane: it is the only chat path that WRITES option
+    // interventions (update_node → data/interventions/<factor_id>, already
+    // sanctioned end-to-end). Before this gate these messages carried no
+    // positive edit verb (or were value-update gated), fell through to the
+    // LLM router, and live-routed to adjust_edge_strength — a field PLoT's
+    // preflight ignores — closing the infinite recovery-chip loop the 2.11
+    // diagnosis captured (scenario A, A5–A7). Negative gates shared with
+    // the edit-verb candidate: meta-questions, analytical questions and
+    // state queries never dispatch. Deliberately NOT gated on the
+    // value-update phrasing (an option-intervention "set …" must not go to
+    // set_factor_value, whose misroute guard can only refuse-to-clarify).
+    //
+    // ⭐ ROADMAP 2.308 / S1 — THE LABEL ANCHOR IS NOW REACHABLE.
+    // Until this change the label list came solely from `extensions.graphState`,
+    // which is NULL ON EVERY LIVE TURN (the platform invariant: the UI sends a
+    // turn, never a graph — verified at the bytes across all eight captured
+    // request bodies in the 2.308 diagnosis). The persisted graph that carries
+    // the labels was loaded ~340 lines below, INSIDE `if (editIntentDetected)`,
+    // and `editIntentDetected` is computed FROM this detection: circular, so
+    // triggers 4 (`effect_vocab`) and 5 (`option_value_set`) — which sit below
+    // the detector's mandatory anchor guard — were DEAD CODE in production.
+    // `resolveConfigureOptionIntent` takes the persisted read ONLY when the
+    // detector itself reports a label anchor would decide the verdict, and
+    // shares that read with the edit-lane reload below (`loadPersistedGraphOnce`)
+    // so the edit lane pays no extra round-trip.
+    const configureOptionResolution = await resolveConfigureOptionIntent({
+      message: ingress.message,
+      requestOptionLabels: projectOptionLabels(extensions.graphState?.nodes),
+      loadPersistedOptionLabels: async () => {
+        const persisted = await loadPersistedGraphOnce();
+        return projectOptionLabels((persisted as { nodes?: unknown } | null)?.nodes);
+      },
+    });
+    const configureOptionDetection = configureOptionResolution.detection;
+    // Emitted on EVERY read ATTEMPT, not only the ones that yielded labels —
+    // otherwise a failed or option-less read is invisible and this counter
+    // under-reports the read frequency it exists to measure (review #796).
+    if (configureOptionResolution.persistedRead !== 'not_attempted') {
+      emit(TelemetryEvents.V5EditGraphConfigureOptionLabelsLoaded, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        outcome: configureOptionResolution.persistedRead,
+        matched: configureOptionDetection.matched,
+      });
+    }
     // State-query suppressor (behaviour #3): a question containing an edit verb
     // ("what did you just change?", "what did that update do?") must NOT edit.
     const stateQuerySuppressed = isStateQueryQuestionShape(ingress.message);
+    const configureOptionIntent =
+      configureOptionDetection.matched &&
+      !negativeEditRegexHit &&
+      !analyticalQuestionDetected &&
+      !stateQuerySuppressed;
+    if (configureOptionIntent && !positiveEditRegexHit) {
+      // Emit ONLY when this gate is the deciding factor (an edit-verb-
+      // bearing configure message would have dispatched anyway).
+      emit(TelemetryEvents.V5EditGraphConfigureOptionRouted, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        trigger: configureOptionDetection.trigger,
+      });
+    }
+    // Structural-restructure intent (LATENCY-RECAPTURE finding 3; probe
+    // 69a2f44f). A free-text restructure request ("split the shared factor
+    // into per-option links") carries no EDIT_GRAPH_POSITIVE_REGEX verb, so
+    // without this gate it falls through to the coach, which DESCRIBES the
+    // change without seeding an apply action — leaving a following "Yes, apply
+    // it now" nothing to resume. Routing it to the edit lane (the sole
+    // structural-proposal producer) mints the STRUCTURAL_APPLY_HELD /
+    // REMOVE_UNCONFIRMED held proposal + confirm chip; the bare consent then
+    // resumes via the existing short-confirm → executeGmHeldResume path. Same
+    // shared negative gates as the configure-option sibling above.
+    const structuralRestructureDetection = detectStructuralRestructureIntent(
+      ingress.message,
+    );
+    const structuralRestructureIntent =
+      structuralRestructureDetection.matched &&
+      !negativeEditRegexHit &&
+      !analyticalQuestionDetected &&
+      !stateQuerySuppressed;
+    if (structuralRestructureIntent && !positiveEditRegexHit) {
+      // Emit ONLY when this gate is the deciding factor (an edit-verb-bearing
+      // restructure message would have dispatched via editVerbCandidate).
+      emit(TelemetryEvents.V5EditGraphStructuralRestructureRouted, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        trigger: structuralRestructureDetection.trigger,
+      });
+    }
     if (
       stateQuerySuppressed
       && positiveEditRegexHit
@@ -1683,11 +4141,43 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isConfirmationShaped =
       SHORT_CONFIRM_PATTERN.test(ingress.message) ||
       PROPOSAL_CONFIRM_PATTERN.test(ingress.message);
-    if (editVerbCandidate && isConfirmationShaped) {
+    // P0 held-proposal replay (2026-07-15, DGAI #340): the consent-clarity
+    // NAMED hold chip copy ("Add 'X', change 'Y' to 0.8 and link 'Z' to
+    // 'W'" — changeset honesty 1.134 enumerates every op) carries an edit
+    // verb by construction, so it can never be confirmation-shaped
+    // — yet it IS the product's own confirmation affordance (the chip
+    // replays its label/message as the user text, with no proposal
+    // reference on the wire). A chip_click ingress or an
+    // affirmative-prefixed reply therefore also pays the pendings read; the
+    // resolver then requires an EXACT match against a proposal's rendered
+    // copy before suppressing, so unrelated edit chips and fresh edit
+    // commands proceed to the edit path untouched.
+    const isProposalReplayCandidate =
+      !isConfirmationShaped &&
+      (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
+    // #644 adversarial P2-2 (KNOWN ASYMMETRY, currently zero blast radius —
+    // deliberately NOT folded in): `structuralRestructureIntent` is absent from
+    // this proposal-confirm resolution gate, so a structural-restructure REPLAY
+    // (a chip_click / affirmative-prefixed message that matches
+    // detectStructuralRestructureIntent) skips resolveProposalConfirmAtRoute
+    // and re-dispatches the edit lane instead of resuming the exact live hold.
+    // This is unreachable today: every structural hold's rendered chip copy is
+    // built by describe-changeset.ts, whose per-op verbs lead with
+    // add/remove/change/update/adjust — ALL in EDIT_GRAPH_POSITIVE_REGEX — so
+    // `editVerbCandidate` already claims the replay here; and the only edit-verb-
+    // free copy it emits ("link 'X' to 'Y'", "rename 'X' to 'Y'") never carries a
+    // per-option / each-option-own clause, so it never matches the structural
+    // detector either. The omission would only bite if a FUTURE hold rendered a
+    // restructure-phrased, edit-verb-free chip label (e.g. "Split 'Cost' into
+    // per-option links"). Folding `|| structuralRestructureIntent` in now would
+    // be symmetry with no discriminating (non-vacuous) mutation-pin — rowed for
+    // ROADMAP follow-up (add it in the SAME change that introduces such copy).
+    if ((editVerbCandidate || configureOptionIntent) && (isConfirmationShaped || isProposalReplayCandidate)) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
         requestId,
         extensions.graphState ?? null,
+        isConfirmationShaped ? null : ingress.message,
       );
       emit(TelemetryEvents.V5EditGraphProposalConfirmResolved, {
         request_id: requestId,
@@ -1697,22 +4187,33 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       if (resolution.kind === 'suppress') {
         proposalConfirmSuppressed = true;
-      } else {
+      } else if (resolution.kind === 'clarify') {
         // No live, graph-safe proposal — return the deterministic
         // no-live-proposal clarification rather than dispatching an edit that
         // would no-op. This turn does NOT mutate the graph.
         const noProposalResponse = composeDirectAnswerResponse({
+          answerKind: 'functional',
           assistant_text: NO_LIVE_PROPOSAL_TEXT,
           stage: ingress.stage,
           suggested_actions: [],
         });
         return sendFinalised200(reply, requestId, 'edit_graph', noProposalResponse, {
           graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
+          // functional and must ship plain.
+          answerKind: 'functional',
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       }
+      // resolution.kind === 'pass' (replay-candidate, no exact copy match):
+      // not a confirmation — edit routing proceeds untouched.
     }
     // A confirmation routed to apply, or a state-query question, must bypass the
     // Stage-4A edit intercepts below — otherwise tryVagueEditGuard /
@@ -1736,9 +4237,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+        // copy is functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -1782,9 +4291,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       );
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+        // copy is functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -1804,10 +4321,104 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+        // copy is functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // ⭐ L16 / walk finding N16 — BARE configure-option is a first-class
+    // typed action, not a prompt for the edit LLM to guess at.
+    //
+    // "Configure {option}" and the configure chip's own message name NO factor
+    // and NO value. They route here correctly (2.11 / 2.308), and then the
+    // edit LLM has nothing to write, so it invents an operation. On the 3 Aug
+    // walk the invention did not survive canonicalisation: 200 /
+    // `OPERATION_DID_NOT_LAND` / "I wasn't able to make that change safely."
+    // — the product unable to execute the chip it had just offered, on the
+    // turn immediately after a successful add-option.
+    //
+    // Everything the user is missing is derivable server-side, so answer it
+    // deterministically: the blocked option by name, the factor it is linked
+    // to by name, and the one phrasing proven to reach the honest writer
+    // (`buildConfigureOptionAdvisedFormat` = probe P1). No LLM call, no
+    // invented value, no new vocabulary.
+    //
+    // Placed AFTER the Stage-4A intercepts (so chip-simplify / label / vague
+    // keep precedence) and BEFORE the edit dispatch. `configureOptionIntent`
+    // already carries the shared negative gates (meta-question, analytical,
+    // state-query); `bypassEditHandling` keeps confirmations and state
+    // queries out, exactly as its siblings above do.
+    //
+    // Strictly additive: `tryConfigureOptionClarify` declines — and the
+    // pre-existing route runs untouched — unless it can name a concrete next
+    // step. In particular a configure message that DOES carry a factor and a
+    // value (walk remedy #5, the path that worked) is declined on
+    // `value_payload_present` and goes to the edit lane as before.
+    if (configureOptionIntent && !bypassEditHandling) {
+      let persistedForClarify: unknown = null;
+      try {
+        // Memoised: the configure label anchor above already paid for this
+        // read on most of these turns, and the edit-lane reload below shares
+        // the same memo — so the remedy costs no extra round-trip.
+        persistedForClarify = await loadPersistedGraphOnce();
+      } catch {
+        // A labels/graph read must never fail a turn that would otherwise
+        // succeed (same policy as `resolveConfigureOptionIntent`). Declining
+        // here just leaves the pre-existing route in charge.
+        persistedForClarify = null;
+      }
+      const configureClarify = tryConfigureOptionClarify({
+        message: ingress.message,
+        detection: configureOptionDetection,
+        graph: persistedForClarify,
+      });
+      if (configureClarify.matched) {
+        emit(TelemetryEvents.V5ConfigureOptionClarifyIntercept, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          trigger: configureOptionDetection.trigger,
+          option_source: configureClarify.optionSource,
+          factor_count: configureClarify.factorLabels.length,
+        });
+        const response = composeConfigureOptionClarifyResponse({
+          optionLabel: configureClarify.optionLabel,
+          factorLabels: configureClarify.factorLabels,
+          stage: ingress.stage,
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          // ⭐ GATE-REASON INTEGRITY. On the walk, the turns that took the
+          // edit-lane non-apply path were the ONLY ones of seven to ship no
+          // `analysis_ready`, and they are exactly the turns on which the run
+          // gate's copy degraded from the specific reason ("'Launch Customer
+          // Retention Programme' has no effect values yet") to the generic
+          // one. Readiness is derived from the UNCHANGED persisted graph, so
+          // it is current truth, not a guess — and the remedy turn is not the
+          // turn the user loses their specific blocker.
+          analysisReady: configureClarify.readiness,
+          graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        });
+      }
     }
 
     // Predicates, state-query suppression, and the proposal-confirmation
@@ -1815,7 +4426,24 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // a confirmation / state-query cannot be claimed by tryVagueEditGuard et al.
     // before it is applied / answered). Edit intent is the candidate minus a
     // suppressed proposal confirmation.
-    const editIntentDetected = editVerbCandidate && !proposalConfirmSuppressed;
+    // ROADMAP 2.11 / P0-2: configure-option intent is an edit-lane candidate
+    // in its own right (see the detection block above) — same suppressors,
+    // same proposal-confirm resolution, same dispatch.
+    const editIntentDetected =
+      (editVerbCandidate || configureOptionIntent || structuralRestructureIntent) &&
+      !proposalConfirmSuppressed &&
+      // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
+      // mutation chip_click (source==='chip_click' with a defined, non-readiness
+      // `action_type` — e.g. `adjust_edge_strength`/`set_factor_value`) whose
+      // rendered copy is edge-edit-shaped hits EDIT_GRAPH_POSITIVE_REGEX and
+      // would be claimed here by the V4 edit lane BEFORE runTurnExecutor — so
+      // the C2 typed-chip reader (buildTypedChipMutationProposal in
+      // turn-executor) never sees the chip's typed parameters. Excluding the
+      // typed chip from this gate (the SAME guard already threaded into the
+      // process-meta / frame-no-brief guards above) routes it by its TYPE to
+      // turn-executor, where the C2 pre-route + #639 fall-through contract own
+      // it. Genuine typed-TEXT edits (source!=='chip_click') are unaffected.
+      !isNonReadinessTypedChipClickForExecutor;
     // Emit ONLY when the analytical-question guard is THE deciding
     // factor — i.e. the message WOULD have dispatched to edit_graph
     // had the guard not fired. The earlier loose condition (emit on
@@ -1854,7 +4482,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // telemetry. Both export from build-turn-context.ts so the
           // `getSessionStore` import surface stays bounded to the
           // three sites the state-write-invariant check allows.
-          persisted = await loadPersistedGraphStrict(ingress.scenario_id);
+          // ROADMAP 2.308 / S1: via the turn-scoped memo, so a turn whose
+          // configure-option label anchor already read the graph does not
+          // read it twice. Identical semantics — the memo re-throws the
+          // original error.
+          persisted = await loadPersistedGraphOnce();
         } catch (err) {
           // Session-store / Supabase failure. Distinct from
           // "no_persisted_graph" so dashboards can separate
@@ -1867,32 +4499,102 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed');
+          return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         if (persisted == null) {
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph');
-        }
-        // Validate the reloaded graph through the same ingress schema the
-        // request body would have gone through. A persisted-but-invalid
-        // shape is a different operational signal than absence — write a
-        // distinct telemetry reason so it can be alerted on.
-        const parsed = GraphStateIngressSchema.safeParse(persisted);
-        if (!parsed.success) {
-          log.error(
+          // ══════════════════════════════════════════════════════════════
+          // ROADMAP 2.388 — THE MINUTE-ONE DEAD END. AT FRAME STAGE, FALL
+          // THROUGH INSTEAD OF ERRORING.
+          // ══════════════════════════════════════════════════════════════
+          // There is no graph because the user has not built one yet. That is
+          // not a failure of anything — it is the empty canvas, and it is
+          // overwhelmingly a FIRST message: an edit verb (`increase` / `add` /
+          // `raise` / `reduce`) in a sentence that happens to miss the
+          // decision-brief regex. `editIntentDetected` is decided from the
+          // message TEXT ALONE, before anything asks whether there is
+          // something to edit, so the shape is reachable on turn one.
+          //
+          // The previous behaviour returned EDIT_GRAPH_RECOVERY_TEXT — "I
+          // couldn't access the current graph. Please try again in a moment."
+          // — which is both untrue (nothing was inaccessible) and
+          // UNRECOVERABLE: the retry it invites re-enters this same branch.
+          // Measured on staging `672b634`: 3/3 on a repeated message here,
+          // 10/10 on the acceptance walk, with `llm_calls: []` and
+          // `suggested_actions: []` — no model ran and no affordance shipped.
+          //
+          // Falling through costs nothing extra: `effectiveGraphState` below
+          // is `resolvedGraphState ?? extensions.graphState`, and BOTH are
+          // null on this branch, so `isEditGraphShape` is already false. The
+          // turn therefore lands on `frame_no_brief_guard`, which is exactly
+          // what the SAME user gets today when their sentence misses the
+          // edit-verb list — the framing coaching PLUS a "Build the model"
+          // chip. Shipped copy, shipped affordance, no new surface.
+          //
+          // ⚠ SCOPE 1, deliberately narrow. `session_store_failed` (the catch
+          // above) and `persisted_graph_invalid` (below) KEEP the recovery
+          // copy. Those are genuine transient / infrastructure failures where
+          // "try again in a moment" is honest advice — which is the whole
+          // reason `sendEditGraphRecovery` discriminates three reasons.
+          //
+          // ⚠ SCOPE 2 — `stage === 'frame'` ONLY, and this is a DISCLOSED
+          // CARVE-OUT rather than an oversight. The fall-through's whole
+          // justification is that the frame guard is waiting to catch it; at
+          // `analyse` stage that guard does not fire (`isFrameNoBriefShape`
+          // requires `stage === 'frame'`), so the turn would reach
+          // `runTurnExecutor` instead — a broad LLM call, and a violation of
+          // the standing edit-lane routing contract that
+          // `tests/integration/orchestrator/route-v2-edit-graph-recovery.ts`
+          // asserts (exactly one of dispatch / clarification / typed recovery,
+          // never a fall-through to Sonnet). Every dead end L56 MEASURED
+          // arrived at `stage: 'frame'` — it is what the UI sends on a first
+          // message — so this scoping fixes 100% of the observed defect with
+          // ZERO blast radius on the analyse-stage contract. An analyse-stage
+          // turn with no persisted graph at all is a different (and much
+          // rarer) state; it keeps today's typed recovery, and whether that
+          // copy is right THERE is rowed separately rather than changed blind.
+          //
+          // The counter moves with the behaviour rather than disappearing: a
+          // class that stops erroring must not also stop being measurable.
+          if (ingress.stage !== 'frame') {
+            return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+          }
+          emit(TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            message_length: ingress.message.length,
+          });
+          log.info(
             {
               request_id: requestId,
               scenario_id: ingress.scenario_id,
-              issue_count: parsed.error.issues.length,
+              message_length: ingress.message.length,
             },
-            'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
+            'V5 edit intent on an empty canvas — falling through to the frame guard instead of the typed recovery',
           );
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid');
+        } else {
+          // Validate the reloaded graph through the same ingress schema the
+          // request body would have gone through. A persisted-but-invalid
+          // shape is a different operational signal than absence — write a
+          // distinct telemetry reason so it can be alerted on. UNCHANGED by
+          // 2.388: this one really is a failure, and it really is retryable.
+          const parsed = GraphStateIngressSchema.safeParse(persisted);
+          if (!parsed.success) {
+            log.error(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                issue_count: parsed.error.issues.length,
+              },
+              'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
+            );
+            return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+          }
+          resolvedGraphState = parsed.data;
+          emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+          });
         }
-        resolvedGraphState = parsed.data;
-        emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
-          request_id: requestId,
-          scenario_id: ingress.scenario_id,
-        });
       }
     }
     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
@@ -1920,6 +4622,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           request: req,
           graphState: effectiveGraphState!,
           analysisState: extensions.analysisState ?? null,
+          // ROADMAP 2.684 — the turn's wall-clock baseline, threaded so the
+          // structural-edit composer can derive what is LEFT of the turn rather
+          // than a static ceiling. Same baseline `dispatchDraftGraph` already
+          // receives, and for the same reason: pre-flight, ingress parse and
+          // scenario upsert spend the deadline before either dispatcher starts.
+          //
+          // ⚠ This one line is the difference between the composer getting the
+          // turn's real remaining time and getting a number derived from
+          // constants the deployed box does not hold. Witness #3 measured that
+          // difference as a 5.0s kill. Removing it is caught by
+          // `structural-edit-deadline-plumbing.test.ts`.
+          requestStartMs: routeStartedAt,
         });
         if (!eg.commitPerformed) {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
@@ -1935,10 +4649,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
           graph: eg.graph,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
+          // functional (add-option / edit confirmation) and must ship plain.
+          answerKind: 'functional',
           ...(eg.freshness ? { freshness: eg.freshness } : {}),
+          // S3-L6 / F-5: edit-lane LLM call → `_diagnostic_trace.llm_calls[]`.
+          ...(eg.editLlmCall ? { editLlmCall: eg.editLlmCall } : {}),
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
+        userMessage: ingress.message,
         });
       } catch (err) {
         log.error(
@@ -1961,6 +4685,81 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // Round-1 process-meta intake answer (META-DECISION-DIAGNOSIS-2026-07-20)
+    // ────────────────────────────────────────────────────────────────────
+    // A question TO the assistant about the process — the product's own
+    // pre-analysis spark prompts ("What should I check before running the
+    // first analysis?"), or a narrowly-matched typed variant — on the
+    // empty-canvas frame state. The `draftShapedTurn` exclusion above
+    // already kept it out of the draft dispatch and the clarify round;
+    // this branch gives it an ANSWER. It must run BEFORE the frame-stage
+    // no-brief guard below: that guard's canned reply ignores the user's
+    // question, and its C3 offer path would seed a "Build the model" chip
+    // with the meta-question as the brief seed — re-creating the exact
+    // poisoned-brief defect one tap later.
+    //
+    // Scope (deliberately the defect state and nothing else):
+    //   - frame stage, canvas not populated (nullness OR {nodes:[]} — the
+    //     clarify gate's A5 population judgement, so both defect entry
+    //     points are covered);
+    //   - not a continuation (a mid-conversation meta-question already
+    //     reaches TurnExecutor's LLM with memory — richer than this canned
+    //     answer), EXCEPT the frame guard's own offer-loop continuation
+    //     (marker), which would otherwise re-fire the canned framing
+    //     prompt over the user's question.
+    // COMMIT POSTURE: none — same as the plain frame guard ("no chip, no
+    // commit, scenario stays fresh"). A committed turn here would make the
+    // NEXT message a continuation and strand the user's real brief (the
+    // Signature-Loop guard would suppress its draft) — the exact dead-end
+    // class C3 exists to prevent, and no non-poisoned offer seed exists on
+    // this state. Cost accepted: the exchange is not in turn memory.
+    const isProcessMetaIntakeTurn =
+      ingress.stage === 'frame' &&
+      !isPopulatedIngressGraph(extensions.graphState) &&
+      (!isContinuationScenario || draftOfferMarker !== null) &&
+      // S2-L1 §2g: a typed chip_click bound for TurnExecutor is routed BY TYPE
+      // and must never be intercepted by the string mirror (the whole point of
+      // S2 — the type wins over the canned wording).
+      !isNonReadinessTypedChipClickForExecutor &&
+      isProcessMetaIntake(ingress.message);
+    if (isProcessMetaIntakeTurn) {
+      log.info(
+        {
+          event: 'v5.process_meta_intake_guard',
+          request_id: requestId,
+          message_length: ingress.message.length,
+          source: ingress.source,
+        },
+        'Round-1 process-meta intake guard fired — answering the process question instead of drafting/clarifying',
+      );
+      emit(TelemetryEvents.V5ProcessMetaIntakeGuard, {
+        request_id: requestId,
+        message_length: ingress.message.length,
+        source: ingress.source,
+      });
+      return sendFinalised200(
+        reply,
+        requestId,
+        'process_meta_intake',
+        composeProcessMetaIntakeResponse(),
+        {
+          graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: process-meta intake
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        },
+      );
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Frame-stage no-brief guard — deterministic fallback for messages
     // that arrive at frame stage with no graph yet but do not look like a
     // fresh decision brief. Without this gate, such messages fall through
@@ -1971,10 +4770,24 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // draft_graph or sending a follow-up clarification.
     //
     // The previous (draft_graph) dispatch already filtered for the
-    // brief-shaped messages; chip_click and system_event branches handled
-    // those above. What reaches here at stage=frame + no graph is
-    // necessarily a non-brief, non-chip user message. Guide them back to
-    // the frame-stage flow deterministically with no LLM call.
+    // brief-shaped messages; whitelisted chip_click and system_event
+    // branches handled those above. What reaches here at stage=frame + no
+    // graph on a FRESH scenario is a non-brief ANONYMOUS message (source
+    // 'composer'/'chip', no typed action_type).
+    //
+    // S2-L1 §2g FIX (2026-07-20): a `source='chip_click'` with a valid but
+    // non-whitelisted, non-readiness `action_type` no longer reaches this
+    // guard. Previously the chip_click exclusion forced `draftShapedTurn`
+    // false even for draft-shaped canned text, so this guard CLAIMED it and
+    // answered with the framing prompt — a misfire that contradicted the
+    // #575 commit message's "the rest belong to TurnExecutor". The
+    // `isNonReadinessTypedChipClickForExecutor` exclusion above now routes
+    // every such typed chip_click to TurnExecutor, making the chip_click
+    // region total. The formerly-pinning test
+    // (route-v2-process-meta-intake.test.ts "chip_click with valid
+    // non-whitelisted action_type") now asserts TurnExecutor routing.
+    // Guide genuine anonymous frame-stage text back to the flow
+    // deterministically with no LLM call.
     //
     // Pricing-brief retry scenario from staging:
     //   Turn 1: pricing brief → CEE_GRAPH_INVALID (no graph persisted)
@@ -1985,12 +4798,35 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //       → "I couldn't complete that turn cleanly" generic fallback
     //     - NOW caught here, emits a deterministic framing prompt.
     // ────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.63 C3 — the guard may RE-FIRE on a continuation scenario the
+    // guard itself created (marker = the last committed turn was a draft
+    // offer): a second unshaped, non-confirm message keeps the deterministic
+    // framing loop (fresh copy, fresh offer, refreshed TTL) instead of
+    // paying a broad TurnExecutor LLM call. Confirm-shaped messages are
+    // EXCLUDED from the re-fire: a "yes" that did not resume above (offer
+    // expired, or another live pending exists) belongs to TurnExecutor's
+    // short-confirm machinery (recovery_expired / consent-priority), never
+    // to a canned framing prompt that would swallow it.
+    const isDraftOfferRefire =
+      isContinuationScenario &&
+      draftOfferMarker !== null &&
+      !SHORT_CONFIRM_PATTERN.test(ingress.message) &&
+      !AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message);
     const isFrameNoBriefShape =
       ingress.stage === 'frame' &&
       extensions.graphState == null &&
       // V5 Signature Loop — a continuation (prior committed turns) must NOT get
       // the "start over" framing prompt; let it reach TurnExecutor's memory.
-      !isContinuationScenario &&
+      // C3 re-fire (above) is the one exception: the continuation consists of
+      // the guard's own offer turns.
+      (!isContinuationScenario || isDraftOfferRefire) &&
+      // S2-L1 §2g fix: a typed chip_click with a valid non-whitelisted,
+      // non-readiness action_type must reach TurnExecutor, not the canned
+      // framing prompt. This retires the documented misfire (a draft-shaped
+      // such chip_click was CLAIMED here because the chip_click exclusion
+      // forces draftShapedTurn=false → isDraftGraphShape=false → this guard
+      // consumed it). With the exclusion, the chip_click region is total.
+      !isNonReadinessTypedChipClickForExecutor &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(
@@ -2027,11 +4863,125 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         insights: [],
         stage_indicator: 'frame',
       } as import('@talchain/schemas/boundary').OlumiResponse;
+      // ────────────────────────────────────────────────────────────────
+      // ROADMAP 2.63 C3 — seed the deterministic draft offer.
+      // ────────────────────────────────────────────────────────────────
+      // Only when the guard-firing message carries a usable brief seed
+      // (typed, ≥ min length after normalisation): a "Build the model"
+      // chip is added, and a `draft_graph` pending action carrying the
+      // seed is COMMITTED with the turn (pendings live on committed turn
+      // rows), so the next turn's chip click / typed "yes" resumes through
+      // the draft-offer pre-route into the C1/C2 deterministic dispatch.
+      // Unusable-seed turns (short messages, chip_click canned text) keep
+      // the pre-C3 guard byte-identically: no chip, no commit, scenario
+      // stays fresh. On a commit failure the chip-less pre-C3 response is
+      // sent (a chip whose consent cannot resume would be
+      // guarantee-theatre) and the loop stays recoverable.
+      const guardOfferSeed = deriveDraftOfferSeed(ingress.message, ingress.source);
+      if (guardOfferSeed !== undefined) {
+        const guardNowMs = Date.now();
+        const guardChip = {
+          id: `draft-offer-${randomUUID()}`,
+          label: DRAFT_OFFER_CHIP_LABEL,
+          message: DRAFT_OFFER_CHIP_MESSAGE,
+        };
+        const guardPending = buildDraftOfferPending({
+          scenarioId: ingress.scenario_id,
+          chipId: guardChip.id,
+          publicLabel: guardChip.label,
+          publicMessage: guardChip.message,
+          briefSeed: guardOfferSeed,
+          nowMs: guardNowMs,
+        });
+        // P1-1 — same derivation as the C4 site (one derivation, two
+        // consumers): `draftOfferPriorPendings` is exactly what the commit
+        // below threads, so the ", or just reply yes" clause is only made
+        // when the offer will stand alone after this commit.
+        const guardOfferWillBeSoleLive = willDraftOfferBeSoleLivePending(
+          draftOfferPriorPendings,
+          guardPending,
+          guardNowMs,
+        );
+        const offerResponse: import('@talchain/schemas/boundary').OlumiResponse = {
+          ...guardResponse,
+          assistant_text: `${assistantText} ${draftOfferGuardSentence(guardOfferWillBeSoleLive)}`,
+          suggested_actions: [guardChip],
+        } as import('@talchain/schemas/boundary').OlumiResponse;
+        try {
+          const commitResult = await commitDirectAnswer(offerResponse, {
+            scenario_id: ingress.scenario_id,
+            turn_id: ingress.turn_id,
+            turn_class: 'clarify',
+            handler_id: null,
+            request_hash: computeRequestHash(ingress),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - routeStartedAt,
+            handler_facts: [],
+            pending_actions: [guardPending],
+            // Fresh scenarios have no prior pendings ([]); on a re-fire the
+            // pre-route read already loaded them — threading keeps the
+            // carry-forward honest either way (the fresh offer supersedes
+            // the carried one kind-level).
+            priorPendingActions: draftOfferPriorPendings,
+            coaching_state: null,
+            userMessage: ingress.message,
+          });
+          emit(TelemetryEvents.V5DraftOfferSeeded, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            site: 'frame_no_brief_guard',
+            redraft: false,
+            had_seed: true,
+            refire: isDraftOfferRefire,
+            persisted: true,
+          });
+          return sendFinalised200(reply, requestId, 'frame_no_brief_guard', commitResult.response, {
+            graph: null,
+            // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+            // the permission belongs to the fact this response DISPLAYS, not to
+            // whether this turn ran an analysis. See turn-claim-safety.ts.
+            ...(await claimSafety.forExit()),
+            // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard/commit copy is
+            // functional and must ship plain.
+            answerKind: 'functional',
+            requestStartedAt: routeStartedAt,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+            userMessage: ingress.message,
+          });
+        } catch (err) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'V5 frame-guard draft offer — commit failed; sending chip-less framing prompt (pre-C3 behaviour)',
+          );
+          emit(TelemetryEvents.V5DraftOfferSeeded, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            site: 'frame_no_brief_guard',
+            redraft: false,
+            had_seed: true,
+            refire: isDraftOfferRefire,
+            persisted: false,
+          });
+        }
+      }
       return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
         graph: null,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard decline copy is
+        // functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
+      userMessage: ingress.message,
       });
     }
 
@@ -2046,6 +4996,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       selectedElements: extensions.selectedElements,
       ...(chipClickResumeIntent
         ? { chipClickResumeIntent }
+        : {}),
+      // F2 CHANGE A — forced explanation intent for a typed analytical pill.
+      ...(chipClickForcedIntent
+        ? { chipClickForcedIntent }
         : {}),
     });
 
@@ -2082,16 +5036,43 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // ("the analysis ran but didn't save" vs "we couldn't frame the
       // decision"). `stages_completed` is positioned *after* stage inside
       // details, preserving the pre-refactor insertion order.
+      // F4 — a graph CAS conflict (GRAPH_DIVERGED) is NOT an infra failure: it
+      // is a recoverable divergence. Return HTTP 409 with the explicit
+      // refresh-and-reconfirm recovery metadata (lifted from the failure
+      // response's error block) instead of the uniform 500, so the UI can
+      // refresh canonical state and reconfirm rather than blind-retrying the
+      // same stale base. All other commit failures keep the uniform 500.
+      const isGraphConflict = failureType === 'GRAPH_DIVERGED';
+      const conflictRecovery = isGraphConflict
+        ? extractGraphConflictRecovery(run.response)
+        : undefined;
       const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
         validator: 'turn_commit',
-        reason: 'state_commit_failed_or_turn_runtime_failure',
+        reason: isGraphConflict
+          ? 'graph_write_conflict'
+          : 'state_commit_failed_or_turn_runtime_failure',
         retryable,
         requestId,
         stage: ingress.stage,
         errorCode: failureType ?? 'INTERNAL_ERROR',
-        preStageExtras: { failure_type: failureType },
+        preStageExtras: {
+          failure_type: failureType,
+          ...(conflictRecovery ?? {}),
+        },
         postStageExtras: { stages_completed: run.telemetry.stages_completed },
       });
+      if (isGraphConflict) {
+        log.warn(
+          {
+            request_id: requestId,
+            failure_type: failureType,
+            stages_completed: run.telemetry.stages_completed,
+          },
+          'V5 turn — graph CAS conflict; returning 409 with refresh-reconfirm BoundaryError envelope',
+        );
+        // 409: recoverable divergence — nothing clobbered (txn rolled back).
+        return reply.code(409).send(boundaryError);
+      }
       log.error(
         {
           request_id: requestId,
@@ -2126,11 +5107,38 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
       graph: turnGraph,
+      // T1 claim safety — READ off the executor's run result, which took it
+      // from the stamp the run_analysis handler persisted on the fact.
+      // Never re-derived at the route (CLAUDE.md trap #12).
+      //
+      // F6 — the `?? true` is GONE and cannot regrow: the field is REQUIRED on
+      // `TurnExecutorRunResult`, so an exit that fails to carry it fails to
+      // compile. The default was dead (the ROADMAP 1.233 hoist populates the
+      // field on every exit) and that is exactly why it was dangerous: a
+      // latent, unexercised re-arming point that would have silently licensed
+      // the next exit family to ship unguarded.
+      mayNameLeadingOption: run.mayNameLeadingOption,
+      // …and its evidence. REQUIRED on the run result for the same reason the
+      // boolean is: a value reported without its provenance is a value no walk
+      // can falsify.
+      mayNameLeadingOptionProvenance: run.mayNameLeadingOptionProvenance,
+      // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
+      // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
+      // the honest reading for a permitted turn or a non-explanation handler.
+      ...(run.withheldExplanationReason !== undefined
+        ? { withheldExplanationReason: run.withheldExplanationReason }
+        : {}),
       ...(run.freshness ? { freshness: run.freshness } : {}),
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,
       turnId: ingress.turn_id,
+      userMessage: ingress.message,
       ...(run.coachingDelivery ? { coachingDelivery: run.coachingDelivery } : {}),
+      // Observability: thread the turn's real per-stage timings so the
+      // flag-gated minimal diagnostic trace records the routing LLM call in
+      // `_diagnostic_trace.llm_calls` (was structurally always empty on
+      // turn_executor turns). Present only when timings capture is enabled.
+      ...(run.turnTimings ? { turnTimings: run.turnTimings } : {}),
       // V5 M5 (read-only): thread the turn-executor's full canonical analysis
       // state into the flag-gated `_context_summary` diagnostic. When present
       // it supersedes the route's freshness-derived partial state (adds
@@ -2139,6 +5147,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // T4 Slice 2: the once-per-turn canonical context frame. When present,
       // the context-summary diagnostic is projected from the frame alone.
       ...(run.frame ? { frame: run.frame } : {}),
+      // ROADMAP 1.42: thread the turn-executor's VERBATIM captured reasoning
+      // into the flag-gated `_reasoning` sidecar (see sendFinalised200 ctx
+      // jsdoc). Undefined when the flag was off or no thinking was captured.
+      ...(run.reasoning ? { reasoning: run.reasoning } : {}),
+      // ROADMAP 1.132: thread the turn-executor's validated answer shape
+      // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
+      // ctx docs above).
+      ...(run.answerShape ? { answerShape: run.answerShape } : {}),
+      // ROADMAP 1.132 (F1): thread the turn-executor's declared answer kind so
+      // the egress synthesiser shapes ONLY substantive answers (coach / converse /
+      // text_only model prose AND the deterministic post-analysis advice-gate /
+      // run-comparison explanations) — never the deterministic clarify / receipt /
+      // recovery / decline copy this same path can emit. Verified fail-closed
+      // against the FINAL text at the executor's finalise seam.
+      ...(run.answerKind ? { answerKind: run.answerKind } : {}),
     });
   });
 }
@@ -2163,5 +5186,45 @@ function extractRetryableFlag(response: unknown): boolean {
   const details = (errBlock as { details?: unknown }).details;
   if (!details || typeof details !== 'object') return false;
   return (details as { retryable?: unknown }).retryable === true;
+}
+
+/**
+ * F4 — pull the graph-conflict recovery metadata out of the failure
+ * response's error-block details so it can be forwarded onto the 409
+ * BoundaryError envelope (A2's UI refresh/reconfirm leg reads it). Returns
+ * undefined on any shape drift — the 409 status alone still carries the
+ * recoverable signal.
+ *
+ * A-2: DERIVED from `GRAPH_CONFLICT_RECOVERY_KEYS`, the same manifest the
+ * producers are compile-bound to (`satisfies GraphConflictFailureDetails` in
+ * turn-executor.ts). The old hand allowlist here FAILED SILENT — a key added
+ * at a producer never reached the wire (`fence_verdict` had to be hand-added
+ * when the fence landed). Now a new key is either in the manifest (and flows
+ * end-to-end) or a compile error at the producer; there is no silent third
+ * state. Per-key copy semantics live beside the manifest.
+ */
+function extractGraphConflictRecovery(
+  response: unknown,
+): Record<string, unknown> | undefined {
+  if (!response || typeof response !== 'object') return undefined;
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks) || blocks.length === 0) return undefined;
+  const errBlock = blocks.find(
+    (b: unknown) =>
+      b != null && typeof b === 'object' && (b as { type?: unknown }).type === 'error',
+  );
+  if (!errBlock || typeof errBlock !== 'object') return undefined;
+  const details = (errBlock as { details?: unknown }).details;
+  if (!details || typeof details !== 'object') return undefined;
+  const d = details as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of GRAPH_CONFLICT_RECOVERY_KEYS) {
+    if (GRAPH_CONFLICT_RECOVERY_COPY_MODE[key] === 'string') {
+      if (typeof d[key] === 'string') out[key] = d[key];
+    } else if (key in d) {
+      out[key] = d[key];
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 

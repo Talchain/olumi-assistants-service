@@ -29,6 +29,23 @@ import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import { OlumiResponseSchema, BoundaryErrorSchema } from '@talchain/schemas/boundary';
+import { AnswerShapeSchema } from '../../src/orchestrator-v5/routing/answer-shape.js';
+
+// The vendored `@talchain/schemas` OlumiResponseSchema is `.strict()` and does
+// NOT declare `_answer_shape`: that field is a POST-validation product sidecar
+// (ROADMAP 1.132), the same mechanic as `_reasoning` / `_timings` — route-v2
+// STRIPS it before the strict egress parse and RE-ATTACHES it after, so the
+// wire body legitimately carries it while the contract schema never sees it.
+// Coach/converse turns have shipped it on the wire unconditionally since the F1
+// flag deletion; the F1 egress fallback now additionally synthesises it for the
+// model's own un-shaped ANSWER prose (this A1 direct_answer path). To validate
+// the wire body the way it is actually shaped, extend the strict contract with
+// the KNOWN optional sidecar — DERIVED from the authoritative `AnswerShapeSchema`
+// (not a hand-copied field list) so its shape is still fully validated, and
+// `.extend` preserves `.strict()` so every OTHER unknown key is still rejected.
+const OlumiResponseWireSchema = OlumiResponseSchema.extend({
+  _answer_shape: AnswerShapeSchema.optional(),
+});
 
 // ---------------------------------------------------------------------------
 // Fixture loading
@@ -205,25 +222,20 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 }));
 
 // Slice B: mock the V5 session store so the integration tests don't try to
-// reach Supabase. Every mocked method is a no-op; Slice B behaviour is
-// covered by dedicated session unit + integration tests.
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    // Upsert-on-append pre-flight: A1 fixtures don't send user_id, so the
-    // preflight short-circuits to skipped before this stub is reached. The
-    // method is declared to satisfy the SessionStore interface.
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
-
-let v5Enabled = true;
+// reach Supabase. Slice B behaviour is covered by dedicated session unit +
+// integration tests.
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore(),
+    resetSessionStoreForTests: () => {},
+  };
+});
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -233,7 +245,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -276,7 +287,6 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();
@@ -302,12 +312,19 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = OlumiResponseWireSchema.parse(body);
     expect(parsed.assistant_text).toBe(fx.expected.body!.assistant_text);
     expect(parsed.blocks).toEqual([]);
-    expect(parsed.suggested_actions).toEqual([]);
+    // ROADMAP 1.148 C3 re-pin: at stage 'analyse' with no analysable graph
+    // the deterministic chip floor offers the curated set-option-values
+    // prompt chip (was `[]` when this fixture ran at frame stage).
+    expect(parsed.suggested_actions.map((a) => a.id)).toEqual([
+      'chip_prompt_set_option_values',
+    ]);
     expect(parsed.insights).toEqual([]);
-    expect(parsed.stage_indicator).toBe('frame');
+    // ROADMAP 1.148 C3: fixture now runs at stage 'analyse' (see the
+    // fixture's note_roadmap_1148) so it genuinely reaches the LLM path.
+    expect(parsed.stage_indicator).toBe('analyse');
 
     expect(turnExecutorEvents('started')).toHaveLength(1);
     const completed = turnExecutorEvents('completed');
@@ -401,7 +418,7 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = OlumiResponseWireSchema.parse(body);
     // Text was contaminated; sanitiser stripped tags + em-dashes.
     expect(parsed.assistant_text).not.toMatch(/<[a-zA-Z]|\u2014/);
     expect(parsed.assistant_text).toContain('two forces');

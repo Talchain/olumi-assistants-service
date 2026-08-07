@@ -28,20 +28,37 @@ const UI_FIXTURE = JSON.parse(
 ) as Record<string, unknown>;
 
 // Session store stub — no Supabase.
+//
+// Built from `createMockSessionStore()` (tests/utils/mock-session-store.ts)
+// rather than a hand-rolled literal. The literal that used to sit here
+// implemented five of the interface's methods, so it silently lacked
+// `ensureScenarioExists` — the V5 pre-flight's ownership oracle. That gap was
+// invisible only because production carried a `typeof store.ensureScenarioExists
+// !== 'function'` skip branch, i.e. a partial test double was shaping a
+// fail-open on the security path. The branch is gone; completeness comes from
+// the helper, which is typed `Required<SessionStore>` and so goes RED in one
+// place when the interface grows a method (derive, don't mirror).
+//
+// `importOriginal` is spread because a bare factory REPLACES the module:
+// without it, real exports the code under test imports from this module
+// (`SessionReadError`, `StateCommitFailedError`) would vanish.
 const appendCalls: unknown[] = [];
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async (write: unknown) => {
-      appendCalls.push(write);
-      return { id: 'mock-row' };
-    },
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-  }),
-  resetSessionStoreForTests: () => {},
-}));
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: async (write: unknown) => {
+          appendCalls.push(write);
+          return { id: 'mock-row' };
+        },
+      }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 // Mock getAdapter so route-level integration tests don't hit a live provider.
 // The mock exposes chatWithTools — the seam routeWithToolUse uses.
@@ -73,7 +90,6 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
 }));
 
 // Feature flag proxy — enable V5 route for these tests.
-let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -83,7 +99,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (p === 'features') {
           return new Proxy(Reflect.get(t, p) as object, {
             get(ft, fp) {
-              if (fp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(ft, fp);
             },
           });
@@ -132,7 +147,6 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();
@@ -263,14 +277,24 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
       payload,
     });
 
-    // Post-fail-closed (v5-exclusive-cee Task B): a handler that fails at
-    // scenario_read produces commit_performed=false, which the route
-    // surfaces as 500 BoundaryError. Status 200 is unreachable from this
-    // setup because the production registry has no wired scenarioReader.
-    // The test's purpose is the VALIDATE-stage regression — that the
-    // validator didn't over-reach on real-UI graph_state — so assert on
-    // the telemetry (always emitted) rather than status 200.
-    expect(res.statusCode).toBe(500);
+    // The turn now completes 200 with a recoverable "nothing to analyse yet"
+    // recovery response. It previously asserted 500, and the 500 was an
+    // ARTEFACT OF THE INCOMPLETE STORE DOUBLE above, not product behaviour:
+    // the hand-rolled literal implemented five SessionStore methods, so the
+    // handler's scenario read hit `store.loadGraph is not a function`,
+    // commit_performed went false, and the route surfaced a 500. With the
+    // complete double the handler reaches its real precondition
+    // (`analysis_not_ready`) and returns the recovery chip — which is what
+    // production does. The old comment's claim that "status 200 is
+    // unreachable from this setup" was true only of the broken double.
+    //
+    // The test's purpose is unchanged and is now pinned MORE tightly, on
+    // signals that are non-vacuous at 200 (`validator_outcome` /
+    // `handler_proposed` are always emitted, and both carry a real value
+    // here — the previous `body.details?.reason` checks would have degraded
+    // to `undefined !== 'no_options_defined'`, i.e. passing by testing
+    // nothing, the moment the status stopped being 500).
+    expect(res.statusCode).toBe(200);
     const completed = events.find((e) => e.event === 'turn_executor.completed');
     expect(completed).toBeDefined();
     const stages = completed!.data.stages_completed as string[];
@@ -278,16 +302,17 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
     // real wire. A prior precondition revision required canonical options[]
     // on graph_state, which the real UI doesn't carry — under that bug this
     // turn would have been rejected at validate with PRECONDITION_UNMET.
-    // Now validate runs; any failure is downstream (handler / scenario
-    // read / PLoT) — never a validator over-reach.
     expect(stages).toContain('validate');
-    expect(completed!.data.turn_class).toBe('handler'); // routed to handler
-    // Confirm the 500's failure originated downstream (handler path), not at
-    // the validator. The wire BoundaryError's reason / cause_kind must not
-    // name the validator-layer over-reach code.
-    const body = JSON.parse(res.body);
-    expect(body.details?.reason).not.toBe('no_options_defined');
-    expect(body.details?.validation_error_code).toBeUndefined();
+    // Control reached handler routing on the unmodified real-UI graph_state.
+    expect(completed!.data.handler_proposed).toBe('run_analysis');
+    // The validator PASSED — the direct statement of "no over-reach", and the
+    // assertion the old `not.toBe('no_options_defined')` was reaching for.
+    // Under the P0-1 bug this would read as a validator rejection.
+    expect(completed!.data.validator_outcome).toBe('valid');
+    // Whatever failed, failed AFTER validate: the recovery response is the
+    // handler's own precondition answer, so `validate` is in stages_completed
+    // and the turn was not rejected before it.
+    expect(stages.indexOf('validate')).toBeGreaterThanOrEqual(0);
   });
 
   it('text_only turn with graph_state — validate stage skipped entirely', async () => {

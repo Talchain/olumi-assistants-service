@@ -290,7 +290,11 @@ describe('repository scan (the gate)', () => {
     const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/turn-executor.ts'), 'utf-8');
     const sourceLines = source.split('\n');
     const sites = result.sites.filter((s) => s.file === 'orchestrator-v5/turn-executor.ts');
-    expect(sites).toHaveLength(3);
+    // Derived from the allowlist (was a hand-pinned `3` — a mirror of the
+    // allowlist count that would false-RED on every reviewed extension).
+    expect(sites).toHaveLength(
+      AUTHORITY_ALLOWLIST['orchestrator-v5/turn-executor.ts']!.count,
+    );
     for (const site of sites) {
       expect(
         sourceLines[site.line - 1],

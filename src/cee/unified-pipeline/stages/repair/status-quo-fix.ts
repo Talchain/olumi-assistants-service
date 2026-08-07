@@ -12,6 +12,7 @@
  */
 
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
+import { canReachAnyGoal } from "../../../../graph/reachability.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { canonicalStructuralEdge, neutralCausalEdge } from "../../utils/edge-format.js";
 
@@ -36,35 +37,25 @@ export interface StatusQuoResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Check if a node has a directed path to any goal node via BFS.
+ * Check if a node has a directed path to any goal node.
+ *
+ * Delegates to the single reachability kernel (`src/graph/reachability.ts`).
+ * It previously carried its own BFS which built adjacency from EVERY edge with
+ * no `edge_type` test, so a bidirected edge — an unmeasured confounder, not a
+ * causal path — counted as a route to the goal. Both validators that judge this
+ * pass's output exclude bidirected edges (`graph-validator.ts:61`,
+ * `graph-structure-validator.ts:294/346`), so the repair could be told
+ * "nothing is disconnected" about the very graph the validator had just failed.
+ *
+ * Kept as a named export: it is part of this module's tested surface and its
+ * signature is unchanged.
  */
 export function hasPathToGoal(
   startId: string,
   edges: readonly EdgeT[],
   goalIds: ReadonlySet<string>,
 ): boolean {
-  const forward = new Map<string, string[]>();
-  for (const edge of edges) {
-    const list = forward.get(edge.from) ?? [];
-    list.push(edge.to);
-    forward.set(edge.from, list);
-  }
-
-  const visited = new Set<string>();
-  const queue = [startId];
-  visited.add(startId);
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (goalIds.has(current)) return true;
-    for (const next of forward.get(current) ?? []) {
-      if (!visited.has(next)) {
-        visited.add(next);
-        queue.push(next);
-      }
-    }
-  }
-  return false;
+  return canReachAnyGoal(startId, edges, goalIds);
 }
 
 /**

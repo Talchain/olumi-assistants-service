@@ -37,15 +37,6 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async repairGraph(args: any, _opts: CallOpts): Promise<any> {
-    this.callCount++;
-    return {
-      graph: args.graph,
-      rationales: [],
-      usage: { input_tokens: 10, output_tokens: 20 },
-    };
-  }
-
   async clarifyBrief(args: any, _opts: CallOpts): Promise<any> {
     this.callCount++;
     return {
@@ -187,7 +178,7 @@ describe("CachingAdapter", () => {
     await caching.suggestOptions({ goal: "Test" }, defaultOpts);
     await caching.suggestOptions({ goal: "Test" }, defaultOpts);
 
-    // Repair graph
+    // (repairGraph removed — ROADMAP 2.763)
     const testGraph = {
       version: "1",
       default_seed: 17,
@@ -195,8 +186,6 @@ describe("CachingAdapter", () => {
       edges: [],
       meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
     };
-    await caching.repairGraph({ graph: testGraph, violations: ["test"] }, defaultOpts);
-    await caching.repairGraph({ graph: testGraph, violations: ["test"] }, defaultOpts);
 
     // Clarify brief
     await caching.clarifyBrief({ brief: "Test", round: 0 }, defaultOpts);
@@ -215,7 +204,8 @@ describe("CachingAdapter", () => {
     }, defaultOpts);
 
     // Each operation called twice, but second call from cache
-    expect(mock.getCallCount()).toBe(6); // 6 operations, 1 adapter call each
+    // 5 (was 6 — repairGraph retired by ROADMAP 2.763), 1 adapter call each
+    expect(mock.getCallCount()).toBe(5);
   });
 
   it("should expose cache statistics", () => {

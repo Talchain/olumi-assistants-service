@@ -23,6 +23,7 @@ import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { CONTEXT_PACK_RECENT_TURNS_CAP } from '../context/context-pack-assembler.js';
 import { summariseCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { summariseGraphCounts } from '../context/build-context-summary.js';
 
@@ -251,19 +252,21 @@ describe('TurnExecutor — canonical context frame threading (T4 Slice 2)', () =
   });
 
   it('priorTurnCount reports the ASSEMBLED (capped) context, never the uncapped store total', async () => {
-    // 7 prior turns in the store; the ContextPack conversation projection caps
-    // at CONTEXT_PACK_RECENT_TURNS_CAP (5). The frame must report what the
-    // turn actually reasoned over — an uncapped 7 would over-report context
-    // completeness to the harness (A2 fabricated-completeness hazard flagged
-    // in the slice-2 fail-open review).
-    mockState.priorTurns = [1, 2, 3, 4, 5, 6, 7].map(mkPriorTurn);
+    // cap+2 prior turns in the store; the ContextPack conversation projection
+    // caps at CONTEXT_PACK_RECENT_TURNS_CAP. The frame must report what the turn
+    // actually reasoned over — the uncapped store total would over-report context
+    // completeness to the harness (A2 fabricated-completeness hazard flagged in
+    // the slice-2 fail-open review). Derived from the constant so the cap binds
+    // whatever its value.
+    const storeTotal = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
+    mockState.priorTurns = Array.from({ length: storeTotal }, (_, i) => i + 1).map(mkPriorTurn);
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-frame-cap', {
       routingAdapter: mockRoutingAdapter(async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…')),
       handlerRegistry: makeSuccessRegistry(GRAPH_HASH),
       graphState: GRAPH_WITH_OPTIONS,
     });
     expect(result.frame).toBeDefined();
-    expect(result.frame!.conversation.priorTurnCount).toBe(5);
+    expect(result.frame!.conversation.priorTurnCount).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
   });
 
   it('read-only posture: the frame never alters the user-facing response', async () => {

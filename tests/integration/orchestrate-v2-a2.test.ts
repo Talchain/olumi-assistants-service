@@ -165,25 +165,20 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 }));
 
 // Slice B: mock the V5 session store so the integration tests don't try to
-// reach Supabase. Every mocked method is a no-op; Slice B behaviour is
-// covered by dedicated session unit + integration tests.
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    // Upsert-on-append pre-flight: A2 fixtures don't send user_id, so the
-    // preflight short-circuits to skipped before this stub is reached, but
-    // the SessionStore interface still requires the method.
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
-
-let v5Enabled = true;
+// reach Supabase. Slice B behaviour is covered by dedicated session unit +
+// integration tests.
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore(),
+    resetSessionStoreForTests: () => {},
+  };
+});
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -193,7 +188,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -228,7 +222,6 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();
@@ -259,9 +252,16 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
     const parsed = OlumiResponseSchema.parse(body);
     expect(parsed.assistant_text).toBe(fx.expected.body!.assistant_text);
     expect(parsed.blocks).toEqual([]);
-    expect(parsed.suggested_actions).toEqual([]);
+    // ROADMAP 1.148 C3 re-pin: at stage 'analyse' with no analysable graph
+    // the deterministic chip floor offers the curated set-option-values
+    // prompt chip on the clarify compose path (was `[]` at frame stage).
+    expect(parsed.suggested_actions.map((a) => a.id)).toEqual([
+      'chip_prompt_set_option_values',
+    ]);
     expect(parsed.insights).toEqual([]);
-    expect(parsed.stage_indicator).toBe('frame');
+    // ROADMAP 1.148 C3: fixture now runs at stage 'analyse' (see the
+    // fixture's note_roadmap_1148) so it genuinely reaches the LLM path.
+    expect(parsed.stage_indicator).toBe('analyse');
 
     expect(turnExecutorEvents('started')).toHaveLength(1);
     const completed = turnExecutorEvents('completed');

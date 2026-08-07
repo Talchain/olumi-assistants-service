@@ -20,9 +20,19 @@
  * graphOutput is available. The graph is also persisted atomically via
  * CommitMetadata.graph → append_turn_atomic → scenarios.graph for session
  * resume. The inline graph is the primary render path; Supabase is the
- * fallback for session resume. We still drop V4's GraphPatchBlock,
- * strengthen_items, draft warnings, and telemetry — those remain V4-only
- * surface not yet in the V5+UI contract.
+ * fallback for session resume. We still drop V4's GraphPatchBlock, the
+ * STRUCTURED `strengthen_items` wire field / guidance chips, draft warnings,
+ * and telemetry — those structured surfaces remain V4-only, not yet in the
+ * V5+UI contract.
+ *
+ * NOTE (corrected 2026-06-14, landed 2026-07-19): the raw object-shaped
+ * `strengthen_items` are NOT discarded on V5 — they are consumed by
+ * `buildPostDraftNarrative` (imported at the top of this file, called in the
+ * dispatch body below) to source the post-draft "assumption to check" bullet
+ * and one additional "worth a look" line in `assistant_text`. The earlier
+ * wording here ("we drop strengthen_items") referred only to the structured
+ * wire field, and was read by a later audit as a total coaching loss. It is
+ * not. Object-shaped items survive into the served narrative.
  *
  * V4 column audit (2026-04-22): V4's handleDraftGraph does not write to the
  * scenarios table directly — it returns graphOutput in its result and the
@@ -54,9 +64,16 @@ import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tool
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { loadMostRecentPendingActions } from '../build-turn-context.js';
+import {
+  appendLapseNotice,
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from './hold-thread-through.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { emitContextBudget } from '../context/context-budget-telemetry.js';
 import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
@@ -64,9 +81,11 @@ import {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
+import { SET_OPTION_VALUES_CHIP } from '../configure-option-chip-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
+import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -77,6 +96,38 @@ export interface DispatchDraftGraphParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   readonly request: FastifyRequest;
+  /**
+   * ROADMAP 2.63 C2 — server-assembled decision brief for explicit-generate
+   * turns (`generate_model` / `explicit_generate` wire flag). When set, the
+   * pipeline drafts from THIS text instead of `payload.message`: the wire
+   * message on a confirm-chip click is the chip's canned label, not the
+   * brief. Redirects every brief consumer in this dispatcher (the unified
+   * pipeline input, brief-text persistence, context-budget telemetry, the
+   * V6 dual-draft enrichment brief) — but NOT the committed turn's
+   * `user_message`, which stays the verbatim wire message so the
+   * conversation record remains honest. Absent on the route's heuristic
+   * (isDraftGraphShape) path, where behaviour is unchanged.
+   */
+  readonly briefOverride?: string;
+  /**
+   * ROADMAP 2.63 C3/C4 — pending-action refs (== chip_id) CONSUMED by this
+   * draft: the `draft_graph` offer pending the route-level resume just
+   * honoured. Threaded to `CommitMetadata.consumedPendingRefs` so the
+   * carry-forward retires the offer with the draft — otherwise a live
+   * "build/redraft the model" offer would survive the very draft it
+   * produced and a later bare "yes" could re-trigger it (zombie re-offer).
+   * Absent on the heuristic and flag paths (nothing to consume).
+   */
+  readonly consumedPendingRefs?: readonly string[];
+  /**
+   * Review-576 condition 2 — wall-clock baseline of the HTTP request
+   * (route-v2's `routeStartedAt`). Threaded through `handleDraftGraph` to
+   * the unified pipeline so the draft retry-affordability gate and the
+   * Step-11 budget guard measure elapsed time from REQUEST start (covering
+   * routing tool-use + context assembly), not from LLM start. Optional:
+   * absent callers keep parse.ts's documented LLM-start fallback.
+   */
+  readonly requestStartMs?: number;
 }
 
 export interface DispatchDraftGraphResult {
@@ -133,7 +184,7 @@ export interface DispatchDraftGraphResult {
  *     The response text here is never sent to the client; use the pipeline's
  *     own narration as a neutral fallback for server-side logging only.
  */
-function draftResultToOlumiResponse(
+export function draftResultToOlumiResponse(
   result: DraftGraphResult,
   payload: MessageTurnPayload,
   graphPersisted: boolean,
@@ -225,6 +276,28 @@ function draftResultToOlumiResponse(
   // frame stays visible and the operator can investigate the persistence log.
   const stageIndicator = graphPersisted ? 'analyse' : payload.stage;
 
+  // Hard constraints extracted from the brief. These ride on `graphOutput` as
+  // a SIBLING of nodes/edges (package.ts:406 emits them alongside `graph`;
+  // transformResponseToV3 lifts them to the V3 root; draft-graph.ts:300's
+  // `body.graph ?? body` then makes that root the graphOutput). Before
+  // @talchain/schemas 0.18.0 the rebuild below dropped them, because
+  // DraftGraphBlockSchema was `.strict()` over exactly four keys — so
+  // threading the field WITHOUT the contract bump would have failed
+  // validateEgress and replaced every draft response with the
+  // EGRESS_CONTRACT_VIOLATION envelope. 0.18.0 declares it optional.
+  //
+  // Emitted ONLY when a non-empty array is actually present. An absent or
+  // empty extraction omits the key entirely rather than emitting `[]`, so
+  // no-constraint responses stay byte-identical to the pre-0.18.0 wire and
+  // the contract's "consumers must treat absence and [] as equivalent" note
+  // is never exercised by us.
+  const rawGoalConstraints = (result.graphOutput as { goal_constraints?: unknown } | undefined)
+    ?.goal_constraints;
+  const goalConstraints =
+    Array.isArray(rawGoalConstraints) && rawGoalConstraints.length > 0
+      ? (rawGoalConstraints as unknown[])
+      : undefined;
+
   // Include the FINAL graph inline so the UI can apply it directly without a
   // Supabase re-fetch. Only present when graphOutput is available and
   // persistence succeeded — on failure the client never sees this response.
@@ -235,6 +308,7 @@ function draftResultToOlumiResponse(
           edges: (result.graphOutput.edges ?? []) as unknown[],
           node_count: finalNodeCount,
           edge_count: finalEdgeCount,
+          ...(goalConstraints ? { goal_constraints: goalConstraints } : {}),
         }
       : undefined;
 
@@ -268,10 +342,28 @@ function draftResultToOlumiResponse(
     ? { draft_graph: result.draftGraphTimings }
     : undefined;
 
+  // Bias-signal visibility (a1/bias-signal-blocks): project the draft LLM's
+  // already-emitted `coachingBiasSignals` into UP TO 2 structured
+  // `coaching_kind:'bias_signal'` blocks so DGAI #356's merged renderer can
+  // surface them as bias cards. Additive — the prose-bullet path
+  // (buildPostDraftNarrative above) is unchanged; these ride alongside it.
+  // Only on the persisted path (a non-persisted draft has no canvas graph to
+  // ground the target refs against, and the response is discarded anyway).
+  // Entity-id leaks in title/body are scrubbed downstream by the central
+  // egress chokepoint (sanitiseOlumiResponseForEgress → sanitiseBlock
+  // 'coaching'), exactly as for every other coaching block.
+  const blocks: OlumiResponse['blocks'] = graphPersisted
+    ? buildDraftBiasSignalBlocks({
+        biasSignals: result.coachingBiasSignals,
+        graph: result.graphOutput,
+        createdAt: new Date().toISOString(),
+      })
+    : [];
+
   return {
     response_version: 2,
     assistant_text: assistantText,
-    blocks: [],
+    blocks,
     suggested_actions: [...suggestedActions],
     insights: [],
     stage_indicator: stageIndicator,
@@ -316,13 +408,13 @@ function buildPostDraftChips(params: {
       },
     ];
   }
-  return [
-    {
-      id: 'chip_prompt_set_option_values',
-      label: 'Set values for options',
-      message: 'Help me set up the options for this decision so the analysis can run.',
-    },
-  ];
+  // ROADMAP 2.308 / S2(b) — derived from `configure-option-chip-text.ts`, the
+  // single source both the configure gate and every configure chip build from.
+  // The literal that used to sit here ("Help me set up the options …") was
+  // NO_MATCH at the gate AND blocked by EDIT_GRAPH_NEGATIVE_REGEX's "set up",
+  // so the product's own readiness chip could not reach the one chat path that
+  // writes option interventions.
+  return [{ ...SET_OPTION_VALUES_CHIP }];
 }
 
 export async function dispatchDraftGraph(
@@ -331,9 +423,19 @@ export async function dispatchDraftGraph(
   const { payload, requestId, request } = params;
   const startedAt = Date.now();
 
+  // C2 — the brief the pipeline drafts from. `payload.message` except on
+  // the explicit-generate path, where route-v2 assembled the real brief
+  // server-side (see DispatchDraftGraphParams.briefOverride).
+  const effectiveBrief = params.briefOverride ?? payload.message;
+
   let draftResult: DraftGraphResult;
   try {
-    draftResult = await handleDraftGraph(payload.message, request, payload.turn_id);
+    draftResult = await handleDraftGraph(
+      effectiveBrief,
+      request,
+      payload.turn_id,
+      params.requestStartMs !== undefined ? { requestStartMs: params.requestStartMs } : undefined,
+    );
   } catch (err) {
     log.error(
       {
@@ -371,6 +473,32 @@ export async function dispatchDraftGraph(
   }
 
   try {
+    // Context v2 S0 (ROADMAP 1.73, 03 §2): draft is INSTRUMENTED but NOT
+    // re-budgeted (the 58,564-char draft prompt is ROADMAP 1.75's scope).
+    // The draft LLM call happens inside the unified pipeline; its usage
+    // surfaces post-hoc via toolLLMTelemetry (prompt/completion tokens —
+    // cache token fields are not carried on that trace, so they report
+    // null). Emitted only when an LLM call actually landed.
+    if (draftResult.toolLLMTelemetry) {
+      emitContextBudget({
+        call_site: 'draft_graph',
+        model: draftResult.toolLLMTelemetry.model || null,
+        prompt_version: draftResult.toolLLMTelemetry.prompt_version ?? null,
+        prompt_hash: draftResult.toolLLMTelemetry.prompt_hash ?? null,
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        section_chars: { brief: effectiveBrief.length },
+        total_chars: effectiveBrief.length,
+        truncations: [],
+        summary_lag_turns: null,
+        ui_narrowed: null,
+        usage: {
+          input_tokens: draftResult.toolLLMTelemetry.input_tokens,
+          output_tokens: draftResult.toolLLMTelemetry.output_tokens,
+        },
+      });
+    }
+
     // M2 LLM calls made by the dual-draft stage this turn (0 or 1). Counted
     // whenever M2 actually reached the model — even if the merge applied
     // nothing, timed out, or errored — NOT gated on whether a merge landed.
@@ -395,7 +523,7 @@ export async function dispatchDraftGraph(
         const { enrichDraftGraph, m2LlmCallMade } = await import('../../cee/dual-draft/index.js');
         const outcome = await enrichDraftGraph({
           graph: draftResult.graphOutput,
-          brief: payload.message,
+          brief: effectiveBrief,
           analysisReady: draftResult.analysisReady ?? null,
           requestId,
           scenarioId: payload.scenario_id,
@@ -474,7 +602,11 @@ export async function dispatchDraftGraph(
     // as the DB CHECK constraint, with truncation rather than failure
     // on over-length inputs. Whitespace-only payloads collapse to
     // undefined → RPC param NULL → no write.
-    const briefNorm = normaliseBriefText(payload.message);
+    // C2 — persist the EFFECTIVE brief (the assembled one on explicit-
+    // generate turns): brief_text is what downstream enrichers (decision_
+    // review) and future draft turns read as "the user's brief", and the
+    // first-write-wins RPC predicate still protects an already-seeded value.
+    const briefNorm = normaliseBriefText(effectiveBrief);
     if (briefNorm.truncated) {
       emit(TelemetryEvents.V5BriefTextNormalised, {
         request_id: requestId,
@@ -486,6 +618,50 @@ export async function dispatchDraftGraph(
     }
     const briefTextForCommit = briefNorm.value;
 
+    // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──
+    // Closes the F-HELD round-2 KNOWN RESIDUAL for the draft path: this
+    // commit previously threaded NO priorPendingActions, so ANY draft turn
+    // silently wiped a live consent hold. Read the prior turn's pendings
+    // (single-row read; [] on a genuinely-first turn, degrades to [] on
+    // failure with store-layer telemetry — NOTE this is NOT the forbidden
+    // `readRecent` turn-chain read the freshness invariant below pins) and
+    // validate holds against the NEW draft graph: threaded re-pinned when
+    // the held batch still referees cleanly, honest lapse (notice +
+    // redacted telemetry) when the wholesale redraft invalidated it.
+    const priorPendingActions = await loadMostRecentPendingActions(
+      payload.scenario_id,
+      requestId,
+    );
+    const postDraftGraphHash = ((): string | null => {
+      try {
+        return computeAnalysisAffectingGraphHash(
+          draftResult.graphOutput as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        return null;
+      }
+    })();
+    const holdThread = threadHoldsThroughMutatingCommit({
+      priorPendingActions,
+      graphAfterCommit: draftResult.graphOutput ?? null,
+      graphHashAfterCommit: draftResult.graphOutput != null ? postDraftGraphHash : null,
+      // No per-operation record on a draft — the whole NEW graph IS the
+      // mutation. Fulfilment detection (round-3 concern 1) falls back to
+      // the post-draft end state: a concept the redraft itself delivered
+      // retires without the false "has lapsed" sentence.
+      appliedOperations: null,
+      nowMs: Date.now(),
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    emitHoldLapseTelemetry(holdThread.lapsed, {
+      requestId,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      site: 'draft_graph_dispatch',
+    });
+
     // Capture persistence_ms for the diagnostic trace's substage timings.
     // Cheap: two Date.now() calls regardless of flag state — the timing is
     // only surfaced when the trace is built (flag-on); flag-off path
@@ -495,6 +671,11 @@ export async function dispatchDraftGraph(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
       // sent to the client (the caller uses the response we return).
+      // HOLD-WIPE fix: the lapse notice IS committed on the provisional
+      // response (assistant_text below) so the durable copy carries it; the
+      // committed text is re-attached to the real wire response after the
+      // build (stored copy ⊆ wire copy — the draft narrative itself is
+      // reconstructable from the persisted graph, per the note below).
       //
       // V5 Conversation Context Reliability: the draft turn's assistant
       // narrative is built AFTER this commit (it needs graphPersisted, and
@@ -507,7 +688,7 @@ export async function dispatchDraftGraph(
       // user brief (userMessage) — it is graphPersisted-independent and
       // side-effect-free. Capturing the draft narrative without a second write
       // or breaking the telemetry-after-persistence invariant is a follow-up.
-      { response_version: 2, assistant_text: '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      { response_version: 2, assistant_text: holdThread.notice ?? '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -522,8 +703,30 @@ export async function dispatchDraftGraph(
         llm_calls_used: 1 + m2LlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
+        // A3 graph CAS observe-mode: the draft path is DELIBERATELY
+        // uninstrumented — no expectedGraphIdentityHash / expectedGraph
+        // AnalysisHash are threaded (undefined). This path performs no
+        // server-side persisted-graph read (it never runs buildTurnContext),
+        // and manufacturing an expected base from request input would violate
+        // the trusted-base rule (graph-cas-conflict.ts). The CAS hook
+        // therefore categorises draft writes as `first_write` on fresh
+        // scenarios and `no_expected`/`not_instrumented` on redrafts — that
+        // IS the coverage metric for this path, not a gap to "fix" by
+        // trusting the request.
         graph: draftResult.graphOutput ?? undefined,
         briefText: briefTextForCommit,
+        // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
+        // carry-forward runs on this path; graph_hash is the NEW draft's
+        // analysis-affecting hash (only when a graph is actually written).
+        priorPendingActions: holdThread.threaded,
+        // ROADMAP 2.63 C3/C4 — retire the honoured draft-offer pending
+        // atomically with the draft it produced (see the param doc).
+        ...(params.consumedPendingRefs !== undefined
+          ? { consumedPendingRefs: params.consumedPendingRefs }
+          : {}),
+        ...(draftResult.graphOutput != null && postDraftGraphHash !== null
+          ? { graph_hash: postDraftGraphHash }
+          : {}),
         // V5 Stage 2B-1b: the route-v2 draft path never runs buildTurnContext,
         // so no coaching_state is derived for this turn — persist NULL explicitly.
         coaching_state: null,
@@ -533,7 +736,20 @@ export async function dispatchDraftGraph(
     );
     const persistenceMs = Date.now() - commitStartedAt;
 
-    const response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
+    let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
+    // HOLD-WIPE fix — the committed provisional response carried the lapse
+    // notice (and the commit seam may have appended its own turn-TTL lapse
+    // notice, F-HELD 2b). The REAL wire response is built above, so
+    // re-attach the committed text here — the honest sentence must ship,
+    // never be stored-only. A bare `{}` commit result (test-double shape)
+    // has no assistant_text and appends nothing.
+    const committedText = commitResult.response?.assistant_text;
+    if (typeof committedText === 'string' && committedText.trim().length > 0) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, committedText.trim()),
+      };
+    }
     // V5 finaliser contract: surface the rich pipeline payload on the
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.
     // Only surface when the graph actually persisted — a non-persisted
@@ -587,9 +803,9 @@ export async function dispatchDraftGraph(
     // shape lands on a session with prior facts) surface as a divergence
     // between the wire `none` and any later turn's actual `freshness`
     // verdict — operators have a grep target.
-    const currentGraphHash = computeAnalysisAffectingGraphHash(
-      draftResult.graphOutput as GraphStateIngress | null | undefined,
-    );
+    // HOLD-WIPE fix: reuse the pre-commit hash of the SAME graph object
+    // (pure function, identical input) instead of re-deriving it here.
+    const currentGraphHash = postDraftGraphHash;
     const freshness: FreshnessDerivation = {
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',

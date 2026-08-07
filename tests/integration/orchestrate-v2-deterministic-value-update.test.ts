@@ -87,40 +87,49 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 let mockedPriorFacts: unknown[] = [];
 const appendCalls: unknown[] = [];
 
-vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: async (write: unknown) => {
-      appendCalls.push(write);
-      return { id: 'mock-row-id' };
-    },
-    // build-turn-context calls readRecent first (filters to handler
-    // turn_class) then readFactsFor against each row id. To exercise
-    // the freshness derivation against prior facts we must surface a
-    // prior handler turn so readFactsFor fires.
-    readRecent: async () =>
-      mockedPriorFacts.length > 0
-        ? [
-            {
-              id: 'mock-prior-handler-row',
-              turn_class: 'handler' as const,
-              turn_id: 'prior-turn',
-            },
-          ]
-        : [],
-    readFactsFor: async () => mockedPriorFacts,
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({
-      scope: { kind: 'structural' as const },
-      entries_invalidated: [],
-    }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
-
-let v5Enabled = true;
+// ROADMAP 1.148 C5 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror). The old hand-rolled store (a) lacked `loadGraph`,
+// so the D1 merge-base guard (PR #268) correctly fail-closed the mutation
+// turn with a 500 against the incomplete MOCK — not a live defect — and
+// (b) returned partial readRecent rows ({ id, turn_class, turn_id }) that
+// fail the ContextPack row validation (handler_id/created_at are required),
+// silently dropping the prior fact. The shared helper provides the full
+// interface; `makeSessionTurnRow` provides a complete prior-handler row.
+vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore, makeSessionTurnRow } = await import(
+    '../utils/mock-session-store.js'
+  );
+  return {
+    ...original,
+    getSessionStore: () =>
+      createMockSessionStore({
+        append: async (write) => {
+          appendCalls.push(write);
+          return { id: 'mock-row-id' };
+        },
+        // build-turn-context calls readRecent first (filters to handler
+        // turn_class) then readFactsFor against each row id. To exercise
+        // the freshness derivation against prior facts we must surface a
+        // prior handler turn so readFactsFor fires.
+        readRecent: async () =>
+          mockedPriorFacts.length > 0
+            ? [
+                makeSessionTurnRow({
+                  id: '77777777-7777-4777-8777-777777777777',
+                  scenario_id: SCENARIO_ID,
+                  turn_id: 'prior-turn',
+                  turn_class: 'handler',
+                  handler_id: 'run_analysis',
+                }),
+              ]
+            : [],
+        readFactsFor: async () => mockedPriorFacts as never,
+      }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -130,7 +139,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -291,7 +299,6 @@ describe('POST /orchestrate/v2/turn — deterministic value-update HTTP boundary
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();
@@ -457,7 +464,6 @@ describe('POST /orchestrate/v2/turn — live-hash prior fact + mutation replay',
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();

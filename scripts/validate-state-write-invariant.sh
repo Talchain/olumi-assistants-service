@@ -40,15 +40,21 @@ fail() {
 }
 
 # Pattern note: matches call-site syntax `.rpc('append_turn_atomic'…)` and
-# `.from('v5_conversation_turns'…)` — NOT plain string occurrences in
-# comments or docstrings. Comments that mention the names remain legal.
+# `.from('v5_conversation_turns'…)`. Comments remain legal BY MECHANISM, not
+# by hope: matching runs on the COMMENT-STRIPPED view of each file
+# (scripts/ci/strip-source-comments.mjs, literal-aware tokeniser), so even a
+# comment quoting the call syntax verbatim — which the raw grep used to flag —
+# cannot fail the gate, while the real call (whose table name lives in a
+# string literal, kept intact) still does.
+STRIPPER="scripts/ci/strip-source-comments.mjs"
+command -v node >/dev/null 2>&1 || { echo "FAIL: node is required (matching runs via $STRIPPER)"; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 1. append_turn_atomic RPC — production callers must be supabase-store.ts only
 # ---------------------------------------------------------------------------
 ILLEGAL_RPC=$(
-  grep -RInE --include='*.ts' --exclude-dir='__tests__' --exclude='*.test.ts' \
-    "\.rpc\\(['\"]append_turn_atomic['\"]" src/ 2>/dev/null \
+  node "$STRIPPER" --scan "\.rpc\(['\"]append_turn_atomic['\"]" src 2>/dev/null \
+  | grep -v '/__tests__/' | grep -v '\.test\.ts:' \
   | grep -v '^src/orchestrator-v5/session/supabase-store\.ts:' \
   || true
 )
@@ -66,8 +72,8 @@ V5_TABLES=(
 )
 for tbl in "${V5_TABLES[@]}"; do
   ILLEGAL_TABLE=$(
-    grep -RInE --include='*.ts' --exclude-dir='__tests__' --exclude='*.test.ts' \
-      "\.from\\(['\"]$tbl['\"]" src/ 2>/dev/null \
+    node "$STRIPPER" --scan "\.from\(['\"]$tbl['\"]" src 2>/dev/null \
+    | grep -v '/__tests__/' | grep -v '\.test\.ts:' \
     | grep -v '^src/orchestrator-v5/session/supabase-store\.ts:' \
     || true
   )
@@ -83,8 +89,8 @@ done
 #   - src/orchestrator-v5/commit.ts
 #   - src/orchestrator-v5/build-turn-context.ts
 ILLEGAL_IMPORTS=$(
-  grep -RIn --include='*.ts' --exclude-dir='__tests__' --exclude='*.test.ts' \
-    -E "from '[^']*(orchestrator-v5/)?session/(index|store|supabase-store|cache|invalidation)(\.js)?'" src/ 2>/dev/null \
+  node "$STRIPPER" --scan "from '[^']*(orchestrator-v5/)?session/(index|store|supabase-store|cache|invalidation)(\.js)?'" src 2>/dev/null \
+  | grep -v '/__tests__/' | grep -v '\.test\.ts:' \
   | grep -v '^src/orchestrator-v5/session/' \
   | grep -v '^src/orchestrator-v5/commit\.ts:' \
   | grep -v '^src/orchestrator-v5/build-turn-context\.ts:' \

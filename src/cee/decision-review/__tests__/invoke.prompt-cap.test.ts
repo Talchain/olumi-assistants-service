@@ -1,0 +1,387 @@
+/**
+ * FIX 2 (1.41) — prompt size budgets for `buildDecisionReviewUserMessage`.
+ *
+ * Live evidence (flag-activation trial, 2026-07-08 — see
+ * Docs/lanes/LANE-REVIEW-DELIVERABLE) showed the <GRAPH>, <ISL_RESULTS>, and
+ * <DETERMINISTIC_COACHING> sections were raw `JSON.stringify` blocks with
+ * zero capping: no length check, no array-size cap anywhere. At a MODEST
+ * decision (4 options, 5 factors, 15 edges) this already cost ~9.9k input
+ * tokens; nothing stopped it scaling linearly (or worse) with graph size on
+ * a larger real decision.
+ *
+ * These tests pin:
+ *   1. An oversized fixture (100s of factor_sensitivity / fragile_edges /
+ *      option_comparison / graph node entries) produces a BOUNDED prompt —
+ *      never unbounded growth.
+ *   2. Truncation is always disclosed via a `[TRUNCATED: ...]` marker —
+ *      never silent.
+ *   3. Truncation keeps the most decision-relevant entries (highest
+ *      |elasticity| factors, highest switch_probability edges, highest
+ *      win_probability options) — not an arbitrary/positional cut.
+ *   4. A typical/small payload (well under every cap) is completely
+ *      unaffected — same content, no truncation marker, same order.
+ */
+
+import { describe, it, expect } from 'vitest';
+import {
+  buildDecisionReviewUserMessage,
+  DECISION_REVIEW_MAX_FACTOR_SENSITIVITY,
+  DECISION_REVIEW_MAX_FRAGILE_EDGES,
+  DECISION_REVIEW_MAX_OPTION_COMPARISON,
+  DECISION_REVIEW_MAX_GRAPH_NODES,
+  DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES,
+  DECISION_REVIEW_MAX_BRIEF_CHARS,
+  DECISION_REVIEW_SECTION_MAX_CHARS,
+  type DecisionReviewInvokeInput,
+} from '../invoke.js';
+
+function baseInput(overrides: Partial<DecisionReviewInvokeInput> = {}): DecisionReviewInvokeInput {
+  return {
+    brief: 'Should we hire a backend engineer or bring on a contractor?',
+    brief_hash: 'abc123',
+    graph: { nodes: [], edges: [] },
+    isl_results: { factor_sensitivity: [], fragile_edges: [], option_comparison: [] },
+    deterministic_coaching: { readiness: 'ready', headline_type: 'clear_winner', evidence_gaps: [], model_critiques: [] },
+    winner: { id: 'opt-1', label: 'Hire', win_probability: 0.7 },
+    runner_up: { id: 'opt-2', label: 'Contract', win_probability: 0.3 },
+    ...overrides,
+  };
+}
+
+function makeFactorSensitivity(n: number): Record<string, unknown>[] {
+  return Array.from({ length: n }, (_, i) => ({
+    factor_id: `fac_${i}`,
+    factor_label: `Factor ${i}`,
+    // Spread elasticity across a wide range so ranking is unambiguous —
+    // higher index = higher |elasticity| = more decision-relevant.
+    elasticity: (i + 1) * 0.01,
+    confidence: 0.5,
+  }));
+}
+
+function makeFragileEdges(n: number): Record<string, unknown>[] {
+  return Array.from({ length: n }, (_, i) => ({
+    edge_id: `edge_${i}`,
+    from_label: `Node ${i}`,
+    to_label: `Node ${i + 1}`,
+    switch_probability: (i + 1) / (n + 1),
+  }));
+}
+
+function makeOptionComparison(n: number): Record<string, unknown>[] {
+  return Array.from({ length: n }, (_, i) => ({
+    option_id: `opt_${i}`,
+    option_label: `Option ${i}`,
+    win_probability: (i + 1) / (n + 1),
+    outcome: { mean: 100 * i, p10: 90 * i, p90: 110 * i },
+  }));
+}
+
+function makeGraphNodes(n: number): Record<string, unknown>[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `node_${i}`, kind: 'factor', label: `Node ${i}` }));
+}
+
+function makeFlipThresholdData(n: number): Record<string, unknown>[] {
+  // Spread |flip_value - current_value| across a wide range so ranking is
+  // unambiguous — LOWER index = SMALLER distance-to-flip = MORE
+  // decision-relevant (closest to flipping is the most actionable signal,
+  // matching the historical `deriveFlipThresholds` closest-distance doctrine
+  // in src/orchestrator/context/analysis-compact.ts).
+  return Array.from({ length: n }, (_, i) => ({
+    factor_id: `flip_${i}`,
+    factor_label: `Flip Factor ${i}`,
+    current_value: 0,
+    flip_value: i + 1,
+    direction: 'increase',
+    unit: null,
+    elasticity: null,
+  }));
+}
+
+describe('buildDecisionReviewUserMessage — prompt size budgets (FIX 2, 1.41)', () => {
+  it('an oversized isl_results fixture produces a BOUNDED prompt, not unbounded growth', () => {
+    const small = buildDecisionReviewUserMessage(baseInput(), 0.4);
+
+    const huge = buildDecisionReviewUserMessage(
+      baseInput({
+        isl_results: {
+          factor_sensitivity: makeFactorSensitivity(500),
+          fragile_edges: makeFragileEdges(500),
+          option_comparison: makeOptionComparison(500),
+        },
+      }),
+      0.4,
+    );
+
+    // The huge fixture must NOT scale linearly with input size — bounded
+    // regardless of how many entries PLoT/upstream supplies.
+    expect(huge.length).toBeLessThan(small.length + 40_000);
+    // Sanity: without capping, 500+500+500 entries would be tens of
+    // thousands of characters just for these three arrays — confirm we're
+    // nowhere near that.
+    expect(huge.length).toBeLessThan(30_000);
+  });
+
+  it('an oversized graph fixture (100s of nodes/edges) produces a BOUNDED <GRAPH> section', () => {
+    const huge = buildDecisionReviewUserMessage(
+      baseInput({ graph: { nodes: makeGraphNodes(500), edges: [] } }),
+      0.4,
+    );
+    expect(huge.length).toBeLessThan(30_000);
+    expect(huge).toContain('[TRUNCATED:');
+    expect(huge).toContain('graph.nodes entries omitted');
+  });
+
+  it('truncation is always disclosed via a [TRUNCATED: ...] marker — never silent', () => {
+    const message = buildDecisionReviewUserMessage(
+      baseInput({
+        isl_results: {
+          factor_sensitivity: makeFactorSensitivity(50),
+          fragile_edges: makeFragileEdges(50),
+          option_comparison: makeOptionComparison(50),
+        },
+      }),
+      0.4,
+    );
+    expect(message).toContain('[TRUNCATED:');
+    expect(message).toContain('factor_sensitivity entries omitted');
+    expect(message).toContain('fragile_edges entries omitted');
+    expect(message).toContain('option_comparison entries omitted');
+  });
+
+  it('truncation keeps the most decision-relevant factor_sensitivity entries (highest |elasticity|), drops the least relevant', () => {
+    const n = DECISION_REVIEW_MAX_FACTOR_SENSITIVITY + 10;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ isl_results: { factor_sensitivity: makeFactorSensitivity(n) } }),
+      0.4,
+    );
+    // Highest-index entries have the highest elasticity (most relevant) —
+    // must survive. Lowest-index entries (least relevant) must be dropped.
+    expect(message).toContain('"factor_id": "fac_' + (n - 1) + '"');
+    expect(message).toContain('"factor_id": "fac_' + (n - DECISION_REVIEW_MAX_FACTOR_SENSITIVITY) + '"');
+    expect(message).not.toContain('"factor_id": "fac_0"');
+  });
+
+  it('truncation keeps the most severe fragile_edges entries (highest switch_probability), drops the least severe', () => {
+    const n = DECISION_REVIEW_MAX_FRAGILE_EDGES + 10;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ isl_results: { fragile_edges: makeFragileEdges(n) } }),
+      0.4,
+    );
+    // Highest-index entries have the highest switch_probability — must survive.
+    expect(message).toContain('"edge_id": "edge_' + (n - 1) + '"');
+    expect(message).not.toContain('"edge_id": "edge_0"');
+  });
+
+  it('truncation keeps the highest win_probability option_comparison entries, drops the rest', () => {
+    const n = DECISION_REVIEW_MAX_OPTION_COMPARISON + 10;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ isl_results: { option_comparison: makeOptionComparison(n) } }),
+      0.4,
+    );
+    expect(message).toContain('"option_id": "opt_' + (n - 1) + '"');
+    expect(message).not.toContain('"option_id": "opt_0"');
+  });
+
+  it('graph node/edge truncation keeps the first N (structural — no ranking signal at this layer)', () => {
+    const n = DECISION_REVIEW_MAX_GRAPH_NODES + 10;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ graph: { nodes: makeGraphNodes(n), edges: [] } }),
+      0.4,
+    );
+    expect(message).toContain('"id": "node_0"');
+    expect(message).toContain('"id": "node_' + (DECISION_REVIEW_MAX_GRAPH_NODES - 1) + '"');
+    expect(message).not.toContain('"id": "node_' + (n - 1) + '"');
+  });
+
+  it('a typical/small payload (well under every cap) is byte-identical to the uncapped path — no truncation marker, no reordering', () => {
+    const islResults = {
+      factor_sensitivity: makeFactorSensitivity(5),
+      fragile_edges: makeFragileEdges(3),
+      option_comparison: makeOptionComparison(2),
+    };
+    const input = baseInput({
+      isl_results: islResults,
+      graph: { nodes: makeGraphNodes(3), edges: [] },
+    });
+    const message = buildDecisionReviewUserMessage(input, 0.4);
+    expect(message).not.toContain('[TRUNCATED:');
+    // Order preserved exactly (no forced re-sort when under the cap) — the
+    // capped ISL_RESULTS block is byte-identical to a direct stringify of
+    // the original (uncapped) object.
+    expect(message).toContain(JSON.stringify(islResults, null, 2));
+  });
+
+  it('DETERMINISTIC_COACHING with a pathologically oversized single field is still bounded by the hard byte ceiling', () => {
+    const message = buildDecisionReviewUserMessage(
+      baseInput({
+        deterministic_coaching: {
+          readiness: 'ready',
+          headline_type: 'clear_winner',
+          evidence_gaps: [],
+          model_critiques: [],
+          // A single oversized blob — array-count capping alone can't catch this.
+          _pathological_blob: 'x'.repeat(50_000),
+        },
+      }),
+      0.4,
+    );
+    expect(message.length).toBeLessThan(30_000);
+    expect(message).toContain('[TRUNCATED:');
+    expect(message).toContain('hard ceiling');
+  });
+
+  // ==========================================================================
+  // FIX A (1.41 fix round, C1) — FLIP_THRESHOLD_DATA and BRIEF were still
+  // raw uncapped `JSON.stringify` after FIX 2 — defeating the "hard ceiling"
+  // claim. These pin both sections bounded, disclosed, and ranked.
+  // ==========================================================================
+
+  it('an oversized flip_threshold_data fixture produces a BOUNDED <FLIP_THRESHOLD_DATA> section, disclosed', () => {
+    const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 20;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ flip_threshold_data: makeFlipThresholdData(n) }),
+      0.4,
+    );
+    expect(message.length).toBeLessThan(30_000);
+    expect(message).toContain('[TRUNCATED:');
+    expect(message).toContain('flip_threshold_data entries omitted');
+  });
+
+  it('flip_threshold_data truncation keeps the closest-to-flip entries (smallest |flip - current|), drops the farthest', () => {
+    const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 10;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ flip_threshold_data: makeFlipThresholdData(n) }),
+      0.4,
+    );
+    // flip_0 has distance 1 (closest — most decision-relevant) — must survive.
+    expect(message).toContain('"factor_id": "flip_0"');
+    expect(message).toContain(
+      '"factor_id": "flip_' + (DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES - 1) + '"',
+    );
+    // flip_(n-1) has the largest distance (least relevant) — must be dropped.
+    expect(message).not.toContain('"factor_id": "flip_' + (n - 1) + '"');
+  });
+
+  it('a typical/small flip_threshold_data payload (under the cap) is byte-identical — no marker, no reordering', () => {
+    const flipData = makeFlipThresholdData(3);
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ flip_threshold_data: flipData }),
+      0.4,
+    );
+    expect(message).toContain(JSON.stringify(flipData, null, 2));
+  });
+
+  it('an oversized brief is capped to DECISION_REVIEW_MAX_BRIEF_CHARS, disclosed', () => {
+    const hugeBrief = 'Should we hire? '.repeat(400); // well over the cap
+    const message = buildDecisionReviewUserMessage(baseInput({ brief: hugeBrief }), 0.4);
+    const briefSection = message.slice(
+      message.indexOf('<BRIEF>') + '<BRIEF>'.length,
+      message.indexOf('</BRIEF>'),
+    );
+    expect(briefSection.length).toBeLessThan(DECISION_REVIEW_MAX_BRIEF_CHARS + 200);
+    expect(message).toContain('[TRUNCATED:');
+    expect(message).toContain('brief truncated');
+  });
+
+  it('a typical/small brief (under the cap) is byte-identical — no marker', () => {
+    const brief = 'Should we hire a backend engineer or bring on a contractor?';
+    const message = buildDecisionReviewUserMessage(baseInput({ brief }), 0.4);
+    const briefSection = message.slice(
+      message.indexOf('<BRIEF>') + '<BRIEF>'.length,
+      message.indexOf('</BRIEF>'),
+    ).trim();
+    expect(briefSection).toBe(brief);
+    expect(message).not.toContain('[TRUNCATED:');
+  });
+
+  // ==========================================================================
+  // P1 fix (overnight review F3) — factor_sensitivity cap comparator wrapped
+  // the NEGATIVE_INFINITY missing-elasticity sentinel in Math.abs(), so
+  // Math.abs(-Infinity) === Infinity made a malformed entry sort as the
+  // HIGHEST-magnitude entry — kept ahead of every well-formed high-elasticity
+  // entry, the inverse of the documented "keep highest |elasticity|"
+  // doctrine. A missing/non-numeric elasticity must sort LAST (least
+  // relevant), matching the `flipDistance` sentinel pattern already used for
+  // flip_threshold_data in this same file.
+  // ==========================================================================
+
+  it('a malformed (missing-elasticity) factor_sensitivity entry sorts LAST and is dropped ahead of well-formed high-elasticity entries when the cap overflows', () => {
+    // 16 entries: 15 well-formed with ascending elasticity (fac_1..fac_15,
+    // elasticity 1..15) plus 1 malformed entry with no numeric elasticity at
+    // all. Cap is 15, so exactly one entry must be dropped.
+    const wellFormed = Array.from({ length: 15 }, (_, i) => ({
+      factor_id: `fac_${i + 1}`,
+      factor_label: `Factor ${i + 1}`,
+      elasticity: i + 1, // fac_1 has the LOWEST elasticity (least relevant), fac_15 the HIGHEST
+      confidence: 0.5,
+    }));
+    const malformed = {
+      factor_id: 'fac_malformed',
+      factor_label: 'Malformed Factor',
+      // elasticity intentionally absent/non-numeric — triggers the
+      // NEGATIVE_INFINITY sentinel in readSortNum.
+      elasticity: null,
+      confidence: 0.5,
+    };
+    const message = buildDecisionReviewUserMessage(
+      baseInput({ isl_results: { factor_sensitivity: [...wellFormed, malformed] } }),
+      0.4,
+    );
+
+    // The malformed entry must NOT survive the cap — it is the least
+    // relevant entry (no elasticity signal at all), not the most.
+    expect(message).not.toContain('"factor_id": "fac_malformed"');
+    // The lowest well-formed elasticity entry (fac_1) is the next-least
+    // relevant of the well-formed set — it IS the one that should be
+    // dropped in its place... no: with 15 well-formed + 1 malformed = 16
+    // entries and a cap of 15, exactly one entry drops. The malformed entry
+    // must be that one, so ALL 15 well-formed entries (including the lowest,
+    // fac_1) must survive.
+    expect(message).toContain('"factor_id": "fac_1"');
+    expect(message).toContain('"factor_id": "fac_15"');
+    // Exactly one entry (the malformed one) drops out of 16 total.
+    expect(message).toContain('1 lower-sensitivity factor_sensitivity entries omitted');
+  });
+
+  it('an oversized graph THAT ALSO carries an oversized brief and flip_threshold_data hits BOTH new caps simultaneously and the total prompt stays under the hard per-section ceiling for each capped section', () => {
+    const hugeBrief = 'x'.repeat(DECISION_REVIEW_MAX_BRIEF_CHARS * 5);
+    const n = DECISION_REVIEW_MAX_FLIP_THRESHOLD_ENTRIES + 50;
+    const message = buildDecisionReviewUserMessage(
+      baseInput({
+        brief: hugeBrief,
+        graph: { nodes: makeGraphNodes(500), edges: [] },
+        isl_results: {
+          factor_sensitivity: makeFactorSensitivity(500),
+          fragile_edges: makeFragileEdges(500),
+          option_comparison: makeOptionComparison(500),
+        },
+        flip_threshold_data: makeFlipThresholdData(n),
+      }),
+      0.4,
+    );
+
+    // Every disclosed truncation must be present.
+    expect(message).toContain('brief truncated');
+    expect(message).toContain('flip_threshold_data entries omitted');
+    expect(message).toContain('graph.nodes entries omitted');
+
+    // Each capped section individually respects the hard per-section byte
+    // ceiling (plus slack for the disclosure marker text itself).
+    const briefSection = message.slice(
+      message.indexOf('<BRIEF>') + '<BRIEF>'.length,
+      message.indexOf('</BRIEF>'),
+    );
+    expect(briefSection.length).toBeLessThan(DECISION_REVIEW_MAX_BRIEF_CHARS + 200);
+
+    const flipSection = message.slice(
+      message.indexOf('<FLIP_THRESHOLD_DATA>') + '<FLIP_THRESHOLD_DATA>'.length,
+      message.indexOf('</FLIP_THRESHOLD_DATA>'),
+    );
+    expect(flipSection.length).toBeLessThan(DECISION_REVIEW_SECTION_MAX_CHARS + 500);
+
+    // Total prompt is still bounded overall, not scaling linearly with the
+    // combined oversized input.
+    expect(message.length).toBeLessThan(50_000);
+  });
+});

@@ -61,7 +61,6 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return true;
               if (featProp === 'pipelineV4Enabled') return false;
               return Reflect.get(featTarget, featProp);
             },
@@ -177,6 +176,34 @@ describe('POST /orchestrate/v2/turn — system event dispatch', () => {
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: makeSystemEventPayload({ kind: 'redo' }, '5'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
+  it('selection_change → 200 + NO commit (client-only event)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: makeSystemEventPayload(
+        { kind: 'selection_change', selected: [{ id: 'node-1', kind: 'factor' }] },
+        '7',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
+  it('selection_change cleared → 200 + NO commit (client-only event)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: makeSystemEventPayload(
+        { kind: 'selection_change', selected: [], cleared: true },
+        '8',
+      ),
     });
     expect(res.statusCode).toBe(200);
     expect(appendMock).not.toHaveBeenCalled();

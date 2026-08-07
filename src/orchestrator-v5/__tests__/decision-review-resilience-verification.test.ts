@@ -21,10 +21,16 @@
  *        input fact array UNCHANGED (decision_review absent on
  *        enrichment), and `v5.decision_review_failed` telemetry fires.
  *
- *   The outer `v5.decision_review_degraded` event from
- *   turn-executor.ts:1180 is documented in the verification doc as covered
- *   by code review (the catch wrap is a 6-line escape net) rather than a
- *   runtime assertion.
+ *   ⚠ AMENDED BY ROADMAP 2.180-B. This header used to close: "the outer
+ *   `v5.decision_review_degraded` event from turn-executor.ts:1180 is
+ *   documented in the verification doc as covered by code review (the catch
+ *   wrap is a 6-line escape net) rather than a runtime assertion." That was an
+ *   accurate description of a broken alarm. The outer wrap fires only when the
+ *   enricher RETHROWS, and the enricher rethrows only on an OUTER turn-budget
+ *   abort — so the event named "degraded" could not fire for the internal
+ *   hard-budget abort, which the 2.180 probe measured as the dominant cause of
+ *   missing reviews. The enricher now emits it directly on every INVOKED-but-
+ *   lost path, and case 2 below asserts it rather than asserting its absence.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -86,7 +92,10 @@ function makeRunAnalysisFact(): HandlerFact {
 describe('Test K — decision_review enricher resilience (verification)', () => {
   it('SUCCESS path — populates enrichment.decision_review, no degraded telemetry', async () => {
     invokeMock.mockResolvedValueOnce({
-      output: { recommendation: 'go with Option A', summary: 'strong margin' },
+      // narrative_summary present so the POST-parse contract gate admits the
+      // review (a missing review_card is dropped); `recommendation`/`summary`
+      // remain the fields this success-path attach assertion reads.
+      output: { narrative_summary: 'Option A leads.', recommendation: 'go with Option A', summary: 'strong margin' },
       raw: '{}',
       model: 'claude-sonnet-4-6',
       provider: 'anthropic',
@@ -144,10 +153,28 @@ describe('Test K — decision_review enricher resilience (verification)', () => 
     expect(failed).toHaveLength(1);
     expect(failed[0]!.data.reason).toBe('upstream blew up');
 
-    // The outer turn-executor "degraded" wrap is a defense-in-depth net
-    // for exceptions ESCAPING the enricher's try/catch. Since the enricher
-    // does NOT rethrow, the degraded event is correctly absent here.
-    expect(eventsOfType('v5.decision_review_degraded')).toHaveLength(0);
+    // ⚠ INVERTED BY ROADMAP 2.180-B. This assertion used to read
+    // `toHaveLength(0)`, with the comment: "the outer turn-executor 'degraded'
+    // wrap is a defense-in-depth net for exceptions ESCAPING the enricher's
+    // try/catch. Since the enricher does NOT rethrow, the degraded event is
+    // correctly absent here."
+    //
+    // Every clause of that was true, and the conclusion was still wrong. The
+    // enricher not rethrowing is exactly WHY the event named "degraded" could
+    // not fire for the dominant degradation — the 22 s hard-budget abort, which
+    // the 2.180 probe measured losing the model review on 12 of 363 analyses in
+    // 14 days. This test was pinning that silence as correct, so a lane reading
+    // it would have concluded the alarm was working as designed.
+    //
+    // The enricher now emits the degraded event itself on every path where the
+    // review was INVOKED and the turn ships without one. Rethrow behaviour is
+    // unchanged; the silence is what changed.
+    const degraded = eventsOfType('v5.decision_review_degraded');
+    expect(degraded).toHaveLength(1);
+    expect(degraded[0]!.data.reason).toBe('upstream_error');
+    expect(degraded[0]!.data.timed_out).toBe(false);
+    expect(typeof degraded[0]!.data.elapsed_ms).toBe('number');
+    expect(typeof degraded[0]!.data.budget_ms).toBe('number');
   });
 
   it('FAILURE path: shape_extraction_failed when invoke returns output:null', async () => {

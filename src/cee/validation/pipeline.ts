@@ -1,27 +1,10 @@
 import type { FastifyRequest } from "fastify";
 import type { components } from "../../generated/openapi.d.ts";
-import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
-import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
+import { log } from "../../utils/telemetry.js";
 import { config } from "../../config/index.js";
 import { safeEqual } from "../../utils/hash.js";
-import { computeQuality } from "../quality/index.js";
-import { normaliseCeeGraphVersionAndProvenance } from "../transforms/graph-normalisation.js";
 import { normaliseRiskCoefficients } from "../transforms/risk-normalisation.js";
-import {
-  validateAndFixGraph,
-} from "../structure/index.js";
-import {
-  detectAmbiguities,
-  detectConvergence,
-  generateQuestionCandidates,
-  selectBestQuestion,
-  cacheQuestion,
-  retrieveQuestion,
-  incorporateAnswer,
-  type ConversationHistoryEntry,
-} from "../clarifier/index.js";
-import { randomUUID } from "node:crypto";
 
 type CEEDraftGraphResponseV1 = components["schemas"]["CEEDraftGraphResponseV1"];
 type CEEErrorResponseV1 = components["schemas"]["CEEErrorResponseV1"];
@@ -55,211 +38,13 @@ export function isAdminAuthorized(request: FastifyRequest): boolean {
   return Boolean((adminKey && safeEqual(providedKey, adminKey)) || (adminKeyRead && safeEqual(providedKey, adminKeyRead)));
 }
 
-function clarifierEnabled(): boolean {
-  return config.cee.clarifierEnabled;
-}
-
-type CEEClarifierBlockV1 = components["schemas"]["CEEClarifierBlockV1"];
-
-export interface ClarifierIntegrationResult {
-  clarifier?: CEEClarifierBlockV1;
-  refinedGraph?: GraphV1;
-  previousQuality?: number;
-  /** Convergence status for backward compatibility with clarifier_status field */
-  convergenceStatus?: "complete" | "max_rounds" | "confident";
-}
-
-export async function integrateClarifier(
-  input: DraftInputWithCeeExtras,
-  graph: GraphV1,
-  quality: { overall: number },
-  requestId: string,
-  previousGraph?: GraphV1
-): Promise<ClarifierIntegrationResult> {
-  if (!clarifierEnabled()) {
-    return {};
-  }
-
-  // Map conversation history to required format (filter out entries without questions)
-  const conversationHistory: ConversationHistoryEntry[] = (input.conversation_history ?? [])
-    .filter((h): h is typeof h & { question: string; answer: string } =>
-      Boolean(h.question && h.answer))
-    .map((h) => ({
-      question_id: h.question_id,
-      question: h.question,
-      answer: h.answer,
-    }));
-
-  const round = conversationHistory.length + 1;
-  const maxRounds = input.max_clarifier_rounds ?? config.cee.clarifierMaxRoundsDefault;
-
-  // If clarifier_response is provided, incorporate the answer
-  let refinedGraph = graph;
-  let previousQuality: number | undefined;
-  let currentQuality = quality.overall;
-
-  if (input.clarifier_response) {
-    emit(TelemetryEvents.CeeClarifierAnswerReceived, {
-      request_id: requestId,
-      round,
-      question_id: input.clarifier_response.question_id,
-      answer_length: input.clarifier_response.answer.length,
-    });
-
-    const cachedQuestion = await retrieveQuestion(input.clarifier_response.question_id);
-    if (cachedQuestion) {
-      emit(TelemetryEvents.CeeClarifierQuestionRetrieved, {
-        request_id: requestId,
-        question_id: input.clarifier_response.question_id,
-      });
-
-      // Capture quality BEFORE incorporation (Fix 1.1)
-      previousQuality = quality.overall;
-
-      const result = await incorporateAnswer({
-        graph,
-        brief: input.brief,
-        clarifier_response: input.clarifier_response,
-        conversation_history: input.conversation_history,
-        requestId,
-      });
-
-      if (result.refined_graph) {
-        // Normalize and validate refined graph BEFORE quality computation (W's suggestion)
-        // This ensures convergence decisions use the same canonical representation as the final response
-        // AND maintains all graph invariants (single goal, outcome beliefs, decision branches)
-        let normalizedRefinedGraph = normaliseCeeGraphVersionAndProvenance(result.refined_graph);
-        const refinedValidation = validateAndFixGraph(normalizedRefinedGraph, undefined, {
-          checkSizeLimits: false, // Pipeline has existing size guards
-          enforceSingleGoal: config.cee.enforceSingleGoal,
-        });
-        refinedGraph = refinedValidation.graph ?? result.refined_graph;
-
-        // Recompute quality from normalized refined graph (Fix 1.1 + W's refinement)
-        const refinedQuality = computeQuality({
-          graph: refinedGraph,
-          confidence: quality.overall / 10, // Approximate original confidence
-          engineIssueCount: 0,
-          ceeIssues: [],
-        });
-        currentQuality = refinedQuality.overall;
-
-        log.debug(
-          {
-            request_id: requestId,
-            previous_quality: previousQuality,
-            current_quality: currentQuality,
-            quality_delta: currentQuality - previousQuality,
-          },
-          "Recomputed quality after answer incorporation"
-        );
-      }
-    }
-  } else if (round === 1) {
-    // First round - emit session start
-    emit(TelemetryEvents.CeeClarifierSessionStart, {
-      request_id: requestId,
-      brief_length: input.brief.length,
-      initial_quality: quality.overall,
-    });
-  }
-
-  // Check convergence with updated quality (Fix 1.1)
-  const convergence = detectConvergence({
-    currentGraph: refinedGraph,
-    previousGraph: previousGraph ?? null,
-    qualityScore: currentQuality,
-    roundCount: round,
-    maxRounds,
-    previousQualityScore: previousQuality,
-  }, {
-    qualityComplete: config.cee.clarifierQualityThreshold,
-    stabilityThreshold: config.cee.clarifierStabilityThreshold,
-    minImprovement: config.cee.clarifierMinImprovementThreshold,
-  });
-
-  if (!convergence.should_continue) {
-    emit(TelemetryEvents.CeeClarifierConverged, {
-      request_id: requestId,
-      total_rounds: round,
-      final_quality: currentQuality,
-      quality_improvement: previousQuality ? currentQuality - previousQuality : 0,
-      reason: convergence.reason,
-      status: convergence.status,
-    });
-
-    // Map convergence status to clarifier_status for backward compatibility (Fix 1.4)
-    const convergenceStatus = convergence.status as "complete" | "max_rounds" | "confident";
-
-    return { refinedGraph, previousQuality, convergenceStatus };
-  }
-
-  // Generate clarifier block if we should continue
-  const ambiguities = detectAmbiguities(refinedGraph, input.brief, currentQuality);
-
-  if (ambiguities.length === 0) {
-    return { refinedGraph, previousQuality };
-  }
-
-  const candidates = await generateQuestionCandidates(
-    ambiguities,
-    refinedGraph,
-    input.brief,
-    conversationHistory,
-    requestId
-  );
-
-  const best = selectBestQuestion(candidates, conversationHistory);
-
-  if (!best) {
-    return { refinedGraph, previousQuality };
-  }
-
-  // Cache the question
-  const questionId = randomUUID();
-  await cacheQuestion(questionId, {
-    question: best.question,
-    question_type: best.question_type,
-    options: best.options,
-    targets_ambiguity: best.targets_ambiguity,
-    generated_at: new Date().toISOString(),
-  }, config.cee.clarifierQuestionCacheTtlSeconds);
-
-  emit(TelemetryEvents.CeeClarifierQuestionCached, {
-    request_id: requestId,
-    question_id: questionId,
-    question_type: best.question_type,
-  });
-
-  emit(TelemetryEvents.CeeClarifierQuestionAsked, {
-    request_id: requestId,
-    round,
-    question_id: questionId,
-    question_type: best.question_type,
-    targets_ambiguity: best.targets_ambiguity,
-    information_gain: best.score / 10, // Normalize score to 0-1
-  });
-
-  const clarifier: CEEClarifierBlockV1 = {
-    needs_clarification: true,
-    round,
-    question_id: questionId,
-    question: best.question,
-    question_type: best.question_type,
-    options: best.options,
-    metadata: {
-      targets_ambiguity: best.targets_ambiguity,
-      expected_improvement: Math.min(best.score, 10),
-      convergence_confidence: convergence.confidence,
-      information_gain: best.score / 10,
-      // Enhancement 3.2: Expose convergence status/reason to clients
-      convergence_status: "continue",
-      convergence_reason: "continue",
-    },
-  };
-
-  return { clarifier, refinedGraph, previousQuality };
-}
+// The Stage-4 multi-turn clarifier (integrateClarifier) was RETIRED
+// 2026-07-16 (ROADMAP 1.94, Option A). Verified triple-dead on staging:
+// its convergence gate (drafter self-confidence ≥ 8/10) suppressed question
+// generation on 100% of firings, the V5 draft tool discarded its output
+// block, and the answer-incorporation loop was unreachable from the live
+// turn path. The standalone POST /assist/clarify-brief route is a separate
+// surface and is unaffected.
 
 export function buildCeeErrorResponse(
   code: CEEErrorCode,
@@ -376,6 +161,11 @@ export function buildCeeErrorResponse(
     // Additional domain-level hints
     reason: options.reason,
     recovery: options.recovery,
+    // Wave-2 ask 7 (@talchain/schemas 0.19.0, routed from DGAI #383): the
+    // PINNED flat field name for the recovery sentence. Mirrors
+    // recovery.suggestion so consumers stop passthrough-sniffing fallback
+    // names; present exactly when the structured suggestion is.
+    recovery_suggestion: options.recovery?.suggestion,
     node_count: options.nodeCount,
     edge_count: options.edgeCount,
     missing_kinds: options.missingKinds,

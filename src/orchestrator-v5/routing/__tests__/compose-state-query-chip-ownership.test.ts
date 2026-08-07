@@ -16,35 +16,48 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { execSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readdirSync, statSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+
+import { stripCommentsFile, GUARD_WALK_TIMEOUT_MS } from '../../../../scripts/ci/strip-source-comments.mjs';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
 
+function walkTsFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      if (entry === '__tests__' || entry === 'node_modules') continue;
+      walkTsFiles(full, out);
+    } else if (entry.endsWith('.ts') && !entry.endsWith('.d.ts')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
 describe('composeStateQueryChip — ownership boundary', () => {
   it('has exactly one production callsite (turn-executor.ts state-query guard block)', () => {
-    // Match ACTUAL invocations only: `composeStateQueryChip(` with an
-    // open paren. This excludes comments and JSDoc references (which
-    // typically wrap the name in backticks). Imports use a trailing
-    // comma so they're naturally excluded too — we count them
-    // separately if needed for diagnostic context.
-    let stdout: string;
-    try {
-      stdout = execSync(
-        `grep -RIn 'composeStateQueryChip(' src/ --include='*.ts' \
-           | grep -v '__tests__' \
-           | grep -v 'routing/state-query-guard.ts' \
-           || true`,
-        { cwd: REPO_ROOT, encoding: 'utf8' },
-      );
-    } catch (err) {
-      throw new Error(`grep scan failed: ${(err as Error).message}`);
+    // Match ACTUAL invocations only: `composeStateQueryChip(` with an open
+    // paren, in the COMMENT-STRIPPED view of each file
+    // (scripts/ci/strip-source-comments.mjs, the shared literal-aware
+    // tokeniser). Comments are excluded by MECHANISM — the raw grep this
+    // replaces claimed comments were excluded "because JSDoc wraps the name
+    // in backticks", and a positive control on a plain comment naming the
+    // call turned this gate red on 2026-07-20. Imports use a trailing comma
+    // so they're naturally excluded too.
+    const callLines: string[] = [];
+    for (const abs of walkTsFiles(join(REPO_ROOT, 'src'))) {
+      const rel = relative(REPO_ROOT, abs).split('\\').join('/');
+      if (rel === 'src/orchestrator-v5/routing/state-query-guard.ts') continue;
+      const lines = stripCommentsFile(abs).split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i]!.includes('composeStateQueryChip(')) {
+          callLines.push(`${rel}:${i + 1}:${lines[i]!.trim()}`);
+        }
+      }
     }
-
-    const callLines = stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
 
     const callFiles = new Set(callLines.map((l) => l.split(':')[0]));
 
@@ -62,5 +75,5 @@ describe('composeStateQueryChip — ownership boundary', () => {
       callLines.length,
       `expected exactly 1 production call line; got:\n${callLines.join('\n')}`,
     ).toBe(1);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 });

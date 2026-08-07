@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 
 const originalEnv = { ...process.env };
 
@@ -28,7 +28,8 @@ describe("HMAC + API Key Fallback", () => {
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();
-  });
+    // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await server.close();
@@ -97,7 +98,8 @@ describe("HMAC-only auth without API keys", () => {
     const { build } = await import("../../src/server.js");
     server = await build();
     await server.ready();
-  });
+    // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await server.close();

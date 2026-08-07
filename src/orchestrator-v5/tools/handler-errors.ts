@@ -41,6 +41,16 @@ export type HandlerInvocationFailedCause =
   // no usable fields". See Docs/v5/v5-resilience-contract.md Part C.
   | 'analysis_blocked'
   | 'analysis_failed'
+  // ROADMAP 2.202 fix ③ (diagnosis-run-analysis-500s.md): the analysis engine
+  // is at its CONCURRENCY LIMIT — a downstream HTTP 429 (ISL's compute governor
+  // rejecting a concurrent run, or PLoT's own limiter rejecting CEE). This is
+  // capacity contention, not breakage: nothing is wrong with the user's model
+  // and a retry in a few seconds plausibly succeeds. Recoverable typed 200 with
+  // honest busy copy + a retry chip — NOT a 500 INTERNAL_ERROR, which told the
+  // tester the service was broken when it was merely busy. Same principle CEE
+  // already accepted for its OWN ingress limiter (41d5ecf0, "429 RATE_LIMITED,
+  // not 500 INTERNAL"). Carries `downstream_http_status` in details.
+  | 'analysis_engine_busy'
   | 'options_not_configured'
   // EP2 (V5 Edit Safety Core): the read-boundary analysis-ready guard found the
   // persisted graph unrecoverable (non-canonical option shape that can't be

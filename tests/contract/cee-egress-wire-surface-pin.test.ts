@@ -82,8 +82,26 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       'analysis_ready',
       'assistant_text',
       'blocks',
+      // 0.19.0-new: producer decision classification (wave-2 ask 5,
+      // UI-SEM-077). Approved surface change — 0.19.0 wave-2 contract wave.
+      'decision_classification',
       'draft_graph',
+      // 0.20.0-new: producer-owned framing readiness (`ready | thin |
+      // conflict`). `conflict` displaces the UI's client-side `blocked`
+      // heuristic — the UI retires that derivation on consumption.
+      'framing_quality',
+      // 0.19.0-new: explicit producer framing question (wave-2 ask 4,
+      // UI-SEM-078 — retires the UI's client-side derivation).
+      'framing_question',
+      // 0.22.0-new (S1 batch): optional top-level graph hash for the
+      // freshness / GRAPH_DIVERGED handshake. DECLARED here by the re-vendor;
+      // CEE does not yet EMIT it (emission is the S1 egress lane, later). The
+      // field is optional, so its declaration is additive to the wire surface.
+      'graph_hash',
       'insights',
+      // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
+      // wire sidecar). Approved surface change — 0.15.0 contract wave.
+      'reasoning',
       'response_version',
       'stage_indicator',
       'suggested_actions',
@@ -94,6 +112,11 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       (top.shape[key] as { isOptional(): boolean }).isOptional()
     expect(optionality('draft_graph')).toBe(true)
     expect(optionality('analysis_ready')).toBe(true)
+    expect(optionality('reasoning')).toBe(true)
+    expect(optionality('framing_question')).toBe(true)
+    expect(optionality('decision_classification')).toBe(true)
+    expect(optionality('framing_quality')).toBe(true)
+    expect(optionality('graph_hash')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })
@@ -122,7 +145,7 @@ describe('block-type registry (@talchain/schemas 0.13.0)', () => {
     .map((option) => (unwrapToObject(option).shape.type as { value: string }).value)
     .sort()
 
-  it('pins the 12 block-type discriminators', () => {
+  it('pins the 14 block-type discriminators', () => {
     expect(discriminators).toEqual([
       'analysis_result',
       'coaching',
@@ -134,8 +157,14 @@ describe('block-type registry (@talchain/schemas 0.13.0)', () => {
       'explanation',
       'flip_analysis',
       'graph_patch',
+      // 0.15.0-new: held_proposal (ROADMAP 1.43 durable held-mutation shape)
+      // + ui_directive (seamlessness R4). Approved surface change — 0.15.0
+      // contract wave. held_proposal is emitted unconditionally by CEE at the
+      // edit_graph GM held seam (R8 flag deleted; UI card #382 live).
+      'held_proposal',
       'review_card',
       'text',
+      'ui_directive',
     ])
   })
 
@@ -153,13 +182,34 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
     expect(shapeKeys(CoachingBlockSchema)).toEqual([
       'action_intent',
       'action_label',
+      // schemas 0.31.0 (ROADMAP 2.225): the producer-authored turn text a chip
+      // dispatches VERBATIM. Bounded at 300 (PHASE3_ACTION_PROMPT_MAX). CEE is
+      // the declared PRODUCER, and as of this PR it IS one: `assumption_check`,
+      // `calibration_prompt` and the stale-rerun `orientation` block each
+      // author a prompt (phase3-blocks.ts), pinned in
+      // `compose/__tests__/phase3-action-prompt.test.ts`. The lens/`strengthen`
+      // producer deliberately still emits none — it has no action fields at
+      // all under the no-inert-chips rule.
+      'action_prompt',
       'block_id',
       'body',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085): producer-owned guidance
+      // class + coarse urgency score, previously UI-invented on 10/10
+      // live blocks.
+      'category',
       'coaching_kind',
       'created_at',
       'freshness',
       'graph_hash_at_generation',
+      'priority',
       'priority_rank',
+      // 0.20.0-new (ROADMAP 1.120 residual): `signal` = short human-readable
+      // signal text (140-char WIRE bound, not a layout contract);
+      // `signal_code` = STABLE machine-readable detector CLASS
+      // (SCREAMING_SNAKE_CASE by doc convention, open string in schema).
+      // Distinct from `signal_id`, which identifies the INSTANCE.
+      'signal',
+      'signal_code',
       'signal_id',
       'source',
       'source_handler',
@@ -176,11 +226,17 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'block_id',
       'body',
       'card_kind',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
+      'category',
       'created_at',
       'freshness',
       'graph_hash_at_generation',
+      'priority',
       'priority_rank',
       'severity',
+      // 0.20.0-new (ROADMAP 1.120 residual).
+      'signal',
+      'signal_code',
       'signal_id',
       'source_handler',
       'target_refs',
@@ -194,6 +250,8 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'action_intent',
       'action_label',
       'block_id',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
+      'category',
       'created_at',
       'current_confidence',
       'evidence_gap',
@@ -202,8 +260,12 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'freshness',
       'graph_hash_at_generation',
       'impact_if_gathered',
+      'priority',
       'priority_rank',
       'severity',
+      // 0.20.0-new (ROADMAP 1.120 residual).
+      'signal',
+      'signal_code',
       'signal_id',
       'source_handler',
       'suggested_technique',
@@ -215,15 +277,25 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
   it('pins ExerciseBlockSchema keys', () => {
     expect(shapeKeys(ExerciseBlockSchema)).toEqual([
       'block_id',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
+      'category',
       'counter_case',
       'created_at',
+      // 0.37.0-new (ROADMAP 2.490 slice 2) — the atomic DSK protocol triple.
+      // Additive + optional, so a consumer on an older pin simply does not see
+      // it; the merge order schemas -> UI -> CEE keeps that window closed.
+      'dsk_provenance',
       'exercise_kind',
       'failure_scenario',
       'freshness',
       'graph_hash_at_generation',
       'mitigation',
+      'priority',
       'reference_class',
       'review_trigger',
+      // 0.20.0-new (ROADMAP 1.120 residual).
+      'signal',
+      'signal_code',
       'signal_id',
       'source_handler',
       'target_element_ref',
@@ -232,11 +304,38 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'warning_signs',
     ])
   })
+
+  it('pins signal_code + signal as optional wire fields on all four guidance blocks', () => {
+    // 0.20.0/0.21.0 (ROADMAP 1.120 residual, UI-SEM-085): the producer now
+    // populates signal_code (+ signal where deterministic) — see
+    // compose/guidance-signals.ts. On the wire both are additive/optional so a
+    // pre-0.20.0 or un-re-vendored consumer fails closed. This asserts the
+    // wire SURFACE (optionality) at each guidance block point; the producer
+    // EMISSION is pinned in compose/__tests__/phase3-blocks.test.ts.
+    const guidanceBlockSchemas: Array<[string, unknown]> = [
+      ['ReviewCardBlock', ReviewCardBlockSchema],
+      ['CoachingBlock', CoachingBlockSchema],
+      ['EvidenceBlock', EvidenceBlockSchema],
+      ['ExerciseBlock', ExerciseBlockSchema],
+    ]
+    for (const [name, schema] of guidanceBlockSchemas) {
+      const shape = unwrapToObject(schema).shape
+      for (const field of ['signal_code', 'signal']) {
+        expect(shape[field], `${name}.${field} exists on the wire`).toBeDefined()
+        expect(
+          (shape[field] as { isOptional(): boolean }).isOptional(),
+          `${name}.${field} is optional (consumers fail closed on absence)`,
+        ).toBe(true)
+      }
+    }
+  })
 })
 
 describe('affordance pins (chips-on-the-wire)', () => {
-  it('pins ActionSchema keys — suggested_actions[] carries action_type (0.5.0+)', () => {
-    expect(shapeKeys(ActionSchema)).toEqual(['action_type', 'id', 'label', 'message'])
+  it('pins ActionSchema keys — action_type (0.5.0+) + detail (0.19.0, wave-2 ask 20)', () => {
+    // `detail` carries the FULL producer text behind a SHORT `label` —
+    // the held-proposal confirm-chip split (see compose/held-proposal.ts).
+    expect(shapeKeys(ActionSchema)).toEqual(['action_type', 'detail', 'id', 'label', 'message'])
   })
 
   it('pins ChipSchema keys (0.13.0 export, not yet rendered by the UI)', () => {

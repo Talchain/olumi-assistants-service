@@ -72,7 +72,12 @@ function renderRejection(graph: GraphV3T, flagOn: boolean) {
 }
 
 const RISK = n('risk_resent', 'risk', 'Team resents new tech lead');
-const TARGETED = g([...BASE_NODES, RISK], [...BASE_EDGES, e('risk_resent', 'opt_hire')]); // risk→option → NO_PATH_TO_GOAL
+// 1.16 item C — deliberate fixture change: `risk → option` is a legitimate
+// exogenous influence under the corrected reachability predicate (the risk
+// reaches the goal via option → factor → goal) and is now ACCEPTED. The
+// Cap-2A rejection shape is the TRUE dead-end: an inbound-only risk
+// (option → risk, nothing flows out) that cannot reach the goal.
+const TARGETED = g([...BASE_NODES, RISK], [...BASE_EDGES, e('opt_hire', 'risk_resent')]); // option→risk sink → NO_PATH_TO_GOAL
 const CYCLE = g([...BASE_NODES], [...BASE_EDGES, e('goal_q3', 'fac_capacity')]); // CYCLE_DETECTED
 const ORPHAN_FACTOR = g([...BASE_NODES, n('fac_orphan', 'factor', 'Unconnected factor')], [...BASE_EDGES]); // ORPHAN on a factor
 
@@ -105,10 +110,25 @@ describe('2A rejection render — flag parity + targeted enrichment', () => {
 
   it('budget_exceeded is unaffected even if structural_guidance is set', () => {
     const env = buildPatchRejectionEnvelope(
-      { reason: 'budget_exceeded', detail: 'x', node_ops: 5, edge_ops: 2, structural_guidance: 'SHOULD NOT APPEAR', suggested_actions: [...STRUCT_CHIPS] },
+      {
+        reason: 'budget_exceeded',
+        detail: 'x',
+        node_ops: 5,
+        edge_ops: 2,
+        breached_dimensions: ['node'],
+        structural_guidance: 'SHOULD NOT APPEAR',
+        suggested_actions: [...STRUCT_CHIPS],
+      },
       'turn', ctx,
     );
-    expect(env.assistant_text).toContain('5 node operations');
+    // ⚠ ROADMAP 2.655 — this assertion used to be `toContain('5 node
+    // operations')`, i.e. it pinned the very leak the 2.634 walk received. The
+    // POINT of the test is unchanged and is the second assertion: the
+    // structural-guidance branch must not bleed into the budget branch. The
+    // first assertion is now bound to the budget branch's OWN copy, which is
+    // what actually proves that branch was taken.
+    expect(env.assistant_text).toContain('more separate additions than');
+    expect(env.assistant_text).not.toContain('node operations');
     expect(env.assistant_text).not.toContain('SHOULD NOT APPEAR');
   });
 

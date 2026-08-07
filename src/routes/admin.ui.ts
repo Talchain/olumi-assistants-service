@@ -21,10 +21,16 @@ import { ADMIN_TOAST_DURATION_MS } from '../config/timeouts.js';
 import { config } from '../config/index.js';
 
 /**
- * Generate HTML options for task dropdown from canonical PROMPT_TASKS registry.
- * This ensures admin UI stays in sync with all registered prompt tasks.
+ * Generate HTML options for task dropdown from the canonical PROMPT_TASKS
+ * registry, which is itself derived from `CeeTaskIdSchema`. This is the ONLY
+ * production consumer of PROMPT_TASKS, so it is the surface where registry
+ * drift became user-visible: a task absent here cannot be selected when
+ * creating a prompt, even though the API would accept it.
+ *
+ * Exported for tests/unit/prompt-tasks-registry.test.ts, which asserts the
+ * rendered dropdown covers every task the create endpoint accepts.
  */
-function generateTaskOptions(): string {
+export function generateTaskOptions(): string {
   return PROMPT_TASKS.map(task => `<option value="${task}">${task}</option>`).join('\n                    ');
 }
 
@@ -3855,20 +3861,17 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     let nodeEnv: string;
-    let orchestratorEnabled: boolean;
     let dskEnabled: boolean;
     let anthropicPromptCacheEnabled: boolean;
     let zone2RegistryEnabled: boolean;
 
     try {
       nodeEnv = config.server.nodeEnv ?? 'unknown';
-      orchestratorEnabled = config.features.orchestrator ?? false;
       dskEnabled = config.features.dskEnabled ?? false;
       anthropicPromptCacheEnabled = config.promptCache.anthropicEnabled ?? false;
       zone2RegistryEnabled = config.features.zone2Registry ?? false;
     } catch {
       nodeEnv = 'unknown';
-      orchestratorEnabled = false;
       dskEnabled = false;
       anthropicPromptCacheEnabled = false;
       zone2RegistryEnabled = false;
@@ -3880,7 +3883,6 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
       .send({
       node_env: nodeEnv,
       feature_flags: [
-        { name: 'CEE_ORCHESTRATOR_ENABLED', enabled: orchestratorEnabled },
         { name: 'DSK_ENABLED', enabled: dskEnabled },
         { name: 'ANTHROPIC_PROMPT_CACHE_ENABLED', enabled: anthropicPromptCacheEnabled },
         { name: 'CEE_ZONE2_REGISTRY_ENABLED', enabled: zone2RegistryEnabled },

@@ -1,0 +1,11 @@
+{
+  "_doc": "PROMOTION-GATE grandfather baseline. A frozen, SHRINK-ONLY allowlist of prompts that were promoted BEFORE this gate existed and have no passing eval. Each is tolerated ONLY at the exact promotedHash recorded. Adding an entry is a deliberate, reviewed act (a promotion knowingly shipped un-evalled); the gate FAILS LOUD if a listed hash no longer matches the manifest, if a listed task now has a passing eval (remove it — the ratchet tightens), or if it references a task with no manifest row. This is the same discipline as scripts/ci/typecheck-baseline.txt.",
+  "entries": [],
+  "_ratchet_log": [
+    {
+      "removed": "decision_review@b4f15305c2bb32e9",
+      "removedAt": "2026-07-31",
+      "reason": "RETIRED BY A PASSING EVAL, which is exactly the condition the entry was written to expire on (\"the pending rewrite must ship a PASS report at its new hash, which makes this entry stale and forces its removal\"). PMS row 15 (ba4879dd0a714b8f) was promoted to staging on 2026-07-31 and carries a hash-matched PASS report at n=21 (21/21 clean outputs, 16 required dimensions measured and clear, zero failing dimension-observations). decision_review is now GATED_PASS on its own evidence. NOTE the direction: this is a ratchet TIGHTENING (an entry removed), not a widening, so it needs no acknowledgment-ledger entry — the shrink guard only errors on a WIDEN."
+    }
+  ]
+}

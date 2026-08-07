@@ -59,8 +59,20 @@ import {
   resolveInfluenceDirection,
   type InfluenceDirection,
 } from '../../orchestrator/context/influence-direction.js';
+import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
+import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
+import {
+  deriveConfidenceTierFromEnrichment,
+  deriveEvidenceGapsFromEnrichment,
+  deriveGoalFitFromEnrichment,
+  deriveOptionGoalFitsFromEnrichment,
+  deriveOptionOutcomesFromEnrichment,
+  deriveTippingPointsFromTopLevel,
+  type AnalysisResponseSummaryWithSignals,
+} from './analysis-signals.js';
 import { selectRunAnalysisFact } from './freshness.js';
+import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
 
 export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknown';
 
@@ -88,17 +100,20 @@ function buildLabelMap(
 
 /**
  * Derive top drivers from a TOP-LEVEL `enrichment.factor_sensitivity[]`
- * array — the shape PLoT actually returns on staging. Each entry is read
- * with both legacy and current field names so we tolerate vendor drift:
+ * array — the shape PLoT actually returns on staging.
  *
- *   { label, elasticity, direction }   ← V2RunResponseEnvelope contract
- *   { factor_label, sensitivity, direction }  ← alternate naming
+ * DGAI #341: entries are RANKED by `influence_score` via the shared accessor
+ * (`readDriverInfluenceScore`) — the field ISL actually ranks
+ * (`influence_rank`) and the UI displays. Entries without a usable
+ * influence_score are omitted; `sensitivity` / `elasticity` are never a
+ * ranking fallback (on an intervention_override board they are zeroed
+ * artifacts that invert the ranking). `DriverSummary.sensitivity` carries the
+ * influence magnitude (field name kept for shape compatibility).
  *
  * `compactAnalysis()`'s `deriveTopDrivers` only walks
  * `results[].factor_sensitivity` (per-option) and misses the top-level
  * array entirely. This helper closes that gap so Step 5 actually sees
- * sensitivity figures from prior facts. Mirrors the dual-shape approach
- * in `src/orchestrator/guidance/post-analysis.ts:getAllFactors`.
+ * driver figures from prior facts.
  */
 function deriveTopDriversFromTopLevel(
   enrichment: Record<string, unknown>,
@@ -115,11 +130,14 @@ function deriveTopDriversFromTopLevel(
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as Record<string, unknown>;
 
-    const sensitivityRaw =
-      typeof e.sensitivity === 'number' ? e.sensitivity
-      : typeof e.elasticity === 'number' ? e.elasticity
-      : null;
-    if (sensitivityRaw === null || !Number.isFinite(sensitivityRaw)) continue;
+    // DGAI #341: driver RANKING reads the shared influence accessor
+    // (`influence_score` only — what ISL ranks and the UI displays). An entry
+    // without a usable influence_score is NOT a driver candidate; the former
+    // `sensitivity → elasticity` fallback latched onto the only non-zero
+    // elasticity artifact on an intervention_override board and named the
+    // LEAST influential factor as top driver.
+    const influence = readDriverInfluenceScore(e);
+    if (influence === null) continue;
 
     const factorId =
       typeof e.factor_id === 'string' ? e.factor_id
@@ -136,11 +154,19 @@ function deriveTopDriversFromTopLevel(
       : factorId;
 
     // Honour the authoritative `direction` enum ('positive'|'negative'|
-    // 'neutral'); only sign-derive when it is absent (elasticity is unsigned
-    // per the sensitivity contract). Shared rule with the primary derive path.
-    const direction: InfluenceDirection = resolveInfluenceDirection(e.direction, sensitivityRaw);
+    // 'neutral'); when it is absent, sign-derive from the SIGN of the legacy
+    // signed magnitude when one exists (`sensitivity` then `elasticity` —
+    // sign only, never the magnitude; DGAI #341), else from the non-negative
+    // influence score (⇒ 'positive'). Preserves pre-#341 direction behaviour.
+    const signedForDirection =
+      typeof e.sensitivity === 'number' && Number.isFinite(e.sensitivity)
+        ? e.sensitivity
+        : typeof e.elasticity === 'number' && Number.isFinite(e.elasticity)
+          ? e.elasticity
+          : influence;
+    const direction: InfluenceDirection = resolveInfluenceDirection(e.direction, signedForDirection);
 
-    const absSensitivity = Math.abs(sensitivityRaw);
+    const absSensitivity = influence;
     const existing = factorMap.get(factorId);
     if (!existing || absSensitivity > existing.absSensitivity) {
       factorMap.set(factorId, { label, absSensitivity, direction });
@@ -393,6 +419,74 @@ export function applyTopLevelDriversOverride(
 }
 
 /**
+ * Lane 21 (P0-A) — the SINGLE reconciliation seam between an
+ * `AnalysisResponseSummary` and the raw top-level enrichment record. Shared
+ * by the prior-facts fallback below AND the turn-executor body
+ * `analysis_state` ingress path so the two can never drift:
+ *
+ *   1. `applyTopLevelDriversOverride` — top-level `factor_sensitivity[]`
+ *      fills `top_drivers` when the per-option shape is empty.
+ *   2. `applyTopLevelFragileEdgeOverride` — top-level
+ *      `robustness.fragile_edges[]` fills `top_fragile_edges` +
+ *      `fragile_edge_count` when the per-option shape is empty.
+ *   3. Lane 21 signal attachment (`./analysis-signals.ts`): tipping points
+ *      (top-level `flip_thresholds[]`), evidence-gap VOI
+ *      (`m1_coaching.evidence_gaps[]`), and goal-fit provenance
+ *      (PLoT #204 `goal_fit_basis` / CONSTRAINT_GOALFIT_MODELLED_BASIS).
+ *      Lane 30 adds per-option goal-fit VALUES
+ *      (`option_comparison[].probability_of_joint_goal`) via the same seam.
+ *      Fields are attached only when non-empty — a summary with nothing to
+ *      say stays shaped exactly as before.
+ *
+ * `robustness_level` is deliberately NOT touched here: `compactAnalysis`
+ * already derives it from the same envelope on both call paths; the minimal
+ * win_probabilities path merges it separately (see
+ * `buildAnalysisFromPriorFacts`).
+ */
+export function reconcileAnalysisSummaryWithEnrichment(
+  summary: AnalysisResponseSummary,
+  enrichment: Record<string, unknown>,
+): {
+  summary: AnalysisResponseSummaryWithSignals;
+  top_driver_source: TopDriverSource;
+  fragile_edge_source: FragileEdgeSource;
+} {
+  const { summary: withDrivers, source: topDriverSource } =
+    applyTopLevelDriversOverride(summary, enrichment);
+  const { summary: withFragile, source: fragileEdgeSource } =
+    applyTopLevelFragileEdgeOverride(withDrivers, enrichment);
+
+  const tippingPoints = deriveTippingPointsFromTopLevel(enrichment);
+  const evidenceGaps = deriveEvidenceGapsFromEnrichment(enrichment);
+  const goalFit = deriveGoalFitFromEnrichment(enrichment);
+  // Lane 30 — per-option goal-fit VALUES (PLoT #204). Without these the
+  // ContextPack carried only the global provenance sentence and the LLM
+  // filled the per-option gap with win probabilities (live defect,
+  // scenario 90385279).
+  const optionGoalFits = deriveOptionGoalFitsFromEnrichment(enrichment);
+  // Lane 30 fix 3 — confidence tier (top-level ordinal token) + per-option
+  // modelled-outcome means (banded downstream, never surfaced raw).
+  const confidenceTier = deriveConfidenceTierFromEnrichment(enrichment);
+  const optionOutcomes = deriveOptionOutcomesFromEnrichment(enrichment);
+
+  const withSignals: AnalysisResponseSummaryWithSignals = {
+    ...withFragile,
+    ...(tippingPoints.length > 0 ? { tipping_points: tippingPoints } : {}),
+    ...(evidenceGaps.length > 0 ? { evidence_gaps: evidenceGaps } : {}),
+    ...(goalFit !== null ? { goal_fit: goalFit } : {}),
+    ...(optionGoalFits.length > 0 ? { option_goal_fits: optionGoalFits } : {}),
+    ...(confidenceTier !== null ? { confidence_tier: confidenceTier } : {}),
+    ...(optionOutcomes.length > 0 ? { option_outcomes: optionOutcomes } : {}),
+  };
+
+  return {
+    summary: withSignals,
+    top_driver_source: topDriverSource,
+    fragile_edge_source: fragileEdgeSource,
+  };
+}
+
+/**
  * Scan prior facts (newest-first, same order as `readRecent`) for the most
  * recent non-noop `run_analysis` fact and project it into an
  * `AnalysisResponseSummary`. Returns null when no usable prior analysis
@@ -405,7 +499,7 @@ export function applyTopLevelDriversOverride(
 export function buildAnalysisFromPriorFacts(
   priorFacts: readonly HandlerFact[],
   optionLabelSource?: readonly OptionLabelSource[],
-): AnalysisResponseSummary | null {
+): AnalysisResponseSummaryWithSignals | null {
   // V5 state-trust: route both the projection and the freshness verdict
   // through the SAME selector. Pre-state-trust this used `priorFacts.find`
   // which picked the FIRST non-noop fact regardless of analysis_status —
@@ -430,9 +524,27 @@ export function buildAnalysisFromPriorFacts(
   // the difference between Step 5 saying "top drivers are not available
   // from this run" and Step 5 surfacing the actual sensitivity figures.
   const enrichment = result.enrichment;
-  if (enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)) {
-    const fromEnrichment = compactAnalysis(enrichment as V2RunResponseEnvelope);
-    if (fromEnrichment && fromEnrichment.options.length > 0) {
+  const enrichmentRecord =
+    enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)
+      ? (enrichment as Record<string, unknown>)
+      : null;
+  if (enrichmentRecord !== null) {
+    // Runtime tripwire (context-audit #1). This is the single seam where the
+    // byte-for-byte persisted PLoT enrichment (the untyped z.record
+    // passthrough) is read for the analysis→LLM projection; a top-level key
+    // PLoT emits but no deriver reads is invisible to the coach. Emit loud
+    // structured telemetry on any key not in ENRICHMENT_PRODUCER_MANIFEST —
+    // observe-only, never throws, never blocks. (Not placed in the shared
+    // reconcile seam: that also serves the UI ingress analysis_state, a
+    // different producer whose keys are not the PLoT manifest.)
+    emitUnknownEnrichmentKeyTelemetry(enrichmentRecord);
+  }
+  const fromEnrichment =
+    enrichmentRecord !== null
+      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope)
+      : null;
+  if (enrichmentRecord !== null && fromEnrichment !== null) {
+    if (fromEnrichment.options.length > 0) {
       // Apply option-label resolution from the current graph when a node
       // matches by id; falls back to whatever compactAnalysis derived.
       const relabelled: OptionSummary[] = fromEnrichment.options.map((o) =>
@@ -440,11 +552,26 @@ export function buildAnalysisFromPriorFacts(
           ? { ...o, option_label: labelMap.get(o.option_id)! }
           : o,
       );
-      const winner = relabelled[0]
+      // Status gate (shared with compactAnalysis / projectAnalysis / the direct
+      // receipt via the ONE isRecommendableOption predicate). `relabelled`
+      // deliberately retains the FULL option list (errored options kept so the
+      // coach can still disclose they ran) and is sorted by win_probability
+      // descending, so `relabelled[0]` can be a FAILED option carrying the top
+      // win_probability. Taking it as the winner here would RE-CROWN the failed
+      // option that compactAnalysis already excluded — desyncing the winner from
+      // the margin, which compactAnalysis measures over the recommendable subset
+      // only (fromEnrichment.margin / margin_pp flow through the `...fromEnrichment`
+      // spread below). Select the top RECOMMENDABLE option so winner and margin
+      // derive from the SAME subset; when none is recommendable, fall through to
+      // the honest empty winner compactAnalysis already produced. `relabelled`
+      // preserves the win_probability order, so `[0]` of the filtered list is the
+      // same option deriveWinner crowned inside compactAnalysis.
+      const topRecommendable = relabelled.filter(isRecommendableTypedOption)[0];
+      const winner = topRecommendable
         ? {
-            option_id: relabelled[0].option_id,
-            option_label: relabelled[0].option_label,
-            win_probability: relabelled[0].win_probability,
+            option_id: topRecommendable.option_id,
+            option_label: topRecommendable.option_label,
+            win_probability: topRecommendable.win_probability,
           }
         : fromEnrichment.winner;
 
@@ -453,20 +580,17 @@ export function buildAnalysisFromPriorFacts(
       // drivers and fragile edges live at the envelope TOP LEVEL and would
       // otherwise be dropped before the advice-gate projection that
       // composeExplainResults / composeMeaning read. Reconcile through the
-      // SHARED override helpers so this prior-facts fallback and the body
-      // `analysis_state` ingress path (turn-executor) project identically;
-      // per-option result wins when present.
-      const { summary: withDrivers } = applyTopLevelDriversOverride(
+      // SHARED composite seam (drivers + fragile edges + Lane 21 signals) so
+      // this prior-facts fallback and the body `analysis_state` ingress path
+      // (turn-executor) project identically; per-option result wins when
+      // present.
+      const { summary: reconciled } = reconcileAnalysisSummaryWithEnrichment(
         {
           ...fromEnrichment,
           options: relabelled,
           winner,
         },
-        enrichment as Record<string, unknown>,
-      );
-      const { summary: reconciled } = applyTopLevelFragileEdgeOverride(
-        withDrivers,
-        enrichment as Record<string, unknown>,
+        enrichmentRecord,
       );
       return reconciled;
     }
@@ -526,7 +650,7 @@ export function buildAnalysisFromPriorFacts(
       : null;
   const marginPp = margin === null ? null : Math.round(margin * 1000) / 10;
 
-  return {
+  const minimal: AnalysisResponseSummary = {
     winner,
     options,
     top_drivers: [],
@@ -536,4 +660,41 @@ export function buildAnalysisFromPriorFacts(
     margin_pp: marginPp,
     analysis_status: 'complete',
   };
+
+  // Lane 21 (P0-A) gate reconciliation: before this lane, reaching the
+  // minimal win_probabilities path meant the ENTIRE enrichment was dropped —
+  // `top_drivers: []`, `robustness_level: 'unknown'`, no fragile edges —
+  // even when the well-formed envelope carried all of them at the TOP LEVEL
+  // (the live staging shape: `option_comparison[]` entries can be unusable
+  // for option identity while `factor_sensitivity[]` / `robustness` /
+  // `flip_thresholds[]` / `m1_coaching` are fully populated). Make this path
+  // consult the SAME source as the enriched path: merge the
+  // option-independent fields compactAnalysis derived, then run the shared
+  // composite (drivers + fragile edges + signals). Blocked / failed
+  // envelopes (compactAnalysis → null) still skip — a blocked analysis must
+  // not ground prose.
+  if (enrichmentRecord !== null && fromEnrichment !== null) {
+    const merged: AnalysisResponseSummary = {
+      ...minimal,
+      robustness_level: fromEnrichment.robustness_level,
+      fragile_edge_count: fromEnrichment.fragile_edge_count,
+      top_drivers: fromEnrichment.top_drivers,
+      ...(fromEnrichment.flip_thresholds !== undefined
+        ? { flip_thresholds: fromEnrichment.flip_thresholds }
+        : {}),
+      ...(fromEnrichment.top_fragile_edges !== undefined
+        ? { top_fragile_edges: fromEnrichment.top_fragile_edges }
+        : {}),
+      ...(fromEnrichment.constraint_tensions !== undefined
+        ? { constraint_tensions: fromEnrichment.constraint_tensions }
+        : {}),
+    };
+    const { summary: reconciled } = reconcileAnalysisSummaryWithEnrichment(
+      merged,
+      enrichmentRecord,
+    );
+    return reconciled;
+  }
+
+  return minimal;
 }

@@ -28,7 +28,8 @@ export type StructuralViolationCode =
   | 'NO_GOAL'
   | 'NO_DECISION'
   | 'FEWER_THAN_TWO_OPTIONS'
-  | 'OPTION_NO_FACTOR_EDGES';
+  | 'OPTION_NO_FACTOR_EDGES'
+  | 'OPTION_NOT_LINKED_TO_DECISION';
 
 export interface StructuralViolation {
   code: StructuralViolationCode;
@@ -68,6 +69,11 @@ const MIN_OPTIONS = 2;
 
 export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
   ORPHAN_NODE: 'This change would leave a node with no connections.',
+  // 1.16 item C: the message and the predicate now agree — checkPathToGoal's
+  // second loop flags nodes that cannot REACH the goal via forward directed
+  // edges (reverse-BFS from the goal), not nodes unreachable FROM the
+  // decision. Loop 1 (goal reachable from the decision) also reports under
+  // this code; "cannot reach the goal" reads correctly for both.
   NO_PATH_TO_GOAL: 'This change would leave a node that cannot reach the goal.',
   CYCLE_DETECTED: 'This change would create a circular dependency in the model.',
   NODE_LIMIT_EXCEEDED: 'The model has reached its maximum size. Try simplifying before adding more.',
@@ -76,6 +82,9 @@ export const VIOLATION_MESSAGES: Record<StructuralViolationCode, string> = {
   NO_DECISION: 'The model would have no decision node.',
   FEWER_THAN_TWO_OPTIONS: 'The model would have fewer than two options.',
   OPTION_NO_FACTOR_EDGES: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
+  // PR #413 review FIXUP 3 — distinct from NO_PATH_TO_GOAL: a floating
+  // option can reach the goal, but nothing selects it.
+  OPTION_NOT_LINKED_TO_DECISION: 'This change would leave an option that is not connected from the decision. Link the decision to it.',
 };
 
 // ============================================================================
@@ -141,6 +150,7 @@ export function validateGraphStructure(graph: GraphV3T): StructuralValidationRes
   checkLimits(graph, violations);
   checkOrphanNodes(graph, violations);
   checkOptionFactorEdges(graph, violations);
+  checkOptionDecisionEdges(graph, violations);
   checkPathToGoal(graph, violations);
   checkCycles(graph, violations);
 
@@ -242,6 +252,38 @@ function checkOptionFactorEdges(graph: GraphV3T, violations: StructuralViolation
   }
 }
 
+/**
+ * PR #413 review FIXUP 3 — every option node must have at least one INBOUND
+ * directed edge from a decision node. The item-C reachability flip (loop 2
+ * now checks "can the node REACH the goal", not "is it reachable FROM the
+ * decision") opened a gap the old loop 2 happened to cover: a FLOATING
+ * option (outbound option → factor edge, no decision → option inbound)
+ * reaches the goal and would pass every remaining check — but an option no
+ * decision can select is structurally meaningless. Skipped entirely when
+ * the graph has no decision node (NO_DECISION owns that failure; flagging
+ * every option as well would be noise).
+ */
+function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolation[]): void {
+  const decisionIds = new Set<string>();
+  for (const node of graph.nodes) {
+    if (node.kind === 'decision') decisionIds.add(node.id);
+  }
+  if (decisionIds.size === 0) return; // Already caught by NO_DECISION.
+
+  for (const node of graph.nodes) {
+    if (node.kind !== 'option') continue;
+    const hasDecisionInbound = graph.edges.some(
+      (edge) => isDirected(edge) && edge.to === node.id && decisionIds.has(edge.from),
+    );
+    if (!hasDecisionInbound) {
+      violations.push({
+        code: 'OPTION_NOT_LINKED_TO_DECISION',
+        detail: `Option "${node.id}" (${node.label}) has no inbound edge from a decision — nothing selects it. Add a decision → option edge.`,
+      });
+    }
+  }
+}
+
 function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): void {
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
   if (goalNodes.length === 0) return; // Already caught by NO_GOAL check
@@ -289,17 +331,77 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
     }
   }
 
-  // Check non-decision/non-goal nodes that are unreachable
+  // Loop 2 (1.16 item C — reachability predicate flip): every edged
+  // non-goal node must be able to REACH the goal via forward directed
+  // edges. The previous predicate required every edged node to be
+  // reachable FROM the decision, which wrongly rejected legitimate
+  // exogenous influences — e.g. a new risk node whose only edge is an
+  // outbound edge into a factor that reaches the goal has a valid
+  // forward path to the goal, but nothing points at it from the
+  // decision side. One reverse-BFS from the goal nodes over the same
+  // forward adjacency computes the honest set; true dead-ends (edged
+  // nodes with no forward path to the goal) still fail.
+  const reverse = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    if (!isDirected(edge)) continue;
+    if (!reverse.has(edge.to)) reverse.set(edge.to, new Set());
+    reverse.get(edge.to)!.add(edge.from);
+  }
+
+  const canReachGoal = new Set<string>();
+  const reverseQueue: string[] = [];
+  for (const goal of goalNodes) {
+    canReachGoal.add(goal.id);
+    reverseQueue.push(goal.id);
+  }
+  while (reverseQueue.length > 0) {
+    const current = reverseQueue.shift()!;
+    const predecessors = reverse.get(current);
+    if (predecessors) {
+      for (const prev of predecessors) {
+        if (!canReachGoal.has(prev)) {
+          canReachGoal.add(prev);
+          reverseQueue.push(prev);
+        }
+      }
+    }
+  }
+
+  // Suppress the redundant flag for options already reported by
+  // OPTION_NO_FACTOR_EDGES: an option with no outbound factor edge
+  // trivially cannot reach the goal, so both codes would fire on the SAME
+  // defect. The specific violation subsumes the generic one — and the edit
+  // repair loop gates on "ALL new violations repairable"
+  // (STRUCTURAL_REPAIRABLE_CODES = {OPTION_NO_FACTOR_EDGES}), so the
+  // redundant NO_PATH_TO_GOAL would make the orphan-option repair path
+  // unreachable. Same predicate as checkOptionFactorEdges.
+  const factorIds = new Set(
+    graph.nodes.filter((n) => n.kind === 'factor').map((n) => n.id),
+  );
+  const optionsMissingFactorEdge = new Set(
+    graph.nodes
+      .filter(
+        (n) =>
+          n.kind === 'option' &&
+          !graph.edges.some(
+            (edge) => isDirected(edge) && edge.from === n.id && factorIds.has(edge.to),
+          ),
+      )
+      .map((n) => n.id),
+  );
+
   for (const node of graph.nodes) {
-    if (node.kind === 'decision') continue; // Decision is the source
-    if (reachable.has(node.id)) continue;
-    // Already caught by orphan check if it has no edges at all
-    // But a node might have edges yet be disconnected from the decision
+    if (node.kind === 'goal') continue; // Trivially reaches itself; loop 1 owns the goal.
+    if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
+    if (canReachGoal.has(node.id)) continue;
+    if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
+    // Already caught by orphan check if it has no edges at all —
+    // but an edged node can still be a dead-end with no path to the goal.
     const hasAnyEdge = graph.edges.some((e) => e.from === node.id || e.to === node.id);
     if (hasAnyEdge) {
       violations.push({
         code: 'NO_PATH_TO_GOAL',
-        detail: `Node "${node.id}" (${node.label}) not reachable from decision via directed paths`,
+        detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,
       });
     }
   }

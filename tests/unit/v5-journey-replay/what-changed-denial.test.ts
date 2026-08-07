@@ -27,6 +27,28 @@ import { assertWhatChanged } from '../../../tools/v5-journey-replay/assertions.j
 const FACTOR = 'Incremental Hiring Cost';
 
 describe('assertWhatChanged — denial-of-recent-edit regression guard', () => {
+  // Two of these fixtures ("I haven't applied any changes in this session
+  // yet." / "I have not applied any changes in this session yet." / "No
+  // changes have been applied so far.") are now ALSO literal entries in
+  // the canonical FORBIDDEN_USER_FACING_PHRASES list (src/orchestrator-v5/
+  // compose/forbidden-user-facing-phrases.ts), which coreAssertions()'s
+  // noForbiddenTerms() scans BEFORE assertWhatChanged's own denialPatterns
+  // check ever runs (assertions.ts:564 calls coreAssertions() first). The
+  // harness deliberately imports the same constant as the runtime egress
+  // guard ("the harness and runtime agree on the contradiction list" —
+  // forbidden-terms.ts) precisely so historical incident text like this
+  // gets caught even earlier. The end-to-end regression guarantee this
+  // test locks in — "the exact text observed on staging build 6211789
+  // must fail" — still holds; only WHICH contract reports the failure
+  // changed. Fixtures whose exact wording is not on that shared list
+  // (e.g. "yet applied", "made any changes", "edits") still reach and
+  // exercise assertWhatChanged's own denialPatterns branch directly.
+  const FORBIDDEN_LIST_OVERLAP = new Set([
+    "I haven't applied any changes in this session yet.",
+    'I have not applied any changes in this session yet.',
+    'No changes have been applied so far.',
+  ]);
+
   it.each([
     "I haven't applied any changes in this session yet.",
     "I have not applied any changes in this session yet.",
@@ -45,9 +67,13 @@ describe('assertWhatChanged — denial-of-recent-edit regression guard', () => {
     );
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.failing_contract).toBe('what_changed_denies_recent_edit');
-      expect(r.evidence).toMatch(/denial_pattern=/);
-      expect(r.evidence).toMatch(/mentioned=false/);
+      if (FORBIDDEN_LIST_OVERLAP.has(text)) {
+        expect(r.failing_contract).toMatch(/^forbidden terms in assistant_text:/);
+      } else {
+        expect(r.failing_contract).toBe('what_changed_denies_recent_edit');
+        expect(r.evidence).toMatch(/denial_pattern=/);
+        expect(r.evidence).toMatch(/mentioned=false/);
+      }
     }
   });
 
@@ -65,8 +91,10 @@ describe('assertWhatChanged — denial-of-recent-edit regression guard', () => {
       undefined,
     );
     expect(r.ok).toBe(false);
+    // Same shared-forbidden-list precedence as above — this exact phrase
+    // is caught by coreAssertions() before assertWhatChanged's own check.
     if (!r.ok) {
-      expect(r.failing_contract).toBe('what_changed_denies_recent_edit');
+      expect(r.failing_contract).toMatch(/^forbidden terms in assistant_text:/);
     }
   });
 

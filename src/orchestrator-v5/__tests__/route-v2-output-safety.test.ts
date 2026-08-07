@@ -65,7 +65,7 @@ describe('Egress sanitiser — envelope-level integration', () => {
     const sanitised = sanitiseOlumiResponseForEgress(polluted, {
       graph: makeGraph(),
       requestId: 'req-failure-1',
-      exitPath: 'turn_executor',
+      exitPath: 'turn_executor', userMessage: null, mayNameLeadingOption: true,
     });
 
     // assistant_text scrubbed.
@@ -113,7 +113,7 @@ describe('Egress sanitiser — envelope-level integration', () => {
     const sanitised = sanitiseOlumiResponseForEgress(polluted, {
       graph: makeGraph(),
       requestId: 'req-happy-1',
-      exitPath: 'turn_executor',
+      exitPath: 'turn_executor', userMessage: null, mayNameLeadingOption: true,
     });
 
     // Top-level prose

@@ -157,6 +157,48 @@ describe('runPreFlight — 422 envelope shapes', () => {
     expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
   });
 
+  it('IDOR fail-closed: no user_id + owned scenario → scenario_preflight 422 (scenario_requires_authenticated_owner)', async () => {
+    // The store reports a non-null owner while the body carries NO user_id
+    // (JWT flag off → effective identity is the caller-supplied value, i.e.
+    // null). Before the fix this passed pre-flight (either-null skip), so any
+    // anonymous request could act on any owned scenario. Now it must 422.
+    ensureScenarioExistsSpy.mockReset();
+    ensureScenarioExistsSpy.mockResolvedValueOnce({ user_id: OWNER_USER_ID });
+
+    const req = makeReq({
+      kind: 'message',
+      turn_id: '33333333-3333-4333-8333-333333333333',
+      scenario_id: SCENARIO_ID,
+      message: 'test',
+      turn_class: 'frame',
+      stage: 'frame',
+      source: 'composer',
+      // no user_id — anonymous caller
+    });
+
+    const result = await runPreFlight(req as any);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.status).toBe(422);
+    expect(result.error).toMatchInlineSnapshot(`
+      {
+        "boundary": "B1",
+        "details": {
+          "reason": "scenario_requires_authenticated_owner",
+          "scenario_id": "55555555-5555-4555-8555-555555555555",
+        },
+        "direction": "ingress",
+        "error": "INGRESS_CONTRACT_VIOLATION",
+        "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "retryable": false,
+        "validator": "scenario_preflight",
+      }
+    `);
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledTimes(1);
+    expect(ensureScenarioExistsSpy).toHaveBeenCalledWith(SCENARIO_ID, null);
+  });
+
   it('scenario-preflight failure: cross-tenant ownership mismatch produces a scenario_preflight BoundaryError', async () => {
     // Store returns a different owner than the caller — cross-tenant.
     ensureScenarioExistsSpy.mockReset();

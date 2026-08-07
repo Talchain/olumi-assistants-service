@@ -12,6 +12,7 @@ import {
   ToolCallParseError,
   parseToolCallResponse,
 } from '../tool-schema.js';
+import { deriveAnswerTextFromShape } from '../answer-shape.js';
 
 const VALID_EXECUTE_INPUT = {
   intent_class: 'execute' as const,
@@ -40,11 +41,26 @@ const VALID_CLARIFY_INPUT = {
   },
 };
 
-const VALID_CONVERSE_INPUT = { intent_class: 'converse' as const };
+// answer_shape is REQUIRED on coach/converse (ROADMAP 1.132, F2 —
+// unconditional since the F1 flag deletion). answer_text is DERIVED from the
+// shape at parse (single source of truth). The full shape contract lives in
+// tool-schema-answer-shape-enforced.test.ts; these fixtures carry a valid
+// shape so the shared coach/converse parse tests exercise the real contract.
+const VALID_SHAPE = {
+  headline: 'A complete answer in one sentence.',
+  bullets: ['A supporting point.'],
+  detail: 'The full supporting explanation carrying the rest of the answer.',
+};
+
+const VALID_CONVERSE_INPUT = {
+  intent_class: 'converse' as const,
+  answer_shape: VALID_SHAPE,
+};
 
 const VALID_COACH_INPUT = {
   intent_class: 'coach' as const,
   coaching_mode: 'challenge' as const,
+  answer_shape: VALID_SHAPE,
 };
 
 describe('OLUMI_ACTION_TOOL definition', () => {
@@ -246,6 +262,30 @@ describe('OLUMI_ACTION_TOOL definition', () => {
     expect(desc).toContain('Requires a prior analysis run');
   });
 
+  // ROADMAP 1.52 — goal-fit sign inversion. "reduce/decrease X by N%"
+  // states a CHANGE, not a level; the naive positive "at_least +N%"
+  // reading structurally inverts the claim whenever the constrained
+  // node's own distribution is the signed delta (6B capture: displayed
+  // ~0%, honest ~97-99%). This guidance must survive future edits.
+  it('add_constraint guidance covers REDUCTION-FRAMED targets with the flipped encoding + clarify-on-ambiguity', () => {
+    const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
+      properties: { handler_id: { description: string } };
+    };
+    const desc = action.properties.handler_id.description;
+
+    expect(desc).toContain('REDUCTION-FRAMED');
+    // The worked example must use the real field shapes the handler
+    // actually accepts (constraint_type: at_most, negative value) — not
+    // an invented parameter name.
+    expect(desc).toContain('"at_most"');
+    expect(desc).toContain('value: -15');
+    // Explicitly rules out the buggy reading.
+    expect(desc).toMatch(/do not emit `at_least` with a positive value/i);
+    // Ambiguous cases must route to clarify, never a silent guess.
+    expect(desc).toMatch(/do not guess/i);
+    expect(desc).toContain('"clarify"');
+  });
+
   it('parser remains permissive on unknown handler_ids (validator handles it)', () => {
     // Sonnet could still emit a non-enum value despite the schema constraint;
     // the Zod parser must not reject it, because the TurnExecutor relies on
@@ -302,7 +342,10 @@ describe('parseToolCallResponse', () => {
   });
 
   it('parses a coach response without coaching_mode', () => {
-    const result = parseToolCallResponse({ intent_class: 'coach' });
+    const result = parseToolCallResponse({
+      intent_class: 'coach',
+      answer_shape: VALID_SHAPE,
+    });
     expect(result.intent_class).toBe('coach');
   });
 
@@ -338,7 +381,11 @@ describe('parseToolCallResponse', () => {
 
   it('rejects converse carrying coaching_mode (coach-only field)', () => {
     expect(() =>
-      parseToolCallResponse({ intent_class: 'converse', coaching_mode: 'deepen' }),
+      parseToolCallResponse({
+        intent_class: 'converse',
+        answer_shape: VALID_SHAPE,
+        coaching_mode: 'deepen',
+      }),
     ).toThrow(/coaching_mode is forbidden/);
   });
 
@@ -472,5 +519,83 @@ describe('OLUMI_ACTION_TOOL.action.explanation field', () => {
     if (result.intent_class === 'execute') {
       expect(result.action.explanation).toBeUndefined();
     }
+  });
+});
+
+// Top-level answer_text field — ROADMAP 1.38 coach-answer-body fix. The
+// coach and converse tool-call variants previously had no body field at
+// all, so compose could only ship Sonnet's brief pre-tool-call
+// `orientationText` — the fuller authored answer was silently dropped
+// (TRUNCATION-BUG-HANDOVER.md). This adds an OPTIONAL top-level
+// `answer_text`, mirroring the existing `explanation.answer_text` pattern
+// on the execute side. turn-executor.ts prefers it when present and falls
+// back to orientationText when absent (see phase1-behavioural.test.ts for
+// the end-to-end compose-level coverage).
+describe('OLUMI_ACTION_TOOL top-level answer_text field (coach/converse)', () => {
+  it('declares an optional top-level answer_text string on the JSON schema', () => {
+    const props = OLUMI_ACTION_TOOL.input_schema.properties as {
+      answer_text?: { type: string; description?: string };
+    };
+    expect(props.answer_text).toBeDefined();
+    expect(props.answer_text?.type).toBe('string');
+    // Not in the top-level `required` array — optional by construction so
+    // old-shaped responses (answer in leading text) remain valid.
+    expect(OLUMI_ACTION_TOOL.input_schema.required).not.toContain('answer_text');
+  });
+
+  it('parses a coach response: answer_text is DERIVED from the required shape (ROADMAP 1.132)', () => {
+    const result = parseToolCallResponse({
+      intent_class: 'coach',
+      coaching_mode: 'deepen',
+      answer_shape: VALID_SHAPE,
+      // A model-authored answer_text is OVERRIDDEN by the shape derivation.
+      answer_text: 'A rambling wall of prose that should not ship.',
+    });
+    expect(result.intent_class).toBe('coach');
+    if (result.intent_class === 'coach') {
+      expect(result.answer_text).toBe(deriveAnswerTextFromShape(VALID_SHAPE));
+      expect(result.coaching_mode).toBe('deepen');
+    }
+  });
+
+  it('rejects a coach response with NO answer_shape (shape required, unconditional — ROADMAP 1.132)', () => {
+    const { answer_shape: _omitted, ...coachWithout } = VALID_COACH_INPUT;
+    expect(() =>
+      parseToolCallResponse({ ...coachWithout, answer_text: 'prose only' }),
+    ).toThrow(/answer_shape is required/);
+  });
+
+  it('parses a converse response: answer_text is DERIVED from the required shape', () => {
+    const result = parseToolCallResponse({
+      intent_class: 'converse',
+      answer_shape: VALID_SHAPE,
+    });
+    expect(result.intent_class).toBe('converse');
+    if (result.intent_class === 'converse') {
+      expect(result.answer_text).toBe(deriveAnswerTextFromShape(VALID_SHAPE));
+    }
+  });
+
+  it('rejects a converse response with NO answer_shape (shape required, unconditional)', () => {
+    const { answer_shape: _omitted, ...converseWithout } = VALID_CONVERSE_INPUT;
+    expect(() =>
+      parseToolCallResponse({ ...converseWithout, answer_text: 'prose only' }),
+    ).toThrow(/answer_shape is required/);
+  });
+
+  it('COERCES execute carrying a stray answer_text (stripped, not rejected — repair-tax fix 2026-07-22)', () => {
+    // Was a hard rejection; now stripped on the first pass so a forced pill no
+    // longer pays a REPAIR_ONCE second LLM call. run_analysis is a mutation
+    // handler with no user-facing prose, so the stray text is dropped (not
+    // lifted). See REPAIR-TAX-ROOT-CAUSE-2026-07-22.md / first-pass-coercion.test.ts.
+    const coerced = parseToolCallResponse({ ...VALID_EXECUTE_INPUT, answer_text: 'stray body' });
+    expect(coerced.intent_class).toBe('execute');
+    expect((coerced as { answer_text?: unknown }).answer_text).toBeUndefined();
+  });
+
+  it('rejects clarify carrying answer_text (clarify uses clarification.question)', () => {
+    expect(() =>
+      parseToolCallResponse({ ...VALID_CLARIFY_INPUT, answer_text: 'stray body' }),
+    ).toThrow(/answer_text is forbidden/);
   });
 });

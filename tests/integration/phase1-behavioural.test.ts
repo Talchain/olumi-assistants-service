@@ -33,6 +33,7 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../../src/orchestrator-v5/turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../../src/orchestrator-v5/routing/tool-schema.js');
+const { deriveAnswerTextFromShape } = await import('../../src/orchestrator-v5/routing/answer-shape.js');
 
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: '99999999-9999-4999-8999-999999999999',
@@ -123,7 +124,25 @@ describe('phase 1 behavioural — right-tool-for-job', () => {
         }),
       ),
     };
-    const rightTool = await runTurnExecutor(BASE_PAYLOAD, 'req-rt-right', {
+    // ⚠ MESSAGE CORRECTED 2026-08-07 (ROADMAP 2.652 / INV-1). This call passed
+    // `BASE_PAYLOAD`, whose message is 'do something' — which is neither the
+    // "set churn to 5%" this test's own name claims nor an edit request of any
+    // kind. The mismatch was invisible while any proposal could execute
+    // regardless of what the user said; the mutation warrant made it visible,
+    // because a `set_factor_value` proposal on 'do something' now demotes to a
+    // chip instead of executing.
+    //
+    // Fixed by giving the case a real edit request rather than by exempting it:
+    // 'do something' reaching a value write with no chip IS the defect 2.652
+    // closes, so asserting `execute` on it would pin the defect. The literal
+    // string from the test name ('set churn to 5%') is NOT used — measured, it
+    // is claimed by an upstream deterministic guard and never reaches the
+    // routing adapter this case is about, which would make the assertion
+    // vacuous in the other direction. Everything else is unchanged, and the
+    // wrong-tool half below still uses BASE_PAYLOAD (it asserts a VALIDATION
+    // rejection, which the warrant gate runs after and cannot pre-empt).
+    const rightToolPayload = { ...BASE_PAYLOAD, message: 'update the churn factor' };
+    const rightTool = await runTurnExecutor(rightToolPayload, 'req-rt-right', {
       routingAdapter: adapterRight,
       handlerRegistry,
       validationRegistry,
@@ -263,21 +282,33 @@ describe('phase 1 behavioural — coach vs converse distinction', () => {
     //   - Tool-call with intent_class="coach" (+coaching_mode)
     //   - Text-only response (inferred "converse")
     // The two MUST be distinguishable in telemetry for Phase 2 evaluation.
+    // answer_shape REQUIRED on coach tool calls (ROADMAP 1.132, F2 —
+    // unconditional since the F1 flag deletion); answer_text is DERIVED from
+    // it. The text-only converse ships the SAME derived text verbatim.
+    const COACH_SHAPE = {
+      headline: 'Think about what matters most.',
+      bullets: [],
+      detail: 'Weigh the options against your main goal before you decide.',
+    };
+    const derivedText = deriveAnswerTextFromShape(COACH_SHAPE);
     const adapterCoach = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'coach', coaching_mode: 'deepen' }, 'Think about what matters most.'),
+        toolResult(
+          { intent_class: 'coach', coaching_mode: 'deepen', answer_shape: COACH_SHAPE },
+          'Short orientation.',
+        ),
       ),
     };
     const adapterConverse = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(textResult('Think about what matters most.')),
+      chatWithTools: vi.fn().mockResolvedValueOnce(textResult(derivedText)),
     };
 
     const coachRun = await runTurnExecutor(BASE_PAYLOAD, 'req-co', { routingAdapter: adapterCoach });
     const converseRun = await runTurnExecutor(BASE_PAYLOAD, 'req-cv', { routingAdapter: adapterConverse });
 
     // Runtime text identical
-    expect(coachRun.response.assistant_text).toBe('Think about what matters most.');
-    expect(converseRun.response.assistant_text).toBe('Think about what matters most.');
+    expect(coachRun.response.assistant_text).toBe(derivedText);
+    expect(converseRun.response.assistant_text).toBe(derivedText);
 
     // Intent classification DISTINCT
     expect(coachRun.telemetry.intent_class).toBe('coach');
@@ -289,5 +320,190 @@ describe('phase 1 behavioural — coach vs converse distinction', () => {
 
     // turn_class is the same (direct_answer) — runtime behaviour matches
     expect(coachRun.telemetry.turn_class).toBe(converseRun.telemetry.turn_class);
+  });
+});
+
+describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.38)', () => {
+  // Root cause: the coach and tool-call-converse branches of the
+  // `olumi_action` tool had NO answer-body field, so compose could only
+  // ever ship Sonnet's brief pre-tool-call `orientationText` — the fuller
+  // coaching/conversational answer the model authored was silently
+  // dropped. See TRUNCATION-BUG-HANDOVER.md. The fix adds an OPTIONAL
+  // `answer_text` field to the coach and converse tool-call variants
+  // (tool-schema.ts); turn-executor prefers it when present and falls
+  // back to `orientationText` exactly as before when absent.
+
+  it('coach tool call carrying a shape ships the full derived answer, not the short orientationText', async () => {
+    const adapter = {
+      chatWithTools: vi.fn().mockResolvedValueOnce(
+        toolResult(
+          {
+            intent_class: 'coach',
+            coaching_mode: 'challenge',
+            answer_shape: {
+              headline: "You're going against a decisive result, worth examining carefully.",
+              bullets: [
+                'Two mid-level developers cost more up front but spread delivery risk across people rather than one senior hire.',
+              ],
+              detail:
+                'Worth stress-testing whether the timeline assumption holds before committing either way.',
+            },
+          },
+          "You're going against a decisive result, which is worth examining carefully.",
+        ),
+      ),
+    };
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-full', {
+      routingAdapter: adapter,
+    });
+
+    expect(telemetry.intent_class).toBe('coach');
+    expect(telemetry.coaching_mode).toBe('challenge');
+    // Ships the FULL derived answer, not the one-sentence orientation.
+    expect(response.assistant_text).toContain('spread delivery risk across people');
+    expect(response.assistant_text).not.toBe(
+      "You're going against a decisive result, which is worth examining carefully.",
+    );
+  });
+
+  // UPDATED 2026-07-20 (O-7 wave 2): answer_text is REQUIRED on coach/converse
+  // tool calls (CEE_ANSWER_TEXT_REQUIRED deleted, live-true on staging). An
+  // omitted/blank answer_text is now a schema failure → REPAIR_ONCE; if the
+  // repair also omits it, the turn ships the bounded recovery copy — it NEVER
+  // silently falls back to the short orientation (that silent-drop WAS the
+  // ROADMAP 1.38 defect class).
+  it('coach tool call WITHOUT answer_text on both attempts → REPAIR_ONCE then bounded recovery (never blank)', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'A short orientation sentence only.'),
+        )
+        .mockResolvedValueOnce(
+          toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'A short orientation sentence only.'),
+        ),
+    };
+
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-absent', {
+      routingAdapter: adapter,
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(response.assistant_text.trim()).not.toBe('');
+  });
+
+  it('coach tool call with EMPTY/whitespace answer_text → REPAIR_ONCE then bounded recovery (never ships blank)', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolResult(
+            { intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' },
+            'A short orientation sentence only.',
+          ),
+        )
+        .mockResolvedValueOnce(
+          toolResult(
+            { intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' },
+            'A short orientation sentence only.',
+          ),
+        ),
+    };
+
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-blank', {
+      routingAdapter: adapter,
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(response.assistant_text.trim()).not.toBe('');
+  });
+
+  it('converse tool call carrying a shape ships the full derived answer, not the short orientationText', async () => {
+    const adapter = {
+      chatWithTools: vi.fn().mockResolvedValueOnce(
+        toolResult(
+          {
+            intent_class: 'converse',
+            answer_shape: {
+              headline: 'Good structural question, with two moves worth considering.',
+              bullets: [
+                'Strengthen the budget link.',
+                'Revisit the churn assumption that is driving most of the spread.',
+              ],
+              detail: 'Either move changes how the goal responds, so pick based on your constraint.',
+            },
+          },
+          'Good structural question.',
+        ),
+      ),
+    };
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-converse-full', {
+      routingAdapter: adapter,
+    });
+
+    expect(telemetry.intent_class).toBe('converse');
+    expect(response.assistant_text).toContain('Revisit the churn assumption');
+    expect(response.assistant_text).not.toBe('Good structural question.');
+  });
+
+  it('converse tool call WITHOUT answer_text on both attempts → REPAIR_ONCE then bounded recovery (never blank)', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(toolResult({ intent_class: 'converse' }, 'Just a short conversational reply.'))
+        .mockResolvedValueOnce(toolResult({ intent_class: 'converse' }, 'Just a short conversational reply.')),
+    };
+
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-converse-absent', {
+      routingAdapter: adapter,
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(response.assistant_text.trim()).not.toBe('');
+  });
+
+  it('a guard-tripping coach answer (via the shape) is scrubbed exactly like other narrate surfaces', async () => {
+    // Pseudo-XML tag contamination — same TAG_PATTERN sanitiseNarrateOutput
+    // strips (tag markup only; inner text is retained per house behaviour)
+    // on every other narrate surface, flagging contamination via the same
+    // telemetry event. Proves the shape-derived answer_text channel runs
+    // through the SAME egress guard as orientationText, not a bypass.
+    const adapter = {
+      chatWithTools: vi.fn().mockResolvedValueOnce(
+        toolResult(
+          {
+            intent_class: 'coach',
+            coaching_mode: 'summarise',
+            answer_shape: {
+              headline: '<internal>hidden reasoning</internal>The real coaching answer stands alone.',
+              bullets: [],
+              detail: 'A plain supporting sentence with no markup.',
+            },
+          },
+          'Orientation text.',
+        ),
+      ),
+    };
+
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-guard', {
+      routingAdapter: adapter,
+    });
+
+    // Tag markup stripped (matches sanitiseNarrateOutput's TAG_PATTERN
+    // behaviour on every other surface); the un-tagged answer text ships.
+    expect(response.assistant_text).toContain('hidden reasoningThe real coaching answer stands alone.');
+    expect(response.assistant_text).not.toContain('<internal>');
+    expect(response.assistant_text).not.toContain('</internal>');
+    // Contamination was flagged (same telemetry event other narrate
+    // surfaces emit) — the guard fired on answer_text, not a silent pass.
+    expect(
+      events.some(
+        (e) =>
+          e.event === 'turn_executor.contamination_narrate' &&
+          e.data.request_id === 'req-coach-guard',
+      ),
+    ).toBe(true);
   });
 });

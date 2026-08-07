@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 
 import type { QuantityExtractionResult } from '../../context/cqe/schema-types.js';
+import { extractQuantities } from '../../context/cqe/extract-quantities.js';
 import type { GraphLookup } from '../validator.js';
 import {
   tryDeterministicValueUpdate,
@@ -317,13 +318,135 @@ describe('buildClarifyAssistantText / buildClarifyChipMessage', () => {
     expect(text).toContain('one of these');
   });
 
-  it('chip message preserves the user verb and surfaces the raw quantity text', () => {
+  it('chip message preserves the user verb and renders the parsed quantity', () => {
+    // 1.16 item E — deliberate expectation change: the chip previously
+    // embedded `raw_text` verbatim ('£300k'). The value slot now renders
+    // from the PARSED quantity (mapCqeQuantityToProposalValue +
+    // formatValueWithUnit), because CQE `raw_text` can span the whole
+    // sentence (see the real-CQE fixtures below). A GBP quantity therefore
+    // renders as the canonical '£300,000'.
     const msg = buildClarifyChipMessage(
       'Increase the budget to £300k',
       { id: 'f1', label: 'Hiring and Staffing Cost', score: 0.5, source: 'dice' },
-      quantity(300000, '£300k'),
+      { ...quantity(300000, '£300k'), unit: 'GBP' },
     );
-    expect(msg).toBe('Increase Hiring and Staffing Cost to £300k.');
+    expect(msg).toBe('Increase Hiring and Staffing Cost to £300,000.');
+  });
+
+  // -------------------------------------------------------------------------
+  // 1.16 item E — clarify chip raw-text embed. CQE's `raw_text` is the FULL
+  // pattern match (context/cqe/rules.ts `emit`: raw = match[0]), and the
+  // sentence-level patterns capture the whole leading phrase. Embedding it in
+  // the chip template produced "Set X to Set migration cost to £250k." —
+  // garbled copy whose replay also re-parses unreliably. These fixtures run
+  // REAL CQE over the exact diagnosed sentence.
+  // -------------------------------------------------------------------------
+
+  describe('buildClarifyChipMessage — real-CQE raw_text spans the sentence (item E, 1.16)', () => {
+    it('"Set migration cost to £250k." → chip renders the parsed value, not the sentence', () => {
+      const parsed = extractQuantities('Set migration cost to £250k.');
+      expect(parsed.length).toBe(1);
+      // Proves the hazard: raw_text covers the whole sentence.
+      expect(parsed[0]!.raw_text.toLowerCase()).toContain('set migration cost');
+      const msg = buildClarifyChipMessage(
+        'Set migration cost to £250k.',
+        { id: 'f1', label: 'Migration Cost', score: 1, source: 'substring' },
+        parsed[0]!,
+      );
+      expect(msg).toBe('Set Migration Cost to £250,000.');
+    });
+
+    it('delta phrasing keeps its "by" semantics so the replay stays a delta', () => {
+      const parsed = extractQuantities('Increase the budget by £20k.');
+      expect(parsed.length).toBe(1);
+      expect(parsed[0]!.operator).toBe('increment');
+      const msg = buildClarifyChipMessage(
+        'Increase the budget by £20k.',
+        { id: 'f1', label: 'Budget', score: 1, source: 'substring' },
+        parsed[0]!,
+      );
+      // "to £20,000" would silently flip the delta into an absolute set on
+      // replay; the preposition must follow the parsed operator.
+      expect(msg).toBe('Increase Budget by £20,000.');
+    });
+
+    it('raw_text is only a fallback when the quantity has no parsed value', () => {
+      const msg = buildClarifyChipMessage(
+        'Set the cost to a lot',
+        { id: 'f1', label: 'Cost', score: 1, source: 'substring' },
+        { ...quantity(0, 'a lot'), value: null },
+      );
+      expect(msg).toBe('Set Cost to a lot.');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1.16 item B — kind-gate clarify restore. PR #383's type filter narrows the
+// candidate pool to factor-kind nodes, which is right for ranking — but when
+// the user names a NON-factor node ("Set Customer Churn Risk to 20%") the
+// filtered pool yields no match and the turn fell through to the LLM as
+// `no_candidate_match`, losing the cheap pre-LLM recovery that existed
+// before the filter: dispatch the single substring match and let the
+// caller's kind check downgrade it to the kind-gate clarify
+// (`downgrade_reason: 'non_factor_kind'`).
+// ---------------------------------------------------------------------------
+
+describe('tryDeterministicValueUpdate — non-factor single substring match (item B, 1.16)', () => {
+  const MIXED_KINDS = makeGraph([
+    { id: 'fac_mkt', label: 'Marketing Cost' },
+    { id: 'risk_churn', label: 'Customer Churn Risk' },
+  ]);
+  const FACTOR_IDS = new Set(['fac_mkt']);
+  const PARSED_20: QuantityExtractionResult[] = [quantity(20, '20%')];
+
+  it('only substring match in the unfiltered pool is a non-factor → dispatches it for the caller kind gate (was: no_candidate_match)', () => {
+    const result = tryDeterministicValueUpdate(
+      'Set Customer Churn Risk to 20%',
+      PARSED_20,
+      MIXED_KINDS,
+      [],
+      FACTOR_IDS,
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('risk_churn');
+    expect(result.candidate.source).toBe('substring');
+  });
+
+  it('multiple non-factor substring matches → still no_candidate_match (narrow by design)', () => {
+    const graph = makeGraph([
+      { id: 'fac_mkt', label: 'Marketing Cost' },
+      { id: 'risk_churn', label: 'Churn Risk' },
+      { id: 'out_churn', label: 'Churn Outcome' },
+    ]);
+    const result = tryDeterministicValueUpdate(
+      'Set Churn Risk and Churn Outcome to 20%',
+      PARSED_20,
+      graph,
+      [],
+      new Set(['fac_mkt']),
+    );
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('no_candidate_match');
+  });
+
+  it('factor match present → non-factor pool is never consulted (type filter unchanged)', () => {
+    const result = tryDeterministicValueUpdate(
+      'Set Marketing Cost to 20%',
+      PARSED_20,
+      MIXED_KINDS,
+      [],
+      FACTOR_IDS,
+    );
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_mkt');
   });
 });
 
@@ -681,5 +804,201 @@ describe('tryDeicticValueUpdate — AC.2 conservative multi-quantity skip', () =
     if (result.matched) {
       expect(result.dispatch).toBe('set_factor_value');
     }
+  });
+});
+
+// ===========================================================================
+// 1.16b — Demo-Gate usability defect: a unique, exact substring match on a
+// factor label was being defeated by lower-quality Dice runner-ups (which
+// could include differently-typed nodes, e.g. the decision node, sharing
+// tokens with the message). Fixed via:
+//   1. auto-select when the top substring match clearly dominates any
+//      Dice runner-up (AUTO_SELECT_DOMINANCE_MARGIN), and
+//   2. an optional `factorNodeIds` type filter so non-factor nodes never
+//      enter the candidate pool at all.
+// The two fixes are independently exercised below, plus a regression guard
+// that genuinely-ambiguous cases (comparable-score factor matches) still
+// clarify.
+// ===========================================================================
+
+/**
+ * Extended graph builder that also accepts a `factorIds` set, mirroring
+ * production's `factorIdSet` (turn-executor.ts) — the caller-supplied type
+ * filter. `makeGraph` above stays factor-only-by-construction for the
+ * pre-existing tests; this helper is separate so it can model a candidate
+ * pool that mixes factor and non-factor nodes under the same bucketed
+ * `listEntitiesByKind('node')` EntityKind, exactly as `buildGraphLookup`
+ * does in production.
+ */
+function makeMixedGraph(
+  entries: ReadonlyArray<{ id: string; label: string | null }>,
+): GraphLookup {
+  const byId = new Map(entries.map((f) => [f.id, f]));
+  return {
+    findEntityById: (id) => {
+      const f = byId.get(id);
+      return f ? { id: f.id, kind: 'node', label: f.label } : null;
+    },
+    listEntitiesByKind: (kind) => {
+      if (kind !== 'node') return [];
+      return entries.map((f) => ({ id: f.id, label: f.label }));
+    },
+  };
+}
+
+describe('tryDeterministicValueUpdate — 1.16b factor-edit matcher fix', () => {
+  it('REGRESSION FIXTURE (render request_id 1921f7c1-b295-4056-8b3a-21b4c3ef63fb): exact factor label + a differently-typed node sharing tokens (decision) → auto-applies (was: clarify)', () => {
+    // Reproduces the verified defect: a perfect substring match on the
+    // named factor ("North America Market Growth Rate") competed against
+    // two Dice matches whose labels share tokens but belong to a
+    // differently-typed node (here: a decision node) — those Dice
+    // candidates previously forced clarify even though the substring
+    // match was unique and exact. With the `factorNodeIds` type filter,
+    // the decision node never enters the candidate pool in the first
+    // place, so the lone substring match auto-selects.
+    const graph = makeMixedGraph([
+      { id: 'fac_namg', label: 'North America Market Growth Rate' },
+      { id: 'dec_expand', label: 'Grow North America market share' },
+      { id: 'out_entry', label: 'Enter the North American market' },
+    ]);
+    const factorNodeIds = new Set(['fac_namg']); // only the factor is a valid type
+
+    const result = tryDeterministicValueUpdate(
+      'Set North America Market Growth Rate to £5m',
+      [quantity(5_000_000, '£5m')],
+      graph,
+      [],
+      factorNodeIds,
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_namg');
+    expect(result.candidate.source).toBe('substring');
+  });
+
+  it('dominance fix alone (no type filter supplied): unique substring match beats weak same-kind Dice runner-ups → auto-applies', () => {
+    // Isolates fix component #1 from #2: every candidate here IS a
+    // factor (no non-factor node in the pool at all — `factorNodeIds` is
+    // omitted), so this exercises the dominance-margin auto-select on
+    // its own. Before the fix, ANY Dice runner-up — however weak —
+    // defeated the substring match; now a weak echo (well below the
+    // 0.85 dominance-margin cutoff) does not.
+    const graph = makeGraph([
+      { id: 'fac_namg', label: 'North America Market Growth Rate' },
+      { id: 'fac_decoy_1', label: 'Grow North America market share' },
+      { id: 'fac_decoy_2', label: 'Enter the North American market' },
+    ]);
+
+    const result = tryDeterministicValueUpdate(
+      'Set North America Market Growth Rate to £5m',
+      [quantity(5_000_000, '£5m')],
+      graph,
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_namg');
+  });
+
+  it('type filter alone: a decision-kind node scoring ABOVE the dominance margin is excluded from candidates entirely, not merely outscored', () => {
+    // Distinguishes "type-filtered out" from "dominated but still
+    // present": the decision node's label is deliberately chosen to
+    // Dice-score close to (or above) the 0.85 dominance cutoff against
+    // the message, so if it were merely outscored (not filtered) this
+    // case could still tip into ambiguous_quantity/clarify. Because
+    // `factorNodeIds` excludes it from the pool up front, it can never
+    // appear in `matched.length`/candidates and never influence the
+    // dispatch at all — the sole factor candidate auto-selects.
+    const graph = makeMixedGraph([
+      { id: 'fac_namg', label: 'North America Market Growth Rate' },
+      // Near-identical wording to the factor label but a decision node —
+      // Dice-scores 0.857 against the message (verified in this file's
+      // dev-time score computation), i.e. ABOVE the 0.85 dominance
+      // cutoff. If this candidate were merely outscored rather than
+      // type-filtered out, the dominance check alone would deem it "too
+      // close to call" and fall through to clarify — proving this
+      // assertion exercises the type filter, not the dominance margin.
+      { id: 'dec_near_dupe', label: 'The North America Market Growth Rate' },
+    ]);
+    const factorNodeIds = new Set(['fac_namg']);
+
+    const result = tryDeterministicValueUpdate(
+      'Set North America Market Growth Rate to £5m',
+      [quantity(5_000_000, '£5m')],
+      graph,
+      [],
+      factorNodeIds,
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('set_factor_value');
+    if (result.dispatch !== 'set_factor_value') return;
+    expect(result.candidate.id).toBe('fac_namg');
+  });
+
+  it('GENUINELY AMBIGUOUS regression guard: two comparable-score factor matches still clarify (dominance fix does not over-correct)', () => {
+    // Two near-duplicate FACTOR labels (both pass the type filter) where
+    // the unmatched one Dice-scores 0.902 against the message — well
+    // ABOVE the 0.85 dominance cutoff, i.e. a genuine rival, not a weak
+    // echo. Must still clarify — the over-acceptance guard and the new
+    // dominance auto-select coexist. (Labels are deliberately long/
+    // near-identical so the single Q1/Q2 token difference is diluted
+    // enough by shared bigrams to land above the cutoff — a short label
+    // pair would score lower and defeat the point of this fixture.)
+    const LABEL_Q1 = 'North America Market Growth Rate for Q1 Regional Expansion Plan';
+    const LABEL_Q2 = 'North America Market Growth Rate for Q2 Regional Expansion Plan';
+    const graph = makeMixedGraph([
+      { id: 'fac_q1', label: LABEL_Q1 },
+      { id: 'fac_q2', label: LABEL_Q2 },
+    ]);
+    const factorNodeIds = new Set(['fac_q1', 'fac_q2']);
+
+    const result = tryDeterministicValueUpdate(
+      `Set ${LABEL_Q1} to £5m`,
+      [quantity(5_000_000, '£5m')],
+      graph,
+      [],
+      factorNodeIds,
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('clarify');
+    if (result.dispatch !== 'clarify') return;
+    const ids = result.candidates.map((c) => c.id);
+    expect(ids).toContain('fac_q1');
+    expect(ids).toContain('fac_q2');
+  });
+
+  it('factorNodeIds omitted (back-compat): unfiltered pool behaves exactly as before this fix for non-dominant cases', () => {
+    // When the caller has no kind information (factorNodeIds undefined),
+    // the pool is unfiltered — same as every pre-1.16b test fixture.
+    // Pins that omitting the new parameter does not change behaviour for
+    // a case that was ALREADY clarify before this fix (comparable-score
+    // rival present, no type information to exclude it). Same labels as
+    // the fixture above, verifying the outcome doesn't depend on whether
+    // `factorNodeIds` is supplied-but-inclusive or omitted entirely.
+    const LABEL_Q1 = 'North America Market Growth Rate for Q1 Regional Expansion Plan';
+    const LABEL_Q2 = 'North America Market Growth Rate for Q2 Regional Expansion Plan';
+    const graph = makeGraph([
+      { id: 'fac_q1', label: LABEL_Q1 },
+      { id: 'fac_q2', label: LABEL_Q2 },
+    ]);
+
+    const result = tryDeterministicValueUpdate(
+      `Set ${LABEL_Q1} to £5m`,
+      [quantity(5_000_000, '£5m')],
+      graph,
+    );
+
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.dispatch).toBe('clarify');
   });
 });

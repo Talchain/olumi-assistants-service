@@ -36,7 +36,15 @@ vi.mock('../../../src/orchestrator-v5/commit.js', () => ({
 const { priorFactsOverrideRef } = vi.hoisted(() => ({
   priorFactsOverrideRef: { current: null as unknown[] | null },
 }));
-vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
+// ROADMAP 1.148 C2 — importOriginal-spread (derive, don't mirror): the old
+// hand-listed factory silently LACKED every export it didn't enumerate, so
+// when PR #212 added a live `loadMostRecentPendingActions` call to
+// edit-graph-dispatch the suite crashed with "is not a function". Spreading
+// the real module keeps current AND future exports present (the real
+// loaders degrade gracefully to [] without Supabase env); only the seams
+// this suite controls are overridden.
+vi.mock('../../../src/orchestrator-v5/build-turn-context.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/orchestrator-v5/build-turn-context.js')>()),
   buildTurnContext: vi.fn(async () => ({
     goal_node_id: 'goal_growth',
     prior_facts: priorFactsOverrideRef.current ?? [],
@@ -50,6 +58,12 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', () => ({
     handler_id: null,
     received_at: new Date().toISOString(),
   })),
+  // ROADMAP 1.33: dispatchEditGraph reads this unconditionally for the
+  // conversation-slice feed. Empty — this suite exercises the add-risk
+  // e2e path, not conversation history.
+  loadRecentConversationTurns: vi.fn(async () => []),
+  // Proposal-memory continuation (PR #212): no pending actions in this suite.
+  loadMostRecentPendingActions: vi.fn(async () => []),
 }));
 
 // ────────────────────────────────────────────────────────────────────
@@ -142,7 +156,27 @@ describe('dispatchEditGraph e2e — bare add_risk clarification path', () => {
     expect(metadata.graph).toBeUndefined();
 
     expect(result.graph).toBeNull();
-    expect(result.analysisReady).toBeUndefined();
+
+    // ⚠ L16 — this assertion was `expect(result.analysisReady).toBeUndefined()`.
+    // It is now the opposite, and deliberately so. A deterministic
+    // clarification is a NON-APPLY turn, and dropping `analysis_ready` on
+    // non-apply turns is the defect the 3 Aug walk measured: the run gate's
+    // copy degraded from the specific reason to the generic "Olumi is not able
+    // to run this yet" on exactly the turns that shipped no block. A user who
+    // asks a clarifying question must not be punished by losing the specific
+    // reason their run is blocked.
+    //
+    // The claim this case actually exists to make — "does not mutate or
+    // persist the graph" — is untouched and still asserted above and below:
+    // `result.graph` is null, `metadata.graph` is undefined, `llm_calls_used`
+    // is 0, and `PRICING_GRAPH` is unmutated. Readiness here is derived from
+    // the UNCHANGED pre-edit graph, which is why it is safe: it reports the
+    // model as it stands, and cannot report the un-added risk as added.
+    expect(result.analysisReady).toBeDefined();
+    expect(result.analysisReady!.goal_node_id).toBe('goal_growth');
+    // The mutation that did NOT happen is absent from the readiness view too —
+    // no option gained an intervention, nothing became `ready`.
+    expect(result.analysisReady!.options.every((o) => o.status === 'needs_encoding')).toBe(true);
     expect(PRICING_GRAPH).toEqual(originalGraph);
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });

@@ -11,38 +11,43 @@
  *                                  No-op when no such collision exists; safe-conservative
  *                                  rule (only fires when a non-baseline survives).
  * 1.  Deterministic sweep        — resolves mechanical violations, unreachable factors, status quo
- * 1.5 Options-identical bypass   — fail-fast gate for OPTIONS_IDENTICAL: skips LLM repair and emits
- *                                  a clarification-shaped CEE_GRAPH_INVALID so the user is not
- *                                  blocked behind a ~30s repair-then-fail loop. Other Bucket C
- *                                  codes still route through LLM repair (substep 2).
+ * 1.5 Options-identical bypass   — fail-fast gate for OPTIONS_IDENTICAL: emits a
+ *                                  clarification-shaped CEE_GRAPH_INVALID so the user is not
+ *                                  blocked behind a slow failure. Other Bucket C codes proceed
+ *                                  down the deterministic path (substep 2) and, if unfixable,
+ *                                  fail closed at the post-enforcement gate (9b).
  * 1b. Orchestrator validation    — optional LLM-backed validation (gated), runs AFTER sweep
- * 2.  PLoT validation            — external validation + LLM repair (only if Bucket C remains)
+ * 2.  PLoT validation            — external validation + deterministic normalisation.
+ *                                  (The gpt-4.1 LLM repair that used to run here for surviving
+ *                                  Bucket C was REMOVED — ROADMAP 2.731, 0/12 successes in the
+ *                                  7-day efficacy window at ~44.7s per failed turn.)
  * 3. Edge ID stabilisation    — deterministic IDs BEFORE goal merge
  * 4. Goal merge               — enforceSingleGoal, captures nodeRenames
  * 5. Compound goals           — generates constraint nodes/edges
  * 6. Late STRP                — Rules 3,5 with goalConstraints context
  * 7. Edge field restoration   — restores V4 fields using stash + nodeRenames
  * 8. Connectivity             — wires orphans to goal, ensures goal exists
- * 9. Clarifier                — graph refinement (may replace ctx.graph)
  * 9b. Deterministic enforcement — budget rescale + bridge chain repair (gated)
  * 10. Structural parse        — DraftGraphOutput.parse safety net
+ *
+ * (Substep 9, the multi-turn clarifier, was RETIRED 2026-07-16 — ROADMAP 1.94
+ * Option A. It was verified triple-dead: its convergence gate suppressed
+ * question generation on 100% of firings, the V5 draft tool discarded its
+ * output, and the answer loop was unreachable. The 9b/10 labels are kept so
+ * historical traces and docs still line up.)
  *
  * Key dependencies:
  * - 3 BEFORE 4: stable IDs before goal merge changes from/to
  * - 4 BEFORE 7: nodeRenames from goal merge needed for stash restoration
  * - 6 BEFORE 7: late STRP may modify edges that restoration must preserve
  * - 7 AFTER all topology changes: restoration is the last edge mutation
- * - 8 BEFORE 9: clarifier sees connected graph
- * - 9 BEFORE 9b: clarifier may replace ctx.graph; enforcement must run on the
- *   final graph so over-budget sums or forbidden bridge chains reintroduced
- *   by clarifier are still caught
  * - 9b BEFORE 10: structural parse validates final graph state
  *
  * EARLY RETURN RULES:
  * Substeps 1b, 9b, and 10 can set ctx.earlyReturn.
- * Substep 2 falls back to simpleRepair (never early-returns).
+ * Substep 2 normalises via simpleRepair (never early-returns).
  * Substep 8 writes validationSummary (never early-returns).
- * Substeps 1, 3-7 and 9 are deterministic transforms that must not fail.
+ * Substeps 1 and 3-7 are deterministic transforms that must not fail.
  * The earlyReturn guards after substeps 1b and 2 are defensive only.
  * 9b sets earlyReturn (422 CEE_GRAPH_INVALID) when post-enforcement validation
  * finds blocking topology errors (severity="error") that survived all repair stages.
@@ -62,7 +67,6 @@ import { runCompoundGoals } from "./compound-goals.js";
 import { runLateStrp } from "./late-strp.js";
 import { runEdgeRestoration } from "./edge-restoration.js";
 import { runConnectivity } from "./connectivity.js";
-import { runClarifier } from "./clarifier.js";
 import { runStructuralParse } from "./structural-parse.js";
 import { applyDeterministicEnforcement } from "./graph-enforcement.js";
 
@@ -100,13 +104,12 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   // for the explicit-baseline-duplicates-non-explicit case.
   await runDeterministicSweep(ctx);
 
-  // Substep 1.5: Pre-LLM-repair fail-fast gate for OPTIONS_IDENTICAL.
-  // Bypasses the ~30s LLM repair call when the deterministic sweep leaves
-  // an OPTIONS_IDENTICAL violation — `repair_graph` has repeatedly failed
-  // to fix this class in staging, producing a user-hostile 86s "draft +
-  // repair-then-fail" loop. Emits a fail-fast CEE_GRAPH_INVALID with a
-  // clarification-shaped recovery payload. Other Bucket C codes continue
-  // to route through LLM repair. See options-identical-bypass.ts.
+  // Substep 1.5: Fail-fast gate for OPTIONS_IDENTICAL. Emits a fail-fast
+  // CEE_GRAPH_INVALID with a clarification-shaped recovery payload instead
+  // of letting the draft limp on to a later, less actionable failure.
+  // (Historically this gate existed to skip the ~30s `repair_graph` LLM
+  // call, which 2.731 has since removed for ALL Bucket C codes.)
+  // See options-identical-bypass.ts.
   if (runOptionsIdenticalBypass(ctx)) {
     return;
   }
@@ -115,7 +118,8 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   await runOrchestratorValidation(ctx);
   if (ctx.earlyReturn) return;
 
-  // Substep 2: PLoT validation + LLM repair (gated by deterministic sweep)
+  // Substep 2: PLoT validation + deterministic normalisation
+  // (LLM repair removed — ROADMAP 2.731)
   await runPlotValidation(ctx);
   if (ctx.earlyReturn) return;
 
@@ -137,12 +141,7 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   // Substep 8: Connectivity + goal repair
   runConnectivity(ctx);
 
-  // Substep 9: Clarifier (may replace ctx.graph with refinedGraph)
-  await runClarifier(ctx);
-
   // Substep 9b: Deterministic enforcement (budget rescale + bridge chain repair)
-  // Runs AFTER clarifier so any over-budget sums or forbidden bridge chains
-  // reintroduced by clarifier refinement are still enforced before packaging.
   // Sets ctx.earlyReturn (422) if post-enforcement validation finds blocking
   // topology errors (e.g. INVALID_EDGE_TYPE from surviving option shortcuts).
   applyDeterministicEnforcement(ctx);

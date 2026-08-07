@@ -119,6 +119,11 @@ describe("/assist/v1/draft-graph endpoint contract", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
+    // LLM_PROVIDER must be stubbed — the config default is "openai"
+    // (src/config/index.ts), and no OPENAI_API_KEY is present in this
+    // environment; without this, build() throws FATAL before ever reaching
+    // the routes under test (ROADMAP 1.30f investigation).
+    vi.stubEnv("LLM_PROVIDER", "fixtures");
     cleanBaseUrl();
     app = await build();
     await app.ready();
@@ -126,6 +131,7 @@ describe("/assist/v1/draft-graph endpoint contract", () => {
 
   afterAll(async () => {
     await app.close();
+    vi.unstubAllEnvs();
   });
 
   it("success carries coaching (summary, strengthen_items, widening_log, bias_signals)", async () => {
@@ -452,7 +458,7 @@ describe("/orchestrate/v2/turn — substitute composition primitives", () => {
     const scrubbed = sanitiseOlumiResponseForEgress(dirty, {
       graph: null,
       requestId: "test",
-      exitPath: "test",
+      exitPath: "test", userMessage: null, mayNameLeadingOption: true,
     });
     expect(scrubbed.assistant_text).not.toContain("fac_revenue");
   });

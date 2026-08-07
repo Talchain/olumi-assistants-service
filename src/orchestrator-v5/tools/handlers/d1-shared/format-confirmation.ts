@@ -91,6 +91,29 @@ export function formatFactorValueSet(input: {
   return `Updated ${input.label} to ${after}.`;
 }
 
+/**
+ * Honest receipt for when a proposed factor value is IDENTICAL to the one
+ * already persisted (Gate-1 claim integrity). `formatFactorChange` implies
+ * a fresh commit; shipping it for a value that did not change produces the
+ * self-refuting "Updated X from 0.8 to 0.8." — the fact channel already
+ * knows it is a no-op (`SetFactorValueHandlerFact.noop === true`) but the
+ * text channel ignored it and narrated a change regardless.
+ *
+ * Same discipline as `formatConstraintUnchanged` (ROADMAP 1.19(a)), which
+ * fixed this exact divergence for add_constraint: deliberately avoids a
+ * sentence-leading commit verb ("Updated"/"Set"), so the sentence cannot
+ * be misread as a receipt for work done. The value is still named — the
+ * user asked for a specific number and is owed confirmation that it is
+ * the number in the model.
+ */
+export function formatFactorValueUnchanged(input: {
+  readonly label: string;
+  readonly after: { readonly raw_value: number; readonly unit?: string };
+}): string {
+  const value = formatValueWithUnit(input.after.raw_value, input.after.unit);
+  return `${input.label} is already set to ${value}.`;
+}
+
 export interface ConstraintAddedInput {
   readonly targetLabel: string;
   readonly operator: '>=' | '<=';
@@ -113,6 +136,87 @@ export function formatConstraintUpdated(input: ConstraintAddedInput): string {
   const phrase = OPERATOR_PHRASE[input.operator];
   const value = formatValueWithUnit(input.value, input.unit);
   return `Updated constraint: ${input.targetLabel} must be ${phrase} ${value}.`;
+}
+
+/**
+ * Honest re-registration receipt for when a restated constraint value is
+ * IDENTICAL to what is already persisted (ROADMAP 1.19(a) — receipt
+ * claim-integrity). `formatConstraintUpdated` implies a fresh commit;
+ * shipping it for a value that did not actually change is a false
+ * "updated" claim — the fact channel already knows it is a no-op
+ * (`AddConstraintHandlerFact.noop === true`) but the text channel
+ * previously ignored that and always claimed "Updated" whenever a prior
+ * constraint existed, regardless of whether the value differed.
+ * Deliberately avoids a sentence-leading commit verb ("Updated"/"Set").
+ */
+export function formatConstraintUnchanged(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `${input.targetLabel} is already constrained to be ${phrase} ${value}.`;
+}
+
+/**
+ * Overnight review F8(b) — distinct receipt for a restatement whose VALUE
+ * is unchanged but whose LABEL differs from what is persisted. Neither
+ * `formatConstraintUpdated` ("Updated constraint: …") — which implies a
+ * value change that did not happen — nor `formatConstraintUnchanged`
+ * ("… is already constrained …") — which implies nothing changed at all,
+ * when the label in fact did — is honest here. `label` is excluded from
+ * the add_constraint value-sameness predicate precisely so this case can
+ * be named on its own terms.
+ */
+export function formatConstraintLabelUpdated(input: ConstraintAddedInput): string {
+  const phrase = OPERATOR_PHRASE[input.operator];
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Updated the label to ${input.targetLabel} — the constraint (must be ${phrase} ${value}) is unchanged.`;
+}
+
+/**
+ * Receipt for a goal-target set through the add_constraint goal-threshold
+ * join (lane CEE-W5 Mission B). Names the target honestly and states only
+ * what durably happened (the threshold is stamped on the goal node in the
+ * same committed write). provisional_doctrine_v0.
+ *
+ * Lane 22 honesty fix: the previous second sentence promised "The next
+ * analysis will score your options against this target." — FALSE for
+ * every goal-target registration today (goal-fit is deterministically
+ * suppressed for goal nodes without a value channel; the PLoT
+ * threshold-normalisation fix and the target_base doctrine implementation
+ * are both pending). The receipt now promises only what the system can
+ * honour: the target is saved, and goal fit is flagged once the analysis
+ * can score it. The conditional "once" keeps the second sentence outside
+ * the goal-target claim class (goal-target-receipt-guard
+ * NEGATION_CONDITIONAL_RE) while sentence one remains guarded.
+ */
+export function formatGoalTargetSet(input: {
+  readonly goalLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Success target set: ${input.goalLabel} at least ${value}. I'll flag how your options score against it once the analysis can measure this goal.`;
+}
+
+/**
+ * Honest re-registration receipt for when a restated success target is
+ * IDENTICAL to what is already persisted (ROADMAP 1.19(a) — receipt
+ * claim-integrity, single-goal re-registration). `formatGoalTargetSet`
+ * unconditionally reads as a fresh registration event; shipping it when
+ * the target did not actually change borrows the pre-existing threshold
+ * to narrate a commit that did not happen this turn.
+ *
+ * Overnight review N1: carries the same "at least" operator qualifier as
+ * `formatGoalTargetSet` — the registered contract is `>=`, and the bare
+ * value alone ("already 15%") under-specifies it, reading as an exact
+ * target rather than a floor.
+ */
+export function formatGoalTargetUnchanged(input: {
+  readonly goalLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `${input.goalLabel}'s success target is already at least ${value} — no need to change it.`;
 }
 
 export interface EdgeAdjustmentInput {
@@ -141,6 +245,31 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
     : '';
 
   return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
+}
+
+/**
+ * Honest receipt for an edge-strength proposal that matches the strength
+ * already persisted (Gate-1 claim integrity). The counterpart to
+ * `formatFactorValueUnchanged` for the edge handler, which had the same
+ * fact/text divergence: `adjust-edge-strength.ts` computed `noop` for its
+ * fact but always narrated via `formatEdgeAdjustment`, yielding the
+ * false "Adjusted the link between A and B from moderate to moderate."
+ *
+ * No sentence-leading commit verb. Near-zero means take a "has no
+ * material influence" phrasing because the band noun does not read as a
+ * predicate complement ("is already no material influence" is not
+ * English).
+ */
+export function formatEdgeStrengthUnchanged(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly mean: number;
+}): string {
+  const link = `The link between ${input.fromLabel} and ${input.toLabel}`;
+  if (Math.abs(input.mean) < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+    return `${link} already has no material influence.`;
+  }
+  return `${link} is already ${describeBandWithDirection(input.mean)}.`;
 }
 
 function describeBandWithDirection(mean: number): string {

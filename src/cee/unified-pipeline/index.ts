@@ -8,7 +8,7 @@
  *  1.  Parse           — LLM draft + adapter normalisation
  *  2.  Normalise       — STRP + risk coefficients (field transforms only)
  *  3.  Enrich          — Factor enrichment (ONCE, try/catch wrapped for degenerate graphs)
- *  4.  Repair          — Validation + repair + goal merge + connectivity + clarifier
+ *  4.  Repair          — Validation + repair + goal merge + connectivity
  *  4b. Threshold Sweep — Deterministic goal threshold hygiene (non-critical, try/catch wrapped)
  *  5.  Package         — Caps + warnings + quality + trace assembly
  *  6.  Boundary        — V3 transform + analysis_ready + model_adjustments
@@ -17,24 +17,45 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras, PipelineOutcome } from "./types.js";
+import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras, PipelineOutcome, PipelineStageEvent } from "./types.js";
 import { getRequestId, generateRequestId } from "../../utils/request-id.js";
 import { computeResponseHash } from "../../utils/response-hash.js";
 import { config } from "../../config/index.js";
 import { createCorrectionCollector } from "../corrections.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
+import { isDemandNotBriefFailure } from "../../adapters/llm/draft-budget.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
+import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-timings.js";
 
 import { runStageParse } from "./stages/parse.js";
 import { runStageNormalise } from "./stages/normalise.js";
 import { runStageEnrich } from "./stages/enrich.js";
 import { runStageRepair } from "./stages/repair/index.js";
+import { runStageCoachingPass } from "./stages/coaching-pass.js";
 import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 import { runValidationPipeline } from "../validation-pipeline/index.js";
+import { classifyValidationFailure } from "../validation-pipeline/validate-graph.js";
+import { projectGraphForStagedFrame } from "./staged-graph-projection.js";
+
+/**
+ * Stamp coaching_status 'complete' at a terminal exit UNLESS the coaching pass
+ * already owns a terminal marker: 'skipped_budget' (Lane C2, budget skip) or
+ * 'failed_degraded' (draft-F3, ran-and-errored). Consolidates the two identical
+ * preserve-guards at the pipeline's fallback + main exits (simplification F6,
+ * 2026-07-24) so a marker can never be clobbered on only one path.
+ */
+export function markCoachingCompleteUnlessTerminal(outcome: PipelineOutcome): void {
+  if (
+    outcome.coaching_status !== 'skipped_budget' &&
+    outcome.coaching_status !== 'failed_degraded'
+  ) {
+    outcome.coaching_status = 'complete';
+  }
+}
 
 function buildInitialContext(
   input: DraftInputWithCeeExtras,
@@ -60,7 +81,6 @@ function buildInitialContext(
     draftAdapter: undefined,
     llmMeta: undefined,
     confidence: undefined,
-    clarifierStatus: undefined,
     effectiveBrief: input.brief,
     edgeFieldStash: undefined,
     skipRepairDueToBudget: false,
@@ -80,9 +100,6 @@ function buildInitialContext(
     nodeRenames: new Map(),
     goalConstraints: undefined,
     constraintStrpResult: undefined,
-    repairCost: 0,
-    repairFallbackReason: undefined,
-    clarifierResult: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 
@@ -271,14 +288,13 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
         ...baseTrace,
         pipeline: {
           ...basePipeline,
-          llm_metadata: {
-            model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
-            prompt_version: ctx.llmMeta.prompt_version,
-            prompt_hash: ctx.llmMeta.prompt_hash,
-            duration_ms: ctx.llmMeta.provider_latency_ms,
-            finish_reason: ctx.llmMeta.finish_reason,
-            token_usage: ctx.llmMeta.token_usage,
-          },
+          // ONE projection, shared with the success surface in stages/package.ts.
+          // This list used to be a SIX-key hand-written subset of the success
+          // surface's fifteen, so a failed draft's response omitted `max_tokens`
+          // (the cap that caused the truncation) and `runaway_abort_count` (the
+          // aborts that starved it) — the two fields a truncation diagnosis
+          // actually needs. See llm-metadata-projection.ts.
+          llm_metadata: buildLlmMetadataProjection(ctx.llmMeta, ctx.draftAdapter?.model),
         },
       },
     };
@@ -294,9 +310,13 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
 
   if (err instanceof RequestBudgetExceededError) {
     log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: budget exceeded");
+    // CEE_BUDGET_EXCEEDED, not CEE_RATE_LIMIT: the error carries
+    // budgetMs/elapsedMs — this is an elapsed-time DEADLINE breach, not a
+    // throttle and not a spend cap. Sharing CEE_RATE_LIMIT here is what made
+    // the 2026-07-20 draft-timeout investigation read these 429s as throttling.
     return {
       statusCode: 429,
-      body: withLlmTrace(buildCeeErrorResponse("CEE_RATE_LIMIT", err.message, { requestId: ctx.requestId })),
+      body: withLlmTrace(buildCeeErrorResponse("CEE_BUDGET_EXCEEDED", err.message, { requestId: ctx.requestId })),
     };
   }
 
@@ -308,23 +328,116 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     };
   }
 
-  // Upstream non-JSON: LLM returned unparseable content (e.g. nonsensical brief → garbage output)
+  // Demand-vs-brief classification (S-AUDIT-2026-07-20 probe, aggravator 1;
+  // GENERALISED F1, 2026-07-25). A draft that outgrew CEE's token/time budget is
+  // a demand-exceeds-budget failure, not a vague-brief failure, and the two need
+  // OPPOSITE recovery copy: asking such a user to be "more specific" increases
+  // output-token demand and steers them back into the exact failure. Message-
+  // prefix matching cannot carry this (the truncation note breaks the anchored
+  // `^anthropic_response_invalid_schema` regex below), so the classification is
+  // structural.
+  //
+  // ⚠ WHY THIS IS NO LONGER AN INLINE PROPERTY READ. It used to be
+  // `err.truncated_at_max_tokens === true` — a flag every adapter throw site had
+  // to REMEMBER to attach. The `skipped_unaffordable_final` route (the runaway-
+  // abort budget running out) did not attach it, so an entirely CEE-side failure
+  // was served as `reason: llm_non_json`, `retryable: false`, "Provide a
+  // clearer, more specific decision brief" — the cruel inversion this very
+  // comment block warns about, committed by the branch below it. #682's fourth
+  // abort trigger raised the rate of it. `isDemandNotBriefFailure` DERIVES the
+  // answer from the canonical `_llm_meta` every failure route already builds
+  // (`buildFailedCallLlmMeta`), so a future throw site cannot silently opt out.
+  const demandNotBriefFailure = isDemandNotBriefFailure(err);
+  // HONEST COPY (2026-07-23 firefight, CORRECTED 2026-07-25).
+  //
+  // The failure is the draft outgrowing the token/time budget, NOT a bad brief.
+  // Do NOT tell the user to "simplify" or "be more specific" — a vaguer brief
+  // gives the model less to anchor on, so it INFERS more factors and options,
+  // produces a LARGER graph, and is MORE likely to truncate again (the cruel
+  // inversion; see the firefight RCA). That part of the 2026-07-23 copy stands.
+  //
+  // ⚠ WHAT WAS WITHDRAWN: the lead hint used to read "Retrying the same brief
+  // usually succeeds". It was measured on 2026-07-24 and it is FALSE — the
+  // identical brief was retried 18 times against staging and succeeded 0 times,
+  // each attempt costing the user ~90s and real provider spend. Copy that
+  // invites an unbounded retry loop is worse than no copy: it is the product
+  // lying about its own recovery odds. The word "usually" was never measured;
+  // it was inferred from the failure being *classified* transient.
+  //
+  // Retry is still offered — `retryable: true` is correct, a truncation is not a
+  // client input error — but it is offered ONCE and honestly bounded. The
+  // reliable lever is scope narrowing, which genuinely shrinks the graph the
+  // model commits to; it is not the cruel inversion because it removes
+  // DECISIONS and OPTIONS, not DETAIL.
+  const truncationRecovery = {
+    suggestion:
+      "The draft grew past the time budget and was cut off before it finished, so nothing was saved.",
+    hints: [
+      "One retry is worth trying — but if it fails the same way again, more retries will not help",
+      "Narrowing the scope reliably fixes it: one decision at a time, with fewer options",
+      "A very broad brief with many options takes longer to draft",
+    ],
+  };
+
+  // The copy for the OTHER class: output that genuinely could not be parsed or
+  // validated, with no truncation and no runaway abort behind it. Hoisted
+  // alongside `truncationRecovery` because it was written out twice below and
+  // the two copies had to be kept in step by hand.
+  const vagueBriefRecovery = {
+    suggestion: "Provide a clearer, more specific decision brief.",
+    hints: [
+      "State the specific decision you are trying to make",
+      "List 2-3 concrete options you are considering",
+      "Describe what success looks like",
+    ],
+  };
+
+  /**
+   * ⭐ THE RECOVERY CONTRACT, STATED ONCE for both 400 routes.
+   *
+   * `buildCeeErrorResponse` ends with `retryable: options.retryable ?? false`,
+   * so an OMITTED `retryable` is NOT a missing field on the wire — it is an
+   * explicit "do not retry". The old `...(flag ? { retryable: true } : {})`
+   * spread therefore told every runaway-aborted user not to retry a failure
+   * where one retry is the honest lever. Passing it unconditionally makes both
+   * answers deliberate.
+   *
+   * The demand class deliberately keeps ONE reason string rather than minting a
+   * second value: `route-v2.ts:mapDraftGraphPipelineReason` derives the V5 turn
+   * surface's retryable from `reason` alone, and a new value would need a new
+   * hand-maintained branch over there to be treated the same way (trap 12).
+   * Keeping the string means the V5 surface is fixed by this change too.
+   *
+   * @param briefFailureReason the reason to use when the failure really is the
+   *   brief — the only thing that differs between the two routes.
+   */
+  const recoveryContract = (briefFailureReason: string) => ({
+    reason: demandNotBriefFailure ? "llm_truncated_max_tokens" : briefFailureReason,
+    retryable: demandNotBriefFailure,
+    recovery: demandNotBriefFailure ? truncationRecovery : vagueBriefRecovery,
+  });
+
+  // Upstream non-JSON: LLM returned unparseable content — either a draft that
+  // outgrew CEE's budget (classified above) or garbage output from a
+  // nonsensical brief.
   if (err instanceof UpstreamNonJsonError) {
-    log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM returned non-JSON response");
+    // Both facts logged: the derived VERDICT that now selects the copy, and the
+    // raw adapter flag under its original key so existing log queries built on
+    // `truncated_at_max_tokens` keep resolving instead of silently returning
+    // nothing. They are different facts, not two copies of one.
+    log.warn({ error: err, requestId: ctx.requestId, demand_not_brief_failure: demandNotBriefFailure, truncated_at_max_tokens: (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true }, "Unified pipeline: LLM returned non-JSON response");
     return {
       statusCode: 400,
-      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM response could not be parsed — the brief may be too vague or nonsensical", {
-        requestId: ctx.requestId,
-        reason: "llm_non_json",
-        recovery: {
-          suggestion: "Provide a clearer, more specific decision brief.",
-          hints: [
-            "State the specific decision you are trying to make",
-            "List 2-3 concrete options you are considering",
-            "Describe what success looks like",
-          ],
+      body: withLlmTrace(buildCeeErrorResponse(
+        "CEE_LLM_VALIDATION_FAILED",
+        demandNotBriefFailure
+          ? "The draft needed more output tokens than the request budget affords and was truncated"
+          : "LLM response could not be parsed — the brief may be too vague or nonsensical",
+        {
+          requestId: ctx.requestId,
+          ...recoveryContract("llm_non_json"),
         },
-      })),
+      )),
     };
   }
 
@@ -351,22 +464,30 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     /^(?:openai|anthropic)_(?:response_invalid_schema|empty_response)/.test(err.message ?? "") ||
     err.message === "draft_graph_missing_result";
 
-  if (isLlmSchemaOrEmptyError) {
-    log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM response failed schema validation");
+  // `demandNotBriefFailure` joins the condition because the adapter PREFIXES
+  // the schema-invalid message with the truncation note, which breaks the
+  // anchored regex above — pre-flag, a truncated-then-schema-invalid draft
+  // fell through to the untyped 500 below with no recovery at all.
+  //
+  // ⚠ 2026-07-25: broadened from the raw truncation flag to the derived
+  // classifier. A draft that CEE runaway-aborted and that then failed to parse
+  // or validate matched neither the anchored regex nor the flag, so it landed on
+  // the untyped 500 — `retryable: false` with `recovery` absent entirely, which
+  // is the worst shape this estate ships. It now lands here with honest copy.
+  if (isLlmSchemaOrEmptyError || demandNotBriefFailure) {
+    log.warn({ error: err, requestId: ctx.requestId, demand_not_brief_failure: demandNotBriefFailure, truncated_at_max_tokens: (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true }, "Unified pipeline: LLM response failed schema validation");
     return {
       statusCode: 400,
-      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM produced a response that does not match the expected graph schema", {
-        requestId: ctx.requestId,
-        reason: "llm_schema_invalid",
-        recovery: {
-          suggestion: "Provide a clearer, more specific decision brief.",
-          hints: [
-            "State the specific decision you are trying to make",
-            "List 2-3 concrete options you are considering",
-            "Describe what success looks like",
-          ],
+      body: withLlmTrace(buildCeeErrorResponse(
+        "CEE_LLM_VALIDATION_FAILED",
+        demandNotBriefFailure
+          ? "The draft needed more output tokens than the request budget affords and was truncated"
+          : "LLM produced a response that does not match the expected graph schema",
+        {
+          requestId: ctx.requestId,
+          ...recoveryContract("llm_schema_invalid"),
         },
-      })),
+      )),
     };
   }
 
@@ -452,6 +573,36 @@ function attachDraftGraphTimings(
 }
 
 /**
+ * Fire the staged-emission seam (ROADMAP 1.204 M1).
+ *
+ * THREE PROPERTIES MAKE THE STAGED ROUTE'S OUTPUT BYTE-EQUIVALENT TO THE
+ * BUFFERED ROUTE'S BY CONSTRUCTION, and each is enforced here rather than
+ * asserted downstream:
+ *
+ *  1. **No-op when unwired.** Every pre-existing caller omits `onStage`, so the
+ *     pipeline they run is the one that ran before this seam existed.
+ *  2. **Pure observer.** The emitter returns `void`; nothing it does can reach
+ *     `ctx`, the response body, or the stage order.
+ *  3. **Cannot fail or stall the draft.** Throws are swallowed (a dead SSE
+ *     socket must degrade to a plain buffered completion, never a corrupt half
+ *     state), and the call is synchronous and un-awaited so a slow consumer
+ *     cannot add latency to the very wall this work exists to shorten.
+ */
+function emitStageEvent(ctx: StageContext, event: PipelineStageEvent): void {
+  const emitter = ctx.opts.onStage;
+  if (!emitter) return;
+  try {
+    emitter(event);
+  } catch (err) {
+    // Deliberately swallowed — see property 3 above.
+    log.debug(
+      { err, request_id: ctx.requestId, stage_event: event.kind },
+      "staged-emission consumer threw; draft continues unaffected",
+    );
+  }
+}
+
+/**
  * Helper: if earlyReturn is set, attach pipeline outcome and return it.
  * Avoids TS control-flow narrowing issues with repeated earlyReturn checks.
  */
@@ -511,6 +662,17 @@ export async function runUnifiedPipeline(
     }
     return attachDraftGraphTimings(body, timings, ctx.requestId);
   };
+
+  // ── Validation pipeline (Pass 2) handle — HOISTED DELIBERATELY (2.146) ─────
+  // Declared out here, not at its fire site inside the try, for exactly one
+  // reason: after 2.146 the await sits AFTER the coaching pass, so there is a
+  // ~20 s window in which an unexpected throw from a stage could unwind to the
+  // outer catch with the promise still in flight and still holding a pending
+  // write to `ctx.pipelineOutcome.validation_status`. Hoisting lets the outer
+  // catch drain it before the error body is finalised — see the catch block.
+  // `Promise.resolve()` is the correct initial value: the flag-off path and every
+  // pre-fire failure then await nothing.
+  let validationPromise: Promise<void> = Promise.resolve();
 
   try {
     // Stage 1: Parse — LLM draft + adapter normalisation
@@ -623,7 +785,7 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
 
-    // Stage 4: Repair — Validation + goal merge + connectivity + clarifier
+    // Stage 4: Repair — Validation + goal merge + connectivity
     const t4 = stageStart();
     await runStageRepair(ctx);
     timings.repair_ms = stageElapsed(t4);
@@ -641,15 +803,13 @@ export async function runUnifiedPipeline(
       ctx.pipelineOutcome.rescue_score = sweepTrace.rescue_score;
     }
 
-    // LLM repair outcome
-    ctx.pipelineOutcome.llm_repair = {
-      triggered: ctx.llmRepairNeeded ?? false,
-      outcome: ctx.llmRepairNeeded
-        ? (ctx.repairFallbackReason ? 'rejected' : 'accepted')
-        : 'skipped',
-      fallback_reason: ctx.repairFallbackReason ?? null,
-      attempts: ctx.llmRepairNeeded ? 1 : 0,
-    };
+    // LLM repair outcome: the draft path's LLM repair was REMOVED
+    // (ROADMAP 2.731 — 0/12 successes in the 7-day efficacy window), so
+    // llm_repair stays at its init value ({ triggered: false, outcome:
+    // 'skipped', attempts: 0 }), which is now the truth on every turn.
+    // The field itself is kept: V5 diagnostics (v5-diagnostic-trace.ts)
+    // reads it, and a constant-honest 'skipped' is not a constant-wrong
+    // claim.
 
     // Factor value coverage + edge strength unique count (computed from graph)
     if (ctx.graph) {
@@ -706,38 +866,96 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
 
     // Validation pipeline (Pass 2) — fired immediately after Repair, runs
-    // concurrently with Stage 4b. Uses catch() so Stage 4b is never blocked
-    // by validation errors. Awaited before Stage 5 so metadata is ready.
-    const tValidation = stageStart();
-    let validationPromise: Promise<void>;
+    // concurrently with Stage 4b. Uses catch() so nothing downstream is ever
+    // blocked by validation errors.
+    //
+    // ⚠ AWAITED AFTER THE COACHING PASS, NOT HERE (ROADMAP 2.146). See the await
+    // site below for the full argument; the short version is that Pass 2 costs
+    // 10–28 s (60 s cap) and the coaching pass costs ~19.8 s, and the metadata's
+    // only consumer is Stage 5 (Package) — so overlapping the two hides almost
+    // all of Pass 2 behind latency the draft was already paying.
+    //
+    // ⚠ THE TIMER IS SCOPED TO THE FLAG-ON ARM, AND THAT IS A FIX, NOT A TIDY-UP
+    // (review A1 on #758). It used to start HERE, outside the branch, with
+    // `stageElapsed` read at the await site — which was harmless while the await
+    // sat 10 lines below and became a lie the moment the await moved behind the
+    // coaching pass: the window then spanned Stage 4b + GRAPH_READY + the whole
+    // ~19.8 s coaching pass, so a FLAG-OFF turn reported ~19,800 ms of
+    // "validation" for a pipeline that never ran (measured ratio 1.00 against a
+    // forced 150 ms coaching pass). That is worse than a missing number, because
+    // it reads as a measurement — and it is the number the A/B probe's Phase-1
+    // gate is judged on, so both arms would have reported sweep+coaching and the
+    // Pass-2 cost would have cancelled to ~0 by construction.
+    //
+    // Now: the flag-ON arm owns its own timer and records at SETTLEMENT, so the
+    // field means what its name claims — how long Pass 2 itself took, wherever the
+    // await happens to sit. The flag-OFF arm reports an explicit 0. Declaring
+    // `tValidation` inside the branch is what makes the old bug structurally
+    // impossible to reintroduce: move the await again and the compiler, not a
+    // reviewer, catches it.
     if (config.cee.validationPipelineEnabled) {
+      const tValidation = stageStart();
       validationPromise = runValidationPipeline(ctx).then(() => {
         ctx.pipelineOutcome.validation_status = 'passed';
       }).catch((err: unknown) => {
-        const isTimeout = err instanceof Error && (err.name === 'AbortError' || err.message.includes('timeout'));
-        const isParse = err instanceof Error && err.message.includes('parse_error');
+        // Extracted to classifyValidationFailure (validation-pipeline/
+        // validate-graph.ts) so it is pinnable. The inline version this
+        // replaces could not see a real UpstreamTimeoutError and filed every
+        // timeout as api_error; it had zero test coverage.
+        const errorType = classifyValidationFailure(err);
         log.warn(
           {
             event: "cee.validation_pipeline.failed",
             request_id: ctx.requestId,
             error: err instanceof Error ? err.message : String(err),
-            error_type: isTimeout ? 'timeout' : isParse ? 'parse_error' : 'api_error',
+            error_type: errorType,
           },
           "cee.validation_pipeline.failed",
         );
         ctx.pipelineOutcome.validation_status = 'failed_degraded';
+        // ⚠ THE CLASSIFICATION, NOT THE RAW MESSAGE — and this is a fix the
+        // 2.146 default-ON activation forced into the open (ROADMAP 2.146).
+        //
+        // Pass 2's own error text EMBEDS THE REQUEST ID
+        // (`cee.validation_pipeline.parse_error: Pass 2 response missing 'edges'
+        // array (request_id=<uuid>)`), so putting it here put a per-request
+        // value on the RESPONSE PAYLOAD. While the pipeline was dark that was
+        // invisible; the moment it ships ON it broke the staged-SSE↔buffered
+        // equivalence pin, whose volatility derivation correctly refused to
+        // classify a structural `_pipeline_outcome.*` path as ignorable rather
+        // than let the comparison go hollow. The alarm was right.
+        //
+        // Nothing is lost: the FULL raw message is logged immediately above with
+        // `error` + `error_type` + `request_id` as first-class fields, which is
+        // where an operator debugging a degradation actually looks. What the
+        // payload carries now is the stable reason class — comparable across
+        // requests, free of per-request identifiers, and already the vocabulary
+        // the budget design reasons in.
         ctx.pipelineOutcome.warnings.push({
           stage: 'validation_pipeline',
-          error: err instanceof Error ? err.message : String(err),
+          error: errorType,
           degraded: true,
         });
+      }).finally(() => {
+        // Recorded at SETTLEMENT, not at the await — so the number is Pass 2's own
+        // wall time (concurrent with Stage 4b) and is independent of where the
+        // await sits. `.finally` rather than a copy in both handlers: two
+        // `stageElapsed` calls would be a mirror of each other, and the one that
+        // drifts is always the error arm nobody exercises.
+        timings.validation_pipeline_ms = stageElapsed(tValidation);
       });
     } else {
       log.debug(
         { event: "cee.validation_pipeline.skipped", request_id: ctx.requestId },
         "cee.validation_pipeline.skipped",
       );
-      validationPromise = Promise.resolve();
+      // EXPLICIT 0, not an unmeasured window. The pipeline did not run, so the
+      // truthful duration is zero; `stageElapsed` of anything here would be a
+      // small nonzero number that invites exactly the misreading A1 caught.
+      timings.validation_pipeline_ms = 0;
+      // No `validationPromise` write here (S2-10): the hoisted initialiser is
+      // already the resolved promise, and nothing between it and this branch
+      // reassigns — a re-set would read as if something needed undoing.
     }
 
     // Stage 4b: Threshold Sweep — deterministic goal threshold hygiene
@@ -761,10 +979,130 @@ export async function runUnifiedPipeline(
     timings.threshold_sweep_ms = stageElapsed(t4b);
     ctx.stageSnapshots.stage_4b_threshold_sweep = captureStageSnapshot(ctx);
 
-    // Await Pass 2 before Stage 5 (Package) so validation metadata is present
-    // on edges when the response is assembled.
+    // ── GRAPH_READY (ROADMAP 1.204 M1) ────────────────────────────────────
+    // The graph is repaired HERE, and the ~20 s coaching pass has not started —
+    // this is the point the 28 Jul live probe measured at ~33 s of a ~53 s draft.
+    // Emitting here is what turns one silent blob into staged delivery, and it
+    // needs NO reordering: the split the design asked for already exists in the
+    // current stage order.
+    //
+    // ⚠ "and validated" was DROPPED from the line above by ROADMAP 2.146. Pass 2
+    // is no longer awaited before this frame — it is awaited after the coaching
+    // pass, so its 10–25 s hides behind the coaching tax instead of landing on
+    // graph_ready. The frame's MEANING is unchanged (repaired structure, values
+    // still settle at the terminal frame); what changed is that it no longer
+    // waits for an enrichment nothing in the frame carries.
+    //
+    // ⚠ The design's Q3 CEE-1 also said "reorder coaching after package+
+    // boundary". That is REFUTED and deliberately NOT done: Stage 5 (Package)
+    // is a CONSUMER of the coaching pass's output (package.ts reads
+    // ctx.coaching / ctx.causalClaims — enforceCoachingContract,
+    // validateCausalClaims, narrowCoachingForResponse), as coaching-pass.ts's
+    // own header states. Reordering would make Package emit canonical-empty
+    // coaching, changing the BUFFERED route's response bytes — breaking both
+    // "the buffered route stays byte-identical" and the equivalence pin.
+    //
+    // Claim-safety: `ctx.coaching` and `ctx.causalClaims` are still undefined at
+    // this line, so this frame cannot carry a leader designation, a
+    // recommendation, or any analysis claim. Structure only, by construction.
+    //
+    // ⚠ 2.146 — the SECOND half of "structure only" is now enforced rather than
+    // timed. With Pass 2 no longer awaited above, the validation pipeline can
+    // attach per-edge Pass-2 REASONING PROSE to `ctx.graph` at any moment while
+    // this line runs (it mutates edges in place). `projectGraphForStagedFrame`
+    // therefore STRIPS the validation pipeline's two keys unconditionally — see
+    // staged-graph-projection.ts. Racing for a claim is not holding a claim.
+    //
+    // ⚠ The graph is projected into the NEGOTIATED SCHEMA VOCABULARY before it
+    // goes on the wire. Emitting the raw V1 `ctx.graph` here would be a silent
+    // lane-killer: `parseSchemaVersion` defaults to "v3", and the V3 transform
+    // REWRITES node ids and labels — so the client would key the ~33 s graph by
+    // one set of ids and the ~53 s terminal frame by another, and reconciliation
+    // would fail. See staged-graph-projection.ts for the full argument.
+    if (ctx.opts.onStage) {
+      emitStageEvent(ctx, {
+        kind: "GRAPH_READY",
+        graph: projectGraphForStagedFrame(ctx.graph, ctx.opts.schemaVersion, ctx.requestId),
+        schema_version: ctx.opts.schemaVersion,
+        elapsed_ms: Date.now() - ctx.start,
+      });
+    }
+
+    // Stage 4.5: Post-draft coaching pass (v12, lean-draft contract 1.197).
+    // The lean draft call emits STRUCTURE ONLY; coaching + causal_claims are
+    // re-produced here from the FINAL (repaired) structure in a bounded,
+    // STRICTLY NON-FATAL LLM call and attached to ctx for Stage 5 to package.
+    // A failure leaves ctx.coaching undefined → Stage 5 emits canonical-empty,
+    // exactly as a draft that produced no coaching. Never fails the draft.
+    const tCoaching = stageStart();
+    await runStageCoachingPass(ctx);
+    timings.coaching_pass_ms = stageElapsed(tCoaching);
+
+    // ── COACHING_READY (ROADMAP 1.204 M1) ─────────────────────────────────
+    // The ~19.8 s coaching tax has settled — the ~53 s point. Carries the
+    // STATUS only; the coaching prose itself rides the terminal COMPLETE frame
+    // (the byte-identical buffered body), so coaching reaches the client
+    // through exactly one path and one shape. `coaching_status` is not final
+    // until Stage 5/6 stamp it, so this reports the pass's own outcome —
+    // 'complete' here means the PASS settled, and the terminal frame remains
+    // the authority on the finished draft.
+    if (ctx.opts.onStage) {
+      emitStageEvent(ctx, {
+        kind: "COACHING_READY",
+        coaching_status: ctx.pipelineOutcome.coaching_status,
+        elapsed_ms: Date.now() - ctx.start,
+      });
+    }
+
+    // ── AWAIT PASS 2 (ROADMAP 2.146) ──────────────────────────────────────
+    // THE LATENCY CONDITION OF THE CONTESTED-EDGE FLIP, and this is its whole
+    // implementation. Pass 2 was fired ~20 s ago, immediately after Repair; it
+    // has been running THROUGHOUT the coaching pass. Awaiting it here rather than
+    // before GRAPH_READY is what makes the flip affordable:
+    //
+    //   before: graph_ready = repair + PASS2(10–25 s) ; total = +PASS2
+    //   after:  graph_ready = repair                  ; total = +max(0, PASS2 − COACHING)
+    //
+    // With COACHING ~19.8 s measured (n=40) and PASS2 capped at
+    // CEE_VALIDATION_TIMEOUT_MS (60 s default since ROADMAP 2.146 — the 30 s it
+    // replaced could not cover the task; see the constant's own derivation),
+    // the typical case adds ~0 to BOTH numbers and the worst case adds
+    // ~40 s to the total only. Nothing before
+    // this line consumes validation metadata: Stage 5 (Package) is its only
+    // reader (`ctx.validationSummary` → trace; `edge.validation` rides the graph),
+    // and the coaching pass cannot see it — `projectStructuralGraph`
+    // (coaching-pass.ts) whitelists node {id,kind,label} and edge {from,to}, so
+    // the coaching prompt's bytes are invariant to whether Pass 2 has landed.
+    // That whitelist is the reason this overlap is safe rather than merely quick.
+    //
+    // ⚠ WRITERS, not just readers (review R3) — because the drain argument below is
+    // an argument about write ORDERING, and a reader-only manifest is its weaker
+    // half. `ctx.validationSummary` has THREE writers, in this order:
+    // `stages/repair/connectivity.ts:107` and `:124` (Stage 4, before the fire),
+    // then `validation-pipeline/index.ts:239` (Pass 2, which OVERWRITES them).
+    // Package reads at `stages/package.ts:802`, still downstream of this await, so
+    // the ordering is deterministic and 2.146 does not change it — but the fact
+    // that Pass 2 clobbers a Stage-4 write is the reason the await must stay
+    // BEFORE Package rather than merely "somewhere after coaching".
+    //
+    // ⚠ WHAT THIS AWAIT CAN DO, STATED WITH ITS PRECONDITION (review A2). The
+    // promise carries its own `.catch()` at the fire site, so it cannot reject for
+    // any reason Pass 2 itself produces — PRECONDITION: that the `.catch()`
+    // handler does not itself throw. It cannot today
+    // (`ctx.pipelineOutcome.warnings` is initialised `[]` at :131, so the `push`
+    // is safe), which makes this path unreachable rather than merely unlikely. The
+    // earlier wording here said "cannot throw" flat, which was an absolute claim
+    // resting on a fact two files away — the kind of sentence that stays in the
+    // record after the fact stops being true. If the handler ever does throw, this
+    // await rejects into the outer catch and is handled there as a degradation
+    // (and the drain at that site is now rejection-proof — see it for why that
+    // matters more than this).
+    //
+    // The timing is NOT recorded here any more: it is recorded at the promise's
+    // own settlement, in the `.finally` at the fire site. That is what makes
+    // `validation_pipeline_ms` mean Pass 2's duration rather than "whatever
+    // elapsed before someone chose to await" — review A1.
     await validationPromise;
-    timings.validation_pipeline_ms = stageElapsed(tValidation);
 
     // Stage 5: Package — Quality + warnings + caps + trace
     // Soft gate: both the verification pipeline inside Package and the
@@ -784,7 +1122,13 @@ export async function runUnifiedPipeline(
         error: packageErr?.message ?? 'unknown',
         degraded: true,
       });
-      ctx.pipelineOutcome.coaching_status = 'failed_degraded';
+      // F7 (2026-07-24): a Stage 5 PACKAGE failure is NOT a coaching failure.
+      // Coaching may have succeeded and an unrelated packaging op (bias payload,
+      // schema transform) threw. coaching_status stays owned by the coaching
+      // path — stamp its real terminal status here (complete when it succeeded,
+      // or its preserved skipped_budget / failed_degraded marker); the package
+      // degradation is already signalled by the stage:'package' warning above.
+      markCoachingCompleteUnlessTerminal(ctx.pipelineOutcome);
       timings.package_ms = stageElapsed(t5);
       // Return the structurally valid graph without packaging
       const fallback = { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
@@ -816,7 +1160,9 @@ export async function runUnifiedPipeline(
       timings.boundary_ms = stageElapsed(t6);
       // Return the packaged V1 response without boundary transform
       const fallback = ctx.ceeResponse ?? { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
-      ctx.pipelineOutcome.coaching_status = 'complete';
+      // Preserve a coaching-pass terminal marker (skipped_budget / failed_degraded)
+      // on this fallback path; else stamp 'complete'.
+      markCoachingCompleteUnlessTerminal(ctx.pipelineOutcome);
       attachPipelineOutcome(fallback, ctx.pipelineOutcome);
       finalise(fallback);
       return { statusCode: 200, body: fallback };
@@ -836,8 +1182,11 @@ export async function runUnifiedPipeline(
       return { statusCode: 501, body: errorBody };
     }
 
-    // Coaching status: if we got here with a response, coaching passed
-    ctx.pipelineOutcome.coaching_status = 'complete';
+    // Coaching status: if we got here with a response, coaching passed — UNLESS
+    // the post-draft coaching pass owns a terminal marker (skipped_budget /
+    // failed_degraded), which must survive to the response body so probes and
+    // A2's async-ingest lane can distinguish it from a genuinely-complete pass.
+    markCoachingCompleteUnlessTerminal(ctx.pipelineOutcome);
 
     attachPipelineOutcome(ctx.finalResponse, ctx.pipelineOutcome);
     finalise(ctx.finalResponse);
@@ -848,6 +1197,32 @@ export async function runUnifiedPipeline(
   } catch (error) {
     // Pre-sweep failures (Stage 1-3) or unexpected errors still map to error responses.
     // Post-sweep failures are caught by the stage-level try/catch above.
+    //
+    // ⚠ 2.146 — DRAIN PASS 2 BEFORE BUILDING THE ERROR BODY. After the await
+    // moved behind the coaching pass there is a ~20 s window in which a throw can
+    // reach here with the validation promise still in flight, still holding a
+    // pending write to `ctx.pipelineOutcome.validation_status`.
+    //
+    // Precisely what goes wrong without this, stated no stronger than it is:
+    // `attachPipelineOutcome` assigns the outcome BY REFERENCE, so a late write
+    // is not *lost* — it is NONDETERMINISTIC. Whether the wire carries
+    // `validation_status: 'passed' | 'failed_degraded'` or `null` then depends on
+    // whether the promise settles before or after the framework serialises the
+    // body. A field whose value depends on that is worse than a missing one,
+    // because it reads as a measurement. Draining makes it deterministic.
+    //
+    // Free on the flag-off path (`Promise.resolve()`).
+    //
+    // ⚠ `.catch(() => {})` IS LOAD-BEARING, NOT BELT-AND-BRACES (review A2). If we
+    // reached here BECAUSE the await at the main site rejected — which needs the
+    // fire site's own `.catch()` handler to have thrown — then awaiting the same
+    // already-rejected promise a second time would reject INSIDE this catch block
+    // and propagate out of `runUnifiedPipeline` as an unhandled rejection. A
+    // handled degradation would become a crash, on the one escape path the
+    // relocation created. Swallowing here is correct: the error that brought us
+    // into this catch is the one being reported, and a second copy of it must not
+    // replace the response with a stack trace.
+    await validationPromise.catch(() => {});
     const result = mapPipelineError(error, ctx);
     attachPipelineOutcome(result.body, ctx.pipelineOutcome);
     finalise(result.body);

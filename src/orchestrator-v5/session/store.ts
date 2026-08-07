@@ -23,6 +23,10 @@ import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
 import type { SessionTurnWithContent } from './conversation-content.js';
+// Type-only, and deliberately so: `turn-fence.ts` imports
+// `StateCommitFailedError` from THIS file, and a value import here would close
+// that into a runtime cycle. `import type` is erased entirely.
+import type { TurnFenceHandle, TurnStopOutcome } from './turn-fence.js';
 
 /**
  * Re-export so existing in-session callers (and `commit.ts` /
@@ -124,6 +128,32 @@ export interface SessionTurnWrite {
    * length-capped there. `undefined`/omitted writes NULL.
    */
   readonly assistantMessage?: string;
+  /**
+   * A3 graph CAS observe-mode: full identity hash (64-hex,
+   * `computeGraphIdentityHash`) of the SERVER-SIDE persisted graph read at
+   * turn start — the trusted expected base the pre-RPC CAS evaluation
+   * compares against the current `scenarios.graph`.
+   *
+   * TRUSTED BASE RULE: this must derive ONLY from a server-side persisted
+   * read (`buildTurnContext`'s scenarios read, or edit-graph-dispatch's
+   * `loadPersistedGraphStrict`). NEVER from request-supplied `graph_state` —
+   * that may be the very graph being written, and a CAS that validates the
+   * write against itself always "matches".
+   *
+   * Convention: `undefined` = this write path is not instrumented (no server
+   * base read; categorised `no_expected`, never a conflict). `null` = a
+   * server base read happened but the graph was absent / identity-empty /
+   * unparseable. Mirrors `CommitMetadata.expectedGraphIdentityHash`.
+   */
+  readonly expectedGraphIdentityHash?: string | null;
+  /**
+   * A3 graph CAS observe-mode: analysis-affecting hash (16-hex,
+   * `computeAnalysisAffectingGraphHash`) of the same server-read base as
+   * `expectedGraphIdentityHash`. Used to downgrade an identity mismatch to
+   * `cosmetic_concurrent_edit` when the analysis projection did not move.
+   * Same undefined/null convention as `expectedGraphIdentityHash`.
+   */
+  readonly expectedGraphAnalysisHash?: string | null;
 }
 
 export interface SessionStore {
@@ -134,6 +164,122 @@ export interface SessionStore {
   // treat the result as SessionTurn[] are unaffected; only the ContextPack
   // conversation projection reads the new fields.
   readRecent(scenarioId: string, limit?: number): Promise<readonly SessionTurnWithContent[]>;
+  /**
+   * The PRE-CAP number of conversation turns stored for this scenario — how
+   * many rows `v5_conversation_turns` holds, before {@link readRecent}'s
+   * `LIMIT` throws the older ones away.
+   *
+   * This exists because `readRecent` returns a WINDOW and the ContextPack was
+   * reporting that window's length as the conversation's total length. On a
+   * 78-turn scenario the pack said `turn_count: 20` and the coach told the
+   * user, verbatim, "Total turn count on record for this conversation is 20"
+   * (live probe, build `f00b8ef`, 2026-07-25). The three window numbers agreed
+   * with each other and were jointly false, so no conformance check could see
+   * it. Same defect shape as the decision-record cap fixed in #690, one table
+   * over.
+   *
+   * DELIBERATELY A SEPARATE READ, not a `count: 'exact'` rider on the
+   * `readRecent` SELECT: that SELECT does not run on every turn. The LRU cache
+   * short-circuits it whenever `cached.turns.length >= limit`, which is
+   * precisely the beyond-window case this number exists to describe — so a
+   * count carried on that query would be absent or stale exactly when it
+   * matters, and cacheing + incrementing it on write would make it a
+   * hand-maintained mirror of the table. This is one indexed COUNT per turn,
+   * derived from the source of truth every time.
+   *
+   * MUST throw rather than return an approximation: the caller degrades to
+   * "total unknown" and suppresses the total, which is honest. A silent
+   * fallback to the window length would reproduce the exact falsehood.
+   *
+   * Optional on the interface so existing test mocks aren't forced to
+   * implement it (mirrors {@link readFactsWithTurnFor}); buildTurnContext
+   * treats absence as "total unknown". Production (`SupabaseSessionStore`)
+   * always implements it.
+   */
+  countTurns?(scenarioId: string): Promise<number>;
+  /**
+   * V5 TURN FENCE — claim this turn's place in the scenario's start order.
+   * Called ONCE per turn at ingress (`/orchestrate/v2/turn`), before any
+   * dispatch; the returned handle is bound for the whole turn and read again
+   * immediately before any graph-bearing commit. See `turn-fence.ts` for the
+   * defect this closes and the full arrival enumeration.
+   *
+   * Resolves to `null` when the claim could not be made. The ingress then binds
+   * an UNCLAIMED handle (`generation: null`) and the turn's graph write is
+   * REFUSED at the commit — fail closed there, not here, because refusing at
+   * ingress would turn a fence outage into a total outage including for turns
+   * that write no graph at all.
+   *
+   * ⚠ Until the #759 adversarial review this doc said the turn "runs UNFENCED
+   *   and its graph write is refused", which is a contradiction, and the code
+   *   implemented the first half: a failed claim bound no handle, the commit hit
+   *   `no_ingress_fence`, and the write was ALLOWED.
+   *
+   * Optional on the interface for the same reason as {@link countTurns} —
+   * existing test mocks are not forced to implement it. Production
+   * (`SupabaseSessionStore`) always implements it, and
+   * `turn-fence-guards.test.ts` pins that from the class rather than asserting
+   * it in a comment.
+   */
+  claimTurnFence?(scenarioId: string, turnId: string): Promise<TurnFenceHandle | null>;
+  /**
+   * V5 TURN FENCE — record an explicit user Stop for a turn, making it
+   * server-visible. Returns whether the turn had ALREADY committed when the
+   * Stop arrived, which is what lets the UI describe the past instead of
+   * predicting a commit. Optional for the same reason as
+   * {@link claimTurnFence}.
+   */
+  markTurnStopped?(scenarioId: string, turnId: string): Promise<TurnStopOutcome>;
+  /**
+   * 2.174 fix a (Stop-route hardening) — does a `scenarios` row exist for
+   * this id? Read by `recordExplicitTurnStop` BEFORE the tombstone upsert so
+   * a Stop for an unknown scenario is refused without creating a fence row
+   * (the public route is reachable with any UUID; rows are never deleted, so
+   * unchecked upserts grew the table without bound). MAY throw on a failed
+   * read — the caller fails OPEN (records the Stop anyway): a DB blip must
+   * not cost a legitimate user their Stop. Optional for the same reason as
+   * {@link claimTurnFence}.
+   */
+  scenarioExists?(scenarioId: string): Promise<boolean>;
+  /**
+   * ROADMAP 2.236 (Stop-route authorization; Codex audit C finding C-1) — does
+   * a `v5_turn_fence` row ALREADY exist for this (scenario, turn) pair? In
+   * other words: was this turn ADMITTED on this scenario?
+   *
+   * Read by `recordExplicitTurnStop` immediately before the tombstone upsert,
+   * and it is the check that removes the defect's actual damage. The Stop RPC
+   * UPSERTS, and `generation` is a `BIGSERIAL`: a caller-INVENTED `turn_id`
+   * therefore INSERTS a fresh row with a HIGHER generation than every in-flight
+   * turn on that scenario, so a legitimate graph-bearing turn admitted at
+   * generation G reaches its commit, reads max = G+1, raises `OLTF2` and LOSES
+   * ITS GRAPH WRITE. When the row already exists the RPC takes its
+   * `ON CONFLICT DO UPDATE` branch, which does not touch `generation`, so the
+   * scenario's max generation is unchanged and no in-flight turn is superseded.
+   *
+   * MUST resolve `false` only on a CLEAN no-row read, and MAY throw on a FAILED
+   * read — the caller distinguishes them: a clean `false` is a fact and refuses
+   * the Stop; a throw is an unknown and fails OPEN, exactly as
+   * {@link scenarioExists} does, because a DB blip must not cost a legitimate
+   * user their Stop (the P0 protection outranks the hardening). Optional for
+   * the same reason as {@link claimTurnFence}.
+   */
+  turnFenceRowExists?(scenarioId: string, turnId: string): Promise<boolean>;
+  /**
+   * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
+   * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding
+   * `excludeTurnId` (the turn asking), carries a Stop tombstone. Any later
+   * ordinary turn claims a newer generation, so the state clears itself — no
+   * flag to reset, no second copy of the fact (trap 12: derived from the fence
+   * table that already owns it).
+   *
+   * Read by the clarify-v2 resume to disclose "still working on the original
+   * decision" when a NEW brief arrives right after an explicit Stop (the
+   * 2.171 tester confound). Best-effort by contract: implementations MUST
+   * resolve `false` on any read failure rather than throw — the only consumer
+   * is coach copy, and a copy nicety must never fail or delay-fail a turn.
+   * Optional for the same reason as {@link claimTurnFence}.
+   */
+  wasLatestScenarioTurnStopped?(scenarioId: string, excludeTurnId: string): Promise<boolean>;
   /**
    * Load handler facts for a set of prior conversation turns.
    *
@@ -172,6 +318,42 @@ export interface SessionStore {
     conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFactWithTurn[]>;
+  /**
+   * The SCENARIO's newest non-noop `run_analysis` fact — past the read window.
+   *
+   * WHY THIS IS NOT A FLAVOUR OF {@link readFactsFor}. Every other fact read on
+   * this interface is keyed by `v5_conversation_turn_id`, i.e. by the turns
+   * {@link readRecent} returned, i.e. by a `LIMIT 20` WINDOW. The T1
+   * claim-safety permission was read off that window while the three channels
+   * it gates read the whole scenario (rolling summary `LIMIT 1000`; decision
+   * records scenario-wide). Past 20 turns the analysis fact was simply not
+   * loaded, the reader took its "no analysis ⇒ nothing to withhold" branch, and
+   * a withheld scenario shipped an ungated summary. Same defect shape as the
+   * window-vs-total lie {@link countTurns} exists to remove, one table over —
+   * and the same remedy: a separate read, scoped to the truth, every turn.
+   *
+   * Filtered to `handler_id = 'run_analysis'` and `noop = false`; ordered
+   * `created_at DESC`, `LIMIT 1`. Eligibility beyond that (the
+   * `analysis_status` success filter) is the SELECTOR's job, not the store's —
+   * the store must not acquire a second copy of "is this analysis usable".
+   *
+   * ⚠ MUST NOT be served from the session LRU. That cache is process-local,
+   * has no TTL, and is invalidated only on the instance that did the append,
+   * so a cached permission could be stale across instances in either
+   * direction — the same non-determinism that let the live flip happen twice
+   * over. This read goes to the database every turn, by design.
+   *
+   * Returns `null` when the scenario has no such fact. THROWS on read failure —
+   * no assume-good default, because "no analysis" and "I could not look" are
+   * exactly the two things this method exists to stop conflating. The caller
+   * degrades explicitly and arms the fail-closed guard.
+   *
+   * Optional on the interface so existing test mocks aren't forced to
+   * implement it (mirrors {@link countTurns} / {@link readFactsWithTurnFor});
+   * `buildTurnContext` treats absence as a degraded read. Production
+   * (`SupabaseSessionStore`) always implements it.
+   */
+  readNewestAnalysisFactFor?(scenarioId: string): Promise<HandlerFact | null>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**
@@ -221,13 +403,24 @@ export interface SessionStore {
    * NULL user_id in that case.
    *
    * Returns the AUTHORITATIVE `user_id` (as stored in `public.scenarios`).
-   * Returns null for guest rows. Callers should skip the cross-tenant
-   * ownership check when either the caller userId or the returned value
-   * is null (no ownership concept in guest mode).
+   * Returns null for guest rows.
    *
-   * Read/RPC failures propagate as `SessionReadError`. The pre-flight
-   * treats those as "unknown" and fails-open (traffic continues; the
-   * later `append_turn_atomic` is the last line of defence).
+   * The cross-tenant ownership check is skipped when the RETURNED value is
+   * null (an unowned/guest row, which by design any caller may act on) —
+   * and ONLY then. It is NOT skipped when the CALLER's userId is null: a
+   * stored owner plus an anonymous caller is the IDOR case, and the
+   * either-null short-circuit that used to be documented here was the hole
+   * itself (an request that simply omitted `user_id` could act on any owned
+   * scenario). Closed 2026-07-26; see `preflightEnsureScenario`.
+   *
+   * Read/RPC failures propagate as `SessionReadError`, and the pre-flight
+   * fails CLOSED on them (refuses the turn, route 422). This doc previously
+   * said it "fails-open … the later `append_turn_atomic` is the last line of
+   * defence"; that premise was verified FALSE for ownership —
+   * `append_turn_atomic` (v1/v2/v3) reads `user_id` FROM the scenarios row to
+   * denormalise it onto the turn and never compares it to any caller
+   * identity, so it guards scenario EXISTENCE, not ownership. There is
+   * nothing behind this check.
    *
    * ⚠ PoC security posture — trust-the-caller on `userId`. CEE's HTTP
    * ingress is API-key + HMAC authenticated service-to-service; there
@@ -238,6 +431,29 @@ export interface SessionStore {
    * See supabase/migrations/…_v5_ensure_scenario_exists.sql header.
    */
   ensureScenarioExists(scenarioId: string, userId: string | null): Promise<{ user_id: string | null }>;
+  /**
+   * MM P1 (ROADMAP 1.25 hygiene batch, item 2 completion — Brief H guest
+   * pre-check): plain read-only lookup of `scenarios.user_id`, WITHOUT the
+   * upsert/ownership-comparison side effects of `ensureScenarioExists`.
+   * Used by the commit-seam Model Management version hook
+   * (`commit.ts::recordModelVersionForCommit`) to skip the `saveVersion`
+   * RPC entirely for a guest (unowned) scenario — that RPC always fails
+   * `sign_in_required` (MV001) for `user_id IS NULL`, so calling it is a
+   * wasted round trip on every guest commit.
+   *
+   * Returns the scenario's `user_id` (null for guest / unowned rows, or
+   * when the scenario row does not exist — both read as "cannot version,
+   * skip the write"). Optional on the interface (added after the original
+   * ship) so pre-existing test doubles that don't implement it keep
+   * compiling; callers MUST treat a missing implementation the same as a
+   * read failure — fail-open to the pre-fix behaviour (attempt the RPC,
+   * let it answer MV001 authoritatively) rather than block the write.
+   *
+   * Read failures throw `SessionReadError`, mirroring the other plain
+   * reads on this interface; the commit-seam caller catches and fails
+   * open (same non-blocking contract as every other step in that hook).
+   */
+  getScenarioOwner?(scenarioId: string): Promise<string | null>;
   /**
    * Load the pending actions emitted by the most recent prior turn for a
    * scenario. Returns `[]` when no prior turn exists, when the most
@@ -289,7 +505,90 @@ export interface SessionStore {
    * (`SupabaseSessionStore`) always implements it.
    */
   hasPriorTurns?(scenarioId: string): Promise<boolean>;
+
+  /**
+   * ROADMAP 2.709 invariant 3 — does the scenario carry an ADMITTED turn by
+   * another turn id whose graph write has not been marked failed? The fence
+   * table holds a row from the moment a turn is admitted, ~50 s before its
+   * commit can land, so this is what lets continuation detection SEE an
+   * in-flight draft (the mid-draft-question capture defect). Failure-marked
+   * rows are excluded so the post-loss state classifies fresh — a re-sent
+   * brief must be allowed to redraft.
+   *
+   * Read failures throw; the bounded loader degrades to `false` (same
+   * posture as {@link hasPriorTurns}). Optional so existing mocks need not
+   * implement it.
+   */
+  hasOtherAdmittedLiveTurn?(scenarioId: string, excludeTurnId: string): Promise<boolean>;
+
+  /**
+   * ROADMAP 2.709 invariant 6 — does a draft loss STAND on this scenario?
+   * True iff some fence row carries an UNRESOLVED, DISCLOSABLE loss mark AND
+   * the scenario holds no committed graph.
+   *
+   * ⚠ 2.735 narrowed both halves of this, and the narrowing is the point:
+   *   · DISCLOSABLE — a turn that died BEFORE it had a graph to lose is
+   *     marked dead (so continuation detection stops counting it) but is NOT
+   *     disclosable; telling that user "your last draft didn't save" is a
+   *     false claim about an event that never happened.
+   *   · UNRESOLVED — a later successful graph commit RESOLVES outstanding
+   *     marks explicitly. The previous shape ("mark present AND graph now
+   *     null") only ever MASKED a historical mark, so deleting a graph months
+   *     later re-fired a notice about a draft the user had long since
+   *     replaced.
+   *
+   * Throws on read failure; callers degrade to "no notice". Optional for mock
+   * tolerance.
+   */
+  scenarioDraftLossStands?(scenarioId: string): Promise<boolean>;
+
+  /**
+   * ROADMAP 2.709 invariant 6 — leave the server-side trace of a refused or
+   * failed graph commit on the turn's own fence row. Best-effort by
+   * contract: implementations MUST swallow failures (log-only) — the turn is
+   * already failing and the trace must never change what the caller returns.
+   * `turnId` is the ADMISSION identity (the fence row's key), never the
+   * commit metadata's write identity (2.301 lesson). Optional for mock
+   * tolerance.
+   *
+   * ROADMAP 2.735 — `disclosure` is REQUIRED, and required on purpose: it is
+   * the forcing function that makes every marking site state, in the type
+   * system, whether this failure is something the USER lost. A new call site
+   * cannot inherit "disclosable" by omission, which is exactly how the false
+   * claim shipped.
+   */
+  markGraphWriteFailed?(
+    scenarioId: string,
+    turnId: string,
+    reason: string,
+    disclosure: GraphWriteFailureDisclosure,
+  ): Promise<void>;
+
+  /**
+   * ROADMAP 2.735 — record that any outstanding draft loss on this scenario is
+   * RESOLVED, because a graph has now committed. Best-effort (log-only on
+   * failure): the commit has already landed and a failed resolution write must
+   * never turn a success into an error. Optional for mock tolerance.
+   */
+  resolveScenarioDraftLoss?(scenarioId: string): Promise<void>;
 }
+
+/**
+ * ROADMAP 2.735 — what a graph-write failure mark CLAIMS.
+ *
+ * `draft_loss`      — a drafted model was lost: either the client had already
+ *                     been handed a GRAPH_READY preview, or a commit was
+ *                     actually attempted with a graph in hand. The user has
+ *                     something to be told about, so the next turn discloses.
+ * `turn_dead_only`  — the turn failed before there was a graph: an upstream
+ *                     error, a rate limit, a timeout, a validation failure at
+ *                     parse. The turn is dead (continuation detection must
+ *                     stop counting it as live) but NOTHING WAS LOST, so no
+ *                     disclosure is owed and none is made. These users already
+ *                     received a synchronous 500 carrying the failure and its
+ *                     recovery suggestion on the turn itself.
+ */
+export type GraphWriteFailureDisclosure = 'draft_loss' | 'turn_dead_only';
 
 /**
  * Thrown by commit stage when the Supabase RPC or any underlying DB operation
@@ -307,6 +606,46 @@ export class StateCommitFailedError extends Error {
     if (opts?.cause !== undefined) {
       (this as unknown as { cause?: unknown }).cause = opts.cause;
     }
+  }
+}
+
+/**
+ * A3 graph CAS — enforce mode ONLY. Thrown by `SupabaseSessionStore.append()`
+ * BEFORE the append_turn_atomic_v2 RPC when the pre-write evaluation
+ * categorises the write as `analysis_affecting_conflict` and
+ * CEE_V5_GRAPH_CAS_MODE='enforce' (non-prod only — prod auto-downgrades to
+ * observe). No other category is ever enforced; observe mode never throws.
+ *
+ * Extends StateCommitFailedError so every existing TurnExecutor
+ * `instanceof StateCommitFailedError` catch maps it onto the existing typed
+ * failure envelope (STATE_COMMIT_FAILED → INTERNAL_ERROR) — no route or wire
+ * shape change. This is app-side, best-effort blocking with a
+ * SELECT-then-write TOCTOU window, NOT an atomicity guarantee.
+ */
+export class GraphStaleWriteError extends StateCommitFailedError {
+  /** Closed-enum conflict category from graph-cas-conflict.ts. */
+  readonly conflict_category: string;
+  /**
+   * F4 — the identity hash of the base graph the rejected write was built on
+   * (the caller's stale base). Non-sensitive identity fingerprint; carried
+   * onto the 409 envelope so the UI can surface what it had before it refreshes
+   * canonical state and reconfirms. Undefined when no expected base was
+   * supplied (e.g. an app-side categorisation with no incoming hash).
+   */
+  readonly expected_base_graph_hash: string | undefined;
+
+  constructor(
+    message: string,
+    opts: {
+      conflict_category: string;
+      cause?: unknown;
+      expected_base_graph_hash?: string;
+    },
+  ) {
+    super(message, { cause: opts.cause });
+    this.name = 'GraphStaleWriteError';
+    this.conflict_category = opts.conflict_category;
+    this.expected_base_graph_hash = opts.expected_base_graph_hash;
   }
 }
 

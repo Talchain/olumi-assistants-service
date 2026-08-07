@@ -10,7 +10,12 @@
 
 import type { V2RunResponseEnvelope } from "../types.js";
 import { log } from "../../utils/telemetry.js";
+import { config } from "../../config/index.js";
 import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-direction.js";
+import { readDriverInfluenceScore } from "./driver-influence.js";
+import { winnerOptionResultSource } from "./option-result-source.js";
+import { deriveWinnerConstraintInfeasibility } from "./constraint-feasibility.js";
+import { isRecommendableTypedOption } from "../../orchestrator-v5/tools/handlers/recommendable-option.js";
 
 // ============================================================================
 // Output Types
@@ -24,6 +29,20 @@ export interface OptionSummary {
   outcome_p10?: number;
   outcome_p90?: number;
   probability_of_goal?: number;
+  /**
+   * Per-option ISL compute `status` (e.g. `'computed'` / `'error'` /
+   * `'skipped'`), carried straight off the `option_comparison[]` record when
+   * present. Additive + optional: absent when the wire record carries no
+   * status (legacy / most current payloads), so the key is OMITTED and the
+   * projection stays byte-identical for status-less inputs.
+   *
+   * Retained here — rather than dropped, as it used to be — so the DOWNSTREAM
+   * `projectAnalysis` (context-pack-assembler.ts) can gate the coaching
+   * leading/runner-up on it. Winner selection routes this field through the
+   * ONE shared `isRecommendableOption` predicate so a FAILED option is never
+   * crowned. See recommendable-option.ts.
+   */
+  status?: string;
 }
 
 /** Purpose-specific comparison entry for LLM context (Brief B contract). */
@@ -38,11 +57,33 @@ export interface OptionComparisonEntry {
 export interface DriverSummary {
   factor_id: string;
   factor_label: string;
+  /**
+   * Driver magnitude. DGAI #341: this is the factor's `influence_score`
+   * magnitude (the ranking ISL emits and the UI displays), read via the
+   * shared `readDriverInfluenceScore` accessor — NEVER the
+   * sensitivity/elasticity heuristic, which intervention_override zeroes
+   * into ranking-inverting artifacts. Field name kept for shape
+   * compatibility with existing consumers (`projectTopDrivers`,
+   * `toSignedInfluenceValue`, influence-band prose).
+   */
   sensitivity: number;
   direction: InfluenceDirection;
 }
 
 export interface FlipThreshold {
+  /**
+   * Structural factor id (Lane 30, #369 audit P1). INTERNAL ONLY — never
+   * serialised onto the wire or the strict-validated ContextPack output
+   * (which keeps the `{factor_label, current_value, flip_value, unit,
+   * no_flip_within_bounds}` shape). Carried so the V5 context-pack
+   * assembler can suppress option-controlled-lever tipping points by
+   * structural `factor_id` (never by label — labels collide). Populated
+   * fresh from the raw `factor_sensitivity` entry at derivation time; may
+   * be absent only for legacy hand-built values, which the consumer fails
+   * closed on when a controlled-lever set exists. Mirrors
+   * {@link FragileEdge.from_id}.
+   */
+  factor_id?: string;
   factor_label: string;
   current_value: number;
   flip_value: number;
@@ -65,7 +106,24 @@ export interface FragileEdge {
 }
 
 export interface AnalysisResponseSummary {
-  winner: { option_id: string; option_label: string; win_probability: number };
+  winner: {
+    option_id: string;
+    option_label: string;
+    win_probability: number;
+    /**
+     * Trust-spine board #1 (CEE half). Set true when the leading option
+     * violates a hard constraint (CEE_CONSTRAINT_INFEASIBLE_GATE ON). A typed
+     * field — the coach reads it to avoid recommending an infeasible leader.
+     * Absent when the gate is off or the winner is feasible (byte-identical).
+     */
+    constraint_infeasible?: boolean;
+    /**
+     * Set alongside `constraint_infeasible` — the confident recommendation
+     * framing is suppressed for this winner. Kept distinct so a future doctrine
+     * can flag-without-suppress (or vice versa) without a shape change.
+     */
+    recommendation_suppressed?: boolean;
+  };
   options: OptionSummary[];          // all options, sorted by win_probability descending
   /** Dedicated comparison array for prompt serialisation (Brief B contract).
    *  Sorted by win_probability descending. Only populated when p10/p90 are available
@@ -85,6 +143,14 @@ export interface AnalysisResponseSummary {
    *  Pre-computed here so the V5 ContextPack assembler can stay free of
    *  semantic transforms (F.6 passthrough). */
   margin_pp: number | null;
+  /**
+   * Trust-spine board #1 (CEE half). Honest one-line note for the coach context
+   * when the leading option violates a hard constraint
+   * (CEE_CONSTRAINT_INFEASIBLE_GATE ON) — swaps the recommendation framing for
+   * "leads on outcome but does not satisfy a hard constraint". Absent when the
+   * gate is off or the winner is feasible.
+   */
+  constraint_infeasible_note?: string;
   analysis_status: string;
 }
 
@@ -111,9 +177,23 @@ function isOptionResult(r: unknown): r is OptionResult {
 }
 
 /**
- * Extract the option results array from a V2RunResponseEnvelope.
- * PLoT returns option data in `option_comparison[]`; the UI normalizer copies it to `results[]`.
- * Mirrors getOptionResultCandidates() in analysis-state.ts — both must stay in sync.
+ * Extract the PER-OPTION analysis-result array from a V2RunResponseEnvelope.
+ *
+ * DISTINCT from the WINNER source (M1, Codex r2 pre-merge review). The winner /
+ * options projection in {@link compactAnalysis} is single-sourced current-first
+ * via {@link winnerOptionResultSource} (`option_comparison` beats the legacy
+ * `results` copy, walking past a thin-current source that lacks win_probability).
+ * This reader is a SEPARATE concern: the per-option
+ * aggregation functions (top_drivers, flip_thresholds, fragile_edges,
+ * constraint_tensions) read the nested per-option `factor_sensitivity`,
+ * `robustness`, and `constraint_probabilities` — data that lives in the
+ * `results[]` shape and is ABSENT from the live top-level `option_comparison[]`
+ * entries (verified against tests/fixtures/cross-service/
+ * v5-turn.run-analysis.staging.json, whose option_comparison entries carry only
+ * option_id/label/outcome/win_probability). It therefore stays RESULTS-first so
+ * the per-option shape is never shadowed by the identity-only option_comparison.
+ * Do NOT "resync" this with the current-first winner source — they are
+ * deliberately different concerns.
  */
 function getResultsArray(response: V2RunResponseEnvelope): unknown[] {
   if (Array.isArray(response.results) && response.results.length > 0) return response.results;
@@ -212,7 +292,11 @@ function deriveRobustnessLevel(response: V2RunResponseEnvelope): string {
     }
   }
 
-  // Fallback: robustness.overall_robustness on first option's result
+  // Fallback: robustness.overall_robustness on first option's result.
+  // Reads the per-option analysis reader (getResultsArray, results-first) — this
+  // is per-option robustness data (which lives in the results[] shape alongside
+  // factor_sensitivity), NOT the winner, so it is correct-by-design that this
+  // does not use the current-first winner source (round-3 review minor).
   const results = getResultsArray(response);
   const firstResult = results[0];
   if (firstResult && typeof firstResult === 'object') {
@@ -435,6 +519,9 @@ function deriveFlipThresholds(
     .sort((a, b) => Math.abs(a.flip_value - a.current_value) - Math.abs(b.flip_value - b.current_value))
     .slice(0, 3)
     .map((entry) => ({
+      // Internal structural id for lever suppression (Lane 30) — see the
+      // FlipThreshold.factor_id doc; never serialised downstream.
+      factor_id: entry.factor_id,
       factor_label: entry.factor_label,
       current_value: entry.current_value,
       flip_value: entry.flip_value,
@@ -490,8 +577,12 @@ function deriveTopFragileEdges(
 
 /**
  * Derive top drivers across all option results.
- * Collects unique factors by node_id (or factor_id), takes max absolute sensitivity,
- * sorts descending, returns top 5.
+ * Collects unique factors by node_id (or factor_id), takes the max
+ * `influence_score` magnitude per factor (DGAI #341 — the shared
+ * `readDriverInfluenceScore` accessor; entries without a usable
+ * influence_score are not driver candidates), sorts descending, returns
+ * top 5. `DriverSummary.sensitivity` carries the influence magnitude
+ * (field name kept for shape compatibility).
  */
 function deriveTopDrivers(
   response: V2RunResponseEnvelope,
@@ -511,18 +602,33 @@ function deriveTopDrivers(
         ?? (typeof factor.factor_id === 'string' ? factor.factor_id : null);
       if (!factorId) continue;
 
-      const sensitivityRaw = typeof factor.sensitivity === 'number'
-        ? factor.sensitivity
-        : (typeof factor.elasticity === 'number' ? factor.elasticity : null);
-      // Drop non-finite magnitudes (NaN / Infinity) so they never reach
-      // DriverSummary — matches deriveTopDriversFromTopLevel's guard, protecting
-      // shared summary consumers that do not re-filter at projection time.
-      if (sensitivityRaw === null || !Number.isFinite(sensitivityRaw)) continue;
+      // DGAI #341: driver RANKING reads the shared influence accessor
+      // (`influence_score` only — what ISL ranks and the UI displays). An
+      // entry without a usable influence_score is NOT a driver candidate;
+      // the former `sensitivity → elasticity` fallback latched onto the only
+      // non-zero elasticity artifact on an intervention_override board and
+      // named the LEAST influential factor as top driver. When per-option
+      // entries carry no influence_score at all, this derivation yields []
+      // and the shared top-level override (analysis-fallback.ts) fills
+      // top_drivers from the influence-ranked top-level shape instead.
+      const influence = readDriverInfluenceScore(
+        factor as Record<string, unknown>,
+      );
+      if (influence === null) continue;
 
-      const absSensitivity = Math.abs(sensitivityRaw);
-      // Honour the authoritative PLoT `direction` enum; only sign-derive when
-      // it is absent (elasticity is unsigned per the sensitivity contract).
-      const direction: InfluenceDirection = resolveInfluenceDirection(factor.direction, sensitivityRaw);
+      const absSensitivity = influence;
+      // Honour the authoritative PLoT `direction` enum; when it is absent,
+      // sign-derive from the SIGN of the legacy signed magnitude when one
+      // exists (`sensitivity` then `elasticity` — sign only, never the
+      // magnitude; DGAI #341), else from the non-negative influence score
+      // (⇒ 'positive'). Preserves the pre-#341 direction behaviour exactly.
+      const signedForDirection =
+        typeof factor.sensitivity === 'number' && Number.isFinite(factor.sensitivity)
+          ? factor.sensitivity
+          : typeof factor.elasticity === 'number' && Number.isFinite(factor.elasticity)
+            ? factor.elasticity
+            : influence;
+      const direction: InfluenceDirection = resolveInfluenceDirection(factor.direction, signedForDirection);
 
       // Derive label: graph lookup → factor.label → factor.factor_label → factor_id
       const label = graphNodeLabels?.get(factorId)
@@ -558,6 +664,39 @@ function deriveTopDrivers(
 }
 
 // ============================================================================
+// Constraint-infeasible winner copy (trust-spine board #1, CEE half)
+// ============================================================================
+
+/**
+ * Honest note for a C1 HARD violation (the winner's constraint satisfaction
+ * probability is at/below the hard floor — "does not satisfy" is
+ * definitionally supported). SINGLE SOURCE of this copy — the V5 display
+ * projection and the V4 prompt serializer both render the note verbatim from
+ * the summary; neither re-derives wording. No banned recommendation
+ * vocabulary, no digits, no structural-claim verbs.
+ */
+export function buildConstraintViolationNote(optionLabel: string): string {
+  return (
+    `${optionLabel} leads on outcome but does not satisfy a hard constraint of this decision — ` +
+    'say the constraint conflict plainly and do not present this option as the choice to take.'
+  );
+}
+
+/**
+ * Honest note for a C2 JOINT-GOAL tension (the winner's joint-goal probability
+ * is well below its constraint satisfaction). A TENSION, not a proven
+ * violation — the copy says "may not satisfy", never "does not satisfy"
+ * (adversarial-review P2: reusing the violation copy here overstates the
+ * claim).
+ */
+export function buildConstraintTensionNote(optionLabel: string): string {
+  return (
+    `${optionLabel} leads on outcome but may not satisfy a hard constraint of this decision — ` +
+    'flag this tension and do not present the lead as settled.'
+  );
+}
+
+// ============================================================================
 // Main Export
 // ============================================================================
 
@@ -575,6 +714,7 @@ function deriveTopDrivers(
 export function compactAnalysis(
   response: V2RunResponseEnvelope | null | undefined,
   graphNodeLabels?: Map<string, string>,
+  opts?: { constraintInfeasibleGate?: boolean },
 ): AnalysisResponseSummary | null {
   if (!response) return null;
 
@@ -585,8 +725,22 @@ export function compactAnalysis(
       : 'ok';
     if (status === 'blocked' || status === 'failed') return null;
 
-    // Extract options — PLoT returns option_comparison[], not results[].
-    const results = getResultsArray(response);
+    // Extract options + WINNER from the single-sourced WALKING current-first
+    // reader (M1 / round-3/4): `option_comparison` (current PLoT V2) beats the
+    // legacy `results` copy, BUT a source lacking a usable (finite, [0,1])
+    // win_probability is skipped so the winner falls through to the source that
+    // carries one (shared isUsableWinProbability predicate) — never a phantom 0%
+    // winner. compact derives the winner as the highest-probability option in
+    // the walked-to source; the enricher/headline additionally honour PLoT's
+    // declared leading_option_id (a pre-existing, intentional strategy split —
+    // compact's `response` is the enrichment, which carries no leading_option_id,
+    // and the primary production path uses this analytical winner unreconciled).
+    // They coincide when the leader is the highest-probability option or absent.
+    // (Per-option driver / flip / fragility aggregation below is a SEPARATE
+    // concern — see getResultsArray, which stays results-first because the
+    // per-option factor_sensitivity/robustness shape lives in `results`, not in
+    // the identity-only live option_comparison.)
+    const results = [...winnerOptionResultSource(response as Record<string, unknown>)];
     const options: OptionSummary[] = results
       .filter(isOptionResult)
       .filter((r) => {
@@ -624,6 +778,10 @@ export function compactAnalysis(
         if (probOfGoal !== undefined) {
           summary.probability_of_goal = probOfGoal;
         }
+        // Retain the per-option compute status (additive; key omitted when
+        // absent, so status-less payloads stay byte-identical). Downstream
+        // winner/leading selection gates on it via isRecommendableOption.
+        if (typeof r.status === 'string') summary.status = r.status;
         return summary;
       })
       // Sort by win_probability descending, tiebreak by option_id lexicographic
@@ -633,9 +791,18 @@ export function compactAnalysis(
         return a.option_id.localeCompare(b.option_id);
       });
 
-    const winner = deriveWinner(options);
+    // Status gate (shared with the direct receipt in run-analysis.ts and the
+    // downstream projectAnalysis / decision-review enricher): a FAILED /
+    // skipped option is never crowned and never defines the margin, even when
+    // it carries the top win_probability. Absent status stays recommendable.
+    // The full `options` list is left intact (errored options are retained,
+    // WITH their status) so the coach egress can still disclose that they ran;
+    // only the WINNER + MARGIN are computed from the recommendable subset.
+    const recommendableOptions = options.filter(isRecommendableTypedOption);
+
+    const winner = deriveWinner(recommendableOptions);
     if (!winner) {
-      // No valid options — can still return summary with empty winner
+      // No recommendable options — can still return summary with empty winner
       log.warn({ result_count: results.length }, 'compactAnalysis: no valid options found');
     }
 
@@ -662,9 +829,12 @@ export function compactAnalysis(
         }))
       : [];
 
-    // Margin: winner.win_probability - runner_up.win_probability
-    const margin = options.length >= 2
-      ? options[0].win_probability - options[1].win_probability
+    // Margin: winner.win_probability - runner_up.win_probability, measured
+    // over the RECOMMENDABLE options only (a failed option is never the winner
+    // nor the runner-up it is measured against). recommendableOptions preserves
+    // the win_probability-descending order of `options`.
+    const margin = recommendableOptions.length >= 2
+      ? recommendableOptions[0].win_probability - recommendableOptions[1].win_probability
       : null;
     // margin_pp: margin in percentage points, rounded to 1 dp. Pre-computed
     // upstream so the V5 assembler stays passthrough-only (F.6).
@@ -694,6 +864,35 @@ export function compactAnalysis(
     }
     if (topFragileEdges !== undefined) {
       summary.top_fragile_edges = topFragileEdges;
+    }
+
+    // Trust-spine board #1 (CEE half): flag the WINNER infeasible + suppress the
+    // recommendation framing when the leading option violates a hard constraint.
+    // Gate: explicit opts override (tests / callers) else the CEE flag. Default
+    // OFF → this whole block is skipped → byte-identical to pre-flag behaviour.
+    // Detection is single-sourced in constraint-feasibility.ts (both wire shapes).
+    const constraintInfeasibleGate =
+      opts?.constraintInfeasibleGate ?? config.features.constraintInfeasibleGate;
+    if (constraintInfeasibleGate && winner && winner.option_id.length > 0) {
+      const feasibility = deriveWinnerConstraintInfeasibility(
+        response as Record<string, unknown>,
+        winner.option_id,
+      );
+      if (feasibility.infeasible) {
+        summary.winner.constraint_infeasible = true;
+        summary.winner.recommendation_suppressed = true;
+        // Copy is split by criterion (adversarial-review P2): a hard violation
+        // ("does not satisfy") and a joint-goal tension ("may not satisfy") are
+        // different claims and must not share wording. Both state only what the
+        // detection supports about THE WINNER — never a claim about the other
+        // options' feasibility (the round-1 "no eligible option currently meets
+        // it" clause was false on the live capture, where the runner-up DID
+        // satisfy the constraint).
+        summary.constraint_infeasible_note =
+          feasibility.kind === 'hard_violation'
+            ? buildConstraintViolationNote(summary.winner.option_label)
+            : buildConstraintTensionNote(summary.winner.option_label);
+      }
     }
 
     return summary;

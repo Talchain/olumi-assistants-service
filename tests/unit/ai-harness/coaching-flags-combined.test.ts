@@ -1,24 +1,18 @@
 /**
- * Coaching activation readiness — BOTH-FLAGS-ON smoke (closes readiness gap B).
+ * Coaching non-interference smoke — Cap-1 post-analysis loop and Cap-2A
+ * add-risk rejection guidance running together.
  *
- * Cap-1 (`CEE_POST_ANALYSIS_LOOP_ENABLED`) and Cap-2A
- * (`CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED`) were each proven flag-ON in
- * isolation; no test ran them together, so non-interference was asserted, not
- * proven. Their paths are disjoint by design (V5 post-analysis advice gate vs
- * edit-graph structural-rejection copy), and this suite proves it:
+ * UPDATED 2026-07-20 (O-7 wave 2): both capabilities are UNCONDITIONAL —
+ * CEE_POST_ANALYSIS_LOOP_ENABLED and CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED
+ * were deleted (live-true on staging). The suite keeps its purpose: the two
+ * paths are disjoint by design (V5 post-analysis advice gate vs edit-graph
+ * structural-rejection copy), and running one leg must not perturb the
+ * other's answer, telemetry, or chips. Repeated runs replace the former
+ * flag-toggled "alone vs both" comparison.
  *
- *   - with BOTH flags on, the Cap-1 turn produces the identical grounded
- *     answer and gate telemetry as with Cap-1 alone;
- *   - with BOTH flags on, the Cap-2A rejection produces the identical
- *     placeholder guidance and chips as with Cap-2A alone;
  *   - neutrality: neither path's user-facing copy carries held-science
  *     vocabulary or success claims (supplementary evidence beside the
  *     allowlist guards, not a guard of record).
- *
- * RED-proven reach (transcripts in the component-4 evidence pack): each leg
- * was first committed asserting the both-flags run does NOT activate its
- * capability (Cap-1 `matched === false`; Cap-2A text === generic copy) and
- * FAILED, proving both branches execute under the combined posture.
  *
  * Harness: session-store mock from the Cap-1 loop integration test (real
  * `buildTurnContext`, real commit against the mocked store) + LLM-router and
@@ -163,12 +157,15 @@ async function runCap2aRejectionTurn(turnId: string) {
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
-let originalLoopFlag = false;
-let originalGuidanceFlag = false;
+let originalNamedRefusalFlag = false;
 
-function setFlags(loop: boolean, guidance: boolean): void {
-  (config.cee as { postAnalysisLoopEnabled: boolean }).postAnalysisLoopEnabled = loop;
-  (config.cee as { addRiskRejectionGuidanceEnabled: boolean }).addRiskRejectionGuidanceEnabled = guidance;
+// CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL went DEFAULT-ON 18 Jul (Paul-ratified). It
+// is a strictly-more-specific superseding layer over the Cap-2A add-risk
+// placeholder guidance the Cap-2A leg asserts, so pin it OFF here to keep testing
+// the Cap-2A guidance in isolation (named-refusal default-ON is covered by
+// edit-graph-connectivity-named-refusal-seam.test.ts).
+function setNamedRefusalFlag(on: boolean): void {
+  (config.cee as { editConnectivityNamedRefusalEnabled: boolean }).editConnectivityNamedRefusalEnabled = on;
 }
 
 beforeEach(() => {
@@ -177,13 +174,13 @@ beforeEach(() => {
   mockState.priorTurns = [PRIOR_RA_TURN];
   mockState.priorFacts = [makeBlankProjectionFreshFact()];
   mockState.persistedGraph = PARTIAL_GRAPH;
-  originalLoopFlag = config.cee.postAnalysisLoopEnabled === true;
-  originalGuidanceFlag = config.cee.addRiskRejectionGuidanceEnabled === true;
+  originalNamedRefusalFlag = config.cee.editConnectivityNamedRefusalEnabled === true;
+  setNamedRefusalFlag(false);
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
 });
 
 afterEach(() => {
-  setFlags(originalLoopFlag, originalGuidanceFlag);
+  setNamedRefusalFlag(originalNamedRefusalFlag);
   vi.clearAllMocks();
   setTestSink(null);
 });
@@ -196,10 +193,8 @@ function adviceEvent(): Record<string, unknown> | undefined {
 // Tests
 // ────────────────────────────────────────────────────────────────────
 
-describe('coaching flags combined — non-interference proven, not asserted', () => {
-  it('Cap-1 leg: both flags ON → identical grounded answer and gate telemetry as Cap-1 alone', async () => {
-    // Cap-1 alone.
-    setFlags(true, false);
+describe('coaching capabilities combined — non-interference proven, not asserted', () => {
+  it('Cap-1 leg: repeated runs produce identical grounded answer and gate telemetry', async () => {
     const alone = await runTurnExecutor(mkCap1Payload(), 'req-cap1-alone', {
       routingAdapter: throwingRoutingAdapter(),
       graphState: PARTIAL_GRAPH as never,
@@ -209,7 +204,6 @@ describe('coaching flags combined — non-interference proven, not asserted', ()
 
     // Both flags ON.
     events = [];
-    setFlags(true, true);
     const both = await runTurnExecutor(mkCap1Payload(), 'req-cap1-both', {
       routingAdapter: throwingRoutingAdapter(),
       graphState: PARTIAL_GRAPH as never,
@@ -233,18 +227,15 @@ describe('coaching flags combined — non-interference proven, not asserted', ()
     expect(bothEvent!.deterministic).toBe(aloneEvent!.deterministic);
   });
 
-  it('Cap-2A leg: both flags ON → identical placeholder guidance and chips as Cap-2A alone', async () => {
-    // Cap-2A alone.
-    setFlags(false, true);
+  it('Cap-2A leg: repeated runs produce identical placeholder guidance and chips', async () => {
     const alone = await runCap2aRejectionTurn('bbbbbbb1-0000-4000-8000-000000000001');
 
     // Both flags ON.
-    setFlags(true, true);
     const both = await runCap2aRejectionTurn('bbbbbbb2-0000-4000-8000-000000000002');
 
-    // RED-proven reach: first committed asserting the both-flags text equals the
-    // generic suppression copy and FAILED with the placeholder as received,
-    // proving the flag branch executes under the combined posture.
+    // RED-proven reach (historical, pre flag-deletion): first committed
+    // asserting the text equals the generic suppression copy and FAILED with
+    // the placeholder as received, proving the branch executes.
     expect(both.response.assistant_text).toBe(ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER);
 
     // Non-interference: byte-identical to the single-flag run.
@@ -253,7 +244,6 @@ describe('coaching flags combined — non-interference proven, not asserted', ()
   });
 
   it('neutrality: both paths\' user-facing copy (prose AND chips) carries no held-science vocabulary and no success claims', async () => {
-    setFlags(true, true);
 
     const cap1 = await runTurnExecutor(mkCap1Payload(), 'req-neutrality-cap1', {
       routingAdapter: throwingRoutingAdapter(),

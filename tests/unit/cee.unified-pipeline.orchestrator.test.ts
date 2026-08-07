@@ -33,6 +33,15 @@ vi.mock("../../src/config/index.js", () => ({
     cee: {
       pipelineCheckpointsEnabled: false,
     },
+    // features.diagnosticTraceEnabled is read unconditionally by
+    // runUnifiedPipeline (src/cee/unified-pipeline/index.ts) to gate stage
+    // timing capture. Missing here throws "Cannot read properties of
+    // undefined (reading 'diagnosticTraceEnabled')" — a stale mock shape
+    // that predates that field (default false in real config, see
+    // src/config/index.ts CEE_DIAGNOSTIC_TRACE_ENABLED).
+    features: {
+      diagnosticTraceEnabled: false,
+    },
   },
 }));
 
@@ -182,7 +191,7 @@ describe("runUnifiedPipeline", () => {
     expect((result.body as any).error.code).toBe("CEE_TIMEOUT");
   });
 
-  it("maps RequestBudgetExceededError to 429", async () => {
+  it("maps RequestBudgetExceededError to 429 with CEE_BUDGET_EXCEEDED", async () => {
     (runStageParse as any).mockImplementation(async () => {
       throw new RequestBudgetExceededError("budget exceeded", 90000, 95000, "parse", "test-req");
     });
@@ -190,7 +199,12 @@ describe("runUnifiedPipeline", () => {
     const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, baseOpts);
 
     expect(result.statusCode).toBe(429);
-    expect((result.body as any).error.code).toBe("CEE_RATE_LIMIT");
+    // Elapsed-time DEADLINE breach (budgetMs/elapsedMs) — not money and not
+    // a rate. This is the site that misled the 2026-07-20 draft-timeout
+    // investigation while it shared CEE_RATE_LIMIT with the RPM limiter.
+    expect((result.body as any).error.code).toBe("CEE_BUDGET_EXCEEDED");
+    expect((result.body as any).error.code).not.toBe("CEE_RATE_LIMIT");
+    expect((result.body as any).error.code).not.toBe("CEE_COST_CAP");
   });
 
   it("returns 501 when stages produce no finalResponse (incomplete wiring guard)", async () => {

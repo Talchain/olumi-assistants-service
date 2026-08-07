@@ -262,19 +262,34 @@ describe("POST /assist/v1/draft-graph (CEE v1) - coaching passthrough", () => {
     // 2 from LLM + 1 auto-injected status_quo coaching item (no baseline option in graph)
     expect(body.coaching.strengthen_items).toHaveLength(3);
 
-    // Verify individual strengthen_items survive intact
+    // Verify individual strengthen_items survive intact.
+    //
+    // CHANGED 2026-07-24 (draft-honesty lane). This block previously asserted
+    // that the LLM's raw `action_type: "evidence_needed"` /
+    // `"structural_improvement"` and `bias_category: "anchoring_bias"` reached
+    // the wire unchanged — none of which are members of
+    // `StrengthenItemActionType` / `BiasType`. That pass-through IS the live
+    // defect the day-3 drafting matrix caught (8 of 9 successful drafts stamped
+    // `verification_status: failed_degraded`, "Response does not conform to
+    // expected schema"). The test's real subject — coaching SURVIVING the
+    // pipeline to the V3 response — is unchanged and still asserted via id +
+    // label; only the enum-conformance expectations move onto the contract.
+    //
+    // Note the deliberate asymmetry: an unrecognised action CATEGORY is coerced
+    // to the generic canonical member, but an unrecognised BIAS is DROPPED, not
+    // re-labelled — a bias name is a claim about the user's reasoning.
     const items = body.coaching.strengthen_items;
     expect(items[0]).toMatchObject({
       id: "s1",
       label: "Price-Revenue Link",
-      action_type: "evidence_needed",
+      action_type: "add_constraint",
     });
     expect(items[1]).toMatchObject({
       id: "s2",
       label: "Demand Elasticity",
-      action_type: "structural_improvement",
-      bias_category: "anchoring_bias",
+      action_type: "add_constraint",
     });
+    expect(items[1].bias_category).toBeUndefined();
     // Auto-injected by STATUS_QUO_ABSENT coaching injection
     expect(items[2]).toMatchObject({
       id: "str_status_quo",

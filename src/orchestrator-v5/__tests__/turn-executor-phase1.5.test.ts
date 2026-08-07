@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { makeMessagePayload } from './fixtures.js';
 
-import { setTestSink } from '../../utils/telemetry.js';
+import { log, setTestSink } from '../../utils/telemetry.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -499,20 +499,29 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     expect(glEvent!.data.dropped_by_unknown_kind).toBe(1);
   });
 
-  it('P0-1: validator rejects kind mismatch with ENTITY_KIND_MISMATCH (LLM hallucination guard)', async () => {
-    // Graph has opt_a as kind='option'; Sonnet proposes kind='goal' on the
-    // same id. Without the kind cross-check, this would pass structural
-    // checks (run_analysis accepts both option and goal) and reach the
-    // handler pointing at the wrong node class.
-    const graph: GraphStateIngress = {
-      nodes: [
-        { id: 'goal_1', kind: 'goal', label: 'Profit' },
-        { id: 'opt_a', kind: 'option', label: 'A' },
-      ],
-      edges: [],
-      options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
-    } as GraphStateIngress;
+  // AMENDED 2026-07-27 (entity-kind repair). The guard is unchanged in
+  // purpose — a hallucinated kind must never aim a handler at a node class it
+  // cannot serve — but the graph's kind is now ADOPTED rather than treated as
+  // a fatal disagreement. So the end-to-end rejection case is stated against a
+  // target run_analysis genuinely cannot serve (a factor, which resolves to
+  // wire kind 'node'), and the "same id, wrong label" case is asserted
+  // separately to land. See routing/__tests__/entity-kind-repair.test.ts.
+  const KIND_GUARD_GRAPH: GraphStateIngress = {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Profit' },
+      { id: 'opt_a', kind: 'option', label: 'A' },
+      { id: 'fac_x', kind: 'factor', label: 'Factor X' },
+    ],
+    edges: [],
+    options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
+  } as GraphStateIngress;
 
+  it('P0-1: validator rejects kind mismatch with ENTITY_KIND_MISMATCH (LLM hallucination guard)', async () => {
+    // Sonnet claims kind='option' on an id that resolves to a factor.
+    // run_analysis accepts ['option','goal'] and the graph says 'node', so the
+    // proposal is refused — on what the entity ACTUALLY is, not on the
+    // disagreement. Without the graph being consulted at all this would pass
+    // structural checks and reach the handler pointing at the wrong node class.
     const routingAdapter = mockRoutingAdapter(
       mkToolUseResult(
         {
@@ -520,8 +529,46 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
           action: {
             handler_id: 'run_analysis',
             entity: {
-              id: 'opt_a', // the id resolves to an option
-              kind: 'goal', // but LLM claims goal
+              id: 'fac_x', // the id resolves to a factor → wire kind 'node'
+              kind: 'option', // but LLM claims option
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+              label: 'Factor X',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        },
+        'Running',
+      ),
+    );
+
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-kind', {
+      routingAdapter,
+      graphState: KIND_GUARD_GRAPH,
+    });
+
+    expect(telemetry.validation_error_code).toBe('ENTITY_KIND_MISMATCH');
+    // V5 alpha hardening Phase 2.2: validator outcomes are recoverable —
+    // the turn now commits as a direct_answer and returns 200.
+    expect(telemetry.commit_performed).toBe(true);
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.turn_class).toBe('direct_answer');
+  });
+
+  it('P0-1 (repair): a mislabelled kind on a servable target lands end-to-end', async () => {
+    // The other half of the amendment: id resolves to an option, Sonnet calls
+    // it a goal, run_analysis accepts 'option'. This used to be the refusal
+    // case above; it must now reach the handler with the graph's kind.
+    const routingAdapter = mockRoutingAdapter(
+      mkToolUseResult(
+        {
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'opt_a',
+              kind: 'goal', // mislabelled; the graph says option
               resolution_status: 'resolved',
               resolution_method: 'id_match',
               label: 'A',
@@ -534,17 +581,33 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
       ),
     );
 
-    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-kind', {
+    const infoSpy = vi.spyOn(log, 'info');
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-kind-repair', {
       routingAdapter,
-      graphState: graph,
+      graphState: KIND_GUARD_GRAPH,
     });
 
-    expect(telemetry.validation_error_code).toBe('ENTITY_KIND_MISMATCH');
-    // V5 alpha hardening Phase 2.2: validator outcomes are recoverable —
-    // the turn now commits as a direct_answer and returns 200.
-    expect(telemetry.commit_performed).toBe(true);
-    expect(telemetry.failure_type).toBeNull();
-    expect(telemetry.turn_class).toBe('direct_answer');
+    // Scoped deliberately to the VALIDATOR verdict: the proposal is no longer
+    // rejected on its kind. What run_analysis then does with it (it dispatches
+    // for real and depends on analysis infrastructure this harness does not
+    // stand up) is a different contract, covered elsewhere.
+    expect(telemetry.validation_error_code).toBeNull();
+
+    // The repair must be OBSERVABLE, not silent — it converts a user-visible
+    // refusal into a success, so a rising repair rate has to be readable in
+    // the logs (this is the channel the staging diagnosis was read from).
+    const repairCall = infoSpy.mock.calls.find(
+      (c) => (c[0] as { event?: string } | undefined)?.event === 'v5.entity_kind_repaired',
+    );
+    expect(repairCall).toBeDefined();
+    const repairPayload = repairCall![0] as Record<string, unknown>;
+    expect(repairPayload.entity_id).toBe('opt_a');
+    expect(repairPayload.proposed_kind).toBe('goal');
+    expect(repairPayload.resolved_kind).toBe('option');
+    expect(repairPayload.handler_id).toBe('run_analysis');
+    // Privacy: enum kinds + ids only, never the user-authored label.
+    expect(JSON.stringify(repairPayload)).not.toContain('"A"');
+    infoSpy.mockRestore();
   });
 
   it('ENTITY_NOT_FOUND fires when Sonnet proposes an id absent from the graph', async () => {

@@ -623,10 +623,17 @@ describe("envelope and coaching wiring", () => {
     );
 
     expect(result.assistantText).not.toBeNull();
-    // The proposal-language guard rewrites sentence-start "Added X" to
-    // "Proposing to add X" on proposal turns (auto_apply: false) so the user
-    // reads a coherent proposal frame instead of completion language.
-    expect(result.assistantText).toContain("Proposing to add a competitor response factor");
+    // F3 fix (GM go-live acceptance evidence, Brief H deliverable 5): the
+    // edit_graph success branch always has a committed `appliedGraph` (the
+    // function refuses to reach this branch without one) — the change IS
+    // already applied here, regardless of the block's auto_apply: false
+    // shape contract. The proposal-language guard must NOT rewrite
+    // truthful completion language ("Added X…") into "Proposing to add X…"
+    // on this branch; doing so violated the four-state copy rule
+    // (proposed/applied/blocked/stale) by narrating an applied turn as a
+    // pending proposal.
+    expect(result.assistantText).toContain("Added a competitor response factor");
+    expect(result.assistantText).not.toContain("Proposing to add");
     expect(result.assistantText).toContain("Note:");
     // V5 H5 follow-up: the warning-scrubber now resolves `fac_competitor`
     // to its actual label "Competitor Response" because `candidateGraph`
@@ -674,7 +681,8 @@ describe("envelope and coaching wiring", () => {
 
   // Test 10b (R10 safety sibling): an UNSAFE no-op summary that makes a
   // terse false-success claim must NOT be preserved — it falls back to the
-  // deterministic NO_OP_FALLBACK_TEXT. This retains the Codex-P0 Mode-B
+  // deterministic clarify copy (Lane 22: composeEditClarifyResponse parts,
+  // formerly NO_OP_FALLBACK_TEXT). This retains the Codex-P0 Mode-B
   // safety coverage the old Test 10 enforced. Note: a sentence-leading
   // "Updated X to Y" is INLINE-rewritten into a safe proposal frame by
   // enforceProposalLanguage *before* the trip test (so that path is safely
@@ -707,8 +715,9 @@ describe("envelope and coaching wiring", () => {
     // The false-success claim must not reach the user.
     expect(result.assistantText).not.toContain("Done — value set");
     expect(result.assistantText).not.toContain("value set");
-    // Deterministic forward-looking copy used instead.
-    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
+    // Deterministic forward-looking clarify copy used instead (Lane 22).
+    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
+    expect(result.assistantText).toContain("The model is unchanged so far.");
   });
 
   // Test 11: substantive ops (add_node/add_edge) + prior analysis → suggested action chip
@@ -792,7 +801,7 @@ describe("envelope and coaching wiring", () => {
     expect(result.diagnostics?.target_resolution?.alternatives_count).toBe(2);
   });
 
-  it("returns minimal proposed_changes for compound edits without executing the LLM path", async () => {
+  it("takes the deterministic propose branch for compound edits without executing the LLM path (V4 proposed_changes payload retired)", async () => {
     const adapter = makeAdapter(V2_GOOD_RESPONSE);
     const result = await handleEditGraph(
       makeContext(),
@@ -804,15 +813,21 @@ describe("envelope and coaching wiring", () => {
 
     expect(result.blocks).toEqual([]);
     expect(result.wasRejected).toBe(false);
-    expect(result.proposedChanges).toEqual({
-      changes: [
-        { description: "Update Price", element_label: "Price", action_type: "value_update" },
-        { description: "Also lower Price", element_label: "Price", action_type: "value_update" },
-      ],
-    });
+    // S3-L1 — the top-level `proposedChanges` payload is no longer RETURNED.
+    // Its only readers were the 410-tombstoned V4 pipeline (phase4-tools:369,
+    // tools/dispatch:323); the live V5 dispatcher (edit-graph-dispatch.ts)
+    // never reads it. `proposedChanges` is now a within-turn local feeding the
+    // copy builder only. The compound edit still resolves both clauses to
+    // Price, which is asserted where it is live-observable: the copy.
+    expect(result.proposedChanges).toBeUndefined();
+    // POSITIVE controls that the branch was genuinely taken (trap-13 — the
+    // absence above is not vacuous): the LLM lane was NOT reached, the
+    // resolution mode is the propose branch, proposal_returned is flagged, and
+    // the copy names the resolved target it holds a change for.
     expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
     expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
     expect(result.diagnostics?.proposal_returned).toBe(true);
+    expect(result.assistantText ?? "").toContain("**Price**");
   });
 
   it("constrains auto-apply prompt with the resolved target label context", async () => {
@@ -1187,6 +1202,59 @@ describe("prompt loading", () => {
     expect(result.blocks).toEqual([]);
     expect(result.diagnostics?.validation_outcome).toBe("graph_structure_invalid");
     expect(result.diagnostics?.validation_violation_codes.length).toBeGreaterThan(0);
+  });
+
+  // Lane 22 (live 2026-07-07 session-ending failure) — structural-rejection
+  // honesty. The rejection copy must carry the claim-safe actionable reason
+  // from the VIOLATION_MESSAGES catalogue (not the vague generic line), and
+  // the known dead-end "Simplify the change" chip (whose exact prompt text
+  // needed the chip-simplify-intercept to break a no-op loop) must be gone.
+  it("structural rejection surfaces the claim-safe actionable reason and drops the dead-end chip", async () => {
+    patchPreValidationEnabledForTest = true;
+
+    const adapter = makeAdapter({
+      operations: [
+        {
+          op: "remove_node",
+          path: "/nodes/goal_1",
+          old_value: { id: "goal_1", kind: "goal", label: "Revenue" },
+          impact: "high",
+          rationale: "Remove goal node",
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: { summary: "Removed goal.", rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeContext(),
+      "Remove goal node",
+      adapter,
+      "req-struct-honesty",
+      "turn-struct-honesty",
+    );
+
+    expect(result.wasRejected).toBe(true);
+    const text = result.assistantText ?? "";
+    // Actionable catalogue reason surfaced (one of the user-facing
+    // VIOLATION_MESSAGES strings), not the vague generic copy.
+    expect(text).toMatch(
+      /cannot reach the goal|no goal node|circular dependency|no connections|fewer than two options|no decision node/i,
+    );
+    expect(text).not.toContain("inconsistency in the model structure");
+    // Raw internal detail stays suppressed.
+    expect(text).not.toMatch(/\bgoal_1\b/);
+
+    // Dead-end chip replaced: no "Simplify the change" label, and the exact
+    // interceptor-trapped prompt text is gone.
+    const labels = (result.suggestedActions ?? []).map((a) => a.label);
+    const prompts = (result.suggestedActions ?? []).map((a) => a.prompt);
+    expect(labels).not.toContain("Simplify the change");
+    expect(prompts).not.toContain("Try a simpler version of this change.");
+    // The user still has affordances.
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).toContain("Rebuild from updated brief");
   });
 
   it("returns a concise recovery question after repeated structural outputs for a narrow request", async () => {

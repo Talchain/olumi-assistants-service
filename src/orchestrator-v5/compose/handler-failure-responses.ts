@@ -30,6 +30,10 @@ import type {
   SuggestedAction,
 } from './types.js';
 import { safeLabel, sanitiseForUser } from './helpers.js';
+import {
+  buildConfigureOptionChip,
+  CONFIGURE_OPTION_GENERIC_CHIP,
+} from '../configure-option-chip-text.js';
 
 export interface ComposedHandlerFailure {
   readonly response: OlumiResponse;
@@ -69,6 +73,21 @@ export function composeHandlerFailureBody(
   error: HandlerInvocationFailedError,
 ): HandlerFailureBranchResult {
   const details = error.details;
+  // PLoT typed failure codes (seam item 3): when run-analysis dual-carried a
+  // known critique code, surface honest CEE-authored copy for it instead of
+  // the generic per-cause copy. Unknown or absent codes fall through to the
+  // per-cause branches byte-identically (conscious-promotion doctrine — the
+  // same rule as CRITIQUE_BUCKETS' unknown→D default). PLoT's own
+  // `plot_user_message` prose is deliberately NEVER rendered: this composer
+  // has no label resolver or prose-safety gate, so only the code is trusted.
+  if (
+    error.cause_kind === 'plot_error' ||
+    error.cause_kind === 'analysis_failed' ||
+    error.cause_kind === 'analysis_blocked'
+  ) {
+    const codeKeyed = composePlotCodeKeyedBody(error.cause_kind, details);
+    if (codeKeyed !== null) return codeKeyed;
+  }
   switch (error.cause_kind) {
     case 'args_validation_failed':
       return {
@@ -180,6 +199,25 @@ export function composeHandlerFailureBody(
         chip_type: 'action',
       };
 
+    // ROADMAP 2.202 fix ③ — the analysis engine is at its CONCURRENCY LIMIT
+    // (downstream HTTP 429). Say the true thing: busy, not broken, model
+    // untouched, and a retry shortly is expected to work. This branch must
+    // exist for the cause to recover at all — a cause on
+    // RECOVERABLE_HANDLER_CAUSES with no branch here hits the exhaustive
+    // default, produces `template_id: 'fallback'`, and both the TurnExecutor
+    // and the chip path deliberately fail it loud back to a 500.
+    case 'analysis_engine_busy':
+      return {
+        body: {
+          assistant_text:
+            'The analysis engine is busy right now — several analyses are running at once. '
+            + 'Nothing is wrong with your model. Try again in a few seconds.',
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'analysis_engine_busy',
+        chip_type: 'action',
+      };
+
     case 'analysis_not_ready': {
       // EP2 (V5 Edit Safety Core): the read-boundary guard blocked an
       // un-analysable persisted graph. Surface the honest, user-safe next step
@@ -214,19 +252,23 @@ export function composeHandlerFailureBody(
       // entityRef will be 'that option' — route to the generic branch so the
       // chip reads naturally ("Configure an option") instead of "Configure
       // that option", which sounds off.
+      //
+      // ROADMAP 2.11 / P1-3: the chips are built from the SHARED
+      // configure-option copy module, whose message prefix the route-v2
+      // configure-option gate matches deterministically — this chip now
+      // provably reaches the edit lane (the chat path that WRITES option
+      // interventions), never adjust_edge_strength. Before that gate, this
+      // chip's own message live-routed to an edge-strength tweak and looped
+      // the user forever (2.11 diagnosis, scenario A A6→A7). The copy also
+      // says WHAT to tell the assistant, since the capability is now real.
       const labelUsable = rawLabel !== null && !entityRef.startsWith('that ');
       if (labelUsable) {
         return {
           body: {
             assistant_text:
-              `Options exist but don't have effects configured yet. ${entityRef} needs intervention values to proceed.`,
-            suggested_actions: [
-              {
-                id: 'chip_prompt_configure_option',
-                label: `Configure ${entityRef}`,
-                message: `Help me configure ${entityRef}.`,
-              },
-            ],
+              `Options exist but don't have effects configured yet. ${entityRef} needs intervention values to proceed. ` +
+              `Tell me what ${entityRef} changes and I'll write it into the model.`,
+            suggested_actions: [buildConfigureOptionChip(entityRef)],
           },
           template_id: 'options_not_configured_with_label',
           chip_type: 'text_prompt',
@@ -235,14 +277,9 @@ export function composeHandlerFailureBody(
       return {
         body: {
           assistant_text:
-            "Options exist but don't have effects configured yet. Add intervention values to at least one option to proceed.",
-          suggested_actions: [
-            {
-              id: 'chip_prompt_configure_option_generic',
-              label: 'Configure an option',
-              message: 'Help me configure one of my options.',
-            },
-          ],
+            "Options exist but don't have effects configured yet. Add intervention values to at least one option to proceed. " +
+            "Tell me what one of your options changes and I'll write it into the model.",
+          suggested_actions: [{ ...CONFIGURE_OPTION_GENERIC_CHIP }],
         },
         template_id: 'options_not_configured_no_label',
         chip_type: 'text_prompt',
@@ -353,6 +390,98 @@ export function composeHandlerFailureBody(
 }
 
 // ---------------------------------------------------------------------------
+// PLoT typed-failure-code copy map (seam item 3)
+// ---------------------------------------------------------------------------
+//
+// Code-keyed honest copy for PLoT's typed failure envelope (PLoT #212). Keys
+// are `details.plot_primary_code` values dual-carried by run-analysis.
+// Retryability register per PLoT's guidance: timeout / network / engine /
+// internal failures say "try again" (Retry action chip is safe here — this is
+// the analysis path, so a pending run_analysis is the RIGHT derived action,
+// unlike the D1 mutation causes above); GRAPH_TOO_COMPLEX / ISL_REJECTED /
+// DUPLICATE_EDGE_CONFLICT need a model change, so a bare retry would
+// reproduce the failure and they get text-prompt chips instead.
+//
+// Copy discipline: CEE-authored only, style-guard compliant (no em dashes,
+// no "recommended"/"winner"), no entity IDs, no interpolation of upstream
+// prose. New PLoT codes are NOT auto-surfaced — add them here consciously.
+interface PlotCodeCopy {
+  readonly assistant_text: string;
+  readonly chip: () => SuggestedAction;
+  readonly chip_type: ChipType;
+}
+
+const PLOT_FAILURE_CODE_COPY: Readonly<Record<string, PlotCodeCopy>> = {
+  GRAPH_TOO_COMPLEX: {
+    assistant_text:
+      'Your model is too complex for the analysis engine right now. Try simplifying it, for example by removing some factors or connections, then run again.',
+    chip: simplifyModelPrompt,
+    chip_type: 'text_prompt',
+  },
+  DUPLICATE_EDGE_CONFLICT: {
+    assistant_text:
+      'Two connections in your model conflict with each other. Removing the duplicated connection will let the analysis run.',
+    chip: scenarioStatusChip,
+    chip_type: 'text_prompt',
+  },
+  ISL_TIMEOUT: {
+    assistant_text:
+      'The analysis timed out before finishing. This can happen with complex models. Try again in a moment.',
+    chip: retryActionChip,
+    chip_type: 'action',
+  },
+  ISL_NETWORK_ERROR: {
+    assistant_text:
+      "We couldn't reach the analysis engine. This is on our end, not a problem with your model. Try again in a moment.",
+    chip: retryActionChip,
+    chip_type: 'action',
+  },
+  ISL_ERROR: {
+    assistant_text:
+      'The analysis engine hit a problem while running your scenario. Your model is unaffected. Try again in a moment.',
+    chip: retryActionChip,
+    chip_type: 'action',
+  },
+  ISL_REJECTED: {
+    assistant_text:
+      "The analysis engine couldn't process your model as it stands. Adjusting the model, for example simplifying options or checking factor values, may help.",
+    chip: scenarioStatusChip,
+    chip_type: 'text_prompt',
+  },
+  PLOT_INTERNAL_ERROR: {
+    assistant_text:
+      'Something went wrong on our side while preparing your analysis. Your model is unaffected. Try again in a moment.',
+    chip: retryActionChip,
+    chip_type: 'action',
+  },
+};
+
+/**
+ * Compose the code-keyed body when `details.plot_primary_code` names a known
+ * PLoT failure code. Returns null for unknown/absent codes so the per-cause
+ * branches keep their byte-identical generic copy. `template_id` is
+ * `<cause_kind>_<code>` (e.g. `plot_error_graph_too_complex`) so tests pin
+ * the routing without string-matching prose.
+ */
+function composePlotCodeKeyedBody(
+  causeKind: 'plot_error' | 'analysis_failed' | 'analysis_blocked',
+  details: { readonly plot_primary_code?: unknown } & Record<string, unknown>,
+): HandlerFailureBranchResult | null {
+  const code = details.plot_primary_code;
+  if (typeof code !== 'string' || code.length === 0) return null;
+  const copy = PLOT_FAILURE_CODE_COPY[code];
+  if (copy === undefined) return null;
+  return {
+    body: {
+      assistant_text: copy.assistant_text,
+      suggested_actions: [copy.chip()],
+    },
+    template_id: `${causeKind}_${code.toLowerCase()}`,
+    chip_type: copy.chip_type,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Chip helpers — separate functions per intent, not keyed on `retryable`
 // ---------------------------------------------------------------------------
 
@@ -378,6 +507,17 @@ function scenarioStatusChip(): SuggestedAction {
     id: 'chip_prompt_show_scenario_status',
     label: 'Show scenario status',
     message: 'Show me the current status of my scenario.',
+  };
+}
+
+// Seam item 3 — text-prompt chip for complexity-class PLoT failures.
+// Deliberately no `action_type`: a bare re-run reproduces the failure, the
+// user needs a model change first (same reasoning as the D1 chips below).
+function simplifyModelPrompt(): SuggestedAction {
+  return {
+    id: 'chip_prompt_simplify_model',
+    label: 'Simplify my model',
+    message: 'Help me simplify my model so it can be analysed.',
   };
 }
 

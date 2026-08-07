@@ -1,0 +1,707 @@
+{
+  "$ref": "#/definitions/OrchestratorTurnPayloadSchema",
+  "definitions": {
+    "OrchestratorTurnPayloadSchema": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "turn_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "scenario_id": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "frame",
+                "analyse",
+                "decide",
+                "review"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "message"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10000
+            },
+            "turn_class": {
+              "type": "string",
+              "enum": [
+                "frame",
+                "clarify",
+                "propose",
+                "decide",
+                "review"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "composer",
+                "chip",
+                "chip_click",
+                "retry"
+              ]
+            },
+            "chip": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "action_type": {
+                  "type": "string",
+                  "enum": [
+                    "run_analysis",
+                    "set_factor_value",
+                    "add_constraint",
+                    "adjust_edge_strength",
+                    "explain_result",
+                    "explain_results",
+                    "explain_from_structure",
+                    "compare_options",
+                    "what_would_flip",
+                    "analysis_readiness",
+                    "what_changed"
+                  ]
+                },
+                "intent": {
+                  "type": "string",
+                  "enum": [
+                    "elicit_options",
+                    "add_option",
+                    "challenge_frame",
+                    "challenge_assumption",
+                    "outside_view",
+                    "pre_mortem",
+                    "elicit_risks",
+                    "estimate_help",
+                    "mitigation_help",
+                    "define_success",
+                    "discuss"
+                  ]
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": false
+            },
+            "retry_of": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "generate_model": {
+              "type": "boolean"
+            },
+            "explicit_generate": {
+              "type": "boolean"
+            },
+            "selected_elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 20
+            },
+            "graph_state": {
+              "type": "object",
+              "properties": {
+                "nodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "pattern": "^[a-z0-9_:-]+$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "goal",
+                          "factor",
+                          "outcome",
+                          "risk",
+                          "action",
+                          "decision",
+                          "option",
+                          "constraint"
+                        ]
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "numeric",
+                          "ordinal",
+                          "nominal",
+                          "boolean"
+                        ]
+                      },
+                      "categories": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "category": {
+                        "type": "string",
+                        "enum": [
+                          "controllable",
+                          "observable",
+                          "external"
+                        ]
+                      },
+                      "observed_state": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "number"
+                          },
+                          "std": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "baseline": {
+                            "type": "number"
+                          },
+                          "unit": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "declared_scale": {
+                            "type": "string",
+                            "enum": [
+                              "unit_interval",
+                              "ratio",
+                              "raw_count"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": true
+                      },
+                      "state_space": {
+                        "type": "object",
+                        "properties": {
+                          "range": {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "number"
+                              },
+                              "max": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "min",
+                              "max"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": true
+                      },
+                      "goal_threshold": {
+                        "type": "number"
+                      },
+                      "goal_threshold_frame": {
+                        "type": "string",
+                        "enum": [
+                          "level",
+                          "delta"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "label"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "edges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "to": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "strength": {
+                        "type": "object",
+                        "properties": {
+                          "mean": {
+                            "type": "number",
+                            "minimum": -1,
+                            "maximum": 1
+                          },
+                          "std": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          }
+                        },
+                        "required": [
+                          "mean",
+                          "std"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "exists_probability": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "effect_direction": {
+                        "type": "string",
+                        "enum": [
+                          "positive",
+                          "negative",
+                          "unknown"
+                        ]
+                      },
+                      "edge_type": {
+                        "type": "string",
+                        "enum": [
+                          "directed",
+                          "bidirected"
+                        ],
+                        "default": "directed"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "to",
+                      "strength",
+                      "exists_probability"
+                    ],
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "required": [
+                "nodes",
+                "edges"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "turn_id",
+            "scenario_id",
+            "stage",
+            "kind",
+            "message",
+            "turn_class",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "turn_id": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "scenario_id": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "stage": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/stage"
+            },
+            "kind": {
+              "type": "string",
+              "const": "system_event"
+            },
+            "event": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "patch_accepted"
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "patch_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "patch_dismissed"
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "patch_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "direct_graph_edit"
+                    },
+                    "target_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "operation": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "changed_node_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "changed_edge_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "fields_changed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "target_id",
+                    "operation"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "factor_value_edit"
+                    },
+                    "target_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {
+                      "type": "number",
+                      "description": "The edited value on the MODEL scale (for a capped factor, raw_value / cap). Required: an edit with no value is a `direct_graph_edit` notification, not this event. The server RE-DERIVES the persisted model value from `raw_value` and its own stored cap and never persists this number verbatim — it is the client's statement of intent, cross-checked against `raw_value`, not a trusted input."
+                    },
+                    "raw_value": {
+                      "type": "number",
+                      "description": "The USER-UNIT magnitude as typed (e.g. 30000 for £30,000). ABSENCE IS DISTINCT from any value: it means the client did not state a user-unit magnitude, and the server must derive one from `value` and its own stored cap. It does NOT mean zero. Send this whenever the user typed a magnitude — it is the honest record of the input, and the server prefers it over `value`."
+                    },
+                    "unit": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Unit symbol for `raw_value` (e.g. \"£\", \"%\"). ABSENCE IS DISTINCT from any value: a unit-less number is treated as an AMBIGUOUS bare number against a capped factor and may be refused, whereas a stated unit is validated against the factor's own unit. Absence never means \"no unit\" — it means \"the client did not say\"."
+                    },
+                    "field": {
+                      "type": "string",
+                      "const": "value",
+                      "description": "Which `observed_state` field was edited. The ONLY accepted value is \"value\", and ABSENCE IS THE SAME as passing it — so a client may omit it entirely. It exists to make the edited field EXPLICIT on the wire, not to offer a choice: a future field (e.g. \"baseline\") requires widening this literal to a union in a versioned release, which is deliberately louder than accepting an arbitrary string here and leaving each consumer to decide what to do with it."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "target_id",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "chip_click"
+                    },
+                    "chip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "chip_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "undo"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "redo"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "selection_change"
+                    },
+                    "selected": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/selected_elements/items"
+                      },
+                      "maxItems": 20
+                    },
+                    "cleared": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "selected"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "feedback"
+                    },
+                    "rating": {
+                      "type": "string",
+                      "enum": [
+                        "up",
+                        "down"
+                      ]
+                    },
+                    "comment": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "description": "User free-text feedback. MAY contain PII (names, emails, whatever the user typed) — consumers MUST handle per R-004: treat as sensitive, never log verbatim, redact before persistence/telemetry."
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "turn",
+                            "message",
+                            "block",
+                            "suggestion",
+                            "analysis"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "rating",
+                    "target"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "edge_adjudication"
+                    },
+                    "from": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "to": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "edge_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "accepted_pass1",
+                        "accepted_pass2",
+                        "overridden",
+                        "dismissed"
+                      ]
+                    },
+                    "resolved_strength_mean": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "from",
+                    "to",
+                    "verdict"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "prior_range_edit"
+                    },
+                    "target_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "range_min": {
+                      "type": "number"
+                    },
+                    "range_max": {
+                      "type": "number"
+                    },
+                    "distribution": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "target_id",
+                    "range_min",
+                    "range_max"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "turn_id",
+            "scenario_id",
+            "stage",
+            "kind",
+            "event"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

@@ -93,6 +93,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
   it('commit chain: writing briefText via commitDirectAnswer makes it readable on the next buildTurnContext', async () => {
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: 'drafted',
       stage: 'frame',
     });
@@ -148,6 +149,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     // already-populated brief — a never-written brief stays writable.
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: '',
       stage: 'frame',
     });
@@ -208,6 +210,7 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
   it('write-once via commit chain: a second non-conflict commit on a populated scenario does NOT overwrite', async () => {
     const store = createStatefulFakeStore();
     const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: '',
       stage: 'frame',
     });
@@ -390,6 +393,7 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
     // Step 2: write the brief via the canonical commit path. This is
     // the persistence side of the chain.
     const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: 'drafted',
       stage: 'frame',
     });
@@ -485,7 +489,8 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
     const store = createStatefulFakeStore();
     liveStoreHolder.current = store;
     // Persist a graph but NO brief.
-    const composed = composeDirectAnswerResponse({ assistant_text: '', stage: 'frame' });
+    const composed = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: '', stage: 'frame' });
     await commitDirectAnswer(
       composed,
       {
@@ -565,7 +570,8 @@ describe('V5 Phase 1 brief persistence — full liveness chain through runTurnEx
     // the graph and the brief.
     const PERSISTED_BRIEF = 'V5 Phase 3A Fix B verification brief';
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: 'seed-draft',

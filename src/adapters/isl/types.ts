@@ -344,7 +344,13 @@ export interface PredictionInterval {
   /** Interval width (upper - lower) */
   interval_width: number;
 
-  /** Whether interval is well-calibrated based on historical data */
+  /**
+   * Calibration flag declared by this adapter type. NOTE: ISL does not emit
+   * this field today (its calibration assessment yields metrics only, never
+   * a pass/fail verdict) and no historical-outcome calibration loop exists;
+   * user-facing copy must not present it as a calibration verdict or as
+   * validation against historical data.
+   */
   well_calibrated: boolean;
 
   /** Factors affecting interval width */

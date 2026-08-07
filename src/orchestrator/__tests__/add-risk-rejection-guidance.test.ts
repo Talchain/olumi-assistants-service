@@ -49,9 +49,17 @@ function violationsFor(graph: GraphV3T): StructuralViolation[] {
   return validateGraphStructure(graph).violations;
 }
 
+// 1.16 item C — deliberate fixture change throughout this file: under the
+// corrected reachability predicate (a node fails only when it cannot REACH
+// the goal via forward edges), the old `risk → option` outbound wiring is a
+// legitimate exogenous influence (risk → option → factor → goal) and is now
+// ACCEPTED by the real validator. The Cap-2A rejection shape these tests
+// exercise is the TRUE dead-end: an inbound-only risk (`option → risk`,
+// nothing flows out), which still trips NO_PATH_TO_GOAL and still has no
+// factor inbound — so the classifier's gates are unchanged.
 describe('classifyAddRiskToOptionRejection — conservative', () => {
-  it('POSITIVE: risk wired only to an option (NO_PATH_TO_GOAL) → matches', () => {
-    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('risk_resent', 'opt_hire')]);
+  it('POSITIVE: risk added as a dead-end sink (NO_PATH_TO_GOAL) → matches', () => {
+    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('opt_hire', 'risk_resent')]);
     const v = violationsFor(graph);
     expect(v.map((x) => x.code)).toEqual(['NO_PATH_TO_GOAL']);
     const m = classifyAddRiskToOptionRejection(graph, v);
@@ -91,7 +99,7 @@ describe('classifyAddRiskToOptionRejection — conservative', () => {
   });
 
   it('NEGATIVE: mixed codes (reachability + a non-reachability code) → null (gate 1)', () => {
-    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('risk_resent', 'opt_hire')]);
+    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('opt_hire', 'risk_resent')]);
     const real = violationsFor(graph); // [NO_PATH_TO_GOAL]
     const mixed: StructuralViolation[] = [...real, { code: 'NODE_LIMIT_EXCEEDED', detail: '21 nodes exceeds limit of 20' }];
     expect(classifyAddRiskToOptionRejection(graph, mixed)).toBeNull();
@@ -108,19 +116,19 @@ describe('classifyAddRiskToOptionRejection — conservative', () => {
   });
 
   it('NEGATIVE: empty violations → null', () => {
-    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('risk_resent', 'opt_hire')]);
+    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('opt_hire', 'risk_resent')]);
     expect(classifyAddRiskToOptionRejection(graph, [])).toBeNull();
   });
 
   it('operations gate + observability: add/wire the risk → match; absent → match (fallback); add_node risk → added_new_risk true', () => {
-    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('risk_resent', 'opt_hire')]);
+    const graph = g([...BASE_NODES, RISK], [...BASE_EDGES, e('opt_hire', 'risk_resent')]);
     const v = violationsFor(graph);
     // absent → fallback match, added_new_risk null
     expect(classifyAddRiskToOptionRejection(graph, v)!.added_new_risk).toBeNull();
     // add_node of the risk → match, added_new_risk true
     expect(classifyAddRiskToOptionRejection(graph, v, [{ op: 'add_node', value: { kind: 'risk', id: 'risk_resent', label: 'r' } }])!.added_new_risk).toBe(true);
     // add_edge touching the risk (no add_node) → match, added_new_risk false
-    expect(classifyAddRiskToOptionRejection(graph, v, [{ op: 'add_edge', value: { from: 'risk_resent', to: 'opt_hire' } }])!.added_new_risk).toBe(false);
+    expect(classifyAddRiskToOptionRejection(graph, v, [{ op: 'add_edge', value: { from: 'opt_hire', to: 'risk_resent' } }])!.added_new_risk).toBe(false);
   });
 
   // ── Adversarial false-positive probes (review-requested) ──────────────────
@@ -156,28 +164,28 @@ describe('classifyAddRiskToOptionRejection — conservative', () => {
   it('ADVERSARIAL: real multi-violation (reachability + cycle) → null even with add-risk ops (gate 1)', () => {
     const graph = g(
       [...BASE_NODES, RISK],
-      [...BASE_EDGES, e('risk_resent', 'opt_hire'), e('goal_q3', 'fac_capacity')], // NO_PATH_TO_GOAL + CYCLE
+      [...BASE_EDGES, e('opt_hire', 'risk_resent'), e('goal_q3', 'fac_capacity')], // NO_PATH_TO_GOAL + CYCLE
     );
     const v = violationsFor(graph);
     expect(v.some((x) => x.code === 'NO_PATH_TO_GOAL')).toBe(true);
     expect(v.some((x) => x.code === 'CYCLE_DETECTED')).toBe(true);
     expect(classifyAddRiskToOptionRejection(graph, v, [
       { op: 'add_node', value: { id: 'risk_resent', kind: 'risk', label: 'r' } },
-      { op: 'add_edge', value: { from: 'risk_resent', to: 'opt_hire' } },
+      { op: 'add_edge', value: { from: 'opt_hire', to: 'risk_resent' } },
     ])).toBeNull();
   });
 
-  it('POSITIVE amid noise: two risks, one wired-to-option (bad) + one properly hosted (good) → matches only the bad one', () => {
+  it('POSITIVE amid noise: two risks, one dead-end (bad) + one properly hosted (good) → matches only the bad one', () => {
     const riskGood = n('risk_good', 'risk', 'Properly hosted risk');
     const graph = g(
       [...BASE_NODES, RISK, riskGood],
-      [...BASE_EDGES, e('fac_velocity', 'risk_good'), e('risk_good', 'goal_q3'), e('risk_resent', 'opt_hire')],
+      [...BASE_EDGES, e('fac_velocity', 'risk_good'), e('risk_good', 'goal_q3'), e('opt_hire', 'risk_resent')],
     );
     const v = violationsFor(graph);
     expect(v.map((x) => x.code)).toEqual(['NO_PATH_TO_GOAL']);
     const m = classifyAddRiskToOptionRejection(graph, v, [
       { op: 'add_node', value: { id: 'risk_resent', kind: 'risk', label: 'Team resents new tech lead' } },
-      { op: 'add_edge', value: { from: 'risk_resent', to: 'opt_hire' } },
+      { op: 'add_edge', value: { from: 'opt_hire', to: 'risk_resent' } },
     ]);
     expect(m).not.toBeNull();
     expect(m!.risk_labels).toEqual(['Team resents new tech lead']); // only the bad one

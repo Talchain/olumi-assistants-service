@@ -25,6 +25,12 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
               // candidate even when validation is disabled here.
               if (ceeProp === "patchPreValidationEnabled") return false;
               if (ceeProp === "patchBudgetEnabled") return false;
+              // CEE_EDIT_CAP_SPLIT went DEFAULT-ON 18 Jul (Paul-ratified). This
+              // legacy suite asserts the BARE whole-batch MAX_OPERATIONS_EXCEEDED
+              // dead-end, so it pins the split flag OFF (the kill-switch path).
+              // The default-ON split behaviour is covered by
+              // trust-spine-red-edit-cap-split.test.ts.
+              if (ceeProp === "editCapSplitEnabled") return false;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });
@@ -1454,7 +1460,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     // Deterministic forward-looking default must fire when no warnings either.
     // Forward-looking (not a denial) so it passes the V5 egress forbidden-
     // phrase guard intact — see edit-graph.ts NO_OP_FALLBACK_TEXT comment.
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
     expect(text).not.toMatch(/\bno changes were\b/i);
     // No-commit contract preserved.
     expect(result.wasRejected).toBe(false);
@@ -1507,7 +1513,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     // Coaching content does NOT reach assistant_text.
     expect(text).not.toMatch(/I['’]ve\s+applied/i);
     // Deterministic copy used instead.
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
   });
 
   it("LLM emits operations=[] with FALSE-SUCCESS warning text → no leak to assistant_text (Codex P0)", async () => {
@@ -1531,7 +1537,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     expect(text).not.toContain("Updated Price");
     expect(text).not.toContain("Done");
     expect(text).not.toContain("value set");
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
   });
 
   it("LLM emits operations=[] with JARGON warning text → no leak to assistant_text (Codex P0)", async () => {
@@ -1554,7 +1560,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     );
     const text = result.assistantText ?? "";
     expect(text).not.toMatch(/\bvalidator\b/i);
-    expect(text).toMatch(/Tell me the specific factor and value/i);
+    expect(text).toMatch(/Tell me the specific factor/i);
   });
 
   it("LLM emits operations=[] with no warnings and no coaching → safe default", async () => {
@@ -1571,7 +1577,7 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
       "req-1",
       "turn-1",
     );
-    expect(result.assistantText).toMatch(/Tell me the specific factor and value/i);
+    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
     expect(result.assistantText).not.toMatch(/\bno changes were\b/i);
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();
@@ -1626,21 +1632,42 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     // No-commit contract.
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();
-    expect(result.pendingProposal).toBeDefined();
+    // S3-L1 — the propose-and-confirm branch no longer mints the vestigial V4
+    // `pendingProposal` payload. It was write-only: the ONLY readers of
+    // `result.pendingProposal` live in the V4 pipeline (phase4-tools,
+    // tools/dispatch, deterministic/actions/edit-graph), which is
+    // 410-tombstoned by default (`pipelineV4Enabled` defaults false → route.ts
+    // returns 410). The LIVE V5 dispatcher (edit-graph-dispatch.ts) calls
+    // handleEditGraph WITHOUT invocationInput and consumes the result via
+    // buildBoundarySuggestedActions, which reads only `suggestedActions` +
+    // `pendingClarification` — never `pendingProposal`. So this field had zero
+    // live readers. The live-observable guarantee this test still pins is the
+    // COPY above (see also proposed-change-v4-retire.test.ts).
+    expect(result.pendingProposal).toBeUndefined();
   });
 
   it("single-change high-impact parameter_update → single-change copy with abstract placeholder example", async () => {
     // Single-change ("no and|comma|also|then") + high-impact verb
-    // ("double") + parameter_update → falls past auto_apply gate
-    // (isLowImpactEditRequest=false because "double" matches
+    // ("major") + parameter_update → falls past auto_apply gate
+    // (isLowImpactEditRequest=false because "major" matches the
     // high-impact regex) → final propose_and_confirm fallthrough.
     // This exercises the SINGLE-change branch of
     // `buildProposeAndConfirmText` which used to interpolate
     // "120k" / "20%" hardcoded examples.
+    //
+    // F-1 (POSTDEPLOY-PROBES-573, 2026-07-20) — fixture changed from
+    // "Make Price double" to "Make Price a major driver". "double" IS a
+    // direction with a magnitude, so under the claim-then-starve rule that
+    // turn now hands off to the edit LLM lane rather than answering a stated
+    // direction with a request for a direction (pinned deliberately in
+    // edit-graph-propose-handoff.test.ts). The new fixture carries no value
+    // and no direction, so it still reaches this branch and this test's
+    // actual guarantee — no hardcoded scale values in the propose copy —
+    // is unchanged.
     const adapter = makeAdapter({ operations: [], removed_edges: [], warnings: [], coaching: null });
     const result = await handleEditGraph(
       makeContext(),
-      "Make Price double",
+      "Make Price a major driver",
       adapter,
       "req-1",
       "turn-1",
@@ -1658,7 +1685,10 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     expect(text).toMatch(/value|direction|parameter|element/i);
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();
-    expect(result.pendingProposal).toBeDefined();
+    // S3-L1 — vestigial V4 `pendingProposal` mint retired (zero live readers;
+    // V4-pipeline-only readers are 410-tombstoned). See the compound-copy test
+    // above for the full rationale. Live guarantee = the COPY.
+    expect(result.pendingProposal).toBeUndefined();
   });
 
   // Codex round-1 improvement #3 — Mode A with malformed / free-text
@@ -1738,7 +1768,10 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     // No fabricated label that wasn't in the graph.
     expect(text).not.toMatch(/\bNonexistent\b/);
     expect(result.wasRejected).toBe(false);
-    expect(result.pendingProposal).toBeDefined();
+    // S3-L1 — vestigial V4 `pendingProposal` mint retired (zero live readers;
+    // V4-pipeline-only readers are 410-tombstoned). Live guarantee = the
+    // generic-stub COPY asserted above.
+    expect(result.pendingProposal).toBeUndefined();
   });
 });
 
@@ -2023,21 +2056,26 @@ describe("V5 H5 follow-up — handleEditGraph appliedGraph synthesis", () => {
   });
 
   // Backstop for the staging failure on PR #165. Patch-validation
-  // (src/orchestrator/patch-validation.ts) accepts UpdateEdgeValue as
-  // `z.record(z.string(), z.unknown())` so any shape passes structural
-  // validation. EdgeStrengthV3 requires `std: z.number().positive()`,
-  // so an update setting `std: 0` produces a candidate that passes
+  // (src/orchestrator/patch-validation.ts) accepts UpdateEdgeValue as a
+  // record with numeric-bounds checks only (W2E-2), so non-numeric shape
+  // violations still pass structural validation. EdgeV3 requires
+  // `effect_direction: z.enum(["positive", "negative"])`, so an update
+  // setting an out-of-vocabulary enum produces a candidate that passes
   // patch-validation and applyPatchOperations but fails GraphV3 strict
   // parse — the exact gap the Layer 2 backstop is for.
+  // (The original fixture here — `strength: { std: 0 }` — is now caught
+  // one layer earlier by the W2E-2 numeric-bounds gate in patch-validation
+  // and rejects as STRUCTURAL_VALIDATION_FAILED; see
+  // tests/unit/orchestrator/patch-validation-numeric-bounds.test.ts.)
   it("refuses to persist candidateGraph that fails GraphV3 strict parse (SYNTHESIZED_GRAPH_INVALID)", async () => {
     const adapter = makeAdapter([
       {
         op: "update_edge",
         path: "factor_1::goal_1",
-        // Layer 1 merges into existing { mean: 0.5, std: 0.1 } so the
-        // resulting strength is { mean: 0.5, std: 0 }. GraphV3 requires
-        // std > 0; safeParse rejects; the backstop must catch it.
-        value: { strength: { std: 0 } },
+        // Layer 1 merges into the existing edge so the resulting
+        // effect_direction is "sideways". GraphV3 requires
+        // positive|negative; safeParse rejects; the backstop must catch it.
+        value: { effect_direction: "sideways" },
       },
     ]);
 
@@ -2338,12 +2376,19 @@ describe("H6 — determineEditResolutionMode label-aware compound detection", ()
     // torn into two fake clauses.
     expect(result.wasRejected).toBe(false);
     expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
-    expect(result.proposedChanges).toBeDefined();
-    expect(result.proposedChanges!.changes).toHaveLength(1);
-    expect(result.proposedChanges!.changes[0]!.element_label).toBe("Headcount and Scaling Spend");
-    // The user-visible Mode A copy must NOT contain a torn "Scaling Spend"
-    // fragment as a fake label.
+    // S3-L1 — the top-level `proposedChanges` field is no longer RETURNED (its
+    // only readers were the 410-tombstoned V4 pipeline — phase4-tools:369 +
+    // dispatch:323; the live V5 dispatcher never reads it). `proposedChanges`
+    // is now a within-turn local that ONLY feeds the copy builder, so the
+    // "no torn labels" guarantee is asserted where it is still live-observable:
+    // the user-facing Mode A copy. The POSITIVE control (trap-13) is that the
+    // full separator-bearing label survives intact and bolded; the negatives
+    // pin that no torn fragment is presented as a fake label.
+    expect(result.proposedChanges).toBeUndefined();
     const text = result.assistantText ?? "";
+    // POSITIVE: the coherent full label is surfaced, un-torn.
+    expect(text).toContain("**Headcount and Scaling Spend**");
+    // NEGATIVE: no torn "Scaling Spend" / "Headcount" fragment as a fake label.
     expect(text).not.toContain("**Scaling Spend**");
     expect(text).not.toContain("**Scaling Spend more important**");
     expect(text).not.toContain("**Headcount**");

@@ -60,6 +60,10 @@ vi.mock('../../build-turn-context.js', () => ({
   buildTurnContext: (...args: unknown[]) => buildTurnContextMock(...args),
   loadMostRecentPendingActions: (...args: unknown[]) =>
     loadMostRecentPendingActionsMock(...args),
+  // ROADMAP 1.33: dispatchEditGraph reads this for the conversation-slice
+  // feed. Empty — this suite exercises invalidation-dedup, not
+  // conversation history.
+  loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
 }));
 
 // Spy on `emit` while preserving TelemetryEvents + log + everything else.

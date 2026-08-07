@@ -8,10 +8,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { V5_ROUTING_MAX_OUTPUT_TOKENS, V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY } from '../routing/route-with-tool-use.js';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
-import { setTestSink } from '../../utils/telemetry.js';
+import { setTestSink, log } from '../../utils/telemetry.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -263,18 +264,82 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
     }
   });
 
-  it('unexpected_stop_reason via max_tokens — bounded fallback 200, no retry (V5 P0 review-P2)', async () => {
-    // Direct repro of the live failure mode the brief targets: Sonnet
-    // returns content with `stop_reason: 'max_tokens'` before completing
-    // a tool_use. `tryInterpret` classifies that as non_repairable
-    // `unexpected_stop_reason`, which used to surface as a 500
-    // BoundaryError. The bounded fallback now degrades to a 200
-    // direct_answer envelope. Asserts: exactly one adapter call (no
-    // REPAIR_ONCE), no error block, fallback copy, fallback telemetry,
-    // and the underlying failure cause preserved in run telemetry.
+  it('max_tokens on the first routing call — ONE retry at the escalated budget (V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY) rescues the turn (prompt-workstream fix)', async () => {
+    // Live evidence (2026-07-08 staging-parity runs): ~4-5% of routing
+    // calls die with stop_reason === 'max_tokens' at the first-attempt cap
+    // (a failed call burned exactly that many completion tokens) and each
+    // one shipped the bounded-fallback apology. The fix keeps the
+    // V5_ROUTING_MAX_OUTPUT_TOKENS first attempt and, on max_tokens,
+    // retries ONCE with maxTokens V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY —
+    // same messages, same tools. Asserts: two adapter calls with the
+    // escalated budget, identical messages/tools, turn succeeds as a
+    // normal text_only converse (no bounded fallback, no error block),
+    // and the retry is observable via the plain pino event
+    // 'v5.routing.max_tokens_retry' with attempt latency + token counts.
+    const logInfoSpy = vi.spyOn(log, 'info');
     const adapterMock = vi
       .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
       .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Partial answer cut off at...' }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS } as unknown as ChatWithToolsResult['usage'],
+        model: 'claude-sonnet-4-6',
+        latencyMs: 200,
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Here is the full answer to your question.' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 90 } as unknown as ChatWithToolsResult['usage'],
+        model: 'claude-sonnet-4-6',
+        latencyMs: 150,
+      });
+    const routingAdapter = mockRoutingAdapter(adapterMock as unknown as ChatWithToolsMock);
+
+    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-max-tokens-retry', {
+      routingAdapter,
+    });
+
+    expect(adapterMock).toHaveBeenCalledTimes(2);
+    const firstArgs = adapterMock.mock.calls[0]![0];
+    const retryArgs = adapterMock.mock.calls[1]![0];
+    expect(firstArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
+    // Same messages, same tools — only the output budget changes.
+    expect(retryArgs.messages).toEqual(firstArgs.messages);
+    expect(retryArgs.tools).toEqual(firstArgs.tools);
+
+    const parsed = OlumiResponseSchema.parse(response);
+    expect(parsed.blocks.some((b) => b.type === 'error')).toBe(false);
+    expect(parsed.assistant_text).toContain('Here is the full answer');
+    expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
+    expect(events.find((e) => e.event === 'v5.routing_bounded_fallback')).toBeUndefined();
+
+    // Retry observability: plain pino event-string pattern, NOT a new
+    // TelemetryEvents registry member.
+    const retryLog = logInfoSpy.mock.calls.find(
+      (c) => (c[0] as Record<string, unknown>)?.event === 'v5.routing.max_tokens_retry',
+    );
+    expect(retryLog).toBeDefined();
+    const retryPayload = retryLog![0] as Record<string, unknown>;
+    expect(retryPayload.request_id).toBe('req-max-tokens-retry');
+    expect(retryPayload.first_attempt_latency_ms).toBe(200);
+    expect(retryPayload.first_attempt_input_tokens).toBe(10);
+    expect(retryPayload.first_attempt_output_tokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryPayload.first_attempt_max_tokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+    expect(retryPayload.retry_max_tokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
+  });
+
+  it('max_tokens on BOTH routing calls — bounded fallback 200, no further retry (V5 P0 review-P2)', async () => {
+    // When the escalated-budget retry ALSO ends max_tokens, we fall through to the
+    // pre-existing error path unchanged: `tryInterpret` classifies it as
+    // non_repairable `unexpected_stop_reason` → bounded fallback to a
+    // 200 direct_answer envelope. Asserts: exactly two adapter calls
+    // (one retry, no REPAIR_ONCE), no error block, fallback copy,
+    // fallback telemetry, and the underlying failure cause preserved.
+    const adapterMock = vi
+      .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValue({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
         usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
@@ -287,7 +352,7 @@ describe('TurnExecutor recovery chips — egress safety layer', () => {
       routingAdapter,
     });
 
-    expect(adapterMock).toHaveBeenCalledTimes(1);
+    expect(adapterMock).toHaveBeenCalledTimes(2);
 
     const parsed = OlumiResponseSchema.parse(response);
     expect(parsed.blocks.some((b) => b.type === 'error')).toBe(false);

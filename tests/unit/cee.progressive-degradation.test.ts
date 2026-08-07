@@ -48,6 +48,15 @@ vi.mock("../../src/config/index.js", () => ({
       pipelineCheckpointsEnabled: false,
       validationPipelineEnabled: false,
     },
+    // features.diagnosticTraceEnabled is read unconditionally by
+    // runUnifiedPipeline (src/cee/unified-pipeline/index.ts) to gate stage
+    // timing capture. Missing here throws "Cannot read properties of
+    // undefined (reading 'diagnosticTraceEnabled')" — a stale mock shape
+    // that predates that field (default false in real config, see
+    // src/config/index.ts CEE_DIAGNOSTIC_TRACE_ENABLED).
+    features: {
+      diagnosticTraceEnabled: false,
+    },
   },
 }));
 
@@ -535,7 +544,13 @@ describe("Task 6: Resilience canary — graph survives verification failure", ()
 
     const outcome: PipelineOutcome = body._pipeline_outcome;
     expect(outcome.graph_structurally_valid).toBe(true);
-    expect(outcome.coaching_status).toBe("failed_degraded");
+    // F7 (2026-07-24): a PACKAGE failure is NOT a coaching failure. Coaching ran
+    // and succeeded before Stage 5 threw, so coaching_status is 'complete' (owned
+    // by the coaching path) — NOT 'failed_degraded'. The package degradation is
+    // signalled by the stage:'package' warning below, its own distinct signal.
+    // (Was asserted as 'failed_degraded' pre-F7 — the exact mis-attribution fixed.)
+    expect(outcome.coaching_status).toBe("complete");
+    expect(outcome.coaching_status).not.toBe("failed_degraded");
 
     const pkgWarning = outcome.warnings.find((w) => w.stage === "package");
     expect(pkgWarning).toBeDefined();
