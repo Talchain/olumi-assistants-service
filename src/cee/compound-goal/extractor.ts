@@ -27,6 +27,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { REDUCTION_VERB_PATTERN } from "../../utils/reduction-framing.js";
+import type { GoalThresholdFrameType } from "@talchain/schemas";
 import {
   buildBoundDisplayName,
   buildReductionDisplayName,
@@ -55,6 +56,24 @@ export interface ExtractedGoalConstraint {
   confidence: number;
   /** Provenance type */
   provenance: "explicit" | "inferred" | "proxy";
+  /**
+   * ROADMAP 2.855 — the FRAME this branch's `value` is minted in.
+   *
+   * DELIBERATELY REQUIRED, NOT OPTIONAL. The frame is a property of the
+   * MINTING ARITHMETIC, and every extractor branch knows its own arithmetic at
+   * the point of construction — so the honest place to state it is here, and
+   * making it required means a NEW BRANCH THAT FORGETS IT FAILS `tsc` instead
+   * of silently shipping an unattested constraint that ISL then refuses. That
+   * is a derived, fail-loud guard rather than a hand-maintained list (trap 12).
+   *
+   * ⚠ It is NOT uniform across branches, which is why no code constant can
+   * serve here the way `CEE_GOAL_THRESHOLD_FRAME` does for the node channel:
+   * `extractReductionConstraints` mints `{ operator: '<=', value: -N }`, whose
+   * own comment states the semantics in the SAMPLE frame ("the samples must
+   * reach `-value` or lower") — a DELTA — while every bound/temporal/proxy
+   * branch mints an absolute LEVEL on the metric's own scale.
+   */
+  valueFrame: GoalThresholdFrameType;
   /** Deadline metadata if temporal constraint */
   deadlineMetadata?: {
     deadline_date?: string;
@@ -364,6 +383,9 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
+        // Absolute LEVEL on the metric's own scale (the stated bound is the
+        // target quantity itself, not a change to it).
+        valueFrame: "level",
       });
     }
   }
@@ -413,6 +435,9 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
+        // Absolute LEVEL on the metric's own scale (the stated bound is the
+        // target quantity itself, not a change to it).
+        valueFrame: "level",
       });
     }
   }
@@ -449,6 +474,11 @@ function extractReductionConstraints(brief: string): ExtractedGoalConstraint[] {
         // must reach `-value` or lower. Flipping the naive "+value"
         // reading here is the fix for the traced sign-inversion bug.
         value: -value,
+        // The value above IS a change-from-origin, stated in the target's own
+        // SAMPLE frame — see the comment on the flip. Attest it as such; a
+        // 'level' stamp here would have ISL convert it against the target's
+        // baseline and return a CONFIDENT WRONG probability.
+        valueFrame: "delta",
         unit,
         // ROADMAP 2.653 (I-B) — the CHANGE phrasing, not the level phrasing.
         label: buildReductionDisplayName(targetName, valueStr),
@@ -487,6 +517,9 @@ function extractBetweenConstraints(brief: string): ExtractedGoalConstraint[] {
       sourceQuote: fullMatch.slice(0, 200),
       confidence: 0.9,
       provenance: "explicit",
+      // Absolute LEVEL on the metric's own scale (the stated bound is the
+      // target quantity itself, not a change to it).
+      valueFrame: "level",
     });
 
     // Upper bound constraint
@@ -500,6 +533,9 @@ function extractBetweenConstraints(brief: string): ExtractedGoalConstraint[] {
       sourceQuote: fullMatch.slice(0, 200),
       confidence: 0.9,
       provenance: "explicit",
+      // Absolute LEVEL on the metric's own scale (the stated bound is the
+      // target quantity itself, not a change to it).
+      valueFrame: "level",
     });
   }
 
@@ -525,6 +561,9 @@ function extractTemporalConstraints(brief: string): ExtractedGoalConstraint[] {
     sourceQuote: deadlineResult.sourceQuote,
     confidence: deadlineResult.confidence,
     provenance: deadlineResult.assumed ? "inferred" : "explicit",
+    // Absolute LEVEL on the metric's own scale (the stated bound is the
+    // target quantity itself, not a change to it).
+    valueFrame: "level",
     deadlineMetadata: {
       deadline_date: deadlineResult.deadlineDate,
       reference_date: deadlineResult.referenceDate,
@@ -1094,6 +1133,10 @@ export function toGoalConstraints(
     node_id: c.targetNodeId,
     operator: c.operator,
     value: c.value,
+    // ROADMAP 2.855 — carried EXPLICITLY: this literal is a by-presence
+    // projection, so a field absent here never reaches `graph.goal_constraints`
+    // however faithfully the upstream branches stamp it.
+    value_frame: c.valueFrame,
     label: c.label,
     unit: c.unit || undefined,
     source_quote: c.sourceQuote,

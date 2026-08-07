@@ -7,7 +7,66 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.37.0.tgz`
+### `talchain-schemas-0.38.0.tgz`
+
+> **✔ ADOPTED FROM THE BYTES TWO CONSUMERS ALREADY HOLD — NOT RE-PACKED HERE.**
+> The estate rule is that no two repos may hold DIFFERENT bytes under one
+> version string, so this tarball was taken from the consumers that vendored
+> 0.38.0 first rather than packed afresh. DGAI (`staging`) and PLoT (`staging`)
+> carry the **same git blob** `4fc13289886dbc1b73a28aa80b9d54518a3dc4dd`
+> (353,278 bytes) — blob identity is byte identity, a stronger check than
+> comparing two recorded sha256 strings, since a manifest can be copied without
+> the bytes being. Those bytes were fetched and re-hashed here:
+> sha256 `761c7ec615da3390ec036c8dab4e5a7857501b1d46ff5f3f777353e2d05e55b9`,
+> matching BOTH consumers' recorded sidecars. Tag `v0.38.0` = `main` tip
+> `371e18c87bcc4e3bbfd074a9178da802244aff5b`.
+>
+> The registry-bytes comparison (ROADMAP 2.464) remains open and was NOT
+> performed here.
+
+**What CEE adopts here (ROADMAP 2.855, the producer half of 2.798):**
+`DraftGoalConstraintSchema.value_frame` — the constraint channel's twin of
+`goal_threshold_frame`, reusing the same `GoalThresholdFrame` enum. ISL's
+reader half (2.796) is merged and deployed and is FAIL-CLOSED: a constraint
+without this attestation is refused with `CONSTRAINT_FRAME_UNSPECIFIED` and the
+entire `constraint_analysis` block is omitted, so **no goal constraint can
+deliver a result until the producers catch up.** This bump is CEE's half.
+
+⚠ **THE CONTRACT'S OWN GUIDANCE IS PARTLY WRONG AND IS NOT FOLLOWED HERE.**
+0.38.0's block comment prescribes that "CEE stamps it as a CODE CONSTANT at its
+constraint mint sites … the frame is a property of the minting arithmetic". The
+second clause is right; the first does not follow. Unlike the goal-threshold
+channel — whose single mint branch is `raw / cap`, an absolute level by
+construction — this channel's arithmetic is NOT uniform:
+`extractReductionConstraints` deliberately mints `{ operator: '<=', value: -N }`
+and states its semantics in the SAMPLE frame, which is a DELTA. A blanket
+`'level'` constant would attest a change-from-origin number as an absolute
+level, ISL would convert it against the target's baseline, and the result would
+be a CONFIDENT WRONG probability — strictly worse than today's honest gap. So
+the stamp is derived PER BRANCH at the mint site, and producers whose arithmetic
+CEE does not own (the `add_constraint` handler, whose number the routing model
+computed; the draft LLM's own array; the client ingress array) stamp NOTHING and
+ISL keeps failing closed.
+
+**Also inherited, additive and unused here:** `EnrichmentOutcomeStatsSchema`
+widens `mean`/`p10`/`p50`/`p90` from REQUIRED to optional and adds
+`percentiles_source` (ISL's honest-absence shape for a degenerate run). This is
+a widening, so no payload that parsed before stops parsing; measured green
+across the full required suite.
+
+**Measured pin-bump delta (re-derived at this tip, not inherited):** `pnpm build`
+(the honest typecheck gate) — **0 affected sites**. `EDITABLE_FIELD_TABLE` and
+`CEE_UI_ENRICHMENT_KEEP_LIST` are byte-identical across the two tags, so the
+table-digest test stays green. Exactly **two** assertions moved, both version
+pins in `field-parity-derivation.test.ts` (plus that test's own name). Full
+`pnpm test:required` on the pin bump ALONE: 1512 files / 26,119 tests, green.
+
+**Rollback path:** revert the whole PR. This one cannot be reverted alone —
+`src/schemas/assist.ts` imports `GoalThresholdFrame` and the extractor imports
+`GoalThresholdFrameType` from the package. Re-run `pnpm install` after the
+revert. Reverting does NOT unpublish 0.38.0.
+
+### `talchain-schemas-0.37.0.tgz` (historical — no longer vendored)
 
 > **✔ SOURCE-PACKED FROM `main` AT THE MERGE SHA, AND RE-DERIVED HERE RATHER
 > THAN INHERITED — NOT COMPARED AGAINST THE REGISTRY BYTES.** The tarball was

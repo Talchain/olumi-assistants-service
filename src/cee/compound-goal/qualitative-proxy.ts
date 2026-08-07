@@ -245,6 +245,13 @@ export function mapQualitativeToProxy(brief: string): QualitativeProxyResult {
         sourceQuote: match[0].slice(0, 200),
         confidence: mapping.confidence,
         provenance: "proxy",
+        // Every `ProxyMapping.defaultValue` in the table above is a THRESHOLD
+        // ON THE PROXY METRIC'S OWN SCALE (NPS >= 50, defect rate <= 0.02,
+        // cost reduction >= 0.10) — an absolute level, never a change applied
+        // to the node's current position. Pinned by a table-wide guard in
+        // `__tests__/constraint-value-frame-stamp.test.ts` rather than left to
+        // this comment, so a future mapping minting a delta reddens.
+        valueFrame: "level",
       });
 
       warnings.push(mapping.warning);
