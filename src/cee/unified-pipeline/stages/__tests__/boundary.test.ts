@@ -87,12 +87,11 @@ vi.mock('../../../transforms/graph-data-integrity.js', () => ({
     scale_consistency_repairs: [],
     edge_field_repairs: [],
     intercept_population_repairs: [],
-    // ROADMAP 2.714 (INV-HONOUR). This mock is a hand-maintained mirror of
-    // IntegrityRepairSummary (trap 12) — the stage reads `.length` on every
-    // arm, so an omitted key here is a TypeError, not a silent pass. That is
-    // the intended direction: it fails loud the next time the summary grows.
-    stated_value_honour_repairs: [],
-    stated_value_honour_skips: [],
+    // This mock is a hand-maintained mirror of IntegrityRepairSummary
+    // (trap 12) — the stage reads `.length` on every arm, so an omitted key
+    // here is a TypeError, not a silent pass. That is the intended direction:
+    // it fails loud the next time the summary grows. (The 2.714 honour arms
+    // were removed with the capability on 8 Aug 2026.)
   })),
 }));
 
