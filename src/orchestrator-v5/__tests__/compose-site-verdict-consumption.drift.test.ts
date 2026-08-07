@@ -386,6 +386,26 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     stance: 'structural',
     why: 'Warrant-absent demotion. Deterministic copy from buildMutationWarrantDemotionText / buildWarrantDemotion; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
   },
+  // ── THE ELICITED REFERENCE-CLASS PRE-ROUTE (ROADMAP 2.688 slice 1) ────────
+  // Same family as the two calibration sites and the warrant demotion above,
+  // and the argument is derived at the bytes rather than by analogy:
+  //   - The branch sits IMMEDIATELY BEFORE the calibration pre-route, i.e.
+  //     before `routeWithToolUse`. Zero LLM calls; its own spec asserts the
+  //     routing adapter is never invoked (`reference-class-preroute.test.ts`
+  //     uses a throwing adapter), so no model text can reach the user here.
+  //   - The copy is built by pure functions in
+  //     `belief-elicitation/reference-class-disclosure.ts` from FOUR inputs and
+  //     nothing else: the user's own class words, their own outcome words, and
+  //     their two integers. It reads no analysis, no projection, and no
+  //     persisted verdict — there is no leader in scope to name.
+  //   - The turn returns before any handler runs; it commits with
+  //     `handler_facts: []` and `pending_actions: []`.
+  // The block it can emit (`outside_view` exercise) carries the SAME
+  // disclosure string and is separately schema- and prose-guarded.
+  referenceClassText: {
+    stance: 'structural',
+    why: "Elicited reference-class pre-route (ROADMAP 2.688 slice 1). Deterministic copy from buildReferenceClassReply / buildReferenceClassRecordedText; fires BEFORE routeWithToolUse (zero LLM calls) and the turn returns before any handler runs, so there is no analysis claim in scope. Every interpolated value is the user's own words or a Beta posterior derived from their own two counts — it names no option and makes no comparison. Registered when `pnpm test:required` failed on the commit that created the site: the ledger found the omission, not the author.",
+  },
   'calibrationOffer.assistant_text': {
     stance: 'structural',
     why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis. (Site RENAMED 6 Aug 2026, ROADMAP 2.627: the expression was buildCalibrationPreviewText(calibrationOnly...) until text AND chips moved behind the single buildCalibrationReply builder. Same branch, same stance, re-derived not carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch.)',
@@ -927,7 +947,10 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // ⚠ MUTATION WARRANT (2026-08-07): 37 -> 38. ONE compose site added in
     // turn-executor.ts — the warrant-absent demotion. Explicit `assistant_text:`
     // form, so keyable by the same regex and in scope for this count.
-    expect(compared, 'the re-key comparison compared nothing').toBe(38);
+    // ⚠ ELICITED REFERENCE CLASS (ROADMAP 2.688 slice 1): 38 -> 39. ONE compose
+    // site added in turn-executor.ts — the reference-class pre-route. Explicit
+    // `assistant_text:` form, so keyable by the same regex and in scope here.
+    expect(compared, 'the re-key comparison compared nothing').toBe(39);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1105,8 +1128,17 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // TURN_EXECUTOR_SITES). Recorded the same way as the entries above: this
     // ledger failed the build on the commit that created the site, and the
     // guard found the omission rather than a human remembering it.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(40);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(36);
+    // ⚠ ELICITED REFERENCE CLASS (ROADMAP 2.688 slice 1): 40 -> 41 sites,
+    // 36 -> 37 keys, files unchanged. One ADDED compose site in
+    // turn-executor.ts, registered `structural` with its derivation (see the
+    // reference-class block in TURN_EXECUTOR_SITES). Recorded the same way as
+    // every entry above, and for the same reason: this ledger failed
+    // `pnpm test:required` on the commit that created the site, and the guard
+    // found the omission rather than a human remembering it. Fourth instance
+    // of the mechanism working; the note stays because the next author will
+    // not remember either.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(41);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(37);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',

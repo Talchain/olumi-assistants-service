@@ -112,6 +112,25 @@ export interface ComposeInput {
    * Every chip must already conform to the boundary `ActionSchema`.
    */
   suggested_actions?: readonly SuggestedAction[];
+  /**
+   * ⭐ ROADMAP 2.688 slice 1 — optional deterministic blocks.
+   *
+   * ⚠ A PREMISE CORRECTION, recorded here because the next lane will hit it
+   * too. The elicited-base-rate design assumed that emitting an
+   * `outside_view` ExerciseBlock needed no CEE plumbing, on the (correct)
+   * evidence that the schema slot and the UI renderer both already exist.
+   * They do — but `composeDirectAnswerResponse` hard-coded `blocks: []`, so
+   * NO deterministic pre-route could put a block on the wire at all. The
+   * display slot existed end-to-end everywhere EXCEPT the one composer a
+   * pre-route uses.
+   *
+   * ADDITIVE AND BYTE-SAFE: every existing call site passes nothing and
+   * still gets `blocks: []`, so no composed response changes. Blocks
+   * supplied here must already have passed their builder's strict schema
+   * parse — this composer validates nothing, exactly as it validates no
+   * chip.
+   */
+  blocks?: readonly OlumiResponse['blocks'][number][];
 }
 
 // V5 finaliser contract: no composer in this file may set `analysis_ready`.
@@ -124,7 +143,7 @@ export function composeDirectAnswerResponse(input: ComposeInput): OlumiResponse 
   return {
     response_version: 2,
     assistant_text: input.assistant_text,
-    blocks: [],
+    blocks: [...(input.blocks ?? [])],
     suggested_actions: [...(input.suggested_actions ?? [])],
     insights: [],
     stage_indicator: input.stage,
