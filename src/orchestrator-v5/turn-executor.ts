@@ -10964,7 +10964,19 @@ export async function runTurnExecutor(
     // and they were reachably inconsistent: the channel answered "did THIS RUN
     // withhold?" and could not see the displayed-analysis conjunct #737 added.
     // The channel is now deleted and the producer gate reads THIS SAME
-    // fact-chain verdict, so there is one answer. What still stands, and is the
+    // fact-chain verdict, so the PROSE channels no longer disagree.
+    //
+    // ⚠ AND THAT IS THE WHOLE OF THE CLAIM — narrowed deliberately, because an
+    // earlier draft said "so there is one answer", which is false. The
+    // STRUCTURED half is governed by a different reader and is unchanged: the
+    // `analysis_result` block gates `leading_option_id` and `summary` on
+    // `mayNameLeadingOptionForFact` (the PER-FACT leaf), and this turn-level
+    // value is never passed to `compose.ts` — verified as zero references
+    // repo-wide, not assumed. On the divergence path the block therefore still
+    // carries the leader id while the prose withholds it. Pre-existing, out of
+    // scope for 2.804, rowed as ROADMAP 2.844.
+    //
+    // What still stands, and is the
     // reason this guard stays scoped: the fail-closed default is right for a
     // PERMISSION and dangerous as a licence to DELETE a whole answer — which is
     // precisely why the finaliser must not overrule a producer that has already

@@ -1149,8 +1149,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // now derives the permission from the fact chain in
       // `applyCoachingSignal`, so this field had no consumer left and a second
       // authority sitting here is an invitation for a future handler to start
-      // writing one. The persisted `constraint_verdict` above is the one
-      // channel, and it is what the fact-chain reader reads.
+      // writing one. The persisted `constraint_verdict` above is the channel a
+      // handler influences the leader claim through.
+      //
+      // ⚠ SCOPE, STATED NARROWLY BECAUSE AN EARLIER DRAFT OF THIS COMMENT
+      // OVERSTATED IT. This unifies the PROSE channel only. It is NOT true that
+      // `constraint_verdict` is "the one channel" for the leader claim on the
+      // wire: `compose.ts`'s `analysis_result` block gates `leading_option_id`
+      // and `summary` on `mayNameLeadingOptionForFact` — the PER-FACT leaf
+      // reader — and the TURN-level verdict never reaches `compose.ts` at all
+      // (zero references, verified repo-wide). So on the exact divergence path
+      // this change addresses, the response withholds the leader in prose and
+      // still ships `leading_option_id` in the structured block, because the
+      // current fact's own verdict permits. That gate is PRE-EXISTING, is not
+      // touched here, and whether the block channel should honour the
+      // turn-level verdict is rowed separately as ROADMAP 2.844.
     };
   };
 }

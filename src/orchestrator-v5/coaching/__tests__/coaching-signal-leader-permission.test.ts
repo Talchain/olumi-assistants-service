@@ -54,7 +54,10 @@
 import { describe, it, expect } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { applyCoachingSignal } from '../coaching-signal-application.js';
+import {
+  applyCoachingSignal,
+  attachCoachingSignalToRunAnalysisFact,
+} from '../coaching-signal-application.js';
 import { COACHING_TEXT } from '../../signals/coaching-signals.js';
 import {
   readMayNameLeadingOptionVerdict,
@@ -66,7 +69,7 @@ import {
   selectClaimBearingRunAnalysisFact,
   selectRunAnalysisFact,
 } from '../../context/freshness.js';
-import { projectRunFact } from '../compare-runs.js';
+import { compareRuns, projectRunFact } from '../compare-runs.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -310,10 +313,28 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
       constraintVerdict: { may_name_leading_option: true, constraint_verdict_state: 'not_applicable' },
     });
     const scenarioNewestWithheld = priorProjectableWithheld();
+    // ⚠ `windowTruncated: true` IS FORCED BY THE PRODUCER, not a free choice.
+    //
+    // `claimSafetyScopeFromContext` derives it as
+    // `prior_turns_total > prior_turns.length`. This fixture has a non-null
+    // scenario-newest analysis fact AND an empty prior-fact window — so the
+    // turn that produced that fact is necessarily OUTSIDE the loaded window,
+    // which means the window is necessarily short. The tuple
+    // `{newestAnalysisFact: <fact>, readOk: true, windowTruncated: false}` is
+    // therefore OUTSIDE the producer's real output domain, and an earlier
+    // revision of this fixture used exactly that.
+    //
+    // It is branch-invariant here — `windowTruncated` only ever arms the
+    // belt-and-braces fallback, which additionally requires `!readOk` — so
+    // nothing about this test's result changes. That is precisely why it was
+    // worth fixing rather than shrugging at: a fixture outside the producer's
+    // domain proves nothing about the wire even when it happens to give the
+    // right answer, and "it doesn't matter today" is how it survives to a day
+    // when it does (CLAUDE.md trap 16, inverse form).
     const scope: ClaimSafetyScenarioScope = {
       newestAnalysisFact: scenarioNewestWithheld,
       readOk: true,
-      windowTruncated: false,
+      windowTruncated: true,
     };
     const handlerFacts = [current];
     const unified = [...handlerFacts];
@@ -409,13 +430,152 @@ describe('the coaching slot reads the SETTLED permission, not the turn-entry one
     });
 
     expect(out.signalId).toBe('RERUN_ANALYSIS_COMPLETE');
-    // Permitted ⇒ the real comparison, which NAMES the leader. Asserted as the
-    // exact production string for the delta this fixture produces (identical
-    // envelopes ⇒ the unchanged-leader arm), so a degrade to the
-    // comparison-free copy fails here loudly.
-    expect(out.coachingText).toContain('Launch now');
+
+    // Permitted ⇒ the real comparison, which NAMES the leader.
+    //
+    // ⚠ THIS USED TO BE `toContain('Launch now')` UNDER A COMMENT CLAIMING IT
+    // ASSERTED THE EXACT PRODUCTION STRING. It did not — and the gap mattered,
+    // because FOUR arms of `composeRerunText` contain that label (widened,
+    // narrowed, unchanged, and the identity-basis degrade). A substring
+    // predicate several arms satisfy is precisely the binding defect trap 19
+    // names, sitting inside the file that exists to stop over-claiming. The
+    // comment was right about what the test SHOULD do, so the assertion was
+    // strengthened to match rather than the comment softened to match the
+    // assertion.
+    //
+    // Pinned in two independent halves so neither can carry the other:
+    //   1. the ARM — derived from the producers (`projectRunFact` +
+    //      `compareRuns`), asserted on the delta's own discriminating fields,
+    //      so a drift to a different branch fails HERE by name; and
+    //   2. the COPY — compared against the PRODUCTION text bank rather than a
+    //      hand-typed literal, so a reworded sentence follows in the same
+    //      commit instead of leaving a stale paraphrase green.
+    const priorProjection = projectRunFact(prior);
+    const currentProjection = projectRunFact(current);
+    expect(priorProjection).not.toBeNull();
+    expect(currentProjection).not.toBeNull();
+    const delta = compareRuns(priorProjection!, currentProjection!, undefined);
+    // The arm, by name. Identical envelopes both runs ⇒ same leader, no margin
+    // movement, and an id-based identity basis (both runs carry option_ids).
+    expect(delta.leader_identity_basis).toBe('option_id');
+    expect(delta.leading_option_changed).toBe(false);
+    expect(delta.margin_direction).toBe('unchanged');
+
+    expect(out.coachingText).toBe(
+      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: delta }),
+    );
+    // And it is emphatically NOT the comparison-free degrade — the outcome a
+    // permission read at the wrong moment would produce (see mutant C1).
     expect(out.coachingText).not.toBe(
       COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
     );
+  });
+});
+
+// ============================================================================
+// F5 (partial) — the invariant the two read points rest on.
+// ============================================================================
+
+describe('the coaching marker cannot move the leader-claim permission', () => {
+  /**
+   * ⚠ WHAT THIS DOES AND DOES NOT PIN — stated because the honest scope is
+   * narrower than the property a reader might assume.
+   *
+   * The turn-executor reads the permission TWICE: once inside
+   * `applyCoachingSignal` at STEP 5 (over `handlerFactsForCommit` as it stands
+   * BEFORE the coaching marker is attached) and once at the post-handler
+   * re-read (over the SAME array AFTER `attachCoachingSignalToRunAnalysisFact`
+   * has rewritten the `run_analysis` fact). The two agree only because that
+   * rewrite cannot change the verdict — it spreads `...fact.result` and adds
+   * three `coaching_signal_*` keys to `enrichment`, touching neither
+   * `constraint_verdict`, nor `enrichment.__cee_claim_safety`, nor any field
+   * the two selectors order or filter on.
+   *
+   * That reasoning was INSPECTION-ONLY and nothing enforced it, so a later
+   * refactor of the attach helper could break the agreement in silence. This
+   * test pins exactly that invariant, at the pure-function level where the
+   * refactor would happen.
+   *
+   * It does NOT pin that the two CALL SITES pass the same scope object — that
+   * needs the whole executor harness or a static scan, and it stays rowed
+   * (review finding F2) rather than being half-done here under a name implying
+   * it was covered.
+   */
+  function assertMarkerIsVerdictNeutral(
+    label: string,
+    turnFacts: readonly HandlerFact[],
+    windowFacts: readonly HandlerFact[],
+    scope: ClaimSafetyScenarioScope,
+  ): void {
+    const before = readMayNameLeadingOptionVerdict(
+      [...turnFacts, ...windowFacts],
+      scope,
+    );
+    const marked = attachCoachingSignalToRunAnalysisFact(
+      turnFacts,
+      'RERUN_ANALYSIS_COMPLETE',
+      'turn-under-test',
+    );
+
+    // POSITIVE CONTROL (trap 13): a test asserting that something did NOT
+    // change is vacuous until it proves the change it tolerates actually
+    // happened. If `attachCoachingSignalToRunAnalysisFact` ever no-ops, the
+    // equality below passes by testing nothing.
+    const markedRun = marked.find((f) => f.fact_type === 'run_analysis') as
+      | { result: { enrichment?: Record<string, unknown> } }
+      | undefined;
+    expect(markedRun, `${label}: no run_analysis fact to mark`).toBeDefined();
+    expect(
+      markedRun!.result.enrichment?.coaching_signal_id,
+      `${label}: the marker did not land, so the equality below proves nothing`,
+    ).toBe('RERUN_ANALYSIS_COMPLETE');
+
+    const after = readMayNameLeadingOptionVerdict(
+      [...marked, ...windowFacts],
+      scope,
+    );
+
+    // The WHOLE verdict, not just the boolean: permission, state and
+    // provenance all have to survive, because the withheld-reason copy is
+    // composed from the state and the diagnostics from the provenance.
+    expect(after, label).toEqual(before);
+  }
+
+  it('holds on a PERMITTED turn', () => {
+    const current = runFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      constraintVerdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
+    });
+    // Pin the branch by name so this case cannot quietly become the other one.
+    expect(
+      readMayNameLeadingOptionVerdict([current], SCOPE).may_name_leading_option,
+    ).toBe(true);
+    assertMarkerIsVerdictNeutral('permitted', [current], [], SCOPE);
+  });
+
+  it('holds on the WITHHELD divergence turn — the branch that actually matters', () => {
+    const current = runFact({
+      analysisStatus: 'partial',
+      computedAt: '2026-08-01T00:00:00.000Z',
+      constraintVerdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'not_applicable',
+      },
+    });
+    const prior = runFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-07-15T00:00:00.000Z',
+      constraintVerdict: null,
+    });
+    // Both branches are covered on purpose: an invariant proven only where the
+    // answer is `true` says nothing about the path this PR exists for.
+    const v = readMayNameLeadingOptionVerdict([current, prior], SCOPE);
+    expect(v.may_name_leading_option).toBe(false);
+    expect(v.provenance).toBe('fail_closed_projected_analysis');
+    assertMarkerIsVerdictNeutral('withheld/divergence', [current], [prior], SCOPE);
   });
 });
