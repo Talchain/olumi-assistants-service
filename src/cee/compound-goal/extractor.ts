@@ -27,6 +27,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { REDUCTION_VERB_PATTERN } from "../../utils/reduction-framing.js";
+import type { GoalThresholdFrameType } from "@talchain/schemas";
 import {
   buildBoundDisplayName,
   buildReductionDisplayName,
@@ -55,6 +56,36 @@ export interface ExtractedGoalConstraint {
   confidence: number;
   /** Provenance type */
   provenance: "explicit" | "inferred" | "proxy";
+  /**
+   * ROADMAP 2.855 — the FRAME this branch's `value` is minted in.
+   *
+   * DELIBERATELY REQUIRED, NOT OPTIONAL. The frame is a property of the
+   * MINTING ARITHMETIC, and every extractor branch knows its own arithmetic at
+   * the point of construction — so the honest place to state it is here, and
+   * making it required means a NEW BRANCH THAT FORGETS IT FAILS `tsc` instead
+   * of silently shipping an unattested constraint that ISL then refuses. That
+   * is a derived, fail-loud guard rather than a hand-maintained list (trap 12).
+   *
+   * ⚠ It is NOT the SAME constant at every branch, which is why one shared
+   * literal cannot serve here the way `CEE_GOAL_THRESHOLD_FRAME` does for the
+   * node channel: `extractReductionConstraints` mints
+   * `{ operator: '<=', value: -N }`, whose own comment states the semantics in
+   * the SAMPLE frame ("the samples must reach `-value` or lower") — a DELTA —
+   * while every bound/temporal/proxy branch mints an absolute LEVEL on the
+   * metric's own scale.
+   *
+   * That is the CONTRACT's instruction, not a departure from it. `@talchain/
+   * schemas` 0.38.0 says CEE stamps this "as a CODE CONSTANT at its constraint
+   * mint siteS (never LLM-derivable — the frame is a property of the minting
+   * arithmetic)": "code constant" contrasts with LLM-DERIVED, and the clause
+   * that follows instructs deriving from the arithmetic, which is exactly what
+   * these branches do. An earlier revision of this comment read the first
+   * clause as ruling out per-branch stamps and called it wrong; that
+   * manufactured a disagreement with the contract that is not there, and it
+   * was refuted in review (PR #862, 2026-08-07). Recorded so the next reader
+   * does not inherit the false conflict.
+   */
+  valueFrame: GoalThresholdFrameType;
   /** Deadline metadata if temporal constraint */
   deadlineMetadata?: {
     deadline_date?: string;
@@ -364,6 +395,9 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
+        // Absolute LEVEL on the metric's own scale (the stated bound is the
+        // target quantity itself, not a change to it).
+        valueFrame: "level",
       });
     }
   }
@@ -413,6 +447,9 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
+        // Absolute LEVEL on the metric's own scale (the stated bound is the
+        // target quantity itself, not a change to it).
+        valueFrame: "level",
       });
     }
   }
@@ -449,6 +486,39 @@ function extractReductionConstraints(brief: string): ExtractedGoalConstraint[] {
         // must reach `-value` or lower. Flipping the naive "+value"
         // reading here is the fix for the traced sign-inversion bug.
         value: -value,
+        // The value above IS a change-from-origin, stated in the target's own
+        // SAMPLE frame — see the comment on the flip. Attest it as such; a
+        // 'level' stamp here would have ISL convert it against the target's
+        // baseline and return a CONFIDENT WRONG probability.
+        //
+        // ⚠ THIS IS THE ONE STAMP WITH A CROSS-SERVICE PRECONDITION, and it is
+        // recorded here because nothing in this repo can enforce it.
+        // ISL trusts a `delta` attestation UNCONDITIONALLY — its delta branch
+        // returns `GoalThresholdPlan(delta_threshold=threshold)` with no domain
+        // guard at all (the guard sits on the `level` branch only). The
+        // adversarial review of PR #862 measured the consequence: PLoT
+        // NORMALISED `-0.15` to `0` (clamped) while faithfully forwarding the
+        // 'delta' attestation, so "P(cost falls by >= 15%)" became "P(cost
+        // falls at all)" — silent, confident, wrong.
+        //
+        // THAT HOLE IS CLOSED IN PLoT, NOT HERE: `plot-lite-service` 38bc3826
+        // (#318, ROADMAP 2.878) REFUSES a delta-framed constraint whose
+        // normalisation would alter the stated quantity — per constraint, with
+        // the refused id removed from the active set and reported by name in
+        // `_meta.filtered_constraints`. That refusal is a DEPLOY-ORDER
+        // PRECONDITION of this stamp: PLoT must be serving #318 before a CEE
+        // build carrying this line reaches staging.
+        //
+        // ⚠ AND STAMPING NOTHING HERE WOULD BE WORSE, not safer, which is the
+        // non-obvious part. ISL's refusal unit for an unattested constraint is
+        // the whole BLOCK ("the refusal unit is the BLOCK",
+        // robustness_analyzer_v2.py) — one unstamped constraint omits the
+        // ENTIRE `constraint_analysis`, deleting every OTHER constraint's
+        // correctly-computed verdict. On a mixed brief ("reduce cost by 15%,
+        // keep churn under 5%") an unstamped reduction would take the level
+        // constraints down with it. PLoT's #318 reasoning reached the same
+        // conclusion independently and rejected frame-dropping for it.
+        valueFrame: "delta",
         unit,
         // ROADMAP 2.653 (I-B) — the CHANGE phrasing, not the level phrasing.
         label: buildReductionDisplayName(targetName, valueStr),
@@ -487,6 +557,9 @@ function extractBetweenConstraints(brief: string): ExtractedGoalConstraint[] {
       sourceQuote: fullMatch.slice(0, 200),
       confidence: 0.9,
       provenance: "explicit",
+      // Absolute LEVEL on the metric's own scale (the stated bound is the
+      // target quantity itself, not a change to it).
+      valueFrame: "level",
     });
 
     // Upper bound constraint
@@ -500,6 +573,9 @@ function extractBetweenConstraints(brief: string): ExtractedGoalConstraint[] {
       sourceQuote: fullMatch.slice(0, 200),
       confidence: 0.9,
       provenance: "explicit",
+      // Absolute LEVEL on the metric's own scale (the stated bound is the
+      // target quantity itself, not a change to it).
+      valueFrame: "level",
     });
   }
 
@@ -525,6 +601,9 @@ function extractTemporalConstraints(brief: string): ExtractedGoalConstraint[] {
     sourceQuote: deadlineResult.sourceQuote,
     confidence: deadlineResult.confidence,
     provenance: deadlineResult.assumed ? "inferred" : "explicit",
+    // Absolute LEVEL on the metric's own scale (the stated bound is the
+    // target quantity itself, not a change to it).
+    valueFrame: "level",
     deadlineMetadata: {
       deadline_date: deadlineResult.deadlineDate,
       reference_date: deadlineResult.referenceDate,
@@ -1094,6 +1173,10 @@ export function toGoalConstraints(
     node_id: c.targetNodeId,
     operator: c.operator,
     value: c.value,
+    // ROADMAP 2.855 — carried EXPLICITLY: this literal is a by-presence
+    // projection, so a field absent here never reaches `graph.goal_constraints`
+    // however faithfully the upstream branches stamp it.
+    value_frame: c.valueFrame,
     label: c.label,
     unit: c.unit || undefined,
     source_quote: c.sourceQuote,

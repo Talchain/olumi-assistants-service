@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Graph } from "./graph.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
-import { BiasType, TopologyPlanSchema, StrengthenItemActionType } from "@talchain/schemas";
+import { BiasType, TopologyPlanSchema, StrengthenItemActionType, GoalThresholdFrame } from "@talchain/schemas";
 
 /**
  * Minimum brief length for draft_graph input validation.
@@ -293,6 +293,25 @@ export const GoalConstraintSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   /** Provenance marker for UI display */
   provenance: z.enum(["explicit", "inferred", "proxy"]).optional(),
+  /**
+   * ROADMAP 2.855 / 2.798 — the FRAME `value` is stated in. Channel B's twin
+   * of `goal_threshold_frame`, and the field ISL blocks on: absent means
+   * UNATTESTED, and ISL omits the ENTIRE constraint_analysis block with a
+   * `CONSTRAINT_FRAME_UNSPECIFIED` warning rather than guessing.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION. This object is a
+   * plain `z.object` — see the closing "CIL Phase 1: strip unknown fields"
+   * comment below — so an undeclared `value_frame` is SILENTLY DELETED at
+   * every parse hop between the mint site and the PLoT payload, and the stamp
+   * would reach nothing with no error anywhere. Exactly how the
+   * `goal_threshold_frame` stamp nearly shipped dark on the node channel.
+   *
+   * ⚠ NOT DEFAULTED, AND NEVER TO BE. A defaulted frame is a manufactured
+   * attestation. Only producers that KNOW their own minting arithmetic stamp
+   * this; see `cee/compound-goal/extractor.ts`. Derived from the contract's
+   * own enum rather than restated as a local literal union (trap 12).
+   */
+  value_frame: GoalThresholdFrame.optional(),
   /** Deadline metadata for temporal constraints */
   deadline_metadata: z.object({
     deadline_date: z.string().optional(),

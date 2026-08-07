@@ -245,6 +245,41 @@ export function mapQualitativeToProxy(brief: string): QualitativeProxyResult {
         sourceQuote: match[0].slice(0, 200),
         confidence: mapping.confidence,
         provenance: "proxy",
+        // ROADMAP 2.855 — the one frame stamp in this channel that is a
+        // JUDGEMENT rather than a derivation: the value is a TABLE CONSTANT,
+        // not a number parsed out of the user's own sentence, so no arithmetic
+        // at this site forces the answer. Every `ProxyMapping.defaultValue` in
+        // the table above is read as a threshold ON THE PROXY METRIC'S OWN
+        // SCALE (NPS >= 50, defect rate <= 0.02) — an absolute level, never a
+        // change applied to the node's current position.
+        //
+        // ⚠ ONE ENTRY IS CONTESTED, and saying so here is the point:
+        // `fac_cost_reduction` ("reduce operating costs" -> `>= 0.10`) reads as
+        // a REDUCTION AMOUNT, i.e. arguably a DELTA (raised in the PR #862
+        // review). It is not a live defect only because this whole path is
+        // DARK — the sole production call site,
+        // `unified-pipeline/stages/repair/compound-goals.ts`, passes
+        // `includeProxies: false`.
+        //
+        // Both facts are pinned by machinery rather than by this comment, in
+        // `__tests__/constraint-value-frame-stamp.test.ts`: a table-wide guard
+        // driving EVERY mapping through the real matcher (a new mapping minting
+        // a delta, or a negative default, reddens), plus a darkness pin.
+        //
+        // WHAT THE DARKNESS PIN ACTUALLY GUARANTEES — stated narrowly, because
+        // its first version claimed more than it could deliver and was refuted
+        // by measurement (re-review of PR #862): it was bound to the
+        // EXTRACTOR'S DEFAULT, so flipping the call site above to `true` left
+        // the whole affected suite GREEN. It now reddens on exactly two
+        // things, and only those: (1) the REAL repair stage emitting a
+        // `fac_cost_reduction` constraint, driven through `runCompoundGoals`
+        // on a graph that contains that target node; and (2) the literal
+        // argument at that call site ceasing to be `includeProxies: false`,
+        // read from disk and bound by identity to that call. Both fire on the
+        // flip; measured RED-then-GREEN as a pair. It does NOT guarantee that
+        // every conceivable future route to the proxy path reddens — a NEW
+        // call site would have to be caught by review, or by adding it here.
+        valueFrame: "level",
       });
 
       warnings.push(mapping.warning);
