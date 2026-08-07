@@ -169,7 +169,6 @@ function makeCtx(overrides: Record<string, unknown> = {}): any {
     effectiveBrief: "Test brief",
     skipRepairDueToBudget: false,
     repairTimeoutMs: 60_000,
-    repairCost: 0,
     llmRepairNeeded: false,
     repairTrace: undefined,
     earlyReturn: undefined,

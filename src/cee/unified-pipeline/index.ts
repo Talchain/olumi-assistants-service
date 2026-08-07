@@ -100,7 +100,6 @@ function buildInitialContext(
     nodeRenames: new Map(),
     goalConstraints: undefined,
     constraintStrpResult: undefined,
-    repairCost: 0,
     structuralMeta: undefined,
     validationSummary: undefined,
 

@@ -161,7 +161,7 @@ Stage 2: Normalise → strpResult, transforms
   ↓
 Stage 3: Enrich → enrichmentResult
   ↓
-Stage 4: Repair → validationSummary, repairCost
+Stage 4: Repair → validationSummary, structuralMeta   (deterministic only; no LLM repair)
   ↓
 Stage 4b: Threshold Sweep → (deterministic hygiene)
   ↓
@@ -227,7 +227,10 @@ Since `CEE_UNIFIED_PIPELINE_ENABLED=true` is already set on staging Render:
 **Performance Metrics:**
 - p95 latency should remain < 8s (existing perf gate)
 - Compare stage-by-stage timing to legacy pipeline
-- Monitor `draftDurationMs` and `repairCost` fields
+- Monitor the `draftDurationMs` field. *(`repairCost` was also listed here; it
+  was deleted in ROADMAP 2.754 along with the LLM repair calls that wrote it —
+  2.731 and 2.740a. There is no repair token cost to monitor: Stage 4 is
+  deterministic.)*
 
 ---
 

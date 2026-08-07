@@ -316,9 +316,9 @@
           "field": "usage",
           "type": "object",
           "classification": "CONSUMED_INTERNALLY",
-          "boundary_description": "Accumulated into ctx.repairCost for telemetry",
+          "boundary_description": "NO LONGER PRODUCED — the repair_graph prompt is never sent (ROADMAP 2.731 removed the draft-path/substep-2 LLM repair, 2.740a removed substep 1b's limb). It was accumulated into ctx.repairCost, a field deleted in ROADMAP 2.754 once its last writer went.",
           "dead_text_quality": "Low",
-          "dead_text_assessment": "Token usage metadata for cost tracking. No user-facing value."
+          "dead_text_assessment": "Token usage metadata for cost tracking. No user-facing value. Historical: this prompt no longer runs."
         }
       ]
     },
