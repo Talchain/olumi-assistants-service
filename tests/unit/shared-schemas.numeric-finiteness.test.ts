@@ -16,7 +16,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   LLMDraftResponse,
-  LLMRepairResponse,
 } from "../../src/adapters/llm/shared-schemas.js";
 import { log } from "../../src/utils/telemetry.js";
 
@@ -94,17 +93,9 @@ describe("LLM draft/repair response numeric finiteness (W2E-2)", () => {
     expect(LLMDraftResponse.safeParse(draft).success).toBe(false);
   });
 
-  it("rejects a repair response carrying non-finite numbers", () => {
-    const repair = {
-      ...VALID_DRAFT,
-      nodes: [
-        { ...VALID_DRAFT.nodes[0], goal_threshold_raw: Number.POSITIVE_INFINITY },
-        VALID_DRAFT.nodes[1],
-      ],
-      rationales: [],
-    };
-    expect(LLMRepairResponse.safeParse(repair).success).toBe(false);
-  });
+  // The repair-response finiteness case was REMOVED with LLMRepairResponse
+  // (ROADMAP 2.763). The draft case above exercises the same `refineFiniteNumbers`
+  // superRefine, so the finiteness gate itself is still covered.
 
   it("does not echo raw offending values or labels in the Zod issues (PII invariant)", () => {
     const draft = {

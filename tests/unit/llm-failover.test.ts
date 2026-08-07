@@ -43,17 +43,6 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async repairGraph(args: any, _opts: CallOpts): Promise<any> {
-    if (this.shouldFail) {
-      throw new Error(`${this.name} failed`);
-    }
-    return {
-      graph: args.graph,
-      rationales: [],
-      usage: { input_tokens: 10, output_tokens: 20 },
-    };
-  }
-
   async clarifyBrief(args: any, _opts: CallOpts): Promise<any> {
     if (this.shouldFail) {
       throw new Error(`${this.name} failed`);
@@ -261,28 +250,8 @@ describe("FailoverAdapter", () => {
     expect(result.options[0].id).toBe("opt_1");
   });
 
-  it("should work with repairGraph method", async () => {
-    const adapters = [
-      new MockAdapter("primary", "model-v1", true),
-      new MockAdapter("fallback", "model-v2", false),
-    ];
-
-    const failover = new FailoverAdapter(adapters, "repair_graph");
-    const testGraph = {
-      version: "1",
-      default_seed: 17,
-      nodes: [],
-      edges: [],
-      meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" as const },
-    };
-
-    const result = await failover.repairGraph(
-      { graph: testGraph, violations: ["test"] },
-      defaultOpts
-    );
-
-    expect(result.graph).toBeDefined();
-  });
+  // "should work with repairGraph method" REMOVED — ROADMAP 2.763 retired the
+  // capability; the failover decorator no longer has a repairGraph limb.
 
   it("should work with clarifyBrief method", async () => {
     const adapters = [

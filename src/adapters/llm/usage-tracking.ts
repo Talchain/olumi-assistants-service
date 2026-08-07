@@ -26,8 +26,6 @@ import type {
   DraftGraphResult,
   SuggestOptionsArgs,
   SuggestOptionsResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
@@ -127,13 +125,6 @@ class UsageTrackingAdapter implements LLMAdapter {
     enforceBudget(opts.requestId);
     const result = await this.adapter.suggestOptions(args, opts);
     logAndRecord('suggest_options', this.name, this.model, result.usage, opts.requestId);
-    return result;
-  }
-
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    enforceBudget(opts.requestId);
-    const result = await this.adapter.repairGraph(args, opts);
-    logAndRecord('repair_graph', this.name, this.model, result.usage, opts.requestId);
     return result;
   }
 

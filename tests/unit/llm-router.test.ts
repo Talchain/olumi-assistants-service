@@ -123,25 +123,10 @@ describe("LLM Router", () => {
       expect(result.usage.input_tokens).toBe(0);
     });
 
-    it("returns input graph unchanged for repairGraph", async () => {
-      const adapter = getAdapter();
-      const inputGraph = {
-        version: "1" as const,
-        default_seed: 17,
-        nodes: [{ id: "test", kind: "goal" as const, label: "Test" }],
-        edges: [],
-        meta: { roots: ["test"], leaves: ["test"], suggested_positions: {}, source: "assistant" as const },
-      };
-
-      const result = await adapter.repairGraph(
-        { graph: inputGraph, violations: [] },
-        { requestId: "test", timeoutMs: 1000 }
-      );
-
-      expect(result.graph).toEqual(inputGraph);
-      expect(result.rationales).toHaveLength(1);
-      expect(result.usage.input_tokens).toBe(0);
-    });
+    // "returns input graph unchanged for repairGraph" REMOVED — ROADMAP 2.763
+    // retired the capability; the Fixtures adapter has no repairGraph limb.
+    // The RUNTIME guard that it stays gone lives in the compliance test below
+    // and in tests/unit/llm-repair-graph-retired.test.ts.
   });
 
   describe("Adapter interface compliance", () => {
@@ -155,7 +140,13 @@ describe("LLM Router", () => {
         expect(adapter).toHaveProperty("model");
         expect(typeof adapter.draftGraph).toBe("function");
         expect(typeof adapter.suggestOptions).toBe("function");
-        expect(typeof adapter.repairGraph).toBe("function");
+        // ROADMAP 2.763 — INVERTED. `repairGraph` was a required member of the
+        // adapter contract; the LLM graph-repair capability is retired, so its
+        // ABSENCE is now the contract. This REDs if any adapter re-grows it.
+        expect(
+          (adapter as unknown as Record<string, unknown>).repairGraph,
+          `${provider} adapter must NOT expose repairGraph (ROADMAP 2.763)`,
+        ).toBeUndefined();
       }
     });
 
@@ -216,35 +207,8 @@ describe("LLM Router", () => {
       expect(result.usage.output_tokens).toBe(0);
     });
 
-    it("Fixtures adapter reports zero tokens for repairGraph", async () => {
-      const adapter = getAdapterForProvider("fixtures");
-      const testGraph = {
-        version: "1" as const,
-        default_seed: 17,
-        nodes: [{ id: "test", kind: "goal" as const, label: "Test" }],
-        edges: [],
-        meta: { roots: ["test"], leaves: ["test"], suggested_positions: {}, source: "assistant" as const },
-      };
-
-      const result = await adapter.repairGraph(
-        { graph: testGraph, violations: [] },
-        { requestId: "test", timeoutMs: 1000 }
-      );
-
-      expect(result.usage.input_tokens).toBe(0);
-      expect(result.usage.output_tokens).toBe(0);
-    });
-
     it("Fixtures adapter has consistent UsageMetrics structure across all methods", async () => {
       const adapter = getAdapterForProvider("fixtures");
-      const testGraph = {
-        version: "1" as const,
-        default_seed: 17,
-        nodes: [{ id: "test", kind: "goal" as const, label: "Test" }],
-        edges: [],
-        meta: { roots: ["test"], leaves: ["test"], suggested_positions: {}, source: "assistant" as const },
-      };
-
       const draftResult = await adapter.draftGraph(
         { brief: "test", docs: [], seed: 17 },
         { requestId: "test", timeoutMs: 1000 }
@@ -255,13 +219,9 @@ describe("LLM Router", () => {
         { requestId: "test", timeoutMs: 1000 }
       );
 
-      const repairResult = await adapter.repairGraph(
-        { graph: testGraph, violations: [] },
-        { requestId: "test", timeoutMs: 1000 }
-      );
-
       // All methods return consistent UsageMetrics structure
-      for (const result of [draftResult, suggestResult, repairResult]) {
+      // (repairGraph removed — ROADMAP 2.763)
+      for (const result of [draftResult, suggestResult]) {
         expect(result.usage).toHaveProperty("input_tokens");
         expect(result.usage).toHaveProperty("output_tokens");
         expect(typeof result.usage.input_tokens).toBe("number");

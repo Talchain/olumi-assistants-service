@@ -354,8 +354,11 @@ export const TelemetryEvents = {
   // JSON extraction events (model output normalization)
   JsonExtractionRequired: "llm.json_extraction.required",
 
-  // Repair prompt truncation event (large graph handling)
-  RepairPromptTruncated: "llm.repair_prompt.truncated",
+  // NOTE: `RepairPromptTruncated` was REMOVED by ROADMAP 2.763 with the LLM
+  // graph-repair capability — its only two emitters were the Anthropic and
+  // OpenAI repair-prompt builders. It joins the 2.731 quintet (RepairAttempted,
+  // RepairStart, RepairSuccess, RepairPartial, RepairFallback): an event key
+  // with no live emitter is a broken alarm. Guarded in telemetry-events.test.ts.
 
   // Goal generation tracking (prompt tuning)
   GoalGeneration: "cee.goal_generation",

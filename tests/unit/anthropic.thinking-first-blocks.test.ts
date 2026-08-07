@@ -288,36 +288,14 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
   });
 
   // -------------------------------------------------------------------------
-  // repairGraphWithAnthropic
+  // repairGraphWithAnthropic — REMOVED (ROADMAP 2.763)
+  //
+  // The two cases that lived here exercised `repairGraphWithAnthropic`'s
+  // thinking-block handling. That function was deleted with the LLM
+  // graph-repair capability; there is no longer a repair entry point whose
+  // response parsing could regress. The remaining cases in this file cover
+  // the same [thinking, text] contract on the entry points that survive.
   // -------------------------------------------------------------------------
-
-  it("repairGraphWithAnthropic parses a [thinking, text] response", async () => {
-    mockCreate.mockResolvedValue(
-      makeResponse([THINKING_BLOCK, { type: "text", text: VALID_GRAPH_JSON }]),
-    );
-    const { repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-
-    const result = await repairGraphWithAnthropic({
-      graph: MINIMAL_GRAPH,
-      violations: ["isolated node opt_1"],
-      model: "claude-sonnet-4-6",
-    });
-
-    expect(result.graph.nodes.map((n) => n.id)).toContain("goal_1");
-  });
-
-  it("repairGraphWithAnthropic still rejects a response with no text block", async () => {
-    mockCreate.mockResolvedValue(makeResponse([THINKING_BLOCK]));
-    const { repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-
-    await expect(
-      repairGraphWithAnthropic({
-        graph: MINIMAL_GRAPH,
-        violations: ["isolated node opt_1"],
-        model: "claude-sonnet-4-6",
-      }),
-    ).rejects.toThrow("unexpected_response_type");
-  });
 
   // -------------------------------------------------------------------------
   // clarifyBriefWithAnthropic

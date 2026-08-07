@@ -24,7 +24,6 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
       cache_read_input_tokens: 0,
     },
   }),
-  repairGraphWithAnthropic: vi.fn(),
 }));
 
 vi.mock("../../src/services/validateClient.js", () => ({

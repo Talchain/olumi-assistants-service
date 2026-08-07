@@ -71,7 +71,6 @@ function createMockAdapter(): LLMAdapter {
     model: 'gpt-4o',
     draftGraph: vi.fn().mockResolvedValue({ graph: {}, usage: makeUsage(200, 100) }),
     suggestOptions: vi.fn().mockResolvedValue({ options: [], usage: makeUsage(80, 40) }),
-    repairGraph: vi.fn().mockResolvedValue({ graph: {}, usage: makeUsage(150, 75) }),
     clarifyBrief: vi.fn().mockResolvedValue({ questions: [], usage: makeUsage(60, 30) }),
     critiqueGraph: vi.fn().mockResolvedValue({ issues: [], usage: makeUsage(90, 45) }),
     explainDiff: vi.fn().mockResolvedValue({ rationales: [], usage: makeUsage(70, 35) }),
@@ -184,14 +183,8 @@ describe('withUsageTracking', () => {
     );
   });
 
-  it('logs usage after repairGraph', async () => {
-    await tracked.repairGraph({ graph: {} as any, violations: [] }, baseOpts);
-
-    expect(mockLog.info).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'llm_usage' }),
-      'LLM token usage',
-    );
-  });
+  // 'logs usage after repairGraph' REMOVED — ROADMAP 2.763 retired the
+  // capability; the usage-tracking decorator no longer wraps a repair call.
 
   it('logs usage after clarifyBrief', async () => {
     await tracked.clarifyBrief({ brief: 'test', round: 1 }, baseOpts);

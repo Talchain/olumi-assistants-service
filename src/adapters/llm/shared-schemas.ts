@@ -150,38 +150,14 @@ export const LLMDraftResponse = z.object({
 export type LLMDraftResponseT = z.infer<typeof LLMDraftResponse>;
 
 // ============================================================================
-// Repair Response Schema
+// Repair Response Schema — REMOVED (ROADMAP 2.763)
 // ============================================================================
-
-/**
- * Rationale shape produced by the repair prompt (repair_graph_v8+).
- *
- * The repair prompt instructs the LLM to emit one rationale per violation
- * with fields {violation_code, node_or_edge, action, elements_changed}.
- * This is a different shape from the draft rationale ({target, why}).
- */
-const LLMRepairRationale = z.object({
-  violation_code: z.string(),
-  node_or_edge: z.string(),
-  action: z.string(),
-  elements_changed: z.number(),
-}).passthrough();
-
-/**
- * Schema for repair graph responses from LLM.
- *
- * Uses the same node/edge validation as draft responses but with the
- * repair-specific rationale shape. This decouples the repair and draft
- * validation contracts so rationale format mismatches don't break repairs.
- */
-// W2E-2 finiteness gate — same rationale as LLMDraftResponse above.
-export const LLMRepairResponse = z.object({
-  nodes: z.array(LLMNode),
-  edges: z.array(LLMEdge),
-  rationales: z.array(LLMRepairRationale).optional().default([]),
-}).passthrough().superRefine(refineFiniteNumbers);
-
-export type LLMRepairResponseT = z.infer<typeof LLMRepairResponse>;
+//
+// `LLMRepairResponse` / `LLMRepairRationale` parsed the output of the LLM
+// graph-repair call. That call was retired with `LLMAdapter.repairGraph`
+// (2.731 removed the draft-path caller, 2.740a substep 1b's, 2.763 the
+// capability itself), so the schema had zero production readers left.
+// The deterministic repair (`simpleRepair`) has no LLM response to parse.
 
 // ============================================================================
 // Options Response Schema

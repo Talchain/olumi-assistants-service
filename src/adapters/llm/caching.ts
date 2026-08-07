@@ -31,8 +31,6 @@ import type {
   SuggestOptionsResult,
   ExplainDiffArgs,
   ExplainDiffResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
@@ -262,10 +260,6 @@ export class CachingAdapter implements LLMAdapter {
     return this.withCache("suggest_options", args, opts, () =>
       this.adapter.suggestOptions(args, opts)
     );
-  }
-
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    return this.withCache("repair_graph", args, opts, () => this.adapter.repairGraph(args, opts));
   }
 
   async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {

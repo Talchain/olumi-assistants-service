@@ -232,38 +232,9 @@ export interface ExplainDiffResult {
   usage: UsageMetrics;
 }
 
-/**
- * Arguments for repairing a graph that failed validation.
- */
-export interface RepairGraphArgs {
-  graph: GraphT;
-  violations: string[];
-  brief?: string;
-  docs?: DocPreview[];
-  /** Pre-formatted currency context instruction to append to repair prompt. */
-  currencyInstruction?: string;
-}
-
-/**
- * Rationale entry from the repair prompt (repair_graph_v8+).
- * Different from draft rationales ({target, why}) — repair rationales
- * describe which violation was fixed and how.
- */
-export interface RepairRationale {
-  violation_code: string;
-  node_or_edge: string;
-  action: string;
-  elements_changed: number;
-}
-
-/**
- * Result from repairing a graph.
- */
-export interface RepairGraphResult {
-  graph: GraphT;
-  rationales?: RepairRationale[];
-  usage: UsageMetrics;
-}
+// `RepairGraphArgs` / `RepairRationale` / `RepairGraphResult` were REMOVED by
+// ROADMAP 2.763 together with `LLMAdapter.repairGraph`. They had no consumer
+// outside that method's signature.
 
 /**
  * A clarification question to refine the brief.
@@ -499,15 +470,14 @@ export interface LLMAdapter {
    */
   suggestOptions(args: SuggestOptionsArgs, opts: CallOpts): Promise<SuggestOptionsResult>;
 
-  /**
-   * Repair a graph that failed validation (cycles, missing nodes, etc.).
-   *
-   * @param args - Graph, violations, optional context (brief, docs)
-   * @param opts - Request ID, timeout, abort signal
-   * @returns Repaired graph with rationales and usage metrics
-   * @throws Error on timeout or API failure
-   */
-  repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult>;
+  // NOTE: `repairGraph` was REMOVED by ROADMAP 2.763. The LLM graph-repair
+  // capability had zero originating callers left after 2.731 (#846, draft
+  // path) and 2.740a (#851, substep 1b) — the only `.repairGraph(` sites in
+  // `src/` were four decorators delegating to each other. Its measured
+  // efficacy was 0 successes in 12 invocations over a full 7-day window.
+  // The DETERMINISTIC repair (`simpleRepair`, src/services/repair.ts) is the
+  // surviving, live half — it still runs in Stage 3 and substep 2.
+  // Do NOT re-add this method: see tests/unit/llm-repair-graph-retired.test.ts.
 
   /**
    * Optional: Stream draft graph generation for SSE endpoints.

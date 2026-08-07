@@ -24,8 +24,6 @@ import type {
   DraftGraphResult,
   SuggestOptionsArgs,
   SuggestOptionsResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
@@ -369,19 +367,6 @@ class FixturesAdapter implements LLMAdapter {
       },
     };
   }
-
-  async repairGraph(args: RepairGraphArgs, _opts: CallOpts): Promise<RepairGraphResult> {
-    // For fixtures, just return the input graph unchanged
-    return {
-      graph: args.graph,
-      rationales: [{ violation_code: "FIXTURE", node_or_edge: "graph", action: "No actual changes", elements_changed: 0 }],
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-      },
-    };
-  }
-
   async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
     return {
       questions: [
