@@ -1,5 +1,34 @@
 # Server-authoritative freshness — scoping v0 (backlog item A)
 
+> ## ⏸ FROZEN AT 2026-07-05 — status appended 2026-08-08 at merge (R1 PR-disposition pass)
+>
+> **This is a scoping document, not a plan of record, and it is 34 days old. Its point 5 stands:
+> nothing here is authorised to be built.** It is merged so that the phased migration plan, the
+> two-repo inventory and the test plan stop living only in the body of an unmerged draft PR —
+> which is exactly the fragility that forced the decision half to be rescued separately.
+>
+> **Where the DECISION lives.** Paul's binding 2026-07-05 decision was extracted to
+> `Docs/v5/decision-2026-07-05-server-authoritative-freshness.md` on 2026-07-19, because it
+> existed nowhere but this PR. That file is the authority for *what was decided*; this file is
+> the authority for *how it was scoped*. They do not disagree.
+>
+> **Re-derived 2026-08-08 — the problem this document scopes is STILL LIVE and has GROWN:**
+> - CEE still emits the authoritative freshness fields (`freshness` / `freshness_reason` /
+>   `graph_hash_at_run` / `current_graph_hash`) —
+>   `src/orchestrator-v5/compose/analysis-ready-emit.ts:17,94`.
+> - `computeAnalysisAffectingGraphHash` is still the CEE-side authority —
+>   `src/orchestrator-v5/turn-executor.ts:272,2037`.
+> - The UI still consumes the wire verdict, via `deriveAnalysisFreshnessUpdate` in
+>   `src/canvas/store/analysisFreshness.ts` (**renamed** from the `deriveAnalysisFreshnessState`
+>   this document names).
+> - **The divergence is worse, not better:** this document enumerated *five* UI-local surfaces
+>   keyed to `generateGraphHash`. At UI `staging` `8be2fae6` there are **17 non-test
+>   `generateGraphHash(` call sites**.
+>
+> **⚠ Every other `file:line` citation below is AS AT 2026-07-05 and was NOT re-verified.**
+> Re-derive before relying on any of them.
+
+
 **Date:** 2026-07-05 · **Status:** scoping + recorded product decision — no implementation
 in this lane; each phase below requires separate authorisation · **Origin:** tracked backlog
 item A from the Layer-1 contract-drift analysis (`contract-drift-and-revendor-plan-v0.md`
