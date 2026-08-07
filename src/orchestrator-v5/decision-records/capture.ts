@@ -47,9 +47,15 @@
  *     Absent/unusable values stay ABSENT — never 0. This lane was blocked
  *     under 0.15.0 (.strict() hard-rejected the fields at every layer —
  *     HANDOVER.md ~02:45 wave entry, 2026-07-11) and unblocked by the
- *     0.16.0 vendor bump in this same PR. ⚠ The merged-but-unexecuted
- *     migration still whitelists the 0.15.0 prediction key-set — see the
- *     SEAM NOTE on CreateDecisionRecordWrite (store-adapter.ts).
+ *     0.16.0 vendor bump in this same PR. ⚠ CORRECTED (calibration R0, R7):
+ *     this used to warn that "the merged-but-unexecuted migration still
+ *     whitelists the 0.15.0 prediction key-set". BOTH HALVES ARE FALSE at
+ *     the current tip — the migration header records "✅ EXECUTED ON
+ *     STAGING" and the 2026-07-12 amendment widened the p_prediction
+ *     whitelist to admit confidence_source / probability_of_goal /
+ *     probability_of_joint_goal (…decision_records.sql:5-14,26-34,446-467).
+ *     A stale warning teaches the next lane to route around a hazard that
+ *     is gone (CLAUDE.md trap 7b).
  *
  * Idempotency: record_id is a deterministic UUID over
  * (scenario_id, decision.graph_hash, computed_at), so a retried turn
@@ -59,8 +65,6 @@
  * parity with the MM hook's caller-supplied idempotency key).
  */
 
-import { createHash } from 'node:crypto';
-
 import { DecisionRecordAnalysisSummarySchema } from '@talchain/schemas/boundary';
 import type { DecisionRecordAnalysisSummary } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
@@ -68,6 +72,10 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
 import type { MayNameLeadingOptionVerdict } from '../context/claim-safety-read.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  AUTO_CAPTURE_RECORD_ID_NAMESPACE,
+  deterministicRecordUuid,
+} from './record-id.js';
 import { getDecisionRecordStore } from './index.js';
 import { DecisionRecordSignInRequiredError } from './store-adapter.js';
 import type { CreateDecisionRecordWrite } from './store-adapter.js';
@@ -97,20 +105,22 @@ const REVIEW_HORIZON_MS = DECISION_RECORD_REVIEW_HORIZON_DAYS * 24 * 60 * 60 * 1
  * and variant bits stamped (name-based-style — deterministic by design, so a
  * retried turn carries the SAME p_record_id and the RPC's replay branch
  * dedupes instead of duplicating).
+ *
+ * ⚠ THIS ID SPACE IS SHARED WITH NOTHING ELSE. A USER-COMMITTED record must
+ * NEVER derive an id from this namespace — see `record-id.ts` and
+ * `user-commit.ts`: the RPC's replay branch would return this ambient record
+ * and silently discard the user's stated confidence.
  */
 export function deriveDecisionRecordId(
   scenarioId: string,
   graphHash: string,
   computedAt: string,
 ): string {
-  const digest = createHash('sha256')
-    .update(`cee:decision_record:v1\n${scenarioId}\n${graphHash}\n${computedAt}`)
-    .digest();
-  const bytes = digest.subarray(0, 16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x50; // version nibble → 5 (name-based)
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80; // RFC 4122 variant
-  const hex = Buffer.from(bytes).toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return deterministicRecordUuid(AUTO_CAPTURE_RECORD_ID_NAMESPACE, [
+    scenarioId,
+    graphHash,
+    computedAt,
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -361,8 +371,10 @@ export async function recordDecisionRecordForCommit(
   // persisted `prediction` is a THREE-hop contract change, and CEE owns only
   // the middle hop:
   //   1. `@talchain/schemas` `DecisionRecordPredictionSchema` is `.strict()`
-  //      (vendor/talchain-schemas-0.25.0 → dist/boundary/decision-record.js),
-  //      and `capture.test.ts` pins that it "stays armed";
+  //      (the vendored pin in package.json → dist/boundary/decision-record.js;
+  //      DERIVE the version at your tip — this comment used to name 0.25.0
+  //      while the pin had moved to 0.37.0), and `capture.test.ts` pins that
+  //      it "stays armed";
   //   2. `create_decision_record`'s `p_prediction` key whitelist — LIVE on
   //      staging since 2026-07-11T18:46Z, not merely merged — raises 22023 on
   //      any off-whitelist key, refusing the WHOLE record rather than
