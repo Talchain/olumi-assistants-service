@@ -48,17 +48,20 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     //    from observed root nodes (ISL evaluates non-intervened roots as value + intercept,
     //    so the duplicate doubles the baseline). Never assigns intercepts.
     // Mutations are logged in trace.pipeline.repair_summary.graph_data_integrity.
-    // 4. ROADMAP 2.714 (INV-HONOUR): a value the user stated in THIS turn's
-    //    brief is never overridden by the drafter. `ctx.input.brief` is the
-    //    same brief the transform above read; on a clarify resume it is the
-    //    ACCUMULATED working brief, which carries the user's words verbatim.
+    //
+    // ⚠ NONE OF THESE READS THE BRIEF, and none may (ROADMAP 2.714 reverted,
+    // 8 Aug 2026). #853 added a fourth check here that read a stated number out
+    // of `ctx.input.brief` and stamped it `source: "user_override"` — the
+    // system's reading of prose, attributed to the user. It was measured
+    // writing values 10^6x wrong, values the user had negated or retracted, and
+    // values bound to the wrong node, all silently. The brief is still passed
+    // so the guard suite can prove it is inert; see the parameter doc on
+    // `runGraphDataIntegrityChecks`.
     const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId, ctx.input.brief);
     if (
       integrityRepairs.scale_consistency_repairs.length > 0 ||
       integrityRepairs.edge_field_repairs.length > 0 ||
-      integrityRepairs.intercept_population_repairs.length > 0 ||
-      integrityRepairs.stated_value_honour_repairs.length > 0 ||
-      integrityRepairs.stated_value_honour_skips.length > 0
+      integrityRepairs.intercept_population_repairs.length > 0
     ) {
       // Attach to pipeline trace so debug bundles capture the corrections.
       const pipelineTrace = (v3Body as any)?.trace?.pipeline;

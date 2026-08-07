@@ -401,15 +401,15 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // --- Comment-only mentions. Each of these imports the canonical alphabet
     // --- or spells no magnitude list at all; the hits are prose describing the
     // --- historical defect, which is exactly the prose we want people writing.
-    "cee/transforms/stated-value-honour.ts":
-      "ROADMAP 2.714 (INV-HONOUR). Spells NO alphabet: it imports " +
-      "MAGNITUDE_ALTERNATION and derives one guard from it. The hits are that " +
-      "import plus prose naming `grand`/`t`/`trillion` — the canonical keys " +
-      "`numeric-parser`'s own MULTIPLIERS lacks, which is precisely why this " +
-      "module refuses any binding carrying a magnitude word the parser did not " +
-      "consume. Without that refusal the honour rule would read '£2 grand' as " +
-      "2 GBP and stamp it as the USER'S OWN value. A key added to the canonical " +
-      "alphabet is covered here on arrival, with nothing to keep in sync.",
+    // `cee/transforms/stated-value-honour.ts` sat here until 8 Aug 2026. The
+    // module (ROADMAP 2.714, INV-HONOUR) was REMOVED with its capability after
+    // post-merge review measured it writing brief-derived numbers — some 10^6x
+    // wrong, some the user had explicitly negated — stamped as the user's own
+    // values. Worth recording where this guard is concerned: its magnitude
+    // derivation was correct and its `£2 grand` refusal genuinely worked. The
+    // rule still fabricated, because a decimal point truncated the binding
+    // window BEFORE the magnitude guard could inspect it. A guard can be right
+    // and still never see the input it was written for.
     "cee/compound-goal/extractor.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/factor-extraction/index.ts": "comments only; derives its patterns from the canonical alphabet",
     "context/resolver.ts": "comments only; derives its patterns from the canonical alphabet",
