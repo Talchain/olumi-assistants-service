@@ -201,6 +201,9 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
    * An older analysis that IS projectable (`computed`) and reads WITHHELD
    * because it is UNSTAMPED — the pre-#710 population, for which the A1 ruling
    * records there is no data migration, so these facts are still in the store.
+   *
+   * This is THE DISPLAYED ANALYSIS: `selectRunAnalysisFact` picks the NEWEST
+   * successful fact, and this one is newer than {@link olderStillWithheld}.
    */
   function priorProjectableWithheld(): HandlerFact {
     return runFact({
@@ -210,10 +213,32 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
     });
   }
 
+  /**
+   * A THIRD fact, older still, also projectable and also withheld — and it is
+   * NOT the displayed analysis.
+   *
+   * It exists to make the binding provable rather than plausible (trap 19). A
+   * test with only two facts can be satisfied by "some withheld fact exists
+   * somewhere in the array"; with this one present, the DISCRIMINATING MUTANT
+   * PAIR becomes available:
+   *   - stamp {@link priorProjectableWithheld} as permitting  => MUST go RED
+   *   - stamp THIS fact as permitting                          => MUST stay GREEN
+   * Neither mutant alone shows binding. The pair proves the assertion is bound
+   * to the DISPLAYED analysis specifically, not to the array's contents.
+   */
+  function olderStillWithheld(): HandlerFact {
+    return runFact({
+      analysisStatus: 'computed',
+      computedAt: '2026-07-01T00:00:00.000Z',
+      constraintVerdict: null,
+    });
+  }
+
   it('withholds the leader in the coaching sentence when the DISPLAYED analysis withholds it', () => {
     const current = currentPartialPermitting();
     const prior = priorProjectableWithheld();
-    const priorFacts = [prior];
+    const older = olderStillWithheld();
+    const priorFacts = [prior, older];
     const handlerFacts = [current];
     const unified = [...handlerFacts, ...priorFacts];
 
@@ -225,7 +250,11 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
     const claimBearing = selectClaimBearingRunAnalysisFact(unified);
     const projected = selectRunAnalysisFact(unified);
     expect(claimBearing?.fact).toBe(current);
+    // THE DISPLAYED ANALYSIS IS `prior`, NOT `older` — bound by identity, so a
+    // change to the selector's ordering fails here rather than silently
+    // re-pointing every assertion below at a different fact.
     expect(projected?.fact).toBe(prior);
+    expect(projected?.fact).not.toBe(older);
     expect(claimBearing?.fact).not.toBe(projected?.fact);
 
     // 2. Authority A's answer (this run's own verdict) PERMITS.
