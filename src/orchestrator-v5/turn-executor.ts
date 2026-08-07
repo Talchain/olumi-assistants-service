@@ -8790,7 +8790,7 @@ export async function runTurnExecutor(
         // ROADMAP 2.804 — the SCOPE only. The helper derives the leader-claim
         // permission itself, from `handlerFacts ∪ priorFacts` above, because
         // STEP 5 runs BEFORE the post-handler re-read of
-        // `mayNameLeadingOptionForRun` (a few hundred lines below). Passing
+        // `mayNameLeadingOptionForRun` (further down this function). Passing
         // that variable here would hand the coaching slot the TURN-ENTRY value
         // — the state before this turn's analysis existed — and suppress honest
         // coaching on a first analysis whose scenario carries an older withheld
