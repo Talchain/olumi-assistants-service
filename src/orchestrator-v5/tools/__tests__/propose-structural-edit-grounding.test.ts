@@ -390,8 +390,22 @@ describe('EXPLICIT CREATES are the only ungrounded ids allowed', () => {
     const result = validateProposedStructuralEdit(
       {
         operations: [
-          { op: 'add_node', path: 'f-referrals', value: { id: 'f-referrals', kind: 'factor', label: 'Referral rate' } },
-          { op: 'add_edge', path: 'f-referrals::g-profit', value: { from: 'f-referrals', to: 'g-profit' } },
+          // 2.713: identity in `path` only (the deployed advert declares no
+          // `value.id` property and closes `value`), and a CAUSAL link carries
+          // the belief the apply contract requires — the composer refuses a
+          // link the model did not describe rather than inventing one.
+          { op: 'add_node', path: 'f-referrals', value: { kind: 'factor', label: 'Referral rate' } },
+          {
+            op: 'add_edge',
+            path: 'f-referrals::g-profit',
+            value: {
+              from: 'f-referrals',
+              to: 'g-profit',
+              strength: { mean: 0.4, std: 0.15 },
+              exists_probability: 0.8,
+              effect_direction: 'positive',
+            },
+          },
         ],
       },
       grounding(),

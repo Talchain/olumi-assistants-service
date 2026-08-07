@@ -72,6 +72,40 @@ function grounding() {
 /** The four EXISTING nodes each new driver is wired to. All are in the fixture. */
 const WIRED_TO = ['g-profit', 'f-spend', 'f-reach', 'd-choice'] as const;
 
+/**
+ * ⚠ ROADMAP 2.713 — THE RECONSTRUCTED `value`s IN THIS FILE WERE WRONG IN BOTH
+ * DIRECTIONS, AND THAT IS WHY THE APPLY SEAM STAYED BROKEN FOR TWO DAYS.
+ *
+ * The op COUNTS and TOPOLOGY below are witnessed (the server's own
+ * "3 node operations and 12 edge operations"). The per-op `value` CONTENT never
+ * was — the raw `tool_use` payload is deliberately unlogged — so it was
+ * reconstructed, and the reconstruction encoded its author's model of the wire
+ * rather than the wire (CLAUDE.md trap 16: a fixture you wrote yourself is not
+ * evidence about the wire). It was wrong twice over:
+ *
+ *   · every `add_node` carried `value.id`, which the deployed advert makes
+ *     STRUCTURALLY IMPOSSIBLE — `value` declares no `id` property and is closed
+ *     to additional ones, and the prose forbids restating identity. The fixture
+ *     therefore supplied by hand the exact field whose absence failed every
+ *     real apply, which is precisely why no test here could see the defect;
+ *   · every `add_edge` carried only `{from,to}`, which the apply contract has
+ *     rejected since February — it requires `strength.{mean,std}`,
+ *     `exists_probability` and `effect_direction` on a create.
+ *
+ * `value.id` now arrives by SERVER-SIDE SYNTHESIS from the authoritative
+ * `path`, so the fixtures below no longer state it: stating it would re-hide
+ * the defect. The causal belief is stated, because the composer refuses a
+ * causal link the model did not fully describe rather than inventing one.
+ * Neither change touches an envelope count — `add_edge` and `add_node` each
+ * project exactly ONE envelope regardless of `value` — so every partitioning
+ * assertion in this file measures exactly what it measured before.
+ */
+const CAUSAL_BELIEF = {
+  strength: { mean: 0.4, std: 0.15 },
+  exists_probability: 0.8,
+  effect_direction: 'positive',
+} as const;
+
 /** The three new drivers, named so every assertion can bind to one by id. */
 const NEW_DRIVERS = [
   { id: 'f-driver-a', label: 'Plan A cost driver' },
@@ -90,13 +124,13 @@ function probeCShape(interleaved = true): { operations: unknown[] } {
   const creates = NEW_DRIVERS.map((d) => ({
     op: 'add_node',
     path: d.id,
-    value: { id: d.id, kind: 'factor', label: d.label },
+    value: { kind: 'factor', label: d.label },
   }));
   const links = NEW_DRIVERS.flatMap((d) =>
     WIRED_TO.map((target) => ({
       op: 'add_edge',
       path: `${d.id}::${target}`,
-      value: { from: d.id, to: target },
+      value: { from: d.id, to: target, ...CAUSAL_BELIEF },
     })),
   );
   if (!interleaved) return { operations: [...creates, ...links] };
@@ -114,12 +148,12 @@ const PROBE_D_SHAPE = {
     ...NEW_DRIVERS.map((d) => ({
       op: 'add_node',
       path: d.id,
-      value: { id: d.id, kind: 'factor', label: d.label },
+      value: { kind: 'factor', label: d.label },
     })),
     ...NEW_DRIVERS.map((d) => ({
       op: 'add_edge',
       path: `${d.id}::g-profit`,
-      value: { from: d.id, to: 'g-profit' },
+      value: { from: d.id, to: 'g-profit', ...CAUSAL_BELIEF },
     })),
   ],
 };
@@ -303,13 +337,13 @@ const MERGED_CLUSTERS = {
     ...NEW_DRIVERS.map((d) => ({
       op: 'add_node',
       path: d.id,
-      value: { id: d.id, kind: 'factor', label: d.label },
+      value: { kind: 'factor', label: d.label },
     })),
     ...NEW_DRIVERS.flatMap((d) =>
       ['g-profit', 'f-spend'].map((t) => ({
         op: 'add_edge',
         path: `${d.id}::${t}`,
-        value: { from: d.id, to: t },
+        value: { from: d.id, to: t, ...CAUSAL_BELIEF },
       })),
     ),
   ],
@@ -357,17 +391,17 @@ describe('the dependency flag MEANS something — a discriminating pair', () => 
       {
         op: 'add_node',
         path: 'f-driver-a',
-        value: { id: 'f-driver-a', kind: 'factor', label: 'Plan A cost driver' },
+        value: { kind: 'factor', label: 'Plan A cost driver' },
       },
       ...['g-profit', 'f-spend', 'f-reach', 'd-choice', 'o-a', 'o-b'].map((t) => ({
         op: 'add_edge',
         path: `f-driver-a::${t}`,
-        value: { from: 'f-driver-a', to: t },
+        value: { from: 'f-driver-a', to: t, ...CAUSAL_BELIEF },
       })),
       ...['g-profit', 'f-spend', 'f-reach'].map((t) => ({
         op: 'add_edge',
         path: `${t}::f-driver-a`,
-        value: { from: t, to: 'f-driver-a' },
+        value: { from: t, to: 'f-driver-a', ...CAUSAL_BELIEF },
       })),
     ],
   };
@@ -482,7 +516,7 @@ describe('every cap in the sizer is REACHABLE, including the ones the others hid
     const operations = Array.from({ length: MAX_NODE_OPS + 1 }, (_, i) => ({
       op: 'add_node',
       path: `f-new-${i}`,
-      value: { id: `f-new-${i}`, kind: 'factor', label: `New factor ${i}` },
+      value: { kind: 'factor', label: `New factor ${i}` },
     }));
     const whole = measurePart(operations);
     expect(whole.nodeOps).toBeGreaterThan(MAX_NODE_OPS);
@@ -602,7 +636,7 @@ describe('⭐⭐ EVERY PART THE SPLITTER EMITS IS LEGAL AT THE ENFORCER (2.624)'
     const whole = Array.from({ length: MAX_NODE_OPS + 1 }, (_, i) => ({
       op: 'add_node',
       path: `f-extra-${i}`,
-      value: { id: `f-extra-${i}`, kind: 'factor', label: `Extra driver ${i}` },
+      value: { kind: 'factor', label: `Extra driver ${i}` },
     }));
     expect(checkPatchBudget(asPatch(whole)).allowed).toBe(false);
     const parts = partsOf(whole);
@@ -633,7 +667,7 @@ describe('⭐⭐ EVERY PART THE SPLITTER EMITS IS LEGAL AT THE ENFORCER (2.624)'
     const overByOne = Array.from({ length: MAX_NODE_OPS + 1 }, (_, i) => ({
       op: 'add_node',
       path: `f-control-${i}`,
-      value: { id: `f-control-${i}`, kind: 'factor', label: `Control ${i}` },
+      value: { kind: 'factor', label: `Control ${i}` },
     }));
     const budget = checkPatchBudget(asPatch(overByOne));
     expect(budget.allowed).toBe(false);

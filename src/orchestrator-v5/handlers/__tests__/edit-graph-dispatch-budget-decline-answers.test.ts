@@ -99,6 +99,24 @@ import {
 import type { ConversationContext } from '../../../orchestrator/types.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
+/**
+ * ⚠ ROADMAP 2.713 — a CAUSAL link create must carry the belief the apply
+ * contract has required since February (`strength.{mean,std}`,
+ * `exists_probability`, `effect_direction`). The reconstructed fixtures here
+ * carried only `{from,to}`, and separately supplied a `value.id` the deployed
+ * advert makes structurally impossible — so they were unfaithful to the wire in
+ * both directions and could not see the seam defect. Identity now arrives by
+ * server-side synthesis from the authoritative `path`; the belief is stated,
+ * because the composer refuses a link the model did not describe rather than
+ * inventing one. Neither change alters an envelope count.
+ */
+const CAUSAL_BELIEF = {
+  strength: { mean: 0.4, std: 0.15 },
+  exists_probability: 0.8,
+  effect_direction: 'positive',
+} as const;
+
+
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const TURN_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const STUB_REQUEST = {} as FastifyRequest;
@@ -137,17 +155,17 @@ const NEW_OPTIONS = [
  * which is precisely what the witnessed sentence failed to explain.
  */
 const WALK_OPERATIONS = NEW_OPTIONS.flatMap((o) => [
-  { op: 'add_node', path: o.id, value: { id: o.id, kind: 'option', label: o.label } },
-  { op: 'add_edge', path: `${o.id}::goal_mrr`, value: { from: o.id, to: 'goal_mrr' } },
+  { op: 'add_node', path: o.id, value: { kind: 'option', label: o.label } },
+  { op: 'add_edge', path: `${o.id}::goal_mrr`, value: { from: o.id, to: 'goal_mrr', ...CAUSAL_BELIEF } },
   {
     op: 'add_node',
     path: `fac_risk_${o.id}`,
-    value: { id: `fac_risk_${o.id}`, kind: 'factor', label: o.risk },
+    value: { kind: 'factor', label: o.risk },
   },
   {
     op: 'add_edge',
     path: `fac_risk_${o.id}::${o.id}`,
-    value: { from: `fac_risk_${o.id}`, to: o.id },
+    value: { from: `fac_risk_${o.id}`, to: o.id, ...CAUSAL_BELIEF },
   },
 ]);
 
@@ -519,7 +537,7 @@ const DECLINE_CASES: readonly DeclineCase[] = [
           Array.from({ length: 16 }, (_, i) => ({
             op: 'add_node',
             path: `fac_x${i}`,
-            value: { id: `fac_x${i}`, kind: 'factor', label: `X${i}` },
+            value: { kind: 'factor', label: `X${i}` },
           })),
         ) as never,
       );

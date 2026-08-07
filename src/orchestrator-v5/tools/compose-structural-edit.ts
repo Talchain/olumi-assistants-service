@@ -337,12 +337,38 @@ export async function composeStructuralEdit(
     maxPatchOperations: input.maxPatchOperations,
   });
 
+  // ROADMAP 2.713 — WHAT THE CAP COUNTS IS WHAT THE CAP DISCLOSES.
+  //
+  // The counts below are read off `validation`, which on a REJECTION carries
+  // no operations BY DESIGN (reject-don't-repair returns no partial batch), so
+  // every count was hardcoded 0 on exactly the branch a diagnosis needs them.
+  // The model's raw emission has been in scope all along and was never
+  // counted. With `raw_operations_count` present, the two guards that share
+  // `BATCH_CAP_EXCEEDED` become distinguishable from telemetry alone — a
+  // RUNAWAY emission (count over the cap) versus a legitimate batch no split
+  // can make cap-legal (count at or under it) — which is the exact ambiguity
+  // that blocked a live diagnosis. Structural only: a COUNT and a CODE, never
+  // the reason prose, which quotes ids.
+  const rawOperationsCount = Array.isArray(
+    (toolUse.input as { operations?: unknown } | null)?.operations,
+  )
+    ? ((toolUse.input as { operations: unknown[] }).operations.length)
+    : null;
+
   emit(TelemetryEvents.V5StructuralEditToolComposed, {
     request_id: input.requestId,
     scenario_id: input.scenarioId,
     outcome: validation.ok ? 'accepted' : 'rejected',
     // Structural code only — never the reason prose, which quotes ids.
     rejection_code: validation.ok ? null : validation.code,
+    // Which of the two guards behind BATCH_CAP_EXCEEDED fired; null on every
+    // other rejection code and on acceptance.
+    rejection_detail: validation.ok ? null : (validation.detail ?? null),
+    // The model's RAW emission length, on BOTH branches — the one number that
+    // survives a rejection, because it is measured from the tool payload and
+    // not from the validation outcome. `null` only if the payload carried no
+    // `operations` array at all (itself a SCHEMA_INVALID rejection).
+    raw_operations_count: rawOperationsCount,
     operations_count: validation.ok ? validation.operations.length : 0,
     envelope_count: validation.ok ? validation.envelopeCount : 0,
     // A3 — how many proposals this request became. 1 on the ordinary path;
