@@ -1,5 +1,32 @@
 # answer_shape production instruction — where the guarantee actually lives
 
+> ## Status re-derived 2026-08-08 at merge (R1 PR-disposition pass) — the served half CLOSED, the fallback half did NOT
+>
+> This note was written on 2026-07-21 with v118 pending. Both halves re-derived today at the
+> bytes, because a governance note about which artefact guards what is worthless if it describes
+> an artefact that has moved:
+>
+> - ✅ **The SERVED prompt now carries the instruction, and it is v120, not v118.**
+>   `Prompts/canonical/routing.txt` (the hash-verified export of the served PMS prompt —
+>   `manifest.json`: `served_version: 120`, `pms_staging_version: 120`,
+>   `cee_content_hash_16: adcc5128d4e6e6bc`, `served_hash_verified: true`) carries the
+>   converse/coach `answer_shape` instruction at **line 101**, in substantively the same words
+>   this PR adds to the fallback. **The `666d56dd4845e2c7` v118 hash named below is therefore
+>   stale — do not use it as a SERVE-VERIFY expectation.**
+> - ❌ **The FALLBACK gap this PR closes is STILL OPEN at `staging`.** At CEE `staging`
+>   `b5204544`, `Prompts/v40.txt` contains **zero** occurrences of `answer_shape` — and
+>   `src/prompts/defaults.ts:2350-2352` still reads that exact file from disk and registers it as
+>   the `routing` default (`routing: 'v40'` at `:2388`). So a PMS outage today would silently
+>   regress F1 to the #611 defect: the model is never told to emit `answer_shape`, and it arrives
+>   only via a `REPAIR_ONCE` round-trip, or not at all.
+>
+> That split is the whole reason this PR is merged rather than closed as superseded. It was
+> queued last in a merge train (`#614 → F1 fallback → belt-delete → #613`) that ended before
+> reaching it, and the gap has sat open for 18 days behind a served prompt that looks healthy.
+> **The DO-NOT-MERGE label was a state, not a verdict** — it existed because the test was
+> deliberately RED until v118 shipped. v118 shipped, then v119 and v120.
+
+
 Status: governance note (added with #613, the #611 de-fixture). Read this
 before trusting any test that mentions the `answer_shape` prompt instruction.
 
