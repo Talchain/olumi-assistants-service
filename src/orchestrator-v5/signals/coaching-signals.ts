@@ -206,8 +206,11 @@ export function detectCoachingSignal(
     // uses to keep no-ops out of the recent-changes projection.
     if (isNoopEditOutcome(input.outcome)) return null;
 
-    const priorSuccessfulAnalysis = findMostRecentSuccessfulAnalysisFact(input.priorFacts);
-    if (priorSuccessfulAnalysis) {
+    // The question THIS branch asks: "was an analysis on screen that this edit
+    // could have made stale?" — existence, not recency and not success. See the
+    // helper's own note for why it is kept separate from the run_analysis
+    // branch's predicate even though the two agree today.
+    if (hasPriorRunAnalysisFactToStale(input.priorFacts)) {
       // STALE wins over HIGH_SENSITIVITY per the authoritative priority order.
       return {
         signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
@@ -247,7 +250,10 @@ export function detectCoachingSignal(
     // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
     const leaderWithheld = !input.mayNameLeadingOption;
 
-    if (!hasPriorSuccessfulRunAnalysis(input.priorFacts)) {
+    // The question THIS branch asks: "has an analysis ever completed before,
+    // i.e. is this a re-run rather than the first?" — a different question from
+    // the edit branch's, with the same answer today.
+    if (!hasAnyPriorRunAnalysisFact(input.priorFacts)) {
       // SUPPRESSED, not reworded. The whole of this signal's value is the
       // "explore the leading option" nudge, and on a withheld turn there is no
       // leading option to explore. A replacement sentence would either repeat
@@ -342,21 +348,73 @@ function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
   return compareRuns(prior, current, input.interventionControlledFactorIds);
 }
 
-function hasPriorSuccessfulRunAnalysis(facts: readonly HandlerFact[]): boolean {
-  // Presence of a run_analysis fact in priorFacts means the handler returned
-  // success on a prior turn (failed handlers throw and never emit facts).
-  // Paul's Task C correction: a failed analysis attempt must NOT block
-  // FIRST_ANALYSIS_COMPLETE from firing on the first success.
+/**
+ * "Has an analysis ever completed before this turn, i.e. is this a RE-RUN
+ * rather than the first analysis?"
+ *
+ * ⚠ APPLIES NO SUCCESS TEST, AND THE LOOSENESS IS THE CONTRACT. Presence of a
+ * run_analysis fact in priorFacts means the handler returned success on a prior
+ * turn (failed handlers throw and never emit facts). Paul's Task C correction:
+ * a failed analysis attempt must NOT block FIRST_ANALYSIS_COMPLETE from firing
+ * on the first success.
+ *
+ * ⚠ RENAMED FROM `hasPriorSuccessfulRunAnalysis` (ROADMAP 2.842). The old name
+ * claimed a success test this function does not perform, which made it a THIRD
+ * status predicate in a codebase whose dominant defect class is predicate
+ * drift: a `partial` / `degraded` fact counts as "successful" here while
+ * `isSuccessfulRunAnalysisFact` (`context/freshness.ts`) excludes exactly
+ * those. The NAME was the defect — tightening the behaviour would change the
+ * first-analysis path. The divergence from the freshness authority is now
+ * pinned by test rather than remembered; see `__tests__/coaching-signals.test.ts`
+ * ("the coaching layer's predicate is DELIBERATELY broader...").
+ *
+ * ⚠ BYTE-IDENTICAL TO `hasPriorRunAnalysisFactToStale` TODAY, AND KEPT SEPARATE
+ * ON PURPOSE. The two answer different questions ("is this a re-run?" vs "could
+ * this edit have staled a shown analysis?") that happen to share an answer, and
+ * they are loose for different reasons. CLAUDE.md trap #21: when two authorities
+ * agree today, the fix is to name the concepts apart, not to collapse them —
+ * merging would silently bind a future tightening of one to the other. Their
+ * agreement is itself pinned by test, so a divergence is loud rather than
+ * silent.
+ */
+function hasAnyPriorRunAnalysisFact(facts: readonly HandlerFact[]): boolean {
   return facts.some((f) => f.fact_type === 'run_analysis');
 }
 
-function findMostRecentSuccessfulAnalysisFact(
-  facts: readonly HandlerFact[],
-): HandlerFact | null {
-  for (let i = facts.length - 1; i >= 0; i--) {
-    if (facts[i].fact_type === 'run_analysis') return facts[i];
-  }
-  return null;
+/**
+ * "Was an analysis produced before this turn whose displayed results this edit
+ * could have made stale?"
+ *
+ * ⚠ EXISTENCE ONLY — THE ORDERING CLAIM WAS DELETED, NOT CORRECTED (ROADMAP
+ * 2.842). This replaced `findMostRecentSuccessfulAnalysisFact`, whose name
+ * asserted an ordering it did not deliver: it walked `facts` from the LAST
+ * index downwards and returned the first hit, while `prior_facts` arrives
+ * NEWEST-FIRST (`build-turn-context.ts`: "Order matches prior_turns
+ * (newest-first)", restated at several sites in `context/freshness.ts`). So it
+ * returned the OLDEST run_analysis fact under a name promising the newest.
+ * There was no live harm — its sole consumer read the result for truthiness, so
+ * the direction was unobservable — but the name guaranteed that the first
+ * caller to read a FIELD off it would silently get the wrong run's data.
+ *
+ * The direction was not "fixed", because nothing here consumes recency: a
+ * most-recent guarantee with no reader is a guarantee kept alive only by its own
+ * test. ⭐ AND A HAND-ROLLED NEWEST-PICKER WOULD BE THE WORSE DEFECT: this file
+ * already imports `selectRunAnalysisFact`, the canonical newest-first selector,
+ * and `buildRerunDelta` already uses it precisely because #738 removed a private
+ * ordering from this same file ("the right PREDICATE but a private ORDERING").
+ * A second private ordering alongside it would recreate that drift. If a caller
+ * here ever needs the newest prior run_analysis fact, `selectRunAnalysisFact` is
+ * the answer.
+ *
+ * ⚠ Applies no success test either, and no longer claims one — a `partial` /
+ * `degraded` fact counts. That is correct for THIS question (an edit invalidates
+ * whatever was on screen, degraded or not) and is a deliberate divergence from
+ * `isSuccessfulRunAnalysisFact`, pinned by test. See the note on
+ * {@link hasAnyPriorRunAnalysisFact} for why the two coaching predicates stay
+ * separate despite agreeing today.
+ */
+function hasPriorRunAnalysisFactToStale(facts: readonly HandlerFact[]): boolean {
+  return facts.some((f) => f.fact_type === 'run_analysis');
 }
 
 /**
