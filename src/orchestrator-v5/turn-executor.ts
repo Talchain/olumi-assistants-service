@@ -8787,6 +8787,16 @@ export async function runTurnExecutor(
         handlerFacts: handlerFactsForCommit,
         requestId,
         scenarioId: context.session_id,
+        // ROADMAP 2.804 — the SCOPE only. The helper derives the leader-claim
+        // permission itself, from `handlerFacts ∪ priorFacts` above, because
+        // STEP 5 runs BEFORE the post-handler re-read of
+        // `mayNameLeadingOptionForRun` (a few hundred lines below). Passing
+        // that variable here would hand the coaching slot the TURN-ENTRY value
+        // — the state before this turn's analysis existed — and suppress honest
+        // coaching on a first analysis whose scenario carries an older withheld
+        // fact. Same `claimSafetyScope` object the post-handler re-read uses,
+        // so both read points describe the same scenario.
+        claimSafetyScope,
         // Spine A backstop for the rerun delta: same collector + same
         // persisted-first form as the executor's other authority sites
         // (guarded by controlled-factor-authority.guard.test.ts).
@@ -10943,16 +10953,22 @@ export async function runTurnExecutor(
     // over-suppression failure this estate treats as a defect, not a safe
     // default.
     //
-    // ⚠ AND THE DIVERGENCE UNDERNEATH IT IS WORTH KNOWING. That copy is ALREADY
-    // producer-gated — `coaching-signals.ts` returns `null` for it when
-    // `leadingOptionClaimWithheld(outcome)` is true. Its appearance means the
-    // PRODUCER read the claim as permitted (via the handler outcome's
-    // `__leading_option_claim_withheld` channel) while the FACT-CHAIN verdict
-    // read here fail-closed to `false` on an unstamped fact. Two authorities,
-    // one question. The fail-closed default is right for a PERMISSION and
-    // dangerous as a licence to DELETE a whole answer — which is precisely why
-    // the finaliser must not overrule a producer that has already consulted its
-    // own gate.
+    // ⚠ THE DIVERGENCE THIS PARAGRAPH USED TO DESCRIBE IS CLOSED (ROADMAP
+    // 2.804) — and the record is kept rather than deleted, because the shape of
+    // the mistake is the durable part. That copy is ALREADY producer-gated:
+    // `coaching-signals.ts` returns `null` for it when the leader claim is
+    // withheld. It USED to reach that conclusion from a SECOND authority — the
+    // handler outcome's `__leading_option_claim_withheld` channel — so its
+    // appearance meant the producer read the claim as permitted while the
+    // FACT-CHAIN verdict read here fail-closed. Two authorities, one question,
+    // and they were reachably inconsistent: the channel answered "did THIS RUN
+    // withhold?" and could not see the displayed-analysis conjunct #737 added.
+    // The channel is now deleted and the producer gate reads THIS SAME
+    // fact-chain verdict, so there is one answer. What still stands, and is the
+    // reason this guard stays scoped: the fail-closed default is right for a
+    // PERMISSION and dangerous as a licence to DELETE a whole answer — which is
+    // precisely why the finaliser must not overrule a producer that has already
+    // consulted its own gate.
     //
     // SO: this guard owns the exits where NO producer-side verdict gate exists
     // — the turns that dispatched no execute-intent handler at all. That is the
@@ -10972,9 +10988,11 @@ export async function runTurnExecutor(
     //     enforces a DIFFERENT claim class — a false first-person MUTATION
     //     success claim — and says nothing about leader claims. Counting it here
     //     was counting an unrelated guard as protection.
-    //   - the producer gate is ONE call, `leadingOptionClaimWithheld` at
-    //     `signals/coaching-signals.ts:233`, inside `if (input.proposedHandlerId
-    //     === 'run_analysis')`. It covers ONE signal of ONE handler.
+    //   - the producer gate is ONE read, `input.mayNameLeadingOption` in
+    //     `signals/coaching-signals.ts`, inside `if (input.proposedHandlerId
+    //     === 'run_analysis')`. It covers ONE handler's signals. (Until 2.804
+    //     it read a different authority than this guard; it now reads the same
+    //     fact-chain verdict, so the two can no longer disagree.)
     //   - the in-flow explanation gate covers `EXPLANATION_HANDLER_IDS` only:
     //     `explain_from_structure`, `explain_results`, `what_would_flip`.
     //

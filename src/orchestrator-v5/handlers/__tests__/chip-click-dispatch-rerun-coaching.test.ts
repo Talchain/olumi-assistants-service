@@ -177,6 +177,15 @@ function handlerOutcome() {
           leading_option_id: 'opt_launch',
           summary: 'Analysis ran with two options compared.',
           enrichment: runEnvelope(),
+          // ROADMAP 2.804 — now LOAD-BEARING. The coaching slot's leader-claim
+          // permission comes from the fact chain, which fails CLOSED on a fact
+          // with no verdict stamp (the pre-#710 population). An unstamped
+          // fixture no longer models a current production turn: `run_analysis`
+          // stamps every fact it writes. Exact shape of `projectClaimSafety`.
+          constraint_verdict: {
+            may_name_leading_option: true,
+            constraint_verdict_state: 'not_applicable',
+          },
         },
       },
     ],
@@ -196,6 +205,14 @@ function priorRunFact(): HandlerFact {
       enrichment: runEnvelope(),
       computed_at: '2026-07-15T00:00:00.000Z',
       graph_hash_at_run: 'hash-prior',
+      // ROADMAP 2.804 — stamped for the same reason as the current-turn fact
+      // above. This one matters twice over: it is the fact
+      // `selectRunAnalysisFact` picks as the DISPLAYED analysis, and an
+      // unstamped displayed analysis withholds the leader for the whole turn.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'not_applicable',
+      },
     },
   } as unknown as HandlerFact;
 }

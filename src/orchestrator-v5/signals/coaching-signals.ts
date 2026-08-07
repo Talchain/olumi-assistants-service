@@ -74,6 +74,26 @@ export interface CoachingSignalInput {
    * correctly means "no prior success" per Paul's Task C correction.
    */
   readonly priorFacts: readonly HandlerFact[];
+  /**
+   * ⭐ ROADMAP 2.804 — MAY THIS TURN NAME A LEADING OPTION ON SCREEN?
+   *
+   * The TURN-LEVEL, DISPLAY-BOUND permission, derived by
+   * `readMayNameLeadingOptionVerdict` in `applyCoachingSignal` (the shared
+   * helper both dispatch paths use). It is a conjunction — the entitling
+   * fact's verdict AND the DISPLAYED analysis's verdict — and it fails closed.
+   *
+   * ⚠ THIS IS NOT "did this run's constraint verdict withhold?". That was the
+   * old `HandlerOutcome.__leading_option_claim_withheld` channel, now deleted:
+   * a per-run answer that structurally could not carry the displayed-analysis
+   * conjunct, because it never saw the fact array. Consuming it here meant the
+   * confirmation could withhold the leader while the coaching sentence
+   * directly beneath it named one. Do not reintroduce a per-run signal on this
+   * input — the question this slot must ask is about the TURN.
+   *
+   * REQUIRED, not optional-defaulting-true: an absent permission must not read
+   * as a granted one.
+   */
+  readonly mayNameLeadingOption: boolean;
 }
 
 export interface CoachingSignalDetection {
@@ -113,28 +133,6 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
   RERUN_ANALYSIS_COMPLETE: ({ runDelta }) => composeRerunText(runDelta ?? null),
 };
-
-/**
- * Read the constraint verdict's own "may a leading option be named"
- * declaration off the handler outcome's internal channel
- * (`HandlerOutcome.__leading_option_claim_withheld`, registry.ts).
- *
- * The parameter widens `SuccessfulHandlerOutcome` — which is a deliberately
- * narrowed brand carrying only the three contract fields — with the optional
- * channel, so this is a typed read and not a cast. The runtime object IS the
- * handler's outcome, so the field is present when the handler set it; the
- * route-level test proves that end to end rather than assuming it.
- *
- * Absent ⇒ not withheld, so every non-run_analysis handler and every
- * pre-existing caller stays byte-identical.
- */
-function leadingOptionClaimWithheld(
-  outcome: SuccessfulHandlerOutcome & {
-    readonly __leading_option_claim_withheld?: boolean;
-  },
-): boolean {
-  return outcome.__leading_option_claim_withheld === true;
-}
 
 /**
  * ROADMAP 2.73 — rerun acknowledgment copy, derived from the shared
@@ -239,9 +237,15 @@ export function detectCoachingSignal(
     // compose slot. So the claim-safety machinery built for the headline is
     // bypassed by the sentence underneath it unless the signal itself is aware.
     //
-    // The verdict's own `mayNameLeadingOption` declaration arrives on the
-    // handler outcome; nothing here re-derives it (CLAUDE.md trap #12).
-    const leaderWithheld = leadingOptionClaimWithheld(input.outcome);
+    // ⭐ ROADMAP 2.804 — THE PERMISSION IS THE TURN'S, NOT THE RUN'S. This read
+    // used to be `leadingOptionClaimWithheld(input.outcome)`, an internal
+    // channel carrying THIS RUN's constraint verdict. That answered a narrower
+    // question than the slot asks, and could not see the displayed-analysis
+    // conjunct the turn verdict acquired in #737 — so on the divergence path
+    // the headline withheld the leader and this sentence named it. Nothing here
+    // re-derives the permission: it arrives already computed by the shared
+    // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
+    const leaderWithheld = !input.mayNameLeadingOption;
 
     if (!hasPriorSuccessfulRunAnalysis(input.priorFacts)) {
       // SUPPRESSED, not reworded. The whole of this signal's value is the

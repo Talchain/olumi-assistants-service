@@ -1140,16 +1140,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ...(scaffoldOutcome.scaffolded.length > 0
         ? { __scaffolded_options: scaffoldPresence.stamped }
         : {}),
-      // T1 claim safety, carried to the STEP-5 coaching detector. The egress
-      // allowlist governs only the confirmation segment of `assistant_text`;
-      // the coaching piece is a separate compose slot whose copy presumes a
-      // leading option ("explore the leading option"; on a re-run "{label}
-      // still leads"). Without this the turn withholds the claim in one
-      // sentence and asserts it by name in the next. The verdict's own
-      // declaration is passed rather than re-derived downstream.
-      ...(constraintVerdict.mayNameLeadingOption
-        ? {}
-        : { __leading_option_claim_withheld: true }),
+      // ROADMAP 2.804 — `__leading_option_claim_withheld` USED TO BE SET HERE
+      // and is deliberately gone. It carried THIS RUN's verdict to the STEP-5
+      // coaching detector, which is a narrower question than that slot asks:
+      // the slot needs the TURN-level, display-bound permission, and this
+      // channel could never carry the displayed-analysis conjunct #737 added
+      // because a handler outcome never sees the fact array. The coaching slot
+      // now derives the permission from the fact chain in
+      // `applyCoachingSignal`, so this field had no consumer left and a second
+      // authority sitting here is an invitation for a future handler to start
+      // writing one. The persisted `constraint_verdict` above is the one
+      // channel, and it is what the fact-chain reader reads.
     };
   };
 }
