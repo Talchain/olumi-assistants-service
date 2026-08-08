@@ -697,11 +697,10 @@ export async function draftGraphWithAnthropic(
   const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
   const promptMeta = getSystemPromptMeta('draft_graph');
   // Derive the last-resort fallback from the checked-in draft default rather
-  // than a hard-copied literal (1.185(a) rec-2 derive-don't-mirror). Identical
-  // value today (claude-sonnet-4-6) — pinned by model-resolution-table.test.ts —
-  // so removing the mirror is a zero-behaviour-change edit; every live caller
-  // already passes an explicitly resolved args.model, and the boot drift guard
-  // proves this default is a registered, enabled id.
+  // than a hard-copied literal (1.185(a) rec-2 derive-don't-mirror). Pinned by
+  // model-resolution-table.test.ts (claude-sonnet-5 since 2026-08-08); every
+  // live caller already passes an explicitly resolved args.model, and the boot
+  // drift guard proves this default is a registered, enabled id.
   const model = args.model || getDefaultModelForTask('draft_graph');
   const draftThinkingRequested = args.thinking?.type === 'enabled';
   const draftThinkingSupported = draftThinkingRequested && isThinkingSupported(model, 'draft_graph');

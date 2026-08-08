@@ -194,10 +194,11 @@ describe("Task-to-Model Routing", () => {
     });
 
     it("assigns optimized models to complex reasoning tasks", () => {
-      // Reconciled to live staging CEE_MODEL_* (2026-07-19): draft/edit serve
-      // claude-sonnet-4-6, orchestrator serves claude-sonnet-5.
-      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("claude-sonnet-4-6");
-      expect(TASK_MODEL_DEFAULTS.edit_graph).toBe("claude-sonnet-4-6");
+      // Reconciled to live staging CEE_MODEL_* (2026-08-08): draft/edit/
+      // orchestrator all serve claude-sonnet-5 (Paul's ruling: all Claude
+      // tasks on sonnet-5, never 4-6).
+      expect(TASK_MODEL_DEFAULTS.draft_graph).toBe("claude-sonnet-5");
+      expect(TASK_MODEL_DEFAULTS.edit_graph).toBe("claude-sonnet-5");
       expect(TASK_MODEL_DEFAULTS.orchestrator).toBe("claude-sonnet-5");
       // bias_check uses Claude Sonnet 4 (excellent reasoning)
       expect(TASK_MODEL_DEFAULTS.bias_check).toBe("claude-sonnet-4-20250514");
@@ -240,7 +241,7 @@ describe("Task-to-Model Routing", () => {
   describe("getDefaultModelForTask", () => {
     it("returns correct default for each task", () => {
       expect(getDefaultModelForTask("clarification")).toBe("gpt-4.1-2025-04-14");
-      expect(getDefaultModelForTask("draft_graph")).toBe("claude-sonnet-4-6");
+      expect(getDefaultModelForTask("draft_graph")).toBe("claude-sonnet-5");
       expect(getDefaultModelForTask("bias_check")).toBe("claude-sonnet-4-20250514");
     });
   });
