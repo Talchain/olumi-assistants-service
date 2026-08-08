@@ -119,6 +119,24 @@ describe("extractJsonFromResponse — multi-document selection (2.996)", () => {
       expect(identity(result.json)).toBe(identity(good));
       expect(result.documentIndex).toBe(1);
     });
+
+    it("when SEVERAL later documents are acceptable, the EARLIEST wins", () => {
+      // Without this, a "last acceptable document wins" chooser is
+      // indistinguishable from this one on every other test in the file:
+      // reversing the scan order still lands on the same document whenever
+      // exactly one candidate is acceptable.
+      const rejected = { nodes: [], edges: [], marker: "REJECTED" };
+      const earliest = { nodes: [], edges: [{ from: "a", to: "b" }], marker: "EARLIEST" };
+      const latest = { nodes: [], edges: [{ from: "c", to: "d" }], marker: "LATEST" };
+      const raw = [rejected, earliest, latest].map((d) => JSON.stringify(d)).join("\nprose\n");
+      const result = extractJsonFromResponse(raw, {
+        logWarnings: false,
+        acceptDocument: acceptsGraphWithEdges,
+      });
+      expect(identity(result.json)).toBe(identity(earliest));
+      expect((result.json as { marker: string }).marker).toBe("EARLIEST");
+      expect(result.documentIndex).toBe(1);
+    });
   });
 
   describe("single-document responses are unchanged (absence claim)", () => {
