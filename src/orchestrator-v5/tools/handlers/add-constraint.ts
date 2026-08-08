@@ -432,6 +432,52 @@ export function createAddConstraintHandler(): HandlerFn {
         (c) => c.node_id === targetId && c.operator === operator,
       );
 
+      // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
+      // UNCHANGED). On an update, a turn that does not mention a unit
+      // keeps the persisted row's unit — `existing?.unit` sits between
+      // the explicit parameter and the node's observed unit, and it
+      // OUTRANKS the observed unit because the row is the prior state
+      // of the thing being updated (same convention as
+      // set_factor_value's `parsed.unit → before.unit` merge). Before
+      // this fix the chain skipped `existing` entirely, so the
+      // whole-object update splice below silently stripped the
+      // persisted `%` (the live gc-cdd6eb74 silent-nullification
+      // defect). Never silently clear a persisted unit.
+      //
+      // Lifted out of the object literal because the FRAME resolution below
+      // has to read the resolved unit, not the raw parameter.
+      const resolvedUnit =
+        params.unit !== undefined
+          ? params.unit
+          : existing?.unit !== undefined
+            ? existing.unit
+            : targetNode.observed_state?.unit !== undefined
+              ? targetNode.observed_state.unit
+              : undefined;
+
+      // ROADMAP 2.877 (link 1) — THE SAME SILENT-NULLIFICATION CLASS AS THE
+      // UNIT DROP ABOVE, which this PR would otherwise have opened on a new
+      // field. The update path replaces the row WHOLESALE (`list.map(... =>
+      // constraintParse.data)`), so once a row can carry a frame, a later turn
+      // that carries no deterministic evidence — a label-only change, or a
+      // restatement phrased without a constraint clause — would silently CLEAR
+      // an attestation that is still true, and ISL would resume refusing.
+      //
+      // Same doctrine, same shape: OMISSION MEANS UNCHANGED. But gated
+      // strictly harder than the unit, because a frame describes a NUMBER:
+      // it is inherited only when this turn's value AND unit are both
+      // unchanged, i.e. the row still describes the very quantity the frame
+      // was attested for. If the value moved, the old frame described a
+      // different number and carrying it over would be a manufactured
+      // attestation — so it is dropped and the row fails closed, exactly as an
+      // unattested row should.
+      const inheritedValueFrame =
+        existing?.value_frame !== undefined &&
+        valuesMatch(existing.value, params.value) &&
+        existing.unit === resolvedUnit
+          ? existing.value_frame
+          : undefined;
+
       const newConstraintBase: Omit<GoalConstraintT, 'constraint_id'> = {
         node_id: targetId,
         operator,
@@ -440,26 +486,15 @@ export function createAddConstraintHandler(): HandlerFn {
         provenance: 'explicit',
         // BY-PRESENCE, never defaulted: an absent frame must stay absent on the
         // row, because `undefined` and "unattested" are the same fact here and
-        // the contract forbids manufacturing the difference.
-        ...(statedValueFrame !== undefined ? { value_frame: statedValueFrame } : {}),
-        // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
-        // UNCHANGED). On an update, a turn that does not mention a unit
-        // keeps the persisted row's unit — `existing?.unit` sits between
-        // the explicit parameter and the node's observed unit, and it
-        // OUTRANKS the observed unit because the row is the prior state
-        // of the thing being updated (same convention as
-        // set_factor_value's `parsed.unit → before.unit` merge). Before
-        // this fix the chain skipped `existing` entirely, so the
-        // whole-object update splice below silently stripped the
-        // persisted `%` (the live gc-cdd6eb74 silent-nullification
-        // defect). Never silently clear a persisted unit.
-        ...(params.unit !== undefined
-          ? { unit: params.unit }
-          : existing?.unit !== undefined
-            ? { unit: existing.unit }
-            : targetNode.observed_state?.unit !== undefined
-              ? { unit: targetNode.observed_state.unit }
-              : {}),
+        // the contract forbids manufacturing the difference. This turn's own
+        // deterministic evidence outranks the inherited one — a re-statement
+        // that parses is a fresh attestation of the same number.
+        ...(statedValueFrame !== undefined
+          ? { value_frame: statedValueFrame }
+          : inheritedValueFrame !== undefined
+            ? { value_frame: inheritedValueFrame }
+            : {}),
+        ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
       };
 
       const newConstraint: GoalConstraintT = {

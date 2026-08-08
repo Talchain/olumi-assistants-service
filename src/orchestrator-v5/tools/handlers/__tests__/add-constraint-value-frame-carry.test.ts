@@ -354,6 +354,122 @@ describe('2.877 link 1 — NO deterministic evidence means NO stamp (fail closed
   });
 });
 
+describe('2.877 link 1 — an UPDATE must not silently clear a still-true attestation', () => {
+  /**
+   * Register once through chat (framed), then run a SECOND turn against the
+   * persisted row — the update path, which replaces the row WHOLESALE.
+   */
+  async function updateAfterFraming(second: {
+    message: string;
+    value: number;
+    unit?: string;
+    label?: string;
+  }) {
+    const first = await registerViaChat({
+      message: 'Keep churn under 5% this year.',
+      targetId: 'o-churn-rate',
+      kind: 'node',
+      constraintType: 'at_most',
+      value: 5,
+      unit: '%',
+    });
+    // PRECONDITION: the row really is framed going in, or every assertion about
+    // what the second turn does to that frame is vacuous.
+    expect(
+      pick(first, 'o-churn-rate', '<=').value_frame,
+      'the first turn did not frame the row — the update assertions are vacuous',
+    ).toBe('level');
+
+    const proposal = makeProposal(
+      'o-churn-rate',
+      'node',
+      'at_most',
+      second.value,
+      second.unit,
+    );
+    if (second.label !== undefined) {
+      proposal.parameters.push({
+        name: 'label',
+        value: second.label,
+        source: 'user_explicit',
+      } as ProposalAction['parameters'][number]);
+    }
+    const handler = createAddConstraintHandler();
+    const out = await handler(buildInvocation(first, proposal, second.message));
+    return out.mutated_graph as GraphV3T;
+  }
+
+  it('a LABEL-ONLY turn keeps the frame (omission means unchanged)', async () => {
+    // This is the regression THIS PR would otherwise have introduced: once a row
+    // can carry a frame, the wholesale row replacement on update silently clears
+    // it on any turn whose message states no constraint clause — and ISL quietly
+    // resumes refusing. Same silent-nullification class as the persisted-unit
+    // drop this handler already guards (the live gc-cdd6eb74 defect).
+    const graph = await updateAfterFraming({
+      message: 'Call that one the churn ceiling.',
+      value: 5,
+      unit: '%',
+      label: 'Churn ceiling',
+    });
+
+    const row = pick(graph, 'o-churn-rate', '<=');
+    expect(row.label).toBe('Churn ceiling');
+    expect(row.value).toBe(5);
+    expect(
+      row.value_frame,
+      'a label-only turn cleared an attestation that is still true of the same number',
+    ).toBe('level');
+  });
+
+  it('a turn that CHANGES the value does NOT inherit the old frame (fails closed)', async () => {
+    // The frame describes a NUMBER. Once the number moves, the old attestation
+    // is about a different quantity, and carrying it across would be exactly the
+    // manufactured attestation the contract forbids — worse than the honest gap,
+    // because ISL trusts what it is told.
+    const graph = await updateAfterFraming({
+      message: 'Actually make it 3 instead.',
+      value: 3,
+      unit: '%',
+    });
+
+    const row = pick(graph, 'o-churn-rate', '<=');
+    expect(row.value).toBe(3);
+    expect(
+      row.value_frame,
+      "the previous number's frame was carried onto a different number",
+    ).toBeUndefined();
+  });
+
+  it('a turn that CHANGES the unit does NOT inherit the old frame (fails closed)', async () => {
+    // Same number, different scale: `5 %` and `5 £` are not the same quantity,
+    // and nothing here reconciles units.
+    const graph = await updateAfterFraming({
+      message: 'Keep it at 5 there.',
+      value: 5,
+      unit: '£',
+    });
+
+    const row = pick(graph, 'o-churn-rate', '<=');
+    expect(row.unit).toBe('£');
+    expect(row.value_frame).toBeUndefined();
+  });
+
+  it("this turn's OWN evidence outranks the inherited frame", async () => {
+    // A restatement that parses is a fresh attestation of the same number, so it
+    // must be sourced from THIS turn rather than silently reused — otherwise a
+    // stale inherited frame could outlive a producer change.
+    const graph = await updateAfterFraming({
+      message: 'Reduce churn by 5%.',
+      value: -5,
+      unit: '%',
+    });
+
+    const row = pick(graph, 'o-churn-rate', '<=');
+    expect(row.value).toBe(-5);
+    expect(row.value_frame).toBe('delta');
+  });
+});
+
 describe('2.877 link 1 — the PINNED post-state: the refusal moves one hop LATER', () => {
   it("a level-framed non-goal constraint now reaches the wire framed AND baseline-less", async () => {
     // THIS IS THE EXPECTED STATE, NOT A DEFECT. Before this change ISL refused
