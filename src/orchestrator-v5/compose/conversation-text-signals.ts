@@ -77,8 +77,8 @@
  *   scanning the assistant ("if the coach already raised base rates, the nudge
  *   is redundant") therefore holds only for prose answers, not for block-borne
  *   coaching. Recorded so a later reader does not assume wider coverage.
- * - **Numeric detection is digits-only** (`/\d/`). Spelled magnitudes ("five
- *   million") are NOT recognised. A spelled-number recogniser is exactly the
+ * - **Numeric detection is digits-only** (`/\d/`). Spelled-out magnitude words
+ *   are NOT recognised. A spelled-number recogniser is exactly the
  *   magnitude-alphabet mirror that has bitten this estate before; it gets added
  *   only with a hand-written corpus, never inferred.
  */
