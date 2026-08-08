@@ -223,7 +223,7 @@ import {
 } from '../orchestrator-v5/routing/post-analysis-label-intercept.js';
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
 // L16 / N16 — deterministic remedy for a bare configure-option turn.
-import { tryConfigureOptionClarify } from '../orchestrator-v5/routing/configure-option-clarify.js';
+import { shouldInterceptBeforeEditLane } from '../orchestrator-v5/routing/configure-option-clarify.js';
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 import {
   isProcessMetaIntake,
@@ -4359,7 +4359,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // state-query); `bypassEditHandling` keeps confirmations and state
     // queries out, exactly as its siblings above do.
     //
-    // Strictly additive: `tryConfigureOptionClarify` declines — and the
+    // Strictly additive: `shouldInterceptBeforeEditLane` declines — and the
     // pre-existing route runs untouched — unless it can name a concrete next
     // step. In particular a configure message that DOES carry a factor and a
     // value (walk remedy #5, the path that worked) is declined on
@@ -4377,7 +4377,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // here just leaves the pre-existing route in charge.
         persistedForClarify = null;
       }
-      const configureClarify = tryConfigureOptionClarify({
+      const configureClarify = shouldInterceptBeforeEditLane({
         message: ingress.message,
         detection: configureOptionDetection,
         graph: persistedForClarify,

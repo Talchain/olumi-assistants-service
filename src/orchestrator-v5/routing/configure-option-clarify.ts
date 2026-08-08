@@ -104,26 +104,43 @@ function decline(reason: ConfigureOptionClarifyDeclineReason): ConfigureOptionCl
 }
 
 /**
- * Decide whether a configure-option turn should be answered with the
- * deterministic remedy instead of being sent to the edit LLM.
+ * ⭐⭐ ROADMAP 2.427 — TRAP 21: TWO QUESTIONS, ONE PREDICATE.
  *
- * Pure. `graph` is the PERSISTED graph (the caller owns the read and its
- * failure policy); anything that does not strict-parse declines.
+ * Until this change there was ONE exported predicate here
+ * (`tryConfigureOptionClarify`) and route-v2 consumed it for ONE purpose:
+ * *"should the deterministic remedy answer this turn INSTEAD of the edit
+ * lane?"* Its decline on `value_payload_present` is exactly right for that
+ * question — a configure message that names a factor and a value has something
+ * to write, and pre-empting the edit lane would replace a WORKING edit with a
+ * question.
+ *
+ * 2.427 needs an answer to a DIFFERENT question: *"the edit lane has already
+ * run and did NOT record this option — can we name what the user should type
+ * now?"* On that question the `value_payload_present` decline is not just
+ * unhelpful, it is precisely inverted: the failure captures that motivated this
+ * row ALL carry a value payload ("Under the Cloud-Native CRM option, set its
+ * effect on Adoption Complexity to 0.7."), so the single predicate declined
+ * every turn that most needed the copy, and the user got the generic dead end
+ * instead.
+ *
+ * Trap 21's rule is to name the concepts apart rather than reconcile the
+ * defaults, so the shared FACT RESOLUTION lives in `resolveConfigureOptionFacts`
+ * below and the two questions get one named predicate each:
+ *
+ *   `shouldInterceptBeforeEditLane`   — BEFORE the edit lane. Declines on a
+ *                                       value payload. Behaviour unchanged.
+ *   `buildConfigureOptionRecoveryCopy` — AFTER the edit lane failed. Does not
+ *                                       consult the value payload at all.
+ *
+ * Note what is NOT shared: the gate. Both call the same resolver, and neither
+ * inherits the other's answer to a question it was not asked.
  */
-export function tryConfigureOptionClarify(params: {
+function resolveConfigureOptionFacts(params: {
   readonly message: string;
   readonly detection: ConfigureOptionIntentDetection;
   readonly graph: unknown;
 }): ConfigureOptionClarifyResult {
   if (!params.detection.matched) return decline('not_configure_intent');
-
-  // The load-bearing discriminator: a configure message that names a factor
-  // AND a value has something to write, and the edit lane is the right place
-  // for it. That is walk remedy #5 — the path that WORKED — and it must stay
-  // on its existing route.
-  if (carriesConfigureOptionValuePayload(params.message)) {
-    return decline('value_payload_present');
-  }
 
   const parsed = GraphV3.safeParse(params.graph);
   if (!parsed.success) return decline('graph_unparseable');
@@ -170,6 +187,65 @@ export function tryConfigureOptionClarify(params: {
     readiness,
     optionSource,
   };
+}
+
+/**
+ * QUESTION: *should the deterministic remedy answer this turn INSTEAD of
+ * sending it to the edit LLM?*
+ *
+ * Pure. `graph` is the PERSISTED graph (the caller owns the read and its
+ * failure policy); anything that does not strict-parse declines.
+ *
+ * Behaviour is byte-identical to the pre-2.427 `tryConfigureOptionClarify`,
+ * including the `value_payload_present` decline that keeps walk remedy #5 — the
+ * path that WORKED — on its existing route. Renamed, not changed: the old name
+ * did not say WHICH question it answered, which is how the second question came
+ * to be answered by the same predicate.
+ */
+export function shouldInterceptBeforeEditLane(params: {
+  readonly message: string;
+  readonly detection: ConfigureOptionIntentDetection;
+  readonly graph: unknown;
+}): ConfigureOptionClarifyResult {
+  if (!params.detection.matched) return decline('not_configure_intent');
+
+  // The load-bearing discriminator FOR THIS QUESTION: a configure message that
+  // names a factor AND a value has something to write, and the edit lane is the
+  // right place for it. Never consulted by the recovery sibling below — after
+  // the edit lane has already failed, the value payload says nothing about
+  // whether the user needs the copy.
+  if (carriesConfigureOptionValuePayload(params.message)) {
+    return decline('value_payload_present');
+  }
+
+  return resolveConfigureOptionFacts(params);
+}
+
+/**
+ * ⭐ ROADMAP 2.427 — QUESTION: *the edit lane has already run and the option
+ * was NOT recorded; can we name the option, its still-unset factors, and the
+ * sentence that writes it?*
+ *
+ * This is a RECOVERY predicate, and it is reached only from the failure path
+ * (`evaluateConfigureOptionOutcome` has already established that no
+ * interventions write landed for the resolved option). It therefore does NOT
+ * consult `carriesConfigureOptionValuePayload`: on this question a value
+ * payload is not evidence that the edit lane is the right destination — the
+ * edit lane already had its turn and produced nothing for this option.
+ *
+ * `graph` should be the POST-edit graph when one exists, falling back to the
+ * pre-edit graph: the copy must describe what is STILL unset after whatever the
+ * edit did land, not what was unset before it ran.
+ *
+ * Same safe bias as its sibling: every path that cannot name a concrete next
+ * step declines, and a decline leaves the pre-existing copy in place.
+ */
+export function buildConfigureOptionRecoveryCopy(params: {
+  readonly message: string;
+  readonly detection: ConfigureOptionIntentDetection;
+  readonly graph: unknown;
+}): ConfigureOptionClarifyResult {
+  return resolveConfigureOptionFacts(params);
 }
 
 /**

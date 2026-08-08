@@ -176,3 +176,55 @@ describe('handleEditGraph no-op — R10 clarification preservation', () => {
     expect(result.suggestedActions!.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * ⭐ ROADMAP 2.427 — the LLM-suggestion loop, closed at the preservation trip
+ * test.
+ *
+ * This branch is the ONE surface where the edit LLM's own prose reaches
+ * `assistantText` verbatim, which makes it the one surface where the product
+ * can advise a phrasing it would then refuse — the closed loop the 2.11
+ * diagnosis named ("the assistant suggests phrasings that cannot return to the
+ * lane that suggested them"). The three pre-existing trip conditions all ask
+ * what the text CLAIMS; none asked what it ADVISES.
+ *
+ * These cases drive the REAL handler, so they bind the production wiring
+ * (`findNonRoutableConfigureAdvice` in the trip test), not just the predicate.
+ */
+describe('handleEditGraph no-op — ROADMAP 2.427 advice routability', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('DECLINES preservation when the question advises an option phrasing that would not route', async () => {
+    // Verbatim the phrasing PR #487's round-3 review caught the misroute
+    // clarify shipping: it names an option and the configure gate rejects it.
+    const q =
+      "I need a value first. Say 'the acquisition option sets Setup Cost to £2m' and I'll apply it.";
+    const result = await runNoOp(q);
+
+    expect(result.noOpClarificationPreserved).toBe(false);
+    expect(result.assistantText).not.toContain('the acquisition option sets Setup Cost');
+    expect(result.assistantText).toContain(FALLBACK_SENTINEL);
+  });
+
+  it('PRESERVES a question advising the phrasing the product actually sanctions', () => {
+    // The discriminating twin. Same shape of sentence, same option reference,
+    // same quoting grammar — only the advised phrasing differs, and this one
+    // routes. Without this half, the test above would be satisfied by a guard
+    // that simply declined every quoted option reference.
+    const advised = "Set the Cloud-Native CRM option's effect on Adoption Complexity to 0.7";
+    const q = `I need a value first. Say '${advised}' and I'll apply it.`;
+    return runNoOp(q).then((result) => {
+      expect(result.noOpClarificationPreserved).toBe(true);
+      expect(result.assistantText).toContain(advised);
+    });
+  });
+
+  it('leaves advice that names no option alone (scope guard)', async () => {
+    // Factor-only advice is deliberately out of scope — see
+    // `configure-option-advice.ts`. A guard that reached here would discard
+    // working clarifying questions.
+    const q = 'What number should this be? Say "Set Price to 0.8" when you know it.';
+    const result = await runNoOp(q);
+    expect(result.noOpClarificationPreserved).toBe(true);
+  });
+});

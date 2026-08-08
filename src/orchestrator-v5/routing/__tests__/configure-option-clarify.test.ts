@@ -11,7 +11,10 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { tryConfigureOptionClarify } from '../configure-option-clarify.js';
+import {
+  shouldInterceptBeforeEditLane,
+  buildConfigureOptionRecoveryCopy,
+} from '../configure-option-clarify.js';
 import {
   carriesConfigureOptionValuePayload,
   detectConfigureOptionIntent,
@@ -81,10 +84,10 @@ function tryFor(message: string, g: unknown = graph()) {
     'Invest in Content Marketing',
     'Cut The Price',
   ]);
-  return { detection, result: tryConfigureOptionClarify({ message, detection, graph: g }) };
+  return { detection, result: shouldInterceptBeforeEditLane({ message, detection, graph: g }) };
 }
 
-describe('tryConfigureOptionClarify — matches only when it can name a concrete next step', () => {
+describe('shouldInterceptBeforeEditLane — matches only when it can name a concrete next step', () => {
   it("claims the walk's bare configure and names the real linked factor", () => {
     const { detection, result } = tryFor(`Configure ${OPTION_LABEL}`);
     expect(detection.matched).toBe(true);
@@ -149,7 +152,7 @@ describe('tryConfigureOptionClarify — matches only when it can name a concrete
     const message = 'Thanks, that all makes sense so far.';
     const detection = detectConfigureOptionIntent(message, [OPTION_LABEL]);
     expect(detection.matched).toBe(false);
-    const result = tryConfigureOptionClarify({ message, detection, graph: graph() });
+    const result = shouldInterceptBeforeEditLane({ message, detection, graph: graph() });
     expect(result.matched).toBe(false);
     if (result.matched) return;
     expect(result.reason).toBe('not_configure_intent');
@@ -251,5 +254,76 @@ describe('composeConfigureOptionClarifyResponse — copy contract', () => {
     });
     expect(multi.assistant_text).toContain(`${FACTOR_LABEL}, Churn Rate and Support Cost`);
     expect(findForbiddenPhraseHit(multi.assistant_text)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ ROADMAP 2.427 — TRAP 21: the two predicates answer DIFFERENT questions.
+// ---------------------------------------------------------------------------
+
+/**
+ * Before 2.427 there was ONE predicate here, and route-v2 consumed it for ONE
+ * question: *should the deterministic remedy answer this turn INSTEAD of the
+ * edit lane?* Its `value_payload_present` decline is exactly right for that.
+ *
+ * 2.427 needed an answer to a second question — *the edit lane already ran and
+ * did NOT record this option; can we name what the user should type now?* — on
+ * which that same decline is precisely inverted, because every failure capture
+ * that motivated the row CARRIES a value payload.
+ *
+ * These tests are the discrimination. They are written as a PAIR on one input,
+ * so the file fails loudly if the two predicates are ever "reconciled" back
+ * into agreement — which is what trap 21 says the next reader will be tempted
+ * to do, seeing two functions with different defaults side by side.
+ */
+describe('ROADMAP 2.427 — intercept vs recovery are not the same question', () => {
+  const VALUE_BEARING = `Under the ${OPTION_LABEL} option, set its effect on ${FACTOR_LABEL} to 0.7.`;
+
+  it('a value-bearing configure: intercept DECLINES, recovery RESOLVES', () => {
+    const detection = detectConfigureOptionIntent(VALUE_BEARING, [OPTION_LABEL]);
+    expect(detection.matched, 'precondition: the message must reach the edit lane').toBe(true);
+
+    // BEFORE the edit lane — must not pre-empt a turn that has something to
+    // write. Unchanged behaviour.
+    const intercept = shouldInterceptBeforeEditLane({
+      message: VALUE_BEARING,
+      detection,
+      graph: graph(),
+    });
+    expect(intercept).toEqual({ matched: false, reason: 'value_payload_present' });
+
+    // AFTER the edit lane failed — the value payload says nothing about
+    // whether the user needs the copy, so it is not consulted.
+    const recovery = buildConfigureOptionRecoveryCopy({
+      message: VALUE_BEARING,
+      detection,
+      graph: graph(),
+    });
+    expect(recovery.matched).toBe(true);
+    if (!recovery.matched) return;
+    expect(recovery.optionId).toBe('opt_retention');
+    expect(recovery.factorLabels).toEqual([FACTOR_LABEL]);
+  });
+
+  it('the two agree on everything that is NOT the value payload', () => {
+    // A bare configure carries no value, so both questions have the same
+    // answer — proving the split introduced ONE difference, not a fork.
+    const bare = `Configure ${OPTION_LABEL}`;
+    const detection = detectConfigureOptionIntent(bare, [OPTION_LABEL]);
+    expect(
+      shouldInterceptBeforeEditLane({ message: bare, detection, graph: graph() }),
+    ).toEqual(buildConfigureOptionRecoveryCopy({ message: bare, detection, graph: graph() }));
+  });
+
+  it('recovery still refuses to guess between two blocked options', () => {
+    // The safety that must NOT be relaxed along with the value-payload gate.
+    const detection = detectConfigureOptionIntent(VALUE_BEARING, []);
+    const recovery = buildConfigureOptionRecoveryCopy({
+      message: 'Help me configure one of my options.',
+      detection: detectConfigureOptionIntent('Help me configure one of my options.', []),
+      graph: graph({ secondBlockedOption: true }),
+    });
+    expect(recovery).toEqual({ matched: false, reason: 'option_not_identified' });
+    expect(detection.matched).toBe(true);
   });
 });

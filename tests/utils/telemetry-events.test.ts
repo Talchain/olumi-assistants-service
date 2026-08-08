@@ -628,6 +628,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
         V5ConfigureOptionClarifyIntercept:
           "v5.edit_graph.configure_option_clarify_intercept",
+        V5ConfigureOptionOutcomeUnhonoured:
+          "v5.edit_graph.configure_option_outcome_unhonoured",
         V5EditGraphConfigureOptionLabelsLoaded:
           "v5.edit_graph.configure_option_labels_loaded",
         V5EditGraphStructuralRestructureRouted:
@@ -1448,6 +1450,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // L16 / N16 — the bare-configure deterministic remedy intercept.
         // Diagnostic-only, same posture as its configure-option sibling.
         TelemetryEvents.V5ConfigureOptionClarifyIntercept,
+        // ⭐ ROADMAP 2.427 — the configure-option outcome did not honour the
+        // turn's intent (no interventions write for the named option id).
+        // Diagnostic-only, same posture as its false-success sibling
+        // V5EditGraphFalseSuccessRewritten: structured logs are the
+        // operational signal and a Datadog counter would need a firing
+        // baseline this seam does not yet have.
+        TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
         // Structural-restructure routing gate (LATENCY-RECAPTURE finding 3).
         // Diagnostic-only, same posture as its configure-option sibling.
         TelemetryEvents.V5EditGraphStructuralRestructureRouted,
@@ -2125,6 +2134,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.proposal_confirm_resolved",
         "v5.edit_graph.state_query_suppressed",
         "v5.edit_graph.configure_option_clarify_intercept",
+        "v5.edit_graph.configure_option_outcome_unhonoured",
         "v5.edit_graph.configure_option_intent_routed",
         "v5.edit_graph.configure_option_labels_loaded",
         "v5.edit_graph.structural_restructure_intent_routed",

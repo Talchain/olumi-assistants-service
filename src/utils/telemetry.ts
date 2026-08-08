@@ -1904,6 +1904,25 @@ export const TelemetryEvents = {
   // ('named_in_message' | 'sole_unconfigured'), factor_count.
   V5ConfigureOptionClarifyIntercept: "v5.edit_graph.configure_option_clarify_intercept",
 
+  // ⭐⭐ ROADMAP 2.427 — the configure-option OUTCOME did not honour the turn's
+  // INTENT: the message named an option, the edit lane ran, and the applied
+  // graph carries NO interventions write for THAT option id. Emitted where the
+  // response is replaced with the deterministic recovery copy.
+  //
+  // This is the meter for the false-success class the V5 H5 invariant cannot
+  // see. H5 asks "did anything land?"; on the motivating capture something did
+  // — an EDGE STRENGTH — so H5 stayed silent while the reply claimed success
+  // about an entity the user had not asked about and the option stayed
+  // `needs_encoding`. A non-zero count here with `applied_something: true` is
+  // precisely the wrong-entity write; with `applied_something: false` it is the
+  // generic-degradation branch that used to ship "I wasn't able to make that
+  // change safely."
+  //
+  // Payload: request_id, scenario_id, option_id, factor_count,
+  // applied_something (whether the edit landed ANY graph at all — the field
+  // that separates the two failure branches).
+  V5ConfigureOptionOutcomeUnhonoured: "v5.edit_graph.configure_option_outcome_unhonoured",
+
   // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
   // read for its option-label anchor. Until 2.308 the labels came only from
   // `extensions.graphState`, which the UI never sends, so the label anchor
