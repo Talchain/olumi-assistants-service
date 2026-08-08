@@ -942,10 +942,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // enumeration, or a brief whose words reconcile with nothing on the graph
     // all yield `not_applicable`, which declares `mayNameLeadingOption: true`
     // and leaves both the headline and the persisted verdict byte-identical.
+    const snapshotOptionLabels = readGraphOptionLabels(snapshot.options);
     const intakeReconciliation = deriveIntakeOptionReconciliation(
       snapshot.briefText,
-      readGraphOptionLabels(snapshot.options).length > 0
-        ? readGraphOptionLabels(snapshot.options)
+      snapshotOptionLabels.length > 0
+        ? snapshotOptionLabels
         : readGraphOptionLabels(snapshot.rawPersistedGraph ?? snapshot.graph),
     );
     // ⚠ NO TELEMETRY EVENT HERE, AND THAT IS A DISCLOSED GAP RATHER THAN AN
