@@ -19,6 +19,13 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { extractJsonFromResponse } from "../../src/utils/json-extractor.js";
 import { isUsableDraftDocument } from "../../src/adapters/llm/draft-document-acceptance.js";
+import {
+  normaliseDraftResponse,
+  ensureControllableFactorBaselines,
+  stripModelAuthoredGoalThreshold,
+} from "../../src/adapters/llm/normalisation.js";
+import { LLMDraftResponse } from "../../src/adapters/llm/shared-schemas.js";
+import { validateGraph } from "../../src/validators/graph-validator.js";
 
 const FIXTURES = join(__dirname, "../fixtures/multi-document-draft-2026-08-09");
 const capture = (n: number): string => readFileSync(join(FIXTURES, `armD-${n}.txt`), "utf8");
@@ -70,6 +77,34 @@ describe("isUsableDraftDocument", () => {
     const doc = extractJsonFromResponse(capture(1), { logWarnings: false }).json as Record<string, unknown>;
     expect(doc.edges).toBeUndefined();
     expect(doc.edges_placeholder).toBeDefined();
+    expect(isUsableDraftDocument(doc)).toBe(false);
+  });
+
+  it("rejects a document that validateGraph accepts but the ADAPTER'S SCHEMA does not", () => {
+    // Why this test exists: without it, deleting the `LLMDraftResponse.safeParse`
+    // step leaves every other assertion in this file green — the arm-D corpus
+    // alone cannot see the difference, because on that corpus the schema parse
+    // never changes a verdict. Dropping it would let the selector choose a
+    // document the draft path then THROWS on, turning a merely-unusable draft
+    // into a hard failure. The predicate must be at least as strict as the
+    // pipeline's own acceptance, and this is what pins that.
+    const doc = structuredClone(
+      extractJsonFromResponse(capture(3), { logWarnings: false }).json,
+    ) as Record<string, unknown>;
+    doc.rationales = [{ target: 5, why: "a number is not a target id" }];
+
+    // PRECONDITION, asserted in-test so this can never quietly stop
+    // discriminating: the structural validator DOES accept this document.
+    // (Same normalisation the predicate runs, so the two verdicts are
+    // comparable.)
+    const probe = structuredClone(doc);
+    stripModelAuthoredGoalThreshold(probe);
+    const { response } = ensureControllableFactorBaselines(normaliseDraftResponse(probe));
+    const asGraph = response as { nodes: unknown[]; edges: unknown[] };
+    expect(validateGraph({ graph: { nodes: asGraph.nodes, edges: asGraph.edges } as never }).valid).toBe(true);
+    expect(LLMDraftResponse.safeParse(response).success).toBe(false);
+
+    // THE PROPERTY.
     expect(isUsableDraftDocument(doc)).toBe(false);
   });
 
