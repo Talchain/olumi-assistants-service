@@ -16,6 +16,7 @@ import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from ".
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
+import { isUsableDraftDocument } from "./draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import {
@@ -1696,6 +1697,11 @@ export async function draftGraphWithAnthropic(
           model,
           correlationId: idempotencyKey,
           includeRawContent: args.includeDebug, // Preserve full raw text for debugging
+          // ROADMAP 2.996 — this path (and ONLY this path) sees the model's
+          // "partial object, then prose, then the real object" pattern. The
+          // predicate keeps the first document whenever it is usable; a later
+          // document is consulted only when the first is not.
+          acceptDocument: isUsableDraftDocument,
         }, "draft_graph", providerLatencyMs, idempotencyKey);
         rawJson = extractionResult.json as Record<string, unknown>;
       }

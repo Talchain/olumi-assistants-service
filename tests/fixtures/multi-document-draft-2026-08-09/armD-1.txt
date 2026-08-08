@@ -1,0 +1,23 @@
+{
+  "nodes": [
+    {"id": "dec_crm", "kind": "decision", "label": "CRM Replacement vs Training Investment Decision"},
+
+    {"id": "opt_replace", "kind": "option", "label": "Replace CRM This Year",
+     "data": {"interventions": {"fac_migration_investment": 0.7, "fac_training_investment": 0.2}}, "is_baseline": false},
+    {"id": "opt_train", "kind": "option", "label": "Keep Current CRM and Invest in Training",
+     "data": {"interventions": {"fac_migration_investment": 0.0, "fac_training_investment": 0.7}}, "is_baseline": false},
+    {"id": "opt_hybrid", "kind": "option", "label": "Pilot New CRM with One Team While Training Others",
+     "data": {"interventions": {"fac_migration_investment": 0.3, "fac_training_investment": 0.4}}, "is_baseline": false},
+    {"id": "opt_status_quo", "kind": "option", "label": "Keep Current CRM, No Change (Status Quo)",
+     "data": {"interventions": {"fac_migration_investment": 0.0, "fac_training_investment": 0.0}}, "is_baseline": true}
+  ],
+  "nodes_continued_note": "see full nodes array below",
+
+  "edges_placeholder": "see full edges array below",
+
+  "goal_constraints": [],
+
+  "causal_claims": [],
+
+  "coaching": {}
+}

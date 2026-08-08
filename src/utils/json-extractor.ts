@@ -27,10 +27,25 @@ export interface JsonExtractionResult {
   /** Characters of suffix text that was stripped */
   suffixLength?: number;
   /** The extraction method used */
-  extractionMethod?: "fast_path" | "code_block" | "boundary" | "bracket_matching";
+  extractionMethod?: "fast_path" | "code_block" | "boundary" | "bracket_matching" | "document_selection";
   /** The full raw content before extraction (for debugging) */
   rawContent?: string;
+  /**
+   * ROADMAP 2.996 — index (within the response's top-level JSON documents) of
+   * the document that was selected by `acceptDocument`. Present ONLY when a
+   * LATER document displaced the first one; absent on every other result, so a
+   * first-document outcome is byte-identical to the pre-2.996 result.
+   */
+  documentIndex?: number;
 }
+
+/**
+ * ROADMAP 2.996 — the total number of top-level JSON documents the selector
+ * will ever evaluate for one response, INCLUDING the core extractor's own
+ * result. Bounds the cost of `acceptDocument` (which on the draft path runs a
+ * schema parse + a full graph validation per candidate).
+ */
+export const MAX_SELECTABLE_DOCUMENTS = 8;
 
 /**
  * Options for JSON extraction
@@ -46,6 +61,31 @@ export interface JsonExtractionOptions {
   logWarnings?: boolean;
   /** Whether to include raw content in result (for debugging) */
   includeRawContent?: boolean;
+  /**
+   * ROADMAP 2.996 — OPT-IN multi-document selection.
+   *
+   * When supplied, the caller's predicate decides whether the document the core
+   * extractor chose is USABLE. If it is, that result is returned verbatim and
+   * nothing else is parsed. If it is NOT, the remaining top-level documents in
+   * the response are tried in order and the FIRST accepted one is returned.
+   *
+   * Why: on the no-structured-outputs draft path the model often emits a
+   * deliberately-partial first object, then prose ("let me actually build this
+   * out properly"), then a second COMPLETE object. First-document-wins
+   * discarded the finished graph in 7 of 15 captures on 2026-08-09.
+   *
+   * Two properties this shape guarantees, and they are why it is a predicate
+   * rather than a score:
+   *   1. An accepted first document is NEVER displaced — so a complete first
+   *      document followed by a truncated second still yields the first.
+   *   2. When NO document is accepted, the core extractor's result is returned
+   *      unchanged — so the fix can only ever turn an unusable outcome into a
+   *      usable one; it can never alter an outcome that was already usable, nor
+   *      one that no candidate could rescue.
+   *
+   * The predicate must be TOTAL: a throw is treated as a rejection.
+   */
+  acceptDocument?: (json: unknown) => boolean;
 }
 
 /**
@@ -56,12 +96,32 @@ export interface JsonExtractionOptions {
  * 2. Try extracting from markdown code blocks (```json ... ```) - scans ALL blocks
  * 3. Try bracket-matching from each candidate `{` or `[` position until valid JSON found
  *
+ * ROADMAP 2.996: when `options.acceptDocument` is supplied this delegates to
+ * `extractJsonFromResponseCore` FIRST and returns its result untouched unless
+ * the predicate rejects it — see `selectAcceptedDocument` below. Without the
+ * option, this function is exactly `extractJsonFromResponseCore`.
+ *
  * @param content - Raw LLM response content
  * @param options - Extraction options for telemetry
  * @returns Extraction result with parsed JSON and metadata
  * @throws Error if no valid JSON can be extracted
  */
 export function extractJsonFromResponse(
+  content: string,
+  options: JsonExtractionOptions = {}
+): JsonExtractionResult {
+  const coreResult = extractJsonFromResponseCore(content, options);
+  const { acceptDocument } = options;
+  if (!acceptDocument) return coreResult;
+  return selectAcceptedDocument(content, coreResult, acceptDocument, options) ?? coreResult;
+}
+
+/**
+ * The extraction algorithm. UNCHANGED by 2.996 — every pre-2.996 call reaches
+ * this directly, and a 2.996 caller whose first document is accepted gets this
+ * result verbatim.
+ */
+function extractJsonFromResponseCore(
   content: string,
   options: JsonExtractionOptions = {}
 ): JsonExtractionResult {
@@ -237,6 +297,137 @@ export function extractJsonFromResponse(
   throw new Error(
     `Failed to extract valid JSON from response: tried ${candidates.length} candidate position(s)`
   );
+}
+
+/**
+ * ROADMAP 2.996 — enumerate the NON-OVERLAPPING top-level JSON documents in a
+ * response, left to right.
+ *
+ * Uses the SAME bracket matcher the core extractor uses, so a "document" here
+ * is exactly what the core extractor would have accepted at that offset — there
+ * is no second parser and no second definition of a document. A position whose
+ * bracket match does not parse is skipped (this is how brace-bearing prose,
+ * e.g. "use `{foo}`", is stepped over).
+ *
+ * @param trimmed - the TRIMMED response text (offsets are relative to it)
+ * @param maxDocuments - hard cap on documents returned (cost bound)
+ */
+export function enumerateTopLevelJsonDocuments(
+  trimmed: string,
+  maxDocuments: number = MAX_SELECTABLE_DOCUMENTS
+): Array<{ json: unknown; content: string; startIndex: number }> {
+  const documents: Array<{ json: unknown; content: string; startIndex: number }> = [];
+  let i = 0;
+  while (i < trimmed.length && documents.length < maxDocuments) {
+    const ch = trimmed[i];
+    if (ch !== "{" && ch !== "[") {
+      i++;
+      continue;
+    }
+    const match = extractJsonWithBracketMatching(trimmed, i);
+    if (!match) {
+      i++;
+      continue;
+    }
+    documents.push({ json: match.json, content: match.content, startIndex: i });
+    i += match.content.length;
+  }
+  return documents;
+}
+
+/**
+ * ROADMAP 2.996 — return a LATER document that the predicate accepts, or `null`
+ * to keep the core extractor's result.
+ *
+ * Returns `null` (i.e. changes nothing) in every one of these cases:
+ *   - the core result is already accepted;
+ *   - the whole response was a single document (`fast_path` — nothing follows);
+ *   - the response holds only one top-level document;
+ *   - no later document is accepted.
+ *
+ * A predicate that throws counts as a rejection: extraction must never fail
+ * because a caller's scorer did.
+ */
+function selectAcceptedDocument(
+  content: string,
+  coreResult: JsonExtractionResult,
+  acceptDocument: (json: unknown) => boolean,
+  options: JsonExtractionOptions
+): JsonExtractionResult | null {
+  const { task, model, correlationId, logWarnings = true, includeRawContent = false } = options;
+
+  let budget = MAX_SELECTABLE_DOCUMENTS;
+  const accepts = (json: unknown): boolean => {
+    budget--;
+    try {
+      return acceptDocument(json);
+    } catch {
+      return false;
+    }
+  };
+
+  if (accepts(coreResult.json)) return null;
+
+  // `fast_path` means the ENTIRE response parsed as one JSON value: there is no
+  // second document to find, so the scan is provably pointless.
+  if (coreResult.extractionMethod === "fast_path") return null;
+
+  const trimmed = content.trim();
+  const documents = enumerateTopLevelJsonDocuments(trimmed, MAX_SELECTABLE_DOCUMENTS);
+  if (documents.length <= 1) return null;
+
+  for (let index = 0; index < documents.length; index++) {
+    if (budget <= 0) break;
+    const doc = documents[index];
+    // Skip the document the core extractor already chose (and we already
+    // rejected) rather than paying for the predicate twice. Identified by
+    // POSITION as well as content: a response can repeat the same document
+    // text, and matching on content alone would skip every one of them
+    // (assertions and skips alike must bind to the object, not to a value
+    // another object can satisfy).
+    if (doc.startIndex === coreResult.preambleLength && doc.content === coreResult.extractedContent) {
+      continue;
+    }
+    if (!accepts(doc.json)) continue;
+
+    const suffixLength = trimmed.length - (doc.startIndex + doc.content.length);
+    if (logWarnings) {
+      log.warn(
+        {
+          task,
+          model,
+          correlationId,
+          extraction_method: "document_selection",
+          document_index: index,
+          total_documents: documents.length,
+          rejected_first_document_bytes: coreResult.extractedContent?.length,
+          selected_document_bytes: doc.content.length,
+        },
+        "Multi-document response: the first JSON document was rejected by the caller's acceptance predicate; a later complete document was selected (ROADMAP 2.996)"
+      );
+    }
+    emit("llm.json_extraction.document_selected", {
+      task,
+      model,
+      document_index: index,
+      total_documents: documents.length,
+      selected_document_bytes: doc.content.length,
+      rejected_first_document_bytes: coreResult.extractedContent?.length ?? 0,
+    });
+
+    return {
+      json: doc.json,
+      wasExtracted: true,
+      extractedContent: doc.content,
+      preambleLength: doc.startIndex,
+      suffixLength,
+      extractionMethod: "document_selection",
+      documentIndex: index,
+      rawContent: includeRawContent ? content : undefined,
+    };
+  }
+
+  return null;
 }
 
 /**
