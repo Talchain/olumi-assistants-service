@@ -67,6 +67,9 @@ export interface NotModelledItem {
    *  IDENTITY — consumers must address items by it, never by value. */
   readonly char_offset: number;
   readonly verdict: QuantityVerdict;
+  /** The modelled quantity this figure was matched to, when matched
+   *  numerically. Null for a text match or no match. */
+  readonly matched_node_id: string | null;
 }
 
 export interface NotModelledManifest {
@@ -180,7 +183,10 @@ const UNIT_WORDS =
  */
 const QUANTITY_RE = new RegExp(
   [
-    `(?<money>(?<mcur>[£€$])\\s?(?<mnum>\\d[\\d,]*(?:\\.\\d+)?)\\s?(?<mmag>bn|[kmb])?)(?![\\d])`,
+    // The sign is part of the user's literal. Without it "-£2m" was quoted
+    // back to them as "£2m" — misreporting their own words, and inverting the
+    // meaning of a figure that is very often a loss.
+    `(?<money>(?<msign>-)?(?<mcur>[£€$])\\s?(?<mnum>\\d[\\d,]*(?:\\.\\d+)?)\\s?(?<mmag>bn|[kmb])?)(?![\\d])`,
     `(?<percent>(?<pnum>\\d[\\d,]*(?:\\.\\d+)?)\\s?%)`,
     `(?<date>(?:\\d{1,2}\\s+)?(?:${MONTHS})\\s+\\d{4})`,
     `(?<period>(?:FY\\s?\\d{2,4}|Q[1-4]\\s?\\d{4}|Q[1-4]\\b))`,
@@ -198,9 +204,24 @@ interface Quantity {
   readonly value: number | null;
   /** As written (£11.2m -> 11.2). Models store either form; both count. */
   readonly mantissa: number | null;
+  /** Currency symbol for money, "%" for percent, null otherwise. Load-bearing:
+   *  it is what stops a count matching a currency-denominated carrier. */
+  readonly unit: string | null;
 }
 
 const toNumber = (raw: string): number => Number(raw.replace(/,/g, ""));
+
+/** The unit WORD a count was stated in ("8 people" -> "people"). Load-bearing:
+ *  it is the only thing that can tell a headcount from a Trustpilot score. */
+function countUnitWord(literal: string): string | null {
+  const m = literal.match(new RegExp(`(${UNIT_WORDS})$`, "i"));
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** Singular/plural-tolerant stem, so "people"/"person" and "month"/"months"
+ *  compare equal. Deliberately crude: it only has to separate unit FAMILIES. */
+const stem = (w: string): string =>
+  w.toLowerCase().replace(/(ies|es|s)$/, "").replace(/^(people|person)$/, "person");
 
 export function extractStatedQuantities(text: string): Quantity[] {
   const out: Quantity[] = [];
@@ -209,22 +230,23 @@ export function extractStatedQuantities(text: string): Quantity[] {
     const at = m.index ?? 0;
     const literal = m[0];
     if (g.money !== undefined && g.mnum !== undefined) {
-      const base = toNumber(g.mnum);
+      const sign = g.msign === "-" ? -1 : 1;
+      const base = toNumber(g.mnum) * sign;
       const mag = g.mmag ? (MAGNITUDE[g.mmag.toLowerCase()] ?? 1) : 1;
-      out.push({ literal, at, kind: "money", value: base * mag, mantissa: base });
+      out.push({ literal, at, kind: "money", value: base * mag, mantissa: base, unit: g.mcur ?? null });
     } else if (g.percent !== undefined && g.pnum !== undefined) {
       const v = toNumber(g.pnum);
-      out.push({ literal, at, kind: "percent", value: v, mantissa: v });
+      out.push({ literal, at, kind: "percent", value: v, mantissa: v, unit: "%" });
     } else if (g.date !== undefined) {
-      out.push({ literal, at, kind: "date", value: null, mantissa: null });
+      out.push({ literal, at, kind: "date", value: null, mantissa: null, unit: null });
     } else if (g.period !== undefined) {
-      out.push({ literal, at, kind: "period", value: null, mantissa: null });
+      out.push({ literal, at, kind: "period", value: null, mantissa: null, unit: null });
     } else if (g.counted !== undefined && g.cnum !== undefined) {
       const v = toNumber(g.cnum);
-      out.push({ literal, at, kind: "count", value: v, mantissa: v });
+      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal) });
     } else if (g.hyph !== undefined && g.hnum !== undefined) {
       const v = toNumber(g.hnum);
-      out.push({ literal, at, kind: "count", value: v, mantissa: v });
+      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal) });
     }
   }
   return out;
@@ -440,50 +462,146 @@ function readDeclaredExclusions(
   return { status: items.length > 0 ? "reported" : "none_reported", items };
 }
 
+/**
+ * A NAMED, UNITED quantity the model actually carries.
+ *
+ * ⚠ THIS TYPE IS THE FIX FOR A REAL DEFECT. The first version matched a stated
+ * quantity against every number anywhere in the model subtree, unit-blind.
+ * Measured on all three real graphs, that made ordinary input false:
+ *
+ *     "We need to decide within 1 year."   -> reported as USED
+ *     "It has 1 month of runway left."     -> reported as USED
+ *     "We can spend £0.75m on marketing."  -> reported as USED
+ *
+ * The `1` came from 46x `edges[].strength.mean` and 46x
+ * `edges[].exists_probability` — topology metadata that is not a user-facing
+ * quantity at all — and `0.75` from a unitless prior bound. 59/38/32 money
+ * mantissas had a collision target per graph.
+ *
+ * It is the SAME mechanism already rejected for percentages ("every stated
+ * percentage finds a coincidental match against some prior bound"); it was
+ * closed there and left open for money and counts. It is now closed generally:
+ * a match must NAME the modelled quantity it matched, in compatible units.
+ * A bag of numbers cannot do that, so the corpus is a list of named candidates.
+ */
+interface Candidate {
+  readonly nodeId: string;
+  readonly label: string;
+  /** Real-world value, already scaled by its declared unit (1.5 "£m" -> 1.5e6). */
+  readonly value: number;
+  readonly unitClass: "money" | "percent" | "other";
+  /** Currency symbol for money candidates, so € never matches £. */
+  readonly symbol: string | null;
+  /** The unit string the model declared, verbatim. A count can only match a
+   *  carrier that declares the same unit family. */
+  readonly declaredUnit: string | null;
+}
+
+const CURRENCY_SYMBOLS = ["£", "€", "$"] as const;
+
+/** Parse a declared unit string into a class, a currency symbol and a scale. */
+function parseUnit(unit: unknown): {
+  unitClass: Candidate["unitClass"];
+  symbol: string | null;
+  scale: number;
+} {
+  if (typeof unit !== "string" || unit.trim().length === 0) {
+    return { unitClass: "other", symbol: null, scale: 1 };
+  }
+  const u = unit.trim();
+  if (u === "%" || /percent/i.test(u)) return { unitClass: "percent", symbol: null, scale: 1 };
+  const symbol = CURRENCY_SYMBOLS.find((c) => u.includes(c)) ?? null;
+  if (symbol !== null) {
+    const suffix = u.replace(symbol, "").trim().toLowerCase();
+    const scale = suffix === "" ? 1 : (MAGNITUDE[suffix] ?? 1);
+    return { unitClass: "money", symbol, scale };
+  }
+  return { unitClass: "other", symbol: null, scale: 1 };
+}
+
+/**
+ * Numeric candidates come ONLY from node/option value carriers that declare a
+ * unit alongside them. Everything else numeric in the graph — prior bounds
+ * (unitless [0,1]), intervention encodings (unitless 0..1), and the entire
+ * `edges` subtree (strength, exists_probability, validation passes) — is
+ * DELIBERATELY EXCLUDED. Those numbers are how the model computes, not what it
+ * is claiming about the world, and matching against them is how a stated
+ * quantity gets "found" in a model that never carried it.
+ */
+function collectCandidates(graph: Record<string, unknown>): Candidate[] {
+  const out: Candidate[] = [];
+  const collections = ["nodes", "options"] as const;
+  for (const key of collections) {
+    const entries = graph[key];
+    if (!Array.isArray(entries)) continue;
+    for (const raw of entries) {
+      if (raw === null || typeof raw !== "object") continue;
+      const node = raw as Record<string, unknown>;
+      const nodeId = typeof node.id === "string" ? node.id : null;
+      const label = typeof node.label === "string" ? node.label : null;
+      if (nodeId === null || label === null) continue;
+
+      // Each carrier is (values..., unit) taken from the SAME object, so a
+      // value can never borrow a unit from elsewhere.
+      const carriers: Array<Record<string, unknown>> = [node];
+      for (const nested of ["observed_state", "data"] as const) {
+        const v = node[nested];
+        if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
+      }
+      for (const carrier of carriers) {
+        const { unitClass, symbol, scale } = parseUnit(carrier.unit);
+        for (const field of ["value", "raw", "raw_value", "cap"] as const) {
+          const v = carrier[field];
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          out.push({
+            nodeId,
+            label,
+            value: v * scale,
+            unitClass,
+            symbol,
+            declaredUnit: typeof carrier.unit === "string" ? carrier.unit : null,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 interface Surfaces {
-  readonly modelNumbers: ReadonlySet<number>;
+  readonly candidates: readonly Candidate[];
   readonly modelStrings: readonly string[];
-  readonly proseNumbers: ReadonlySet<number>;
   readonly proseStrings: readonly string[];
 }
 
 function splitSurfaces(graph: Record<string, unknown>): Surfaces {
-  const modelNumbers = new Set<number>();
-  const proseNumbers = new Set<number>();
   const modelStrings: string[] = [];
   const proseStrings: string[] = [];
 
-  const walk = (node: unknown, inProse: boolean): void => {
+  const walkText = (node: unknown, inProse: boolean): void => {
     if (node === null || node === undefined) return;
-    if (typeof node === "number") {
-      (inProse ? proseNumbers : modelNumbers).add(node);
-      return;
-    }
     if (typeof node === "string") {
       (inProse ? proseStrings : modelStrings).push(node);
       return;
     }
     if (Array.isArray(node)) {
-      for (const v of node) walk(v, inProse);
+      for (const v of node) walkText(v, inProse);
       return;
     }
     if (typeof node === "object") {
       for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-        // The exclusion record is reported separately and verbatim; a figure
-        // that appears ONLY there is absent from the model, not "mentioned in
-        // the explanation", so it must not be scored against either surface.
         if (k === "widening_log") continue;
-        walk(v, inProse || PROSE_KEYS.has(k));
+        walkText(v, inProse || PROSE_KEYS.has(k));
       }
     }
   };
 
   for (const [k, v] of Object.entries(graph)) {
-    if (!NON_MODEL_TOP_KEYS.has(k)) walk(v, false);
-    else if (PROSE_TOP_KEYS.has(k)) walk(v, true);
+    if (!NON_MODEL_TOP_KEYS.has(k)) walkText(v, false);
+    else if (PROSE_TOP_KEYS.has(k)) walkText(v, true);
   }
 
-  return { modelNumbers, modelStrings, proseNumbers, proseStrings };
+  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
 }
 
 // ── matching ────────────────────────────────────────────────────────────────
@@ -524,31 +642,70 @@ function appearsInStrings(q: Quantity, strings: readonly string[]): boolean {
 }
 
 /**
- * ⚠ MEASURED AND REJECTED, 2026-08-08: accepting a FRACTION form for a
- * percentage (34% ~ 0.34).
+ * Is this modelled quantity a plausible carrier of what the user stated?
  *
- * It looks like the safe, generous reading. It is not. This pipeline emits
- * unitless priors on [0,1] constantly, so every stated percentage finds a
- * coincidental match against some prior bound. On brief B3 the rule flipped
- * EIGHT quantities from `absent` to `in_model` against an independent oracle of
- * ONE — turning the manifest into precisely the reassuring falsehood it exists
- * to prevent. A percentage counts as retained only if the model carries it AS a
- * percentage: the number 34, or the literal "34%" in a label or unit.
+ * ⚠ MEASURED AND REJECTED for percentages, 2026-08-08: accepting a FRACTION
+ * form (34% ~ 0.34). This pipeline emits unitless priors on [0,1] constantly,
+ * so every stated percentage found a coincidental match. On brief B3 it
+ * flipped EIGHT quantities from `absent` to `in_model` against an independent
+ * oracle of ONE.
+ *
+ * ⚠ AND THE SAME MECHANISM, GENERALISED, 2026-08-09: magnitude agreement alone
+ * is not evidence for ANY class. `fac_headcount_budget` carries `cap: 8` under
+ * unit `"£m"`, so "8 people" and "£8m" are indistinguishable by magnitude and
+ * mean completely different things.
  */
-function classify(q: Quantity, s: Surfaces): QuantityVerdict {
-  if (q.value !== null && q.mantissa !== null) {
-    for (const n of s.modelNumbers) {
-      if (numbersEqual(n, q.value) || numbersEqual(n, q.mantissa)) return "in_model";
+function unitCompatible(q: Quantity, c: Candidate): boolean {
+  switch (q.kind) {
+    case "money":
+      // Same currency, or it is not the user's figure. The trace measured a
+      // real €900k -> £1.6m swap; a matcher blind to the symbol would have
+      // reported that swap as the user's own number.
+      return c.unitClass === "money" && c.symbol === q.unit;
+    case "percent":
+      return c.unitClass === "percent";
+    case "count": {
+      // ⚠ A COUNT MUST NAME ITS UNIT, AND THE CARRIER MUST DECLARE THE SAME
+      // ONE. Measured 2026-08-09 against the real graphs: allowing a count to
+      // match any non-money carrier made "5 people on the team" match
+      // `out_csat`'s cap of 5 — declared unit "Trustpilot score" — and "1
+      // year" / "1 month" / "1 engineer" all match `fac_automation_scale`'s
+      // cap of 1, declared unit "scale". Those are not the user's figures.
+      // Requiring the unit family to agree makes counts match rarely and
+      // honestly; a count that cannot be verified falls to "not modelled yet",
+      // which invites the user to add it rather than claiming we used it.
+      if (q.unit === null || c.declaredUnit === null) return false;
+      return stem(q.unit) === stem(c.declaredUnit);
     }
+    default:
+      // Dates and periods carry no magnitude; they match on text only.
+      return false;
   }
-  if (appearsInStrings(q, s.modelStrings)) return "in_model";
-  if (q.value !== null && q.mantissa !== null) {
-    for (const n of s.proseNumbers) {
-      if (numbersEqual(n, q.value) || numbersEqual(n, q.mantissa)) return "prose_only";
-    }
+}
+
+/** The candidate this quantity matches, or null — NAMED, so a match can always
+ *  say WHICH modelled quantity it is claiming. */
+function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
+  if (q.value === null) return null;
+  for (const c of candidates) {
+    if (!unitCompatible(q, c)) continue;
+    if (numbersEqual(c.value, q.value)) return c;
   }
-  if (appearsInStrings(q, s.proseStrings)) return "prose_only";
-  return "absent";
+  return null;
+}
+
+function classify(
+  q: Quantity,
+  s: Surfaces,
+): { verdict: QuantityVerdict; matched: Candidate | null } {
+  const matched = matchCandidate(q, s.candidates);
+  if (matched !== null) return { verdict: "in_model", matched };
+  // Text is the second route: a figure written into a label, a unit string or
+  // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")
+  // is genuinely carried by the model even though it is not a numeric field.
+  if (appearsInStrings(q, s.modelStrings)) return { verdict: "in_model", matched: null };
+  if (appearsInStrings(q, s.proseStrings)) return { verdict: "prose_only", matched: null };
+  return { verdict: "absent", matched: null };
 }
 
 // ── the derivation ──────────────────────────────────────────────────────────
@@ -608,7 +765,7 @@ export function deriveNotModelledManifest(
   let absent = 0;
 
   for (const q of quantities) {
-    const verdict = classify(q, surfaces);
+    const { verdict, matched } = classify(q, surfaces);
     if (verdict === "in_model") inModel += 1;
     else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
@@ -618,6 +775,9 @@ export function deriveNotModelledManifest(
         kind: q.kind,
         char_offset: q.at,
         verdict,
+        // Which modelled quantity this figure was matched to. Null for a text
+        // match. A numeric match that cannot name its carrier is not a match.
+        matched_node_id: matched?.nodeId ?? null,
       });
     }
   }

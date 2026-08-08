@@ -128,13 +128,47 @@ describe("B1 growth brief — oracle: loss-map B1 per-atom table", () => {
     expect(statedItem(B1, "€400m").verdict).toBe("absent");
   });
 
-  it("reports the two surviving caps as in_model (atoms A19, A20)", () => {
+  it("reports the surviving marketing cap as in_model (atom A20)", () => {
     // The constraint chain demonstrably works where a cap-bearing factor is
-    // drafted. The manifest must NOT cry loss over these, or it becomes noise.
-    // Note the two representations: cap 8 (expanded) and cap 1.5 with unit "£m"
-    // (mantissa). Both must count.
-    expect(statedItem(B1, "8 people").verdict).toBe("in_model");
-    expect(statedItem(B1, "£1.5m").verdict).toBe("in_model");
+    // drafted. The manifest must NOT cry loss over this, or it becomes noise.
+    // `fac_marketing_spend` carries cap 1.5 under unit "£m" — same currency,
+    // and 1.5 x 10^6 is exactly what the brief said.
+    const item = statedItem(B1, "£1.5m");
+    expect(item.verdict).toBe("in_model");
+    // A numeric match must NAME its carrier, or it is not a match.
+    expect(item.matched_node_id).toBe("fac_marketing_spend");
+  });
+
+  it("does NOT claim the headcount cap, whose declared unit is money (atom A19)", () => {
+    // ⚠ A DELIBERATE DIVERGENCE FROM THE TRACE'S GRADING, and the reason
+    // matters. The trace graded A19 "faithful (constraint→cap)" because the
+    // number 8 reached the graph. That answers "did the value arrive?". This
+    // surface makes a STRICTER claim to the user — "the model is using your
+    // figure" — and a unit mismatch defeats it: `fac_headcount_budget` records
+    // that cap under unit "£m", so what the model holds is £8m, not 8 hires.
+    //
+    // Two different questions under one number (trap 21). Telling the user
+    // their hiring constraint is in the model, when what is in the model is a
+    // money cap, is exactly the confident-false-statement this panel exists to
+    // stop. Falling to "not modelled yet" invites them to add it — the
+    // recoverable direction.
+    expect(statedItem(B1, "8 people").verdict).not.toBe("in_model");
+
+    // PRECONDITION, pinned in-test so this cannot pass by the cap having
+    // vanished from the fixture: the carrier really is there, really is 8, and
+    // really declares a money unit.
+    const nodes = B1.graph.nodes as Array<Record<string, unknown>>;
+    const headcount = nodes.find((n) => n.id === "fac_headcount_budget");
+    const observed = headcount?.observed_state as Record<string, unknown>;
+    expect(observed.cap).toBe(8);
+    expect(observed.unit).toBe("£m");
+
+    // And the pair partner: the SAME magnitude stated as money DOES match it,
+    // so the rule discriminates on unit rather than simply refusing counts.
+    const asMoney = deriveNotModelledManifest("We can spend £8m on this.", B1.graph);
+    const eightMillion = asMoney.quantities?.items.find((i) => i.literal === "£8m");
+    expect(eightMillion?.verdict).toBe("in_model");
+    expect(eightMillion?.matched_node_id).toBe("fac_headcount_budget");
   });
 
   it("reports the goal figure as in_model (atom A07)", () => {
@@ -373,6 +407,86 @@ describe("what the product ESTIMATED — derived from evidence, not from labels"
     const m = deriveNotModelledManifest(B1.brief_text, null);
     expect(m.inferred_factors.status).toBe("not_recorded");
     expect(m.inferred_factors.items).toEqual([]);
+  });
+});
+
+describe("ORDINARY INPUT MUST NOT COLLIDE WITH TOPOLOGY — the corpus is external", () => {
+  /**
+   * ⚠ THIS CORPUS IS DELIBERATELY NOT DRAWN FROM THE THREE BRIEFS, because the
+   * three briefs are exactly where this defect hid (trap 22: a corpus from the
+   * author's head cannot see the class the author did not imagine).
+   *
+   * The first matcher compared a stated quantity against EVERY number anywhere
+   * in the model subtree, unit-blind. On the real deployed graphs that made
+   * ordinary sentences false — "within 1 year" matched one of 46
+   * `edges[].exists_probability` values; "£0.75m" matched a unitless prior
+   * bound; "5 people" matched `out_csat`'s cap of 5, declared unit "Trustpilot
+   * score". None of those is a user-facing quantity.
+   *
+   * Every sentence here states a figure NO graph legitimately carries, so any
+   * verdict other than `absent` is a collision.
+   */
+  const ORDINARY = [
+    "We need to decide within 1 year.",
+    "It has 1 month of runway left.",
+    "We have 1 engineer free.",
+    "There are 5 people on the team.",
+    "Give it 2 quarters.",
+    "Attrition sits at 1%.",
+    "Churn is 0.5%.",
+    "We can spend £0.75m on marketing.",
+    "We lose £0.5m a quarter.",
+    "Payback is 3 years.",
+    "We need 8 weeks.",
+  ];
+
+  it.each([
+    ["B1", B1],
+    ["B2", B2],
+    ["B3", B3],
+  ])("%s: no ordinary figure is falsely reported as used", (_name, capture) => {
+    for (const sentence of ORDINARY) {
+      const m = deriveNotModelledManifest(sentence, capture.graph);
+      const items = m.quantities?.items ?? [];
+      // POSITIVE CONTROL: the sentence must actually yield a quantity, or the
+      // assertion below passes by there being nothing to check (trap 13).
+      expect(items.length, `"${sentence}" must yield a quantity`).toBeGreaterThan(0);
+      for (const item of items) {
+        expect(
+          item.verdict,
+          `"${sentence}" -> "${item.literal}" wrongly reported ${item.verdict}` +
+            (item.matched_node_id ? ` against ${item.matched_node_id}` : ""),
+        ).toBe("absent");
+      }
+    }
+  });
+
+  it("DISCRIMINATION: a figure the graph really carries is still reported as used", () => {
+    // Without this, every row above could pass on a matcher that never matches
+    // anything. B1 carries current marketing spend as 0.3 under unit "£m".
+    const m = deriveNotModelledManifest("Budget of £0.3m for marketing.", B1.graph);
+    const item = m.quantities?.items.find((i) => i.literal === "£0.3m");
+    expect(item?.verdict).toBe("in_model");
+    expect(item?.matched_node_id).toBe("fac_marketing_spend");
+  });
+
+  it("does not match across currencies", () => {
+    // The trace measured a real €900k -> £1.6m swap. A matcher blind to the
+    // symbol would report that swap as the user's own number.
+    const m = deriveNotModelledManifest("Marketing is capped at €1.5m.", B1.graph);
+    expect(m.quantities?.items.find((i) => i.literal === "€1.5m")?.verdict).toBe("absent");
+  });
+
+  it("topology metadata is not a candidate at all", () => {
+    // The mechanism, pinned directly rather than only through its symptoms.
+    // B1 carries 46 edges whose `exists_probability` is 1; none may be offered
+    // as evidence that a user's "1" reached the model.
+    const edges = B1.graph.edges as Array<Record<string, unknown>>;
+    const ones = edges.filter((e) => e.exists_probability === 1);
+    expect(ones.length, "fixture must carry the collision targets").toBeGreaterThan(10);
+
+    const m = deriveNotModelledManifest("Give us 1 quarter.", B1.graph);
+    expect(m.quantities?.items[0]?.verdict).toBe("absent");
   });
 });
 
