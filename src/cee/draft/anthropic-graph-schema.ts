@@ -142,6 +142,19 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
     // declared further below as required top-level fields.
     nodes: {
       type: "array",
+      // Same structural hole as `edges` below, closed at the same time —
+      // required, typed as an array, previously with no length constraint, so
+      // `"nodes": []` was a strictly-conformant structured output.
+      //
+      // ⚠ SCOPE — THIS ONE IS PROPHYLACTIC, NOT A MEASURED FIX. Do not read it
+      // as part of the 2026-08-08 regression. Every failing event in that
+      // corpus carried NODES and no edges (`roots == leaves == nodes` is only
+      // expressible with nodes present), so an empty `nodes` array was NEVER
+      // OBSERVED and its reachability is UNKNOWN, not established. It is closed
+      // because the hole is identical, a zero-node draft graph is meaningless
+      // and rejected downstream regardless, and the keyword costs 13 bytes and
+      // no budget slot. The measured defect is `edges`.
+      minItems: 1,
       items: {
         type: "object",
         properties: {
@@ -317,6 +330,52 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
     },
     edges: {
       type: "array",
+      // P0 GUARD (2026-08-08) — `minItems: 1` makes the EMPTY edge list
+      // ungrammatical. Without it, 80% of sonnet-5 structured-outputs drafts
+      // 500'd.
+      //
+      // THE REGRESSION. Measured from the CEE Render log stream for 8 Aug
+      // (PHASE0-EVIDENCE-2026-07-28/structured-outputs-witness-2026-08-08.md
+      // §1.5/§2.5), partitioned by the two fields the producer itself logs:
+      //   claude-sonnet-4-6, structured_outputs_used:true   n=45  edges:0   0%
+      //   claude-sonnet-5,   structured_outputs_used:false  n=12  edges:0  25%
+      //   claude-sonnet-5,   structured_outputs_used:true   n=15  edges:0  80%
+      // Every failure logged `"edges":0` with `roots == leaves == nodes`, and
+      // downstream became a 500 (`draft_graph_cee_graph_invalid`,
+      // MISSING_BRIDGE / UNREACHABLE_FROM_DECISION / NO_PATH_TO_GOAL /
+      // NO_EFFECT_PATH). NOT a truncation: cap 8489, failing outputs 183-986
+      // tokens against 2465-2876 for a success. The emission STOPS after the
+      // node list because at that point the object is already complete and
+      // legal.
+      //
+      // `required` DOES NOT FIX THIS — and `edges` HAS ALWAYS BEEN REQUIRED
+      // (see the top-level `required` list below). `required` forces the KEY,
+      // never the CONTENT, and `[]` satisfies it perfectly. This is the exact
+      // defect the option-`interventions` P0 guard ~100 lines above documents
+      // from 2026-07-19, one level up the tree; that lane's measured arms were
+      //   optional -> 3/3 fail · required (the naive fix) -> 3/3 fail
+      //   optional + minItems: 1 -> 0/3 · no grammar -> 0/3
+      // Under prompt-only JSON the served prompt's own instructions kept edges
+      // flowing, which is why the fallback regime failed at 25% while the
+      // structured-outputs regime failed at 80%.
+      //
+      // ⚠ THE VALUE MUST BE 1. `enforceAnthropicSchemaCompliance` was REMOVED
+      // FROM THE RUNTIME (adapters/llm/anthropic.ts:65 — "compliant by
+      // construction"), so this object reaches the wire verbatim with nothing
+      // to sanitise it. Anthropic accepts `minItems` 0 or 1 ONLY
+      // (MIN_ITEMS_ALLOWED_VALUES; `minItems: 4` -> HTTP 400, live-probed
+      // 2026-07-19) and 0 is a documented NO-OP. A "stronger" value would 400
+      // EVERY draft rather than degrade quietly.
+      //
+      // Safe to pair with `required` here — unlike `interventions`, which had
+      // to stay optional because a factor node legitimately has none. A draft
+      // graph with nodes and NO edges has no causal structure at all and is
+      // rejected downstream by construction, so there is no legitimate
+      // response this forecloses.
+      // Costs no optional-parameter slot, no union slot, and 13 bytes
+      // (re-derived, not inherited: tests/unit/draft-grammar-edges-non-empty.test.ts).
+      // Guard: tests/unit/draft-grammar-edges-non-empty.test.ts
+      minItems: 1,
       items: {
         type: "object",
         properties: {
