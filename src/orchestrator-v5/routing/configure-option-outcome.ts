@@ -103,7 +103,12 @@ function readInterventions(
 ): Readonly<Record<string, number>> {
   const node = graph.nodes.find((n) => n.id === optionId);
   if (node === undefined) return {};
-  return mergeInterventionSources(node as unknown as Record<string, unknown>) ?? {};
+  // Single cast, matching `computeStructuralReadiness`'s own call site
+  // verbatim (`const nodeAny = opt as Record<string, unknown>`). Deliberately
+  // NOT an `as unknown as` double-cast: that is one of the three high-risk
+  // boundary patterns the forbidden-boundary ratchet freezes, and the reader
+  // this feeds is duck-typed precisely so callers do not need to force it.
+  return mergeInterventionSources(node as Record<string, unknown>) ?? {};
 }
 
 /**
