@@ -733,9 +733,21 @@ export function createAddConstraintHandler(): HandlerFn {
       //   - NON-ROOT target: ISL refuses roots (`root_target`) AND reads a
       //     root's observed value as its sample base, so a root mint buys
       //     nothing and moves the analysis instead;
-      //   - FILL-ONLY: an existing baseline — whatever wrote it — outranks
-      //     this mint; an existing observed_state is only extended when its
-      //     scale fields agree with the minted shape.
+      //   - FILL-ONLY, precisely scoped: an existing BASELINE — whatever wrote
+      //     it — outranks this mint and is never overwritten. An existing
+      //     observed_state WITHOUT a baseline is extended, and its `value` IS
+      //     replaced by the stated fraction (the user's own statement outranks
+      //     a model-drafted value — the same doctrine as the transform's goal
+      //     limb, 2.294) provided its scale fields (unit/cap) agree with the
+      //     minted shape; otherwise the whole mint is skipped.
+      //
+      // KNOWN RESIDUAL (paired with row 2.918, disclosed not discovered): a
+      // baseline minted from a statement the user later disavows cannot be
+      // corrected through THIS channel — fill-only means a restatement with a
+      // different number refuses rather than overwrites. The correction path
+      // is the elicitation/edit seam (2.918), which owns provenance-aware
+      // overwrite semantics; silently letting the newest parse win here would
+      // let one regex misread destroy a user-attested value.
       //
       // THE SHAPE {value: frac, baseline: frac, unit: 'fraction', cap: 1} is
       // the identity-scale declaration: PLoT's deriveRange resolves
