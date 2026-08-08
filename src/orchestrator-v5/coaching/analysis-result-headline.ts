@@ -83,6 +83,15 @@ import {
   CONSTRAINT_GAP_DISCLOSURE_RE_SRC,
   CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS,
 } from './constraint-gap-disclosure.js';
+// ROADMAP 2.579: the THIRD suffix that may ride on a run_analysis summary —
+// "an option your brief listed is not in the model". Same three pieces of
+// plumbing as its two siblings, for the same reason: shipped without them it
+// composes correctly and is then rejected here, and the user receives the
+// locked template with no error anywhere.
+import {
+  INTAKE_OPTION_DISCLOSURE_RE_SRC,
+  INTAKE_OPTION_DISCLOSURE_MAX_CHARS,
+} from './intake-option-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -220,7 +229,14 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // the handler's append order), and can co-occur with it — a scaffolded run
   // may also have an unevaluated ratified constraint. Same rule: budgeted from
   // the builder's own worst case, never hand-estimated.
-  CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS;
+  CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS +
+  // ROADMAP 2.579: the intake disclosure rides LAST (matching the handler's
+  // append order) and can co-occur with both of the above — a scaffolded run
+  // with an unevaluated constraint may ALSO be ranking an incomplete candidate
+  // set. Same rule: budgeted from the builder's own worst case, never
+  // hand-estimated, so an honest disclosure cannot knock the summary back to
+  // the locked template on length.
+  INTAKE_OPTION_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -376,6 +392,34 @@ export interface AnalysisResultHeadlineInput {
    * confident verdicts. Omitted / false ⇒ no change (byte-identical).
    */
   readonly constraint_identity_unresolved?: boolean;
+  /**
+   * ROADMAP 2.579. True when the brief ENUMERATED an option that is not on the
+   * graph being ranked — the `options_missing` state of
+   * `deriveIntakeOptionReconciliation`
+   * (`orchestrator/context/intake-option-reconciliation.ts`), derived by
+   * identity-matching the brief's own words against the graph's option labels.
+   *
+   * WHY THIS WITHHOLDS AND WHAT IT DOES NOT WITHHOLD. "{X} currently leads" is
+   * a claim about which option is BEST. It cannot be true over a candidate set
+   * that is missing a candidate — the option that was dropped never got a
+   * chance to win. The per-option numbers computed on the options that WERE
+   * captured are unaffected and stay on screen; only the ranking claim is
+   * withheld. That is 2.579's ruling in one line: block the ranking, not the
+   * analysis.
+   *
+   * DISTINCT FROM ALL THREE CONSTRAINT FLAGS ABOVE, and deliberately carried as
+   * its own input rather than folded into one of them (CLAUDE.md trap 21).
+   * Those answer "was the hard condition the user RATIFIED honoured by this
+   * result?" — a question about the RUN. This answers "does the candidate set
+   * match what the user ENUMERATED?" — a question about the INTAKE. A run can
+   * be `evaluated_feasible` on every ratified constraint and still be ranking
+   * four options out of five, and the repair steps have nothing in common:
+   * "re-state your condition in the same units" is useless to a user whose
+   * option went missing. Own flag, own reason code, own copy.
+   *
+   * Omitted / false ⇒ no change (byte-identical).
+   */
+  readonly intake_options_missing?: boolean;
 }
 
 /**
@@ -437,6 +481,13 @@ export type HeadlineFallbackReason =
   // Its own reason code, so a seam divergence can never be read off a dashboard
   // as an engine failure to evaluate.
   | 'constraint_identity_unresolved'
+  // ROADMAP 2.579: the brief enumerated an option that is not on the graph, so
+  // the candidate set being ranked is incomplete and the confident-lead
+  // headline is withheld (see AnalysisResultHeadlineInput.intake_options_missing).
+  // Deliberately separate from every constraint reason — this is a fact about
+  // the INTAKE, not about the run's evidence, and conflating them on the
+  // dashboard would hide a drafter defect inside a producer statistic.
+  | 'intake_options_missing'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -502,6 +553,38 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         reason: 'unsafe_label',
         has_leading_option: false,
         has_clean_label: false,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // ROADMAP 2.579: the brief enumerated an option that is not on the graph, so
+  // the set being ranked is not the set the user asked about. WITHHOLD the
+  // confident "{X} currently leads" headline — a "which is best" claim cannot
+  // be true over a candidate set missing a candidate. Placed AFTER
+  // resolveWinner (so the positive-control winner is still resolved for the
+  // descriptor) and BEFORE any "leads" case, exactly like its siblings.
+  //
+  // FIRST AMONG THE WITHHOLDING CHECKS, and the ordering is a claim, not a
+  // convenience: every constraint reason below presupposes there IS a
+  // well-formed candidate set for a leader to exist in, and says something
+  // about the EVIDENCE gathered on it. When the candidate set itself is
+  // incomplete that presupposition fails, so this is the more fundamental
+  // answer and the one telemetry should carry. Nothing is lost to the ordering
+  // on the USER-FACING side: the run_analysis handler appends the constraint
+  // disclosure AND the intake disclosure independently, so a turn that is both
+  // constraint-gapped and intake-incomplete still tells the user both things.
+  // Only the single `reason` code has to choose.
+  if (input.intake_options_missing === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'intake_options_missing',
+        has_leading_option: true,
+        has_clean_label: true,
         has_driver: false,
         has_fragility: false,
         margin_bucket: null,
@@ -1712,7 +1795,11 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // T1: the constraint-gap disclosure composes LAST of all — after the scaffold
 // disclosure — mirroring `${headline ?? template}${scaffoldDisclosure}${
 // constraintGapDisclosure}` in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?`;
+// ROADMAP 2.579: the intake disclosure composes LAST of all — after the
+// constraint-gap disclosure — mirroring
+// `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
+// intakeDisclosure}` in the run_analysis handler.
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?`;
 
 /**
  * Anchored form of the DISCLOSURE grammars, for the locked-template branch of
@@ -1725,7 +1812,7 @@ const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${RED
  * template.length`), so an empty match cannot admit a bare template twice.
  */
 const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
-  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?$`,
+  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?$`,
 );
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three

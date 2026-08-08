@@ -53,6 +53,20 @@ import {
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
+// ROADMAP 2.579 — the intake axis: did the graph keep every option the brief
+// spelled out? Derived here, at the point of the claim, from the two pieces of
+// canonical persisted state this handler already holds (`snapshot.briefText`
+// and the graph's option labels). Not persisted and not stamped: `enrichment`
+// is a byte-for-byte PLoT pass-through by handler-ownership invariant §6, and a
+// copy of labels on the fact would be a second thing to drift (trap 12) — the
+// sibling `withheld-reason-tail.ts` records the identical decision for the
+// ratified constraint labels it names.
+import {
+  deriveIntakeOptionReconciliation,
+  readGraphOptionLabels,
+  applyIntakeToLeaderPermission,
+} from '../../../orchestrator/context/intake-option-reconciliation.js';
+import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
@@ -913,6 +927,42 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       });
     }
 
+    // ROADMAP 2.579 — THE INTAKE AXIS, derived beside the constraint verdict
+    // and kept entirely separate from it (trap 21: two authorities, two
+    // questions, named apart rather than aligned).
+    //
+    // Option labels come from the SAME `snapshot.options` array this handler
+    // forwards to PLoT — the tightest possible statement of "what we asked the
+    // engine to rank" — falling back to the raw persisted graph for snapshots
+    // that carry labels only there. That mirrors `readRatifiedConstraints`'s
+    // two-shape read above and for the same reason: never depend on which
+    // mirror a call site happens to hold.
+    //
+    // Fails toward TODAY'S BEHAVIOUR at every step: no brief, no explicit
+    // enumeration, or a brief whose words reconcile with nothing on the graph
+    // all yield `not_applicable`, which declares `mayNameLeadingOption: true`
+    // and leaves both the headline and the persisted verdict byte-identical.
+    const intakeReconciliation = deriveIntakeOptionReconciliation(
+      snapshot.briefText,
+      readGraphOptionLabels(snapshot.options).length > 0
+        ? readGraphOptionLabels(snapshot.options)
+        : readGraphOptionLabels(snapshot.rawPersistedGraph ?? snapshot.graph),
+    );
+    // ⚠ NO TELEMETRY EVENT HERE, AND THAT IS A DISCLOSED GAP RATHER THAN AN
+    // OVERSIGHT. The obvious move — reuse `V5RunAnalysisConstraintUnevaluated`
+    // with a discriminating code — is the exact conflation this module's
+    // separation exists to prevent: it would file a drafter defect inside a
+    // producer statistic, and the first dashboard to read it would be wrong
+    // about both. A registered `V5RunAnalysisIntakeOptionsMissing` event is its
+    // own change (the telemetry-validation workflow owns that registry).
+    //
+    // Stated exactly, because a wrong observability claim is worse than none:
+    // this withhold emits NO event at all today. The `V5HeadlineFellBack` emit
+    // below cannot cover it — that fires only on `descriptor.case === 'E'`, and
+    // every withholding branch (this one and all three constraint branches)
+    // returns `case: null`, which is precisely why each constraint branch
+    // carries its own explicit emit. The user-facing disclosure is the only
+    // signal until the registered event lands.
     const headlineInput = {
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
@@ -943,6 +993,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       constraint_infeasible:
         config.features.constraintInfeasibleGate &&
         constraintVerdict.state === 'evaluated_infeasible',
+      // ROADMAP 2.579 — block the RANKING, not the analysis. The brief
+      // enumerated an option the graph does not carry, so "{X} currently leads"
+      // is a claim about which option is best over a set that is missing a
+      // candidate. UNGATED BY ANY FEATURE FLAG, deliberately: the estate's
+      // standing rule is no new env-var gates, and a flag here would mean the
+      // product keeps making the false claim by default.
+      intake_options_missing: intakeReconciliation.state === 'options_missing',
       samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.
@@ -1017,7 +1074,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // withheld above, so the message can no longer lead with an option while
     // this is present.
     const constraintGapDisclosure = buildConstraintDisclosure(constraintVerdict);
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;
+    // ROADMAP 2.579 disclosure, LAST of the three. It names the option(s) the
+    // brief listed and the graph does not carry, and gives BOTH repair paths
+    // (add it, or confirm the omission was deliberate). Appended after the
+    // constraint gap so the user reads the more fundamental fact — the set
+    // being ranked is not the set they described — at the end of the message,
+    // where the headline has already been withheld above. Additive, never
+    // exclusive: a turn can carry a scaffold disclosure, a constraint-gap
+    // disclosure AND this one, and none of them may eat another.
+    const intakeDisclosure = buildIntakeOptionDisclosure(intakeReconciliation);
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -1090,7 +1156,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // confirmation said "no option can be put forward yet" while
         // `blocks[1].body` in the SAME response said "The MacBook Pro leads by
         // a margin of about 52 percentage points".
-        constraint_verdict: projectClaimSafety(constraintVerdict),
+        // ROADMAP 2.579 — the intake answer folds into the SAME persisted
+        // permission, so the withhold reaches every egress surface that already
+        // reads it (compose, the leading-option egress guard, the coaching
+        // surfaces, the analysis_result block) instead of only the headline.
+        // Gating the headline alone would ship a contradiction inside one HTTP
+        // response, which is the defect class ROADMAP 1.218 exists to close.
+        // A conjunction: the intake axis can only ever REMOVE the permission,
+        // and it leaves `constraint_verdict_state` untouched because it has
+        // nothing true to say about the constraint evidence — see
+        // `applyIntakeToLeaderPermission` for the full statement of that
+        // residual.
+        constraint_verdict: applyIntakeToLeaderPermission(
+          projectClaimSafety(constraintVerdict),
+          intakeReconciliation,
+        ),
       },
     };
 
