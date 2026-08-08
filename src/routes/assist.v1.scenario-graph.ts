@@ -148,6 +148,7 @@ import type { FastifyInstance } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
+import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
 import {
   authorizeScenarioOwnership,
   resolveVerifiedIdentityOrRefuse,
@@ -442,6 +443,23 @@ export default async function route(app: FastifyInstance) {
           ? computeGraphIdentityHash(graph as GraphStateIngress)
           : null,
         layout_present: detectLayout(graphPresent ? graph : null),
+        // ROADMAP 2.973 — what of the brief did NOT reach the model.
+        //
+        // DERIVED HERE, from the very bytes this response carries, for the same
+        // reason `layout_present` is: a snapshot taken at draft time is a
+        // hand-maintained mirror that starts lying the moment the user edits the
+        // graph, whereas a re-derivation cannot disagree with what it was
+        // computed from. It is a pure function of (brief_text, graph) — no I/O,
+        // no clock — so it costs one pass over bytes already in memory.
+        //
+        // ⚠ WHEN IT CANNOT LOOK IT SAYS SO. Absent brief or absent graph yields
+        // `status: "unavailable"` with `quantities: null`, never a zero tally:
+        // on a scenario we know nothing about, "0 dropped" would be a new lie
+        // carrying the authority of a measurement.
+        not_modelled: deriveNotModelledManifest(
+          briefText,
+          graphPresent ? graph : null,
+        ),
         request_id: requestId,
       });
     },
