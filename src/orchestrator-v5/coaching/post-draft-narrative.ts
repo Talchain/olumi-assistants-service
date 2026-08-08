@@ -65,6 +65,8 @@
 
 import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/types.js';
 
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+
 import {
   gateAssumptionFragment,
   gateFullResponse,
@@ -294,6 +296,12 @@ export interface BuildPostDraftNarrativeInput {
    * and especially `elements_added` (NODE IDs) are never rendered raw.
    */
   readonly wideningLog?: DraftCoachingWideningLog | null;
+  /**
+   * The text the user submitted (ROADMAP 2.972). READ-ONLY, and read for exactly one
+   * purpose: to refuse the `thin` brief-completeness advisory when the brief
+   * itself refutes it. No content is ever lifted out of it into copy.
+   */
+  readonly briefText?: string | null;
 }
 
 /**
@@ -302,7 +310,7 @@ export interface BuildPostDraftNarrativeInput {
  * `text`.
  */
 export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): PostDraftNarrativeResult {
-  const { graph, analysisReady, strengthenItems, coachingSummary, coachingBiasSignals, wideningLog } = input;
+  const { graph, analysisReady, strengthenItems, coachingSummary, coachingBiasSignals, wideningLog, briefText } = input;
 
   const wideningLogPresent = wideningLog != null;
   const briefCompleteness = wideningLog?.brief_completeness ?? null;
@@ -425,7 +433,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   // Brief-completeness advisory (own droppable block). Only the enum is read;
   // it is mapped to a calm advisory phrase and never emitted verbatim.
-  const completenessBlock = buildBriefCompletenessLine(wideningLog);
+  const completenessBlock = buildBriefCompletenessLine(wideningLog, briefText);
 
   const nextStep =
     'Next, run the analysis to see how the options compare and what could shift the outcome.';
@@ -887,8 +895,29 @@ function toCheckBullet(text: string): string {
  */
 function buildBriefCompletenessLine(
   wideningLog: DraftCoachingWideningLog | null | undefined,
+  briefText?: string | null,
 ): string | null {
   if (!wideningLog) return null;
+  // ROADMAP 2.972 — DO NOT TELL A USER THEIR BRIEF WAS LIGHT ON DETAIL WHEN
+  // THEIR BRIEF CONTAINS DETAIL.
+  //
+  // `brief_completeness` is an LLM-authored enum. Measured on staging
+  // 2026-08-08 it returned `thin` for the DENSEST of three briefs — 2,563
+  // characters carrying ~14 quantitative atoms — and the product told its
+  // author their brief was light on detail and that adding specifics would
+  // help. That is the same defect class as the rest of this row wearing the
+  // opposite sign: a confident, underived claim about what the user did or
+  // did not say.
+  //
+  // The refusal is deliberately not a threshold. The sentence's REMEDY is
+  // "add specifics"; a brief that already states an amount has already
+  // supplied specifics, so the advice is unearned however few there are. The
+  // honest output where the claim cannot be established is SILENCE, never the
+  // stronger claim. `partial` is left alone: it makes no negative claim about
+  // the user's input and nothing measured it false.
+  if (wideningLog.brief_completeness === "thin" && findStatedAmounts(briefText).length > 0) {
+    return null;
+  }
   return COMPLETENESS_ADVISORY[wideningLog.brief_completeness];
 }
 

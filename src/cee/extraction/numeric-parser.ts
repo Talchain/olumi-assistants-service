@@ -36,6 +36,13 @@ export interface ParsedValue {
 
 /**
  * Currency symbol to unit mapping.
+ *
+ * EXPORTED as {@link CURRENCY_SYMBOL_TO_CODE} (ROADMAP 2.972) so the
+ * provenance locator (`cee/provenance/stated-amounts.ts`) derives its currency
+ * alternation from THIS list rather than re-spelling one. A second hand-written
+ * currency vocabulary is exactly the mirror CLAUDE.md trap 12 describes, and a
+ * symbol missing from a copy would make a stated amount invisible — i.e. would
+ * silently strip a provenance claim that was in fact earned.
  */
 const CURRENCY_MAP: Record<string, string> = {
   "£": "GBP",
@@ -49,6 +56,9 @@ const CURRENCY_MAP: Record<string, string> = {
   "CHF": "CHF",
   "kr": "SEK",
 };
+
+/** The one currency vocabulary. See the note on {@link CURRENCY_MAP}. */
+export const CURRENCY_SYMBOL_TO_CODE: Readonly<Record<string, string>> = CURRENCY_MAP;
 
 /**
  * Multiplier suffixes.

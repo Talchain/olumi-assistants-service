@@ -19,6 +19,7 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
+import { isAmountStatedInBrief } from "../provenance/stated-amounts.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import {
   computeOptionStatus,
@@ -495,7 +496,8 @@ function buildInterventionsFromV4Data(
   optionId: string,
   optionLabel: string,
   v4Interventions: Record<string, number>,
-  factors: NodeV3T[]
+  factors: NodeV3T[],
+  briefText?: string
 ): ExtractedOption {
   const interventions: Record<string, InterventionV3T> = {};
   const factorIds = new Set(factors.map((f) => f.id));
@@ -515,17 +517,37 @@ function buildInterventionsFromV4Data(
     // Get factor node for context
     const factor = factors.find((f) => f.id === factorId);
 
+    // ROADMAP 2.972 — THE PROVENANCE CLAIM IS EARNED, NOT ASSUMED.
+    //
+    // This branch used to stamp `brief_extraction` / `value_confidence: "high"`
+    // on EVERY value, with the comment "V4 prompt extracts from brief". That
+    // comment described the prompt's INTENT, never the values that arrive: the
+    // 2026-08-08 context-integrity trace measured 47 of 47 interventions
+    // carrying model-chosen normalised lever levels (0.8, 0.75, 0.45 …) that
+    // appear nowhere in the user's words, all stamped brief-extracted at high
+    // confidence.
+    //
+    // The value is ALWAYS kept — only its unearned label is withdrawn, and only
+    // in the weaker direction. `target_match.confidence` is untouched: it
+    // answers a DIFFERENT question ("did the LLM name a factor that exists?"),
+    // and `exact_id` genuinely is a high-confidence target match (trap 21 —
+    // do not align the defaults of two different questions).
+    const unit = factor?.observed_state?.unit;
+    const statedInBrief = isAmountStatedInBrief(value, unit, briefText);
+
     interventions[factorId] = {
       value,
-      unit: factor?.observed_state?.unit,
-      source: "brief_extraction", // V4 prompt extracts from brief
+      unit,
+      source: statedInBrief ? "brief_extraction" : "cee_hypothesis",
       target_match: {
         node_id: factorId,
         match_type: "exact_id", // LLM provided exact ID
         confidence: "high", // Direct from V4 prompt = high confidence
       },
-      value_confidence: "high",
-      reasoning: "Direct from V4 prompt data.interventions",
+      value_confidence: statedInBrief ? "high" : "low",
+      reasoning: statedInBrief
+        ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+        : "Model-chosen intervention level; this amount is not stated in the brief",
     };
   }
 
@@ -556,6 +578,12 @@ function buildInterventionsFromV4Data(
  * @param edgeHints - Optional V1 edges from this option to factors (high-confidence targets)
  * @param v4Interventions - Optional direct interventions from V4 prompt
  * @param nodeId - Optional node ID from graph (used to ensure option.id matches node.id)
+ * @param briefText - The text the user submitted, as sent/persisted. ROADMAP 2.972:
+ *   READ-ONLY EVIDENCE, never a source of values. It is used solely to decide
+ *   whether an intervention value the MODEL chose may keep the claim
+ *   `source: "brief_extraction"`. Absent ⇒ no value can earn the claim (the
+ *   fail-closed direction). Nothing is ever extracted FROM it here — that is
+ *   the reverted 2.714 seam and it stays reverted.
  * @returns Extracted option with matched interventions
  */
 export function extractInterventionsForOption(
@@ -567,7 +595,8 @@ export function extractInterventionsForOption(
   existingIds: Set<string> = new Set(),
   edgeHints: EdgeHint[] = [],
   v4Interventions?: Record<string, number>,
-  nodeId?: string
+  nodeId?: string,
+  briefText?: string
 ): ExtractedOption {
   // Use node ID if provided (ensures option.id matches graph node.id)
   // Fallback to normalized label for backwards compatibility
@@ -576,7 +605,7 @@ export function extractInterventionsForOption(
   // V4 prompt: If interventions are provided directly, use them (high confidence)
   if (v4Interventions && Object.keys(v4Interventions).length > 0) {
     const factors = nodes.filter((n) => n.kind === "factor");
-    return buildInterventionsFromV4Data(id, optionLabel, v4Interventions, factors);
+    return buildInterventionsFromV4Data(id, optionLabel, v4Interventions, factors, briefText);
   }
 
   // Fallback: Extract interventions from text (legacy path)
@@ -867,6 +896,9 @@ function determineOptionStatus(
  * @param edges - Graph edges
  * @param goalNodeId - Goal node ID
  * @param edgeHints - Optional V1 edges from option→factor for improved targeting
+ * @param briefText - The text the user submitted (ROADMAP 2.972). See
+ *   {@link extractInterventionsForOption} — read-only provenance evidence,
+ *   never a value source.
  * @returns Array of extracted options
  */
 export function extractOptionsFromNodes(
@@ -881,7 +913,8 @@ export function extractOptionsFromNodes(
   allNodes: NodeV3T[],
   edges: EdgeV3T[],
   goalNodeId: string,
-  edgeHints: EdgeHint[] = []
+  edgeHints: EdgeHint[] = [],
+  briefText?: string
 ): ExtractedOption[] {
   const results: ExtractedOption[] = [];
   const usedIds = new Set<string>();
@@ -902,7 +935,8 @@ export function extractOptionsFromNodes(
       usedIds,
       hintsForOption,
       node.v4Interventions,
-      node.id
+      node.id,
+      briefText
     );
     // Carry is_baseline from the source node (v191+)
     if (node.is_baseline !== undefined) {
