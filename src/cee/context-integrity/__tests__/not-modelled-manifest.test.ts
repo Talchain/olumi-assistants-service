@@ -267,6 +267,66 @@ describe("the drafting model's OWN declared exclusions", () => {
   });
 });
 
+describe("what the product ESTIMATED — derived from evidence, not from labels", () => {
+  it("names the factor whose stated value was dropped (B1 atom A22, SEVERE)", () => {
+    // The trace's sharpest case: the user stated NRR 112%, the value never
+    // entered, the factor got a maximum-width prior, and that prior then topped
+    // the influence ranking. The figure the model is using is OURS, and the
+    // user is entitled to know that.
+    const m = deriveNotModelledManifest(B1.brief_text, B1.graph);
+    expect(m.inferred_factors.status).toBe("derived");
+    const ids = m.inferred_factors.items.map((i) => i.node_id);
+    expect(ids).toContain("fac_nrr");
+    expect(ids).toContain("fac_cash_runway"); // A14 — £3.1m collapsed to 0.31
+  });
+
+  it("does NOT read the provenance label, which is false where it matters", () => {
+    // `fac_nrr` and `fac_cash_runway` both carry provenance "from_brief" /
+    // extractionType "explicit" while holding no brief figure. A derivation
+    // that trusted those labels would report them as the user's own numbers —
+    // laundering the exact defect this surface exists to expose. The
+    // PRECONDITION is pinned in-test so this cannot pass on a fixture that
+    // happens not to carry the mislabel.
+    const nodes = B1.graph.nodes as Array<Record<string, unknown>>;
+    const nrr = nodes.find((n) => n.id === "fac_nrr");
+    expect(nrr?.provenance, "fixture must carry the mislabel").toBe("from_brief");
+    expect(nrr?.extractionType).toBe("explicit");
+
+    const m = deriveNotModelledManifest(B1.brief_text, B1.graph);
+    expect(m.inferred_factors.items.map((i) => i.node_id)).toContain("fac_nrr");
+  });
+
+  it("carries the human label, never the unitless encoded value", () => {
+    const m = deriveNotModelledManifest(B1.brief_text, B1.graph);
+    const nrr = m.inferred_factors.items.find((i) => i.node_id === "fac_nrr");
+    expect(nrr?.label).toBe("Net Revenue Retention");
+    for (const item of m.inferred_factors.items) {
+      // "0.31 to 0.93" and friends must never travel as a label.
+      expect(item.label).not.toMatch(/^\d|\bto\b\s*\d/);
+    }
+  });
+
+  it("does NOT claim a factor whose figure the user DID state", () => {
+    // The discrimination. A derivation that simply listed every factor would
+    // satisfy every assertion above. B2's offshore-scale and opex-savings
+    // factors carry the caps the brief stated (£2.9m, £4m), so they are the
+    // user's numbers and must not appear as ours.
+    const m = deriveNotModelledManifest(B2.brief_text, B2.graph);
+    const ids = m.inferred_factors.items.map((i) => i.node_id);
+    const factors = (B2.graph.nodes as Array<Record<string, unknown>>).filter(
+      (n) => n.kind === "factor",
+    );
+    expect(ids.length).toBeLessThan(factors.length);
+    expect(ids).not.toContain("fac_offshore_scale");
+  });
+
+  it("reports not_recorded rather than an empty list when there is no graph to read", () => {
+    const m = deriveNotModelledManifest(B1.brief_text, null);
+    expect(m.inferred_factors.status).toBe("not_recorded");
+    expect(m.inferred_factors.items).toEqual([]);
+  });
+});
+
 describe("the loss is visible across all three briefs", () => {
   it("finds a majority of stated quantities missing from every model", () => {
     // The headline the surface exists to show. Stated as a floor, not a fixed

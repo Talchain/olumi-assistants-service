@@ -103,6 +103,19 @@ export interface NotModelledManifest {
     /** VERBATIM. The model's own sentence, never re-worded or summarised. */
     readonly items: readonly string[];
   };
+  /**
+   * Factors carrying a figure the user never stated — i.e. WE supplied it.
+   *
+   * Derived from evidence, never from the `provenance`/`extractionType`
+   * labels, which the 2026-08-08 trace measured as false precisely where they
+   * matter. Carries the human LABEL, never the encoded value: the pipeline's
+   * own `display_value` reads "0.31 to 0.93" with no unit and means nothing to
+   * a user.
+   */
+  readonly inferred_factors: {
+    readonly status: "derived" | "not_recorded";
+    readonly items: readonly { readonly node_id: string; readonly label: string }[];
+  };
   /** Loss classes this derivation CANNOT observe. The anti-reassurance field. */
   readonly not_tracked: readonly string[];
 }
@@ -269,6 +282,118 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
   "fix_hint",
   "commentary",
 ]);
+
+/**
+ * The factors the product ESTIMATED — figures it supplied that the user never
+ * stated. The trust-critical half: a user who cannot tell their own numbers
+ * from ours cannot audit the model at all.
+ *
+ * ── DERIVED FROM EVIDENCE, NOT FROM THE PROVENANCE LABEL ───────────────────
+ * This deliberately does NOT read `provenance` / `extractionType`. The
+ * 2026-08-08 trace measured those labels as WRONG exactly where they matter:
+ * `fac_nrr` carried `extractionType:"explicit", provenance:"from_brief"` while
+ * holding zero brief information, and every option intervention value carried
+ * `source:"brief_extraction", value_confidence:"high"` while being
+ * model-invented. Building a trust surface on a label that is false where it
+ * counts would launder the defect rather than expose it.
+ *
+ * So the test is the one thing that cannot lie: does any figure this factor
+ * carries correspond to something the user actually wrote? If not, we supplied
+ * it, whatever the label says.
+ *
+ * (Independent of the provenance-honesty work in `src/cee/provenance/` — that
+ * corrects the labels at the source; this needs no label to be correct.)
+ */
+function collectFactorNumbers(node: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+  };
+  const prior = node.prior;
+  if (prior !== null && typeof prior === "object") {
+    const p = prior as Record<string, unknown>;
+    push(p.range_min);
+    push(p.range_max);
+    push(p.value);
+  }
+  // ⚠ THE FIELD LIST IS THE WHOLE CORRECTNESS ARGUMENT, and its asymmetry runs
+  // the DANGEROUS way — which is why it is pinned by a discrimination test
+  // rather than trusted. A field MISSING here means a figure the user really
+  // stated goes unseen, and we then tell them we invented their own number.
+  // (Measured: `observed_state.cap` and `raw_value` were absent from the first
+  // version, and B2's offshore-scale factor — carrying the brief's £2.9m cap —
+  // was wrongly claimed as ours.)
+  const observed = node.observed_state;
+  if (observed !== null && typeof observed === "object") {
+    const o = observed as Record<string, unknown>;
+    push(o.value);
+    push(o.raw);
+    push(o.raw_value);
+    push(o.cap);
+  }
+  push(node.value);
+  push(node.raw);
+  push(node.raw_value);
+  push(node.cap);
+  const data = node.data;
+  if (data !== null && typeof data === "object") {
+    const d = data as Record<string, unknown>;
+    push(d.value);
+    push(d.raw);
+    push(d.raw_value);
+    push(d.cap);
+  }
+  // The encoding map's KEYS are encoded levels, but its captions carry the
+  // real-world figures the model is claiming ("45 roles offshored (~40%
+  // saving)"), so a factor whose caption quotes the brief is not ours.
+  const encoding = node.encoding_map;
+  if (encoding !== null && typeof encoding === "object") {
+    for (const caption of Object.values(encoding as Record<string, unknown>)) {
+      if (typeof caption !== "string") continue;
+      for (const m of caption.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+        push(Number(m[0].replace(/,/g, "")));
+      }
+    }
+  }
+  return out;
+}
+
+function deriveInferredFactors(
+  graph: Record<string, unknown>,
+  stated: readonly Quantity[],
+): NotModelledManifest["inferred_factors"] {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return { status: "not_recorded", items: [] };
+
+  const statedForms: number[] = [];
+  for (const q of stated) {
+    if (q.value !== null) statedForms.push(q.value);
+    if (q.mantissa !== null) statedForms.push(q.mantissa);
+  }
+
+  const items: Array<{ node_id: string; label: string }> = [];
+  for (const raw of nodes) {
+    if (raw === null || typeof raw !== "object") continue;
+    const node = raw as Record<string, unknown>;
+    if (node.kind !== "factor") continue;
+    const id = typeof node.id === "string" ? node.id : null;
+    const label = typeof node.label === "string" ? node.label : null;
+    // A factor with no label cannot be described to a user, and describing it
+    // by its internal id would be pipeline vocabulary on screen.
+    if (id === null || label === null) continue;
+
+    const numbers = collectFactorNumbers(node);
+    // A factor carrying no figure at all is not something we "estimated" — it
+    // is structural. Only claim an estimate where there is a number to own.
+    if (numbers.length === 0) continue;
+
+    const matchesSomethingStated = numbers.some((n) =>
+      statedForms.some((f) => numbersEqual(n, f)),
+    );
+    if (!matchesSomethingStated) items.push({ node_id: id, label });
+  }
+  return { status: "derived", items };
+}
 
 /**
  * The drafting model's own record of what it considered and left out, at
@@ -452,6 +577,7 @@ const UNAVAILABLE = (
   // would be read as "nothing was dropped".
   quantities: null,
   declared_exclusions: { status: "not_recorded", items: [] },
+  inferred_factors: { status: "not_recorded", items: [] },
   not_tracked: NOT_TRACKED_CLASSES,
 });
 
@@ -511,6 +637,10 @@ export function deriveNotModelledManifest(
       items,
     },
     declared_exclusions: readDeclaredExclusions(graph as Record<string, unknown>),
+    inferred_factors: deriveInferredFactors(
+      graph as Record<string, unknown>,
+      quantities,
+    ),
     not_tracked: NOT_TRACKED_CLASSES,
   };
 }
