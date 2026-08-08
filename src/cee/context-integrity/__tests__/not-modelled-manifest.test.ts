@@ -488,6 +488,43 @@ describe("ORDINARY INPUT MUST NOT COLLIDE WITH TOPOLOGY — the corpus is extern
     const m = deriveNotModelledManifest("Give us 1 quarter.", B1.graph);
     expect(m.quantities?.items[0]?.verdict).toBe("absent");
   });
+
+  it("what actually excludes topology is the NAMED+UNITED requirement, not the collection list", () => {
+    // ⚠ DEMONSTRATED, NOT ASSERTED, and it corrects my own reasoning. A mutant
+    // that readmitted `edges` to the candidate collections stayed GREEN. That
+    // mutant is EQUIVALENT — and the reason is worth pinning, because it means
+    // the collection list is NOT the guard I thought it was.
+    //
+    // Real edges carry no `id` and no `label` (0 of 46 here), so the
+    // named-candidate requirement drops them before the unit rules are even
+    // consulted; and their numbers live under `strength.mean` /
+    // `exists_probability`, which are not value carriers either. Two
+    // independent reasons, so the exclusion does not rest on the list.
+    const edges = B1.graph.edges as Array<Record<string, unknown>>;
+    expect(edges.length).toBeGreaterThan(10);
+    expect(
+      edges.filter((e) => typeof e.id === "string" && typeof e.label === "string").length,
+      "real edges carry neither id nor label",
+    ).toBe(0);
+
+    // And the hypothetical the mutant was reaching for: even an edge-shaped
+    // entry that DID carry id + label still offers no candidate, because
+    // topology fields are not value carriers.
+    const graph = {
+      nodes: [
+        {
+          id: "edge_like",
+          kind: "factor",
+          label: "Edge-shaped entry",
+          strength: { mean: 1, std: 0.2 },
+          exists_probability: 1,
+        },
+      ],
+      edges: [],
+    };
+    const m = deriveNotModelledManifest("Give us 1 quarter.", graph);
+    expect(m.quantities?.items[0]?.verdict).toBe("absent");
+  });
 });
 
 describe("the loss is visible across all three briefs", () => {
