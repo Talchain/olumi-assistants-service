@@ -59,7 +59,11 @@
  * other value would 400 EVERY draft rather than degrade quietly.
  */
 import { describe, expect, it } from "vitest";
-import Ajv from "ajv";
+// NAMED import: ajv's default export is not constructable under this repo's
+// module interop (`new (default)` is the shape that put
+// tests/contracts/schema-self-test.test.ts into the typecheck baseline). The
+// named class and its error type both typecheck cleanly.
+import { Ajv, type ErrorObject } from "ajv";
 
 import {
   ANTHROPIC_DRAFT_GRAPH_SCHEMA,
@@ -188,10 +192,10 @@ describe("`required` forces the KEY, `minItems` forces the CONTENT", () => {
     // Bind to the REASON, not merely to a failure: the instance is otherwise
     // complete, so any other error would mean this test passes for the wrong
     // cause (trap #19 — assert against the named object, not a value predicate).
-    const errs = validate.errors ?? [];
+    const errs: ErrorObject[] = validate.errors ?? [];
     expect(
-      errs.some((e) => e.keyword === "minItems" && e.instancePath === "/edges"),
-      `expected a minItems violation at /edges, got: ${JSON.stringify(errs.map((e) => ({ p: e.instancePath, k: e.keyword })))}`,
+      errs.some((e: ErrorObject) => e.keyword === "minItems" && e.instancePath === "/edges"),
+      `expected a minItems violation at /edges, got: ${JSON.stringify(errs.map((e: ErrorObject) => ({ p: e.instancePath, k: e.keyword })))}`,
     ).toBe(true);
   });
 
