@@ -181,6 +181,68 @@ describe('resolveDskClaimProvenance — refusals', () => {
     );
   });
 
+  /**
+   * ⚠ THE NEXT THREE ARMS EXIST BECAUSE THEIR MUTANTS SURVIVED, and the reason
+   * they survived is worth stating: the id grammar and the index's type filter
+   * DEFEND EACH OTHER on today's bundle. Deleting either one alone reds
+   * nothing, because the other still refuses — `DSK-P-002` fails the grammar
+   * before the lookup, and a protocol object is absent from the index anyway.
+   * Two guards that agree are not two guards; they are one guard with a spare,
+   * and the spare goes unnoticed the moment the bundle's id-letter convention
+   * (B=bias, T=technique, P=protocol …) stops holding — which nothing enforces.
+   * Each arm below isolates ONE branch by constructing the state only that
+   * branch can refuse, re-hashed so the bundle still verifies.
+   */
+  it('refuses a claim-shaped id whose object is NOT a claim', () => {
+    // Isolates the index's type filter: the id passes the grammar, so only the
+    // filter can refuse. The letter convention is a convention, not a schema.
+    const trigger = bundle.objects.find((o) => o.type === 'trigger')!;
+    withBundleOnDisk(
+      rehashed({
+        ...bundle,
+        objects: bundle.objects.map((o) =>
+          o.id === trigger.id ? { ...o, id: 'DSK-T-907' } : o,
+        ),
+      }),
+      () => {
+        expect(resolveDskClaimProvenance(techniqueClaims[0].id)).not.toBeNull();
+        expect(resolveDskClaimProvenance('DSK-T-907')).toBeNull();
+      },
+    );
+  });
+
+  it('refuses a CLAIM whose id is outside the contract grammar', () => {
+    // Isolates the grammar gate: the object IS a claim and IS in the index, so
+    // only the regex can refuse it. This is not pedantry — `claim_id` is
+    // regex-validated in the strict contract, so emitting `DSK-F-001` would
+    // fail the parse at the block gate and take the whole coaching card off the
+    // wire. Withholding the badge keeps the card.
+    const target = techniqueClaims[0];
+    withBundleOnDisk(
+      rehashed({
+        ...bundle,
+        objects: bundle.objects.map((o) =>
+          o.id === target.id ? { ...o, id: 'DSK-F-001' } : o,
+        ),
+      }),
+      () => {
+        expect(resolveDskClaimProvenance(techniqueClaims[1].id)).not.toBeNull();
+        expect(resolveDskClaimProvenance('DSK-F-001')).toBeNull();
+      },
+    );
+  });
+
+  it('refuses a bundle that PARSES but is not a bundle, and does not throw', () => {
+    // Isolates the shape check. Without it the hash verifier is handed an
+    // arbitrary object and the failure mode is a THROW on a live turn, not a
+    // withheld badge — the difference between losing an attribution and losing
+    // the response.
+    withBundleOnDisk('{"hello":"world"}', () => {
+      expect(() => resolveDskClaimProvenance(techniqueClaims[0].id)).not.toThrow();
+      expect(resolveDskClaimProvenance(techniqueClaims[0].id)).toBeNull();
+    });
+  });
+
   it('refuses a claim whose title is empty — the triple has no honest text', () => {
     const target = techniqueClaims[0];
     withBundleOnDisk(
