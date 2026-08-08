@@ -108,6 +108,11 @@ import {
 import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
 import { buildNoOpRecoveryChips } from "./edit-graph-noop-chips.js";
 import { buildEditClarifyFallbackParts } from "../../orchestrator-v5/compose/edit-clarify-response.js";
+// ROADMAP 2.427 — the no-op preservation path is the one surface where the edit
+// LLM's own prose reaches the user verbatim, so it is the one surface that can
+// still advise a phrasing the product refuses. See the trip test below.
+import { findNonRoutableConfigureAdvice } from "../../orchestrator-v5/routing/configure-option-advice.js";
+import { projectOptionLabels } from "../../orchestrator-v5/routing/configure-option-intent.js";
 
 // ============================================================================
 // Types
@@ -2274,11 +2279,34 @@ export async function handleEditGraph(
           m[0] === 'G' ? 'Model' : 'model',
         );
       }
+      // ⭐ ROADMAP 2.427 — CLOSE THE LLM-SUGGESTION LOOP AT THE ONE SURFACE
+      // THAT COULD STILL OPEN IT.
+      //
+      // The three trip conditions above are all about what the text CLAIMS
+      // (a success, a denial, an internal identifier). None of them looks at
+      // what the text ADVISES — and this is the branch where the edit LLM's own
+      // prose reaches `assistant_text` verbatim, so it is the one place the
+      // product can tell a user to type a sentence the product then refuses.
+      // That closed loop is the defect ROADMAP 2.11 named and 2.11/P1-3 closed
+      // for the DETERMINISTIC copy surfaces only; a contract test over shipped
+      // copy is structurally blind here, because this copy is not in the repo.
+      //
+      // Narrow by construction (see `configure-option-advice.ts`): the trip
+      // fires only on quoted advice that REFERS TO AN OPTION and that
+      // `detectConfigureOptionIntent` would not route. Advice about factors,
+      // values or plain words is untouched — declining preservation costs the
+      // user a genuinely useful clarifying question, so the predicate must not
+      // reach past the class it can prove is broken.
+      const nonRoutableAdvice = findNonRoutableConfigureAdvice(
+        noOpCandidate,
+        projectOptionLabels(context.graph?.nodes),
+      );
       const noOpClarificationPreserved =
         noOpCandidate.trim().length > 0 &&
         findSuccessClaimHit(noOpCandidate) === null &&
         findForbiddenPhraseHit(noOpCandidate) === null &&
-        findEditInternalsHit(noOpCandidate) === null;
+        findEditInternalsHit(noOpCandidate) === null &&
+        nonRoutableAdvice === null;
 
       // Lane 22 — richer deterministic fallback. When preservation
       // declines (or there is no candidate at all), reuse the SAME copy +

@@ -38,6 +38,11 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   findSuccessClaimHit,
 } from '../compose/forbidden-user-facing-phrases.js';
+// ROADMAP 2.427 — configure-option outcome binding (see the guard below the
+// V5 H5 invariant). The composer is the SAME one route-v2's pre-edit-lane
+// intercept uses, so the recovery copy and the intercept copy cannot drift.
+import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outcome.js';
+import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
 import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
@@ -3211,6 +3216,77 @@ export async function dispatchEditGraph(
         });
       }
     }
+  }
+
+  // ⭐⭐ ROADMAP 2.427 — CONFIGURE-OPTION OUTCOME BINDING.
+  //
+  // Placement is load-bearing in BOTH directions, so it is stated here rather
+  // than left to be re-derived:
+  //
+  //   AFTER the V5 H5 invariant above — because H5's sub-case A rewrites
+  //   UNCONDITIONALLY on `operations > 0 && !appliedGraph`, which is exactly
+  //   failure branch (a) below. Running before H5 would have this richer copy
+  //   clobbered by the generic fallback on the very shape it exists to fix.
+  //   H5 makes the turn SAFE; this makes it USEFUL, and safety goes first.
+  //
+  //   BEFORE the part-accounting / unmapped-part disclosures below — those
+  //   APPEND honest notices to whatever text is current, and they must append
+  //   to the recovery copy rather than to a claim that has been replaced.
+  //
+  // ⚠ NOT gated on `successfulAppliedMutation`, and that is the whole reason
+  // this guard is separate from H5 rather than another sub-case inside it. H5
+  // asks *"did anything land?"*. On the motivating capture (deployed
+  // `98f2476`, diagnosis capture `P3r7_4_phrasing.json`) something DID land —
+  // the edge `opt_cloud_native → fac_adoption_complexity` moved to
+  // `strength.mean 0.7` — so `successfulAppliedMutation` was TRUE, H5 was
+  // structurally silent, ZERO error blocks shipped, and the user read
+  // "Updated the Cloud-Native CRM to Adoption Complexity edge strength from 1.0
+  // to 0.7. Rerun analysis to see the effect." while the option they had asked
+  // to configure stayed `needs_encoding` with `interventions: {}`.
+  //
+  // The question asked here is different, and identity-bound (trap 19): did an
+  // interventions write land FOR THE OPTION THE USER NAMED? Both failure
+  // branches converge on one answer — the deterministic clarify copy that names
+  // the option, the factors still unset, and the sentence that writes them:
+  //
+  //   (a) nothing landed at all (`OPERATION_DID_NOT_LAND`, capture
+  //       `P3_4_phrasing.json`) — previously the generic "I wasn't able to make
+  //       that change safely.", which names no working phrasing while the same
+  //       product emits the routable form in its own clarify reply;
+  //   (b) something landed for a DIFFERENT entity — previously a confident
+  //       success claim about that other entity, with no error block.
+  //
+  // `parsedGraph` is the pre-edit graph this turn was dispatched against;
+  // `editResult.appliedGraph` is the post-edit graph, null when the edit
+  // produced none. See `routing/configure-option-outcome.ts` for why the check
+  // compares the applied GRAPH rather than the operation list.
+  const configureOutcome = evaluateConfigureOptionOutcome({
+    message: payload.message,
+    before: parsedGraph,
+    after: editResult.appliedGraph ?? null,
+  });
+  if (configureOutcome.status === 'not_honoured') {
+    emit(TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      option_id: configureOutcome.optionId,
+      factor_count: configureOutcome.factorLabels.length,
+      // Separates branch (b) — the wrong-entity write H5 cannot see — from
+      // branch (a), the ordinary did-not-land dead end.
+      applied_something: editResult.appliedGraph != null,
+    });
+    // REFUSE, rather than confirm-with-a-caveat. The text is replaced
+    // WHOLESALE: a success sentence followed by a correction is still a success
+    // sentence, and the capture that motivated this row put its false claim in
+    // the FIRST sentence, where it is what the user reads and acts on.
+    response = {
+      ...response,
+      assistant_text: composeConfigureOptionClarifyResponse({
+        optionLabel: configureOutcome.optionLabel,
+        factorLabels: configureOutcome.factorLabels,
+        stage: payload.stage,
+      }).assistant_text,
+    };
   }
 
   // Part-accounting disclosure (defect A) — appended as the LAST content

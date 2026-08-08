@@ -26,6 +26,7 @@ import { detectConfigureOptionIntent } from '../configure-option-intent.js';
 import {
   buildConfigureOptionChip,
   CONFIGURE_OPTION_GENERIC_CHIP,
+  buildConfigureOptionAdvisedFormat,
 } from '../../configure-option-chip-text.js';
 import { composeBody } from '../../compose/validation-failure-responses.js';
 import type { ComposeContext } from '../../compose/types.js';
@@ -34,28 +35,15 @@ import type {
   ValidationError,
 } from '../validator.js';
 import { buildUnconfiguredOptionsNotice } from '../../handlers/gm-held-execute.js';
-
-// ---------------------------------------------------------------------------
-// Exemplar extraction — quoted phrases the copy tells the user to type.
-// ---------------------------------------------------------------------------
-
-/**
- * Extract every advised exemplar from a piece of assistant copy: a straight-
- * quoted ('…' or "…") phrase introduced by "say" or "for example". This is
- * the copy grammar both advised sites use; extraction from the LIVE copy is
- * what makes this a derived contract rather than a hand-maintained mirror.
- */
-function extractAdvisedExemplars(copy: string): string[] {
-  const out: string[] = [];
-  const pattern = /(?:\bsay\b|\bfor example\b)[,:]?\s+(?:'([^']+)'|"([^"]+)")/gi;
-  for (const m of copy.matchAll(pattern)) {
-    const exemplar = m[1] ?? m[2];
-    if (typeof exemplar === 'string' && exemplar.trim().length > 0) {
-      out.push(exemplar.trim());
-    }
-  }
-  return out;
-}
+// ⭐ ROADMAP 2.427 — the extractor now SHIPS, and this suite consumes the
+// shipped one. It used to be defined locally here, which made the test and the
+// production check a hand-maintained pair with nothing keeping them equal
+// (trap 12, inside the very file that exists to abolish mirrors).
+import {
+  extractAdvisedExemplars,
+  findNonRoutableConfigureAdvice,
+} from '../configure-option-advice.js';
+import { composeConfigureOptionClarifyResponse } from '../../compose/configure-option-clarify-response.js';
 
 // Positive control for the extractor itself (trap-13: an absence/coverage
 // assertion is vacuous unless the mechanism provably sees a presence).
@@ -138,6 +126,88 @@ describe('configure-option copy ↔ detector contract', () => {
       }
     });
   }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // ⭐ ROADMAP 2.427 — the two surfaces the original contract could not see.
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * The recovery copy is now reachable on the FAILURE path (before 2.427 its
+   * only consumer was route-v2's pre-edit-lane intercept), which makes it the
+   * copy a user reads at exactly the moment they are most likely to type the
+   * advised sentence back.
+   *
+   * It is asserted DIFFERENTLY from the sources above, and the difference is
+   * itself the finding: this copy advises with "in this form: …" and no
+   * quotation marks, so `extractAdvisedExemplars` — whose grammar is
+   * "say '…'" / 'for example "…"' — sees NOTHING in it. Routing it through the
+   * quote-extraction path would have produced a source whose positive control
+   * fires on emptiness, i.e. a test that proves nothing. So the claim is made
+   * against the producer instead, which is a stronger claim anyway: the
+   * sentence in the copy IS `buildConfigureOptionAdvisedFormat`'s output, and
+   * that output routes.
+   */
+  it('2.427 recovery copy advises the shipped format, and that format routes', () => {
+    const optionLabel = 'Cloud-Native CRM';
+    const factorLabel = 'Adoption Complexity';
+    const copy = composeConfigureOptionClarifyResponse({
+      optionLabel,
+      factorLabels: [factorLabel, 'Feature Richness'],
+      stage: 'analyse',
+    }).assistant_text;
+
+    // Derived from the builder, never transcribed: a change to the advised
+    // phrasing moves both halves of this assertion together.
+    const advised = buildConfigureOptionAdvisedFormat(optionLabel, factorLabel, '<0-1>');
+    expect(copy).toContain(advised);
+
+    // And the thing it advises is a thing the product accepts. `<0-1>` is a
+    // placeholder the user replaces, so route the realistic filled form too.
+    expect(detectConfigureOptionIntent(advised, []).matched).toBe(true);
+    expect(
+      detectConfigureOptionIntent(
+        buildConfigureOptionAdvisedFormat(optionLabel, factorLabel, '0.7'),
+        [],
+      ).matched,
+    ).toBe(true);
+  });
+
+  /**
+   * THE SURFACE THIS CONTRACT WAS BLIND TO. On the no-op branch the edit LLM's
+   * own `coaching.summary` reaches `assistant_text` verbatim
+   * (`edit-graph.ts`, the R10 preservation path). That prose is not in the
+   * repo, so no amount of deriving from shipped copy can cover it — the check
+   * has to run at RUNTIME, and `findNonRoutableConfigureAdvice` is it.
+   *
+   * Pinned here rather than only in `configure-option-advice.test.ts` because
+   * THIS is the file a future copy change is read against, and the property is
+   * the same one: nothing the product advises may fail to route.
+   */
+  it('2.427 LLM-authored advice: option-referring advice that would not route is caught', () => {
+    const optionLabels = ['Cloud-Native CRM'];
+
+    // The exact phrasing PR #487's round-3 review caught shipping (see this
+    // file's header). Precondition pinned so the case cannot decay into
+    // agreeing with itself if the detector later widens.
+    const broken = 'the acquisition option sets Setup Cost to £2m';
+    expect(
+      detectConfigureOptionIntent(broken, optionLabels).matched,
+      'precondition broken: this exemplar now routes and can no longer prove the loop',
+    ).toBe(false);
+    expect(
+      findNonRoutableConfigureAdvice(`Nothing changed. Say '${broken}' to proceed.`, optionLabels),
+    ).toBe(broken);
+
+    // The real captured advice sentence (deployed `98f2476`, `P2_2_confirm`)
+    // must survive untouched — the guard exists to catch a broken loop, not to
+    // discard working clarifying questions.
+    expect(
+      findNonRoutableConfigureAdvice(
+        "If you want to set them now, say 'configure the Cloud-Native CRM option'.",
+        optionLabels,
+      ),
+    ).toBeNull();
+  });
 
   it('the shared configure chips route deterministically via the chip prefix', () => {
     // Both chip surfaces (options_not_configured composer, GM applied
