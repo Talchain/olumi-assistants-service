@@ -320,6 +320,55 @@ describe("what the product ESTIMATED — derived from evidence, not from labels"
     expect(ids).not.toContain("fac_offshore_scale");
   });
 
+  it.each([
+    ["observed_state.cap", { observed_state: { cap: 4_000_000, unit: "£" } }],
+    ["observed_state.raw_value", { observed_state: { raw_value: 4_000_000 } }],
+    ["observed_state.value", { observed_state: { value: 4_000_000 } }],
+    ["a node-level cap", { cap: 4_000_000 }],
+    ["a prior bound", { prior: { range_min: 4_000_000, range_max: 9 } }],
+    ["an encoding-map caption", { encoding_map: { "0.5": "£4,000,000 of savings" } }],
+  ])(
+    "does not claim a factor whose ONLY link to the brief is %s",
+    (_where, valueCarrier) => {
+      // ⚠ WHY THESE ARE SEPARATE, MINIMAL CASES. The real-capture test above
+      // stopped discriminating the field list once encoding-map captions were
+      // also read: B2's offshore factor is rescued by its caption whether or
+      // not `observed_state.cap` is consulted, so a mutant deleting that read
+      // stayed GREEN. A guard that passes for a reason other than the one it
+      // names is not a guard (trap 13b). Each row here isolates ONE carrier as
+      // the sole link, so deleting any single read turns exactly this red.
+      const graph = {
+        nodes: [
+          {
+            id: "fac_savings",
+            kind: "factor",
+            label: "Opex savings",
+            ...valueCarrier,
+          },
+        ],
+        edges: [],
+      };
+      const m = deriveNotModelledManifest("We must take £4m out of opex.", graph);
+      // Precondition: the brief really does state a matching figure, so a
+      // "not claimed" result cannot come from there being nothing to match.
+      expect(m.quantities?.items.map((i) => i.literal)).toContain("£4m");
+      expect(m.inferred_factors.items.map((i) => i.node_id)).not.toContain("fac_savings");
+    },
+  );
+
+  it("DOES claim a factor whose figure matches nothing in the brief (the pair partner)", () => {
+    // Without this, every row above could pass on a derivation that claims
+    // nothing at all.
+    const graph = {
+      nodes: [
+        { id: "fac_other", kind: "factor", label: "Something else", observed_state: { cap: 777 } },
+      ],
+      edges: [],
+    };
+    const m = deriveNotModelledManifest("We must take £4m out of opex.", graph);
+    expect(m.inferred_factors.items.map((i) => i.node_id)).toContain("fac_other");
+  });
+
   it("reports not_recorded rather than an empty list when there is no graph to read", () => {
     const m = deriveNotModelledManifest(B1.brief_text, null);
     expect(m.inferred_factors.status).toBe("not_recorded");
