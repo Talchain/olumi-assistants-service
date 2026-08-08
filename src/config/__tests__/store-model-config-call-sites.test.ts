@@ -231,18 +231,41 @@ describe("store_model_config — the documented claims are bound to the source",
       "utf8",
     );
 
-    // Precondition, pinned in-test: the call must exist at all, or the
+    /*
+     * SCOPE THE SEARCH TO THE FUNCTION BODY, NOT THE FILE.
+     *
+     * The docblock ABOVE resolveRoutingAdapter quotes the call it documents,
+     * verbatim. A whole-file regex is therefore satisfied by the PROSE: the
+     * code could start passing an override, the docblock example would still
+     * match, and this assertion would pass while the paragraph it defends
+     * became false. That is not hypothetical — the mutation kit for this guard
+     * caught exactly it (mutant M7), because the first occurrence of the call
+     * in this file is the comment, not the code.
+     *
+     * Slicing from the `function` keyword drops every preceding comment, so
+     * what follows is a statement about the CODE.
+     */
+    const DECL = "function resolveRoutingAdapter";
+    const declAt = routing.indexOf(DECL);
+    expect(
+      declAt,
+      `route-with-tool-use.ts no longer declares resolveRoutingAdapter. Everything below is a ` +
+        `claim about that function's body; with the function gone the claim has no subject.`,
+    ).toBeGreaterThan(-1);
+    const body = routing.slice(declAt);
+
+    // Precondition, pinned in-test: the call must exist in the BODY, or the
     // assertion below would pass by finding nothing (CLAUDE.md trap 13b).
     expect(
-      /getAdapterWithResolution\(\s*['"]orchestrator['"]/.test(routing),
-      `route-with-tool-use.ts no longer resolves the 'orchestrator' task via ` +
-        `getAdapterWithResolution. The docblock on resolveRoutingAdapter() describes that call ` +
-        `and is now describing code that is not there.`,
+      /getAdapterWithResolution\(\s*['"]orchestrator['"]/.test(body),
+      `resolveRoutingAdapter's body no longer resolves the 'orchestrator' task via ` +
+        `getAdapterWithResolution. Its docblock describes that call and is now describing code ` +
+        `that is not there.`,
     ).toBe(true);
 
     // The claim: no modelOverride argument, so ranks 1 and 2 cannot apply.
     expect(
-      /getAdapterWithResolution\(\s*['"]orchestrator['"]\s*\)/.test(routing),
+      /getAdapterWithResolution\(\s*['"]orchestrator['"]\s*\)/.test(body),
       `resolveRoutingAdapter() now passes an argument after 'orchestrator'. That makes ranks 1 ` +
         `and 2 REACHABLE at the V5 ORIENT site, which falsifies its docblock ("STRUCTURALLY ` +
         `UNREACHABLE ... a prompt-store modelConfig pin on the 'orchestrator' task is INERT") and ` +
