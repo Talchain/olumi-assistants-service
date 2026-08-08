@@ -108,14 +108,29 @@ export type CeeTask =
  * at startup. This map + the startup "model.task_resolved" log are
  * advisory; the per-request log is authoritative for any given call.
  *
- * Last reconciled to live staging env: 2026-07-19.
+ * Last reconciled to live staging env: 2026-08-08 (derived via Render API,
+ * service srv-d4slpaili9vc73eiq4og).
  *   Live CEE_MODEL_* on Render (override-only):
- *     CEE_MODEL_DRAFT_GRAPH   = claude-sonnet-4-6  (→ draft_graph)
- *     CEE_MODEL_EDIT_GRAPH    = claude-sonnet-4-6
- *     CEE_MODEL_ORCHESTRATOR  = claude-sonnet-5
- *     CEE_MODEL_REPAIR        = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
+ *     CEE_MODEL_DRAFT        = claude-sonnet-5
+ *     CEE_MODEL_DRAFT_GRAPH  = claude-sonnet-5  (→ draft_graph)
+ *     CEE_MODEL_EDIT         = claude-sonnet-5
+ *     CEE_MODEL_EDIT_GRAPH   = claude-sonnet-5
+ *     CEE_MODEL_ORCHESTRATOR = claude-sonnet-5
+ *     CEE_MODEL_REPAIR       = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
  *     CEE_MODEL_DECISION_REVIEW = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
+ *     CEE_MODEL_EXTRACTION   = gpt-4.1  (no CeeTask row — env-only)
  *   Not set on Render → these tasks serve the default below directly.
+ *
+ * ⚠ PROMPT-STORE OVERRIDE DISCOVERY (2026-08-08): env vars are NOT the top of
+ * the chain. The PMS prompt `draft_graph_default` carried
+ * modelConfig.staging = claude-sonnet-4-6, which outranks env (precedence
+ * step 2 > step 3, applied in unified-pipeline stages/parse.ts), so staging
+ * kept serving sonnet-4-6 through two redeploys AFTER the env vars were
+ * flipped to claude-sonnet-5. Fixed 2026-08-08 via PATCH
+ * /admin/prompts/draft_graph_default {modelConfig.staging: claude-sonnet-5}
+ * + POST /admin/prompts/reload; verified by the per-request "draft complete"
+ * log (model=claude-sonnet-5). When a model change does not take, check the
+ * prompt store's modelConfig BEFORE suspecting the env or this map.
  *
  * ⚠ Provider-mismatch caveat: when LLM_PROVIDER is unset/openai (as on
  * staging), the router SKIPS an anthropic-provider task default rather
@@ -139,9 +154,9 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   explainer: "gpt-4.1-2025-04-14",
   evidence_helper: "gpt-4.1-2025-04-14",
   sensitivity_coach: "gpt-4.1-2025-04-14",
-  // Quality tier - reconciled to live staging CEE_MODEL_* (2026-07-19)
-  draft_graph: "claude-sonnet-4-6",  // live CEE_MODEL_DRAFT_GRAPH (was gpt-4.1-2025-04-14)
-  edit_graph: "claude-sonnet-4-6",  // live CEE_MODEL_EDIT_GRAPH (was gpt-4o)
+  // Quality tier - reconciled to live staging CEE_MODEL_* (2026-08-08)
+  draft_graph: "claude-sonnet-5",  // live CEE_MODEL_DRAFT_GRAPH (was claude-sonnet-4-6)
+  edit_graph: "claude-sonnet-5",  // live CEE_MODEL_EDIT_GRAPH (was claude-sonnet-4-6)
   bias_check: "claude-sonnet-4-20250514",  // Excellent reasoning for bias detection
   orchestrator: "claude-sonnet-5",  // live CEE_MODEL_ORCHESTRATOR (was gpt-4o)
   repair_graph: "gpt-4.1-2025-04-14",  // registered pin of live CEE_MODEL_REPAIR=gpt-4.1
@@ -151,7 +166,7 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   critique_graph: "gpt-5.2",
   decision_review: "gpt-4.1-2025-04-14",  // registered pin of live CEE_MODEL_DECISION_REVIEW=gpt-4.1
   // Validation Pass 2 — CROSS-PROVIDER ON PURPOSE (ROADMAP 2.146). Pass 1 (the
-  // drafter) is `draft_graph` above = claude-sonnet-4-6 (anthropic); this is
+  // drafter) is `draft_graph` above = claude-sonnet-5 (anthropic); this is
   // o4-mini (openai, registered at config/models.ts:216 — provider openai, tier
   // quality, enabled). Independence is the ONLY reason this task exists, so the
   // default must not be able to collide with the drafting family. Reconciles with

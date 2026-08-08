@@ -180,6 +180,16 @@ describe('⭐ the per-string-value ceiling ABORTS a runaway and the abort is vis
 });
 
 describe('⭐ F3 — the retry after a runaway abort CAN differ from the attempt that failed', () => {
+  // MODEL BINDING (2026-08-08): these three tests pass an EXPLICIT
+  // temperature-accepting model. The F3 escalation is routed through
+  // anthropicTemperatureFor, which returns undefined for rejects-sampling
+  // models — and the checked-in draft DEFAULT is now claude-sonnet-5, which
+  // rejects sampling params, so under the default the escalation is a designed
+  // no-op (anthropic.ts retry branch: no change → no rewrite). Without the
+  // explicit model these tests would silently stop exercising the mechanism
+  // they exist to pin (trap 3b's shape: a test bound to a surface the default
+  // no longer serves). The default-model (rejects-sampling) semantics are
+  // pinned by the dedicated test at the bottom of this block.
   it('sends the post-abort retry at a higher temperature than the attempt it is replacing', async () => {
     // THE DEFECT (F3, /code-review 2026-07-25): every attempt was sent at
     // temperature 0, so "abort the doomed generation and re-roll" re-sent a
@@ -192,7 +202,7 @@ describe('⭐ F3 — the retry after a runaway abort CAN differ from the attempt
     h.runawayFirstAttempt = true;
 
     await draftGraphWithAnthropic(
-      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17, model: 'claude-sonnet-4-6' },
     );
 
     expect(h.sentBodies).toHaveLength(2);
@@ -213,7 +223,7 @@ describe('⭐ F3 — the retry after a runaway abort CAN differ from the attempt
     h.runawayFirstAttempt = false;
 
     await draftGraphWithAnthropic(
-      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17, model: 'claude-sonnet-4-6' },
     );
 
     expect(h.sentBodies).toHaveLength(1);
@@ -228,11 +238,36 @@ describe('⭐ F3 — the retry after a runaway abort CAN differ from the attempt
     h.runawayFirstAttempt = true;
 
     const result = await draftGraphWithAnthropic(
-      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17, model: 'claude-sonnet-4-6' },
     );
 
     const meta = result.meta as Record<string, unknown>;
     expect(meta.temperature).toBe(DRAFT_RUNAWAY_RETRY_TEMPERATURE);
     expect(meta.temperature).toBe((h.sentBodies.at(-1) as Record<string, unknown>).temperature);
+  });
+
+  it('under the DEFAULT model (claude-sonnet-5, rejects sampling params) no attempt carries a temperature — and the abort/retry machinery still executes', async () => {
+    // The checked-in draft default moved to claude-sonnet-5 (2026-08-08),
+    // which has rejectsSamplingParams: anthropicTemperatureFor returns
+    // undefined, attempt 1 is built with temperature undefined, and the F3
+    // retry branch (retryTemperature !== attempt temperature → rewrite) is a
+    // deliberate no-op because undefined === undefined. This pins the LIVE
+    // default's semantics so the three explicit-model tests above cannot be
+    // mistaken for coverage of the default path.
+    h.runawayFirstAttempt = true;
+
+    const result = await draftGraphWithAnthropic(
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+    );
+
+    // The abort mechanism is temperature-independent: still 2 attempts.
+    expect(h.callCount).toBe(2);
+    const meta = result.meta as Record<string, unknown>;
+    expect(meta.runaway_abort_count).toBe(1);
+    // No sampling params were sent on EITHER attempt…
+    expect((h.sentBodies[0] as Record<string, unknown>).temperature).toBeUndefined();
+    expect((h.sentBodies[1] as Record<string, unknown>).temperature).toBeUndefined();
+    // …and the metadata honestly reports what was sent (nothing), not a literal.
+    expect(meta.temperature).toBeUndefined();
   });
 });

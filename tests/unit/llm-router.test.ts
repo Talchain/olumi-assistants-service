@@ -236,8 +236,8 @@ describe("LLM Router", () => {
   });
 
   describe("TASK_MODEL_DEFAULTS integration", () => {
-    it("uses claude-sonnet-4-6 for draft_graph when no CEE_MODEL_DRAFT override", () => {
-      // Default reconciled to live staging (2026-07-19). The anthropic default
+    it("uses claude-sonnet-5 for draft_graph when no CEE_MODEL_DRAFT override", () => {
+      // Default reconciled to live staging (2026-08-08). The anthropic default
       // only serves when LLM_PROVIDER matches; under openai it is skipped
       // (provider-mismatch) — see the startup WARN in model-resolution-logger.
       delete process.env.CEE_MODEL_DRAFT;
@@ -248,7 +248,7 @@ describe("LLM Router", () => {
       const adapter = getAdapter("draft_graph");
 
       expect(adapter.name).toBe("anthropic");
-      expect(adapter.model).toBe("claude-sonnet-4-6");
+      expect(adapter.model).toBe("claude-sonnet-5");
     });
 
     it("uses gpt-4.1 for clarification when no CEE_MODEL_CLARIFICATION override", () => {
@@ -293,8 +293,8 @@ describe("LLM Router", () => {
       expect(adapter.model).toBe("claude-sonnet-5");
     });
 
-    it("uses claude-sonnet-4-6 for edit_graph when no CEE_MODEL_EDIT_GRAPH override", () => {
-      // Default reconciled to live staging (2026-07-19); serves under matching provider.
+    it("uses claude-sonnet-5 for edit_graph when no CEE_MODEL_EDIT_GRAPH override", () => {
+      // Default reconciled to live staging (2026-08-08); serves under matching provider.
       delete process.env.CEE_MODEL_EDIT_GRAPH;
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "anthropic";
@@ -302,7 +302,7 @@ describe("LLM Router", () => {
       const adapter = getAdapter("edit_graph");
 
       expect(adapter.name).toBe("anthropic");
-      expect(adapter.model).toBe("claude-sonnet-4-6");
+      expect(adapter.model).toBe("claude-sonnet-5");
     });
 
     it("CEE_MODEL_ORCHESTRATOR env var overrides TASK_MODEL_DEFAULTS", () => {

@@ -92,7 +92,7 @@ describe("selectModel", () => {
 
     it("returns quality tier for draft_graph task (optimized default)", () => {
       const result = selectModel({ task: "draft_graph" }, enabledConfig);
-      expect(result.modelId).toBe("claude-sonnet-4-6"); // reconciled to live staging (2026-07-19)
+      expect(result.modelId).toBe("claude-sonnet-5"); // reconciled to live staging (2026-08-08)
       expect(result.tier).toBe("quality");
       expect(result.source).toBe("default");
     });

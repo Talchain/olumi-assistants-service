@@ -27,8 +27,12 @@ const RESOLUTION_TABLE: ReadonlyArray<{
 }> = [
   // ── LIVE on the V5 conversational path ──────────────────────────────────
   { site: "C1 orchestrator (coach turn)", source: "TASK_MODEL_DEFAULTS.orchestrator", expected: "claude-sonnet-5" },
-  { site: "C2 draft_graph", source: "TASK_MODEL_DEFAULTS.draft_graph", expected: "claude-sonnet-4-6" },
-  { site: "C3 edit_graph", source: "TASK_MODEL_DEFAULTS.edit_graph", expected: "claude-sonnet-4-6" },
+  // C2/C3 re-pinned 2026-08-08: draft/edit defaults DELIBERATELY moved
+  // claude-sonnet-4-6 → claude-sonnet-5 (reconciled to live staging env;
+  // Paul's ruling: all Claude tasks on sonnet-5). Not a refactor drift —
+  // an intentional default change, tests updated in the same PR.
+  { site: "C2 draft_graph", source: "TASK_MODEL_DEFAULTS.draft_graph", expected: "claude-sonnet-5" },
+  { site: "C3 edit_graph", source: "TASK_MODEL_DEFAULTS.edit_graph", expected: "claude-sonnet-5" },
   { site: "C4 decision_review", source: "TASK_MODEL_DEFAULTS.decision_review", expected: "gpt-4.1-2025-04-14" },
   { site: "C7/C8 repair_graph", source: "TASK_MODEL_DEFAULTS.repair_graph", expected: "gpt-4.1-2025-04-14" },
   // ── LIVE standalone /assist/* ───────────────────────────────────────────
@@ -138,7 +142,8 @@ describe("anthropic draft fallback derives from the task default (no bare litera
   it("the value the draft-adapter fallback now derives equals the draft task default", () => {
     // anthropic.ts uses `args.model || getDefaultModelForTask('draft_graph')`.
     // Both the fallback and the router default must be the SAME id — this is what
-    // makes removing the hard-coded "claude-sonnet-4-6" literal a zero-change edit.
-    expect(getDefaultModelForTask("draft_graph")).toBe("claude-sonnet-4-6");
+    // makes removing the hard-coded model literal a zero-change edit.
+    // Pinned at the checked-in default (claude-sonnet-5, reconciled 2026-08-08).
+    expect(getDefaultModelForTask("draft_graph")).toBe("claude-sonnet-5");
   });
 });
