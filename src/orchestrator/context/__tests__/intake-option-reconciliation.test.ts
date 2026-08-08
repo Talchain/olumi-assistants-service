@@ -103,6 +103,39 @@ describe('2.579 producer — the measured defect, identity-matched', () => {
   });
 });
 
+describe('2.579 producer — the SECOND corpus case, for the discriminating mutant pair', () => {
+  /**
+   * A different brief losing a DIFFERENT option. Its only job is to make the
+   * binding of the bakery assertion PROVABLE (CLAUDE.md trap 19): a mutant that
+   * loosens the match for THIS case must turn this test RED and leave the
+   * bakery test GREEN. Without a second named object, "loosen for a different
+   * object only" has no object to loosen for, and the GREEN half of the pair
+   * proves nothing.
+   */
+  const CAFE_BRIEF =
+    'We run three city-centre cafés and must pick one growth move this year. ' +
+    'The options are a station kiosk, a delivery partnership, or a weekend bakery counter. ' +
+    'The goal is to raise contribution margin.';
+
+  it('names the KIOSK when the kiosk is the one the graph lost', () => {
+    const result = deriveIntakeOptionReconciliation(CAFE_BRIEF, [
+      'Delivery Partnership',
+      'Weekend Bakery Counter',
+    ]);
+    expect(result.state).toBe('options_missing');
+    expect(result.missing.map((m) => m.text)).toEqual(['a station kiosk']);
+  });
+
+  it('POSITIVE CONTROL — reconciles once the kiosk is on the graph', () => {
+    const result = deriveIntakeOptionReconciliation(CAFE_BRIEF, [
+      'Station Kiosk',
+      'Delivery Partnership',
+      'Weekend Bakery Counter',
+    ]);
+    expect(result.state).toBe('reconciled');
+  });
+});
+
 describe('2.579 producer — precision guards (a false positive suppresses a TRUE ranking)', () => {
   it('has NO OPINION on a brief that never enumerates its options', () => {
     const brief =
