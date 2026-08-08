@@ -260,6 +260,51 @@ describe('ROADMAP 2.964 — calibration_prompt carries dsk_claim_provenance', ()
     expect(blocks[0].dsk_claim_provenance).toBeUndefined();
   });
 
+  it('a GENERAL verdict refuses even when a RESOLVABLE id survives beside it', () => {
+    // ⚠ FOUND BY A SURVIVING MUTANT, and the finding is the reason this test
+    // exists. Widening the grounded set to include `general` REDDED NOTHING:
+    // the policy DELETES `dsk_claim_id` on its way to a `general` verdict, so
+    // every general fixture was being refused by the ID gate and the VERDICT
+    // gate's discrimination was never observed. The suite agreed with itself.
+    //
+    // The state below is reachable without the policy: `decision_review` rides
+    // the untyped enrichment passthrough and is persisted, so a replayed
+    // payload — or a policy that one day stops stripping — hands this producer
+    // an id beside a verdict that positively denies attestation. Badging it
+    // would print "grounded in decision science" on a card the producer of that
+    // verdict has already declared unattested.
+    const blocks = calibrationBlocks([
+      {
+        question: 'How often has a plan like this one landed on time before?',
+        principle: claimById(T2).title,
+        dsk_claim_id: T2,
+        dsk_grounding: 'general',
+      },
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].dsk_claim_provenance).toBeUndefined();
+  });
+
+  it('an UNKNOWN verdict string refuses too — the set is a whitelist', () => {
+    // Fail-closed on a verdict this producer does not understand, rather than
+    // fail-open on anything that is not literally `general`.
+    for (const verdict of ['unverified', 'ATTESTED', 'attested ', 'partial', '']) {
+      const blocks = calibrationBlocks([
+        {
+          question: 'How often has a plan like this one landed on time before?',
+          principle: claimById(T2).title,
+          dsk_claim_id: T2,
+          dsk_grounding: verdict,
+        },
+      ]);
+      expect(blocks).toHaveLength(1);
+      expect(
+        blocks[0].dsk_claim_provenance,
+        `verdict ${JSON.stringify(verdict)} must not badge`,
+      ).toBeUndefined();
+    }
+  });
+
   it('a BIAS claim id on a calibration prompt yields NO badge (wrong table)', () => {
     // `science-claims.ts` offers DSK-B-* for `bias_findings` only. A verdict of
     // `attested` beside a bias id is a state the policy cannot produce for this
