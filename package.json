@@ -22,6 +22,7 @@
     "test:cee:telemetry": "vitest run tests/integration/cee.telemetry.test.ts tests/integration/cee.hero-journey.degraded.test.ts",
     "test:cee:calibration": "vitest run tests/integration/cee.calibration.test.ts",
     "preflight": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi:check",
+    "test:collab-nsuite": "vitest run --config vitest.collab-nsuite.config.ts",
     "test:staging": "RUN_STAGING_SMOKE=1 vitest run --config vitest.staging.config.ts",
     "test:staging:v5": "RUN_STAGING_SMOKE=1 vitest run --config vitest.staging.config.ts tests/staging/proxy-v5-hiring-prompt.smoke.test.ts",
     "test:live": "LIVE_LLM=1 vitest run tests/integration/adversarial.test.ts tests/validation/golden-briefs-runner.test.ts",
