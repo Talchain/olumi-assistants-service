@@ -79,6 +79,19 @@ const REGISTERED_STAMPERS = [
  *     `routing/tool-schema.ts` explicitly instructs a NEGATIVE `at_most`
  *     encoding for reduction framing — so both frames are reachable through
  *     one parameter and the handler cannot tell which it holds.
+ *     ⚠ REFINED BY ROADMAP 2.877 (link 1), AND THE DISTINCTION IS THE WHOLE
+ *     POINT — the sentence above is about the PARAMETER and stays exactly true.
+ *     Since 2.877 the handler DOES emit a frame on some turns, by RELAYING one
+ *     `cee/compound-goal/extractor.ts` already attested for the user's own
+ *     words, gated on the parsed number being the number persisted
+ *     (`cee/compound-goal/constraint-frame-evidence.ts`, itself literal-free
+ *     and therefore correctly not a stamper either). "Emits a frame" and
+ *     "ATTESTS a frame" are different claims: this register is about the
+ *     second, and `add_constraint` still never makes one — which is why its
+ *     entry stays here and its literal count stays zero. Do NOT read this row
+ *     as "no `value_frame` can leave this handler"; that would be false, and a
+ *     register that overstates what it guards teaches the next reader to stop
+ *     looking (CLAUDE.md trap 7b / 14).
  *   - the two draft adapters: the DRAFT LLM's own `goal_constraints` array,
  *     prompt-only and unenforced in code.
  *   - the client ingress: `z.array(z.unknown())`, wholly unconstrained.
