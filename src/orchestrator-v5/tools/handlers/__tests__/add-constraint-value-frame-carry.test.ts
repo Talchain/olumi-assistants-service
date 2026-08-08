@@ -504,20 +504,23 @@ describe('2.877 link 1 — an UPDATE must not silently clear a still-true attest
   });
 });
 
-describe('2.877 link 1 — the PINNED post-state: the refusal moves one hop LATER', () => {
-  it("a level-framed non-goal constraint now reaches the wire framed AND baseline-less", async () => {
-    // THIS IS THE EXPECTED STATE, NOT A DEFECT. Before this change ISL refused
-    // at the FRAME hop (`CONSTRAINT_FRAME_UNSPECIFIED`) — one hop EARLIER than
-    // the baseline hop — so minting a baseline first would have shipped dark.
-    // With the frame relayed, a LEVEL-framed constraint on a target with no
-    // `observed_state.baseline` refuses at `CONSTRAINT_NOT_CONVERTIBLE /
-    // missing_target_baseline` instead. That refusal is CORRECT until the CEE
-    // baseline mint (2.877 link 2) lands, and it must NOT be "fixed" by
-    // defaulting a baseline: an invented baseline converts a level threshold
-    // against a fiction.
+describe('2.877 — the PINNED no-statement arm: no stated level, no baseline, ever', () => {
+  it('a level-framed constraint whose message states NO current level reaches the wire baseline-less', async () => {
+    // SPLIT, NOT RETIRED (link 2, this PR). When link 1 landed, this pin read
+    // "framed AND baseline-less" as the whole post-state, dated until the link
+    // 2 mint. Link 2 has now landed — a message that ALSO states the target's
+    // current level ("churn is 12% today, keep it under 10%") mints
+    // `observed_state.baseline` from that statement, with its own
+    // identity-bound battery in add-constraint-stated-baseline-mint.test.ts.
     //
-    // Pinned here so link 2 has an explicit, dated precondition to flip, and so
-    // nobody reads the refusal as a regression introduced by this change.
+    // THIS ARM KEEPS PROTECTING THE NO-STATEMENT CASE, PERMANENTLY. The
+    // message below states a bound and nothing else, so a baseline appearing
+    // here can only be a DEFAULT — the fabrication class the 2.877 chain
+    // exists to remove (an invented baseline converts a level threshold
+    // against a fiction; CEE's prompt once emitted exactly that as
+    // 0.5/`inferred` placeholders). The honest post-state for this message is
+    // an ISL refusal at `CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`
+    // and, in time, elicitation (row 2.918) — never a manufactured number.
     const graph = await registerViaChat({
       message: 'Keep churn under 5% this year.',
       targetId: 'o-churn-rate',
@@ -533,9 +536,9 @@ describe('2.877 link 1 — the PINNED post-state: the refusal moves one hop LATE
     const target = graph.nodes.find((n) => n.id === 'o-churn-rate')!;
     expect(
       target.observed_state?.baseline,
-      'a baseline appeared on the constraint target. If it was MINTED from real ' +
-        'stated evidence that is 2.877 link 2 landing and this pin should move; ' +
-        'if it was DEFAULTED, it is a fabrication and must be reverted.',
+      'a baseline appeared on a target whose message stated NO current level — ' +
+        'that is a DEFAULTED baseline, the exact fabrication 2.877 exists to ' +
+        'remove. Revert the change that manufactured it.',
     ).toBeUndefined();
   });
 });

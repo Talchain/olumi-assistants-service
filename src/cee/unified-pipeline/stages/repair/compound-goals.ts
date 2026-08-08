@@ -18,6 +18,7 @@ import {
   remapConstraintTargets,
 } from "../../../compound-goal/index.js";
 import { partitionRiskFramedInversions } from "../../../compound-goal/risk-polarity.js";
+import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
 import { log } from "../../../../utils/telemetry.js";
 
 /**
@@ -296,6 +297,19 @@ export function runCompoundGoals(ctx: StageContext): void {
 
   ctx.goalConstraints = binding;
 
+  // ROADMAP 2.877 (link 2) — the DRAFT-path twin of the add_constraint
+  // stated-baseline mint. See `mintStatedTargetBaselines` for the rules; it
+  // runs HERE because this is the single place that holds the brief, the
+  // bound rows WITH their frames, and the mutable V1 graph at once (the
+  // enricher — the twin site the 2.877 brief nominated — writes no constraint
+  // rows and never sees the constraint→node binding; a corrected premise).
+  mintStatedTargetBaselines(
+    ctx.effectiveBrief,
+    binding,
+    ctx.graph as { nodes?: unknown[]; edges?: unknown[] },
+    ctx.requestId,
+  );
+
   log.info({
     event: "cee.compound_goal.integrated",
     request_id: ctx.requestId,
@@ -305,4 +319,121 @@ export function runCompoundGoals(ctx: StageContext): void {
     temporal_withheld: temporal.length,
     risk_inversion_withheld: inverted.length,
   }, "Compound goal constraints emitted to goal_constraints[]");
+}
+
+/**
+ * ROADMAP 2.877 (link 2) — mint `observed_state.baseline` carriers for
+ * constraint targets whose CURRENT LEVEL the brief actually states.
+ *
+ * WHY: a level-framed constraint on an outcome/risk target refuses at ISL
+ * (`CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`) because the
+ * level→sample-frame conversion reads `observed_state.baseline` on the TARGET
+ * node and no producer mints it. The chat path mints in `add_constraint`; this
+ * is the draft twin, sharing the SAME extractor
+ * (`factor-extraction/stated-level.ts`) so the two paths cannot drift.
+ *
+ * RELAY-ONLY, NEVER INVENTED: `deriveStatedTargetBaselinePercent` returns a
+ * number only for an actual present-state statement in the brief ("Churn is
+ * currently 12%."), bound to the target by its label. No statement ⇒ no mint ⇒
+ * the honest ISL refusal stands.
+ *
+ * THE DRAFT CELL — each conjunct derived from a consumer's bytes:
+ *   - `value_frame === 'level'`: deltas need no baseline; unframed rows must
+ *     keep failing closed at the frame hop;
+ *   - row unit 'fraction' with 0 ≤ value ≤ 1 — the pre-divided percent
+ *     convention `normaliseConstraintUnits` produces. A draft '%'-unit row
+ *     (value ≥ 1, i.e. ≥100%) is EXCLUDED: PLoT's unit_percent rung reads it
+ *     as a RAW percent (1.5 → 0.015) while the draft convention means a
+ *     fraction (150%) — a pre-existing cross-repo convention skew a baseline
+ *     must not convert into a confident wrong probability;
+ *   - target kind outcome|risk: factors get a PLoT ParameterUncertainty
+ *     (translator-v3.ts:674) that makes the conversion refuse — a baseline is
+ *     inert there (2.877 measured arm H). Goals have their own mint (2.273);
+ *   - no goal_threshold_cap anywhere on the node (node level or data level,
+ *     mirroring PLoT's collectGoalThresholdNodeMeta): that cap outranks the
+ *     deriveRange ladder rung this mint's shape relies on;
+ *   - NON-ROOT: ISL refuses roots (`root_target`) and reads a root's observed
+ *     value as its sample base — a root mint buys nothing and moves the
+ *     analysis instead;
+ *   - FILL-ONLY: existing `data.baseline` (whoever wrote it) is never
+ *     overwritten, and an existing carrier is only extended when its scale
+ *     fields agree with the minted shape.
+ *
+ * THE SHAPE {value: frac, baseline: frac, unit: 'fraction', cap: 1,
+ * extractionType: 'explicit'} is the V1 carrier `transformResponseToV3`'s
+ * factor-data branch projects into `observed_state` with
+ * `source: 'brief_extraction'` (verified by execution at this tip). cap 1
+ * declares the IDENTITY scale, so PLoT's deriveRange resolves [0,1] for this
+ * node and the 'fraction' row the mint serves normalises to itself — without
+ * it, deriveRange's inferred-baseline rung would turn baseline 0.12 into
+ * range [0,0.24] and rescale a 0.05 row into 0.208, a confident wrong number.
+ *
+ * Pure over its inputs (mutates only `graph.nodes[].data`). Exported for
+ * direct test. Returns the number of nodes minted.
+ */
+export function mintStatedTargetBaselines(
+  brief: string | null | undefined,
+  constraints: readonly unknown[],
+  graph: { nodes?: unknown[]; edges?: unknown[] } | null | undefined,
+  requestId?: string,
+): number {
+  if (typeof brief !== "string" || brief.trim() === "") return 0;
+  const nodes = Array.isArray(graph?.nodes) ? (graph!.nodes as Array<Record<string, any>>) : [];
+  const edges = Array.isArray(graph?.edges) ? (graph!.edges as Array<Record<string, any>>) : [];
+  if (nodes.length === 0) return 0;
+
+  let minted = 0;
+  for (const raw of constraints) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as Record<string, any>;
+    if (row.value_frame !== "level") continue;
+    if (row.unit !== "fraction") continue;
+    if (typeof row.value !== "number" || !(row.value >= 0 && row.value <= 1)) continue;
+
+    const node = nodes.find((n) => n?.id === row.node_id);
+    if (!node) continue;
+    if (node.kind !== "outcome" && node.kind !== "risk") continue;
+    if (node.goal_threshold_cap != null || node.data?.goal_threshold_cap != null) continue;
+    if (!edges.some((e) => e?.to === node.id)) continue;
+
+    const data = node.data as Record<string, any> | undefined;
+    if (data !== undefined) {
+      if ("interventions" in data) continue; // option-shaped carrier — never a mint target
+      if (data.baseline !== undefined) continue; // fill-only
+      if (data.unit !== undefined && data.unit !== "fraction") continue;
+      if (data.cap !== undefined && data.cap !== 1) continue;
+    }
+
+    const statedPercent = deriveStatedTargetBaselinePercent(
+      brief,
+      typeof node.label === "string" ? node.label : undefined,
+    );
+    if (statedPercent === undefined) continue;
+
+    const frac = statedPercent / 100;
+    node.data = {
+      ...data,
+      value: frac,
+      baseline: frac,
+      unit: "fraction",
+      cap: 1,
+      raw_value: frac,
+      extractionType: "explicit",
+    };
+    minted += 1;
+
+    // FAIL LOUD, same contract as this stage's other gates: ids and numbers
+    // only, no labels, no user text.
+    log.info(
+      {
+        event: "cee.compound_goal.target_baseline_minted",
+        request_id: requestId,
+        node_id: node.id,
+        constraint_id: row.constraint_id ?? null,
+        baseline: frac,
+      },
+      "Stated current level minted as constraint-target baseline carrier",
+    );
+  }
+  return minted;
 }
