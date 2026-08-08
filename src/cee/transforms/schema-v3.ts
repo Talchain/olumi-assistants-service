@@ -44,6 +44,7 @@ import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
+import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 
 // ============================================================================
 // V3 Types
@@ -440,7 +441,48 @@ export function transformNodeToV3(
     v3Node.observed_state?.extractionType
     ?? v3Node.extractionType
     ?? dataExtractionType;
-  v3Node.provenance = nodeProvenanceDisplay(extractionTypeForDisplay);
+  const claimedProvenance = nodeProvenanceDisplay(extractionTypeForDisplay);
+
+  // ROADMAP 2.972 — A VALUE-FREE NODE CANNOT HAVE COME FROM THE BRIEF.
+  //
+  // MEASURED 2026-08-08 on deployed staging: `fac_nrr` shipped
+  // `extractionType: "explicit", provenance: "from_brief"` carrying only a
+  // maximum-ignorance prior U(0,1) and no value at all — while
+  // `factor_value_coverage` in the SAME payload reported `explicit: 0`. The
+  // analysis then named NRR the strongest driver and the evidence card asked
+  // the user to go and collect the number they had already stated. The false
+  // label is the part that inverts the product's meaning, so the label is what
+  // goes — the prior, the label text and every computed field are untouched.
+  //
+  // The verdict comes from `classifyFactorValueTier`, the SAME function
+  // `factor_value_coverage` now uses, so the badge a user sees and the number
+  // the pipeline reports about itself cannot disagree again (trap 12: the two
+  // were separate readers of separate field locations, which is exactly how
+  // they drifted).
+  const briefClaimEarned = mayClaimFromBrief({
+    observed_state: v3Node.observed_state,
+    extractionType: v3Node.extractionType,
+    data: node.data,
+  });
+  if (claimedProvenance === "from_brief" && !briefClaimEarned) {
+    v3Node.provenance = "ai_inferred";
+    // Withdraw the contradicting structural label too, or the wire still
+    // carries the claim one field to the left of the one we corrected.
+    // `extractionType` is NOT in `computeAnalysisAffectingGraphHash`'s node
+    // whitelist (graph-hash.ts), so no analysis input, freshness verdict or
+    // computed number moves with it.
+    if (v3Node.extractionType === "explicit" || v3Node.extractionType === "observed") {
+      v3Node.extractionType = "inferred";
+    }
+    if (
+      v3Node.observed_state?.extractionType === "explicit" ||
+      v3Node.observed_state?.extractionType === "observed"
+    ) {
+      v3Node.observed_state = { ...v3Node.observed_state, extractionType: "inferred" };
+    }
+  } else {
+    v3Node.provenance = claimedProvenance;
+  }
 
   return v3Node;
 }
@@ -939,7 +981,10 @@ export function transformResponseToV3(
     v3NodesTyped,
     v3EdgesTyped,
     goalNodeId,
-    edgeHints
+    edgeHints,
+    // ROADMAP 2.972 — the user's own words, as read-only evidence for the
+    // intervention provenance claim. Never a source of values.
+    context.brief
   );
 
   const v3Options = toOptionsV3(extractedOptions);

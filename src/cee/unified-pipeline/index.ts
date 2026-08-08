@@ -40,6 +40,7 @@ import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 import { runValidationPipeline } from "../validation-pipeline/index.js";
 import { classifyValidationFailure } from "../validation-pipeline/validate-graph.js";
 import { projectGraphForStagedFrame } from "./staged-graph-projection.js";
+import { classifyFactorValueTier } from "../provenance/factor-value-provenance.js";
 
 /**
  * Stamp coaching_status 'complete' at a terminal exit UNLESS the coaching pass
@@ -820,12 +821,32 @@ export async function runUnifiedPipeline(
       //   explicit: extractionType is "explicit" or "observed" (real data from brief or environment)
       //   inferred_with_evidence: extractionType is "inferred" but value differs from 0.5 default
       //   fallback_default: no extractionType, or inferred with default 0.5
+      //
+      // ⚠ ROADMAP 2.972 — THIS COUNTER AND THE WIRE'S PROVENANCE BADGE NOW
+      // SHARE ONE DERIVATION, AND THAT IS THE POINT OF THE ROW.
+      //
+      // It used to read `f.data?.extractionType` and nothing else, while the
+      // V3 transform's badge read
+      // `observed_state.extractionType ?? node.extractionType ?? data.extractionType`.
+      // The `unreachable-factors` repair reclassifies a factor to external,
+      // DELETES `data.value` and PROMOTES `data.extractionType` to the node —
+      // so after repair this counter saw nothing where the badge saw
+      // "explicit". Measured on staging 2026-08-08: `factor_value_coverage
+      // { total: 11, explicit: 0 }` shipped in the same payload as a node
+      // badged `from_brief` / `extractionType: "explicit"` with no value.
+      // Two subsystems, one response, one of them lying — the hand-maintained
+      // mirror (CLAUDE.md trap 12) in its purest form.
+      //
+      // `classifyFactorValueTier` is that one derivation, and it adds the
+      // conjunct that closes the defect: `explicit` also requires a value to
+      // EXIST, because a value-free node carries no brief information whatever
+      // its label says.
       const factors = graphNodes.filter((n) => n.kind === "factor");
       let explicit = 0, inferredWithEvidence = 0, fallbackDefault = 0;
       for (const f of factors) {
-        const et = f.data?.extractionType;
-        if (et === "explicit" || et === "observed") explicit++;
-        else if (et === "inferred" && f.data?.value !== 0.5) inferredWithEvidence++;
+        const tier = classifyFactorValueTier(f);
+        if (tier === "explicit") explicit++;
+        else if (tier === "inferred_with_evidence") inferredWithEvidence++;
         else fallbackDefault++;
       }
       ctx.pipelineOutcome.factor_value_coverage = {
