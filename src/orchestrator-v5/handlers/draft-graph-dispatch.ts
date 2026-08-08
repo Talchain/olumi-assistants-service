@@ -235,7 +235,7 @@ export function draftResultToOlumiResponse(
       // Canonical widening_log object (the legacy array field is dead on V5).
       // The builder surfaces only `brief_completeness` as advisory copy.
       wideningLog: result.coachingWideningLogObject ?? null,
-      // ROADMAP 2.972 — the user's own words, so the builder can REFUSE the
+      // ROADMAP 2.972 — the text the user submitted, so the builder can REFUSE the
       // "your brief was light on detail" advisory when the brief refutes it.
       // `payload.message` IS the brief on the ordinary draft turn; on the
       // explicit-generate path the real brief is assembled server-side

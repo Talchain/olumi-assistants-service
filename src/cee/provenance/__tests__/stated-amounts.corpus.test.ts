@@ -168,6 +168,66 @@ describe("2.972 stated-amount scan — [WIRE] the three real briefs", () => {
   });
 });
 
+describe("2.972 F1 — the currency refusal must not be FORM-DEPENDENT", () => {
+  // Found by adversarial review of #873. The refusal was spelled against the
+  // SYMBOL form only, so it held for `unit: "£"` and collapsed for
+  // `unit: "GBP"` — and `GBP` is the producer's own vocabulary, not a
+  // synthetic edge: `schemas/cee-v3.ts:57` documents unit as "e.g. 'GBP',
+  // 'USD'", and `parseNumericValue("£59")` returns `unit: "GBP"` in the very
+  // module this one imports the currency map from. An unread unit degraded to
+  // `plain`, and `plain` accepted ANY kind — so a £-nothing value was
+  // CERTIFIED `brief_extraction`/`high` against a € statement. That is the
+  // fabrication direction, i.e. the exact defect class this row exists to kill.
+  const BRIEF_EUR = "legal quoted us €900k for the process";
+  const BRIEF_GBP = "legal quoted us £900k for the process";
+
+  it("[F1] reads an ISO currency code as that currency, not as a plain unit", () => {
+    expect(readUnit("GBP")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1 });
+    expect(readUnit("usd")).toEqual({ kind: "currency", currencyCode: "USD", multiplier: 1 });
+  });
+
+  it("[F1] every ISO code the shared vocabulary maps to is readable as a unit", () => {
+    // Derived from the same map the symbols come from, so a currency added
+    // there is readable in BOTH forms the instant it lands.
+    for (const code of new Set(Object.values(CURRENCY_SYMBOL_TO_CODE))) {
+      expect(readUnit(code).kind, `ISO code '${code}' did not read as currency`).toBe("currency");
+      expect(readUnit(code).currencyCode).toBe(code);
+    }
+  });
+
+  it("[F1] an ISO-coded value is NOT earned by a different currency's statement", () => {
+    expect(isAmountStatedInBrief(900_000, "GBP", BRIEF_EUR)).toBe(false);
+  });
+
+  it("[F1] an ISO-coded value IS earned by its OWN currency (the discriminating positive)", () => {
+    expect(isAmountStatedInBrief(900_000, "GBP", BRIEF_GBP)).toBe(true);
+    // …and the symbol form still behaves exactly as it did.
+    expect(isAmountStatedInBrief(900_000, "£", BRIEF_GBP)).toBe(true);
+    expect(isAmountStatedInBrief(900_000, "£", BRIEF_EUR)).toBe(false);
+  });
+
+  it("[F1] a unit this module CANNOT read may not be earned by ANY currency statement", () => {
+    // The residual half of the same hole, closed structurally rather than by
+    // enumerating spellings: if we cannot tell what the unit denominates, we
+    // cannot tell that a €/£/$ amount is the same quantity. Word forms
+    // ("pounds"), bare magnitudes ("m"), and every spelling nobody has thought
+    // of are all covered by one rule.
+    expect(isAmountStatedInBrief(900_000, "pounds", BRIEF_GBP)).toBe(false);
+    expect(isAmountStatedInBrief(900_000, "pounds", BRIEF_EUR)).toBe(false);
+    expect(isAmountStatedInBrief(0.9, "m", BRIEF_EUR)).toBe(false);
+    expect(isAmountStatedInBrief(900_000, undefined, BRIEF_EUR)).toBe(false);
+  });
+
+  it("[F1] a plain unit still accepts plain and percent statements — the tightening is currency-only", () => {
+    // Regression fence: the rule above must not turn every unitless lever into
+    // an un-locatable value for the ordinary (non-currency) cases the corpus
+    // already pinned.
+    expect(isAmountStatedInBrief(45, undefined, BRIEF_TEXT_AS_PERSISTED.B2)).toBe(true);
+    expect(isAmountStatedInBrief(34, "scale", BRIEF_TEXT_AS_PERSISTED.B2)).toBe(true);
+    expect(isAmountStatedInBrief(100, "%", BRIEF_TEXT_AS_PERSISTED.B3)).toBe(true);
+  });
+});
+
 describe("2.972 unit reading", () => {
   it("reads currency, magnitude and percent units, and degrades unknown units to plain x1", () => {
     expect(readUnit("£m")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1_000_000 });

@@ -578,7 +578,7 @@ function buildInterventionsFromV4Data(
  * @param edgeHints - Optional V1 edges from this option to factors (high-confidence targets)
  * @param v4Interventions - Optional direct interventions from V4 prompt
  * @param nodeId - Optional node ID from graph (used to ensure option.id matches node.id)
- * @param briefText - The user's own words, as sent/persisted. ROADMAP 2.972:
+ * @param briefText - The text the user submitted, as sent/persisted. ROADMAP 2.972:
  *   READ-ONLY EVIDENCE, never a source of values. It is used solely to decide
  *   whether an intervention value the MODEL chose may keep the claim
  *   `source: "brief_extraction"`. Absent ⇒ no value can earn the claim (the
@@ -896,7 +896,7 @@ function determineOptionStatus(
  * @param edges - Graph edges
  * @param goalNodeId - Goal node ID
  * @param edgeHints - Optional V1 edges from option→factor for improved targeting
- * @param briefText - The user's own words (ROADMAP 2.972). See
+ * @param briefText - The text the user submitted (ROADMAP 2.972). See
  *   {@link extractInterventionsForOption} — read-only provenance evidence,
  *   never a value source.
  * @returns Array of extracted options

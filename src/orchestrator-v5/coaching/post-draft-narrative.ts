@@ -297,7 +297,7 @@ export interface BuildPostDraftNarrativeInput {
    */
   readonly wideningLog?: DraftCoachingWideningLog | null;
   /**
-   * The user's own words (ROADMAP 2.972). READ-ONLY, and read for exactly one
+   * The text the user submitted (ROADMAP 2.972). READ-ONLY, and read for exactly one
    * purpose: to refuse the `thin` brief-completeness advisory when the brief
    * itself refutes it. No content is ever lifted out of it into copy.
    */

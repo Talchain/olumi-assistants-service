@@ -982,7 +982,7 @@ export function transformResponseToV3(
     v3EdgesTyped,
     goalNodeId,
     edgeHints,
-    // ROADMAP 2.972 — the user's own words, as read-only evidence for the
+    // ROADMAP 2.972 — the text the user submitted, as read-only evidence for the
     // intervention provenance claim. Never a source of values.
     context.brief
   );
