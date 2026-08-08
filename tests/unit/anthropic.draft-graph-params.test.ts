@@ -1530,14 +1530,27 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 
-  it("does NOT send output_config for claude-sonnet-5 without a per-call override (shared-allowlist live-safety pin)", async () => {
-    // claude-sonnet-5 is deliberately NOT in STRUCTURED_OUTPUTS_SUPPORTED_MODELS:
-    // that SHARED set also keys buildStrictAnthropicTools (strict tool calling,
-    // no env gate) for every live /orchestrate/v2/turn, and would flip the
-    // edit_graph/draft prompt-only fallbacks under
-    // CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. A bare chat call on sonnet-5 —
-    // which is exactly what edit_graph makes — must keep today's prompt-only
-    // fallback even with the env flag on.
+  it("DOES send output_config for claude-sonnet-5 under the env flag (ROADMAP 2.973 — supersedes the shared-allowlist pin)", async () => {
+    // ⚠ INTENT REVERSED DELIBERATELY, 2026-08-08. This test previously pinned the
+    // OPPOSITE ("does NOT send output_config for claude-sonnet-5"). It was not
+    // wrong when written: sonnet-5 was excluded from the ONE shared set that also
+    // keyed buildStrictAnthropicTools (strict tool calling, NO env gate), so the
+    // only way to hold strict tools steady was to forgo structured outputs too.
+    //
+    // #871 then made sonnet-5 the draft/edit/orchestrator default, and that pin
+    // became a live capability regression: every draft AND every edit_graph chat
+    // call fell back to prompt-only JSON under CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true
+    // (which staging sets — Render API, 2026-08-08).
+    //
+    // 2.973 splits the two concepts apart (see anthropic-model-capabilities.ts), so
+    // sonnet-5 can have structured outputs WITHOUT gaining strict tool calling. The
+    // live-safety intent this test was written to protect is therefore NOT dropped —
+    // it moves to the assertion below and to strict-tool-calling-unchanged.test.ts.
+    //
+    // Evidence (real api.anthropic.com calls, 2026-08-08, controls included):
+    //   - sonnet-5 + output_config.format          → HTTP 200
+    //   - sonnet-5 + the REAL 995-byte edit_graph schema → HTTP 200, valid ops
+    //   - sonnet-5 + the REAL 2689-byte draft grammar    → HTTP 200, 3/3 conformant
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
@@ -1554,8 +1567,12 @@ describe("chatWithAnthropic — output_config.format contract", () => {
 
     expect(createSpy).toHaveBeenCalledOnce();
     const [body] = createSpy.mock.calls[0];
-    expect(body).not.toHaveProperty("output_config");
-    expect(body).not.toHaveProperty("output_format");
+    expect(body.model).toBe("claude-sonnet-5");
+    expect(body.output_config.format.type).toBe("json_schema");
+    expect(body.output_config.format.schema).toEqual(testSchema);
+    // The live-safety half that still holds: structured outputs must NOT drag
+    // strict tool calling along with it. A bare chat call carries no tools at all.
+    expect(body).not.toHaveProperty("tools");
   });
 
   it("sends output_config for claude-sonnet-5 when the caller threads structuredOutputsAdditionalModels (M2 review scoped mechanism)", async () => {
