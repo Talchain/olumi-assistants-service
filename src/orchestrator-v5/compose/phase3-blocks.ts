@@ -95,6 +95,10 @@ import {
   type LensSelectorOptions,
 } from './lens-selector.js';
 import { resolveDskProtocolProvenance } from './dsk-protocol-record.js';
+import {
+  resolveDskClaimProvenance,
+  type DskClaimProvenance,
+} from './dsk-claim-record.js';
 import { config } from '../../config/index.js';
 import {
   classifyClaimUsable,
@@ -788,6 +792,73 @@ export function buildReviewCardBlocks(
 }
 
 /**
+ * ROADMAP 2.964 — THE DSK CLAIM BADGE ON A CALIBRATION PROMPT.
+ *
+ * Olumi grounds its coaching in a decision-science bundle and refuses a
+ * fabricated citation at the enrichment egress, and until now the user was
+ * never told any of it. This is the producer half: the emit/omit rule for
+ * `CoachingBlock.dsk_claim_provenance` (schemas 0.39.0).
+ *
+ * ── WHEN A BADGE IS EARNED ──────────────────────────────────────────────────
+ * ONLY on a `dsk_grounding` verdict of `attested` or `resolved`, and only for
+ * an id in the TECHNIQUE family. Every clause is somebody else's declared
+ * semantics, not this file's reading of what a field ought to mean:
+ *
+ *   - the three verdicts and their meanings are `dsk-grounding-policy.ts`'s.
+ *     `general` is a POSITIVE wire state meaning "genuinely unattested"; a
+ *     badge on it would be the false disclaimer that policy exists to prevent.
+ *   - an ABSENT verdict earns nothing. That policy's header says a consumer
+ *     "must treat ABSENCE as 'no verdict was made' — never as `general`", and
+ *     the same reasoning refuses `attested`. This is not hypothetical: the
+ *     `decision_review` subtree rides the UNTYPED enrichment passthrough and is
+ *     persisted per graph hash, so a payload minted before the policy existed
+ *     reaches this producer carrying a plausible id and no verdict at all.
+ *   - the family restriction is `science-claims.ts`'s: it builds the prompt's
+ *     two tables and labels them "BIAS CLAIMS — use for bias_findings" and
+ *     "TECHNIQUE CLAIMS — use for decision_quality_prompts". A `DSK-B-*`
+ *     citation here cannot have come from the table the model was shown for
+ *     this field, whatever verdict happens to sit beside it.
+ *
+ * ── WHY THE TRIPLE IS RE-RESOLVED FROM THE BUNDLE ───────────────────────────
+ * The entry ALREADY carries `principle`, `evidence_strength` and
+ * `dsk_protocol_id`, and none of them is read. Only the id is, and everything
+ * displayed under the bundle's authority comes back out of `data/dsk/v1.json`
+ * via `resolveDskClaimProvenance`. The model may cite an id correctly and
+ * paraphrase the title beside it; the badge must attest to what the bundle
+ * says, not to what the model typed. CEE #830 is the measured cost of the
+ * other choice.
+ *
+ * ── FAIL-CLOSED, ALWAYS ─────────────────────────────────────────────────────
+ * `null` costs the badge and never the card. That matters more here than
+ * elsewhere: `CoachingBlockSchema` is `.strict()` and the triple is a strict
+ * object with three REQUIRED members, so an incomplete or out-of-enum value
+ * would not degrade to a plain card — it would fail the parse in
+ * `validateProseAndSchemaOrDrop` and take the whole coaching card off the wire.
+ * A missing badge is a lost affordance; a vanished card is lost coaching.
+ *
+ * ── WHAT IS DELIBERATELY NOT DONE HERE (ROADMAP 2.965) ──────────────────────
+ * `buildBiasCards` gets NO badge, even though `ReviewCardBlockSchema` carries
+ * the same field. Bias-finding ids are UNVALIDATED on the live V5 path — a
+ * fabricated `DSK-B-*` can reach the wire inside the passthrough today — so
+ * attaching there would ship the exact trust hole this chain closes. It is
+ * gated on id validation for bias findings landing first.
+ */
+const DSK_GROUNDED_VERDICTS: ReadonlySet<string> = new Set(['attested', 'resolved']);
+
+/** `DskClaimProvenanceSchema.claim_id` narrowed to the TECHNIQUE arm. */
+const DSK_TECHNIQUE_CLAIM_ID_RE = /^DSK-T-\d{3}$/;
+
+function dskClaimProvenanceForPrompt(
+  entry: Record<string, unknown>,
+): DskClaimProvenance | null {
+  const verdict = entry.dsk_grounding;
+  if (typeof verdict !== 'string' || !DSK_GROUNDED_VERDICTS.has(verdict)) return null;
+  const claimId = entry.dsk_claim_id;
+  if (typeof claimId !== 'string' || !DSK_TECHNIQUE_CLAIM_ID_RE.test(claimId)) return null;
+  return resolveDskClaimProvenance(claimId);
+}
+
+/**
  * Build all Phase 3 CoachingBlocks from a fresh `decision_review`
  * enrichment. v11 decision_review sources only `assumption_check` and
  * `calibration_prompt` coaching kinds; the four draft_graph-sourced
@@ -886,6 +957,9 @@ export function buildCoachingBlocks(
       const titleText = principle.length > 0
         ? `${principle} prompt`
         : 'Calibration prompt';
+      // Resolved BEFORE the candidate so the emit/omit decision is one
+      // expression and the spread below cannot half-apply it.
+      const dskClaimProvenance = dskClaimProvenanceForPrompt(e);
       const candidate = {
         ...commonMetadata('coach:calibration', String(idx), ctx),
         type: 'coaching' as const,
@@ -907,6 +981,14 @@ export function buildCoachingBlocks(
         // producer-authored (the model wrote it, this producer chose it), and
         // still verbatim — no templating, no interpolation.
         action_prompt: truncate(question, ACTION_PROMPT_MAX),
+        // ROADMAP 2.964 — the DSK claim badge. `e` is the ONE place carrying
+        // both the grounding verdict and the cited id; until now this mint read
+        // `question` + `principle` and dropped the lineage on the floor. See
+        // `dskClaimProvenanceForPrompt` for the emit/omit rule and why the
+        // triple is re-resolved from the bundle rather than copied from `e`.
+        ...(dskClaimProvenance !== null
+          ? { dsk_claim_provenance: dskClaimProvenance }
+          : {}),
       };
       const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
         block_type: 'coaching',

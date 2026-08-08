@@ -42,12 +42,8 @@
  * cite science the bundle has withdrawn.
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-
-import { verifyDSKHash } from '../../dsk/hash.js';
-import type { DSKBundle, DSKProtocol } from '../../dsk/types.js';
-import { log } from '../../utils/telemetry.js';
+import type { DSKProtocol } from '../../dsk/types.js';
+import { loadVerifiedDskBundle, _resetDskBundleCache } from './dsk-bundle-record.js';
 
 /**
  * The wire shape, structurally identical to schemas'
@@ -76,32 +72,13 @@ function loadProtocolIndex(): ReadonlyMap<string, DSKProtocol> | null {
   if (_attempted) return _protocols;
   _attempted = true;
 
-  const filePath = path.resolve(process.cwd(), 'data/dsk/v1.json');
-  let bundle: DSKBundle;
-  try {
-    bundle = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as DSKBundle;
-  } catch (err) {
-    log.warn(
-      { resolved_path: filePath, error: (err as Error).message },
-      'DSK protocol record unavailable — exercise cards will ship without provenance',
-    );
-    return null;
-  }
-
-  if (!Array.isArray(bundle?.objects) || typeof bundle?.dsk_version_hash !== 'string') {
-    log.warn({ resolved_path: filePath }, 'DSK bundle shape invalid — no protocol provenance');
-    return null;
-  }
-
-  if (!verifyDSKHash(bundle)) {
-    // The badge asserts "this is the published record". An unverified bundle
-    // cannot support that assertion, so we withhold it entirely.
-    log.error(
-      { resolved_path: filePath, declared: bundle.dsk_version_hash },
-      'DSK bundle hash mismatch — refusing to attribute exercises to it',
-    );
-    return null;
-  }
+  // The path resolution, shape check and hash verification live in
+  // `dsk-bundle-record.ts` — one derivation shared with the CLAIM arm, so the
+  // two badge families can never disagree about whether the bundle was
+  // verified (trap 12). What stays here is the question only this arm can
+  // answer: which objects are eligible to be cited as a PROTOCOL.
+  const bundle = loadVerifiedDskBundle();
+  if (bundle === null) return null;
 
   const index = new Map<string, DSKProtocol>();
   for (const obj of bundle.objects) {
@@ -142,8 +119,14 @@ export function resolveDskProtocolProvenance(
   };
 }
 
-/** Test-only: drop the memo so a spec can exercise the read path repeatedly. */
+/**
+ * Test-only: drop the memo so a spec can exercise the read path repeatedly.
+ * Resets the SHARED bundle memo too — otherwise a spec that chdirs to a
+ * tampered/missing bundle would clear this index and then be handed the
+ * previously-cached bundle, and the test would pass while measuring nothing.
+ */
 export function _resetDskProtocolRecordCache(): void {
   _protocols = null;
   _attempted = false;
+  _resetDskBundleCache();
 }
