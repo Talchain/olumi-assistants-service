@@ -253,12 +253,27 @@ describe("store_model_config — the documented claims are bound to the source",
 
   it("PRECEDENCE_BLOCK_POINTS_AT_THE_DECLARATION — one declaration, not two prose copies", () => {
     const modelRouting = readFileSync(join(SRC_ROOT, "config", "model-routing.ts"), "utf8");
+
+    const DECLARATION = "export const STORE_MODEL_CONFIG_LIVE_CALL_SITES";
+    const declarationAt = modelRouting.indexOf(DECLARATION);
+
+    // Precondition, pinned in-test. Without this the search below would run
+    // over the whole file and match the DECLARATION ITSELF — a guard agreeing
+    // with itself (CLAUDE.md trap 13b), passing whether or not any comment
+    // points anywhere. Only the prose ABOVE the declaration is evidence.
     expect(
-      modelRouting.includes("STORE_MODEL_CONFIG_LIVE_CALL_SITES"),
-      `The precedence block in model-routing.ts no longer names ` +
+      declarationAt,
+      `model-routing.ts no longer declares STORE_MODEL_CONFIG_LIVE_CALL_SITES. The precedence ` +
+        `block's rank 2 paragraph depends on it existing.`,
+    ).toBeGreaterThan(-1);
+
+    const prose = modelRouting.slice(0, declarationAt);
+    expect(
+      prose.includes("STORE_MODEL_CONFIG_LIVE_CALL_SITES"),
+      `The precedence block ABOVE the declaration in model-routing.ts no longer names ` +
         `STORE_MODEL_CONFIG_LIVE_CALL_SITES. The whole point of that constant is that the rank 2 ` +
         `paragraph POINTS at it instead of re-listing the call sites in prose — two prose copies ` +
-        `is the drift this guard was written to end.`,
+        `is exactly the drift this guard was written to end.`,
     ).toBe(true);
   });
 
