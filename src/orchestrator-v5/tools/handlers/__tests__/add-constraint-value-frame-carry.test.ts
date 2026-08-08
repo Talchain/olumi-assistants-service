@@ -335,6 +335,40 @@ describe('2.877 link 1 — NO deterministic evidence means NO stamp (fail closed
     ).toBeUndefined();
   });
 
+  it('AMBIGUOUS ZERO BOUNDARY — a message that parses to BOTH frames on the same number leaves the row UNFRAMED', async () => {
+    // ⚠ THIS TEST KILLS MUTANT A-M5 (relax the frame-unanimity check to "take
+    // the first candidate"), and it exists because an earlier revision of this
+    // PR wrongly claimed A-M5 had no killing fixture — that the two frames sat
+    // on disjoint sign ranges so no single number could carry both (trap 13c:
+    // an equivalence asserted, not demonstrated). Refuted by execution in
+    // review, then derived from the producer here (trap 16-inverse).
+    //
+    // The collision is at ZERO. On this exact message the real extractor mints
+    // three LEVEL candidates (value 0, from the two upper bounds' target-name
+    // guesses) AND one DELTA candidate (the reduction branch flips +0 to -0),
+    // all `<=`, none temporal — and `valuesMatch(-0, 0)` is true, so for a
+    // persisted value of 0 all four reach the unanimity Set. Intact,
+    // `frames.size === 2` and the frame is withheld. Under A-M5 the row would
+    // inherit the FIRST candidate's frame ('level') — a silently picked
+    // attestation ISL then trusts.
+    const graph = await registerViaChat({
+      message: 'Reduce marketing cost by 0% and keep churn under 0%.',
+      targetId: 'o-churn-rate',
+      kind: 'node',
+      constraintType: 'at_most',
+      value: 0,
+      unit: '%',
+    });
+
+    const row = pick(graph, 'o-churn-rate', '<=');
+    expect(row.value).toBe(0);
+    expect(
+      row.value_frame,
+      'the extractor derived BOTH level and delta for this number, so CEE cannot ' +
+        'say which the user meant — picking one is a manufactured attestation',
+    ).toBeUndefined();
+  });
+
   it('a message whose stated OPERATOR differs from the persisted one leaves the row UNFRAMED', async () => {
     // 'at least 90%' parses as `>=`; this turn persists `<=`. Same number,
     // opposite comparator — a different constraint, so the evidence does not

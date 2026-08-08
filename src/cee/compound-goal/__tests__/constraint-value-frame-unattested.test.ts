@@ -93,7 +93,10 @@ const REGISTERED_STAMPERS = [
  *     register that overstates what it guards teaches the next reader to stop
  *     looking (CLAUDE.md trap 7b / 14).
  *   - the two draft adapters: the DRAFT LLM's own `goal_constraints` array,
- *     prompt-only and unenforced in code.
+ *     prompt-only and unenforced in code. NOTE the schema PASSES a model-emitted
+ *     `value_frame` THROUGH (proven below); "stamps nothing" means it INJECTS no
+ *     frame the model omitted, so a frameless row is left UNATTESTED — not that
+ *     the field is dropped.
  *   - the client ingress: `z.array(z.unknown())`, wholly unconstrained.
  * Inferring a frame from `(operator, sign)` is not sound — `<=` with a POSITIVE
  * value is a level — so all four fail closed instead, which the contract's own
@@ -272,7 +275,16 @@ describe('2.855 — no non-stamping producer VALIDATOR manufactures a frame', ()
     ).toBe(false);
   });
 
-  it("the DRAFT LLM's own goal_constraints array passes through unframed", () => {
+  it("the DRAFT LLM's own goal_constraints array is left UNATTESTED — the schema INJECTS no frame (a model-emitted one passes through)", () => {
+    // ⚠ PRECISION THE PR BODY GOT WRONG AT FIRST: this row is not "unframed by
+    // the schema". `LLMDraftResponse` PASSES value_frame THROUGH when the model
+    // emits it — the precondition pair below proves exactly that. The guarantee
+    // is narrower and is the one that matters: the schema INJECTS no frame the
+    // model did not write, so a row the model left frameless stays UNATTESTED
+    // and ISL fails closed. A frame the model DOES emit is model prose, not an
+    // attestation CEE stands behind (the merge stage refuses to let it outrank
+    // a deterministic frame — see mergeWithProtectedFrame, ROADMAP 2.932/2.949).
+    //
     // Both adapters spread `parsed.goal_constraints` verbatim, so the only
     // place a frame could be injected on that path is this schema.
     const draft = {
@@ -299,7 +311,8 @@ describe('2.855 — no non-stamping producer VALIDATOR manufactures a frame', ()
 
     expect(
       Object.prototype.hasOwnProperty.call(row, 'value_frame'),
-      "the draft adapter manufactured a frame for the LLM's own constraint array",
+      "the draft adapter manufactured a frame for the LLM's own constraint " +
+        'array — the schema must not INJECT one the model did not emit',
     ).toBe(false);
   });
 });

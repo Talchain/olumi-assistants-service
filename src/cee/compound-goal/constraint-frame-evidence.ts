@@ -120,19 +120,25 @@ export function deriveStatedConstraintFrame(
   // and two disagreeing candidates both mean "CEE cannot say", and both must
   // return undefined rather than pick.
   //
-  // ⚠ HONEST STATUS OF THE DISAGREEMENT HALF: NO TEST KILLS IT, AND IT IS NOT
-  // CLAIMED EQUIVALENT. Relaxing `!== 1` to "take the first" left the whole
-  // suite green (mutant A-M5). The measured reason is that TODAY the two frames
-  // are minted on DISJOINT SIGN RANGES — `extractReductionConstraints` is the
-  // only 'delta' producer and always flips its value negative, while every
-  // bound/temporal branch mints a non-negative level — so no input reaching
-  // this filter can carry both frames on one number, and a discriminating
-  // fixture would have to be invented rather than derived from the producer.
-  // The branch is kept because that disjointness is a PROPERTY OF TODAY'S
-  // EXTRACTOR, not of this contract: a future branch minting a negative LEVEL
-  // ("keep net margin above -2%") makes the collision reachable immediately,
-  // and the failure mode would be a silently picked frame. Fail closed now,
-  // rather than discover it as a confident wrong probability later.
+  // ⚠ THIS DISAGREEMENT BRANCH IS LIVE DEFENCE, REACHABLE FROM A REAL BRIEF —
+  // AND AN EARLIER REVISION OF THIS COMMENT CLAIMED THE OPPOSITE. It said the
+  // two frames sit on DISJOINT SIGN RANGES (reduction always negative, every
+  // level non-negative) so no single number could carry both, and that mutant
+  // A-M5 (relax `!== 1` to "take the first") therefore had no killing fixture.
+  // That was ASSERTED, not demonstrated, and it is FALSE — refuted by execution
+  // in review (trap 13c: never assert an equivalence you have not measured).
+  //
+  // The collision lives at the ZERO BOUNDARY. On
+  //   "Reduce marketing cost by 0% and keep churn under 0%."
+  // the real extractor mints three LEVEL candidates (value 0, from the upper
+  // bounds) and one DELTA candidate (the reduction flips +0 to -0), all `<=`,
+  // none temporal — and `valuesMatch(-0, 0)` is true, so all four reach this
+  // Set for a persisted value of 0. Intact, `frames.size === 2` and this
+  // returns undefined (fail closed, correct). Under A-M5 it would return the
+  // FIRST candidate's frame — a silently picked attestation ISL then trusts.
+  // So the branch is not defence against a hypothetical future producer; it is
+  // defence against a brief a user can type today. Pinned by
+  // "AMBIGUOUS ZERO BOUNDARY" in add-constraint-value-frame-carry.test.ts.
   const frames = new Set<GoalThresholdFrameType>(matching.map((c) => c.valueFrame));
   if (frames.size !== 1) return undefined;
 
