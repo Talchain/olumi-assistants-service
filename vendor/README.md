@@ -7,7 +7,134 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.38.0.tgz`
+### `talchain-schemas-0.39.0.tgz`
+
+> **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE, AND — FOR THE FIRST TIME IN
+> THIS FILE'S HISTORY — VERIFIED AGAINST THE REGISTRY BYTES.** Packed from a fresh
+> blobless clone of `olumi-schemas` with **`HEAD` asserted equal to
+> `76fe0ed9f6a26e884420c2ea5115fa1edb7d2b27`** (tag `v0.39.0`, olumi-schemas #38)
+> *before any read* — fetching a ref is not checking it out — then
+> `npm ci && npm run build && npm pack` (node 20.19.5 / npm 10.8.2).
+>
+> sha256 `4c05a7f71efe56c8144b6125f44181b64c56a996c1d38234212bc09e025c92f0`
+> — 385,991 bytes. **Proven byte-reproducible:** a second independent `npm pack`
+> of the same build produced the identical sha256.
+>
+> **✔ CROSS-REPO BYTE-IDENTITY IS PROVEN, NOT ASSERTED.** The estate rule is that
+> no two repos may hold DIFFERENT bytes under one version string. All three
+> consumers' vendored tarballs are the **same git blob
+> `844d432b7b339869b02e89ed54854f78a2a354d2`** — blob identity is byte identity,
+> a stronger check than comparing three recorded sha256 strings, since a manifest
+> can be copied without the bytes being. All three lockfiles independently
+> recorded the identical `sha512-O2JqLFE6H9V7…` integrity over those bytes.
+>
+> **✅ ROADMAP 2.464 IS CLOSED FOR THIS VERSION — and the premise every previous
+> entry recorded was FALSE.** Since 0.31.0 this file has said the registry-bytes
+> comparison "remains open" because the lane's token had no GitHub Packages read
+> scope (`gh api /orgs/Talchain/packages` → 404). **The 404 was about the wrong
+> endpoint, not about the token.** `curl -H "Authorization: Bearer $(gh auth
+> token)" https://npm.pkg.github.com/@talchain/schemas` succeeds and reports
+> `dist-tags.latest = 0.39.0`. The published artifact was downloaded and compared:
+>
+> | check | result |
+> |---|---|
+> | registry `dist.shasum` vs `shasum -a 1` of the download | `5435da9b9325a5fd88d997164600612032c943fa` — **identical** |
+> | registry `dist.integrity` vs `openssl dgst -sha512 -binary … \| base64` | `sha512-Uk2uRLs94eq7OfJ7TlA2FxccdD0g6k6KOFghJjAPB7+JcBNr4ENaZWODCNVsv61lrQxu4gl3Yoargy6rATy+2w==` — **identical** |
+> | registry tarball's own `package/package.json` | `@talchain/schemas 0.39.0` |
+> | registry bytes vs the source pack vendored here | **DIFFER** — 385,588 vs 385,991 bytes (npm repacks on publish; the 0.29.0 vendor commit learned this the hard way) |
+> | registry CONTENT vs source-pack CONTENT (`diff -r`, both unpacked) | **byte-identical — zero content differences, zero file-list differences** |
+>
+> **So the two artefacts differ only in their gzip/tar envelope and agree on every
+> byte that is ever executed.** The source pack is vendored, because that is the
+> recipe PLoT's and the UI's `vendor/` both instruct the next bumper to use; the
+> registry hash is recorded so a future session can re-derive either side without
+> re-litigating which is canonical. **The honest statement for 0.39.0 is no longer
+> "unverified against the registry" — it is "verified against the registry, and
+> content-identical to it".**
+
+**What CEE adopts here: NOTHING. This is a PARITY-ONLY bump and it is meant to be
+inert.** No field is emitted, no source file is touched beyond the two version
+pins named below.
+
+**⚠ WHY AN INERT BUMP IS NEVERTHELESS URGENT — the adoption-order constraint,
+measured upstream:** every parent touched by 0.39.0 is `.strict()`. If a producer
+emits one of the new fields before its consumer has re-vendored, **the old
+consumer does not silently drop it — it HARD-FAILS the entire block/envelope
+parse.** Consumers must therefore move FIRST, which is what this PR does across
+all three repos. CEE is the eventual PRODUCER for the DSK claim-provenance and
+`run_delta` cars; **that producer work is deliberately NOT in this PR.**
+
+Four additive-optional cars arrive; CEE consumes none of them today:
+
+| car | CEE consumption today |
+|---|---|
+| `DskClaimProvenanceSchema` + the triple on `CoachingBlock` / `ReviewCardBlock` | **not yet** — CEE composes both parents (132 / 211 references) and already carries 192 `dsk_claim_id` references, but has **zero** references to `DskClaimProvenance`. This is CEE's future producer half. |
+| `UiDirectiveSource` + optional `source` on `UiDirectiveBlock` | **not yet** — CEE emits `UiDirectiveBlock` (31 references) but has zero references to `UiDirectiveSource` |
+| `RunDeltaSchema` + optional `OlumiResponse.run_delta` | **no** — zero references to `run_delta`. ⚠ **See the name-collision warning below before wiring this.** |
+| the collab U-S0 family (incl. `AuthoredBySchema`) | **no** — zero references |
+
+> ⚠⚠ **`RunDelta` IS NOW A NAME THAT MEANS TWO DIFFERENT THINGS IN THIS REPO —
+> read this before wiring `run_delta`.** CEE already has its **own**
+> `export interface RunDelta` at `src/orchestrator-v5/coaching/compare-runs.ts:60`,
+> consumed by `signals/coaching-signals.ts` and `routing/run-comparison-gate.ts`
+> (13 references). 0.39.0 introduces a **schemas-side `RunDelta`/`RunDeltaSchema`**
+> that is a *different type with the same name*. **Nothing breaks today** — every
+> current import resolves to the local interface via a relative path, which is why
+> this bump typechecks clean — but this is exactly the two-`generateGraphHash`-twins
+> trap re-armed at a new site, and it is the trap that costs the most when it
+> fires, because there is no compile error to find it by. **Whoever wires
+> `run_delta`: alias the import (`import type { RunDelta as WireRunDelta }`) or
+> rename the local one, and do NOT assume the two shapes agree — derive the wire
+> shape from the schema, not from the local interface.**
+
+**Export verification — checked by IMPORTING, not by grepping the tarball.** A
+`grep` over `dist/` proves presence in a file, never that the package entry
+EXPORTS the symbol. Installed and imported: all four families resolve from
+**`@talchain/schemas/boundary`** (180 exports) and **none from the package ROOT**
+(103 exports). A negative control (`FakeSchema_XYZ`) read ABSENT, so the probe was
+proven able to report absence before its presence readings were trusted.
+
+**⚠ THE EDITABLE-FIELD TABLE DID NOT MOVE — verified at the bytes, not assumed.**
+Unlike the 0.37.0 bump (which silently inherited 0.36.0's table revision 2), the
+0.38.0→0.39.0 diff touches no table source. Read off the INSTALLED 0.39.0
+package: `EDITABLE_FIELD_TABLE_DIGEST = 67cea469-77605f3b`, `length = 43`,
+`REVISION = 2`, and the recomputed digest reproduces the published constant.
+All three are byte-identical to 0.38.0, so `field-parity-derivation.test.ts`'s
+digest, row-count and revision assertions are untouched by this bump.
+
+**Measured pin-bump delta (re-derived at this tip, not inherited):**
+
+- `pnpm typecheck` (the honest gate — `tsc -p tsconfig.build.json --noEmit`, with
+  `pretypecheck` running `openapi:generate` + `check:schemas-resolution`):
+  **clean at pristine `9a957207` and clean here**, with the resolution check
+  flipping from `✔ @talchain/schemas@0.38.0 bound` to
+  `✔ @talchain/schemas@0.39.0 bound`. **0 affected sites.**
+- `pnpm test:required` at pristine `9a957207`: **1535 files passed / 19 skipped
+  (1554); 26,567 tests passed / 176 skipped / 12 todo (26,755).**
+- **Exactly TWO assertions moved, both version pins**, in
+  `src/orchestrator-v5/graph-management/__tests__/field-parity-derivation.test.ts`
+  (plus that test's own name): the INSTALLED-version pin `0.38.0 → 0.39.0` and the
+  DECLARED-pin literal `file:./vendor/talchain-schemas-0.38.0.tgz → …-0.39.0.tgz`.
+  Those two are a **deliberate fail-loud tripwire** — they exist so a re-vendor
+  cannot land silently — so moving them is the tripwire working, not a test being
+  bent around a problem.
+
+> **A THIRD version pin did NOT need touching, and that is worth recording.**
+> `tests/integration/cee.decision-review.flip-threshold-contract.test.ts` also
+> asserts `SCHEMA_PACKAGE_VERSION`, but it **derives** the expected value by
+> regexing the `file:` pin out of `package.json` rather than hardcoding it. It
+> therefore self-adjusted and now actively verifies this bump end-to-end (the
+> declared pin, the resolved runtime constant, and its `minor >= 31` floor all
+> agree at 0.39.0). **That is the pattern the two hand-written pins above should
+> eventually adopt** — trap 12: derive, don't mirror.
+
+**Rollback path:** revert the whole PR, then re-run `pnpm install`. Unlike the
+0.37.0 and 0.38.0 bumps, this one **CAN be reverted alone** — no source file
+imports anything 0.39.0 added, and the only source-tree change is the two version
+literals in the pin test, which revert with it. Reverting does NOT unpublish
+0.39.0.
+
+### `talchain-schemas-0.38.0.tgz` (historical — no longer vendored)
 
 > **✔ ADOPTED FROM THE BYTES TWO CONSUMERS ALREADY HOLD — NOT RE-PACKED HERE.**
 > The estate rule is that no two repos may hold DIFFERENT bytes under one

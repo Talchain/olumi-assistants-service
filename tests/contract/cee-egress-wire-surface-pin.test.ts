@@ -103,6 +103,13 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       // wire sidecar). Approved surface change — 0.15.0 contract wave.
       'reasoning',
       'response_version',
+      // 0.39.0-new: optional top-level run-to-run delta (`RunDeltaSchema`).
+      // DECLARED here by the re-vendor; CEE does NOT yet EMIT it — this pin
+      // bump is consumer-parity only. ⚠ Note for whoever wires it: `RunDelta`
+      // is ALSO the name of a pre-existing LOCAL interface in this repo
+      // (src/orchestrator-v5/coaching/compare-runs.ts) which is a DIFFERENT
+      // type. Alias the wire import; do not assume the two shapes agree.
+      'run_delta',
       'stage_indicator',
       'suggested_actions',
     ])
@@ -199,6 +206,12 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'category',
       'coaching_kind',
       'created_at',
+      // 0.39.0-new: the DSK claim-provenance triple, letting a coaching block
+      // attribute its guidance to a published decision-science claim. DECLARED
+      // here by the re-vendor; CEE does NOT yet EMIT it — this pin bump is
+      // consumer-parity only, and the producer half is separate work. The
+      // field is optional, so its declaration is additive to the wire surface.
+      'dsk_claim_provenance',
       'freshness',
       'graph_hash_at_generation',
       'priority',
@@ -229,6 +242,10 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
       'category',
       'created_at',
+      // 0.39.0-new: the DSK claim-provenance triple (same car as
+      // CoachingBlockSchema above). DECLARED by the re-vendor, NOT emitted —
+      // consumer-parity bump only.
+      'dsk_claim_provenance',
       'freshness',
       'graph_hash_at_generation',
       'priority',
