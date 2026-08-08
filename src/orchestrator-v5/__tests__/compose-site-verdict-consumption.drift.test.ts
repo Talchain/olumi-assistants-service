@@ -1409,14 +1409,32 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // "withheld-able headline, else a locked template", the `gated` stance is
     // void — so the exact expression is pinned, not paraphrased.
     expect(RUN_ANALYSIS).toContain('const headline = buildAnalysisResultHeadline(headlineInput);');
+    // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
+    // constraint-gap one. The `gated` stance is unaffected and the pin is
+    // updated rather than loosened: `summary` is still "withheld-able headline,
+    // else a locked template", now with three additive suffixes in the order
+    // `analysis-result-headline.ts`'s TAIL_PATTERN admits them. Re-pinning the
+    // exact expression (not a paraphrase, not a substring of it) is what keeps
+    // a future reordering visible here — an intake disclosure appended BEFORE
+    // the constraint gap would compose a summary the egress allowlist rejects,
+    // and the user would silently receive the bare template.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather
     // than "two derivations that happen to agree". The same object that gates
     // the headline is the one persisted and read back as mayNameLeadingOption.
-    expect(RUN_ANALYSIS).toContain('constraint_verdict: projectClaimSafety(constraintVerdict),');
+    //
+    // ROADMAP 2.579: the persisted permission is now the CONJUNCTION of that
+    // verdict with the intake reconciliation, so the pin covers both halves.
+    // `projectClaimSafety(constraintVerdict)` is still the sole source of the
+    // constraint half — the intake wrapper can only ever REMOVE the permission,
+    // never grant one the constraint verdict withheld, and it leaves
+    // `constraint_verdict_state` untouched (CLAUDE.md trap 21: two authorities,
+    // two questions, named apart rather than aligned).
+    expect(RUN_ANALYSIS).toContain('projectClaimSafety(constraintVerdict),');
+    expect(RUN_ANALYSIS).toContain('constraint_verdict: applyIntakeToLeaderPermission(');
   });
 
   it('chip-click confirmationText: HOP 4 — EVERY withholding verdict state withholds the headline', () => {

@@ -410,6 +410,12 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // rule still fabricated, because a decimal point truncated the binding
     // window BEFORE the magnitude guard could inspect it. A guard can be right
     // and still never see the input it was written for.
+    "orchestrator/context/intake-option-reconciliation.ts":
+      "comment only (ROADMAP 2.579) — the doc for `cutAtSentenceEnd` quotes trap 22's own " +
+      "example, '£1.5 million', to say why a `[.!?]` split is unsafe. The module holds NO " +
+      "magnitude list and does no numeric parsing at all: it lowercases text to identity " +
+      "tokens and compares token sets. The only numeral it touches is the decimal-point " +
+      "check that keeps '2.5 tonne' inside one candidate.",
     "cee/compound-goal/extractor.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/factor-extraction/index.ts": "comments only; derives its patterns from the canonical alphabet",
     "context/resolver.ts": "comments only; derives its patterns from the canonical alphabet",
