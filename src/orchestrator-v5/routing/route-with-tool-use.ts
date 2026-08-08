@@ -568,8 +568,10 @@ export async function routeWithToolUse(
   options: RouteWithToolUseOptions,
 ): Promise<RoutingResult> {
   // Production path: resolve via the router with the 'orchestrator' task ID so
-  // store_model_config, CEE_MODEL_ORCHESTRATOR, and TASK_MODEL_DEFAULTS['orchestrator']
-  // are respected in that order. Group 3 Task C fix — previously this site used
+  // CEE_MODEL_ORCHESTRATOR and TASK_MODEL_DEFAULTS['orchestrator'] are respected
+  // in that order. A prompt-store modelConfig pin (precedence rank 2) is NOT
+  // respected here — resolveRoutingAdapter passes no modelOverride, so the pin
+  // is inert; see its docblock. Group 3 Task C fix — previously this site used
   // getAdapter('direct_answer_narrate'), which is NOT a valid CeeTask and
   // therefore fell through to LLM_PROVIDER/LLM_MODEL (gpt-4o-mini on staging).
   const { adapter, resolution } = options.adapter
@@ -1438,14 +1440,36 @@ interface MinimalToolUseAdapter {
 }
 
 /**
- * Resolve the adapter for V5 ORIENT (tool-use routing). Group 3 Task C:
- * uses `getAdapterWithResolution('orchestrator', ...)` so the precedence chain
- * (per_call → store_model_config → env_var CEE_MODEL_ORCHESTRATOR →
- * task_default gpt-4o → providers_json → llm_model_fallback) is honoured and
- * observable. The returned `resolution` is forwarded to turn-debug by the
- * caller. Prior to this fix the site called `getAdapter('direct_answer_narrate')`
+ * Resolve the adapter for V5 ORIENT (tool-use routing). Group 3 Task C: uses
+ * `getAdapterWithResolution('orchestrator')` so the resolution is OBSERVABLE —
+ * the returned `resolution` is forwarded to turn-debug by the caller.
+ *
+ * ⚠ THIS SITE HONOURS ONLY RANKS 3-6 of the precedence chain documented in
+ * src/config/model-routing.ts:
+ *
+ *     env_var CEE_MODEL_ORCHESTRATOR
+ *       → task_default TASK_MODEL_DEFAULTS['orchestrator']
+ *       → providers_json
+ *       → llm_model_fallback
+ *
+ * Ranks 1 and 2 (per_call, store_model_config) are STRUCTURALLY UNREACHABLE
+ * here. Both live in the router's override branch, which is entered only when
+ * the caller supplies a `modelOverride` argument — and this call passes none.
+ * A prompt-store modelConfig pin on the 'orchestrator' task is therefore INERT:
+ * it never reaches the router at all. See STORE_MODEL_CONFIG_LIVE_CALL_SITES in
+ * src/config/model-routing.ts for the sites where rank 2 genuinely applies, and
+ * src/config/__tests__/store-model-config-call-sites.test.ts for the guard that
+ * REDs if this call ever starts passing an override (which would make the
+ * paragraph above false).
+ *
+ * The task_default is deliberately NOT restated here as a model name: an
+ * earlier revision of this docblock named one, the default moved, and the
+ * comment went stale. Read TASK_MODEL_DEFAULTS.
+ *
+ * Prior to Group 3 Task C the site called `getAdapter('direct_answer_narrate')`
  * — a non-CeeTask string that caused the router to short-circuit to
- * llm_model_fallback (observed as gpt-4o-mini on 20 April 2026 staging).
+ * llm_model_fallback (observed as gpt-4o-mini on 20 April 2026 staging; a dated
+ * past measurement, not a claim about what resolves today).
  */
 function resolveRoutingAdapter(): {
   adapter: MinimalToolUseAdapter;

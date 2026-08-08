@@ -15,13 +15,40 @@
  *                            supply via request body.
  *                            Source: src/adapters/llm/router.ts:688-719
  *
- *   2. store_model_config    prompt-store modelConfig.{staging,production}
- *                            resolved upstream in parse.ts and passed to
- *                            getAdapter as modelOverride. The router sees
- *                            this as modelOverride; the origin flag in
- *                            getAdapterWithResolution distinguishes it
- *                            from per_call.
- *                            Source: src/cee/unified-pipeline/stages/parse.ts:92-109
+ *   2. store_model_config    prompt-store modelConfig.{staging,production},
+ *                            read BY THE CALL SITE and handed to
+ *                            getAdapterWithResolution as modelOverride with
+ *                            origin='store_model_config'. The router sees only
+ *                            a modelOverride; the origin flag preserves the
+ *                            distinction from per_call.
+ *
+ *                            ⚠ RANK 2 IS NOT GLOBAL — it applies ONLY at the
+ *                            call sites that actually read the pin, which are
+ *                            enumerated in STORE_MODEL_CONFIG_LIVE_CALL_SITES
+ *                            below. The router NEVER consults the prompt store
+ *                            itself: its override branch is entered only when
+ *                            the caller supplied a modelOverride argument
+ *                            (getAdapterWithResolution in
+ *                            src/adapters/llm/router.ts). So on every OTHER
+ *                            task a modelConfig pin is INERT — stored, served
+ *                            by the admin prompts API, and never reaching the
+ *                            router. It is not a weak override; it is no
+ *                            override at all.
+ *
+ *                            MEASURED LIVE, 2026-08-08: the 'orchestrator'
+ *                            task carried a staging modelConfig pin while
+ *                            staging served the CEE_MODEL_ORCHESTRATOR value
+ *                            (rank 3) — Render log 2026-08-08T19:54:41.257Z,
+ *                            "Using CEE task-specific model from environment",
+ *                            task=orchestrator. The pin was dead because
+ *                            resolveRoutingAdapter()
+ *                            (src/orchestrator-v5/routing/route-with-tool-use.ts)
+ *                            passes no modelOverride.
+ *
+ *                            The list below is not a hand-maintained mirror:
+ *                            src/config/__tests__/store-model-config-call-sites.test.ts
+ *                            DERIVES the readers from src/ and REDs on any
+ *                            divergence in either direction.
  *
  *   3. env_var               CEE_MODEL_* env vars via config.cee.models.*
  *                            Source: src/adapters/llm/router.ts:725-731
@@ -45,6 +72,39 @@
  * src/config/model-resolution-logger.ts.
  * ─────────────────────────────────────────────────────────────────
  */
+
+/**
+ * THE REACH OF PRECEDENCE RANK 2 (store_model_config) — the single
+ * declaration, referenced by the precedence block above and enforced against
+ * the source by src/config/__tests__/store-model-config-call-sites.test.ts.
+ *
+ * These are the LIVE TASK PATHS that read a prompt-store modelConfig pin and
+ * pass it to the router. A pin on any task NOT served by one of these sites is
+ * INERT (see rank 2 above).
+ *
+ * Each entry is a repo-relative path that both (a) reads the environment key
+ * off a prompt's modelConfig and (b) names its task with a literal
+ * getSystemPromptMeta('<task>') call — the second condition is what makes it a
+ * task path rather than a generic harness.
+ */
+export const STORE_MODEL_CONFIG_LIVE_CALL_SITES: readonly string[] = [
+  "src/cee/unified-pipeline/stages/parse.ts", // draft_graph
+  "src/routes/assist.critique-graph.ts", // critique_graph
+  "src/routes/assist.suggest-options.ts", // suggest_options
+];
+
+/**
+ * Readers of a prompt's modelConfig that are NOT live task paths.
+ *
+ * The admin testing harness runs an OPERATOR-CHOSEN prompt record and reads
+ * whatever modelConfig that record carries. It names no task, serves no user
+ * turn, and therefore says nothing about which tasks honour rank 2 — it is
+ * listed separately so the derivation guard can tell "a new task path started
+ * consuming pins" (a precedence change) apart from "the harness moved".
+ */
+export const STORE_MODEL_CONFIG_NON_TASK_READERS: readonly string[] = [
+  "src/routes/admin.testing.ts", // operator test-run endpoint, not a task path
+];
 
 /**
  * CEE task types that can have model selection applied
