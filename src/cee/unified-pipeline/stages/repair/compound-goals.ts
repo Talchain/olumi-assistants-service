@@ -74,6 +74,67 @@ export function partitionTemporalNonBinding<T>(
   return { binding, temporal };
 }
 
+/**
+ * ROADMAP 2.932 (CEE limb, Codex external review R4 / MF2) — THE FRAME IS
+ * PROTECTED PAYLOAD.
+ *
+ * The merge below dedupes on `node_id::operator` and lets the LLM row win, for
+ * a real reason: it carries richer metadata (source_quote, confidence,
+ * provenance, better label). But the key says nothing about `value_frame`, so
+ * an LLM duplicate that carries none silently DESTROYED the one the regex
+ * extractor deterministically minted (#862) — and ISL then refuses the entire
+ * `constraint_analysis` block with `CONSTRAINT_FRAME_UNSPECIFIED`. Measured at
+ * `ed8aad89` by execution before the fix: brief "Keep churn under 5%" plus an
+ * LLM row on the same key ⇒ surviving row unframed.
+ *
+ * The rule is narrow ON PURPOSE. Reverting precedence wholesale would trade the
+ * lost frame for lost enrichment. Only the frame is protected; every other
+ * field still comes from the model.
+ *
+ * ⚠ AND IT FAILS CLOSED, WHICH IS THE HALF THAT MATTERS MOST. Sharing
+ * `node_id::operator` does NOT make two rows the same quantity: the regex row
+ * may hold `-0.15` from "reduce cost by 15%" (a DELTA) while the model's row
+ * holds `0.85` (a LEVEL) under the identical key. Carrying the frame across
+ * THAT pair would attest a level as a delta and hand ISL a confident WRONG
+ * probability — strictly worse than the gap being closed. So preservation
+ * requires the two rows to state the SAME NUMBER IN THE SAME UNIT, and
+ * otherwise leaves the model row unframed. No unit reconciliation is attempted:
+ * `0.05 fraction` and `5 %` may well be the same quantity, but deciding that is
+ * a guess, and the cost of refusing is one unframed constraint while the cost
+ * of guessing is a wrong number.
+ *
+ * A frame the MODEL supplied does not outrank a deterministic one on the same
+ * number: the draft LLM's `goal_constraints[]` is prompt-only and unenforced,
+ * so a frame appearing there is model prose, not an attestation.
+ *
+ * Pure. Exported for direct test.
+ */
+export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
+  deterministic: T | undefined,
+  model: T,
+): T {
+  const frame = deterministic?.value_frame;
+  if (deterministic === undefined || frame === undefined) return model;
+
+  const detValue = deterministic.value;
+  const modelValue = model.value;
+  const sameNumber =
+    typeof detValue === "number" &&
+    typeof modelValue === "number" &&
+    Number.isFinite(detValue) &&
+    Number.isFinite(modelValue) &&
+    // Relative tolerance guards only the float round-trip; both sides are
+    // decimal literals in the producers' own units.
+    Math.abs(detValue - modelValue) <=
+      1e-9 * Math.max(1, Math.abs(detValue), Math.abs(modelValue));
+
+  const sameUnit = (deterministic.unit ?? undefined) === (model.unit ?? undefined);
+
+  if (!sameNumber || !sameUnit) return model;
+
+  return { ...model, value_frame: frame };
+}
+
 export function runCompoundGoals(ctx: StageContext): void {
   if (!ctx.graph) return;
 
@@ -176,9 +237,14 @@ export function runCompoundGoals(ctx: StageContext): void {
   for (const c of regexConstraints) {
     merged.set(dedupeKey(c), c);
   }
-  // LLM overwrites on same key (higher priority — richer metadata)
+  // LLM overwrites on same key (higher priority — richer metadata), EXCEPT the
+  // deterministic `value_frame`, which is an attestation rather than metadata
+  // and survives an unframed duplicate that states the same quantity. See
+  // `mergeWithProtectedFrame` for why it fails closed when they do not
+  // (ROADMAP 2.932).
   for (const c of llmConstraints) {
-    merged.set(dedupeKey(c), c);
+    const key = dedupeKey(c);
+    merged.set(key, mergeWithProtectedFrame(merged.get(key), c));
   }
 
   // ROADMAP 2.349 — the single, source-agnostic gate. See

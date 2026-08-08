@@ -57,6 +57,7 @@ import {
   valuesMatch,
 } from '../../../utils/reduction-framing.js';
 import { extractGoalTargetWithBaseline } from '../../../cee/factor-extraction/index.js';
+import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -393,6 +394,33 @@ export function createAddConstraintHandler(): HandlerFn {
         }
       }
 
+      // ROADMAP 2.877 (link 1) — RELAY the frame the user's own words attest.
+      //
+      // ⚠ THIS IS A DIFFERENT QUESTION FROM `isGoalTargetSet` BELOW, AND THAT
+      // IS THE WHOLE POINT (trap 21 shape). That predicate answers "is this
+      // turn setting the SUCCESS TARGET?" — a goal-node question about the
+      // node's own threshold channel. This one answers "does CEE hold
+      // deterministic evidence of THIS NUMBER's frame?" — a question about the
+      // constraint row, with no goal-ness in it. Fusing them is what left the
+      // chat path unframed on EVERY target kind: 2.877 recorded the gap as
+      // "non-goal targets carry no value_frame", but measured at `ed8aad89` the
+      // regex extractor stamps outcome, risk and factor targets alike (it never
+      // reads `kind`), and this handler stamped NONE of them — the dark axis is
+      // the PRODUCER, not the target kind. So this derivation is deliberately
+      // target-kind agnostic.
+      //
+      // It mints nothing: `deriveStatedConstraintFrame` returns a frame a
+      // registered stamper already attested, gated on the parsed number BEING
+      // the number persisted below, and `undefined` in every ambiguous
+      // direction — in which case the row stays unattested and ISL keeps
+      // failing closed, exactly as #862 intended. Same evidence carrier, and
+      // for the same stated reason, as the goal-baseline gate further down.
+      const statedValueFrame = deriveStatedConstraintFrame(
+        invocation.payload.message,
+        operator,
+        params.value,
+      );
+
       // Default the constraint label from the target node's label so the
       // confirmation text and the persisted shape are coherent.
       const constraintLabel = params.label ?? targetNode.label;
@@ -404,30 +432,69 @@ export function createAddConstraintHandler(): HandlerFn {
         (c) => c.node_id === targetId && c.operator === operator,
       );
 
+      // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
+      // UNCHANGED). On an update, a turn that does not mention a unit
+      // keeps the persisted row's unit — `existing?.unit` sits between
+      // the explicit parameter and the node's observed unit, and it
+      // OUTRANKS the observed unit because the row is the prior state
+      // of the thing being updated (same convention as
+      // set_factor_value's `parsed.unit → before.unit` merge). Before
+      // this fix the chain skipped `existing` entirely, so the
+      // whole-object update splice below silently stripped the
+      // persisted `%` (the live gc-cdd6eb74 silent-nullification
+      // defect). Never silently clear a persisted unit.
+      //
+      // Lifted out of the object literal because the FRAME resolution below
+      // has to read the resolved unit, not the raw parameter.
+      const resolvedUnit =
+        params.unit !== undefined
+          ? params.unit
+          : existing?.unit !== undefined
+            ? existing.unit
+            : targetNode.observed_state?.unit !== undefined
+              ? targetNode.observed_state.unit
+              : undefined;
+
+      // ROADMAP 2.877 (link 1) — THE SAME SILENT-NULLIFICATION CLASS AS THE
+      // UNIT DROP ABOVE, which this PR would otherwise have opened on a new
+      // field. The update path replaces the row WHOLESALE (`list.map(... =>
+      // constraintParse.data)`), so once a row can carry a frame, a later turn
+      // that carries no deterministic evidence — a label-only change, or a
+      // restatement phrased without a constraint clause — would silently CLEAR
+      // an attestation that is still true, and ISL would resume refusing.
+      //
+      // Same doctrine, same shape: OMISSION MEANS UNCHANGED. But gated
+      // strictly harder than the unit, because a frame describes a NUMBER:
+      // it is inherited only when this turn's value AND unit are both
+      // unchanged, i.e. the row still describes the very quantity the frame
+      // was attested for. If the value moved, the old frame described a
+      // different number and carrying it over would be a manufactured
+      // attestation — so it is dropped and the row fails closed, exactly as an
+      // unattested row should.
+      const inheritedValueFrame =
+        existing?.value_frame !== undefined &&
+        valuesMatch(existing.value, params.value) &&
+        existing.unit === resolvedUnit
+          ? existing.value_frame
+          : undefined;
+
       const newConstraintBase: Omit<GoalConstraintT, 'constraint_id'> = {
         node_id: targetId,
         operator,
         value: params.value, // user units, no normalisation
         label: constraintLabel,
         provenance: 'explicit',
-        // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
-        // UNCHANGED). On an update, a turn that does not mention a unit
-        // keeps the persisted row's unit — `existing?.unit` sits between
-        // the explicit parameter and the node's observed unit, and it
-        // OUTRANKS the observed unit because the row is the prior state
-        // of the thing being updated (same convention as
-        // set_factor_value's `parsed.unit → before.unit` merge). Before
-        // this fix the chain skipped `existing` entirely, so the
-        // whole-object update splice below silently stripped the
-        // persisted `%` (the live gc-cdd6eb74 silent-nullification
-        // defect). Never silently clear a persisted unit.
-        ...(params.unit !== undefined
-          ? { unit: params.unit }
-          : existing?.unit !== undefined
-            ? { unit: existing.unit }
-            : targetNode.observed_state?.unit !== undefined
-              ? { unit: targetNode.observed_state.unit }
-              : {}),
+        // BY-PRESENCE, never defaulted: an absent frame must stay absent on the
+        // row, because `undefined` and "unattested" are the same fact here and
+        // the contract forbids manufacturing the difference. This turn's own
+        // deterministic evidence outranks the inherited one — a re-statement
+        // that parses is a fresh attestation of the same number.
+        ...(statedValueFrame !== undefined
+          ? { value_frame: statedValueFrame }
+          : inheritedValueFrame !== undefined
+            ? { value_frame: inheritedValueFrame }
+            : {}),
+        ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
       };
 
       const newConstraint: GoalConstraintT = {
@@ -469,13 +536,35 @@ export function createAddConstraintHandler(): HandlerFn {
       // ISL computes P(samples >= threshold) (MINIMISATION doctrine —
       // encoding a "keep below" bound as a >=-threshold would invert the
       // claim). The constraint entry still lands.
-      const isGoalTargetSet = targetNode.kind === 'goal' && operator === '>=';
+      //
+      // ⚠ ONE PREDICATE, TWO QUESTIONS — SPLIT AND NAMED APART (ROADMAP 2.877,
+      // trap 21). `isGoalTargetSet` was read by four call sites answering two
+      // genuinely different questions:
+      //
+      //   (1) "Is this turn SETTING THE SUCCESS TARGET?" — a question about the
+      //       user's INTENT, which decides the positive-value guard and which
+      //       receipt sentence the user reads.
+      //   (2) "Does this write OWN THE GOAL NODE's threshold channel?" — a
+      //       question about PERSISTENCE, which decides the second
+      //       unchanged-value channel and whether the node-threshold stamp runs.
+      //
+      // They are CO-EXTENSIVE TODAY and deliberately derived from one another
+      // below, so this split changes no behaviour. It exists because a third
+      // question — "does CEE hold deterministic evidence of this number's
+      // FRAME?" (see `statedValueFrame` above) — had no name at all, and so
+      // inherited this predicate's goal-ness by default and left the chat path
+      // unframed on every target kind. Naming the questions apart is what stops
+      // the next one being folded in silently: when a new conjunct is needed,
+      // add it to the question it answers, never to "the goal predicate".
+      const isSuccessTargetTurn = targetNode.kind === 'goal' && operator === '>=';
+      /** Co-extensive with (1) today; a separate name so it can stop being. */
+      const ownsGoalThresholdChannel = isSuccessTargetTurn;
 
       // Review hardening (2026-07-07): a success target must be a positive
       // number — the shared value schema is a plain z.number(), so without
       // this guard "-5%" would persist a negative goal_threshold that ships
       // to PLoT/ISL unbounded.
-      if (isGoalTargetSet && !(params.value > 0)) {
+      if (isSuccessTargetTurn && !(params.value > 0)) {
         throw new D1HandlerError(
           'PARAMETER_INVALID',
           'A success target must be a positive number — tell me the target value again.',
@@ -506,7 +595,7 @@ export function createAddConstraintHandler(): HandlerFn {
         existing.value === newConstraint.value &&
         existing.unit === newConstraint.unit;
       const nodeChannelUnchanged =
-        isGoalTargetSet &&
+        ownsGoalThresholdChannel &&
         typeof targetNode.goal_threshold_raw === 'number' &&
         targetNode.goal_threshold_raw === params.value &&
         targetNode.goal_threshold_unit === newConstraint.unit;
@@ -524,7 +613,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // content is byte-identical to what was already persisted); it is
       // ONLY the node-threshold stamp that is gated, since that is the
       // field the F9 defect actually moved.
-      const stampGoalThreshold = isGoalTargetSet && !valueUnchanged;
+      const stampGoalThreshold = ownsGoalThresholdChannel && !valueUnchanged;
 
       // Gate-1 EMIT GUARD — a constraint must not reach the wire
       // unit-ambiguous. A unit-less value outside [0,1] targeting a
@@ -735,7 +824,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // label-only change (value unchanged, label differs) gets its own
       // distinct receipt — never the fresh-update claim, never the
       // total-noop claim either.
-      const assistantText = isGoalTargetSet
+      const assistantText = isSuccessTargetTurn
         ? valueUnchanged
           ? formatGoalTargetUnchanged({
               goalLabel: targetNode.label,

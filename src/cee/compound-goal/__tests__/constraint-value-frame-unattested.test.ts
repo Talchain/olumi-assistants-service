@@ -79,8 +79,24 @@ const REGISTERED_STAMPERS = [
  *     `routing/tool-schema.ts` explicitly instructs a NEGATIVE `at_most`
  *     encoding for reduction framing — so both frames are reachable through
  *     one parameter and the handler cannot tell which it holds.
+ *     ⚠ REFINED BY ROADMAP 2.877 (link 1), AND THE DISTINCTION IS THE WHOLE
+ *     POINT — the sentence above is about the PARAMETER and stays exactly true.
+ *     Since 2.877 the handler DOES emit a frame on some turns, by RELAYING one
+ *     `cee/compound-goal/extractor.ts` already attested for the user's own
+ *     words, gated on the parsed number being the number persisted
+ *     (`cee/compound-goal/constraint-frame-evidence.ts`, itself literal-free
+ *     and therefore correctly not a stamper either). "Emits a frame" and
+ *     "ATTESTS a frame" are different claims: this register is about the
+ *     second, and `add_constraint` still never makes one — which is why its
+ *     entry stays here and its literal count stays zero. Do NOT read this row
+ *     as "no `value_frame` can leave this handler"; that would be false, and a
+ *     register that overstates what it guards teaches the next reader to stop
+ *     looking (CLAUDE.md trap 7b / 14).
  *   - the two draft adapters: the DRAFT LLM's own `goal_constraints` array,
- *     prompt-only and unenforced in code.
+ *     prompt-only and unenforced in code. NOTE the schema PASSES a model-emitted
+ *     `value_frame` THROUGH (proven below); "stamps nothing" means it INJECTS no
+ *     frame the model omitted, so a frameless row is left UNATTESTED — not that
+ *     the field is dropped.
  *   - the client ingress: `z.array(z.unknown())`, wholly unconstrained.
  * Inferring a frame from `(operator, sign)` is not sound — `<=` with a POSITIVE
  * value is a level — so all four fail closed instead, which the contract's own
@@ -259,7 +275,16 @@ describe('2.855 — no non-stamping producer VALIDATOR manufactures a frame', ()
     ).toBe(false);
   });
 
-  it("the DRAFT LLM's own goal_constraints array passes through unframed", () => {
+  it("the DRAFT LLM's own goal_constraints array is left UNATTESTED — the schema INJECTS no frame (a model-emitted one passes through)", () => {
+    // ⚠ PRECISION THE PR BODY GOT WRONG AT FIRST: this row is not "unframed by
+    // the schema". `LLMDraftResponse` PASSES value_frame THROUGH when the model
+    // emits it — the precondition pair below proves exactly that. The guarantee
+    // is narrower and is the one that matters: the schema INJECTS no frame the
+    // model did not write, so a row the model left frameless stays UNATTESTED
+    // and ISL fails closed. A frame the model DOES emit is model prose, not an
+    // attestation CEE stands behind (the merge stage refuses to let it outrank
+    // a deterministic frame — see mergeWithProtectedFrame, ROADMAP 2.932/2.949).
+    //
     // Both adapters spread `parsed.goal_constraints` verbatim, so the only
     // place a frame could be injected on that path is this schema.
     const draft = {
@@ -286,7 +311,8 @@ describe('2.855 — no non-stamping producer VALIDATOR manufactures a frame', ()
 
     expect(
       Object.prototype.hasOwnProperty.call(row, 'value_frame'),
-      "the draft adapter manufactured a frame for the LLM's own constraint array",
+      "the draft adapter manufactured a frame for the LLM's own constraint " +
+        'array — the schema must not INJECT one the model did not emit',
     ).toBe(false);
   });
 });

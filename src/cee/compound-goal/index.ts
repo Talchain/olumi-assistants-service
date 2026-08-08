@@ -23,6 +23,8 @@ export {
   type RemapResult,
 } from "./extractor.js";
 
+export { deriveStatedConstraintFrame } from "./constraint-frame-evidence.js";
+
 export {
   generateConstraintNodes,
   generateConstraintEdge,
