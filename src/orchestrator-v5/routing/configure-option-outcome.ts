@@ -68,7 +68,15 @@ export type ConfigureOptionOutcomeSkipReason =
   | 'not_configure_intent'
   | 'pre_graph_unparseable'
   | 'option_not_identified'
-  | 'recovery_copy_unavailable';
+  /**
+   * The resolver fell back to "the sole unconfigured option" because the
+   * message named none. Sound for the intercept, never for a verdict — see the
+   * P1 note at the check itself.
+   */
+  | 'option_not_named'
+  | 'recovery_copy_unavailable'
+  /** Pre- and post-edit resolution disagreed about which option this is. */
+  | 'recovery_target_diverged';
 
 export type ConfigureOptionOutcomeVerdict =
   | { readonly status: 'not_applicable'; readonly reason: ConfigureOptionOutcomeSkipReason }
@@ -194,6 +202,39 @@ export function evaluateConfigureOptionOutcome(params: {
     return { status: 'not_applicable', reason: 'option_not_identified' };
   }
 
+  // ⭐⭐ P1 (adversarial review of `572f7ea9`) — A GUESS IS NOT AN IDENTITY.
+  //
+  // `resolveConfigureOptionFacts` will fall back to "the sole unconfigured
+  // option" when the message names none. That is a good heuristic for the
+  // INTERCEPT — a value-less "Help me configure one of my options." genuinely
+  // means the only blocked one — and it is unsound here, for a reason that is
+  // pure trap-21 residue: the 2.427 split moved the `value_payload` conjunct
+  // out of the recovery path and left the resolver's OTHER intercept-domain
+  // assumption travelling unexamined.
+  //
+  // In recovery, value-bearing messages flow in, and they routinely name a
+  // CONFIGURED option — which is absent from the unconfigured list, so the
+  // fallback silently retargets the verdict onto a different option. Proven by
+  // execution: "Under the Cloud-Native CRM option, set its effect on Adoption
+  // Complexity to 0.9", with CRM already at 0.7 and Basic Platform the sole
+  // blocked option, LANDS the revision and still returned `not_honoured` for
+  // `opt_basic` — so the dispatcher swapped a TRUE success confirmation for
+  // recovery copy about an option the user never mentioned, and logged
+  // `applied_something: true`, counting the guard's own mistake as a product
+  // defect in the very meter that measures the defect.
+  //
+  // Note the harm is the INVERSE of the one this module exists to fix, and note
+  // what it defeated: the identity mutant pair varies which option the
+  // WRITE-CHECK reads, and this defect is in which option the target RESOLVES
+  // to. Both mutants agreed; neither was pointed at the resolution step.
+  //
+  // So: this guard may only speak about an option the USER NAMED. Its whole
+  // doctrine is identity binding (trap 19), and a sole-unconfigured guess is
+  // not an identity.
+  if (target.optionSource !== 'named_in_message') {
+    return { status: 'not_applicable', reason: 'option_not_named' };
+  }
+
   if (interventionsWriteLandedFor(target.optionId, before, after)) {
     return { status: 'honoured', optionId: target.optionId };
   }
@@ -210,6 +251,17 @@ export function evaluateConfigureOptionOutcome(params: {
     // `needs_encoding` by some route other than an interventions write). No
     // honest copy is available, so say nothing rather than guess.
     return { status: 'not_applicable', reason: 'recovery_copy_unavailable' };
+  }
+
+  // The post-edit re-resolution is a SECOND resolution, against a DIFFERENT
+  // graph, and nothing structurally forces it to land on the same option as the
+  // one whose write was just checked — the unconfigured set can change shape
+  // between `before` and `after`. Pinned rather than assumed: a verdict that
+  // named one option and carried copy about another would be the same
+  // wrong-entity harm this module exists to remove, reintroduced two lines from
+  // the end of it.
+  if (recovery.optionId !== target.optionId) {
+    return { status: 'not_applicable', reason: 'recovery_target_diverged' };
   }
 
   return {

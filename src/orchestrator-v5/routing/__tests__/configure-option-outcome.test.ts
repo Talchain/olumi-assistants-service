@@ -30,6 +30,7 @@ import { describe, it, expect } from 'vitest';
 
 import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
 import { buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
+import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 
 // ---------------------------------------------------------------------------
@@ -415,5 +416,138 @@ describe('ROADMAP 2.427 — the outcome is bound to the option by IDENTITY', () 
     expect(
       evaluateConfigureOptionOutcome({ message: T12C, before: BEFORE, after }).status,
     ).toBe('not_honoured');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. ⭐⭐ P1 (adversarial review of 572f7ea9) — THE SOLE-UNCONFIGURED FALLBACK
+//    BINDS THE VERDICT TO AN OPTION THE USER NEVER NAMED.
+// ---------------------------------------------------------------------------
+
+/**
+ * TRAP 21 RESIDUE, and the lesson is sharper than the bug.
+ *
+ * The 2.427 split correctly moved ONE conjunct out of the recovery predicate —
+ * `carriesConfigureOptionValuePayload`. It did not ask what ELSE in the shared
+ * resolver had been sound only because of the intercept's domain. The
+ * `sole_unconfigured` fallback is the answer: under the intercept it is a good
+ * heuristic (a value-less "Help me configure one of my options." genuinely means
+ * the only blocked one). Under RECOVERY, value-bearing messages flow in, and
+ * those messages routinely NAME a CONFIGURED option — at which point the
+ * fallback silently retargets the verdict onto a different option entirely.
+ *
+ * The harm is the INVERSE of the one this row exists to fix, which is why it
+ * matters so much: the guard takes a TRUE success confirmation and replaces it
+ * wholesale with recovery copy about an option the user never mentioned, and
+ * logs `applied_something: true` — counting its own mistake as a product defect
+ * in the very meter that measures the defect.
+ *
+ * ⚠ Note it defeated the identity mutant pair. Those mutants vary WHICH option
+ * the write-check reads; this defect is in which option the target RESOLVES to.
+ * Both instruments agreed, and neither was pointed at the resolution step.
+ */
+describe('P1 — the verdict may only name an option the USER named', () => {
+  /** CRM already configured; Basic Platform is now the SOLE unconfigured option. */
+  function crmConfiguredBasicBlocked(complexity: number): GraphV3T {
+    return captureGraph({
+      cloudNativeInterventions: { fac_adoption_complexity: complexity },
+      basicInterventions: {},
+    });
+  }
+
+  const REVISION = 'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.9.';
+
+  it('PAIR/1 — a revision that LANDS on the named option leaves the success untouched', () => {
+    const before = crmConfiguredBasicBlocked(0.7);
+    const after = crmConfiguredBasicBlocked(0.9);
+
+    // Preconditions pinned in-test, so this case cannot decay into agreeing
+    // with itself: the fallback must be REACHABLE (exactly one option at
+    // `needs_encoding`, and it is NOT the one the user named). DERIVED from
+    // `computeStructuralReadiness` — the same reader the resolver filters on —
+    // rather than from a local guess about what "unconfigured" means.
+    const blocked = computeStructuralReadiness(before)!
+      .options.filter((o) => o.status === 'needs_encoding')
+      .map((o) => o.option_id);
+    expect(blocked).toEqual(['opt_basic']);
+    expect(REVISION).toContain('Cloud-Native CRM');
+
+    const verdict = evaluateConfigureOptionOutcome({ message: REVISION, before, after });
+
+    // The user's edit SUCCEEDED. The guard must not manufacture a failure, and
+    // above all must not manufacture one about `opt_basic`.
+    expect(verdict.status).not.toBe('not_honoured');
+    expect(JSON.stringify(verdict)).not.toContain('opt_basic');
+    expect(JSON.stringify(verdict)).not.toContain('Basic Platform');
+  });
+
+  it('PAIR/2 — the motivating shape still gets recovery copy about the NAMED option', () => {
+    // The named option IS the unconfigured one (the real capture state), the
+    // write does not land, and nothing about the P1 fix may weaken this.
+    const verdict = evaluateConfigureOptionOutcome({
+      message: T12C,
+      before: BEFORE,
+      after: captureGraph({ cloudNativeComplexityStrength: 0.7 }),
+    });
+    expect(verdict).toMatchObject({
+      status: 'not_honoured',
+      optionId: 'opt_cloud_native',
+      optionLabel: 'Cloud-Native CRM',
+    });
+  });
+
+  it('a sole-unconfigured guess is never grounds for a verdict, even when nothing landed', () => {
+    // The generic chip shape reaching recovery: one blocked option, none named.
+    // A guess is not identity, so the guard has no claim to make.
+    const before = captureGraph({ basicInterventions: {} });
+    const verdict = evaluateConfigureOptionOutcome({
+      message: 'Help me configure one of my options.',
+      before,
+      after: null,
+    });
+    expect(verdict.status).toBe('not_applicable');
+  });
+});
+
+/**
+ * The pre/post divergence pin, made non-vacuous.
+ *
+ * The first cut of this pin shipped with a SURVIVING mutant: deleting it left
+ * all 79 tests green, so it was an assertion about a case nobody had shown was
+ * reachable. An equivalent mutant must be DEMONSTRATED, never assumed — so here
+ * is the discriminating fixture, and it is not exotic:
+ *
+ *   The message names TWO options. Before the edit, only the second is blocked,
+ *   so the target resolves to it, by name. The edit then does something
+ *   destructive to the FIRST one — clearing its interventions is well inside a
+ *   wrong-entity write's repertoire — which makes that option blocked too, and
+ *   it sorts earlier, so the post-edit re-resolution picks it instead.
+ *
+ * Without the pin the verdict would carry `opt_cloud_native`'s outcome under
+ * `opt_basic`'s name and factors: the exact wrong-entity harm this module
+ * exists to remove, reintroduced two lines from the end of it.
+ */
+describe('the post-edit re-resolution may not rename the option', () => {
+  const NAMES_BOTH =
+    'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.7 — not like Basic Platform.';
+
+  it('declines when pre- and post-edit resolution disagree about which option this is', () => {
+    const before = captureGraph(); // opt_basic ready, opt_cloud_native blocked
+    const after = captureGraph({ basicInterventions: {} }); // the edit cleared opt_basic
+
+    // Preconditions pinned in-test, so this cannot decay into a tautology.
+    const blockedBefore = computeStructuralReadiness(before)!
+      .options.filter((o) => o.status === 'needs_encoding').map((o) => o.option_id);
+    const blockedAfter = computeStructuralReadiness(after)!
+      .options.filter((o) => o.status === 'needs_encoding').map((o) => o.option_id);
+    expect(blockedBefore).toEqual(['opt_cloud_native']);
+    expect(blockedAfter).toEqual(['opt_basic', 'opt_cloud_native']);
+    expect(NAMES_BOTH).toContain('Cloud-Native CRM');
+    expect(NAMES_BOTH).toContain('Basic Platform');
+
+    expect(evaluateConfigureOptionOutcome({ message: NAMES_BOTH, before, after })).toEqual({
+      status: 'not_applicable',
+      reason: 'recovery_target_diverged',
+    });
   });
 });

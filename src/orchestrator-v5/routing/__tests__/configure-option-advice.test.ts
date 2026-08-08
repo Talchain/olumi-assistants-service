@@ -59,6 +59,28 @@ describe('extractAdvisedExemplars — positive control', () => {
     expect(extractAdvisedExemplars(`Say '${advised}'.`)).toEqual([advised]);
   });
 
+  /**
+   * Smart quotes, handled rather than documented (adversarial review of
+   * `572f7ea9`). LLM prose routinely emits typographic quotes, and an extractor
+   * blind to them would go silent on exactly the copy this guard polices —
+   * the failure direction where broken advice ships unnoticed.
+   */
+  it('sees typographic single and double quotes', () => {
+    expect(extractAdvisedExemplars('Say \u2018configure the X option\u2019 to go.')).toEqual([
+      'configure the X option',
+    ]);
+    expect(extractAdvisedExemplars('For example \u201Cconfigure my option\u201D.')).toEqual([
+      'configure my option',
+    ]);
+  });
+
+  it('does not terminate a curly-quoted exemplar on a typographic apostrophe', () => {
+    // U+2019 is BOTH the closing curly quote and the correct apostrophe, so
+    // this is the ambiguous case — resolved the way a reader resolves it.
+    const advised = "Set the Cloud-Native CRM option\u2019s effect on Adoption Complexity to 0.7";
+    expect(extractAdvisedExemplars(`Say \u2018${advised}\u2019.`)).toEqual([advised]);
+  });
+
   it('sees a REAL captured advice sentence', () => {
     // Deployed CEE `98f2476`, capture `P2_2_confirm.json` — the only quoted
     // advice the 71-capture set actually contains. Extractor must see it, and

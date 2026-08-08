@@ -73,14 +73,24 @@ const OPTION_WORD = /\boptions?\b/;
  * inspection: the guard was correct and pointed at the wrong bytes. An
  * apostrophe followed by a word character is therefore treated as part of the
  * exemplar, never as its terminator.
+ *
+ * ⚠ SMART QUOTES ARE HANDLED, NOT MERELY DOCUMENTED (adversarial review of
+ * `572f7ea9`). LLM prose routinely emits typographic quotes — `‘…’`, `“…”` —
+ * and an extractor that saw only ASCII would go silently blind on exactly the
+ * copy this guard exists to police, which is the worse failure direction here:
+ * broken advice ships unnoticed. The curly-single branch needs the same
+ * possessive escape as the ASCII one, and needs it MORE, because U+2019 is both
+ * the closing quote and the correct typographic apostrophe — `‘Set the X
+ * option’s effect…’` is genuinely ambiguous, and the same "followed by a word
+ * character" rule resolves it the way a reader does.
  */
 export function extractAdvisedExemplars(copy: string): string[] {
   if (typeof copy !== 'string') return [];
   const out: string[] = [];
   const pattern =
-    /(?:\bsay\b|\bfor example\b)[,:]?\s+(?:'((?:[^']|'(?=\w))+)'|"([^"]+)")/gi;
+    /(?:\bsay\b|\bfor example\b)[,:]?\s+(?:'((?:[^']|'(?=\w))+)'|"([^"]+)"|‘((?:[^’]|’(?=\w))+)’|“([^”]+)”)/gi;
   for (const m of copy.matchAll(pattern)) {
-    const exemplar = m[1] ?? m[2];
+    const exemplar = m[1] ?? m[2] ?? m[3] ?? m[4];
     if (typeof exemplar === 'string' && exemplar.trim().length > 0) {
       out.push(exemplar.trim());
     }

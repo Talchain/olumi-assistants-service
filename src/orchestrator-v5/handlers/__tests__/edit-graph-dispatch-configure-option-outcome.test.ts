@@ -387,3 +387,111 @@ describe('ROADMAP 2.427 — the guard stays out of the way of working turns', ()
     ).toBe(false);
   });
 });
+
+/**
+ * ⭐⭐ P1 (adversarial review of `572f7ea9`) — at the DISPATCHER, where the harm
+ * actually lands.
+ *
+ * The unit-level verdict being wrong is bad; what makes it a P1 is what this
+ * seam then does with it. `dispatchEditGraph` replaces `assistant_text`
+ * WHOLESALE, so a mis-resolved verdict does not merely add a caveat — it
+ * deletes a TRUE success confirmation and substitutes recovery copy about an
+ * option the user never mentioned, then logs `applied_something: true`,
+ * recording the guard's own mistake as a product defect in the meter that
+ * measures product defects.
+ */
+describe('ROADMAP 2.427 — P1 regression pair: the verdict may only name a NAMED option', () => {
+  /** CRM already configured at 0.7; Basic Platform is the SOLE blocked option. */
+  function crmConfiguredBasicBlocked(complexity: number): GraphV3T {
+    return {
+      nodes: [
+        { id: 'goal_crm_roi', kind: 'goal', label: 'CRM Programme ROI' },
+        ...FACTORS.map((f) => ({ id: f.id, kind: 'factor' as const, label: f.label })),
+        { id: 'opt_basic', kind: 'option' as const, label: 'Basic Platform' },
+        {
+          id: 'opt_cloud_native',
+          kind: 'option' as const,
+          label: 'Cloud-Native CRM',
+          interventions: interventionBundle({ fac_adoption_complexity: complexity }),
+        },
+      ],
+      edges: [
+        ...FACTORS.map((f) => edge('opt_basic', f.id, 1)),
+        ...FACTORS.map((f) => edge('opt_cloud_native', f.id, 1)),
+        ...FACTORS.map((f) => edge(f.id, 'goal_crm_roi', 0.5)),
+      ],
+    } as GraphV3T;
+  }
+
+  const REVISION =
+    'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.9.';
+  const TRUE_CONFIRMATION =
+    'Updated the Cloud-Native CRM option: Adoption Complexity is now 0.9. Rerun analysis to see the effect.';
+
+  it('PAIR/1 — a revision that LANDS keeps its true confirmation and emits no meter', async () => {
+    const revisionApplied: EditGraphResult = {
+      blocks: [],
+      assistantText: TRUE_CONFIRMATION,
+      latencyMs: 1000,
+      appliedGraph: crmConfiguredBasicBlocked(0.9) as unknown as EditGraphResult['appliedGraph'],
+      wasRejected: false,
+      operations: [
+        {
+          op: 'update_node',
+          path: 'opt_cloud_native',
+          value: { data: { interventions: { fac_adoption_complexity: 0.9 } } },
+        },
+      ],
+      appliedChanges: {
+        summary: 'Revised Cloud-Native CRM.',
+        changes: [
+          {
+            label: 'Cloud-Native CRM',
+            description: 'Adoption Complexity 0.7 → 0.9.',
+            element_ref: 'opt_cloud_native',
+          },
+        ],
+        rerun_recommended: true,
+      },
+      operation_meta: [{ impact: 'medium', rationale: '' }],
+    } as unknown as EditGraphResult;
+
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(revisionApplied);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(REVISION),
+      requestId: 'req-2427-p1',
+      request: STUB_REQUEST,
+      graphState: crmConfiguredBasicBlocked(0.7) as unknown as GraphStateIngress,
+      analysisState: null,
+    });
+
+    // The user's edit worked. Their confirmation must survive intact.
+    expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+    expect(out.response.assistant_text).toContain('0.9');
+    // And above all, NOTHING about the option they never mentioned.
+    expect(out.response.assistant_text).not.toContain('Basic Platform');
+    expect(out.response.assistant_text).not.toBe(EXPECTED_RECOVERY_TEXT);
+    // The meter must not count the guard's own mis-resolution as a defect.
+    expect(
+      (emit as MockedFunction<typeof emit>).mock.calls.some(
+        ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+      ),
+    ).toBe(false);
+  });
+
+  it('PAIR/2 — the motivating failure still gets recovery copy about the NAMED option', async () => {
+    // The discriminating twin: nothing about the P1 fix may weaken the
+    // defect-kill this row exists for.
+    const out = await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
+
+    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT);
+    expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+    const call = (emit as MockedFunction<typeof emit>).mock.calls.find(
+      ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
+    );
+    expect(call![1]).toMatchObject({ option_id: 'opt_cloud_native' });
+  });
+});
