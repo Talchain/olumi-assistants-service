@@ -64,14 +64,36 @@ const STATIVE_VERB =
   "(?:is|are|sits?\\s+at|stands?\\s+at|is\\s+(?:currently\\s+)?running\\s+at|are\\s+(?:currently\\s+)?running\\s+at)";
 
 /**
- * What may sit between the verb and the number — a CLOSED set of
- * present-state qualifiers and hedges. Anything else ("above", "under",
- * "down", "not", "probably targeted", …) breaks the match, which is exactly
- * the fail-closed behaviour the corpus pins. `about/around/roughly` are the
- * same hedge vocabulary the shipped goal-pair patterns 2/3 already accept as
- * statement-compatible ("currently at|around|about").
+ * The CLOSED present-state qualifier/hedge vocabulary. One list, two
+ * grammars (trap 12 — derive, don't mirror): the statement grammar's FILLER
+ * (between verb and number) and the elicited-answer grammar's leading and
+ * trailing qualifiers are all built from THIS array. Anything else ("above",
+ * "under", "down", "not", "probably targeted", …) breaks the match, which is
+ * exactly the fail-closed behaviour the corpus pins. `about/around/roughly`
+ * are the same hedge vocabulary the shipped goal-pair patterns 2/3 already
+ * accept as statement-compatible ("currently at|around|about"). `right` is
+ * admitted for the "right now" / "right around" hedge family (2.918 — the
+ * elicitation question's own copy says "right now", so answers echo it).
  */
-const FILLER = "(?:\\s+(?:currently|now|presently|today|still|at|around|about|roughly))*";
+const PRESENT_STATE_QUALIFIERS: readonly string[] = [
+  "currently",
+  "now",
+  "presently",
+  "today",
+  "still",
+  "at",
+  "around",
+  "about",
+  "roughly",
+  "right",
+];
+const QUALIFIER_ALT = `(?:${PRESENT_STATE_QUALIFIERS.join("|")})`;
+
+/**
+ * What may sit between the verb and the number — the closed qualifier
+ * vocabulary above, zero or more times.
+ */
+const FILLER = `(?:\\s+${QUALIFIER_ALT})*`;
 
 /**
  * Words that may follow the '%' and CHANGE the claim from a level to a delta
@@ -142,6 +164,16 @@ const SUBJECT_LEADING_STOPWORDS = new Set([
  *     be argued with, not asserted.
  * Over-matching (e.g. the month "May", or a marker in the clause's other
  * half) only ever costs a mint, never truth.
+ *
+ * 2.960 R1 — FUTURE-DATED POST-QUALIFIERS. "Churn is 12% by Q4" states where
+ * churn is EXPECTED to be at a future date — an aspiration wearing a copula
+ * (both review repro strings minted at pristine 060e9ed9, proven by
+ * execution). The `by <date>` family joins the marker set: quarters (Q1–Q4),
+ * month names, "year-end" / "year end", and 4-digit years. The qualifier must
+ * be DATE-SHAPED — an instrumental "by" ("by our own measurement") stays a
+ * genuine statement, pinned by the spec suite's precondition pair. Bare "by
+ * May" was already refused by the modal `may` marker; it is listed here so
+ * the family does not depend on that coincidence.
  */
 const CLAUSE_FRAME_MARKERS = new RegExp(
   "\\b(?:if|when|whenever|unless|suppose|supposing|assuming|assume|imagine|whether|" +
@@ -149,6 +181,8 @@ const CLAUSE_FRAME_MARKERS = new RegExp(
     "target(?:s|ed|ing)?|hope(?:s|d|ing)?|expect(?:s|ed|ing)?|forecast(?:s|ed|ing)?|" +
     "project(?:s|ed|ing)?|plan(?:s|ned|ning)?|should|would|could|will|might|may|" +
     "going\\s+to|used\\s+to|next\\s+(?:year|quarter|month|week)|" +
+    "by\\s+(?:Q[1-4]|January|February|March|April|May|June|July|August|" +
+    "September|October|November|December|year[-\\s]end|\\d{4})|" +
     "doubt(?:s|ed)?|false|untrue|deny|denies|denied)\\b",
   "i",
 );
@@ -380,5 +414,75 @@ export function deriveStatedTargetBaselinePercent(
   // THRESHOLD would clamp on that rung, so the whole cell refuses.
   if (!(value >= 0 && value <= 100)) return undefined;
 
+  return value;
+}
+
+/**
+ * ROADMAP 2.918 — the ELLIPTICAL ANSWER grammar. In reply to a pending
+ * baseline question that NAMES the target ("Roughly what percentage is Churn
+ * rate at right now?"), the natural answer carries no subject: "about 12%",
+ * "it's 12%", "we're at 12% today". The statement grammar above demands a
+ * subject and therefore cannot see these — deliberately, because without a
+ * question in flight a bare number attests nothing.
+ *
+ * The WHOLE message must be the answer: an optional pronoun lead (a CLOSED
+ * set — it/that + copula, we + are (+ at); pronouns carry no metric identity,
+ * which is exactly why the question context must supply it), qualifiers drawn
+ * from the SAME `PRESENT_STATE_QUALIFIERS` vocabulary as the statement
+ * grammar, ONE unsigned number with a literal '%', optional trailing
+ * qualifiers, and at most a closing '.' or '!'. Anything else refuses:
+ * a '?' (question echo), a quote, a delta or bound word, a second number, a
+ * conditional tail, "maybe" — every one of these may change the claim, and
+ * only the full grammar (which demands a subject) is entitled to judge a
+ * longer utterance. Percent-only and [0,100] for the same reasons as the
+ * parent (the mint cell it feeds is unchanged).
+ */
+const ELLIPTICAL_ANSWER_PATTERN = new RegExp(
+  "^\\s*" +
+    "(?:(?:it|that)(?:['’]s|\\s+is)\\s+|we(?:['’]re|\\s+are)\\s+(?:at\\s+)?)?" +
+    `(?:${QUALIFIER_ALT}\\s+)*` +
+    "(?<value>\\d+(?:\\.\\d+)?)\\s*%" +
+    `(?:\\s+${QUALIFIER_ALT})*` +
+    "\\s*[.!]?\\s*$",
+  "i",
+);
+
+/**
+ * The single raw percent an ANSWER TURN states for the pending question's
+ * target, or `undefined`. This is the #868 extractor with a bounded
+ * question-context carry, NOT a second parser:
+ *
+ *   1. the full-sentence limb IS `deriveStatedTargetBaselinePercent` — a
+ *      subject-bearing answer ("Churn rate is about 12%") binds by identity
+ *      and competitor unanimity exactly as on any other turn;
+ *   2. the elliptical limb accepts ONLY a whole-message bare answer (grammar
+ *      above). Its subject binding is the QUESTION's: callers MUST gate this
+ *      function on a live `elicit_target_baseline` pending whose target is
+ *      `targetLabel`'s node — no pending question ⇒ this function must not be
+ *      called ⇒ no elliptical binding. The add_constraint handler enforces
+ *      that gate (exactly one live pending, matching target id, server-minted
+ *      so no LLM proposal can fabricate it).
+ *
+ * EXTRACTION ONLY — never infers, defaults, or rounds; every refusal path
+ * returns `undefined` and the caller mints nothing.
+ */
+export function deriveElicitedBaselineAnswerPercent(
+  message: string | null | undefined,
+  targetLabel: string | null | undefined,
+  competingLabels: readonly (string | null | undefined)[] = [],
+): number | undefined {
+  if (typeof message !== "string" || message.trim() === "") return undefined;
+  // No target label ⇒ no identity to bind ⇒ nothing, same rule as the parent.
+  if (typeof targetLabel !== "string" || targetLabel.trim() === "") return undefined;
+
+  const full = deriveStatedTargetBaselinePercent(message, targetLabel, competingLabels);
+  if (full !== undefined) return full;
+
+  const m = ELLIPTICAL_ANSWER_PATTERN.exec(message);
+  if (m === null) return undefined;
+  const value = Number(m.groups?.["value"]);
+  if (!Number.isFinite(value)) return undefined;
+  // Same [0,100] rule as the parent — the mint cell this feeds is unchanged.
+  if (!(value >= 0 && value <= 100)) return undefined;
   return value;
 }

@@ -56,6 +56,24 @@ import { isClarifyDimension } from '../clarify-v2/rubric.js';
 
 export type PendingActionId = string;
 
+/**
+ * ROADMAP 2.918 — the fields a pending baseline question carries, shared with
+ * `HandlerOutcome.__elicit_baseline` (registry.ts) so the handler's channel
+ * and the persisted pending cannot drift (trap 12). `target_id`/`target_label`
+ * are the question's identity; `constraint_type`/`value`/`unit`/`label` are
+ * the REGISTERED row's shape, carried so the answer-turn resume replays a
+ * value-identical restatement (`label` is the persisted row's label — omitting
+ * it would let the replay silently rewrite the label to the node's).
+ */
+export interface ElicitTargetBaselineFields {
+  readonly target_id: string;
+  readonly target_label: string;
+  readonly constraint_type: 'at_least' | 'at_most';
+  readonly value: number;
+  readonly unit?: string;
+  readonly label?: string;
+}
+
 export type PendingActionAction =
   | {
       readonly kind: 'set_factor_value';
@@ -237,6 +255,30 @@ export type PendingActionAction =
        */
       readonly start_over_brief?: string;
     }
+  | ({
+      /**
+       * ROADMAP 2.918 — the pending BASELINE QUESTION. Emitted by the
+       * turn-executor's commit path when `add_constraint` returns the
+       * `__elicit_baseline` channel: the turn registered a level-framed
+       * constraint on a mintable-and-baseline-less target and the receipt
+       * asked for the target's current level. Carries the question's
+       * TARGET (the identity an elliptical answer binds through — no
+       * pending question, no elliptical binding, fail closed) and the
+       * REGISTERED CONSTRAINT's own shape so the answer-turn resume can
+       * replay a value-identical restatement through the add_constraint
+       * handler (the #868 mint path), never a second writer.
+       *
+       * Server-only (NOT chip-derivable; not confirmation-expecting — a
+       * bare "yes" answers no percent question). Resumed by the
+       * turn-executor's baseline-elicitation pre-route; ALSO read directly
+       * by the add_constraint handler (via
+       * `context.most_recent_pending_actions`) to license the elliptical
+       * grammar when the LLM routes the answer itself. A lapsed question
+       * dies silently by TTL — behaviour is then exactly the honest ISL
+       * refusal that preceded 2.918.
+       */
+      readonly kind: 'elicit_target_baseline';
+    } & ElicitTargetBaselineFields)
   | {
       /**
        * V5 P0 proposal-memory continuation. Captures a noun-phrase
@@ -293,6 +335,12 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // round is claimed by the clarify-v2 resume itself (proceed-with-defaults),
   // never by TurnExecutor's pending-action synthesis.
   'clarify_v2_round',
+  // ROADMAP 2.918 — resumed by the turn-executor's baseline-elicitation
+  // pre-route (answer-shaped message only), and read directly by the
+  // add_constraint handler to license the elliptical answer grammar.
+  // Deliberately ABSENT from the short-confirm resumer's local
+  // RESUMABLE_KINDS: a bare "yes" answers no percent question.
+  'elicit_target_baseline',
 ]);
 
 /**
@@ -471,6 +519,31 @@ export function filterLivePendingActions(
   return pendings.filter((pa) => !isPendingActionExpired(pa, nowMs));
 }
 
+/** A pending baseline question, narrowed to its kind. */
+export type ElicitTargetBaselinePending = PendingAction & {
+  readonly action: { readonly kind: 'elicit_target_baseline' } & ElicitTargetBaselineFields;
+};
+
+/**
+ * ROADMAP 2.918 — THE question-context gate for the elliptical answer
+ * grammar. Returns the pending baseline question if and only if EXACTLY ONE
+ * live `elicit_target_baseline` pending exists — two live questions make a
+ * bare "about 12%" ambiguous between targets, so it binds neither (the same
+ * unanimity doctrine as the extractor's competitor rule, one level up).
+ * Liveness via the shared predicate; `null` in every other case, so every
+ * caller fails closed by construction.
+ */
+export function findSoleLiveElicitBaselinePending(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): ElicitTargetBaselinePending | null {
+  const live = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa): pa is ElicitTargetBaselinePending => pa.action.kind === 'elicit_target_baseline',
+  );
+  if (live.length !== 1) return null;
+  return live[0]!;
+}
+
 /**
  * Redacted read-time tally of prior-turn pending actions. Counts + closed-enum
  * kind counts only. `confirmationExpectingLiveCount` counts live pendings whose
@@ -646,6 +719,19 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     ) {
       return null;
     }
+  }
+  if (a.kind === 'elicit_target_baseline') {
+    // ROADMAP 2.918 — the question's target identity and the registered
+    // row's replay shape are both REQUIRED to be well-formed, or the entry
+    // is unresumable and refused at parse time (a corrupted row must never
+    // license an elliptical bind or a replay).
+    if (typeof a.target_id !== 'string' || a.target_id.length === 0) return null;
+    if (typeof a.target_label !== 'string' || a.target_label.length === 0) return null;
+    if (typeof a.constraint_type !== 'string') return null;
+    if (!['at_least', 'at_most'].includes(a.constraint_type)) return null;
+    if (typeof a.value !== 'number' || !Number.isFinite(a.value)) return null;
+    if (a.unit !== undefined && (typeof a.unit !== 'string' || a.unit.length === 0)) return null;
+    if (a.label !== undefined && (typeof a.label !== 'string' || a.label.length === 0)) return null;
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

@@ -389,6 +389,19 @@ export interface HandlerOutcome {
   readonly __scaffolded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
   >;
+  /**
+   * ROADMAP 2.918 — set ONLY by `add_constraint`, on the exact
+   * mintable-and-baseline-less cell (the #868 `mintEligible` conjunction with
+   * no stated level to mint): the receipt asked for the target's current
+   * level, and this channel is the executor's instruction to persist the
+   * matching `elicit_target_baseline` pending question in the SAME commit
+   * (fields shared with the pending action so the two cannot drift). Internal
+   * channel on the `__plot_timings` pattern — never crosses to the wire
+   * envelope; the user-facing half is the question already appended to
+   * `assistant_text`. Absent ⇒ no question was asked ⇒ no pending persists ⇒
+   * the next turn has no elliptical binding (fail closed).
+   */
+  readonly __elicit_baseline?: import('../session/pending-action.js').ElicitTargetBaselineFields;
   // ⚠ ROADMAP 2.804 — `__leading_option_claim_withheld` WAS DECLARED HERE AND
   // IS DELETED. DO NOT REINSTATE IT.
   //

@@ -57,7 +57,11 @@ import {
   valuesMatch,
 } from '../../../utils/reduction-framing.js';
 import { extractGoalTargetWithBaseline } from '../../../cee/factor-extraction/index.js';
-import { deriveStatedTargetBaselinePercent } from '../../../cee/factor-extraction/stated-level.js';
+import {
+  deriveElicitedBaselineAnswerPercent,
+  deriveStatedTargetBaselinePercent,
+} from '../../../cee/factor-extraction/stated-level.js';
+import { findSoleLiveElicitBaselinePending } from '../../session/pending-action.js';
 import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -65,6 +69,7 @@ import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
+  formatBaselineElicitation,
   formatBaselineNoted,
   formatConstraintAdded,
   formatConstraintLabelUpdated,
@@ -773,22 +778,55 @@ export function createAddConstraintHandler(): HandlerFn {
         existingObserved?.baseline === undefined &&
         (existingObserved?.unit === undefined || existingObserved.unit === 'fraction') &&
         (existingObserved?.cap === undefined || existingObserved.cap === 1);
-      // Review B2 — the statement must name THIS target unambiguously. The
-      // competing population is the MINTABLE one (every other outcome/risk
-      // node, mirroring the kind gate): "The rate is 12%" in a graph holding
-      // both 'Churn rate' and 'Orphan rate' attests neither.
+      // Review B2, WIDENED by 2.960 R2 — the statement must name THIS target
+      // unambiguously among EVERY other labelled node, whatever its kind. The
+      // old population mirrored the KIND gate (outcome/risk), so a goal 'Win
+      // rate' or a factor 'Customer churn' whose label the subject also binds
+      // was invisible to the ambiguity rule and "The rate is 12%" minted onto
+      // 'Churn rate' as if the goal did not exist. Words do not read kinds.
+      // The cost is refusal in graphs that carry a same-worded sibling — and
+      // that refusal lands in the elicitation cell below, whose question
+      // names the target and so RESOLVES the ambiguity on the next turn.
+      const competingLabels = graph.nodes
+        .filter((n) => n.id !== targetId)
+        .map((n) => n.label);
+      // ROADMAP 2.918 — the QUESTION-CONTEXT GATE for the elliptical answer
+      // grammar. An elliptical answer ("about 12%") carries no subject, so it
+      // may bind ONLY when the immediately prior turn asked THIS target's
+      // baseline question: exactly ONE live `elicit_target_baseline` pending
+      // (two live questions are ambiguous — the helper returns null), whose
+      // target IS this handler's target. Pendings are SERVER-MINTED (persisted
+      // by the executor from this handler's own `__elicit_baseline` channel,
+      // validated by `parsePendingAction` on read), so no LLM proposal can
+      // fabricate the carry. No pending question ⇒ the plain #868 grammar ⇒
+      // no elliptical binding — fail closed.
+      const soleElicitPending = findSoleLiveElicitBaselinePending(
+        invocation.context.most_recent_pending_actions,
+        Date.now(),
+      );
+      const ellipticalAllowed =
+        soleElicitPending !== null && soleElicitPending.action.target_id === targetId;
       const statedBaselinePercent = mintEligible
-        ? deriveStatedTargetBaselinePercent(
-            invocation.payload.message,
-            targetNode.label,
-            graph.nodes
-              .filter(
-                (n) => n.id !== targetId && (n.kind === 'outcome' || n.kind === 'risk'),
-              )
-              .map((n) => n.label),
-          )
+        ? ellipticalAllowed
+          ? deriveElicitedBaselineAnswerPercent(
+              invocation.payload.message,
+              targetNode.label,
+              competingLabels,
+            )
+          : deriveStatedTargetBaselinePercent(
+              invocation.payload.message,
+              targetNode.label,
+              competingLabels,
+            )
         : undefined;
       const mintedBaseline = statedBaselinePercent !== undefined;
+      // ROADMAP 2.918 — THE ELICITATION CELL, derived from the mint's own
+      // gates in this same scope (one predicate, no twin to drift): the mint
+      // COULD serve this row (`mintEligible`) and there is no stated level to
+      // mint. The receipt below asks the one question; `__elicit_baseline` on
+      // the outcome tells the executor to persist the pending question in the
+      // same commit. The constraint commit itself is NEVER touched.
+      const elicitBaseline = mintEligible && !mintedBaseline;
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
@@ -985,19 +1023,45 @@ export function createAddConstraintHandler(): HandlerFn {
       // confirmation of both; and on an otherwise-unchanged restatement the
       // note is what keeps the text channel honest about the turn not being a
       // no-op (see `turnIsNoop` above).
+      // ROADMAP 2.918 — the elicitation is the mint receipt's interrogative
+      // dual, on the same cell and the same channel: mint fired → note the
+      // level; mint impossible for want of a statement → ask for one. The
+      // question is ADDITIVE (the constraint receipt precedes it and the row
+      // is already in the committed write); ignoring it costs nothing beyond
+      // the honest ISL refusal that already existed.
       const assistantText = mintedBaseline
         ? `${constraintText} ${formatBaselineNoted({
             targetLabel: targetNode.label,
             value: statedBaselinePercent!,
             unit: '%',
           })}`
-        : constraintText;
+        : elicitBaseline
+          ? `${constraintText} ${formatBaselineElicitation({ targetLabel: targetNode.label })}`
+          : constraintText;
 
       return {
         assistant_text: assistantText,
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
         mutated_graph: result.mutatedGraph,
+        // The executor persists the pending question from this channel in the
+        // SAME commit as the receipt that asked it (fields shared with the
+        // pending-action type so the two cannot drift). `label` is the
+        // PERSISTED row's label so the answer-turn replay cannot silently
+        // rewrite it; `unit` is the RESOLVED unit ('%' by the mint cell's own
+        // gate) so the replay does not depend on inheritance re-running.
+        ...(elicitBaseline
+          ? {
+              __elicit_baseline: {
+                target_id: targetId,
+                target_label: targetNode.label,
+                constraint_type: params.constraint_type,
+                value: params.value,
+                ...(resolvedUnit !== undefined ? { unit: resolvedUnit } : {}),
+                label: newConstraint.label,
+              },
+            }
+          : {}),
       };
     });
   };

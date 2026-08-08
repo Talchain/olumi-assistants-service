@@ -490,6 +490,10 @@ describe('tryClarificationResume — kind classification regression', () => {
     // non-mutating branch.
     apply_proposed_change: 'mutating',
     edit_graph_add_risk: 'mutating',
+    // ROADMAP 2.918 — resuming the pending baseline question replays
+    // add_constraint, whose mint writes observed_state on the target:
+    // graph-mutating, so ask→answer divergence fails closed.
+    elicit_target_baseline: 'mutating',
     // Non-mutating: resuming reads from analysis state, does not
     // change the graph.
     run_analysis: 'non_mutating',

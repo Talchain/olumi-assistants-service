@@ -404,17 +404,18 @@ export function mintStatedTargetBaselines(
       if (data.cap !== undefined && data.cap !== 1) continue;
     }
 
-    // Review B2 — a generic subject ("The rate is 12%") that binds MORE THAN
-    // ONE candidate target attests none of them; the competing population is
-    // the mintable one (every other outcome/risk node), same rule as the chat
-    // path so the two passes cannot disagree about ambiguity.
+    // Review B2, WIDENED by 2.960 R2 — a generic subject ("The rate is 12%")
+    // that binds MORE THAN ONE candidate label attests none of them, and the
+    // competing population is EVERY other labelled node whatever its kind:
+    // the old outcome/risk population mirrored the KIND gate, so a goal 'Win
+    // rate' or a factor 'Customer churn' was invisible to the ambiguity rule.
+    // Words do not read kinds. Same rule as the chat path so the two passes
+    // cannot disagree about ambiguity.
     const statedPercent = deriveStatedTargetBaselinePercent(
       brief,
       typeof node.label === "string" ? node.label : undefined,
       nodes
-        .filter(
-          (n) => n?.id !== node.id && (n?.kind === "outcome" || n?.kind === "risk"),
-        )
+        .filter((n) => n?.id !== node.id)
         .map((n) => (typeof n?.label === "string" ? n.label : undefined)),
     );
     if (statedPercent === undefined) continue;

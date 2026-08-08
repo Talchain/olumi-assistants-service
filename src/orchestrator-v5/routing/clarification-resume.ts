@@ -46,8 +46,12 @@
 
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
-import type { PendingAction } from '../session/pending-action.js';
-import { filterLivePendingActions } from '../session/pending-action.js';
+import type { ElicitTargetBaselinePending, PendingAction } from '../session/pending-action.js';
+import {
+  filterLivePendingActions,
+  findSoleLiveElicitBaselinePending,
+} from '../session/pending-action.js';
+import { deriveElicitedBaselineAnswerPercent } from '../../cee/factor-extraction/stated-level.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -254,6 +258,12 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // applies a persisted operator/value to the graph (there IS no graph at
   // the pre-draft stage), so hash divergence is not a safety concern.
   clarify_v2_round: 'non_mutating',
+  // ROADMAP 2.918 — the pending baseline question. Resuming replays the
+  // registered constraint through add_constraint, whose mint writes
+  // `observed_state` on the target — a graph mutation, so hash divergence
+  // between ask and answer fails closed (a diverged graph may carry a
+  // CHANGED row, and replaying the persisted value would overwrite it).
+  elicit_target_baseline: 'mutating',
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(
@@ -608,4 +618,80 @@ export function tryClarificationResume(
     factorLabel: pickFrom[0]!.label,
     matchKind: pickFrom[0]!.matchKind,
   };
+}
+
+/**
+ * ROADMAP 2.918 — the ANSWER-TURN pre-route for the pending baseline
+ * question. When the immediately prior turn asked "Roughly what percentage
+ * is <target> at right now?" (an `elicit_target_baseline` pending is live)
+ * and the user's reply parses as a level answer for THAT target — elliptical
+ * ("about 12%") through the question-context carry, or full-sentence through
+ * the unchanged #868 grammar — the caller (TurnExecutor) synthesises a
+ * value-identical `add_constraint` replay from the pending's own fields, so
+ * the mint runs through the ONE existing writer with zero LLM calls.
+ *
+ * EVERY non-match falls through SILENTLY to the normal flow (no recovery
+ * copy): the elicitation is additive by contract — a lapsed, diverged or
+ * ignored question must leave behaviour exactly as it was before 2.918. The
+ * skip reasons exist for telemetry only.
+ *
+ * Gates, in order, all fail-closed:
+ *   - exactly ONE live pending question (two are ambiguous for a bare
+ *     number — same unanimity doctrine as the extractor's competitor rule);
+ *   - graph hash unchanged since the ask (MUTATING kind: the replay carries
+ *     the persisted value, and a diverged graph may carry a CHANGED row that
+ *     the replay would silently overwrite);
+ *   - the target still exists with a usable label;
+ *   - the message actually parses as a level answer bound to the target,
+ *     via the SAME shared extractor the handler will re-run (one parser,
+ *     called twice on identical inputs — deterministic, so match and mint
+ *     cannot disagree).
+ */
+export type BaselineElicitationResumeDispatch =
+  | {
+      readonly matched: false;
+      readonly skip_reason:
+        | 'no_pending_question'
+        | 'graph_diverged'
+        | 'target_missing'
+        | 'not_an_answer';
+    }
+  | {
+      readonly matched: true;
+      readonly pending: ElicitTargetBaselinePending;
+      /** The LIVE label of the target node (used for the receipt and replay). */
+      readonly targetLabel: string;
+    };
+
+export function tryBaselineElicitationResume(input: {
+  readonly message: string;
+  readonly pendingActions: readonly PendingAction[];
+  readonly nowMs: number;
+  readonly currentGraphHash?: string;
+  /** The live graph's nodes — the answer's competitor population (2.960 R2). */
+  readonly graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined;
+}): BaselineElicitationResumeDispatch {
+  const pending = findSoleLiveElicitBaselinePending(input.pendingActions, input.nowMs);
+  if (pending === null) {
+    return { matched: false, skip_reason: 'no_pending_question' };
+  }
+  // Mutating kind: missing hash on either side is a conflict (fail closed).
+  if (graphHashConflicts(pending, input.currentGraphHash)) {
+    return { matched: false, skip_reason: 'graph_diverged' };
+  }
+  const targetId = pending.action.target_id;
+  const target = input.graphNodes?.find((n) => n.id === targetId);
+  const liveLabel = typeof target?.label === 'string' ? target.label : undefined;
+  if (target === undefined || liveLabel === undefined || liveLabel.trim() === '') {
+    return { matched: false, skip_reason: 'target_missing' };
+  }
+  // 2.960 R2 population: EVERY other labelled node in the live graph.
+  const competingLabels = (input.graphNodes ?? [])
+    .filter((n) => n.id !== targetId)
+    .map((n) => (typeof n.label === 'string' ? n.label : undefined));
+  const answer = deriveElicitedBaselineAnswerPercent(input.message, liveLabel, competingLabels);
+  if (answer === undefined) {
+    return { matched: false, skip_reason: 'not_an_answer' };
+  }
+  return { matched: true, pending, targetLabel: liveLabel };
 }
