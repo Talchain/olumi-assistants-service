@@ -309,6 +309,96 @@ describe('2.877 link 2 — draft path mints the brief-stated current level', () 
     expect((graph2.nodes[1] as any).data).toBeUndefined();
   });
 
+  it('2.960 R2: a GOAL label the subject binds is a competitor too — mints on NONE', async () => {
+    // The old competitor population mirrored the KIND gate (outcome/risk), so
+    // a goal 'Win rate' was invisible to the ambiguity rule and 'The rate is
+    // 12%' minted onto 'Churn rate' as if the goal did not exist. Words do not
+    // read kinds; ambiguity is over every label in the pass.
+    const { mintStatedTargetBaselines } = await import('../compound-goals.js');
+    const graph = {
+      nodes: [
+        { id: 'out_churn', kind: 'outcome', label: 'Churn rate' },
+        { id: 'goal_win', kind: 'goal', label: 'Win rate' },
+      ],
+      edges: [{ from: 'x', to: 'out_churn' }],
+    };
+    const minted = mintStatedTargetBaselines(
+      'The rate is 12% today. Keep churn under 10%.',
+      [
+        {
+          constraint_id: 'c1',
+          node_id: 'out_churn',
+          operator: '<=',
+          value: 0.1,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+      ],
+      graph,
+    );
+    expect(minted).toBe(0);
+    expect((graph.nodes[0] as any).data).toBeUndefined();
+    expect((graph.nodes[1] as any).data).toBeUndefined();
+  });
+
+  it('2.960 R2: a FACTOR label the subject binds is a competitor too — mints on NONE', async () => {
+    const { mintStatedTargetBaselines } = await import('../compound-goals.js');
+    const graph = {
+      nodes: [
+        { id: 'out_churn', kind: 'outcome', label: 'Churn rate' },
+        { id: 'fac_churn', kind: 'factor', label: 'Customer churn' },
+      ],
+      edges: [{ from: 'x', to: 'out_churn' }],
+    };
+    const minted = mintStatedTargetBaselines(
+      'Churn is 12% today. Keep churn under 10%.',
+      [
+        {
+          constraint_id: 'c1',
+          node_id: 'out_churn',
+          operator: '<=',
+          value: 0.1,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+      ],
+      graph,
+    );
+    expect(minted).toBe(0);
+    expect((graph.nodes[0] as any).data).toBeUndefined();
+    expect((graph.nodes[1] as any).data).toBeUndefined();
+  });
+
+  it('2.960 R2 PRECONDITION PAIR (trap 13b): the fully-named subject beside the same goal/factor still mints', async () => {
+    const { mintStatedTargetBaselines } = await import('../compound-goals.js');
+    const graph = {
+      nodes: [
+        { id: 'out_churn', kind: 'outcome', label: 'Churn rate' },
+        { id: 'goal_win', kind: 'goal', label: 'Win rate' },
+        { id: 'fac_churn', kind: 'factor', label: 'Customer churn' },
+      ],
+      edges: [{ from: 'x', to: 'out_churn' }],
+    };
+    const minted = mintStatedTargetBaselines(
+      'Churn rate is 12% today. Keep churn under 10%.',
+      [
+        {
+          constraint_id: 'c1',
+          node_id: 'out_churn',
+          operator: '<=',
+          value: 0.1,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+      ],
+      graph,
+    );
+    expect(minted).toBe(1);
+    expect((graph.nodes[0] as any).data.baseline).toBe(0.12);
+    expect((graph.nodes[1] as any).data).toBeUndefined();
+    expect((graph.nodes[2] as any).data?.baseline).toBeUndefined();
+  });
+
   it('an existing data.baseline is never overwritten (fill-only)', () => {
     const ctx = makeCtx('Churn is currently 12%. Keep churn under 5%.');
     node(ctx, 'out_churn').data = { value: 0.3, baseline: 0.3, unit: 'fraction', cap: 1 };

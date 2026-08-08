@@ -151,7 +151,10 @@ import {
   tryShortConfirmResume,
   SHORT_CONFIRM_PATTERN,
 } from './routing/deterministic-short-confirm.js';
-import { tryClarificationResume } from './routing/clarification-resume.js';
+import {
+  tryBaselineElicitationResume,
+  tryClarificationResume,
+} from './routing/clarification-resume.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -4812,6 +4815,101 @@ export async function runTurnExecutor(
               ? 'fell_through:handler_not_executable'
               : `fell_through:${built.reason}`,
           });
+        }
+      }
+
+      // ROADMAP 2.918 — baseline-elicitation answer pre-route. When the
+      // immediately prior turn asked the pending baseline question
+      // ("Roughly what percentage is <target> at right now?") and this
+      // message parses as a level answer for THAT target (elliptical
+      // "about 12%" through the question-context carry, or full-sentence
+      // through the unchanged #868 grammar), synthesise a value-identical
+      // add_constraint REPLAY from the pending's own persisted fields and
+      // let the unchanged STEP 2-7 lifecycle run it — the handler's #868
+      // mint block does the write (one writer), reads the same pending to
+      // license the elliptical grammar, and the receipt confirms the noted
+      // level. Zero LLM calls.
+      //
+      // Placement: AFTER the typed-chip mutation route (an explicit chip
+      // click outranks an inferred answer — it has already synthesised a
+      // routingResult, gated below) and BEFORE the deterministic
+      // value-update text parser (a bare "about 12%" carries a digit, and
+      // the answer must bind the QUESTION's target, never a fuzzy factor
+      // match). Every non-match falls through SILENTLY — the elicitation
+      // is additive, so a lapsed/diverged/ignored question leaves the flow
+      // exactly as it was before 2.918. Chip-click turns never reach this
+      // (their copy is canned, not an answer): source-gated below.
+      if (
+        routingResult === undefined &&
+        payload.source !== 'chip_click' &&
+        payload.source !== 'chip'
+      ) {
+        const baselineAnswer = tryBaselineElicitationResume({
+          message: payload.message,
+          pendingActions: context.most_recent_pending_actions ?? [],
+          nowMs: Date.now(),
+          ...(freshness?.current_graph_hash != null
+            ? { currentGraphHash: freshness.current_graph_hash }
+            : {}),
+          graphNodes: graphStateForTurn?.nodes,
+        });
+        if (baselineAnswer.matched) {
+          const pending = baselineAnswer.pending;
+          emit(TelemetryEvents.PendingActionMatched, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: pending.id,
+            kind: 'elicit_target_baseline',
+            chip_id: pending.chip_id,
+            candidate_count: 1,
+          });
+          const a = pending.action;
+          // Same proposal shape `buildTypedChipMutationProposal` emits for
+          // add_constraint (entity kind 'node' — the elicit cell excludes
+          // goals by construction), so the validator and handler see a turn
+          // indistinguishable from any other add_constraint dispatch.
+          const replayProposal: ProposalAction = {
+            handler_id: 'add_constraint',
+            entity: {
+              id: a.target_id,
+              kind: 'node',
+              label: baselineAnswer.targetLabel,
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [
+              { name: 'constraint_type', value: a.constraint_type, source: 'user_explicit' },
+              { name: 'value', value: a.value, source: 'user_explicit' },
+              ...(a.label !== undefined
+                ? [{ name: 'label', value: a.label, source: 'user_explicit' as const }]
+                : []),
+              ...(a.unit !== undefined
+                ? [{ name: 'unit', value: a.unit, source: 'user_explicit' as const }]
+                : []),
+            ],
+            cited_context_fields: ['graph.nodes'],
+          };
+          routingResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: replayProposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 0, output_tokens: 0 },
+              model: 'deterministic-baseline-elicitation-resume',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+            droppedActions: [],
+          };
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          // The question has been answered — consume it so it cannot zombie
+          // into a second resume (the commit excludes its ref from
+          // carry-forward; a successful mint also moves the graph hash).
+          consumedPendingAction = pending;
         }
       }
 
@@ -10333,12 +10431,60 @@ export async function runTurnExecutor(
       // without briefText (e.g. legacy draft pre-Fix A) — subsequent
       // non-draft turns will backfill the brief from the enriched
       // context if it's still null.
+      // ROADMAP 2.918 — persist the pending BASELINE QUESTION the handler's
+      // receipt just asked (`__elicit_baseline`, set only by add_constraint
+      // on the mintable-and-baseline-less cell), in the SAME commit as that
+      // receipt. `preconditions.graph_hash` pins the POST-mutation graph
+      // (`llmGraphHash` is derived from the mutated graph when present) so
+      // the answer-turn resume fails closed if anything moves between ask
+      // and answer. If the hash is unavailable we emit NO pending (mirrors
+      // the add-risk clarify's fail-closed posture): the question text still
+      // ships, a full-sentence answer still binds through the LLM path, and
+      // only the elliptical carry is (safely) unavailable.
+      const elicitChannel = handlerOutcome?.__elicit_baseline;
+      const elicitPendingForCommit: PendingAction | undefined = (() => {
+        if (elicitChannel === undefined) return undefined;
+        if (llmGraphHash === null) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+            },
+            'V5 baseline elicitation — graph hash unavailable; no pending question persisted (fail-closed)',
+          );
+          return undefined;
+        }
+        const emittedAtIso = new Date().toISOString();
+        return {
+          id: randomUUID(),
+          scenario_id: context.session_id,
+          // Server-only pending (no rendered chip — same convention as the
+          // add-risk clarify): a stable synthetic handle for telemetry and
+          // consumption matching.
+          chip_id: 'chip_elicit_target_baseline',
+          action: { kind: 'elicit_target_baseline', ...elicitChannel },
+          preconditions: { graph_hash: llmGraphHash },
+          expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+          expires_at_iso: new Date(
+            Date.parse(emittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+          ).toISOString(),
+          emitted_at_iso: emittedAtIso,
+        };
+      })();
       // V5 P0.2 — merge the flip-threshold proposal's pending (most recent
       // first) ahead of any chip-derived / proposed-concept pendings, capped
-      // at the persisted budget of 3.
-      const pendingForCommit = flipProposalPending
-        ? [flipProposalPending, ...(proposalPendingForCommit ?? [])].slice(0, 3)
-        : proposalPendingForCommit;
+      // at the persisted budget of 3. The 2.918 pending question takes the
+      // same front-of-list precedence when present (it is this turn's own
+      // question; flip proposals cannot co-occur with an add_constraint
+      // turn, so the two heads never compete).
+      const pendingForCommit =
+        flipProposalPending || elicitPendingForCommit
+          ? [
+              ...(elicitPendingForCommit ? [elicitPendingForCommit] : []),
+              ...(flipProposalPending ? [flipProposalPending] : []),
+              ...(proposalPendingForCommit ?? []),
+            ].slice(0, 3)
+          : proposalPendingForCommit;
       // F3 (response projection, 1.16 run-3 diagnosis) — parse the graph
       // this commit is about to persist ONCE, ahead of the commit, so the
       // committed-graph projection can be applied in the right order at

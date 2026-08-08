@@ -194,6 +194,25 @@ export function formatBaselineNoted(input: {
 }
 
 /**
+ * ROADMAP 2.918 — the interrogative dual of `formatBaselineNoted`, appended
+ * to the constraint receipt on the SAME cell when there was no stated level
+ * to note: the bound is saved (the receipt before this fragment says so), and
+ * ONE concrete, answerable question asks for the current level. Honest about
+ * why (ISL's level conversion genuinely cannot run without a baseline —
+ * `CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`), names the target
+ * so an elliptical answer has an identity to bind through, and says
+ * "percentage" because the extractor's v1 grammar is percent-only — an
+ * answer without '%' cannot mint. Leak-safe: no handler ids, no parameter
+ * names, no internal tokens, no em dash.
+ */
+export function formatBaselineElicitation(input: { readonly targetLabel: string }): string {
+  return (
+    `To test that bound, the analysis also needs to know where ${input.targetLabel} stands today. ` +
+    `Roughly what percentage is ${input.targetLabel} at right now?`
+  );
+}
+
+/**
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the

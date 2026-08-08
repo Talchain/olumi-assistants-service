@@ -139,6 +139,21 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
         ...base,
         action: { kind, brief: 'Should we expand into the German market?', asked_dimensions: ['goal'], round: 1 },
       };
+    case 'elicit_target_baseline':
+      // ROADMAP 2.918 — the pending baseline question (server-only; carries
+      // the question's target identity + the registered row's replay shape).
+      return {
+        ...base,
+        action: {
+          kind,
+          target_id: 'out_churn',
+          target_label: 'Churn rate',
+          constraint_type: 'at_most',
+          value: 10,
+          unit: '%',
+          label: 'Churn rate',
+        },
+      };
     case 'proposed_concept':
       return {
         ...base,

@@ -198,9 +198,16 @@ function assertNoOtherBaselines(graph: GraphV3T, exceptId: string | null) {
 }
 
 describe('2.877 link 2 — the mint fires on the stated level, bound by identity', () => {
-  it("the brief's exemplar: churn is 12% today, keep it under 10%", async () => {
+  // 2.960 R2 NOTE: these exemplars say 'Churn rate is', not 'Churn is'. The
+  // competitor population is now EVERY other labelled node (goal/factor kinds
+  // included), and this fixture carries the factor 'Customer churn' — so the
+  // bare subject 'churn' is ambiguous IN THIS GRAPH and correctly refuses (see
+  // the R2 battery below, where that refusal is pinned as intended behaviour).
+  // The uniquely-binding subject keeps each gate in this file the REASON its
+  // case refuses, rather than every case refusing via ambiguity (trap 13b).
+  it("the brief's exemplar, uniquely bound: churn rate is 12% today, keep it under 10%", async () => {
     const outcome = await runTurn({
-      message: 'Churn is 12% today, keep it under 10%.',
+      message: 'Churn rate is 12% today, keep it under 10%.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '%',
@@ -249,7 +256,7 @@ describe('2.877 link 2 — the mint fires on the stated level, bound by identity
 
   it('the minted baseline SURVIVES the graph validator (the silent-strip hazard)', async () => {
     const outcome = await runTurn({
-      message: 'Churn is 12% today, keep it under 10%.',
+      message: 'Churn rate is 12% today, keep it under 10%.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '%',
@@ -281,7 +288,7 @@ describe('2.877 link 2 — the mint fires on the stated level, bound by identity
     // the natural REPAIR turn after an honest ISL refusal — it must not be
     // swallowed by the noop path.
     const second = await runTurn({
-      message: 'Churn is 12% today, keep churn under 10%.',
+      message: 'Churn rate is 12% today, keep churn under 10%.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '%',
@@ -334,7 +341,7 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
     // on an unframed row (a baseline without a frame buys nothing and asserts
     // scale coherence nobody attested).
     const outcome = await runTurn({
-      message: 'Churn is 12% today. Set that to 10.',
+      message: 'Churn rate is 12% today. Set that to 10.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '%',
@@ -355,7 +362,7 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
     // 0.009. A baseline would convert that mixed-frame pair into a confident
     // wrong probability; refusing the mint keeps it an honest refusal.
     const outcome = await runTurn({
-      message: 'Churn is 12% today, keep it under 0.9%.',
+      message: 'Churn rate is 12% today, keep it under 0.9%.',
       targetId: 'o-churn-rate',
       value: 0.9,
       unit: '%',
@@ -365,7 +372,7 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
 
   it('row value > 100 → no mint (the [0,100] rung would clamp the threshold)', async () => {
     const outcome = await runTurn({
-      message: 'Churn is 12% today, keep it under 120%.',
+      message: 'Churn rate is 12% today, keep it under 120%.',
       targetId: 'o-churn-rate',
       value: 120,
       unit: '%',
@@ -375,7 +382,7 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
 
   it("row unit is not '%' → no mint (the divisor would be a guess)", async () => {
     const outcome = await runTurn({
-      message: 'Churn is 12% today, keep it under 10%.',
+      message: 'Churn rate is 12% today, keep it under 10%.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '£',
@@ -449,7 +456,7 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
       source: 'user_override',
     };
     const outcome = await runTurn({
-      message: 'Churn is 12% today, keep it under 10%.',
+      message: 'Churn rate is 12% today, keep it under 10%.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '%',
@@ -466,7 +473,7 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
 
   it('conflicting stated levels → no mint (unanimity)', async () => {
     const outcome = await runTurn({
-      message: 'Churn is 12% today. Actually, churn is 11% now. Keep churn under 10%.',
+      message: 'Churn rate is 12% today. Actually, churn rate is 11% now. Keep churn under 10%.',
       targetId: 'o-churn-rate',
       value: 10,
       unit: '%',
@@ -535,6 +542,79 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
     const graph = outcome.mutated_graph as GraphV3T;
     expect(node(graph, 'o-churn-rate').observed_state).toBeUndefined();
     assertNoOtherBaselines(graph, null);
+  });
+});
+
+describe('2.960 R2 — the competitor population is EVERY other labelled node, not just outcome/risk', () => {
+  // Adversarial review of #868, B2 widened: the old population mirrored the
+  // KIND gate (outcome/risk), so a goal or factor whose label the subject also
+  // binds was INVISIBLE to the ambiguity rule — "The rate is 12%" beside a
+  // goal 'Win rate' minted onto 'Churn rate' as if the goal did not exist.
+  // Ambiguity is about what the WORDS could name, and words do not read kinds.
+
+  it('a GOAL label the subject binds makes the statement ambiguous — mints on NONE', async () => {
+    // Local relabels make the goal the ONLY competing bind for 'rate': the
+    // fixture's 'Orphan rate' would otherwise already refuse this pre-R2
+    // (the B2 chat-variant test above pins that), hiding the goal's effect.
+    const graph = graphWithConstraintTargets();
+    graph.nodes.find((n) => n.id === 'g-revenue')!.label = 'Win rate';
+    graph.nodes.find((n) => n.id === 'o-orphan')!.label = 'Orphan count';
+    const outcome = await runTurn({
+      message: 'The rate is 12% today. Keep churn under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph,
+    });
+    const mutated = outcome.mutated_graph as GraphV3T;
+    expect(node(mutated, 'o-churn-rate').observed_state).toBeUndefined();
+    assertNoOtherBaselines(mutated, null);
+  });
+
+  it('PRECONDITION PAIR (trap 13b): with the goal relabelled AWAY, the same statement mints', async () => {
+    // Same graph shape, goal label word-disjoint from 'rate' — proves the
+    // refusal above is the GOAL binding, not something else in the fixture.
+    const graph = graphWithConstraintTargets();
+    graph.nodes.find((n) => n.id === 'g-revenue')!.label = 'Total revenue';
+    graph.nodes.find((n) => n.id === 'o-orphan')!.label = 'Orphan count';
+    const outcome = await runTurn({
+      message: 'The rate is 12% today. Keep churn under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph,
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state?.baseline).toBe(
+      0.12,
+    );
+  });
+
+  it("a FACTOR label the subject binds makes the statement ambiguous — the 2.877 exemplar refuses IN THIS GRAPH", async () => {
+    // 'churn' ⊆ both 'Churn rate' (the target) and 'Customer churn' (the
+    // fixture factor). CEE cannot say which metric the user stated, so it
+    // states nothing — the elicitation (2.918) is the repair path.
+    const outcome = await runTurn({
+      message: 'Churn is 12% today, keep it under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    const mutated = outcome.mutated_graph as GraphV3T;
+    expect(node(mutated, 'o-churn-rate').observed_state).toBeUndefined();
+    assertNoOtherBaselines(mutated, null);
+    expect(outcome.assistant_text).not.toContain('Noted');
+  });
+
+  it('PRECONDITION PAIR (trap 13b): the fully-named subject in the SAME graph still mints', async () => {
+    const outcome = await runTurn({
+      message: 'Churn rate is 12% today, keep it under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state?.baseline).toBe(
+      0.12,
+    );
   });
 });
 

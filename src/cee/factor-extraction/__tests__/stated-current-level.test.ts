@@ -155,6 +155,45 @@ describe('2.877 link 2 — NON-statements that must NOT mint (the no-invention r
   });
 });
 
+describe('2.960 R1 — a future-dated post-qualifier makes the clause a PROJECTION, not an observation', () => {
+  // Adversarial review of #868 (2.877 correction lineage): "Churn is 12% by
+  // Q4" states where churn is EXPECTED to be at a future date — an aspiration
+  // wearing a copula, exactly the class CLAUSE_FRAME_MARKERS exists to refuse.
+  // Both repro strings below MINTED at pristine 060e9ed9 (verified by
+  // execution); each is a fabrication reachable end-to-end through the chat
+  // and draft mints.
+  const futureDated: ReadonlyArray<readonly [string, string]> = [
+    ['review repro 1: by Q4', 'Churn is 12% by Q4; keep churn under 10%.'],
+    ['review repro 2: by December', 'Our goal is simple; churn is 12% by December.'],
+    ['by year-end', 'Churn is 12% by year-end, keep churn under 10%.'],
+    ['by a 4-digit year', 'Churn is 12% by 2027; keep churn under 10%.'],
+    ['by January', 'Churn is 12% by January. Keep churn under 10%.'],
+    ['marker BEFORE the match binds the whole clause', 'By Q4 churn is 12%, keep churn under 10%.'],
+  ];
+
+  it.each(futureDated)('%s: no mint', (_name, message) => {
+    expect(deriveStatedTargetBaselinePercent(message, LABEL)).toBeUndefined();
+  });
+
+  it('PRECONDITION PAIR (trap 13b): "by" followed by a non-date stays a genuine statement', () => {
+    // The qualifier must be DATE-SHAPED to disqualify — an instrumental "by"
+    // ("by our own measurement") is not a projection, and widening it would
+    // dark a genuine statement class. Minted at pristine; must keep minting.
+    expect(
+      deriveStatedTargetBaselinePercent(
+        'Churn is 12% by our own measurement. Keep churn under 10%.',
+        LABEL,
+      ),
+    ).toBe(12);
+  });
+
+  it('POSITIVE CONTROL (trap 13b): the plain exemplar still mints beside this battery', () => {
+    expect(deriveStatedTargetBaselinePercent('Churn is 12% today. Keep churn under 10%.', LABEL)).toBe(
+      12,
+    );
+  });
+});
+
 describe('2.877 link 2 — B2: a subject binding MORE THAN ONE candidate target is ambiguous', () => {
   // Adversarial review of #868, B2: "The rate is 12%" satisfies subject ⊆
   // label for BOTH "Churn rate" and "Win rate" — the draft pass minted 0.12
