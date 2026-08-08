@@ -169,15 +169,25 @@ describe('buildGraphNodeLookup', () => {
 // ============================================================================
 
 describe('buildFactorConfidenceLookup (Codex correction #1)', () => {
-  it('maps confidence boundaries: >=0.7 → high, >=0.3 → medium, <0.3 → low', () => {
+  // ⚠ ROADMAP 2.681 moved the medium floor 0.3 → 0.4 to match the band PLoT
+  // already shows the user (`src/review-pass/evidence-priority.ts`). The two
+  // boundary fixtures below were NAMED for the old floor and are re-pointed at
+  // the new one here rather than absorbed — `0.3` is now a `low` row, and it is
+  // kept in the table under its true name because it is where live traffic
+  // actually sits. The cross-service parity guard is
+  // `confidence-bands.plot-parity.test.ts`.
+  it('maps confidence boundaries: >=0.7 → high, >=0.4 → medium, <0.4 → low', () => {
     const lookup = buildFactorConfidenceLookup(makeFact({
       factorSensitivity: [
         { factor_id: 'fac_high', confidence: 0.85 },
         { factor_id: 'fac_high_boundary', confidence: 0.7 },
         { factor_id: 'fac_medium', confidence: 0.5 },
-        { factor_id: 'fac_medium_boundary', confidence: 0.3 },
+        { factor_id: 'fac_medium_boundary', confidence: 0.4 },
         { factor_id: 'fac_low', confidence: 0.1 },
-        { factor_id: 'fac_low_boundary', confidence: 0.299 },
+        { factor_id: 'fac_low_boundary', confidence: 0.399 },
+        // The live floor: ISL `negligible` → PLoT 0.5*0.1+0.25. 212 of 404
+        // captured rows sat on exactly this value and were banded 'medium'.
+        { factor_id: 'fac_live_floor', confidence: 0.3 },
       ],
     }));
     expect(lookup.get('fac_high')).toBe('high');
@@ -186,6 +196,7 @@ describe('buildFactorConfidenceLookup (Codex correction #1)', () => {
     expect(lookup.get('fac_medium_boundary')).toBe('medium');
     expect(lookup.get('fac_low')).toBe('low');
     expect(lookup.get('fac_low_boundary')).toBe('low');
+    expect(lookup.get('fac_live_floor')).toBe('low');
   });
 
   it('OMITS entries with missing / null / non-finite confidence (round-2 fail-closed correction)', () => {
