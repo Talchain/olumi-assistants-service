@@ -121,7 +121,11 @@ import {
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
 import { isRawFragile } from '../coaching/robustness-honesty.js';
-import { bandConfidence, type ConfidenceBand } from './confidence-bands.js';
+import {
+  bandConfidence,
+  isLensLowConfidence,
+  type ConfidenceBand,
+} from './confidence-bands.js';
 
 // ============================================================================
 // Public result types
@@ -538,6 +542,18 @@ interface FactorSignal {
   /** Present ONLY when a finite value exists and status is not below-resolution. */
   readonly evpiPercentagePoints: number | null;
   readonly confidenceBand: ConfidenceBand | null;
+  /**
+   * ROADMAP 2.681 — the LADDER's low-confidence signal, which is NOT
+   * `confidenceBand === 'low'` and must not be re-derived from it.
+   *
+   * `confidenceBand` is the DISPLAY band, pinned to the boundary PLoT already
+   * showed the user (< 0.4 → "low"). This flag is the ladder's own trigger
+   * question — "is the top factor uncertain enough to outrank the other
+   * coaching exercises?" — pinned at the historical < 0.3. See
+   * `confidence-bands.ts` for why the two numbers differ and what happens if
+   * they are merged (measured: it starves both DSK exercises on live captures).
+   */
+  readonly lensLowConfidence: boolean;
   /** Lower-cased; `null` when absent. */
   readonly flipRiskCategory: string | null;
 }
@@ -607,6 +623,7 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
         influenceRank: finiteNumberOrNull(e.influence_rank),
         evpiPercentagePoints: evpiPp,
         confidenceBand: bandConfidence(e.confidence),
+        lensLowConfidence: isLensLowConfidence(e.confidence),
         flipRiskCategory:
           typeof e.flip_risk_category === 'string'
             ? e.flip_risk_category.toLowerCase()
@@ -763,8 +780,17 @@ function evaluatePreMortem(signals: AnalysisSignals): EvaluatorHit | null {
   }
 
   // 2b — the single most-influential factor is also the least certain.
+  //
+  // ⚠ ROADMAP 2.681 — reads `lensLowConfidence`, NOT `confidenceBand === 'low'`.
+  // The display band moved to PLoT's 0.4 boundary to stop the product showing
+  // two different confidence words for one factor; this trigger deliberately
+  // stayed at the historical 0.3, because widening it reorders the coaching
+  // ladder on 54% of live traffic and starves the two DSK exercises (measured
+  // on the sessionA/sessionB2 captures). Byte-identical to pre-2.681 behaviour.
+  // The two questions, and why they are not the same question, are written out
+  // in `confidence-bands.ts`.
   const topRankLowConfidence = signals.factors.find(
-    (f) => f.influenceRank === 1 && f.confidenceBand === 'low',
+    (f) => f.influenceRank === 1 && f.lensLowConfidence,
   );
   if (topRankLowConfidence) {
     return { code: 'TOP_FACTOR_LOW_CONFIDENCE', subjectFactorId: topRankLowConfidence.factorId };
