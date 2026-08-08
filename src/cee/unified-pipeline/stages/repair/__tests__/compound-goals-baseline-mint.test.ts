@@ -226,6 +226,89 @@ describe('2.877 link 2 — draft path mints the brief-stated current level', () 
     expect((graph2.nodes[0] as any).data.baseline).toBe(0.12);
   });
 
+  it('B2: one generic statement binding TWO candidate targets mints on NEITHER', async () => {
+    // Adversarial review of #868, B2 (reviewer fixture, demonstrated by
+    // execution pre-fix): "The rate is 12%" satisfies subject ⊆ label for BOTH
+    // 'Churn rate' and 'Win rate', and the pass minted 0.12 onto both nodes
+    // from one statement about ONE unnamed metric — at most one of those
+    // baselines can be true, and CEE cannot say which. Ambiguity refuses.
+    const { mintStatedTargetBaselines } = await import('../compound-goals.js');
+    const graph = {
+      nodes: [
+        { id: 'out_churn', kind: 'outcome', label: 'Churn rate' },
+        { id: 'out_win', kind: 'outcome', label: 'Win rate' },
+      ],
+      edges: [
+        { from: 'x', to: 'out_churn' },
+        { from: 'x', to: 'out_win' },
+      ],
+    };
+    const minted = mintStatedTargetBaselines(
+      'The rate is 12% today. Keep churn under 10%. Keep win rate above 40%.',
+      [
+        {
+          constraint_id: 'c1',
+          node_id: 'out_churn',
+          operator: '<=',
+          value: 0.1,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+        {
+          constraint_id: 'c2',
+          node_id: 'out_win',
+          operator: '>=',
+          value: 0.4,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+      ],
+      graph,
+    );
+    expect(minted).toBe(0);
+    expect((graph.nodes[0] as any).data).toBeUndefined();
+    expect((graph.nodes[1] as any).data).toBeUndefined();
+
+    // PRECONDITION PAIR (trap 13b): a SPECIFIC subject in the same two-node
+    // pass still mints, on the one node it names — the refusal above is the
+    // ambiguity's doing, not a helper that stopped minting.
+    const graph2 = {
+      nodes: [
+        { id: 'out_churn', kind: 'outcome', label: 'Churn rate' },
+        { id: 'out_win', kind: 'outcome', label: 'Win rate' },
+      ],
+      edges: [
+        { from: 'x', to: 'out_churn' },
+        { from: 'x', to: 'out_win' },
+      ],
+    };
+    const minted2 = mintStatedTargetBaselines(
+      'Churn is 12% today. Keep churn under 10%. Keep win rate above 40%.',
+      [
+        {
+          constraint_id: 'c1',
+          node_id: 'out_churn',
+          operator: '<=',
+          value: 0.1,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+        {
+          constraint_id: 'c2',
+          node_id: 'out_win',
+          operator: '>=',
+          value: 0.4,
+          unit: 'fraction',
+          value_frame: 'level',
+        },
+      ],
+      graph2,
+    );
+    expect(minted2).toBe(1);
+    expect((graph2.nodes[0] as any).data.baseline).toBe(0.12);
+    expect((graph2.nodes[1] as any).data).toBeUndefined();
+  });
+
   it('an existing data.baseline is never overwritten (fill-only)', () => {
     const ctx = makeCtx('Churn is currently 12%. Keep churn under 5%.');
     node(ctx, 'out_churn').data = { value: 0.3, baseline: 0.3, unit: 'fraction', cap: 1 };

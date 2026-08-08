@@ -483,6 +483,59 @@ describe('2.877 link 2 — every gate refuses (fail closed), each beside its pos
     });
     expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toBeUndefined();
   });
+
+  // --- Adversarial review of #868, B1 — the three fabrication classes proven
+  // REACHABLE end-to-end (real handler, real fixture, full receipt). Kept at
+  // the handler level, not just the extractor, because that is where the
+  // reviewer demonstrated them.
+  it('B1a: a disbelief echo does not mint (the ? sits after the match)', async () => {
+    const outcome = await runTurn({
+      message: 'Churn is 12%? That cannot be right. Keep churn under 10% regardless.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toBeUndefined();
+    expect(outcome.assistant_text).not.toContain('Noted');
+  });
+
+  it('B1b: quoted third-party speech does not mint (quotes carry context, not sever it)', async () => {
+    const outcome = await runTurn({
+      message:
+        'The analyst said "churn is 12%" but I have not verified it. Keep churn under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toBeUndefined();
+    expect(outcome.assistant_text).not.toContain('Noted');
+  });
+
+  it('B1c: a conditional hidden behind an abbreviation dot does not mint', async () => {
+    const outcome = await runTurn({
+      message: 'If, e.g., churn is 12%, we are in trouble. Keep churn under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toBeUndefined();
+    expect(outcome.assistant_text).not.toContain('Noted');
+  });
+
+  it('B2 (chat variant): a generic subject binding another candidate target in the graph mints nothing', async () => {
+    // 'rate' ⊆ both 'Churn rate' and 'Orphan rate' word-sets — CEE cannot say
+    // WHICH rate is 12%, so it says nothing. The candidate population is the
+    // mintable one (outcome/risk nodes), mirroring the kind gate.
+    const outcome = await runTurn({
+      message: 'The rate is 12% today. Keep churn under 10%.',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+    });
+    const graph = outcome.mutated_graph as GraphV3T;
+    expect(node(graph, 'o-churn-rate').observed_state).toBeUndefined();
+    assertNoOtherBaselines(graph, null);
+  });
 });
 
 describe('2.877 link 2 — the unit-ambiguity emit guard now prices the CLAMP, not just the cap (tightening)', () => {

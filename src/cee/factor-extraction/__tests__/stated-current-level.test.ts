@@ -55,6 +55,13 @@ describe('2.877 link 2 — statements that MUST yield the stated level', () => {
     ['Churn is 0% today. Keep it under 2%.', 0],
     // Repeated agreeing statements are unanimous, not conflicting.
     ['Churn is 12% today. Yes, churn is 12% right now. Keep it under 10%.', 12],
+    // Reviewer-corpus positives: the clause-scoped guards must not over-reach
+    // into NEIGHBOURING clauses (a genuine statement beside a conditional or
+    // desire clause still mints when a real boundary separates them).
+    ['Churn is 12%. If we do nothing it doubles. Keep churn under 10%.', 12],
+    ['£1.5M. Churn is 12% today. Keep churn under 10%.', 12],
+    ['We want churn lower; churn is 12% today. Keep churn under 10%.', 12],
+    ['Overall churn is 12% today. Keep churn under 10%.', 12],
   ];
 
   it.each(statements)('"%s" → %d', (message, expected) => {
@@ -93,6 +100,48 @@ describe('2.877 link 2 — NON-statements that must NOT mint (the no-invention r
     // metric, so it refuses. Over-refusal costs coverage, never truth.
     ['qualified metric the label does not carry', 'Monthly churn is 12% today. Keep it under 10%.'],
     ['a different metric entirely', 'Marketing budget is 40% today. Keep churn under 10%.'],
+    // --- Adversarial review of #868, B1 (reviewer-authored fixtures, trap 22:
+    // classes the self-authored corpus did not list). All three MINTED before
+    // the fix — each is a fabrication class reachable end-to-end.
+    [
+      'B1a disbelief echo (the ? sits AFTER the match)',
+      'Churn is 12%? That cannot be right. Keep churn under 10% regardless.',
+    ],
+    [
+      'B1a embedded question',
+      'Do you think churn is 12%? Keep churn under 10%.',
+    ],
+    [
+      'B1b quoted third-party speech (quote char severed subject capture)',
+      'The analyst said "churn is 12%" but I have not verified it. Keep churn under 10%.',
+    ],
+    [
+      'B1b document title in quotes',
+      'The deck titled "Churn is 12%" is outdated. Keep churn under 10%.',
+    ],
+    ['B1b doubted attribution', 'I doubt churn is 12%. Keep churn under 10%.'],
+    ['B1b denied claim', 'It is false that churn is 12%. Keep churn under 10%.'],
+    [
+      'B1c conditional hidden behind an e.g. dot',
+      'If, e.g., churn is 12%, we are in trouble. Keep churn under 10%.',
+    ],
+    [
+      'B1c conditional hidden behind a rev. abbreviation',
+      'If rev. is flat and churn is 12%, cut marketing. Keep churn under 10%.',
+    ],
+    [
+      'B1c conditional hidden behind a no. abbreviation',
+      'If our no. one metric slips and churn is 12%, escalate. Keep churn under 10%.',
+    ],
+    ['even-if frame', 'Even if churn is 12%, we ship. Keep churn under 10%.'],
+    // B3 — the fixture ONLY the clause-frame guard can refuse: the comma
+    // severs subject capture from the marker, so subject absorption ("If
+    // churn" failing the binding) cannot save it. This is the guard's pin —
+    // it must go RED when the guard is deleted (mutant M-C).
+    [
+      'B3 comma-separated conditional (guard-only refusal)',
+      'If, as we fear, churn is 12%, we are in trouble. Keep it under 10%.',
+    ],
   ];
 
   it.each(nonStatements)('%s: no mint', (_name, message) => {
@@ -103,6 +152,41 @@ describe('2.877 link 2 — NON-statements that must NOT mint (the no-invention r
     // Without this, an extractor that stopped matching altogether would pass
     // every absence assertion above while proving nothing.
     expect(deriveStatedTargetBaselinePercent('Churn is 12% today.', LABEL)).toBe(12);
+  });
+});
+
+describe('2.877 link 2 — B2: a subject binding MORE THAN ONE candidate target is ambiguous', () => {
+  // Adversarial review of #868, B2: "The rate is 12%" satisfies subject ⊆
+  // label for BOTH "Churn rate" and "Win rate" — the draft pass minted 0.12
+  // onto both nodes from one statement about ONE unnamed metric. Unanimity
+  // one level up: such a statement attests neither, so it mints on NEITHER.
+  it('a generic subject that binds a competing label mints nothing', () => {
+    expect(
+      deriveStatedTargetBaselinePercent('The rate is 12% today. Keep churn under 10%.', 'Churn rate', [
+        'Win rate',
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('PRECONDITION PAIR (trap 13b): without the competitor the same statement binds', () => {
+    expect(
+      deriveStatedTargetBaselinePercent('The rate is 12% today. Keep churn under 10%.', 'Churn rate', []),
+    ).toBe(12);
+  });
+
+  it('a SPECIFIC subject is not disqualified by a competitor it does not bind', () => {
+    expect(
+      deriveStatedTargetBaselinePercent('Churn is 12% today. Keep churn under 10%.', 'Churn rate', [
+        'Win rate',
+        'Breach likelihood',
+      ]),
+    ).toBe(12);
+  });
+
+  it('null/undefined competitor labels are ignored, not matched', () => {
+    expect(
+      deriveStatedTargetBaselinePercent('Churn is 12% today.', 'Churn rate', [undefined, null as never]),
+    ).toBe(12);
   });
 });
 

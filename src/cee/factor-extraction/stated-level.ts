@@ -130,43 +130,116 @@ const SUBJECT_LEADING_STOPWORDS = new Set([
 ]);
 
 /**
- * Clause-frame markers that make the statement HYPOTHETICAL, DESIRED, or
- * PROJECTED rather than observed — scanned over the clause PREFIX (from the
- * last sentence boundary to the match). Two families:
+ * Clause-frame markers that make the statement HYPOTHETICAL, DESIRED,
+ * PROJECTED, DOUBTED, or DENIED rather than observed — scanned over the WHOLE
+ * clause containing the match, both sides (adversarial review of #868, B1/B3:
+ * a prefix-only scan let "Churn is 12%? That cannot be right." mint, because
+ * the disqualifying context sat AFTER the match). Families:
  *   - conditionals: "if churn is 12%…" states nothing about today;
  *   - desire/projection: "we want…", "our target…", "by next year…", modals —
- *     the number is an aspiration wearing a copula.
- * Over-matching here (e.g. the month "May") only ever costs a mint, never
- * truth.
+ *     the number is an aspiration wearing a copula;
+ *   - doubt/denial: "I doubt…", "it is false that…" — the copula is quoted to
+ *     be argued with, not asserted.
+ * Over-matching (e.g. the month "May", or a marker in the clause's other
+ * half) only ever costs a mint, never truth.
  */
 const CLAUSE_FRAME_MARKERS = new RegExp(
   "\\b(?:if|when|whenever|unless|suppose|supposing|assuming|assume|imagine|whether|" +
     "in\\s+case|what\\s+if|want(?:s|ed)?|wish(?:es|ed)?|aim(?:s|ed|ing)?|goal|" +
     "target(?:s|ed|ing)?|hope(?:s|d|ing)?|expect(?:s|ed|ing)?|forecast(?:s|ed|ing)?|" +
     "project(?:s|ed|ing)?|plan(?:s|ned|ning)?|should|would|could|will|might|may|" +
-    "going\\s+to|used\\s+to|next\\s+(?:year|quarter|month|week))\\b",
+    "going\\s+to|used\\s+to|next\\s+(?:year|quarter|month|week)|" +
+    "doubt(?:s|ed)?|false|untrue|deny|denies|denied)\\b",
   "i",
 );
 
 /**
- * Sentence/clause boundary for the frame guard. `(?!\d)` keeps a decimal
- * point INSIDE a number ("£1.5M", "12.5%") from terminating the clause — the
- * exact truncation class CLAUDE.md trap 22 records ("the window was cut at
- * the first [.!?], which is also the decimal point"). A dot followed by a
- * non-digit IS a boundary even after a digit ("…was 12. Churn is…").
+ * Quote characters CARRY context rather than severing it (review B1(b)): a
+ * quote character in the clause means the copula is someone's REPORTED words
+ * ("The analyst said \"churn is 12%\"", a document title) — and, mechanically,
+ * the quote is exactly what cut the attribution off from the subject capture.
+ * Straight/curly double quotes, guillemets and backticks always count; an
+ * apostrophe counts only when it OPENS a quotation (whitespace/start before
+ * it), so possessives and contractions ("competitor's") do not trip it.
+ * Refusing the whole clause is deliberate over-refusal: it costs a mint,
+ * never truth.
  */
-const CLAUSE_BOUNDARY = /[.!?;](?!\d)/g;
+const QUOTE_CONTEXT = /["“”«»`]|(?:^|\s)'/;
 
-/** The clause prefix: text from the last boundary before `index` to `index`. */
-function clausePrefix(text: string, index: number): string {
-  let start = 0;
-  CLAUSE_BOUNDARY.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = CLAUSE_BOUNDARY.exec(text)) !== null) {
-    if (m.index >= index) break;
-    start = m.index + m[0].length;
+/**
+ * Sentence/clause boundary candidates. `!`/`?`/`;` are always boundaries. A
+ * dot is NOT a boundary when it is:
+ *   - a decimal point (digit follows — "£1.5M", "12.5%"; the truncation class
+ *     CLAUDE.md trap 22 records), or
+ *   - an abbreviation dot (single-letter word before it — "e.g.", "i.e.",
+ *     initials — or a known abbreviation token; review B1(c): the dots in
+ *     "If, e.g., churn is 12%…" were read as clause ends, hiding the "If").
+ * Misclassifying a real boundary as an abbreviation only WIDENS the clause —
+ * more disqualifying context is scanned, so the failure direction is refusal.
+ */
+const BOUNDARY_CANDIDATE = /[.!?;]/g;
+const DOT_ABBREVIATIONS = new Set([
+  "eg",
+  "ie",
+  "etc",
+  "approx",
+  "vs",
+  "cf",
+  "no",
+  "rev",
+  "est",
+  "dept",
+  "inc",
+  "ltd",
+  "co",
+  "mr",
+  "mrs",
+  "ms",
+  "dr",
+  "st",
+]);
+
+function isRealBoundary(text: string, at: number): boolean {
+  if (text[at] !== ".") return true;
+  const next = text[at + 1];
+  if (next !== undefined && /\d/.test(next)) return false; // decimal point
+  // The word immediately before the dot (letters only).
+  let i = at - 1;
+  let word = "";
+  while (i >= 0 && /[A-Za-z]/.test(text[i]!)) {
+    word = text[i]! + word;
+    i -= 1;
   }
-  return text.slice(start, index);
+  if (word.length === 1) return false; // e.g. / i.e. / initials
+  if (DOT_ABBREVIATIONS.has(word.toLowerCase())) return false;
+  return true;
+}
+
+/**
+ * The full clause containing `index` — text between the nearest REAL
+ * boundaries on each side — and the boundary character that terminates it
+ * (undefined at end-of-text).
+ */
+function clauseAround(
+  text: string,
+  index: number,
+): { readonly clause: string; readonly terminator: string | undefined } {
+  let start = 0;
+  let end = text.length;
+  let terminator: string | undefined;
+  BOUNDARY_CANDIDATE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BOUNDARY_CANDIDATE.exec(text)) !== null) {
+    if (!isRealBoundary(text, m.index)) continue;
+    if (m.index < index) {
+      start = m.index + 1;
+    } else {
+      end = m.index;
+      terminator = text[m.index];
+      break;
+    }
+  }
+  return { clause: text.slice(start, end), terminator };
 }
 
 /**
@@ -189,8 +262,16 @@ export function extractStatedCurrentLevels(text: string): StatedCurrentLevel[] {
     const groups = m.groups ?? {};
     // A delta-post word converts the claim from a level to a change — reject.
     if (groups["post"] !== undefined) continue;
-    // A framed clause states nothing about today — reject.
-    if (CLAUSE_FRAME_MARKERS.test(clausePrefix(text, m.index))) continue;
+    const { clause, terminator } = clauseAround(text, m.index);
+    // A clause that ends in '?' is a QUESTION — a disbelief echo ("Churn is
+    // 12%? That cannot be right.") asserts nothing (review B1(a): the '?'
+    // sits after the match, where the old prefix-only scan never looked).
+    if (terminator === "?") continue;
+    // Reported speech / titles: the copula is someone's quoted words.
+    if (QUOTE_CONTEXT.test(clause)) continue;
+    // A framed clause states nothing about today — reject. Scanned over the
+    // WHOLE clause, both sides of the match.
+    if (CLAUSE_FRAME_MARKERS.test(clause)) continue;
 
     const value = Number(groups["value"]);
     if (!Number.isFinite(value)) continue;
@@ -253,6 +334,15 @@ function subjectBindsToLabel(subjectWords: readonly string[], label: string): bo
  * The single raw percent the user stated as the TARGET's current level, or
  * `undefined` when no unambiguous statement binds to it.
  *
+ * `competingLabels` (review B2) are the labels of the OTHER candidate targets
+ * in the same pass — for the chat path, every other outcome/risk node in the
+ * graph; for the draft pass, the same population. A statement whose subject
+ * ALSO binds a competitor ("The rate is 12%" against both 'Churn rate' and
+ * 'Win rate') describes an AMBIGUOUS metric: at most one of the candidate
+ * baselines can be true and CEE cannot say which, so the statement attests
+ * none of them — unanimity applied one level up. Absent/blank competitor
+ * labels are ignored, never matched.
+ *
  * EXTRACTION ONLY — never infers, defaults, or rounds. Every refusal path
  * returns `undefined` and the caller mints nothing (ISL keeps refusing with
  * `missing_target_baseline`, which is the honest state).
@@ -260,12 +350,18 @@ function subjectBindsToLabel(subjectWords: readonly string[], label: string): bo
 export function deriveStatedTargetBaselinePercent(
   message: string | null | undefined,
   targetLabel: string | null | undefined,
+  competingLabels: readonly (string | null | undefined)[] = [],
 ): number | undefined {
   if (typeof message !== "string" || message.trim() === "") return undefined;
   if (typeof targetLabel !== "string" || targetLabel.trim() === "") return undefined;
 
-  const binding = extractStatedCurrentLevels(message).filter((l) =>
-    subjectBindsToLabel(l.subjectWords, targetLabel),
+  const competitors = competingLabels.filter(
+    (l): l is string => typeof l === "string" && l.trim() !== "",
+  );
+  const binding = extractStatedCurrentLevels(message).filter(
+    (l) =>
+      subjectBindsToLabel(l.subjectWords, targetLabel) &&
+      !competitors.some((c) => subjectBindsToLabel(l.subjectWords, c)),
   );
   if (binding.length === 0) return undefined;
 

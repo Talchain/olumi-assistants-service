@@ -68,6 +68,19 @@ function graphWithNonGoalTargets(): GraphV3T {
     { id: 'o-churn-rate', kind: 'outcome', label: 'Churn rate' } as GraphV3T['nodes'][number],
     { id: 'r-marketing-cost', kind: 'risk', label: 'Marketing cost' } as GraphV3T['nodes'][number],
   );
+  // Adversarial review of #868, B4: without an incoming edge o-churn-rate is a
+  // ROOT, and the link-2 mint's non-root gate refuses BEFORE the extractor is
+  // ever consulted — which made the no-statement pin below VACUOUS (it passed
+  // even with the extractor hardwired to a fabricated 12). The edge makes the
+  // target mint-eligible on every axis EXCEPT the stated evidence, so the pin
+  // pins the evidence gate and nothing else.
+  g.edges.push({
+    from: 'f-quality',
+    to: 'o-churn-rate',
+    strength: { mean: -0.5, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: 'negative',
+  } as GraphV3T['edges'][number]);
   return g;
 }
 

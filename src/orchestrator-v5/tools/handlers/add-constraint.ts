@@ -761,8 +761,20 @@ export function createAddConstraintHandler(): HandlerFn {
         existingObserved?.baseline === undefined &&
         (existingObserved?.unit === undefined || existingObserved.unit === 'fraction') &&
         (existingObserved?.cap === undefined || existingObserved.cap === 1);
+      // Review B2 — the statement must name THIS target unambiguously. The
+      // competing population is the MINTABLE one (every other outcome/risk
+      // node, mirroring the kind gate): "The rate is 12%" in a graph holding
+      // both 'Churn rate' and 'Orphan rate' attests neither.
       const statedBaselinePercent = mintEligible
-        ? deriveStatedTargetBaselinePercent(invocation.payload.message, targetNode.label)
+        ? deriveStatedTargetBaselinePercent(
+            invocation.payload.message,
+            targetNode.label,
+            graph.nodes
+              .filter(
+                (n) => n.id !== targetId && (n.kind === 'outcome' || n.kind === 'risk'),
+              )
+              .map((n) => n.label),
+          )
         : undefined;
       const mintedBaseline = statedBaselinePercent !== undefined;
 

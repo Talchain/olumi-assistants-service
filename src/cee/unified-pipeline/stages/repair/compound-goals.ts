@@ -404,9 +404,18 @@ export function mintStatedTargetBaselines(
       if (data.cap !== undefined && data.cap !== 1) continue;
     }
 
+    // Review B2 — a generic subject ("The rate is 12%") that binds MORE THAN
+    // ONE candidate target attests none of them; the competing population is
+    // the mintable one (every other outcome/risk node), same rule as the chat
+    // path so the two passes cannot disagree about ambiguity.
     const statedPercent = deriveStatedTargetBaselinePercent(
       brief,
       typeof node.label === "string" ? node.label : undefined,
+      nodes
+        .filter(
+          (n) => n?.id !== node.id && (n?.kind === "outcome" || n?.kind === "risk"),
+        )
+        .map((n) => (typeof n?.label === "string" ? n.label : undefined)),
     );
     if (statedPercent === undefined) continue;
 
