@@ -56,6 +56,11 @@ import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-a
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
 import { resolveAnthropicModel } from "./model-fallback.js";
+import {
+  STRUCTURED_OUTPUTS_CAPABLE_MODELS,
+  THINKING_CAPABLE_MODELS,
+  STRICT_TOOL_CALLING_MODELS,
+} from "./anthropic-model-capabilities.js";
 
 // enforceAnthropicSchemaCompliance removed from runtime — schemas are compliant by construction.
 // The function is retained in anthropic-schema-compliance.ts as a test-only utility.
@@ -557,39 +562,18 @@ export type UsageMetrics = {
   cache_read_input_tokens?: number;
 };
 
-// Models confirmed to support Anthropic Structured Outputs (GA since Jan 2026).
-// Uses output_config.format (GA path), no beta header required.
-// Only models listed here will receive the output_config body.
-// Add new models here once confirmed via API testing.
-// Schema is compliant by construction — no runtime normalisation needed.
-
-const STRUCTURED_OUTPUTS_SUPPORTED_MODELS = new Set([
-  "claude-sonnet-4-5-20250929",
-  "claude-sonnet-4-6",
-  // claude-sonnet-5 is deliberately NOT in this SHARED set, even though it
-  // accepts GA structured outputs (live-probed 2026-07-14, output_config, no
-  // beta header). Membership here is consulted by buildStrictAnthropicTools
-  // with NO env gate, so listing sonnet-5 — the model staging serves for
-  // every live /orchestrate/v2/turn — would switch strict tool calling on
-  // for all live turns the moment it deploys (all M2 flags off), and would
-  // flip the edit_graph/draft prompt-only fallbacks whenever
-  // CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true. The V6 dual-draft M2 review — the
-  // one call that needs sonnet-5 structured outputs — opts in per-call via
-  // ChatArgs.structuredOutputsAdditionalModels (src/cee/dual-draft/m2-review.ts).
-  "claude-opus-4-6",
-  "claude-opus-4-20250514",
-  "claude-opus-4-5-20251101",
-]);
-
-// Models that support extended thinking (budget_tokens reasoning).
-// Older Anthropic models reject the `thinking` parameter with a 400.
-// Non-Anthropic models ignore it silently via their own adapters.
-const THINKING_SUPPORTED_MODELS = new Set([
-  "claude-sonnet-4-6",
-  "claude-opus-4-6",
-  "claude-opus-4-20250514",
-  "claude-opus-4-5-20251101",
-]);
+// ── Model capability sets moved to ./anthropic-model-capabilities.ts (2.973) ──
+//
+// They used to be two hand-maintained literals right here, and the structured-
+// outputs one answered TWO questions at once: "may we send output_config?"
+// (env-gated) and "should tools be strict?" (NOT env-gated). Because of the
+// second, claude-sonnet-5 was deliberately excluded — and when #871 moved the
+// draft/edit task defaults to sonnet-5, every draft silently lost its grammar.
+//
+// The sets are now DERIVED from a live-probed evidence map, and the strict-tool
+// POLICY set is separate and frozen. See that module's header for the full
+// rationale, the verbatim API evidence, and why the strict set must not be
+// widened here. `STRICT_TOOL_CALLING_MODELS` keeps tool calling byte-identical.
 
 /**
  * Guard extended thinking against unsupported Anthropic models.
@@ -597,9 +581,9 @@ const THINKING_SUPPORTED_MODELS = new Set([
  * allowing the call to proceed without thinking rather than failing at the API.
  */
 function isThinkingSupported(model: string, context: string): boolean {
-  if (THINKING_SUPPORTED_MODELS.has(model)) return true;
+  if (THINKING_CAPABLE_MODELS.has(model)) return true;
   log.warn(
-    { model, context, supported_models: Array.from(THINKING_SUPPORTED_MODELS) },
+    { model, context, supported_models: Array.from(THINKING_CAPABLE_MODELS) },
     `[Anthropic] Extended thinking requested but model "${model}" is not in the thinking-supported allowlist — disabling thinking for this call`
   );
   return false;
@@ -793,11 +777,11 @@ export async function draftGraphWithAnthropic(
   const structuredOutputsEnabled =
     !draftThinkingEnabled &&
     config.cee.anthropicStructuredOutputs &&
-    STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
+    STRUCTURED_OUTPUTS_CAPABLE_MODELS.has(model);
 
-  if (config.cee.anthropicStructuredOutputs && !STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model)) {
+  if (config.cee.anthropicStructuredOutputs && !STRUCTURED_OUTPUTS_CAPABLE_MODELS.has(model)) {
     log.warn(
-      { model, supported_models: Array.from(STRUCTURED_OUTPUTS_SUPPORTED_MODELS) },
+      { model, supported_models: Array.from(STRUCTURED_OUTPUTS_CAPABLE_MODELS) },
       "[Anthropic] CEE_ANTHROPIC_STRUCTURED_OUTPUTS=true but model is not in supported allowlist — falling back to prompt-only JSON mode"
     );
   }
@@ -3049,7 +3033,7 @@ export async function chatWithAnthropic(
   // shared set — shared membership also keys strict tool calling for every
   // live turn (no env gate) and the edit_graph/draft fallback behaviour.
   const structuredOutputsModelSupported =
-    STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model) ||
+    STRUCTURED_OUTPUTS_CAPABLE_MODELS.has(model) ||
     (args.structuredOutputsAdditionalModels?.includes(model) ?? false);
 
   // Structured Outputs — only active when schema provided, model supported, thinking disabled.
@@ -3321,7 +3305,7 @@ interface ChatWithToolsAnthropicArgs {
  * Normalize tool definitions for the Anthropic API, optionally with strict mode.
  * Shared between streaming and non-streaming tool-calling paths to prevent drift.
  *
- * When the model supports constrained decoding (STRUCTURED_OUTPUTS_SUPPORTED_MODELS),
+ * When the model is in the frozen STRICT_TOOL_CALLING_MODELS policy set,
  * adds strict: true + additionalProperties: false for decoder-constrained arguments.
  * For older models, passes tools without strict mode to avoid hard 400 failures.
  */
@@ -3329,7 +3313,7 @@ function buildStrictAnthropicTools(
   tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
   model: string,
 ) {
-  const supportsStrict = STRUCTURED_OUTPUTS_SUPPORTED_MODELS.has(model);
+  const supportsStrict = STRICT_TOOL_CALLING_MODELS.has(model);
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
