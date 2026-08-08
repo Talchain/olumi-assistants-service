@@ -172,6 +172,28 @@ export function formatConstraintLabelUpdated(input: ConstraintAddedInput): strin
 }
 
 /**
+ * ROADMAP 2.877 (link 2) — receipt fragment for the stated-baseline mint.
+ * Appended to whichever constraint receipt applies when the SAME turn also
+ * recorded the target's user-stated current level as its observed baseline.
+ *
+ * Two honesty jobs at once: (a) the user stated two facts (a bound and a
+ * level) and is owed confirmation of both; (b) on an otherwise-unchanged
+ * restatement turn the mint is the ONLY change, and the F9 discipline
+ * (receipt and analysis-affecting hash must agree) forbids narrating that
+ * turn as a pure no-op. Deliberately verb-led by "Noted" rather than
+ * "Updated"/"Set": the level is recorded as context, not committed as a
+ * constraint, and the receipt must not claim otherwise.
+ */
+export function formatBaselineNoted(input: {
+  readonly targetLabel: string;
+  readonly value: number;
+  readonly unit?: string;
+}): string {
+  const value = formatValueWithUnit(input.value, input.unit);
+  return `Noted ${input.targetLabel} is currently at ${value}.`;
+}
+
+/**
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the

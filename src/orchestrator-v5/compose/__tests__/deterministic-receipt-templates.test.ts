@@ -133,6 +133,8 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
     receipts.formatConstraintUnchanged({ targetLabel: SLOT, operator: '>=', value: 2 }),
   formatConstraintLabelUpdated: () =>
     receipts.formatConstraintLabelUpdated({ targetLabel: SLOT, operator: '>=', value: 2 }),
+  formatBaselineNoted: () =>
+    receipts.formatBaselineNoted({ targetLabel: SLOT, value: 12, unit: '%' }),
   formatGoalTargetSet: () => receipts.formatGoalTargetSet({ goalLabel: SLOT, value: 2 }),
   formatGoalTargetUnchanged: () =>
     receipts.formatGoalTargetUnchanged({ goalLabel: SLOT, value: 2 }),

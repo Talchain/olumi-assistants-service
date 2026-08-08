@@ -57,6 +57,7 @@ import {
   valuesMatch,
 } from '../../../utils/reduction-framing.js';
 import { extractGoalTargetWithBaseline } from '../../../cee/factor-extraction/index.js';
+import { deriveStatedTargetBaselinePercent } from '../../../cee/factor-extraction/stated-level.js';
 import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -64,6 +65,7 @@ import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
+  formatBaselineNoted,
   formatConstraintAdded,
   formatConstraintLabelUpdated,
   formatConstraintUnchanged,
@@ -641,11 +643,25 @@ export function createAddConstraintHandler(): HandlerFn {
       // ALREADY persisted and the turn is a value-identical restatement —
       // confirming "already constrained ✓" would re-affirm a guardrail
       // that is not being evaluated; the clarify is the repair path.
+      // ROADMAP 2.877 (link 2) TIGHTENING — a cap only exempts when the value
+      // actually FITS it. The old predicate treated ANY positive cap as "the
+      // downstream normalisation is explicit", but PLoT's normaliseValue CLAMPS
+      // to [0,1]: a unit-less value ABOVE the cap lands at 1.0 (trivially-true
+      // threshold) and a NEGATIVE one at 0 (trivially-false) — the exact silent
+      // nullification this guard exists to refuse, reachable through e.g. an
+      // LLM-drafted cap smaller than the user's number. Priced now because the
+      // link-2 baseline mint declares cap:1 on its targets (the identity scale
+      // for fraction-frame rows), which would otherwise have widened the
+      // exempt-then-clamp cell to every minted node. The exemption survives
+      // exactly where it is sane: 0 ≤ value ≤ cap, the unclamped cell.
+      const capExempts = (cap: unknown): boolean =>
+        typeof cap === 'number' &&
+        cap > 0 &&
+        params.value >= 0 &&
+        params.value <= cap;
       const declaredCap =
-        (typeof targetNode.observed_state?.cap === 'number' &&
-          targetNode.observed_state.cap > 0) ||
-        (typeof targetNode.goal_threshold_cap === 'number' &&
-          targetNode.goal_threshold_cap > 0);
+        capExempts(targetNode.observed_state?.cap) ||
+        capExempts(targetNode.goal_threshold_cap);
       const capToStamp = stampGoalThreshold
         ? resolveGoalThresholdCap(
             targetNode.goal_threshold_cap,
@@ -680,6 +696,99 @@ export function createAddConstraintHandler(): HandlerFn {
           },
         );
       }
+
+      // ROADMAP 2.877 (link 2) — MINT THE TARGET'S USER-STATED CURRENT LEVEL.
+      //
+      // A level-framed constraint on a non-goal target reaches ISL and refuses
+      // `CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline`, because the
+      // level→sample-frame conversion needs `observed_state.baseline` on the
+      // TARGET node and nobody mints it. This block mints it — RELAY-ONLY,
+      // never invented: `deriveStatedTargetBaselinePercent` returns a number
+      // only when the user's own message states the target's current level
+      // ("churn is 12% today, keep it under 10%"), bound to the target by its
+      // label. No statement ⇒ no mint ⇒ the honest refusal stands (elicitation
+      // is row 2.918, not this handler). A defaulted baseline is the
+      // fabrication class this whole chain exists to remove — CEE's own prompt
+      // once emitted 0.5/`inferred` placeholders (defaults-v187.ts) and that
+      // class is forbidden here.
+      //
+      // THE CELL IS NARROW ON PURPOSE, each conjunct derived from a CONSUMER'S
+      // bytes rather than from what a field ought to mean:
+      //   - frame 'level' on the row that will persist (stated this turn or
+      //     honestly inherited): a delta row needs no baseline, and an
+      //     unframed row must keep failing closed at the frame hop;
+      //   - kind outcome|risk: factors get a PLoT ParameterUncertainty
+      //     (translator-v3.ts:674) and ISL then refuses the conversion — a
+      //     baseline there is inert (2.877 measured arm H). Goals have their
+      //     own coherent mint (2.273) and a different divisor (rung-3 cap);
+      //   - unit '%' with 1 < value ≤ 100: PLoT only RUNS constraint
+      //     normalisation when some value leaves [0,1]
+      //     (constraintsNeedNormalisation); value > 1 guarantees every run
+      //     carrying THIS row normalises it on the fixed [0,100] percent rung,
+      //     and ≤ 100 keeps it unclamped. A '%' row ≤ 1 can be forwarded RAW,
+      //     where a fraction baseline beside a raw-percent threshold converts
+      //     to a confident wrong number — so it never mints;
+      //   - no goal_threshold_cap on the target: that cap outranks the percent
+      //     rung in PLoT's ladder and would change the divisor;
+      //   - NON-ROOT target: ISL refuses roots (`root_target`) AND reads a
+      //     root's observed value as its sample base, so a root mint buys
+      //     nothing and moves the analysis instead;
+      //   - FILL-ONLY, precisely scoped: an existing BASELINE — whatever wrote
+      //     it — outranks this mint and is never overwritten. An existing
+      //     observed_state WITHOUT a baseline is extended, and its `value` IS
+      //     replaced by the stated fraction (the user's own statement outranks
+      //     a model-drafted value — the same doctrine as the transform's goal
+      //     limb, 2.294) provided its scale fields (unit/cap) agree with the
+      //     minted shape; otherwise the whole mint is skipped.
+      //
+      // KNOWN RESIDUAL (paired with row 2.918, disclosed not discovered): a
+      // baseline minted from a statement the user later disavows cannot be
+      // corrected through THIS channel — fill-only means a restatement with a
+      // different number refuses rather than overwrites. The correction path
+      // is the elicitation/edit seam (2.918), which owns provenance-aware
+      // overwrite semantics; silently letting the newest parse win here would
+      // let one regex misread destroy a user-attested value.
+      //
+      // THE SHAPE {value: frac, baseline: frac, unit: 'fraction', cap: 1} is
+      // the identity-scale declaration: PLoT's deriveRange resolves
+      // explicit_cap [0,1] for this node, so a coexisting draft-path 'fraction'
+      // row normalises to itself (without the cap, deriveRange's
+      // inferred-baseline rung would turn baseline 0.12 into range [0,0.24]
+      // and rescale a draft 0.05 into 0.208 — a confident wrong number).
+      // 'fraction' is PLoT's own fraction-scale token, so the scale-unit
+      // compatibility check reconciles. `value` rides beside `baseline`
+      // because ISL's ObservedState requires it (robustness_v2.py:174) — at
+      // statement time the current observed level IS the baseline, the same
+      // single-number argument the goal limb documents (transforms/schema-v3).
+      const effectiveRowFrame = statedValueFrame ?? inheritedValueFrame;
+      const existingObserved = targetNode.observed_state;
+      const mintEligible =
+        effectiveRowFrame === 'level' &&
+        (targetNode.kind === 'outcome' || targetNode.kind === 'risk') &&
+        resolvedUnit === '%' &&
+        params.value > 1 &&
+        params.value <= 100 &&
+        targetNode.goal_threshold_cap === undefined &&
+        graph.edges.some((e) => e.to === targetId) &&
+        existingObserved?.baseline === undefined &&
+        (existingObserved?.unit === undefined || existingObserved.unit === 'fraction') &&
+        (existingObserved?.cap === undefined || existingObserved.cap === 1);
+      // Review B2 — the statement must name THIS target unambiguously. The
+      // competing population is the MINTABLE one (every other outcome/risk
+      // node, mirroring the kind gate): "The rate is 12%" in a graph holding
+      // both 'Churn rate' and 'Orphan rate' attests neither.
+      const statedBaselinePercent = mintEligible
+        ? deriveStatedTargetBaselinePercent(
+            invocation.payload.message,
+            targetNode.label,
+            graph.nodes
+              .filter(
+                (n) => n.id !== targetId && (n.kind === 'outcome' || n.kind === 'risk'),
+              )
+              .map((n) => n.label),
+          )
+        : undefined;
+      const mintedBaseline = statedBaselinePercent !== undefined;
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
@@ -780,19 +889,47 @@ export function createAddConstraintHandler(): HandlerFn {
             }
           }
         }
+        // ROADMAP 2.877 (link 2) — the stated-baseline write. Same committed
+        // write as the row upsert (mutated_graph → persistence), no new
+        // writer. Guarded by `mintedBaseline`, whose derivation above already
+        // enforced fill-only against the pre-mutation node; the goal-stamp
+        // block cannot have raced it because the mint excludes goal targets.
+        if (statedBaselinePercent !== undefined) {
+          const mintTarget = clone.nodes.find((n) => n.id === targetId);
+          if (mintTarget) {
+            const frac = statedBaselinePercent / 100;
+            mintTarget.observed_state = {
+              ...mintTarget.observed_state,
+              value: frac,
+              baseline: frac,
+              unit: 'fraction',
+              cap: 1,
+              raw_value: frac,
+              source: 'brief_extraction',
+            };
+          }
+        }
         return {
           before: existing ? (existing as Record<string, unknown>) : null,
           after: constraintParse.data as unknown as Record<string, unknown>,
         };
       });
 
+      // ROADMAP 2.877 (link 2) — F9 discipline: a turn that minted a baseline
+      // CHANGED the graph (observed_state is analysis-affecting), so it must
+      // not be narrated as a no-op even when the constraint row itself is a
+      // value-identical restatement. That restatement-plus-stated-level turn is
+      // the natural REPAIR after an honest ISL refusal, and swallowing it under
+      // `noop` would both lie in the fact channel and move the
+      // analysis-affecting hash out from under a "nothing changed" receipt.
+      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline;
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
-        noop: valueUnchanged && !labelChanged,
+        noop: turnIsNoop,
         result: {
           target_id: newConstraint.constraint_id,
-          status: valueUnchanged && !labelChanged ? 'noop' : 'applied',
+          status: turnIsNoop ? 'noop' : 'applied',
           before: result.before,
           after: result.after,
         },
@@ -824,7 +961,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // label-only change (value unchanged, label differs) gets its own
       // distinct receipt — never the fresh-update claim, never the
       // total-noop claim either.
-      const assistantText = isSuccessTargetTurn
+      const constraintText = isSuccessTargetTurn
         ? valueUnchanged
           ? formatGoalTargetUnchanged({
               goalLabel: targetNode.label,
@@ -843,6 +980,18 @@ export function createAddConstraintHandler(): HandlerFn {
           : existing !== undefined
             ? formatConstraintUpdated(formatInput)
             : formatConstraintAdded(formatInput);
+      // ROADMAP 2.877 (link 2) — the mint is user-visible in the same receipt:
+      // the user stated two facts (a bound and a level) and is owed
+      // confirmation of both; and on an otherwise-unchanged restatement the
+      // note is what keeps the text channel honest about the turn not being a
+      // no-op (see `turnIsNoop` above).
+      const assistantText = mintedBaseline
+        ? `${constraintText} ${formatBaselineNoted({
+            targetLabel: targetNode.label,
+            value: statedBaselinePercent!,
+            unit: '%',
+          })}`
+        : constraintText;
 
       return {
         assistant_text: assistantText,
