@@ -82,6 +82,10 @@ import {
 } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../orchestrator/routing/edit-graph-intent-regex.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { bandConfidence } from './confidence-bands.js';
@@ -120,9 +124,15 @@ import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
   evidenceSignals,
+  fragileEdgeOfferSignals,
   guidanceSignalsForCoachingKind,
   reviewCardSignals,
 } from './guidance-signals.js';
+// ROADMAP 2.989 — the fragile-edge selector (pure) and the PER-FACT withheld
+// leaf. `mayNameLeadingOptionForFact` is IMPORTED, not restated: the offer's
+// wire-reached telemetry must branch on the same predicate compose branches on.
+import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
+import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
 
@@ -1345,6 +1355,133 @@ export interface LensSurface {
 }
 
 /**
+ * ROADMAP 2.989 — the fragile-edge offer's user-facing parts, composed from the
+ * ONE selected relationship. `null` for every other lens.
+ *
+ * ⚠ THE ACCEPTANCE TEXT HAS TO CLEAR THREE INDEPENDENT GATES. Gates 1 and 2 are
+ * ENFORCED AT COMPOSITION TIME on the actual string, not merely asserted in a
+ * test — see `buildFragileEdgeOffer`. (They were test-only until CEE #883's
+ * review, and a test bound to the lane's own fixture labels could not see the
+ * failing class, because the LABELS are producer data and the gates are
+ * evaluated over the whole message.) All three are also pinned by
+ * `__tests__/fragile-edge-offer.test.ts`:
+ *   1. `EDIT_GRAPH_POSITIVE_REGEX` must MATCH — otherwise the turn never reaches
+ *      the `edit_graph` dispatch and the chip is inert (2.770: no inert chips).
+ *      "Adjust" is in the positive verb set.
+ *   2. `EDIT_GRAPH_NEGATIVE_REGEX` must NOT match — a meta-question veto. This is
+ *      not a formality: the veto set includes `flip`, `explain`, `why`, `tell me`,
+ *      `show me`, `compare`, `describe`, so the obvious phrasings of a fragility
+ *      offer ("…that could flip the result", "tell me the new value") are exactly
+ *      the ones that would silently stop dispatching — AND SO ARE ORDINARY
+ *      ENDPOINT LABELS ("Flip Risk Threshold", "Why Customers Churn"), which is
+ *      why the check has to run on real data rather than on a fixture.
+ *   3. `scanProse` — no bare `0.x` decimal, no slug-shaped entity id, no forbidden
+ *      phrase. This is why the text names the endpoints by LABEL and carries no
+ *      number, and why a label that itself trips a gate DROPS the whole block
+ *      rather than shipping a half-honest one (fail-closed, pinned by test).
+ *
+ * NO NUMERIC TARGET IS STATED, and that is the ruling rather than a gap: nothing
+ * in the enrichment computes a RECOMMENDED new strength. `flip_mean` is the value
+ * at which the ranking flips — advising the user to set it there would be both a
+ * Tier-3 disclosure and backwards advice. The user supplies the number; the draft
+ * is prefilled and editable, which is row 3.17's ratified fulfilment channel (a
+ * pre-filled natural-language turn, measured 3/3 on staging — NOT a bare chip,
+ * which measured 0/5 precisely because it carried no entity and no strength).
+ */
+interface FragileEdgeOffer {
+  readonly body: string;
+  readonly targetRefs: readonly TargetRef[];
+  readonly actionLabel: string;
+  readonly actionPrompt: string;
+}
+
+/** The label the acceptance chip carries. Producer-authored, fixed. */
+export const FRAGILE_EDGE_ACTION_LABEL = 'Adjust this relationship';
+
+/** Compose the acceptance turn. Exported so the routing gates can be asserted on
+ *  the EXACT string the block ships, not on a re-spelling of it. */
+export function composeFragileEdgeActionPrompt(fromLabel: string, toLabel: string): string {
+  return `Adjust the strength of the link from ${fromLabel} to ${toLabel} in my model.`;
+}
+
+/**
+ * The sentence that NAMES the relationship. It LEADS the body, and the lens's
+ * generic tail follows — because the body is truncated at {@link BODY_MAX} and
+ * a naming sentence placed last is the first thing truncation eats (measured:
+ * the naming-last ordering silently dropped the second endpoint label on the
+ * live capture, so the card named half a relationship).
+ */
+export function composeFragileEdgeNaming(fromLabel: string, toLabel: string): string {
+  return `On this run the link from ${fromLabel} to ${toLabel} is the relationship the result leans on most.`;
+}
+
+/** Naming sentence first, the lens's generic tail second. */
+export function composeFragileEdgeBody(base: string, fromLabel: string, toLabel: string): string {
+  return `${composeFragileEdgeNaming(fromLabel, toLabel)} ${base}`;
+}
+
+function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | null {
+  if (selection.lens !== 'fragile_edge_resolution') return null;
+  const edge = selection.fragileEdge;
+  // Fail closed. The evaluator only fires with a selection, so this is
+  // unreachable through `selectLens` — it is here because a lens id and its
+  // payload travelling as two separate fields is exactly the pairing a future
+  // refactor can break, and the honest failure is NO OFFER, never a half one.
+  if (edge === undefined) return null;
+  // FAIL CLOSED ON A HALF-NAMED RELATIONSHIP. Endpoint labels are producer data
+  // and are not length-bounded; if the naming sentence alone would not survive
+  // `BODY_MAX`, truncation would ship a card that names one endpoint and trails
+  // off — worse than no offer, because it still carries an action chip.
+  if (composeFragileEdgeNaming(edge.fromLabel, edge.toLabel).length > BODY_MAX) return null;
+  // ⭐ FAIL CLOSED ON A PROMPT THAT WOULD NOT DISPATCH — the third fail-closed in
+  // this function, and the one a review had to find (CEE #883). The two routing
+  // gates are evaluated by `route-v2.ts` over the WHOLE acceptance message, and
+  // that message CONTAINS PRODUCER-AUTHORED ENDPOINT LABELS. The veto set is
+  // ordinary strategic vocabulary — `flip`, `why`, `compare`, `describe`,
+  // `explain`, `show me`, `tell me`, `set up`, `how does` — so a perfectly
+  // reasonable label ("Flip Risk Threshold", "Why Customers Churn", "Compare
+  // Group Uptake") makes the composed prompt match the NEGATIVE veto. The block
+  // still ships, the lens still wins, `scanProse` still passes: the user is
+  // offered "Adjust this relationship", accepts, AND THE MODEL DOES NOT CHANGE.
+  // That is an inert chip (2.770 / lens-selector.ts "no inert chips, ever").
+  //
+  // Asserting the gates in a test is NOT this check: the fixture labels are the
+  // lane's own, and a corpus from the author's head cannot see the class the
+  // author did not imagine (CLAUDE.md trap 22). The gate has to be evaluated on
+  // the ACTUAL string, at composition time, on every run.
+  //
+  // The SAME regex objects `route-v2.ts` uses are imported — never a re-declared
+  // copy, which is the hand-maintained-mirror defect (trap 12) and would drift
+  // silently the first time the veto set is edited.
+  //
+  // Derived, not assumed: this string is also the string that SHIPS. The naming
+  // guard above bounds the combined label length to 224 chars, so the composed
+  // prompt is at most 278 and `truncate(…, ACTION_PROMPT_MAX = 300)` is a no-op
+  // on every prompt that reaches here — pinned by test, because raising BODY_MAX
+  // or lowering ACTION_PROMPT_MAX would break that and let a truncation re-cut a
+  // word into a veto token.
+  const actionPrompt = composeFragileEdgeActionPrompt(edge.fromLabel, edge.toLabel);
+  if (!EDIT_GRAPH_POSITIVE_REGEX.test(actionPrompt)) return null;
+  if (EDIT_GRAPH_NEGATIVE_REGEX.test(actionPrompt)) return null;
+  return {
+    body: composeFragileEdgeBody(selection.body, edge.fromLabel, edge.toLabel),
+    // The EDGE identity, with the schema's own `edge` kind — `id` is the
+    // `from→to` composite `tools/handlers/adjust-edge-strength.ts::parseEdgeId`
+    // accepts, so the thing the card points at and the thing the handler
+    // resolves are one string, not two spellings of one idea.
+    targetRefs: [
+      {
+        id: edge.edgeIdentity,
+        label: `${edge.fromLabel} → ${edge.toLabel}`,
+        kind: 'edge' as const,
+      },
+    ],
+    actionLabel: FRAGILE_EDGE_ACTION_LABEL,
+    actionPrompt,
+  };
+}
+
+/**
  * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
  * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
  * prose mention in `lens-selector.ts`, and three spec files
@@ -1397,26 +1534,77 @@ export function buildLensSurface(
   ctx: BlockBuildCtx,
   previousAnalysisLens?: LensId | null,
 ): LensSurface | null {
+  // ROADMAP 2.989 — ONE derivation of the fragile-edge decision for this turn,
+  // computed HERE and threaded into the selector, because this site has to emit
+  // its telemetry (both arms) and a selector that emitted its own would stop
+  // being pure. `selectFragileEdge` is pure and total, so the threaded value and
+  // the value `selectLens` would have computed for itself are the same by
+  // construction — pinned by a threaded-vs-omitted equality test.
+  const enrichment = (fact.result as Record<string, unknown>).enrichment;
+  const fragileEdgeDecision = selectFragileEdge(enrichment);
+
+  // THE DECISION IS THE OBSERVABLE, NOT THE OFFER. A refusal is a first-class
+  // outcome of this loop ("the run has nothing honest to offer"), so it is
+  // emitted on the same event as a selection with a closed `refusal_reason`.
+  // Emitted BEFORE the lens race, because the decision is a property of the run
+  // and not of which lens happened to win the slot: gating it on the win would
+  // make the refusal rate unmeasurable on exactly the turns another lens took.
+  emit(TelemetryEvents.V5FragileEdgeSelection, {
+    rationale_code: 'FRAGILE_EDGE_RESOLVABLE',
+    e_value_joined: fragileEdgeDecision.eValueJoined,
+    stability_band: fragileEdgeDecision.stabilityBand,
+    refusal_reason: fragileEdgeDecision.refusalReason,
+  });
+
   const selection = selectLens(fact, {
     ...liveLensExecutorAvailability(),
     // ROADMAP 2.211 — the no-immediate-repeat tie-break's ONE input. Omitted /
     // null ⇒ byte-identical to the pre-amendment selection.
     previousAnalysisLens: previousAnalysisLens ?? null,
+    fragileEdge: fragileEdgeDecision,
   });
   if (selection === null) return null;
+
+  // ROADMAP 2.989 — the offer, present on exactly one lens. `offer` is `null`
+  // for every other lens, so the spreads below are byte-inert on them.
+  const offer = buildFragileEdgeOffer(selection);
+  // THE LENS EXISTS ONLY TO CARRY THE OFFER. Its body's opening clause has no
+  // antecedent without the naming sentence ("Change IT and…"), and its whole
+  // proposition is an action. So an offer that could not be composed drops the
+  // SURFACE, not just the action fields — a lens card with neither the named
+  // relationship nor a chip is a card about nothing.
+  if (selection.lens === 'fragile_edge_resolution' && offer === null) return null;
 
   const candidate = {
     ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
     type: 'coaching' as const,
     coaching_kind: 'strengthen' as const,
     title: truncate(selection.title, TITLE_MAX),
-    body: truncate(selection.body, BODY_MAX),
+    body: truncate(offer?.body ?? selection.body, BODY_MAX),
     source: 'deterministic_signal' as const,
-    target_refs: [] as readonly TargetRef[],
+    target_refs: (offer?.targetRefs ?? []) as readonly TargetRef[],
     priority_rank: 15,
     // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
-    // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM).
-    ...guidanceSignalsForCoachingKind('strengthen'),
+    // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM)
+    // — except on the fragile-edge offer, whose detector class is result
+    // fragility (see `guidance-signals.ts::fragileEdgeOfferSignals`).
+    ...(offer !== null ? fragileEdgeOfferSignals() : guidanceSignalsForCoachingKind('strengthen')),
+    // ROADMAP 2.989 — the ACTION. ⚠ NO `action_intent`, and that is derived,
+    // not forgotten. `ActionIntentLiteral` is a CLOSED 15-value schema enum with
+    // no edge-mutation member; its nearest value, `edit_factor`, would state a
+    // wrong OBJECT on a producer-owned field (the schema's own `TargetRefKind`
+    // distinguishes `factor` from `edge`) — the wrong-object class ROADMAP 2.392
+    // exists to kill, and the field two UI block renderers record as "wiring
+    // action_intent to turn dispatch is a recorded follow-up". Measured at the
+    // deployed UI tip: the chip is live on `action_label` + `action_prompt` and
+    // `action_intent` is never dispatched (it rides as a data-* attribute).
+    // Omitting it costs nothing and promises nothing false.
+    ...(offer !== null
+      ? {
+          action_label: truncate(offer.actionLabel, ACTION_LABEL_MAX),
+          action_prompt: truncate(offer.actionPrompt, ACTION_PROMPT_MAX),
+        }
+      : {}),
   };
   const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
     block_type: 'coaching',
@@ -1424,6 +1612,12 @@ export function buildLensSurface(
     prose: [
       { name: 'title', value: candidate.title },
       { name: 'body', value: candidate.body },
+      // ROADMAP 2.989: the action fields are user-facing prose too — the chip
+      // caption and the turn text the user sends in their own name — so they go
+      // through the SAME guard as the body. Absent on every other lens, and
+      // `scanProse` skips non-strings, so this is inert for them.
+      { name: 'action_label', value: offer?.actionLabel },
+      { name: 'action_prompt', value: offer?.actionPrompt },
     ],
   });
   if (block === null) return null;
@@ -1471,6 +1665,31 @@ export function buildLensSurface(
   // ids a DSK lens was derived from are stamped here (attested against the
   // bundle bytes by `dsk-provenance-attestation.test.ts`). Keys are ABSENT for
   // the non-DSK lenses — absence is the honest default, never an empty string.
+  // ROADMAP 2.989 — THE OFFER REACHED THE COMPOSED RESPONSE.
+  //
+  // ⚠ THIS EVENT DELIBERATELY DOES NOT INHERIT THE SKEW DOCUMENTED BELOW. The
+  // suggestion event fires on surviving CONSTRUCTION, which over-reports by
+  // exactly the withheld rate because every `strengthen` block is dropped by
+  // compose's leader-presuming filter on a withheld turn. An offer counted on a
+  // turn where it was suppressed would make acceptance-vs-offer — the PR5
+  // measurement this event exists for — silently wrong.
+  //
+  // So the emit is gated on the SAME predicate compose branches on, IMPORTED
+  // rather than restated (`mayNameLeadingOptionForFact`, the per-fact leaf): one
+  // pure function of one fact, evaluated twice, cannot disagree with itself. A
+  // hand-copied kind list here would be the mirror class instead.
+  if (offer !== null && mayNameLeadingOptionForFact(fact)) {
+    emit(TelemetryEvents.V5FragileEdgeOfferEmitted, {
+      // The fulfilment FAMILY, not a wire field: the composed prompt routes
+      // through `edit_graph` to the registered `adjust_edge_strength` handler.
+      // Deliberately not an `ActionIntentLiteral` — see the block mint above for
+      // why the wire carries no `action_intent`.
+      action_intent: 'edit_graph',
+      signal_code: fragileEdgeOfferSignals().signal_code,
+      graph_hash_at_generation: ctx.graph_hash_at_generation,
+    });
+  }
+
   const dskProvenance = LENS_DSK_PROVENANCE[selection.lens];
   emit(TelemetryEvents.V5LensSuggestionEmitted, {
     lens_id: selection.lens,
@@ -1639,8 +1858,14 @@ export function buildLensCompanionBlocks(
       );
       return block === null ? [] : [block];
     }
+    // ROADMAP 2.989 — `fragile_edge_resolution` declares NO companion,
+    // deliberately: its executor is not a deterministic exercise block, it is
+    // the `edit_graph` turn the suggestion's own action chip dispatches. A
+    // companion would be a second structured artefact about an offer whose
+    // whole point is one acceptance.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
+    case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
       return [];
     default: {

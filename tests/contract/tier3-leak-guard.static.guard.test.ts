@@ -72,6 +72,15 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   ['compose/flip-proposal.ts', 'structured'],
   ['compose/phase3-blocks.ts', 'structured'],
   ['coaching/decision-review-enricher.ts', 'transport'],
+  // ROADMAP 2.989 (wave-1 Lane A) — the fragile-edge selector JOINS
+  // `robustness.fragile_edges` against `edge_e_values` on (from_id,to_id) and
+  // gates on that row's 10-seed stability band. Classified `structured` for the
+  // reason the classification exists: every quantity it reads from the Tier-3
+  // field (`e_value`, `current_mean`, `flip_mean`, `flip_direction`, the band)
+  // is used ONLY as a gate and NONE of them is carried on its return type, so
+  // no caller can surface one. Its offer copy is number-free by ruling — see
+  // `lens-selector.ts::BODY_BY_RATIONALE.FRAGILE_EDGE_RESOLVABLE`.
+  ['coaching/select-fragile-edge.ts', 'structured'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
   // Root-level seams (non-recursive root scan):
   ['compose.ts', 'transport'],

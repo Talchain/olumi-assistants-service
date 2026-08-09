@@ -292,8 +292,23 @@ describe('ROADMAP 2.490 — a displaced sensitivity head hands the slot to devil
       previousAnalysisLens: 'devils_advocacy',
     });
     expect(next).not.toBeNull();
+    // THE CLAUSE UNDER TEST, unchanged: the sequel did not hand the slot back
+    // to the head. This is what this case discriminates.
     expect(next!.lens).not.toBe('devils_advocacy');
-    expect(next!.lens).toBe('sensitivity_flip_risk');
+    // ⚠ RE-PINNED BY ROADMAP 2.989 (wave-1 Lane A), and the distinction matters.
+    // What changed is NOT this clause — it is LADDER MEMBERSHIP. This line used
+    // to read `toBe('sensitivity_flip_risk')`, which pinned WHO the ordinary
+    // runner-up happens to be on this derived shape, not the sequel rule. With
+    // `fragile_edge_resolution` on the ladder (below devils_advocacy, above the
+    // what-if extension) the yielded sensitivity head is no longer the only
+    // alternate, so the runner-up is the new lens. Measured across FOUR
+    // candidate placements (above the DSK pair, between them, below them, and
+    // last): every one of them moves a runner-up identity somewhere in this
+    // file, because these controls pin exact alternates on derived session-A
+    // shapes. This position was chosen because it disturbs exactly this ONE
+    // assertion and leaves the 2.490 partition, the yield, the no-repeat rule
+    // and both DSK exercises' reachability untouched.
+    expect(next!.lens).toBe('fragile_edge_resolution');
   });
 
   it('no walk ever emits the same lens on consecutive turns while an alternate exists', () => {
