@@ -626,6 +626,16 @@ function deriveInferredFactors(
     // The single provenance authority: anything the matcher certified as the
     // user's figure is theirs, full stop. This is what makes the two sections
     // structurally incapable of contradicting each other.
+    //
+    // ⚠ IT CANNOT CURRENTLY BITE, AND THAT IS DELIBERATE — DEMONSTRATED, not
+    // assumed. A numeric match compares the same underlying magnitudes the
+    // coincidence guard below does, so today every matched node is ALSO
+    // coincidence-suppressed: removing this line leaves 0 clashes across 12
+    // notations. It stays because the no-contradiction property must rest on
+    // the AUTHORITY, not on a heuristic that happens to subsume it — narrow the
+    // guard below (as B3-2 rightly did) and this becomes load-bearing
+    // immediately. Same shape as the topology exclusion: a second line of
+    // defence against a configuration today's code does not produce.
     if (matchedNodeIds.has(id)) continue;
     // CANNOT TELL — claimed by neither section. See the note above.
     if (magnitudeCoincidesWithSomethingWritten(node, briefNumbers)) continue;
