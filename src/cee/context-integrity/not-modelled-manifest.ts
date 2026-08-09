@@ -148,11 +148,22 @@ export const NOT_TRACKED_CLASSES: readonly string[] = [
 
 // ── extraction ──────────────────────────────────────────────────────────────
 
+/**
+ * ⚠ THE LIST ITSELF NEEDS A COMPLETENESS CHECK, NOT JUST CONSISTENT CONSUMERS
+ * (CLAUDE.md trap 12d, whose own worked example is a magnitude map missing
+ * `thousand`). The spelled-out forms are here because `parseUnit("£ million")`
+ * silently scaled by 1 without them — a 10^6 error in a figure we then quote
+ * back to the user as their own.
+ */
 const MAGNITUDE: Readonly<Record<string, number>> = {
   k: 1e3,
+  thousand: 1e3,
   m: 1e6,
+  million: 1e6,
+  mn: 1e6,
   bn: 1e9,
   b: 1e9,
+  billion: 1e9,
 };
 
 const MONTHS =
@@ -218,10 +229,35 @@ function countUnitWord(literal: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-/** Singular/plural-tolerant stem, so "people"/"person" and "month"/"months"
- *  compare equal. Deliberately crude: it only has to separate unit FAMILIES. */
-const stem = (w: string): string =>
-  w.toLowerCase().replace(/(ies|es|s)$/, "").replace(/^(people|person)$/, "person");
+/**
+ * The forms a unit word might be written in, so "month"/"months" and
+ * "people"/"person" compare equal.
+ *
+ * ⚠ RETURNS A SET, NOT A SINGLE STEM. A single crude stem got this wrong in the
+ * obvious direction: "hires" -> "hir" (the `es` branch) while "hire" -> "hire",
+ * so a factor declared in `hires` never matched a brief written in `hire`.
+ * Comparing candidate SETS removes the need for the stemmer to pick correctly.
+ */
+function unitForms(word: string): Set<string> {
+  const w = word.toLowerCase().trim();
+  const forms = new Set<string>([w]);
+  if (w.endsWith("ies")) forms.add(`${w.slice(0, -3)}y`);
+  if (w.endsWith("es")) forms.add(w.slice(0, -2));
+  if (w.endsWith("s")) forms.add(w.slice(0, -1));
+  forms.add(`${w}s`);
+  if (w === "people" || w === "person") {
+    forms.add("people");
+    forms.add("person");
+  }
+  return forms;
+}
+
+/** Do two unit words name the same family? */
+function sameUnitFamily(a: string, b: string): boolean {
+  const fa = unitForms(a);
+  for (const f of unitForms(b)) if (fa.has(f)) return true;
+  return false;
+}
 
 export function extractStatedQuantities(text: string): Quantity[] {
   const out: Quantity[] = [];
@@ -380,18 +416,90 @@ function collectFactorNumbers(node: Record<string, unknown>): number[] {
   return out;
 }
 
+/**
+ * Does this factor put a NUMBER on the world at all?
+ *
+ * ⚠ DELIBERATELY BROADER THAN THE MATCHING CORPUS, and the difference is the
+ * whole point. `collectCandidates` answers *"could this be the user's
+ * figure?"* and therefore demands a declared unit. This answers *"is there a
+ * figure here to own?"* — for which a unitless prior counts, because a prior
+ * IS a number we put on the world.
+ *
+ * Two different questions, named apart on purpose (trap 21). The previous
+ * version of this module answered them with two different matchers and got
+ * caught asserting and denying the same provenance in one panel.
+ */
+function carriesAFigure(node: Record<string, unknown>): boolean {
+  return collectFactorNumbers(node).length > 0;
+}
+
+/**
+ * The factors whose figures are OURS.
+ *
+ * ── ONE AUTHORITY, CONSUMED TWICE ──────────────────────────────────────────
+ * ⚠ THIS FUNCTION USED TO RUN ITS OWN MATCHER, and the bug that produced is
+ * the sharpest one this module has had. `classify` was converted to
+ * unit-aware candidates; this was not, and kept comparing raw values and
+ * mantissas out of an unlabelled bag. It therefore fired whenever the user's
+ * magnitude NOTATION disagreed with the carrier's declared unit scale —
+ * measured on the real b1 graph, 5 of 9 ordinary notations:
+ *
+ *     "We can spend £1.5m ..."      -> used: fac_marketing_spend      (no clash)
+ *     "We can spend £1,500,000 ..." -> used: fac_marketing_spend
+ *                                   AND estimated: Marketing Spend    (CLASH)
+ *
+ * The panel asserted and denied the same node's provenance at once, and the
+ * denial was contradicted by our own matcher, which had just certified the
+ * figure as the user's.
+ *
+ * The fix is structural, not an exclusion list: this consumes the SAME
+ * `matchCandidate` result `classify` does. A node that produced a match cannot
+ * appear here, by construction rather than by suppression — so the two
+ * sections can no longer drift apart, whatever notation the user writes in.
+ */
+/**
+ * Could one of this factor's figures be the user's, even though we could not
+ * CONFIRM it?
+ *
+ * ── WHY A THIRD STATE EXISTS ───────────────────────────────────────────────
+ * The two sections have OPPOSITE safe directions, and that is what makes a
+ * plain two-way split wrong:
+ *
+ *   · refusing a match in "what I used" sends the user's figure to "not
+ *     modelled yet" — over-inviting, and recoverable;
+ *   · refusing the same match in "what I estimated" CLAIMS THEIR NUMBER AS
+ *     OURS — asserting something false about their own input.
+ *
+ * The temptation is to use a looser matcher for the second section. That is
+ * exactly the two-authorities defect this module was just caught shipping. The
+ * consistent answer is that the question has THREE outcomes, not two: theirs,
+ * ours, and CANNOT TELL — and neither section may claim a "cannot tell".
+ *
+ * A bare magnitude coincidence with no declared unit is a "cannot tell": not
+ * strong enough to certify as the user's (the B1 lesson — magnitude alone is
+ * not evidence), and not weak enough to deny as ours.
+ */
+function magnitudeCoincidesWithSomethingStated(
+  node: Record<string, unknown>,
+  stated: readonly Quantity[],
+): boolean {
+  const numbers = collectFactorNumbers(node);
+  for (const n of numbers) {
+    for (const q of stated) {
+      if (q.value !== null && numbersEqual(n, q.value)) return true;
+      if (q.mantissa !== null && numbersEqual(n, q.mantissa)) return true;
+    }
+  }
+  return false;
+}
+
 function deriveInferredFactors(
   graph: Record<string, unknown>,
+  matchedNodeIds: ReadonlySet<string>,
   stated: readonly Quantity[],
 ): NotModelledManifest["inferred_factors"] {
   const nodes = graph.nodes;
   if (!Array.isArray(nodes)) return { status: "not_recorded", items: [] };
-
-  const statedForms: number[] = [];
-  for (const q of stated) {
-    if (q.value !== null) statedForms.push(q.value);
-    if (q.mantissa !== null) statedForms.push(q.mantissa);
-  }
 
   const items: Array<{ node_id: string; label: string }> = [];
   for (const raw of nodes) {
@@ -404,15 +512,16 @@ function deriveInferredFactors(
     // by its internal id would be pipeline vocabulary on screen.
     if (id === null || label === null) continue;
 
-    const numbers = collectFactorNumbers(node);
-    // A factor carrying no figure at all is not something we "estimated" — it
-    // is structural. Only claim an estimate where there is a number to own.
-    if (numbers.length === 0) continue;
+    // Nothing to own.
+    if (!carriesAFigure(node)) continue;
+    // The single provenance authority: anything the matcher certified as the
+    // user's figure is theirs, full stop. This is what makes the two sections
+    // structurally incapable of contradicting each other.
+    if (matchedNodeIds.has(id)) continue;
+    // CANNOT TELL — claimed by neither section. See the note above.
+    if (magnitudeCoincidesWithSomethingStated(node, stated)) continue;
 
-    const matchesSomethingStated = numbers.some((n) =>
-      statedForms.some((f) => numbersEqual(n, f)),
-    );
-    if (!matchesSomethingStated) items.push({ node_id: id, label });
+    items.push({ node_id: id, label });
   }
   return { status: "derived", items };
 }
@@ -675,7 +784,7 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
       // honestly; a count that cannot be verified falls to "not modelled yet",
       // which invites the user to add it rather than claiming we used it.
       if (q.unit === null || c.declaredUnit === null) return false;
-      return stem(q.unit) === stem(c.declaredUnit);
+      return sameUnitFamily(q.unit, c.declaredUnit);
     }
     default:
       // Dates and periods carry no magnitude; they match on text only.
@@ -760,12 +869,14 @@ export function deriveNotModelledManifest(
   const quantities = extractStatedQuantities(briefText);
 
   const items: NotModelledItem[] = [];
+  const matchedNodeIds = new Set<string>();
   let inModel = 0;
   let proseOnly = 0;
   let absent = 0;
 
   for (const q of quantities) {
     const { verdict, matched } = classify(q, surfaces);
+    if (matched !== null) matchedNodeIds.add(matched.nodeId);
     if (verdict === "in_model") inModel += 1;
     else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
@@ -799,6 +910,7 @@ export function deriveNotModelledManifest(
     declared_exclusions: readDeclaredExclusions(graph as Record<string, unknown>),
     inferred_factors: deriveInferredFactors(
       graph as Record<string, unknown>,
+      matchedNodeIds,
       quantities,
     ),
     not_tracked: NOT_TRACKED_CLASSES,

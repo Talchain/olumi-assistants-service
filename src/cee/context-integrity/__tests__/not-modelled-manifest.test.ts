@@ -489,22 +489,25 @@ describe("ORDINARY INPUT MUST NOT COLLIDE WITH TOPOLOGY — the corpus is extern
     expect(m.quantities?.items[0]?.verdict).toBe("absent");
   });
 
-  it("what actually excludes topology is the NAMED+UNITED requirement, not the collection list", () => {
-    // ⚠ DEMONSTRATED, NOT ASSERTED, and it corrects my own reasoning. A mutant
-    // that readmitted `edges` to the candidate collections stayed GREEN. That
-    // mutant is EQUIVALENT — and the reason is worth pinning, because it means
-    // the collection list is NOT the guard I thought it was.
+  it("topology is excluded TWICE OVER — the collection list is the second line", () => {
+    // ⚠ THIS ENTRY HAS BEEN WRONG IN BOTH DIRECTIONS, so it states the measured
+    // position precisely.
     //
-    // Real edges carry no `id` and no `label` (0 of 46 here), so the
-    // named-candidate requirement drops them before the unit rules are even
-    // consulted; and their numbers live under `strength.mean` /
-    // `exists_probability`, which are not value carriers either. Two
-    // independent reasons, so the exclusion does not rest on the list.
-    const edges = B1.graph.edges as Array<Record<string, unknown>>;
-    expect(edges.length).toBeGreaterThan(10);
+    // A mutant readmitting `edges` to the candidate collections stayed GREEN,
+    // and I concluded "the collection list was never the guard". THAT
+    // OVERSTATED IT. The mutant is equivalent only against TODAY'S producer:
+    // real edges carry no `id` and no `label` (0 of 113 across all three
+    // captures), so the named-candidate requirement drops them first. Feed in a
+    // synthetic edge carrying id + label + unit + cap and the exclusion becomes
+    // load-bearing — it is a real second line of defence against a shape the
+    // current producer happens not to emit, not a redundant one.
+    const allEdges = [B1, B2, B3].flatMap(
+      (c) => c.graph.edges as Array<Record<string, unknown>>,
+    );
+    expect(allEdges.length).toBeGreaterThan(100);
     expect(
-      edges.filter((e) => typeof e.id === "string" && typeof e.label === "string").length,
-      "real edges carry neither id nor label",
+      allEdges.filter((e) => typeof e.id === "string" && typeof e.label === "string").length,
+      "real edges carry neither id nor label, in ANY capture",
     ).toBe(0);
 
     // And the hypothetical the mutant was reaching for: even an edge-shaped
@@ -524,6 +527,90 @@ describe("ORDINARY INPUT MUST NOT COLLIDE WITH TOPOLOGY — the corpus is extern
     };
     const m = deriveNotModelledManifest("Give us 1 quarter.", graph);
     expect(m.quantities?.items[0]?.verdict).toBe("absent");
+  });
+});
+
+describe("THE TWO SECTIONS MAY NEVER CONTRADICT EACH OTHER", () => {
+  /**
+   * ⚠ THE CORPUS VARIES MAGNITUDE NOTATION, because that is the axis every
+   * other fixture here holds constant — and it is the axis the defect lived on.
+   *
+   * `classify` was converted to unit-aware candidates and `deriveInferredFactors`
+   * was not, so the two answered "is this number the user's?" with different
+   * machinery. The clash fired only when the user's written magnitude suffix
+   * disagreed with the carrier's declared unit scale: measured on this exact
+   * graph, `£1.5m` was clean while `£1,500,000` had the panel report
+   * "What I used: £1,500,000 -> Marketing Spend" and, directly beneath,
+   * "What I estimated: Marketing Spend" under "the numbers behind these are
+   * mine, not yours".
+   *
+   * `fac_marketing_spend` and `fac_headcount_budget` both declare unit "£m" in
+   * the real capture, which is what makes them the natural probes.
+   */
+  const NOTATIONS = [
+    "£1.5m",
+    "£1,500,000",
+    "£300k",
+    "£300,000",
+    "£8m",
+    "£8,000,000",
+    "£1.6m",
+    "£1,600,000",
+    "£0.3m",
+  ];
+
+  it.each(NOTATIONS)(
+    "a node the matcher certified as the user's is never also claimed as ours (%s)",
+    (notation) => {
+      const m = deriveNotModelledManifest(
+        `We can spend ${notation} on marketing this year.`,
+        B1.graph,
+      );
+
+      const matched = new Set(
+        (m.quantities?.items ?? [])
+          .map((i) => i.matched_node_id)
+          .filter((id): id is string => id !== null),
+      );
+      // POSITIVE CONTROL: this notation must actually reach a node, or the
+      // assertion below passes by matching nothing (trap 13). Every notation
+      // here names a figure the real graph genuinely carries.
+      expect(matched.size, `"${notation}" must match a carrier`).toBeGreaterThan(0);
+
+      const claimedAsOurs = new Set(m.inferred_factors.items.map((i) => i.node_id));
+      const both = [...matched].filter((id) => claimedAsOurs.has(id));
+      expect(
+        both,
+        `these nodes are asserted as the user's AND denied as ours: ${both.join(", ")}`,
+      ).toEqual([]);
+    },
+  );
+
+  it("holds across all three real captures with their own briefs", () => {
+    for (const [name, capture] of [
+      ["B1", B1],
+      ["B2", B2],
+      ["B3", B3],
+    ] as const) {
+      const m = deriveNotModelledManifest(capture.brief_text, capture.graph);
+      const matched = new Set(
+        (m.quantities?.items ?? [])
+          .map((i) => i.matched_node_id)
+          .filter((id): id is string => id !== null),
+      );
+      const claimedAsOurs = new Set(m.inferred_factors.items.map((i) => i.node_id));
+      const both = [...matched].filter((id) => claimedAsOurs.has(id));
+      expect(both, `${name} contradicts itself on: ${both.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("DISCRIMINATION: the estimated list is not simply empty", () => {
+    // Without this, every assertion above passes on a derivation that claims
+    // nothing as ours — which would satisfy "no contradiction" by saying
+    // nothing at all, and delete the trust-critical answer in the process.
+    const m = deriveNotModelledManifest(B1.brief_text, B1.graph);
+    expect(m.inferred_factors.items.length).toBeGreaterThan(3);
+    expect(m.inferred_factors.items.map((i) => i.node_id)).toContain("fac_nrr");
   });
 });
 
