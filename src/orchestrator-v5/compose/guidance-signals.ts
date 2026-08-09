@@ -306,3 +306,48 @@ export function guidanceSignalsForCoachingKind(
   }
   return { ...signalsOf(category), ...provenanceOf(SIGNAL_CODE_BY_COACHING_KIND[kind]) };
 }
+
+/**
+ * ROADMAP 2.989 — signals for the FRAGILE-EDGE RESOLUTION offer.
+ *
+ * ⚠ WHY THIS IS A NAMED FUNCTION AND NOT A NEW ROW IN
+ * {@link SIGNAL_CODE_BY_COACHING_KIND}. That map is
+ * `Record<CoachingKind, …>` where `CoachingKind` is DERIVED FROM THE SCHEMA
+ * (`CoachingBlock['coaching_kind']`). Giving this offer its own coaching kind
+ * would be a `@talchain/schemas` change, which Lane A ships zero of — so the
+ * offer rides the existing `strengthen` kind (which is also what makes it
+ * withheld-safe by construction: `strengthen` is in compose's
+ * `LEADER_PRESUMING_COACHING_KINDS` and is dropped whole on a withheld turn).
+ *
+ * ⚠ WHY THE CODE IS NOT `strengthen`'s. `signal_code` names the producer
+ * SIGNAL — the detector CLASS the item came from — and is explicitly NOT a
+ * restatement of the block's type or kind (see this module's header: the
+ * defect it was created to kill was the UI inventing `signal_code` from
+ * `block.type`). This offer's detector class is RESULT FRAGILITY: it is
+ * generated from `robustness.fragile_edges`, the same producer signal the
+ * `robustness` review card carries. Emitting `STRENGTHEN_ITEM` here would say
+ * "an area to reinforce" about an item whose provenance is the robustness
+ * sweep, and would leave the code non-discriminating across every lens
+ * suggestion — undiscriminated output that looks exactly like a real result
+ * (CLAUDE.md trap 20).
+ *
+ * ONE CODE ACROSS TWO SURFACES IS THE ESTABLISHED PATTERN HERE, not a novelty:
+ * COGNITIVE_BIAS spans the `bias` review card and the `bias_signal` coaching
+ * block; ASSUMPTION_CHECK spans `assumption` and `assumption_check`;
+ * EVIDENCE_GAP spans `evidence_priority` and the evidence blocks. FRAGILE_RESULT
+ * now spans the `robustness` review card and this offer, so a consumer keys one
+ * fragility grouping off it.
+ *
+ * The CATEGORY/PRIORITY still come from the kind, through the single source
+ * above — so this cannot drift from `strengthen`'s ratified urgency class.
+ */
+export function fragileEdgeOfferSignals(): GuidanceSignalsWithProvenance {
+  return {
+    ...signalsOf(
+      // Derived from the kind, never restated: whatever category `strengthen`
+      // carries, this offer carries.
+      guidanceSignalsForCoachingKind('strengthen').category,
+    ),
+    ...provenanceOf(GUIDANCE_SIGNAL_CODES.FRAGILE_RESULT),
+  };
+}

@@ -120,6 +120,11 @@ import {
   readRawRobustnessSignals,
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
+import {
+  selectFragileEdge,
+  type FragileEdgeDecision,
+  type FragileEdgeSelection,
+} from '../coaching/select-fragile-edge.js';
 import { isRawFragile } from '../coaching/robustness-honesty.js';
 import {
   bandConfidence,
@@ -143,6 +148,7 @@ export type LensId =
   | 'sensitivity_flip_risk'
   | 'pre_mortem'
   | 'evpi_evidence_priority'
+  | 'fragile_edge_resolution'
   | 'consider_opposite'
   | 'devils_advocacy'
   | 'what_if_counterfactual';
@@ -170,6 +176,10 @@ export type LensRationaleCode =
   | 'WIN_PROB_MODERATE' // a leader exists but not decisively
   // evpi_evidence_priority
   | 'MATERIAL_EVPI' // learning more about a factor would move the decision
+  // fragile_edge_resolution (ROADMAP 2.989) — one specific relationship in the
+  // graph is the thing most worth resolving next, and the platform can perform
+  // the change. See `coaching/select-fragile-edge.ts` for the gates.
+  | 'FRAGILE_EDGE_RESOLVABLE'
   // consider_opposite (DSK-TR-003 → DSK-P-003 disconfirmation)
   | 'CLEAR_WINNER_DISCONFIRMATION' // a decisive, attested-non-fragile leader invites structured disconfirmation
   // devils_advocacy (DSK-TR-005 → DSK-P-005 devil's advocate)
@@ -185,7 +195,18 @@ export type LensRationaleCode =
 export type LensGroundingField =
   | 'factor_sensitivity'
   | 'confidence_tier'
-  | 'option_comparison';
+  | 'option_comparison'
+  // ROADMAP 2.989 — the fragile-edge lens grounds in `robustness`, which IS in
+  // the A1-seeded Tier-2 allow-list (`claim-safety-cage.ts::TIER2_CANDIDATE_FIELDS`)
+  // and has a strict companion value schema. The lens still ships NUMBER-FREE
+  // (see the copy note on BODY_BY_RATIONALE) — the grounding field is declared
+  // so the cage is a live caller on the field the claim is about, per wave-3 σ.
+  //
+  // ⚠ NOT `edge_e_values`. That field is a RATIFIED TIER-3 DENY key: the
+  // selector reads it as a structured gate only and no quantity from it may
+  // ever be surfaced. Declaring it here would ask the cage a question whose
+  // only answer is `tier3_denied`.
+  | 'robustness';
 
 /**
  * Wave-4 δ2 (ROADMAP 1.202) — the specific graph node this lens POINTS AT, for
@@ -250,6 +271,18 @@ export interface LensSelection {
    * `'correlated_yield'` for the correlated-only yield. CEE-INTERNAL.
    */
   readonly displacementCause?: 'no_repeat' | 'correlated_yield';
+  /**
+   * ROADMAP 2.989 — the ONE fragile relationship this lens is about. Present
+   * exactly when `lens === 'fragile_edge_resolution'`.
+   *
+   * It rides on the SELECTION rather than being re-derived at the block-mint
+   * site for the same reason `buildLensSurface` returns the pair rather than
+   * re-calling `selectLens`: two derivations of one fact over inputs a future
+   * refactor can let diverge is the `generateGraphHash`-twins shape (trap
+   * 12/16). One selection, threaded. CEE-INTERNAL — never a wire field; the
+   * block mint projects it into `target_refs` and the action prompt.
+   */
+  readonly fragileEdge?: FragileEdgeSelection;
 }
 
 // ============================================================================
@@ -432,6 +465,14 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
   sensitivity_flip_risk: true,
   pre_mortem: true,
   evpi_evidence_priority: true,
+  // ROADMAP 2.989: the executor is the `edit_graph` path, which is live and
+  // ungated — the composed acceptance turn passes EDIT_GRAPH_POSITIVE_REGEX,
+  // clears EDIT_GRAPH_NEGATIVE_REGEX (asserted in-test against the imported
+  // regexes, never eyeballed) and resolves to the `adjust_edge_strength`
+  // handler registered at `tools/registry.ts`. The lens is only ever selected
+  // when `selectFragileEdge` returned a row, so the offer names a relationship
+  // the platform can actually change — 2.770, no inert chips.
+  fragile_edge_resolution: true,
   // DSK slice 1: the executor for each DSK lens is the deterministic
   // ExerciseBlock companion emitted on the SAME turn (fixed copy, no
   // transport, no producer-content dependency) plus the conversational
@@ -470,6 +511,21 @@ export interface LensSelectorOptions {
    * never manufacture or suppress a lens.
    */
   readonly previousAnalysisLens?: LensId | null;
+  /**
+   * ROADMAP 2.989 — the fragile-edge decision, THREADED rather than recomputed.
+   *
+   * `selectFragileEdge` is pure and total, so computing it here or at the caller
+   * gives the same answer; the option exists because the CALLER also has to emit
+   * the decision's telemetry (`v5.capability.fragile_edge_selection`, BOTH arms
+   * — a refusal is an outcome, not a non-event), and a selector that emitted it
+   * itself would stop being pure.
+   *
+   * Omitted ⇒ `readAnalysisSignals` computes it from the same enrichment, so
+   * every existing `selectLens` caller (`compose/lens-history.ts`'s replay,
+   * `compose/ui-directive.ts`) keeps working unchanged and sees the identical
+   * selection. Pinned by a threaded-vs-omitted equality test.
+   */
+  readonly fragileEdge?: FragileEdgeDecision;
 }
 
 function isLensExecutorAvailable(lens: LensId, options?: LensSelectorOptions): boolean {
@@ -582,6 +638,12 @@ interface AnalysisSignals {
    * clause exists to detect.
    */
   readonly rawRobustness: RawRobustnessSignals | null;
+  /**
+   * ROADMAP 2.989 — the fragile-edge decision for this run (both arms). Read
+   * through the shared pure selector so the ladder and the block mint cannot
+   * disagree about which relationship the turn is about.
+   */
+  readonly fragileEdge: FragileEdgeDecision;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -600,7 +662,10 @@ function finiteNumberOrNull(value: unknown): number | null {
  * defensively; a missing / non-finite value becomes `null` — NEVER a defaulted
  * zero (absent ≠ zero, per the enrichment doc).
  */
-function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | null {
+function readAnalysisSignals(
+  fact: RunAnalysisHandlerFact,
+  fragileEdge?: FragileEdgeDecision,
+): AnalysisSignals | null {
   const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
   if (enrichment === null) return null;
 
@@ -653,6 +718,10 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
     confidenceTier,
     flipClaimPosture: readFlipClaimPosture(enrichment),
     rawRobustness: readRawRobustnessSignals(enrichment.robustness),
+    // Threaded when the caller already computed it (so the caller can emit the
+    // decision telemetry without a second derivation); otherwise computed here
+    // from the same enrichment — the function is pure, so both routes agree.
+    fragileEdge: fragileEdge ?? selectFragileEdge(enrichment),
   };
 }
 
@@ -668,6 +737,8 @@ interface EvaluatorHit {
   /** The factor the lens points at (§2.1 focus subject); `null` when the lens
    *  has no single-factor subject (overall-confidence / option-level). */
   readonly subjectFactorId: string | null;
+  /** ROADMAP 2.989 — set ONLY by {@link evaluateFragileEdgeResolution}. */
+  readonly fragileEdge?: FragileEdgeSelection;
 }
 
 /**
@@ -880,6 +951,31 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | 
  * assessment") is NOT: it needs a persisted ledger the selector has no input
  * for, and is slice-2 work rather than a silent claim.
  */
+/**
+ * Rule 3b (ROADMAP 2.989) — THE HIGHEST-VALUE ISSUE TO RESOLVE NEXT.
+ *
+ * Fires when, and only when, the shared pure selector
+ * (`coaching/select-fragile-edge.ts`) returned ONE relationship that cleared
+ * every gate: it joined an `edge_e_values` row on `(from_id, to_id)`, its
+ * 10-seed stability band is non-degenerate, its source factor was not computed
+ * from degenerate-fallback inputs, and both endpoint labels exist. There is no
+ * threshold of this rule's own — the trigger IS the selector's verdict, so the
+ * ladder and the block mint cannot disagree about whether an offer exists.
+ *
+ * `subjectFactorId` is deliberately `null`. The subject of this lens is an
+ * EDGE, and {@link LensSubjectRef} is `kind: 'factor'` by contract — a
+ * fragile edge's `from_id` is often a risk or outcome node (measured: four of
+ * session-a's eleven rows), so stamping it as a factor would be a wrong-kind
+ * label on the `focus` directive. With it absent the directive defers to the
+ * v1 winner-highlight and fabricates nothing; the EDGE identity travels on the
+ * block's own `target_refs` with the correct `kind: 'edge'` instead.
+ */
+function evaluateFragileEdgeResolution(signals: AnalysisSignals): EvaluatorHit | null {
+  const edge = signals.fragileEdge.selected;
+  if (edge === null) return null;
+  return { code: 'FRAGILE_EDGE_RESOLVABLE', subjectFactorId: null, fragileEdge: edge };
+}
+
 function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null {
   const raw = signals.rawRobustness;
   if (raw === null || raw.level === null) return null;
@@ -1015,6 +1111,7 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   sensitivity_flip_risk: 'Strengthen your model: pressure-test the key driver',
   pre_mortem: 'Strengthen your model: run a quick pre-mortem',
   evpi_evidence_priority: 'Strengthen your model: focus your evidence-gathering',
+  fragile_edge_resolution: 'Strengthen your model: firm up the relationship carrying the result',
   consider_opposite: 'Strengthen your model: argue the other side',
   devils_advocacy: 'Strengthen your model: challenge the main assumption',
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
@@ -1035,6 +1132,35 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'The leading option is ahead, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
   MATERIAL_EVPI:
     'There is a factor where learning more would change the decision the most. Gathering evidence there first, rather than everywhere, is the fastest way to firm up the choice.',
+  // ── ROADMAP 2.989 — the resolvable fragile relationship ────────────────────
+  // ⚠ NUMBER-FREE, AND THAT IS A RULING, NOT AN OMISSION. Two independent
+  // constraints, both derived at the bytes:
+  //   (a) every quantity that describes this edge's fragility in a way a user
+  //       could act on — `e_value`, `current_mean`, `flip_mean` — lives on
+  //       `edge_e_values`, a RATIFIED TIER-3 DENY field. The cage's answer is
+  //       `tier3_denied` and there is no route to surfacing it;
+  //   (b) `switch_probability` (on `robustness`, Tier-2 allow-listed) IS
+  //       claim-permittable, but NEITHER producer has a ratified gloss for it —
+  //       the UI's own copy authority (`results/utils/fragileEdgeCopy.ts`)
+  //       glosses the E-value and never the switch probability. Authoring a
+  //       method gloss here would be an expectation written from the
+  //       implementer's reading rather than the producer's semantics, which is
+  //       how a full mutant kit certifies a wrong oracle (CLAUDE.md trap 13c).
+  // The quantities therefore ride TELEMETRY (booleans + closed enums) and the
+  // copy states only what the run's robustness output actually establishes.
+  // Surfacing the switch probability behind a reviewed gloss is rowed.
+  //
+  // The consequence clause is taken VERBATIM from the UI's ratified permitted
+  // form (`fragileEdgeConsequence`): one field must not be described two ways
+  // on one screen, and the hero's treatment is canonical.
+  // ⚠ THIS STRING IS THE TAIL, NOT THE WHOLE BODY. `phase3-blocks.ts`
+  // (`composeFragileEdgeBody`) puts the sentence that NAMES the relationship
+  // FIRST and appends this one — because the body is truncated at `BODY_MAX`
+  // and a naming sentence placed last is the first thing truncation eats. That
+  // is not hypothetical: the naming-last ordering was written, measured, and
+  // silently lost the second endpoint label on the live capture.
+  FRAGILE_EDGE_RESOLVABLE:
+    'Change it and which option is most likely to hit your goal could change, so firming it up is the highest-value thing to resolve next.',
   // ── DSK slice 1 — disconfirmation + devil's advocacy ───────────────────────
   CLEAR_WINNER_DISCONFIRMATION:
     'One option is clearly ahead here. Before you commit, spend a few minutes making the strongest honest case against it — if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.',
@@ -1095,6 +1221,9 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   TOP_FACTOR_LOW_CONFIDENCE: 'factor_sensitivity',
   WIN_PROB_MODERATE: 'option_comparison',
   MATERIAL_EVPI: 'factor_sensitivity',
+  // 2.989: the claim is about the run's ROBUSTNESS output (which relationships
+  // can move the ranking), so the cage is consulted for `robustness`.
+  FRAGILE_EDGE_RESOLVABLE: 'robustness',
   // 2.278 counterparts ground in the same field as the rationales they replace:
   // the claim is still about factor sensitivity, only narrowed to the margin.
   SENSITIVITY_ISOLATED_NO_FLIP: 'factor_sensitivity',
@@ -1151,6 +1280,11 @@ function buildSelection(
     ...(hit.subjectFactorId !== null
       ? { subjectRef: { id: hit.subjectFactorId, kind: 'factor' as const } }
       : {}),
+    // ROADMAP 2.989: present exactly on the fragile-edge lens (its evaluator is
+    // the only producer of the key), absent everywhere else — so the absence of
+    // the key is itself the "this is not an edge lens" assertion and existing
+    // `toStrictEqual` comparisons against other lenses stay exact.
+    ...(hit.fragileEdge !== undefined ? { fragileEdge: hit.fragileEdge } : {}),
     // ROADMAP 2.211 / 2.211-①: present ONLY on a displacement (either cause),
     // so the absence of the keys is itself the "the head lens won normally"
     // assertion (and `toStrictEqual` against a pre-amendment selection stays
@@ -1196,7 +1330,7 @@ export function selectLens(
   fact: RunAnalysisHandlerFact,
   options?: LensSelectorOptions,
 ): LensSelection | null {
-  const signals = readAnalysisSignals(fact);
+  const signals = readAnalysisSignals(fact, options?.fragileEdge);
   if (signals === null) return null;
 
   // THE PRIORITY LADDER, unchanged and still the only ordering in this file.
@@ -1208,6 +1342,37 @@ export function selectLens(
     ['sensitivity_flip_risk', evaluateSensitivityFlipRisk(signals)],
     ['pre_mortem', evaluatePreMortem(signals)],
     ['evpi_evidence_priority', evaluateEvpiEvidencePriority(signals)],
+    // ── ROADMAP 2.989 — THE FRAGILE-EDGE RESOLUTION LENS. POSITION IS A
+    // RULING AND IT WAS MEASURED, NOT PREFERRED. Read this before moving it.
+    //
+    // THE LOCKED CORE ORDER ABOVE IS UNTOUCHED. This entry sits BELOW all three
+    // core lenses and ABOVE the DSK exercises. Why not lower: replaying
+    // `selectLens` over the two live captures × six `previousAnalysisLens`
+    // states — the same captures `lens-dsk-sequence-2490.test.ts` uses — the
+    // slot is OCCUPIED on 12 of 12 cells and `selectLens` never returns null.
+    // A lens appended at the BOTTOM of this ladder is therefore selected on
+    // ZERO of those cells: structurally dark, which is ROADMAP 2.490's defect
+    // verbatim ("two lenses, one observable, fixed priority ⇒ the lower one is
+    // unreachable by construction"). Shipping a capability no user can reach is
+    // the estate's first chronic failure, so a dark placement was refused.
+    //
+    // Two other no-ladder-change routes were MEASURED AND REFUTED before this
+    // position was taken, and are recorded so they are not re-tried:
+    //   (1) attach the offer to `sensitivity_flip_risk`'s block instead of
+    //       adding a lens — the two subjects DISAGREE on 12 of 12 cells (the
+    //       sensitivity subject is picked from `flip_risk_category`/dominance,
+    //       the edge from producer robustness order), so the card would focus
+    //       one node while its chip offered to change a different one;
+    //   (2) attach it only when the subjects agree — the same 0/12.
+    //
+    // WHY ABOVE THE DSK PAIR, stated as the judgement it is: this lens offers a
+    // MODEL CHANGE the platform can perform on a relationship the run's own
+    // robustness sweep identified; the DSK entries below are reflective
+    // exercises. The bundle names no priority between a DSK protocol and a
+    // non-DSK capability lens (its declared deference is reciprocal and internal
+    // to the pair), so nothing ratified is inverted here. The 2.490 partition is
+    // preserved and pinned: on the live captures both DSK exercises are still
+    // observed in their own walks.
     // DSK slice 1 — below the three locked core lenses (their order is not
     // touched), above the generic what-if explorer: a lens derived from a
     // specific DSK trigger's evidence condition outranks the last-resort
@@ -1315,6 +1480,7 @@ export function selectLens(
     // dominant driver without a decisive leader ⇒ TR-005's dissent).
     ['consider_opposite', evaluateConsiderOpposite(signals)],
     ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
+    ['fragile_edge_resolution', evaluateFragileEdgeResolution(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
   ];
   const eligible: { lens: LensId; hit: EvaluatorHit }[] = [];
