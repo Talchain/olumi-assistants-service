@@ -29,6 +29,8 @@ import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
 import ceeScenarioGraphRouteV1 from "./routes/assist.v1.scenario-graph.js";
 import ceeScenarioGraphRegisterRouteV1 from "./routes/assist.v1.scenario-graph-register.js";
 import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
+import collabRoundsRouteV1 from "./routes/collab.v1.rounds.js";
+import collabPacketRouteV1 from "./routes/collab.v1.packet.js";
 import ceeDecisionRecordsRouteV1 from "./routes/assist.v1.decision-records.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
@@ -1167,6 +1169,15 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeScenarioGraphRouteV1(app);
   await ceeScenarioGraphRegisterRouteV1(app);
   await ceeElicitBeliefRouteV1(app);
+  // COLLAB U-S0 (ROADMAP 2.686/2.909/2.910) — blind elicitation rounds.
+  // Registered UNCONDITIONALLY (no dark launches, no new env gate). Each
+  // module mounts its handlers at BOTH the contract-pinned /collab/v1/*
+  // prefix and a browser-reachable /assist/v1/collab/* alias — see
+  // src/collab/route-support.ts for why the pinned prefix alone is dark.
+  // The store is constructed lazily per request, so these routes are inert
+  // until called and require no new tables at boot.
+  await collabRoundsRouteV1(app);
+  await collabPacketRouteV1(app);
   // Calibration recording seam (R0). Registered UNCONDITIONALLY — no flag,
   // per Paul's no-dark-launch / no-new-env-gate rulings. Its own always-on
   // Supabase-JWT verification is independent of CEE_REQUIRE_USER_JWT.
