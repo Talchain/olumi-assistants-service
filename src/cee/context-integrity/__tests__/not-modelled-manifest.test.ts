@@ -403,6 +403,26 @@ describe("what the product ESTIMATED — derived from evidence, not from labels"
     expect(m.inferred_factors.items.map((i) => i.node_id)).toContain("fac_other");
   });
 
+  it("does not claim a factor that carries no figure at all", () => {
+    // Found by a surviving mutant: every factor in all three captures happens
+    // to carry a number, so the guard never fired and nothing covered it. A
+    // factor with nothing numeric is structural — there is no figure to own,
+    // and claiming "the numbers behind this are mine" about it would be a
+    // statement with no referent.
+    const graph = {
+      nodes: [
+        { id: "fac_structural", kind: "factor", label: "Something structural" },
+        { id: "fac_numeric", kind: "factor", label: "Has a number", observed_state: { cap: 777 } },
+      ],
+      edges: [],
+    };
+    const m = deriveNotModelledManifest("We must take £4m out of opex.", graph);
+    const ids = m.inferred_factors.items.map((i) => i.node_id);
+    expect(ids).not.toContain("fac_structural");
+    // Pair partner: the derivation is not simply refusing everything.
+    expect(ids).toContain("fac_numeric");
+  });
+
   it("reports not_recorded rather than an empty list when there is no graph to read", () => {
     const m = deriveNotModelledManifest(B1.brief_text, null);
     expect(m.inferred_factors.status).toBe("not_recorded");
@@ -671,6 +691,46 @@ describe('"we did not look" is never reported as "nothing was dropped"', () => {
     expect(m.status).toBe("derived");
     expect(m.quantities?.total).toBe(0);
     expect(m.quantities?.items).toEqual([]);
+  });
+});
+
+describe("the magnitude alphabet needs a CORPUS, not just consistent consumers", () => {
+  /**
+   * ⚠ TRAP 12d, LIVE. A mutant deleting `thousand` from `MAGNITUDE` left every
+   * other test GREEN: deriving guards FROM the map is structurally blind to a
+   * key the map is missing. The only thing that catches a short list is a
+   * hand-written corpus of real-world spellings — exactly the kind of mirror
+   * derivation was introduced to abolish. Both are needed; neither supersedes
+   * the other.
+   *
+   * `parseUnit("£ million")` scaled by 1 before these existed — a 10^6 error in
+   * a figure we quote back to the user as their own.
+   */
+  it.each([
+    ["£ million", 1_000_000, "£4m"],
+    ["£ thousand", 1_000, "£4k"],
+    ["£m", 1_000_000, "£4m"],
+    ["£k", 1_000, "£4k"],
+  ])("a carrier declared in %s is read at its true scale", (unit, scale, literal) => {
+    const value = 4;
+    const graph = {
+      nodes: [
+        {
+          id: "fac_scaled",
+          kind: "factor",
+          label: "Scaled carrier",
+          observed_state: { cap: value, unit },
+        },
+      ],
+      edges: [],
+    };
+    // PRECONDITION: the brief states exactly `value * scale` in the notation
+    // under test, so a match is only possible if the unit was scaled correctly.
+    const m = deriveNotModelledManifest(`We can spend ${literal} on this.`, graph);
+    const item = m.quantities?.items.find((i) => i.literal === literal);
+    expect(item, `the brief must state ${literal}`).toBeDefined();
+    expect(item?.verdict, `unit "${unit}" must scale by ${scale}`).toBe("in_model");
+    expect(item?.matched_node_id).toBe("fac_scaled");
   });
 });
 
