@@ -606,6 +606,107 @@ describe("THE TWO SECTIONS MAY NEVER CONTRADICT EACH OTHER", () => {
     },
   );
 
+  /**
+   * ⚠ MONEY WRITTEN IN WORDS AND IN OTHER CURRENCIES — the axis every previous
+   * corpus here held constant, and the door the original defect came back
+   * through.
+   *
+   * The asymmetry that protects "what I estimated" was robust to MATCHING
+   * failure and not to EXTRACTION failure: `QUANTITY_RE` knows three currency
+   * symbols, and the coincidence guard consumed only successfully-extracted
+   * quantities — so when extraction missed a figure there was no cannot-tell
+   * left to fire, and the factor fell straight through to being claimed as
+   * ours.
+   *
+   * Each notation below writes the SAME figure b1's real brief states
+   * ("marketing spend is capped at £1.5m") against the SAME carrier
+   * (`fac_marketing_spend`, `cap: 1.5, unit: "£m"`) that this module's own
+   * matcher certifies as the user's in the £ notation. None may produce a
+   * claim that the number is ours.
+   */
+  const MONEY_IN_WORDS = [
+    "1.5 million pounds",
+    "GBP 1.5m",
+    "USD 1.5m",
+    "1.5 million dollars",
+    "¥1.5m",
+    "₹1.5m",
+    "CHF 1.5m",
+    "1,500,000 pounds",
+    "1.5 million",
+  ];
+
+  it.each(MONEY_IN_WORDS)(
+    "a figure our extractor cannot read is never claimed as ours (%s)",
+    (notation) => {
+      const brief = `Marketing spend is capped at ${notation}.`;
+      const m = deriveNotModelledManifest(brief, B1.graph);
+
+      // PRECONDITION, and it is the whole point: extraction genuinely FAILS to
+      // produce a matched quantity for these notations. If a future extractor
+      // widening made this false, the case would stop exercising the
+      // extraction-failure path and this test would quietly become a duplicate
+      // of the £ cases above.
+      const matched = (m.quantities?.items ?? []).filter((i) => i.matched_node_id !== null);
+      expect(
+        matched,
+        `"${notation}" is expected to defeat extraction; if it no longer does, ` +
+          `re-point this corpus at a notation that still does`,
+      ).toEqual([]);
+
+      // The claim that must not appear.
+      expect(
+        m.inferred_factors.items.map((i) => i.node_id),
+        `"${notation}" produced a false claim that the carrier's figure is ours`,
+      ).not.toContain("fac_marketing_spend");
+    },
+  );
+
+  it("DISCRIMINATION: the suppressor is not simply silencing everything", () => {
+    // Without this, every row above passes on a guard that claims nothing. A
+    // brief whose numbers match nothing in the graph must still yield the full
+    // estimated list.
+    const m = deriveNotModelledManifest("We should decide by next spring.", B1.graph);
+    expect(m.quantities?.items ?? []).toEqual([]);
+    expect(m.inferred_factors.items.length).toBeGreaterThan(3);
+    expect(m.inferred_factors.items.map((i) => i.node_id)).toContain("fac_marketing_spend");
+  });
+
+  it("an unrelated sentence does not delete the trust-critical answer", () => {
+    // The suppressor's other failure direction. Unitless [0,1] prior bounds are
+    // the pipeline's normalised defaults; admitting them let "We have £1m in
+    // the bank" (mantissa 1 = every default range_max) drop the list 9 -> 6.
+    const baseline = deriveNotModelledManifest(B1.brief_text, B1.graph);
+    const withNoise = deriveNotModelledManifest(
+      `${B1.brief_text} We have £1m in the bank.`,
+      B1.graph,
+    );
+    expect(baseline.inferred_factors.items.length).toBeGreaterThan(3);
+    expect(withNoise.inferred_factors.items.length).toBe(
+      baseline.inferred_factors.items.length,
+    );
+  });
+
+  it("but a REAL-WORLD-magnitude prior bound still suppresses", () => {
+    // The pair partner for the [0,1] rule: a prior outside the unit interval is
+    // a figure, not a normalised default, and a coincidence with one is a
+    // genuine cannot-tell. Excluding those wholesale would trade a recoverable
+    // silence for a false assertion about the user's own number.
+    const graph = {
+      nodes: [
+        {
+          id: "fac_savings",
+          kind: "factor",
+          label: "Opex savings",
+          prior: { range_min: 4_000_000, range_max: 9_000_000 },
+        },
+      ],
+      edges: [],
+    };
+    const m = deriveNotModelledManifest("We must take £4m out of opex.", graph);
+    expect(m.inferred_factors.items.map((i) => i.node_id)).not.toContain("fac_savings");
+  });
+
   it("holds across all three real captures with their own briefs", () => {
     for (const [name, capture] of [
       ["B1", B1],

@@ -43,6 +43,7 @@
  */
 
 import {
+  MAGNITUDE_ALTERNATION,
   magnitudeSuffixPattern,
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
@@ -460,37 +461,143 @@ function carriesAFigure(node: Record<string, unknown>): boolean {
  * sections can no longer drift apart, whatever notation the user writes in.
  */
 /**
+ * The factor's own real-world figures — the ones that could plausibly BE a
+ * number the user wrote.
+ *
+ * ⚠ MIRRORS `collectCandidates`, AND THE MIRRORING IS THE POINT. That function
+ * deliberately excludes unitless `[0,1]` prior bounds, because matching against
+ * them is exactly how a stated quantity gets "found" in a model that never
+ * carried it. The suppressor used to re-admit precisely those numbers,
+ * unit-blind — so an unrelated sentence could delete the trust-critical answer.
+ * MEASURED on b1: appending "We have £1m in the bank." (mantissa 1, which is
+ * every default `range_max`) dropped "what I estimated" from 9 to 6; "£0m"
+ * dropped it to 5, and at zero the surface hides the section entirely.
+ *
+ * Each figure is offered in BOTH forms — as stored, and scaled by its declared
+ * unit — because the brief may write either ("1.5 million pounds" vs
+ * "1,500,000 pounds") and a coincidence in either form is a reason to keep
+ * quiet.
+ */
+function collectSuppressorNumbers(node: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  const carriers: Array<Record<string, unknown>> = [node];
+  for (const nested of ["observed_state", "data"] as const) {
+    const v = node[nested];
+    if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
+  }
+  for (const carrier of carriers) {
+    const { scale } = parseUnit(carrier.unit);
+    for (const field of ["value", "raw", "raw_value", "cap"] as const) {
+      const v = carrier[field];
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      out.push(v);
+      if (scale !== 1) out.push(v * scale);
+    }
+  }
+  // ── PRIOR BOUNDS: real-world magnitudes only ──────────────────────────
+  //
+  // ⚠ NOT A CARVE-OUT — it is the distinction this module already draws
+  // everywhere else, applied here. A prior bound on [0,1] is the pipeline's
+  // NORMALISED default (it emits them constantly; that is why
+  // `collectCandidates` refuses them and why percent-as-fraction was
+  // rejected). Admitting those made an unrelated sentence delete the answer:
+  // "We have £1m in the bank" carries mantissa 1, which is every default
+  // `range_max`, and dropped "what I estimated" from 9 to 6.
+  //
+  // A prior bound OUTSIDE the unit interval is a real-world figure, and a
+  // coincidence with one is a genuine cannot-tell. Excluding those wholesale
+  // would trade a recoverable silence for a false ASSERTION about the user's
+  // own number — the harm this whole surface exists to prevent.
+  const prior = node.prior;
+  if (prior !== null && typeof prior === "object") {
+    for (const v of Object.values(prior as Record<string, unknown>)) {
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      if (v >= 0 && v <= 1) continue;
+      out.push(v);
+    }
+  }
+
+  // Encoding-map captions carry real-world figures ("45 roles offshored").
+  const encoding = node.encoding_map;
+  if (encoding !== null && typeof encoding === "object") {
+    for (const caption of Object.values(encoding as Record<string, unknown>)) {
+      if (typeof caption !== "string") continue;
+      for (const m of caption.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+        out.push(Number(m[0].replace(/,/g, "")));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Every numeric literal in the brief, however it is written.
+ *
+ * ⚠ DELIBERATELY EXTRACTION-INDEPENDENT, and that independence is the fix for a
+ * real false claim. The suppressor used to consume only SUCCESSFULLY EXTRACTED
+ * quantities — and `QUANTITY_RE` knows three currency symbols. So when
+ * extraction missed a figure there was no "cannot tell" left to fire, and the
+ * factor fell straight through to being claimed as ours.
+ *
+ * MEASURED on the real b1 graph, changing ONLY the notation of its own
+ * sentence "marketing spend is capped at £1.5m": every one of
+ * "1.5 million pounds", "GBP 1.5m", "USD 1.5m", "1.5 million dollars",
+ * "¥1.5m", "₹1.5m", "CHF 1.5m" produced a figure absent from "what I used",
+ * absent from "not modelled yet", AND present under "the numbers behind these
+ * are mine, not yours" — against a carrier (`cap: 1.5, unit: "£m"`) that this
+ * module's own matcher certifies as the user's figure in the £ notation.
+ *
+ * The graph's producer is an LLM that understands money written in words; its
+ * auditor was a regex that knows three symbols — and the auditor overruled the
+ * producer. Widening the regex would be another instance patch owing a fresh
+ * breadth defence for every currency form. Reading raw numeric tokens needs no
+ * vocabulary at all, and errs toward silence.
+ */
+const BRIEF_NUMBER_RE = new RegExp(
+  `(\\d[\\d,]*(?:\\.\\d+)?)(?:\\s*(${MAGNITUDE_ALTERNATION})\\b)?`,
+  "gi",
+);
+
+function numericTokensIn(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(BRIEF_NUMBER_RE)) {
+    const n = Number(m[1].replace(/,/g, ""));
+    if (!Number.isFinite(n)) continue;
+    // BOTH forms, symmetrically with `collectSuppressorNumbers`: the brief may
+    // write "£4m" where the model stores 4,000,000, or "1,500,000 pounds"
+    // where it stores 1.5 under unit "£m". A coincidence in EITHER form is a
+    // reason to keep quiet. Note the magnitude word is read from the canonical
+    // alphabet, so this needs no currency vocabulary of its own.
+    out.push(n);
+    const scale = resolveMagnitude(m[2]);
+    if (scale !== 1) out.push(n * scale);
+  }
+  return out;
+}
+
+/**
  * Could one of this factor's figures be the user's, even though we could not
  * CONFIRM it?
  *
  * ── WHY A THIRD STATE EXISTS ───────────────────────────────────────────────
- * The two sections have OPPOSITE safe directions, and that is what makes a
- * plain two-way split wrong:
+ * The two sections have OPPOSITE safe directions:
  *
  *   · refusing a match in "what I used" sends the user's figure to "not
  *     modelled yet" — over-inviting, and recoverable;
  *   · refusing the same match in "what I estimated" CLAIMS THEIR NUMBER AS
  *     OURS — asserting something false about their own input.
  *
- * The temptation is to use a looser matcher for the second section. That is
- * exactly the two-authorities defect this module was just caught shipping. The
- * consistent answer is that the question has THREE outcomes, not two: theirs,
- * ours, and CANNOT TELL — and neither section may claim a "cannot tell".
- *
- * A bare magnitude coincidence with no declared unit is a "cannot tell": not
- * strong enough to certify as the user's (the B1 lesson — magnitude alone is
- * not evidence), and not weak enough to deny as ours.
+ * The temptation is a looser matcher for the second section. That is exactly
+ * the two-authorities defect this module was caught shipping. The consistent
+ * answer is that the question has THREE outcomes: theirs, ours, and CANNOT
+ * TELL — and neither section may claim a "cannot tell".
  */
-function magnitudeCoincidesWithSomethingStated(
+function magnitudeCoincidesWithSomethingWritten(
   node: Record<string, unknown>,
-  stated: readonly Quantity[],
+  briefNumbers: readonly number[],
 ): boolean {
-  const numbers = collectFactorNumbers(node);
-  for (const n of numbers) {
-    for (const q of stated) {
-      if (q.value !== null && numbersEqual(n, q.value)) return true;
-      if (q.mantissa !== null && numbersEqual(n, q.mantissa)) return true;
-    }
+  for (const n of collectSuppressorNumbers(node)) {
+    for (const t of briefNumbers) if (numbersEqual(n, t)) return true;
   }
   return false;
 }
@@ -498,7 +605,7 @@ function magnitudeCoincidesWithSomethingStated(
 function deriveInferredFactors(
   graph: Record<string, unknown>,
   matchedNodeIds: ReadonlySet<string>,
-  stated: readonly Quantity[],
+  briefNumbers: readonly number[],
 ): NotModelledManifest["inferred_factors"] {
   const nodes = graph.nodes;
   if (!Array.isArray(nodes)) return { status: "not_recorded", items: [] };
@@ -521,7 +628,7 @@ function deriveInferredFactors(
     // structurally incapable of contradicting each other.
     if (matchedNodeIds.has(id)) continue;
     // CANNOT TELL — claimed by neither section. See the note above.
-    if (magnitudeCoincidesWithSomethingStated(node, stated)) continue;
+    if (magnitudeCoincidesWithSomethingWritten(node, briefNumbers)) continue;
 
     items.push({ node_id: id, label });
   }
@@ -912,7 +1019,7 @@ export function deriveNotModelledManifest(
     inferred_factors: deriveInferredFactors(
       graph as Record<string, unknown>,
       matchedNodeIds,
-      quantities,
+      numericTokensIn(briefText),
     ),
     not_tracked: NOT_TRACKED_CLASSES,
   };
