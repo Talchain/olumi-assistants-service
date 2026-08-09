@@ -297,6 +297,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
         CeeElicitBeliefFailed: "cee.elicit_belief.failed",
 
+        // Wave-1 Lane D (PR1, ROADMAP 2.967) — context-integrity triad.
+        // Log-only (see debugOnlyEvents).
+        CeeContextIntegrityRouted: "cee.context_integrity.routed",
+        CeeContextIntegrityDerived: "cee.context_integrity.derived",
+        CeeContextIntegrityUnavailable: "cee.context_integrity.unavailable",
+
         // Utility Weight events (v2.5)
         CeeUtilityWeightRequested: "cee.utility_weight.requested",
         CeeUtilityWeightSucceeded: "cee.utility_weight.succeeded",
@@ -438,6 +444,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
         // displaced the head lens. Log-only (see debugOnlyEvents).
         V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
+        // Wave-1 Lane A (PR2, ROADMAP 2.989/3.17) — fragile-edge selection
+        // decision + wire-reaching offer. Log-only (see debugOnlyEvents).
+        V5FragileEdgeSelection: "v5.capability.fragile_edge_selection",
+        V5FragileEdgeOfferEmitted: "v5.capability.fragile_edge_offer_emitted",
         V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.
         V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
@@ -489,6 +499,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CandidateMutationClarifyRequired: "v5.candidate_mutation.clarify_required",
         // Lane 8 — Model Management commit-seam version hook (CEE_MODEL_VERSIONS_ENABLED)
         V5ModelVersionCreated: "v5.model_versions.version_created",
+        // Wave-1 Lane C (PR4) — collab write refused at the route/service
+        // boundary; the only trace of a refusal. Log-only (see debugOnlyEvents).
+        V5CollabWriteRefused: "v5.collab.write_refused",
         // ROADMAP 3.1 — Decision Records commit-seam capture hook
         // (unconditional since #539 deleted CEE_DECISION_RECORD_CAPTURE)
         V5DecisionRecordCaptured: "v5.decision_records.record_captured",
@@ -630,6 +643,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
           "v5.edit_graph.configure_option_clarify_intercept",
         V5ConfigureOptionOutcomeUnhonoured:
           "v5.edit_graph.configure_option_outcome_unhonoured",
+        // Wave-1 Lane B (PR3, ROADMAP 3.16) — edit target not present in the
+        // persisted graph; clarify-never-guess. Log-only (see debugOnlyEvents).
+        V5EditGraphTargetNotNamedInGraph:
+          "v5.edit_graph.target_not_named_in_graph",
         V5EditGraphConfigureOptionLabelsLoaded:
           "v5.edit_graph.configure_option_labels_loaded",
         V5EditGraphStructuralRestructureRouted:
@@ -718,8 +735,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       const allEvents = Object.values(TelemetryEvents);
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
+      // wave1-mint (2026-08-09): added v5.collab and cee.context_integrity
+      // namespace tokens for the four-lane wave's step-zero registry mint.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session|structural_edit_tool|summary)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session|structural_edit_tool|summary)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1603,6 +1622,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // how often the added Supabase read is taken, and there is no Datadog
         // metric mapping until a dashboard consumes it.
         TelemetryEvents.V5EditGraphConfigureOptionLabelsLoaded,
+        // Wave-1 step-zero mint (2026-08-09) — seven names pre-minted for
+        // lanes A/B/C/D; all content-free structured logs, no Datadog
+        // mapping until a dashboard consumes them. Emit sites land in each
+        // lane's own PR.
+        TelemetryEvents.V5FragileEdgeSelection,
+        TelemetryEvents.V5FragileEdgeOfferEmitted,
+        TelemetryEvents.V5EditGraphTargetNotNamedInGraph,
+        TelemetryEvents.V5CollabWriteRefused,
+        TelemetryEvents.CeeContextIntegrityRouted,
+        TelemetryEvents.CeeContextIntegrityDerived,
+        TelemetryEvents.CeeContextIntegrityUnavailable,
       ];
 
       for (const event of allEvents) {
@@ -2247,6 +2277,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.turn_fence.graph_write_failure_marked",
         "v5.turn_fence.draft_loss_resolved",
         "v5.turn_fence.draft_loss_notice_surfaced",
+        // Wave-1 step-zero mint (2026-08-09) — registry pre-minted for the
+        // four-lane wave (A: PR2 fragile-edge loop · B: PR3 mutation
+        // correctness · C: PR4 collaboration · D: PR1 context integrity).
+        // Deliberate frozen-registry additions per the registry discipline.
+        "v5.capability.fragile_edge_selection",
+        "v5.capability.fragile_edge_offer_emitted",
+        "v5.edit_graph.target_not_named_in_graph",
+        "v5.collab.write_refused",
+        "cee.context_integrity.routed",
+        "cee.context_integrity.derived",
+        "cee.context_integrity.unavailable",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
