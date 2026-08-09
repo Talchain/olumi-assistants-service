@@ -289,6 +289,20 @@ describe('2.1033 — reconcileObservedValuePair: scope and by-reference contract
     expect(out[0]).toBe(ops[0]); // identity, not deep equality
   });
 
+  it('THE BOUNDARY: a payload carrying no raw_value is returned BY REFERENCE', () => {
+    // Nothing stale can survive a payload that never carried the field, so
+    // this lane does not touch it. Recorded as a deliberate limit: a literal
+    // nested `{observed_state:{value}}` op is never merged and the applier's
+    // whole-object replace drops unit/cap/raw_value outright. That sibling
+    // WIPE is a separate defect (see the module comment), not this one.
+    const ops = [
+      { op: 'update_node', path: 'fac_spend', value: { observed_state: { value: 0.4 } } },
+    ] as unknown as PatchOperation[];
+
+    const out = run(ops);
+    expect(out[0]).toBe(ops[0]);
+  });
+
   it('IGNORES an op that writes no value (unit-only edit is returned by reference)', () => {
     const ops = [
       { op: 'update_node', path: 'fac_spend', value: { observed_state: { unit: '$' } } },

@@ -199,10 +199,20 @@ describe('R1 — a held mixed batch whose value op is data-spelled APPLIES on co
     // …and the merge preserved the siblings a wholesale replace would wipe.
     // (`source: 'user_override'` is the 2.396(b) user stamp — a confirmed
     // value write is the user's; see gm-held-provenance-stamp.test.ts.)
+    //
+    // 2.1033 — `raw_value` was `10` here, and this whole-object `toEqual` is
+    // exactly where that stale number was ratified: the op moved `value`
+    // 0.1 -> 0.5 against cap 100, so the factor stands at 50, while 10 still
+    // described the value the confirm REPLACED. Because `synthesiseDisplayValue`
+    // reads `raw_value` BEFORE `value`, every surface kept rendering the old
+    // number — and #884's display-anchor repair agreed with it, because it
+    // recomputes the anchor from this same field. The sibling is now
+    // re-derived from the authoritative `value` (0.5 x 100); `unit`/`cap`
+    // still prove the merge is not a wholesale replace.
     expect(fac.observed_state).toEqual({
       value: 0.5,
       unit: 'index',
-      raw_value: 10,
+      raw_value: 50,
       cap: 100,
       source: 'user_override',
     });

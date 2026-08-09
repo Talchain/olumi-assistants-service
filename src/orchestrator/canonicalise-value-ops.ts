@@ -403,13 +403,39 @@ export function reconcileObservedValuePair(
     const newValue = observed.value;
     if (typeof newValue !== 'number' || !Number.isFinite(newValue)) return op;
 
-    // The post-write scale context: the op's own unit/cap when it set them,
-    // otherwise the node's. Same precedence the applier will produce.
-    const existing = asRecord(findNode(currentGraph, op.path)?.observed_state) ?? {};
-    const merged: Record<string, unknown> = { ...existing, ...observed };
+    // ⚠ NARROW BY DESIGN: act ONLY on a payload that already carries a
+    // `raw_value`. That key is the stale-carry-forward signature — it is
+    // there because `canonicaliseUpdateNodeValue` merged the node's existing
+    // observed_state under the write. A payload WITHOUT it cannot strand a
+    // stale claim, so this lane leaves it exactly as it found it.
+    //
+    // This is the boundary, and it is deliberate. A literal nested
+    // `{ observed_state: { value } }` op takes the declared-field branch, is
+    // never merged, and the applier's whole-object replace then drops
+    // `unit`/`cap`/`raw_value` outright — pinned today by
+    // `gm-held-value-canonicalisation.test.ts` ("the canonicaliser is the
+    // identity"). That sibling WIPE is a real and separate defect; it is NOT
+    // this defect (nothing stale survives a wipe), and repairing it here
+    // would be the "while we're here" scope creep this programme keeps
+    // paying for. Recorded, not absorbed.
+    if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value')) return op;
 
-    const unit = typeof merged.unit === 'string' ? merged.unit : undefined;
-    const cap = typeof merged.cap === 'number' ? merged.cap : undefined;
+    // Scale context: the payload's own unit/cap (the canonicaliser already
+    // merged the node's in), falling back to the node for a payload that set
+    // one without the other.
+    const nodeObserved = asRecord(findNode(currentGraph, op.path)?.observed_state) ?? {};
+    const unit =
+      typeof observed.unit === 'string'
+        ? observed.unit
+        : typeof nodeObserved.unit === 'string'
+          ? nodeObserved.unit
+          : undefined;
+    const cap =
+      typeof observed.cap === 'number'
+        ? observed.cap
+        : typeof nodeObserved.cap === 'number'
+          ? nodeObserved.cap
+          : undefined;
 
     // `raw_value` deliberately OMITTED: we are asking what the NEW value
     // denotes, not echoing the old answer back (which is the defect).
@@ -419,14 +445,12 @@ export function reconcileObservedValuePair(
       ...(cap !== undefined ? { cap } : {}),
     });
 
-    const currentRaw = merged.raw_value;
-    const nextObserved: Record<string, unknown> = { ...merged };
+    const nextObserved: Record<string, unknown> = { ...observed };
     if (derived.kind === 'resolved') {
-      if (currentRaw === derived.raw) return op; // already agrees — by reference
+      if (observed.raw_value === derived.raw) return op; // agrees — by reference
       nextObserved.raw_value = derived.raw;
     } else {
       // Scale unrecoverable. Never leave the stale claim standing.
-      if (!Object.prototype.hasOwnProperty.call(merged, 'raw_value')) return op;
       delete nextObserved.raw_value;
     }
 
