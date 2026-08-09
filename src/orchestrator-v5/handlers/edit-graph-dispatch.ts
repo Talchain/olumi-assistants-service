@@ -1359,23 +1359,85 @@ function buildBoundaryBlocks(result: EditGraphResult): OlumiResponse['blocks'] {
   return [];
 }
 
+/**
+ * ROADMAP 2.1003 — the sentence that lied.
+ *
+ * The prior fallback was
+ *   `Applied edit. Graph now has N nodes and M edges.`
+ * whose truth condition was `appliedGraph != null` — PRESENCE OF A GRAPH, not
+ * occurrence of a change and not identity of the object changed. Measured on
+ * deployed staging: an identical replay produced no new graph identity and
+ * still read "Applied edit. Graph now has 21 nodes and 43 edges."
+ *
+ * Three properties this composer now has, in order of precedence:
+ *  1. An UNCHANGED model is stated as unchanged, explicitly, and never
+ *     described as an application. `modelUnchanged === true` is a positive
+ *     verdict from one local comparator over both graphs; `undefined` means
+ *     "could not tell" and deliberately does NOT reach this branch (a guess is
+ *     not a verdict).
+ *  2. A real change is described by the DETERMINISTIC RECEIPT
+ *     (`appliedChanges.summary`, built by `buildAppliedChanges` from the
+ *     operation list AND both graphs — "<Label>: <old> -> <new>"), not by a
+ *     node/edge count. The count was true of a no-change apply and true of a
+ *     wrong-object apply; the receipt names the entity and the transition.
+ *  3. Only when neither is available does it fall back to the count.
+ *
+ * Wholesale replacement, per the discipline already recorded at the 2.427
+ * site: a success sentence followed by a correction is still a success
+ * sentence.
+ */
+export function composeEditFallbackText(result: EditGraphResult): string {
+  if (result.wasRejected) return 'The proposed edit was rejected.';
+  if (!result.appliedGraph) return 'Edit processed.';
+
+  if (result.modelUnchanged === true) {
+    return 'No change: the model already matched that. Nothing was updated.';
+  }
+
+  const receipt = result.appliedChanges?.summary;
+  if (typeof receipt === 'string' && receipt.trim().length > 0) {
+    return receipt.trim();
+  }
+
+  return `Applied edit. Graph now has ${result.appliedGraph.nodes?.length ?? 0} nodes and ${result.appliedGraph.edges?.length ?? 0} edges.`;
+}
+
+/**
+ * ROADMAP 2.1003 — WHOLESALE REPLACEMENT on a proven no-change turn.
+ *
+ * The discipline is already recorded at the 2.427 site: "REFUSE, rather than
+ * confirm-with-a-caveat. The text is replaced WHOLESALE: a success sentence
+ * followed by a correction is still a success sentence."
+ *
+ * The LLM's prose is authored BEFORE the applied graph comes back, so it
+ * cannot know the model did not move — on the measured replay it happily said
+ * the graph had changed. On `modelUnchanged === true` it is therefore
+ * REPLACED, never appended to. `undefined` (no verdict) leaves today's
+ * behaviour byte-identical.
+ *
+ * Named and exported rather than inlined so the rule is a concept with its own
+ * test, not an expression nobody can point a mutant at.
+ */
+export function selectEditAssistantText(result: EditGraphResult, fallback: string): string {
+  if (result.modelUnchanged === true) return fallback;
+  return result.assistantText ?? fallback;
+}
+
 function editResultToOlumiResponse(
   result: EditGraphResult,
   payload: MessageTurnPayload,
 ): OlumiResponse {
-  const fallback = result.wasRejected
-    ? 'The proposed edit was rejected.'
-    : result.appliedGraph
-      ? `Applied edit. Graph now has ${result.appliedGraph.nodes?.length ?? 0} nodes and ${result.appliedGraph.edges?.length ?? 0} edges.`
-      : 'Edit processed.';
+  const fallback = composeEditFallbackText(result);
 
   // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
   // dispatcher computes structural readiness from `editResult.appliedGraph`
   // and surfaces it on `DispatchEditGraphResult.analysisReady`; the
   // response-finaliser stamps it onto the wire envelope after composition.
+  const assistantText = selectEditAssistantText(result, fallback);
+
   return {
     response_version: 2,
-    assistant_text: result.assistantText ?? fallback,
+    assistant_text: assistantText,
     blocks: buildBoundaryBlocks(result),
     suggested_actions: buildBoundarySuggestedActions(result),
     insights: [],
