@@ -75,7 +75,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance } from "../canonicalise-value-ops.js";
+import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance, reconcileObservedValuePair } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -2787,8 +2787,18 @@ export async function handleEditGraph(
     // user's, and before this every one rendered as "Olumi estimate". Stamped
     // INTO the op so the write survives apply → re-parse → the landed-op
     // postcondition identically on both sides (see stampUserEditProvenance).
-    const opsToApply: PatchOperation[] = stampUserEditProvenance(
-      canonicaliseValueOps(operations, context.graph).operations,
+    // 2.1033: the value-pair authority. `canonicaliseValueOps` merges the
+    // node's existing observed_state under the write so siblings survive —
+    // which also carried a now-STALE `raw_value` forward, and `raw_value` is
+    // what the canonical formatter reads FIRST. Editing 20% to 40% therefore
+    // committed `value: 0.4` while every user-facing surface kept rendering
+    // "20%", and #884's display-anchor reconciliation agreed with it (it
+    // recomputes the anchor from the same stale field). Re-derive the sibling
+    // from the authoritative `value`, or clear it when the scale is genuinely
+    // ambiguous — never leave the superseded claim standing.
+    const opsToApply: PatchOperation[] = reconcileObservedValuePair(
+      stampUserEditProvenance(canonicaliseValueOps(operations, context.graph).operations),
+      context.graph,
     );
 
     let candidateGraph: GraphV3T | undefined;

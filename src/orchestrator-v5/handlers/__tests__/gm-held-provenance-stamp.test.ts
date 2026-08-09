@@ -126,7 +126,14 @@ describe('held/confirm seam — a confirmed value op earns the user stamp (2.396
     // The merge siblings still survive — the stamp must never become a
     // wholesale replace.
     expect(observed.unit).toBe('index');
-    expect(observed.raw_value).toBe(10);
+    // 2.1033 — was `10`, and that assertion pinned the defect on the seam a
+    // user reaches by explicitly confirming a change. The op moved `value`
+    // 0.1 -> 0.5 against a cap of 100, so the factor now stands at 50; the
+    // stale 10 described the value the confirm REPLACED, and it is the field
+    // `synthesiseDisplayValue` reads first. Re-derived from the authoritative
+    // `value` (0.5 x 100). `unit`/`cap` still prove the merge is not a
+    // wholesale replace.
+    expect(observed.raw_value).toBe(50);
     expect(observed.cap).toBe(100);
 
     // Negative control: the structural sibling that ALSO landed in this batch
