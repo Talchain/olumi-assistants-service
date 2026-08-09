@@ -29,6 +29,8 @@ import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
 import ceeScenarioGraphRouteV1 from "./routes/assist.v1.scenario-graph.js";
 import ceeScenarioGraphRegisterRouteV1 from "./routes/assist.v1.scenario-graph-register.js";
 import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
+import collabRoundsRouteV1 from "./routes/collab.v1.rounds.js";
+import collabPacketRouteV1 from "./routes/collab.v1.packet.js";
 import ceeDecisionRecordsRouteV1 from "./routes/assist.v1.decision-records.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
@@ -1167,6 +1169,22 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeScenarioGraphRouteV1(app);
   await ceeScenarioGraphRegisterRouteV1(app);
   await ceeElicitBeliefRouteV1(app);
+  // COLLAB U-S0 (ROADMAP 2.686/2.909/2.910) — blind elicitation rounds.
+  // Registered UNCONDITIONALLY (no dark launches, no new env gate).
+  //
+  // Each module mounts its handlers at EXACTLY ONE prefix: the contract-pinned
+  // /collab/v1/*. `collabPaths()` returns a single path. An earlier draft also
+  // aliased these under /assist/v1/collab/* to ride the existing /bff/cee/*
+  // seam; that alias was WITHDRAWN — two entrances to one room is one too many
+  // when the room is a privacy boundary.
+  //
+  // Browser reachability comes from the UI's `/bff/collab/*` edge function,
+  // which rewrites to this prefix and forwards x-collab-participant-token. See
+  // src/collab/route-support.ts for why no pre-existing seam reaches here.
+  // The store is constructed lazily per request, so these routes are inert
+  // until called and require no new tables at boot.
+  await collabRoundsRouteV1(app);
+  await collabPacketRouteV1(app);
   // Calibration recording seam (R0). Registered UNCONDITIONALLY — no flag,
   // per Paul's no-dark-launch / no-new-env-gate rulings. Its own always-on
   // Supabase-JWT verification is independent of CEE_REQUIRE_USER_JWT.

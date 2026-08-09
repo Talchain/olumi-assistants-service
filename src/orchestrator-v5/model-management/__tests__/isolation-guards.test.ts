@@ -186,8 +186,23 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
 // byte-identity + the non-blocking contract). The dark invariant narrows:
 // ZERO call sites → EXACTLY the allowlisted set below. A new consumer must
 // extend this list deliberately, in its own reviewed slice.
+// COLLAB U-S0 (2026-08-09, ROADMAP 2.910): the SECOND sanctioned call site,
+// added deliberately in its own reviewed slice exactly as the note above
+// requires. `src/collab/store.ts` calls `getModelManagementService().saveVersion`
+// when an elicitation round is minted, so the round pins the model version the
+// panel was actually asked about.
+//
+// Why this consumer must exist rather than call the RPC directly: content
+// identity (`computeGraphIdentityHash`) is computed inside the service, and a
+// second caller reaching past it would be a duplicate of the identity envelope
+// — the mirror defect this estate keeps paying for. One implementation, two
+// call sites, is the correct shape.
+//
+// ⚠ It inherits the flag: `saveVersion` returns `disabled` when
+// CEE_MODEL_VERSIONS_ENABLED is off, and the collab store REFUSES the round
+// rather than pinning nothing (an unpinned round is 2.910's exact failure).
 const SANCTIONED_INBOUND_CALL_SITES = new Set(
-  ['../commit.ts'].map((s) => resolve(moduleDir, s)),
+  ['../commit.ts', '../../collab/store.ts'].map((s) => resolve(moduleDir, s)),
 );
 
 describe('model-management isolation guards — INBOUND (only the sanctioned commit-seam call site)', () => {

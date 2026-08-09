@@ -1,45 +1,36 @@
-# 2.909 — Collab U-S0 adversarial N-suite (PRE-DDL, AUTHORED RED-FIRST)
+# COLLAB U-S0 — the elicitation acceptance suite (PROMOTED, GREEN)
 
-**Status: RED by construction, deliberately.** Nothing under `src/collab/` or
-`src/routes/collab.v1.*` exists at the authoring tip (CEE staging `4b57b8ff`,
-2026-08-08). Every spec here is executable and fails with the uniform signature
+**Status: LANDED and collected by the required gate.** This suite was authored
+RED-FIRST against seams that did not exist (tenancy-audit DDL condition 4;
+ROADMAP 2.909). All seven seams have now landed and all 27 specs are GREEN, plus
+`oracle-and-identity-pin.test.ts` (6 more) added from independent review.
 
-    RED (pre-DDL): seam not implemented: <seam path>
+At the pre-DDL tip every spec failed with the uniform signature
+`RED (pre-DDL): seam not implemented: <seam path>` — 6 files / 27 tests. That
+RED was the deliverable then; GREEN with the safety properties intact is the
+deliverable now. **Going green by weakening a property is the one failure mode
+this suite cannot detect about itself, which is why the mutant results are
+recorded in the PR rather than inferred from a passing run.**
 
-That failure IS the deliverable (tenancy-audit DDL condition 4: the N-suite is
-authored RED **before** the DDL merges). The suite goes GREEN only when the
-U-S0 migration set + routes land **with the safety properties intact**.
+`importSeam` and the `RED_SIGNATURE_PREFIX` machinery are RETAINED in
+`contracts.ts`: they cost nothing, and they are what a future seam rename or
+deletion trips over.
 
 Authorities: ROADMAP 2.909/2.910/2.686 · `parallel-briefs/COLLAB-UNIFIED-BUILD-PLAN-2026-08-07.md`
 (§2 asset 6, §3 U-S0, §4 C4) · `parallel-briefs/COLLAB-ELICITATION-DESIGN-2026-08-07.md`
 (G2 §§2-4, §10 INV-A..I) · `docs-designs/COLLAB-TENANCY-AUDIT-2026-07-11/05-adversarial-rls-test-plan.md`
-(N-1..N-12) · `PHASE0-EVIDENCE-2026-07-28/collab-readiness-2026-08-08.md` (build-list items 2/3/6;
-the dim-1 owner-attribution finding).
+(N-1..N-12) · `PHASE0-EVIDENCE-2026-07-28/collab-readiness-2026-08-08.md`.
 
-## Why this directory is not collected by the required gate
+## DB grain
 
-These specs MUST fail today, and the required gate (`pnpm test:required`) must
-stay green. So: files here use the `.ntest.ts` suffix (no vitest config
-collects `*.ntest.ts`), and the gate SEES the suite through ONE collected
-meta-test — `tests/meta/collab-n-suite-pending.test.ts` — which asserts, in the
-required gate, that:
+`n-suite-rls.collab.sql` runs under
+`psql -v ON_ERROR_STOP=1 -f tests/collab/n-suite-rls.collab.sql`
+against the staging clone **after** `20260809120000_v5_collab_elicitation.sql`
+is applied. Blocks N-SQL-0..7 all have implementations in that migration.
 
-1. this directory's file manifest is exactly as declared;
-2. every contract seam is still absent (with a positive control proving the
-   absence check can see a presence — trap 13);
-3. every spec here actually invokes the seam guard (so a tidy-up cannot
-   silently defuse the RED);
-4. **the moment any seam lands, the meta-test goes RED with promotion
-   instructions** — fail-loud, never assume-good (trap 12/12f).
-
-Run the pending suite itself with:
-
-    pnpm test:collab-nsuite        # all specs fail with the RED signature today
-
-DB grain: `n-suite-rls.collab.sql` runs under
-`psql -v ON_ERROR_STOP=1 -f tests/collab-nsuite-pending/n-suite-rls.collab.sql`
-against the staging clone. RED today at block N-SQL-0
-(`missing elicitation relations: elicitation_rounds round_events elicitation_participants elicitation_events`).
+⚠ **It cannot be run before the migration is executed on staging** — migration
+execution is the orchestrator's, not this lane's, so the DB-grain result is
+reported by whoever runs it, not claimed here.
 
 ## The seam-name contract (chosen by this lane — the build lane implements it)
 
@@ -120,18 +111,10 @@ kit is a build-lane deliverable against the aggregation seam when it exists.
    goes RED here until it is added to the allowlist consciously. That is the
    point: the packet is the blindness boundary; it never grows silently.
 
-## Promotion protocol (when the U-S0 build lands)
+## What replaced the promotion protocol
 
-1. Implement the seams (or rename them here, in the same PR).
-2. Rename `*.ntest.ts` → `*.test.ts` and move under `tests/collab/` (collected
-   by the required gate); delete `vitest.collab-nsuite.config.ts` + the
-   `test:collab-nsuite` script.
-3. Delete `tests/meta/collab-n-suite-pending.test.ts` (its job — remembering
-   this suite exists — is done) and this README's pre-DDL framing.
-4. Run the SQL suite against the migrated staging clone; record command+output.
-5. Mutation-check the pins per the standing brief (throwaway worktree OUTSIDE
-   the repo, sentinel write-test for isolation, applied-check scoped to src/):
-   at minimum — unscope the packet query (N-A2 must RED), stamp the owner id in
-   provenance (N-P1 must RED), accept a late event on a closed round (N-L1 must
-   RED), read the everyday-path pointer at mint (N-L5 must RED), skip the audit
-   row (N-E3 must RED). A pin whose revert stays green is theatre (trap 11).
+The protocol is DONE: specs renamed `*.ntest.ts` → `*.test.ts`, moved to
+`tests/collab/`, `vitest.collab-nsuite.config.ts` and the `test:collab-nsuite`
+script deleted, and the collected sentry `tests/meta/collab-n-suite-pending.test.ts`
+removed — its job (remembering this suite existed) is finished now that the gate
+runs the suite directly.
