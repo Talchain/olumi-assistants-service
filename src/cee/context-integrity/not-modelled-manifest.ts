@@ -42,6 +42,11 @@
  * tables, which are an INDEPENDENT oracle produced from the deployed system.
  */
 
+import {
+  magnitudeSuffixPattern,
+  resolveMagnitude,
+} from "../../utils/magnitude-alphabet.js";
+
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
 
@@ -149,22 +154,19 @@ export const NOT_TRACKED_CLASSES: readonly string[] = [
 // ── extraction ──────────────────────────────────────────────────────────────
 
 /**
- * ⚠ THE LIST ITSELF NEEDS A COMPLETENESS CHECK, NOT JUST CONSISTENT CONSUMERS
- * (CLAUDE.md trap 12d, whose own worked example is a magnitude map missing
- * `thousand`). The spelled-out forms are here because `parseUnit("£ million")`
- * silently scaled by 1 without them — a 10^6 error in a figure we then quote
- * back to the user as their own.
+ * ⚠ NO MAGNITUDE LIST LIVES HERE, AND THAT IS THE POINT.
+ *
+ * The first cut of this module hand-wrote one — a FIFTH copy in a service whose
+ * `utils/magnitude-alphabet.ts` exists precisely because fifteen independent
+ * copies had accumulated and EIGHT of them were measurably wrong, each by a
+ * factor of 1,000 to 1,000,000,000,000, at full confidence.
+ *
+ * It was caught by that module's own union tripwire (ROADMAP 2.330), in CI, not
+ * by review — and the tripwire was right: a lookup here would have drifted from
+ * the canonical alphabet the moment either moved. The copy is deleted; the
+ * alphabet is imported. `grand`, `mn`, `t` and the spelled-out words come free,
+ * and cannot diverge.
  */
-const MAGNITUDE: Readonly<Record<string, number>> = {
-  k: 1e3,
-  thousand: 1e3,
-  m: 1e6,
-  million: 1e6,
-  mn: 1e6,
-  bn: 1e9,
-  b: 1e9,
-  billion: 1e9,
-};
 
 const MONTHS =
   "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
@@ -197,7 +199,7 @@ const QUANTITY_RE = new RegExp(
     // The sign is part of the user's literal. Without it "-£2m" was quoted
     // back to them as "£2m" — misreporting their own words, and inverting the
     // meaning of a figure that is very often a loss.
-    `(?<money>(?<msign>-)?(?<mcur>[£€$])\\s?(?<mnum>\\d[\\d,]*(?:\\.\\d+)?)\\s?(?<mmag>bn|[kmb])?)(?![\\d])`,
+    `(?<money>(?<msign>-)?(?<mcur>[£€$])\\s?(?<mnum>\\d[\\d,]*(?:\\.\\d+)?)${magnitudeSuffixPattern("mmag")})(?![\\d])`,
     `(?<percent>(?<pnum>\\d[\\d,]*(?:\\.\\d+)?)\\s?%)`,
     `(?<date>(?:\\d{1,2}\\s+)?(?:${MONTHS})\\s+\\d{4})`,
     `(?<period>(?:FY\\s?\\d{2,4}|Q[1-4]\\s?\\d{4}|Q[1-4]\\b))`,
@@ -268,7 +270,7 @@ export function extractStatedQuantities(text: string): Quantity[] {
     if (g.money !== undefined && g.mnum !== undefined) {
       const sign = g.msign === "-" ? -1 : 1;
       const base = toNumber(g.mnum) * sign;
-      const mag = g.mmag ? (MAGNITUDE[g.mmag.toLowerCase()] ?? 1) : 1;
+      const mag = resolveMagnitude(g.mmag);
       out.push({ literal, at, kind: "money", value: base * mag, mantissa: base, unit: g.mcur ?? null });
     } else if (g.percent !== undefined && g.pnum !== undefined) {
       const v = toNumber(g.pnum);
@@ -621,9 +623,8 @@ function parseUnit(unit: unknown): {
   if (u === "%" || /percent/i.test(u)) return { unitClass: "percent", symbol: null, scale: 1 };
   const symbol = CURRENCY_SYMBOLS.find((c) => u.includes(c)) ?? null;
   if (symbol !== null) {
-    const suffix = u.replace(symbol, "").trim().toLowerCase();
-    const scale = suffix === "" ? 1 : (MAGNITUDE[suffix] ?? 1);
-    return { unitClass: "money", symbol, scale };
+    const suffix = u.replace(symbol, "").trim();
+    return { unitClass: "money", symbol, scale: resolveMagnitude(suffix) };
   }
   return { unitClass: "other", symbol: null, scale: 1 };
 }
