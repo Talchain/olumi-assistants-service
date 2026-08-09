@@ -214,11 +214,33 @@ CREATE POLICY select_own_elicitation_events ON public.elicitation_events
 -- only through the service role. No authenticated SELECT policy = no rows for
 -- any JWT caller, which is the fail-closed default we want.
 
-REVOKE ALL ON public.elicitation_rounds             FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.round_events                   FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.elicitation_participants       FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.elicitation_participant_events FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.elicitation_events             FROM PUBLIC, anon, authenticated;
+-- ⚠⚠ `service_role` IS IN THIS LIST DELIBERATELY, AND ITS ABSENCE WAS A REAL
+-- DEFECT CAUGHT ON THE STAGING PREFLIGHT. Supabase ships DEFAULT ACLs
+-- (`pg_default_acl`, grantor postgres AND supabase_admin) that grant `arwdDxt`
+-- — INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER — on EVERY
+-- new table in `public` to anon, authenticated AND service_role, at CREATE
+-- time. Measured on staging: anon already holds UPDATE on 49 public tables,
+-- authenticated on 53, service_role on 61.
+--
+-- So a new table is born writable by all three, and GRANTing narrowly does NOT
+-- remove an inherited default — only REVOKE does. `REVOKE ALL` then `GRANT`
+-- the narrow set is the ONLY reliable order.
+--
+-- Reproduced in rehearsal on postgres 15.8 with the same default ACLs: without
+-- service_role here, N-SQL-3 fails with
+--   "service_role has UPDATE on append-only table round_events"
+-- and it is RIGHT to fail — the append-only guarantee would have been a comment
+-- rather than a grant.
+REVOKE ALL ON public.elicitation_rounds             FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.round_events                   FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.elicitation_participants       FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.elicitation_participant_events FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.elicitation_events             FROM PUBLIC, anon, authenticated, service_role;
+
+-- Sequences inherit the same defaults. An append-only table whose sequence is
+-- writable by anon is not append-only in any sense that matters.
+REVOKE ALL ON SEQUENCE public.round_events_id_seq                   FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON SEQUENCE public.elicitation_participant_events_id_seq FROM PUBLIC, anon, authenticated, service_role;
 
 GRANT SELECT ON public.elicitation_rounds       TO authenticated;
 GRANT SELECT ON public.round_events             TO authenticated;
@@ -276,7 +298,8 @@ COMMENT ON TABLE public.collab_redaction_audit IS
 
 ALTER TABLE public.collab_redaction_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collab_redaction_audit FORCE  ROW LEVEL SECURITY;
-REVOKE ALL ON public.collab_redaction_audit FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.collab_redaction_audit FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON SEQUENCE public.collab_redaction_audit_id_seq FROM PUBLIC, anon, authenticated, service_role;
 -- No authenticated SELECT policy and no grant: the audit trail is operator-only.
 GRANT SELECT, INSERT ON public.collab_redaction_audit TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.collab_redaction_audit_id_seq TO service_role;
