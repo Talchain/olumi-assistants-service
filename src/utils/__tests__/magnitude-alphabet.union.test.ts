@@ -396,6 +396,18 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "of `grand` alone and false of the file — the `['grand','currency']` unit-KIND row sits " +
       "beside a real multiplier map that this guard could not see.",
     "cee/factor-extraction/display-value.ts": "formats from MAGNITUDE_DISPLAY_LADDER; comment mentions 'thousand'",
+    // ROADMAP 2.973. ⚠ CLASSIFIED (b) — INCIDENTAL MENTION ONLY, and it earned
+    // that classification the hard way: the first cut of that file DID
+    // hand-write a fifth multiplier map, and THIS GUARD caught it in CI. The
+    // map is deleted; the file now imports `resolveMagnitude` and
+    // `magnitudeSuffixPattern` from the canonical alphabet, so its money
+    // extractor and its unit-scale parser both read this list and cannot drift
+    // from it. What remains is prose: a comment naming `grand`, `mn` and `t` as
+    // keys that "come free" from the import. Verified at the bytes — `grep -n
+    // "MAGNITUDE\["` over that file returns nothing.
+    "cee/context-integrity/not-modelled-manifest.ts":
+      "no lookup — imports resolveMagnitude/magnitudeSuffixPattern from the canonical " +
+      "alphabet; the magnitude words appear only in a comment explaining that import",
     "cee/validation/pre-decision-checks.ts": "sibling vocabulary (recognition-only) — compared in Part A",
 
     // --- Comment-only mentions. Each of these imports the canonical alphabet

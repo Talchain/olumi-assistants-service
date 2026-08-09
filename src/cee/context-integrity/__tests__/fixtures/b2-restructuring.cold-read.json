@@ -1,0 +1,3133 @@
+{
+  "_provenance": {
+    "capture": "PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/raw/f9f368a4-T2_COLD1.json",
+    "seam": "POST /bff/cee/scenarios/:id/graph (cold read)",
+    "captured_at": "2026-08-08",
+    "cee_build": "4b57b8f",
+    "scenario_id": "f9f368a4-0136-4fc4-b3b1-fcba4dd74229",
+    "note": "Real deployed bytes. Reduced to the two fields the derivation consumes; neither is edited."
+  },
+  "brief_text": "Need to decide how we take £4m out of opex by end of Q2 2027 — do we do it mainly through offshoring support, automation, or closing the Leeds office? Braindump before the exec offsite, apologies for the mess:\n\n- context: 240 heads, £31m revenue, EBITDA minus £1.8m, board wants breakeven by Q3 2027, non-negotiable\n- target: £4m annualised opex out, ideally £2.5m of it landed by end of Q2\n- support org = 62 people, £2.9m/yr. Offshore quote from TaskUs: ~40% saving on 45 roles = ~£1.1m/yr, but CSAT risk is real\n- when a competitor did this their Trustpilot dropped 4.1 to 3.3 in six months (I saw it in their public reviews, not exactly science)\n- automation: the deflection pilot in April handled 34% of tickets end to end (our own dashboard, n=6 weeks). Jamie extrapolates that to £800k/yr saving but it assumes vendor pricing holds at renewal — the vendor contract renews in November and they know we're locked in\n- Leeds office lease = £600k/yr, break clause March 2027. 70 people based there. Hybrid means maybe we don't need it at all? Nobody has modelled the attrition hit. My guess: we'd lose 10-15% of Leeds staff if we close — pure guess\n- constraint: no more than one compulsory redundancy round in the next 12 months — we promised staff after the last one and the CEO is adamant\n- constraint: engineering (58 heads) is ring-fenced, board agreed\n- assumption: revenue flat at £31m. Sales says +8% but they said that last year and we did minus 2%\n- half-formed: could we sell the Leeds sublease rights? or do a 3-day office share with WPP's local outfit? no idea if either is real\n- Dana thinks we should just do a 10% across-the-board RIF and be done. I think that's how you kill morale twice — we disagree openly\n- worry: doing all three at once = change saturation. The ops director says max two big changes in parallel, based on the 2024 migration mess\n- unknown: what does offshoring do to our ISO 27001 posture? the renewal audit is January 2027 Success = EBITDA breakeven by Q3 2027 while keeping the redundancy promise — one compulsory round max. Go ahead.",
+  "graph": {
+    "meta": {
+      "roots": [
+        "dec_opex",
+        "fac_change_saturation",
+        "fac_iso_risk",
+        "fac_vendor_pricing"
+      ],
+      "leaves": [
+        "goal_ebitda"
+      ],
+      "source": "assistant"
+    },
+    "edges": [
+      {
+        "to": "opt_automate",
+        "from": "dec_opex",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_close_leeds",
+        "from": "dec_opex",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_combined",
+        "from": "dec_opex",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_offshore",
+        "from": "dec_opex",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "opt_status_quo",
+        "from": "dec_opex",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_csat",
+        "from": "fac_automation_scale",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.22
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.22,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Increasing automation scale typically reduces customer satisfaction due to lower-touch support.",
+            "strength_std": 0.15,
+            "strength_mean": -0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": -0.44608695652173913,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip",
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.72,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_opex_savings",
+        "from": "fac_automation_scale",
+        "origin": "ai",
+        "strength": {
+          "std": 0.09851851851851852,
+          "mean": 0.22518518518518515
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.32,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "brief_explicit",
+            "reasoning": "Higher automation deployment directly drives operational cost savings as shown by the pilot extrapolation.",
+            "strength_std": 0.1,
+            "strength_mean": 0.32999999999999996,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.07217391304347831,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.28391304347826085,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.32999999999999996,
+              "before": 0.33,
+              "edge_key": "fac_automation_scale->out_opex_savings"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.82,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_attrition",
+        "from": "fac_change_saturation",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": 0.25
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.25,
+            "exists_probability": 0.7
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "High change saturation increases staff turnover risk as people get overwhelmed.",
+            "strength_std": 0.2,
+            "strength_mean": 0.42,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.3739130434782608,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.7,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_savings_shortfall",
+        "from": "fac_change_saturation",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15,
+          "mean": 0.42
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.42,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "weak_guess",
+            "reasoning": "Excessive concurrent changes can impede execution, risking savings realization.",
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.6
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.2539130434782608,
+            "exists_probability": 0.58
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_iso_audit",
+        "from": "fac_iso_risk",
+        "origin": "ai",
+        "strength": {
+          "std": 0.16,
+          "mean": 0.38
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.16,
+            "strength_mean": 0.38,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher offshoring risk raises probability of ISO 27001 audit failure due to less control.",
+            "strength_std": 0.15,
+            "strength_mean": 0.6,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.34782608695652173,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.5539130434782609,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.72,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_opex_savings",
+        "from": "fac_office_closure",
+        "origin": "ai",
+        "strength": {
+          "std": 0.05629629629629629,
+          "mean": 0.14074074074074072
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.08,
+            "strength_mean": 0.2,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Closing the Leeds office delivers substantial lease and salary savings.",
+            "strength_std": 0.2,
+            "strength_mean": 0.27999999999999997,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.06782608695652165,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.23391304347826083,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.27999999999999997,
+              "before": 0.28,
+              "edge_key": "fac_office_closure->out_opex_savings"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_attrition",
+        "from": "fac_office_closure",
+        "origin": "ai",
+        "strength": {
+          "std": 0.22,
+          "mean": 0.55
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.22,
+            "strength_mean": 0.55,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "brief_explicit",
+            "reasoning": "Office closure is expected to drive a substantial one-time staff attrition spike.",
+            "strength_std": 0.2,
+            "strength_mean": 0.58,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.032173913043478386,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.5339130434782609,
+            "exists_probability": 0.83
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_redundancy_breach",
+        "from": "fac_office_closure",
+        "origin": "ai",
+        "strength": {
+          "std": 0.18,
+          "mean": 0.35
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.35,
+            "exists_probability": 0.65
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Leeds closure risks breaching the promised redundancy constraint through forced layoffs.",
+            "strength_std": 0.2,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.4539130434782609,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.65,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_opex_savings",
+        "from": "fac_offshore_scale",
+        "origin": "ai",
+        "strength": {
+          "std": 0.08444444444444443,
+          "mean": 0.387037037037037
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.55,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "brief_explicit",
+            "reasoning": "Offshoring support roles directly cuts operational costs as per the TaskUs quote.",
+            "strength_std": 0.1,
+            "strength_mean": 0.16999999999999998,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.8521739130434784,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.12391304347826085,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.16999999999999998,
+              "before": 0.17,
+              "edge_key": "fac_offshore_scale->out_opex_savings"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.88,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_csat_drop",
+        "from": "fac_offshore_scale",
+        "origin": "ai",
+        "strength": {
+          "std": 0.18,
+          "mean": 0.62
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.62,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "brief_explicit",
+            "reasoning": "Offshoring drove a competitor’s Trustpilot score drop from 4.1 to 3.3 in six months.",
+            "strength_std": 0.15,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3321739130434782,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": 0.4539130434782609,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "risk_iso_audit",
+        "from": "fac_offshore_scale",
+        "origin": "ai",
+        "strength": {
+          "std": 0.2,
+          "mean": 0.55
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.2,
+            "strength_mean": 0.55,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Scaling offshore operations can jeopardize ISO compliance if controls aren’t replicated.",
+            "strength_std": 0.2,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.5921739130434784,
+          "pass2_adjusted": {
+            "strength_std": 0.2,
+            "strength_mean": 0.2539130434782608,
+            "exists_probability": 0.83
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "raw_magnitude"
+          ],
+          "validation_lint_log": []
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.75,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "out_opex_savings",
+        "from": "fac_vendor_pricing",
+        "origin": "ai",
+        "strength": {
+          "std": 0.09851851851851852,
+          "mean": -0.19703703703703704
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.28,
+            "exists_probability": 0.78
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher automation vendor pricing at renewal directly reduces net savings.",
+            "strength_std": 0.15,
+            "strength_mean": -0.21999999999999995,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.02782608695652189,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": -0.2660869565217391,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.21999999999999995,
+              "before": -0.22,
+              "edge_key": "fac_vendor_pricing->out_opex_savings"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.78,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_automation_scale",
+        "from": "opt_automate",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_office_closure",
+        "from": "opt_close_leeds",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_automation_scale",
+        "from": "opt_combined",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_office_closure",
+        "from": "opt_combined",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_offshore_scale",
+        "from": "opt_combined",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_offshore_scale",
+        "from": "opt_offshore",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_automation_scale",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_office_closure",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "fac_offshore_scale",
+        "from": "opt_status_quo",
+        "origin": "ai",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "out_csat",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.18
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.18,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Better customer satisfaction supports revenue retention, improving EBITDA.",
+            "strength_std": 0.1,
+            "strength_mean": 0.13043478260869562,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.19130434782608702,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.08434782608695648,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.13043478260869562,
+              "before": 0.3,
+              "edge_key": "out_csat->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "out_opex_savings",
+        "origin": "ai",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.7
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.7,
+            "exists_probability": 0.95
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Direct opex reductions flow through to EBITDA improvement.",
+            "strength_std": 0.1,
+            "strength_mean": 0.21739130434782605,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.1,
+            "strength_mean": 0.17130434782608692,
+            "exists_probability": 0.88
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.21739130434782605,
+              "before": 0.5,
+              "edge_key": "out_opex_savings->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.95,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "risk_attrition",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.22
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.22,
+            "exists_probability": 0.78
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher staff attrition undermines productivity and raises hiring costs, hurting EBITDA.",
+            "strength_std": 0.15,
+            "strength_mean": -0.17391304347826086,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": -0.22,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.17391304347826086,
+              "before": -0.4,
+              "edge_key": "risk_attrition->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.78,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "risk_csat_drop",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.3
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.3,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Declines in CSAT often lead to revenue loss, reducing EBITDA.",
+            "strength_std": 0.1043478260869565,
+            "strength_mean": -0.13043478260869562,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.1043478260869565,
+            "strength_mean": -0.17652173913043476,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.13043478260869562,
+              "before": -0.3,
+              "edge_key": "risk_csat_drop->goal_ebitda"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.1043478260869565,
+              "before": 0.15,
+              "edge_key": "risk_csat_drop->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.85,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "risk_iso_audit",
+        "origin": "ai",
+        "strength": {
+          "std": 0.14,
+          "mean": -0.25
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.25,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "An ISO audit failure can incur remediation costs and reputational harm.",
+            "strength_std": 0.06956521739130435,
+            "strength_mean": -0.08695652173913043,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.7
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.06956521739130435,
+            "strength_mean": -0.13304347826086957,
+            "exists_probability": 0.6799999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "confidence_band_change",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.08695652173913043,
+              "before": -0.2,
+              "edge_key": "risk_iso_audit->goal_ebitda"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.06956521739130435,
+              "before": 0.15,
+              "edge_key": "risk_iso_audit->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.72,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "risk_redundancy_breach",
+        "origin": "ai",
+        "strength": {
+          "std": 0.15,
+          "mean": -0.35
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": -0.35,
+            "exists_probability": 0.7
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Breaching redundancy promises can incur legal costs and morale damage.",
+            "strength_std": 0.06956521739130435,
+            "strength_mean": -0.08695652173913043,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.7
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.4339130434782608,
+          "pass2_adjusted": {
+            "strength_std": 0.06956521739130435,
+            "strength_mean": -0.13304347826086957,
+            "exists_probability": 0.6799999999999999
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change",
+            "confidence_band_change",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.08695652173913043,
+              "before": -0.2,
+              "edge_key": "risk_redundancy_breach->goal_ebitda"
+            },
+            {
+              "code": "LINT_STD_CLAMPED",
+              "after": 0.06956521739130435,
+              "before": 0.15,
+              "edge_key": "risk_redundancy_breach->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.7,
+        "provenance_display": "ai_inferred"
+      },
+      {
+        "to": "goal_ebitda",
+        "from": "risk_savings_shortfall",
+        "origin": "ai",
+        "strength": {
+          "std": 0.12,
+          "mean": -0.45
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.45,
+            "exists_probability": 0.9
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Failing to hit savings targets directly undercuts the EBITDA breakeven goal.",
+            "strength_std": 0.15,
+            "strength_mean": -0.17391304347826086,
+            "lint_corrected": true,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.46,
+          "pass2_adjusted": {
+            "strength_std": 0.15,
+            "strength_mean": -0.22,
+            "exists_probability": 0.78
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0,
+            "strength_mean_offset": -0.046086956521739136,
+            "exists_probability_offset": -0.020000000000000018
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.17391304347826086,
+              "before": -0.4,
+              "edge_key": "risk_savings_shortfall->goal_ebitda"
+            }
+          ]
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.9,
+        "provenance_display": "ai_inferred"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "dec_opex",
+        "kind": "decision",
+        "label": "£4m Opex Reduction Strategy",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "fac_automation_scale",
+        "kind": "factor",
+        "label": "Automation Deployment Scale",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "encoding_map": {
+          "0": "No automation",
+          "0.5": "Partial deployment",
+          "0.8": "Full deflection deployment"
+        },
+        "display_value": "0 scale",
+        "observed_state": {
+          "cap": 1,
+          "unit": "scale",
+          "value": 0,
+          "source": "brief_extraction",
+          "raw_value": 0,
+          "factor_type": "cost",
+          "extractionType": "explicit",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_change_saturation",
+        "kind": "factor",
+        "label": "Organisational Change Saturation",
+        "prior": {
+          "range_max": 0.75,
+          "range_min": 0.25,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.25 to 0.75",
+        "extractionType": "inferred"
+      },
+      {
+        "id": "fac_iso_risk",
+        "kind": "factor",
+        "label": "ISO 27001 Compliance Risk (Offshoring)",
+        "prior": {
+          "range_max": 0.9,
+          "range_min": 0.3,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.3 to 0.9"
+      },
+      {
+        "id": "fac_office_closure",
+        "kind": "factor",
+        "label": "Leeds Office Closure",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "encoding_map": {
+          "0": "Leeds office retained",
+          "1": "Leeds office closed"
+        },
+        "display_value": "Low (0)",
+        "observed_state": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "cost",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_offshore_scale",
+        "kind": "factor",
+        "label": "Offshoring Scale (Support Roles)",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "encoding_map": {
+          "0": "No offshoring",
+          "0.45": "45 roles offshored (~40% saving)"
+        },
+        "display_value": "£0",
+        "observed_state": {
+          "cap": 2900000,
+          "unit": "£",
+          "value": 0,
+          "source": "brief_extraction",
+          "raw_value": 0,
+          "factor_type": "cost",
+          "extractionType": "explicit",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        }
+      },
+      {
+        "id": "fac_vendor_pricing",
+        "kind": "factor",
+        "label": "Automation Vendor Pricing at Renewal",
+        "prior": {
+          "range_max": 1,
+          "range_min": 0.5,
+          "distribution": "uniform"
+        },
+        "category": "external",
+        "provenance": "ai_inferred",
+        "display_value": "0.5 to 1"
+      },
+      {
+        "id": "goal_ebitda",
+        "kind": "goal",
+        "label": "Achieve EBITDA Breakeven by Q3 2027",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "opt_automate",
+        "kind": "option",
+        "label": "Automation-Led Reduction",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0.8,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_close_leeds",
+        "kind": "option",
+        "label": "Close Leeds Office",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_combined",
+        "kind": "option",
+        "label": "Phased Combination (Offshore + Automate + Leeds)",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0.3,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0.5,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_offshore",
+        "kind": "option",
+        "label": "Offshore Support (TaskUs)",
+        "provenance": "ai_inferred",
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0.45,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "kind": "option",
+        "label": "Continue Current Operations (Status Quo)",
+        "provenance": "ai_inferred",
+        "is_baseline": true,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "out_csat",
+        "kind": "outcome",
+        "label": "Customer Satisfaction Retention",
+        "provenance": "ai_inferred",
+        "observed_state": {
+          "cap": 5,
+          "unit": "Trustpilot score",
+          "value": 0.8,
+          "source": "cee_inference",
+          "raw_value": 4.1,
+          "factor_type": "quality",
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "out_opex_savings",
+        "kind": "outcome",
+        "label": "Annualised Opex Savings Achieved",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 4000000,
+          "unit": "£",
+          "value": 0,
+          "source": "brief_extraction",
+          "raw_value": 0,
+          "factor_type": "revenue",
+          "extractionType": "explicit"
+        }
+      },
+      {
+        "id": "risk_attrition",
+        "kind": "risk",
+        "label": "Leeds Staff Attrition",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_csat_drop",
+        "kind": "risk",
+        "label": "CSAT / Trustpilot Score Decline",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_iso_audit",
+        "kind": "risk",
+        "label": "ISO 27001 Audit Failure (Jan 2027)",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_redundancy_breach",
+        "kind": "risk",
+        "label": "Compulsory Redundancy Constraint Breach",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "risk_savings_shortfall",
+        "kind": "risk",
+        "label": "Savings Shortfall vs £4m Target",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "trace": {
+      "engine": {
+        "model": "claude-sonnet-4-6",
+        "version": "1.12.0",
+        "provider": "anthropic"
+      },
+      "pipeline": {
+        "enrich": {
+          "source": "unified_pipeline",
+          "called_count": 1,
+          "factors_added": 0,
+          "extraction_mode": "v4_complete_skip",
+          "factors_skipped": 0,
+          "factors_enhanced": 0
+        },
+        "repair": {
+          "edge_restore": {
+            "restoredCount": 0
+          },
+          "deterministic_sweep": {
+            "sweep_ran": true,
+            "status_quo": {
+              "fixed": false,
+              "marked_droppable": false
+            },
+            "edge_format": "V1_FLAT",
+            "graph_delta": {
+              "edges_after": 33,
+              "nodes_after": 20,
+              "edges_before": 33,
+              "nodes_before": 20
+            },
+            "rescue_score": 17,
+            "repairs_count": 7,
+            "sweep_version": "v3",
+            "bucket_summary": {
+              "a": 0,
+              "b": 4,
+              "c": 0
+            },
+            "violations_after": 0,
+            "llm_repair_needed": false,
+            "violations_before": 4,
+            "factor_goal_splits": 0,
+            "unreachable_factors": {
+              "reclassified": [
+                "fac_change_saturation",
+                "fac_iso_risk",
+                "fac_vendor_pricing"
+              ],
+              "marked_droppable": []
+            },
+            "complexity_cap_pruned": 0,
+            "goal_threshold_stripped": 0,
+            "disconnected_options_after": [],
+            "disconnected_options_before": [],
+            "option_goal_shortcuts_removed": 0,
+            "option_goal_shortcuts_skipped": 0,
+            "option_risk_shortcuts_removed": 0,
+            "option_risk_shortcuts_skipped": 0,
+            "option_goal_shortcuts_rerouted": 0,
+            "option_risk_shortcuts_rerouted": 0,
+            "disconnected_observables_pruned": [],
+            "goal_threshold_possibly_inferred": 0,
+            "option_outcome_shortcuts_removed": 0,
+            "option_outcome_shortcuts_skipped": 0,
+            "remaining_forbidden_edges_removed": 0
+          },
+          "deterministic_enforcement": {
+            "ran": true,
+            "blocked": false,
+            "total_repairs": 1,
+            "nodes_rescaled": 1,
+            "bridge_chains_removed": 0,
+            "bridge_goal_edges_added": 0,
+            "edges_skipped_non_finite": 0,
+            "post_validation_error_count": 0,
+            "post_validation_warning_count": 1
+          }
+        },
+        "status": "success",
+        "llm_raw": {
+          "text": "{\"nodes\":[{\"id\":\"dec_opex\",\"kind\":\"decision\",\"label\":\"£4m Opex Reduction Strategy\"},{\"id\":\"opt_offshore\",\"kind\":\"option\",\"label\":\"Offshore Support (TaskUs)\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.45},{\"factor_id\":\"fac_automation_scale\",\"value\":0.0},{\"factor_id\":\"fac_office_closure\",\"value\":0.0}]},\"is_baseline\":false},{\"id\":\"opt_automate\",\"kind\":\"option\",\"label\":\"Automation-Led Reduction\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.0},{\"factor_id\":\"fac_automation_scale\",\"value\":0.8},{\"factor_id\":\"fac_office_closure\",\"value\":0.0}]},\"is_baseline\":false},{\"id\":\"opt_close_leeds\",\"kind\":\"option\",\"label\":\"Close Leeds Office\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.0},{\"factor_id\":\"fac_automation_scale\",\"value\":0.0},{\"factor_id\":\"fac_office_closure\",\"value\":1.0}]},\"is_baseline\":false},{\"id\":\"opt_combined\",\"kind\":\"option\",\"label\":\"Phased Combination (Offshore + Automate + Leeds)\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.3},{\"factor_id\":\"fac_automation_scale\",\"value\":0.5},{\"factor_id\":\"fac_office_closure\",\"value\":1.0}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Continue Current Operations (Status Quo)\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.0},{\"factor_id\":\"fac_automation_scale\",\"value\":0.0},{\"factor_id\":\"fac_office_closure\",\"value\":0.0}]},\"is_baseline\":true},{\"id\":\"fac_offshore_scale\",\"kind\":\"factor\",\"label\":\"Offshoring Scale (Support Roles)\",\"category\":\"controllable\",\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":0,\"unit\":\"£\",\"cap\":2900000,\"encoding_map\":\"{\\\"0\\\": \\\"No offshoring\\\", \\\"0.45\\\": \\\"45 roles offshored (~40% saving)\\\"}\",\"is_baseline\":true},\"prior\":null,\"intercept\":null},{\"id\":\"fac_automation_scale\",\"kind\":\"factor\",\"label\":\"Automation Deployment Scale\",\"category\":\"controllable\",\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":0,\"unit\":\"scale\",\"cap\":1,\"encoding_map\":\"{\\\"0\\\": \\\"No automation\\\", \\\"0.8\\\": \\\"Full deflection deployment\\\", \\\"0.5\\\": \\\"Partial deployment\\\"}\",\"is_baseline\":true},\"prior\":null,\"intercept\":null},{\"id\":\"fac_office_closure\",\"kind\":\"factor\",\"label\":\"Leeds Office Closure\",\"category\":\"controllable\",\"data\":{\"value\":0,\"extractionType\":\"inferred\",\"factor_type\":\"cost\",\"encoding_map\":\"{\\\"0\\\": \\\"Leeds office retained\\\", \\\"1\\\": \\\"Leeds office closed\\\"}\",\"is_baseline\":true},\"prior\":null,\"intercept\":null},{\"id\":\"fac_vendor_pricing\",\"kind\":\"factor\",\"label\":\"Automation Vendor Pricing at Renewal\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.5,\"range_max\":1.0}},{\"id\":\"fac_iso_risk\",\"kind\":\"factor\",\"label\":\"ISO 27001 Compliance Risk (Offshoring)\",\"category\":\"external\",\"prior\":{\"distribution\":\"uniform\",\"range_min\":0.3,\"range_max\":0.9}},{\"id\":\"fac_change_saturation\",\"kind\":\"factor\",\"label\":\"Organisational Change Saturation\",\"category\":\"observable\",\"data\":{\"value\":0.5,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"raw_value\":2,\"unit\":\"concurrent changes\",\"cap\":4,\"is_baseline\":true}},{\"id\":\"out_opex_savings\",\"kind\":\"outcome\",\"label\":\"Annualised Opex Savings Achieved\",\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"revenue\",\"raw_value\":0,\"unit\":\"£\",\"cap\":4000000}},{\"id\":\"out_csat\",\"kind\":\"outcome\",\"label\":\"Customer Satisfaction Retention\",\"data\":{\"value\":0.8,\"extractionType\":\"inferred\",\"factor_type\":\"quality\",\"raw_value\":4.1,\"unit\":\"Trustpilot score\",\"cap\":5}},{\"id\":\"risk_csat_drop\",\"kind\":\"risk\",\"label\":\"CSAT / Trustpilot Score Decline\"},{\"id\":\"risk_attrition\",\"kind\":\"risk\",\"label\":\"Leeds Staff Attrition\"},{\"id\":\"risk_redundancy_breach\",\"kind\":\"risk\",\"label\":\"Compulsory Redundancy Constraint Breach\"},{\"id\":\"risk_iso_audit\",\"kind\":\"risk\",\"label\":\"ISO 27001 Audit Failure (Jan 2027)\"},{\"id\":\"risk_savings_shortfall\",\"kind\":\"risk\",\"label\":\"Savings Shortfall vs £4m Target\"},{\"id\":\"goal_ebitda\",\"kind\":\"goal\",\"label\":\"Achieve EBITDA Breakeven by Q3 2027\",\"data\":null}],\"edges\":[{\"from\":\"dec_opex\",\"to\":\"opt_offshore\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_opex\",\"to\":\"opt_automate\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_opex\",\"to\":\"opt_close_leeds\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_opex\",\"to\":\"opt_combined\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"dec_opex\",\"to\":\"opt_status_quo\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_offshore\",\"to\":\"fac_offshore_scale\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_automate\",\"to\":\"fac_automation_scale\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_close_leeds\",\"to\":\"fac_office_closure\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_combined\",\"to\":\"fac_offshore_scale\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_combined\",\"to\":\"fac_automation_scale\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_combined\",\"to\":\"fac_office_closure\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_offshore_scale\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_automation_scale\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"opt_status_quo\",\"to\":\"fac_office_closure\",\"strength\":{\"mean\":1.0,\"std\":0.01},\"exists_probability\":1.0,\"effect_direction\":\"positive\"},{\"from\":\"fac_offshore_scale\",\"to\":\"out_opex_savings\",\"strength\":{\"mean\":0.55,\"std\":0.12},\"exists_probability\":0.88,\"effect_direction\":\"positive\"},{\"from\":\"fac_offshore_scale\",\"to\":\"risk_csat_drop\",\"strength\":{\"mean\":0.62,\"std\":0.18},\"exists_probability\":0.85,\"effect_direction\":\"positive\"},{\"from\":\"fac_offshore_scale\",\"to\":\"risk_iso_audit\",\"strength\":{\"mean\":0.55,\"std\":0.20},\"exists_probability\":0.75,\"effect_direction\":\"positive\"},{\"from\":\"fac_automation_scale\",\"to\":\"out_opex_savings\",\"strength\":{\"mean\":0.32,\"std\":0.14},\"exists_probability\":0.82,\"effect_direction\":\"positive\"},{\"from\":\"fac_automation_scale\",\"to\":\"out_csat\",\"strength\":{\"mean\":0.22,\"std\":0.10},\"exists_probability\":0.72,\"effect_direction\":\"positive\"},{\"from\":\"fac_office_closure\",\"to\":\"out_opex_savings\",\"strength\":{\"mean\":0.20,\"std\":0.08},\"exists_probability\":0.90,\"effect_direction\":\"positive\"},{\"from\":\"fac_office_closure\",\"to\":\"risk_attrition\",\"strength\":{\"mean\":0.55,\"std\":0.22},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_office_closure\",\"to\":\"risk_redundancy_breach\",\"strength\":{\"mean\":0.35,\"std\":0.18},\"exists_probability\":0.65,\"effect_direction\":\"positive\"},{\"from\":\"fac_vendor_pricing\",\"to\":\"out_opex_savings\",\"strength\":{\"mean\":-0.28,\"std\":0.14},\"exists_probability\":0.78,\"effect_direction\":\"negative\"},{\"from\":\"fac_iso_risk\",\"to\":\"risk_iso_audit\",\"strength\":{\"mean\":0.38,\"std\":0.16},\"exists_probability\":0.72,\"effect_direction\":\"positive\"},{\"from\":\"fac_change_saturation\",\"to\":\"risk_savings_shortfall\",\"strength\":{\"mean\":0.42,\"std\":0.15},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"fac_change_saturation\",\"to\":\"risk_attrition\",\"strength\":{\"mean\":0.25,\"std\":0.12},\"exists_probability\":0.70,\"effect_direction\":\"positive\"},{\"from\":\"out_opex_savings\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":0.70,\"std\":0.10},\"exists_probability\":0.95,\"effect_direction\":\"positive\"},{\"from\":\"out_csat\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":0.18,\"std\":0.10},\"exists_probability\":0.80,\"effect_direction\":\"positive\"},{\"from\":\"risk_csat_drop\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":-0.30,\"std\":0.12},\"exists_probability\":0.85,\"effect_direction\":\"negative\"},{\"from\":\"risk_attrition\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":-0.22,\"std\":0.12},\"exists_probability\":0.78,\"effect_direction\":\"negative\"},{\"from\":\"risk_redundancy_breach\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":-0.35,\"std\":0.15},\"exists_probability\":0.70,\"effect_direction\":\"negative\"},{\"from\":\"risk_iso_audit\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":-0.25,\"std\":0.14},\"exists_probability\":0.72,\"effect_direction\":\"negative\"},{\"from\":\"risk_savings_shortfall\",\"to\":\"goal_ebitda\",\"strength\":{\"mean\":-0.45,\"std\":0.12},\"exists_probability\":0.90,\"effect_direction\":\"negative\"}],\"goal_constraints\":[{\"constraint_id\":\"gc_savings_q2\",\"node_id\":\"out_opex_savings\",\"operator\":\">=\",\"value\":2500000,\"label\":\"£2.5m savings landed by end of Q2 2027\",\"unit\":\"£\",\"source_quote\":\"ideally £2.5m of it landed by end of Q2\",\"confidence\":0.9,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_redundancy\",\"node_id\":\"risk_redundancy_breach\",\"operator\":\"<=\",\"value\":0.1,\"label\":\"No more than one compulsory redundancy round in 12 months\",\"unit\":\"scale\",\"source_quote\":\"no more than one compulsory redundancy round in the next 12 months\",\"confidence\":1.0,\"provenance\":\"explicit\"},{\"constraint_id\":\"gc_ebitda_timing\",\"node_id\":\"goal_ebitda\",\"operator\":\">=\",\"value\":0.0,\"label\":\"EBITDA breakeven by Q3 2027\",\"unit\":\"£\",\"source_quote\":\"board wants breakeven by Q3 2027, non-negotiable\",\"confidence\":1.0,\"provenance\":\"explicit\"}]}",
+          "truncated": true,
+          "char_count": 9808,
+          "output_hash": "718cf894a4512d4f6384528586fe77f9dde25da5ac95fc8a7270dba7f35fdc32",
+          "output_preview": "{\"nodes\":[{\"id\":\"dec_opex\",\"kind\":\"decision\",\"label\":\"£4m Opex Reduction Strategy\"},{\"id\":\"opt_offshore\",\"kind\":\"option\",\"label\":\"Offshore Support (TaskUs)\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.45},{\"factor_id\":\"fac_automation_scale\",\"value\":0.0},{\"factor_id\":\"fac_office_closure\",\"value\":0.0}]},\"is_baseline\":false},{\"id\":\"opt_automate\",\"kind\":\"option\",\"label\":\"Automation-Led Reduction\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.0},{\"factor_id\":\"fac_automation_scale\",\"value\":0.8},{\"factor_id\":\"fac_office_closure\",\"value\":0.0}]},\"is_baseline\":false},{\"id\":\"opt_close_leeds\",\"kind\":\"option\",\"label\":\"Close Leeds Office\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.0},{\"factor_id\":\"fac_automation_scale\",\"value\":0.0},{\"factor_id\":\"fac_office_closure\",\"value\":1.0}]},\"is_baseline\":false},{\"id\":\"opt_combined\",\"kind\":\"option\",\"label\":\"Phased Combination (Offshore + Automate + Leeds)\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.3},{\"factor_id\":\"fac_automation_scale\",\"value\":0.5},{\"factor_id\":\"fac_office_closure\",\"value\":1.0}]},\"is_baseline\":false},{\"id\":\"opt_status_quo\",\"kind\":\"option\",\"label\":\"Continue Current Operations (Status Quo)\",\"data\":{\"value\":0.0,\"extractionType\":\"inferred\",\"factor_type\":\"other\",\"interventions\":[{\"factor_id\":\"fac_offshore_scale\",\"value\":0.0},{\"factor_id\":\"fac_automation_scale\",\"value\":0.0},{\"factor_id\":\"fac_office_closure\",\"value\":0.0}]},\"is_baseline\":true},{\"id\":\"fac_offshore_scale\",\"kind\":\"factor\",\"label\":\"Offshoring Scale (Support Roles)\",\"category\":\"controllable\",\"data\":{\"value\":0.0,\"extractionType\":\"explicit\",\"factor_type\":\"cost\",\"raw_value\":0,\"unit\":\"£\",\"cap\":2900000,\"encoding_map\":\"{\\\"0\\\": \\\"No of",
+          "output_edge_count": 33,
+          "output_node_count": 20,
+          "full_output_available": true
+        },
+        "final_graph": {
+          "edge_count": 33,
+          "node_count": 20,
+          "node_kinds": [
+            "decision",
+            "factor",
+            "goal",
+            "option",
+            "outcome",
+            "risk"
+          ]
+        },
+        "llm_quality": {
+          "risk_coefficient_corrections": 0
+        },
+        "llm_metadata": {
+          "seed": 17,
+          "model": "claude-sonnet-4-6",
+          "streamed": true,
+          "max_tokens": 8423,
+          "duration_ms": 41730,
+          "instance_id": "f67dc9b4",
+          "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "temperature": 0,
+          "token_usage": {
+            "total_tokens": 4001,
+            "prompt_tokens": 761,
+            "completion_tokens": 3240
+          },
+          "cache_age_ms": 464194,
+          "cache_status": "stale",
+          "finish_reason": "end_turn",
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "response_chars": 9808,
+          "time_to_edges_ms": 21303,
+          "use_staging_mode": true,
+          "prompt_text_version": "v195",
+          "runaway_abort_count": 0,
+          "runaway_abort_triggers": [],
+          "structured_outputs_used": true,
+          "salvaged_from_truncation": false
+        },
+        "cee_provenance": {
+          "model": "claude-sonnet-4-6",
+          "commit": "4b57b8f",
+          "version": "1.12.0",
+          "model_id": "claude-sonnet-4-6",
+          "capability": "draft_graph",
+          "prompt_hash": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+          "context_hash": "ea12face2020",
+          "pipeline_path": "unified",
+          "prompt_source": "supabase",
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "build_timestamp": "2026-08-08T16:11:58.029Z",
+          "prompt_store_version": 195,
+          "model_override_active": false,
+          "prompt_override_active": false,
+          "engine_base_url_configured": false
+        },
+        "llm_call_count": 1,
+        "repair_summary": {
+          "status_quo": {
+            "fixed": false,
+            "marked_droppable": false
+          },
+          "graph_delta": {
+            "edges_after": 33,
+            "nodes_after": 20,
+            "edges_before": 33,
+            "nodes_before": 20
+          },
+          "bucket_summary": {
+            "a": 0,
+            "b": 4,
+            "c": 0
+          },
+          "llm_repair_needed": false,
+          "status_quo_action": "none",
+          "unreachable_factors": {
+            "reclassified": [
+              "fac_change_saturation",
+              "fac_iso_risk",
+              "fac_vendor_pricing"
+            ],
+            "marked_droppable": []
+          },
+          "edge_format_detected": "V1_FLAT",
+          "deterministic_repairs": [
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_automation_scale].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_office_closure].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "CONTROLLABLE_MISSING_DATA",
+              "path": "nodes[fac_offshore_scale].data",
+              "action": "Populated missing required fields with defaults"
+            },
+            {
+              "code": "OBSERVABLE_EXTRA_DATA",
+              "path": "nodes[fac_change_saturation].data",
+              "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_change_saturation].category",
+              "action": "Reclassified unreachable factor \"Organisational Change Saturation\" to external with synthesised prior [0.25, 0.75]",
+              "prior_synthesised": true,
+              "synthesised_range": {
+                "range_max": 0.75,
+                "range_min": 0.25
+              }
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_iso_risk].category",
+              "action": "Reclassified unreachable factor \"ISO 27001 Compliance Risk (Offshoring)\" to external"
+            },
+            {
+              "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "path": "nodes[fac_vendor_pricing].category",
+              "action": "Reclassified unreachable factor \"Automation Vendor Pricing at Renewal\" to external"
+            },
+            {
+              "code": "INBOUND_BUDGET_RESCALED",
+              "path": "edges[*→out_opex_savings]",
+              "action": "Rescaled 4 causal inbound edges from sum=1.350 to 0.95"
+            }
+          ],
+          "deterministic_sweep_ran": true,
+          "remaining_violation_codes": [],
+          "remaining_violations_count": 0,
+          "deterministic_repairs_count": 8,
+          "deterministic_sweep_version": "v3",
+          "risk_coefficient_corrections": []
+        },
+        "field_deletions": {
+          "count": 3,
+          "events": [
+            {
+              "field": "data.factor_type",
+              "stage": "deterministic-sweep",
+              "reason": "OBSERVABLE_EXTRA_DATA",
+              "node_id": "fac_change_saturation"
+            },
+            {
+              "field": "data.value",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_change_saturation"
+            },
+            {
+              "field": "data",
+              "stage": "unreachable-factors",
+              "reason": "UNREACHABLE_FACTOR_RECLASSIFIED",
+              "node_id": "fac_change_saturation"
+            }
+          ],
+          "stages": [
+            "deterministic-sweep",
+            "unreachable-factors"
+          ],
+          "reasons": [
+            "OBSERVABLE_EXTRA_DATA",
+            "UNREACHABLE_FACTOR_RECLASSIFIED"
+          ]
+        },
+        "plan_annotation": {
+          "plan_id": "9b7250fb-d7a2-46ab-b3fc-cf7c4140ea6c",
+          "model_id": "claude-sonnet-4-6",
+          "plan_hash": "943dca70e0ca",
+          "confidence": {
+            "overall": 0.85,
+            "structure": 1,
+            "parameters": 1
+          },
+          "open_questions": [],
+          "prompt_version": "draft_graph_default@v195 (staging)",
+          "context_hash_v0": "338c52fbf921",
+          "stage3_rationales": []
+        },
+        "stage_snapshots": {
+          "stage_1_parse": {
+            "goal_node_id": "goal_ebitda",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_3_enrich": {
+            "goal_node_id": "goal_ebitda",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_4_repair": {
+            "goal_node_id": "goal_ebitda",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_5_package": {
+            "goal_node_id": "goal_ebitda",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          },
+          "stage_4b_threshold_sweep": {
+            "goal_node_id": "goal_ebitda",
+            "goal_threshold": "absent",
+            "goal_threshold_cap": "absent",
+            "goal_threshold_raw": "absent",
+            "goal_threshold_unit": "absent",
+            "goal_constraints_count": 0
+          }
+        },
+        "threshold_sweep": {
+          "ran": true,
+          "codes": [],
+          "duration_ms": 0,
+          "goals_checked": 1,
+          "strips_applied": 0,
+          "warnings_emitted": 0
+        },
+        "diagnostic_checks": {
+          "cee_trace_present": true,
+          "llm_raw_available": true,
+          "intercept_populated": false,
+          "is_baseline_present": true,
+          "confidence_unique_values": [
+            0.65,
+            0.7,
+            0.72,
+            0.75,
+            0.78,
+            0.8,
+            0.82,
+            0.85,
+            0.88,
+            0.9,
+            0.95
+          ],
+          "confidence_differentiated": true
+        },
+        "total_duration_ms": 77436,
+        "validation_summary": {
+          "model_notes": [
+            "[brief_ambiguity] The extrapolation from the 6-week automation pilot assumes vendor pricing holds at renewal, which is uncertain.",
+            "[topology_concern] Potential mitigation through sublease sale or hybrid office sharing is not modeled.",
+            "[missing_factor] Staff morale is not explicitly represented despite its known impact on attrition and productivity."
+          ],
+          "bias_offsets": {
+            "strength_std": 0,
+            "strength_mean": -0.046086956521739136,
+            "exists_probability": -0.020000000000000018
+          },
+          "contested_count": 11,
+          "lint_corrections": 14,
+          "pass2_latency_ms": 34120,
+          "total_edges_validated": 19,
+          "total_pipeline_latency_ms": 34124
+        },
+        "pipeline_checkpoints": [
+          {
+            "stage": "post_adapter_normalisation",
+            "edge_count": 33,
+            "node_count": 20,
+            "sample_edges": [
+              {
+                "to": "opt_automate",
+                "from": "dec_opex",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "out_csat",
+                "from": "fac_automation_scale",
+                "strength_std": 0.1,
+                "belief_exists": 0.72,
+                "strength_mean": 0.22,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "goal_ebitda",
+                "from": "out_csat",
+                "strength_std": 0.1,
+                "belief_exists": 0.8,
+                "strength_mean": 0.18,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 0,
+              "strength_std": 33,
+              "belief_exists": 33,
+              "strength_mean": 33,
+              "effect_direction": 33
+            },
+            "node_field_presence": {
+              "option_nodes_total": 5,
+              "options_with_interventions": 5
+            },
+            "nested_strength_detected": true
+          },
+          {
+            "stage": "post_stabilisation",
+            "edge_count": 33,
+            "node_count": 20,
+            "sample_edges": [
+              {
+                "to": "opt_automate",
+                "from": "dec_opex",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "out_csat",
+                "from": "fac_automation_scale",
+                "strength_std": 0.1,
+                "belief_exists": 0.72,
+                "strength_mean": 0.22,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "goal_ebitda",
+                "from": "out_csat",
+                "strength_std": 0.1,
+                "belief_exists": 0.8,
+                "strength_mean": 0.18,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 33,
+              "strength_std": 33,
+              "belief_exists": 33,
+              "strength_mean": 33,
+              "effect_direction": 33
+            },
+            "node_field_presence": {
+              "option_nodes_total": 5,
+              "options_with_interventions": 5
+            }
+          },
+          {
+            "stage": "pre_boundary",
+            "edge_count": 33,
+            "node_count": 20,
+            "sample_edges": [
+              {
+                "to": "opt_automate",
+                "from": "dec_opex",
+                "strength_std": 0.01,
+                "belief_exists": 1,
+                "strength_mean": 1,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "out_csat",
+                "from": "fac_automation_scale",
+                "strength_std": 0.1,
+                "belief_exists": 0.72,
+                "strength_mean": 0.22,
+                "effect_direction": "positive"
+              },
+              {
+                "to": "goal_ebitda",
+                "from": "out_csat",
+                "strength_std": 0.1,
+                "belief_exists": 0.8,
+                "strength_mean": 0.18,
+                "effect_direction": "positive"
+              }
+            ],
+            "edge_field_presence": {
+              "weight": 33,
+              "strength_std": 33,
+              "belief_exists": 33,
+              "strength_mean": 33,
+              "effect_direction": 33
+            },
+            "node_field_presence": {
+              "option_nodes_total": 5,
+              "options_with_interventions": 5
+            }
+          }
+        ],
+        "pipeline_checkpoints_meta": {
+          "enabled": true,
+          "total_count": 3,
+          "adapter_count": 1,
+          "pipeline_count": 2
+        }
+      },
+      "request_id": "229ed031-9558-4cc8-8fff-11d836771d98",
+      "correlation_id": "229ed031-9558-4cc8-8fff-11d836771d98",
+      "repair_summary": {
+        "status_quo": {
+          "fixed": false,
+          "marked_droppable": false
+        },
+        "graph_delta": {
+          "edges_after": 33,
+          "nodes_after": 20,
+          "edges_before": 33,
+          "nodes_before": 20
+        },
+        "bucket_summary": {
+          "a": 0,
+          "b": 4,
+          "c": 0
+        },
+        "llm_repair_needed": false,
+        "status_quo_action": "none",
+        "unreachable_factors": {
+          "reclassified": [
+            "fac_change_saturation",
+            "fac_iso_risk",
+            "fac_vendor_pricing"
+          ],
+          "marked_droppable": []
+        },
+        "edge_format_detected": "V1_FLAT",
+        "deterministic_repairs": [
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_automation_scale].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_office_closure].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "CONTROLLABLE_MISSING_DATA",
+            "path": "nodes[fac_offshore_scale].data",
+            "action": "Populated missing required fields with defaults"
+          },
+          {
+            "code": "OBSERVABLE_EXTRA_DATA",
+            "path": "nodes[fac_change_saturation].data",
+            "action": "Removed factor_type, uncertainty_drivers, and empty interventions sentinel (extra for observable)"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_change_saturation].category",
+            "action": "Reclassified unreachable factor \"Organisational Change Saturation\" to external with synthesised prior [0.25, 0.75]",
+            "prior_synthesised": true,
+            "synthesised_range": {
+              "range_max": 0.75,
+              "range_min": 0.25
+            }
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_iso_risk].category",
+            "action": "Reclassified unreachable factor \"ISO 27001 Compliance Risk (Offshoring)\" to external"
+          },
+          {
+            "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+            "path": "nodes[fac_vendor_pricing].category",
+            "action": "Reclassified unreachable factor \"Automation Vendor Pricing at Renewal\" to external"
+          },
+          {
+            "code": "INBOUND_BUDGET_RESCALED",
+            "path": "edges[*→out_opex_savings]",
+            "action": "Rescaled 4 causal inbound edges from sum=1.350 to 0.95"
+          }
+        ],
+        "deterministic_sweep_ran": true,
+        "remaining_violation_codes": [],
+        "remaining_violations_count": 0,
+        "deterministic_repairs_count": 8,
+        "deterministic_sweep_version": "v3",
+        "risk_coefficient_corrections": []
+      },
+      "transform_defaults": {
+        "defaults": [],
+        "total_defaults": 0,
+        "defaulted_edge_count": 0
+      }
+    },
+    "options": [
+      {
+        "id": "opt_automate",
+        "label": "Automation-Led Reduction",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0.8,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_close_leeds",
+        "label": "Close Leeds Office",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_combined",
+        "label": "Phased Combination (Offshore + Automate + Leeds)",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0.3,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0.5,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_offshore",
+        "label": "Offshore Support (TaskUs)",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": false,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0.45,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Continue Current Operations (Status Quo)",
+        "status": "ready",
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "is_baseline": true,
+        "interventions": {
+          "fac_office_closure": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_office_closure",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_offshore_scale": {
+            "unit": "£",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_offshore_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_automation_scale": {
+            "unit": "scale",
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_automation_scale",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        }
+      }
+    ],
+    "quality": {
+      "safety": 8,
+      "overall": 9,
+      "coverage": 10,
+      "structure": 8,
+      "structural_proxy": 8
+    },
+    "_timings": {
+      "draft_graph": {
+        "parse_ms": 41781,
+        "total_ms": 77449,
+        "enrich_ms": 29,
+        "repair_ms": 94,
+        "package_ms": 18,
+        "boundary_ms": 12,
+        "normalise_ms": 1,
+        "parse_llm_ms": 41730,
+        "repair_fired": false,
+        "repair_reason": null,
+        "repair_attempts": 0,
+        "coaching_pass_ms": 28456,
+        "threshold_sweep_ms": 3,
+        "validation_pipeline_ms": 34125
+      }
+    },
+    "coaching": {
+      "summary": "The decision has good structural coverage of the three main levers and their risks, but several critical uncertainties are unquantified and one important constraint interaction is underexplored. Sharpening those gaps before the offsite will make the exec conversation much more productive.",
+      "bias_signals": [
+        {
+          "type": "overconfidence",
+          "detail": "The brief states 'Jamie extrapolates that to £800k/yr saving but it assumes vendor pricing holds at renewal' while simultaneously noting 'the vendor knows we're locked in' — the planning figure is being treated as reliable despite an acknowledged negotiating disadvantage.",
+          "target": "fac_vendor_pricing"
+        },
+        {
+          "type": "narrow_framing",
+          "detail": "The brief notes 'nobody has modelled the attrition hit' for Leeds closure and offers only 'my guess: we'd lose 10-15%' — a consequential input to both the redundancy constraint and the savings outcome is being carried as an unexamined assumption rather than a range to be bounded.",
+          "target": "risk_attrition"
+        },
+        {
+          "type": "anchoring",
+          "detail": "The competitor's Trustpilot drop from 4.1 to 3.3 is described as 'not exactly science' yet is the sole reference point shaping the CSAT risk framing for offshoring — the brief's own caveat signals this anchor may be distorting the risk assessment.",
+          "target": "risk_csat_drop"
+        }
+      ],
+      "widening_log": {
+        "elements_added": [],
+        "brief_completeness": "partial",
+        "elements_considered_but_excluded": [
+          "Revenue upside scenario (+8% sales forecast) — excluded because the brief explicitly discounts it based on prior-year miss and the goal is cost-side only",
+          "Dana's across-the-board RIF option — excluded because the brief frames it as ruled out by the redundancy constraint and CEO position, so it does not add decision value"
+        ]
+      },
+      "strengthen_items": [
+        {
+          "id": "add-iso-constraint",
+          "label": "Treat ISO 27001 audit as a hard timing constraint, not just a risk",
+          "detail": "The January 2027 renewal audit sits before the Q2 2027 savings deadline, so any offshoring scale decision needs a confirmed compliance position first — currently the brief flags this as 'unknown', which means it could silently block the offshore lever entirely.",
+          "action_type": "add_constraint",
+          "bias_category": "overconfidence"
+        },
+        {
+          "id": "add-vendor-lock-risk",
+          "label": "Stress-test the automation savings figure against vendor renewal leverage",
+          "detail": "The brief explicitly notes 'the vendor knows we're locked in' at November renewal, yet the savings figure used in planning assumes pricing holds — this asymmetry should be surfaced as a distinct scenario before the automation scale decision is made.",
+          "action_type": "add_risk",
+          "bias_category": "overconfidence"
+        },
+        {
+          "id": "add-leeds-sublease-option",
+          "label": "Formalise the Leeds sublease or office-share as a distinct option",
+          "detail": "The brief raises selling sublease rights or a three-day share with WPP's local outfit as ways to capture the £600k lease saving without triggering the attrition and redundancy-breach risks that full closure carries — this alternative path deserves its own evaluation rather than remaining 'half-formed'.",
+          "action_type": "add_option"
+        },
+        {
+          "id": "reframe-change-saturation",
+          "label": "Make change saturation a sequencing constraint, not just a background factor",
+          "detail": "The ops director's explicit cap of two major changes in parallel — grounded in the 2024 migration experience — should be encoded as a hard sequencing rule that shapes which combinations of levers are even feasible, rather than treated as a soft concern.",
+          "action_type": "reframe_goal"
+        }
+      ]
+    },
+    "goal_node_id": "goal_ebitda",
+    "causal_claims": [
+      {
+        "to": "risk_csat_drop",
+        "from": "fac_offshore_scale",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "out_opex_savings",
+        "from": "fac_vendor_pricing",
+        "type": "direct_effect",
+        "stated_strength": "strong"
+      },
+      {
+        "to": "risk_attrition",
+        "from": "fac_office_closure",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "risk_savings_shortfall",
+        "from": "fac_change_saturation",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "risk_iso_audit",
+        "from": "fac_iso_risk",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "risk_redundancy_breach",
+        "from": "fac_office_closure",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "out_opex_savings",
+        "from": "fac_automation_scale",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      },
+      {
+        "to": "risk_attrition",
+        "from": "fac_change_saturation",
+        "type": "direct_effect",
+        "stated_strength": "moderate"
+      }
+    ],
+    "topology_plan": [],
+    "analysis_ready": {
+      "status": "ready",
+      "options": [
+        {
+          "id": "opt_automate",
+          "label": "Automation-Led Reduction",
+          "status": "ready",
+          "interventions": {
+            "fac_office_closure": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_offshore_scale": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "£0"
+            },
+            "fac_automation_scale": {
+              "value": 0.8,
+              "source": "brief_extraction",
+              "display_value": "0 scale"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_office_closure": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_offshore_scale": {
+              "unit": "£",
+              "raw_value": 0,
+              "display_value": "£0",
+              "normalised_value": 0
+            },
+            "fac_automation_scale": {
+              "unit": "scale",
+              "raw_value": 0,
+              "display_value": "0 scale",
+              "normalised_value": 0.8
+            }
+          }
+        },
+        {
+          "id": "opt_close_leeds",
+          "label": "Close Leeds Office",
+          "status": "ready",
+          "interventions": {
+            "fac_office_closure": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_offshore_scale": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "£0"
+            },
+            "fac_automation_scale": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "0 scale"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_office_closure": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            },
+            "fac_offshore_scale": {
+              "unit": "£",
+              "raw_value": 0,
+              "display_value": "£0",
+              "normalised_value": 0
+            },
+            "fac_automation_scale": {
+              "unit": "scale",
+              "raw_value": 0,
+              "display_value": "0 scale",
+              "normalised_value": 0
+            }
+          }
+        },
+        {
+          "id": "opt_combined",
+          "label": "Phased Combination (Offshore + Automate + Leeds)",
+          "status": "ready",
+          "interventions": {
+            "fac_office_closure": {
+              "value": 1,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_offshore_scale": {
+              "value": 0.3,
+              "source": "brief_extraction",
+              "display_value": "£0"
+            },
+            "fac_automation_scale": {
+              "value": 0.5,
+              "source": "brief_extraction",
+              "display_value": "0 scale"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_office_closure": {
+              "display_value": "Low (0)",
+              "normalised_value": 1
+            },
+            "fac_offshore_scale": {
+              "unit": "£",
+              "raw_value": 0,
+              "display_value": "£0",
+              "normalised_value": 0.3
+            },
+            "fac_automation_scale": {
+              "unit": "scale",
+              "raw_value": 0,
+              "display_value": "0 scale",
+              "normalised_value": 0.5
+            }
+          }
+        },
+        {
+          "id": "opt_offshore",
+          "label": "Offshore Support (TaskUs)",
+          "status": "ready",
+          "interventions": {
+            "fac_office_closure": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_offshore_scale": {
+              "value": 0.45,
+              "source": "brief_extraction",
+              "display_value": "£0"
+            },
+            "fac_automation_scale": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "0 scale"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_office_closure": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_offshore_scale": {
+              "unit": "£",
+              "raw_value": 0,
+              "display_value": "£0",
+              "normalised_value": 0.45
+            },
+            "fac_automation_scale": {
+              "unit": "scale",
+              "raw_value": 0,
+              "display_value": "0 scale",
+              "normalised_value": 0
+            }
+          }
+        },
+        {
+          "id": "opt_status_quo",
+          "label": "Continue Current Operations (Status Quo)",
+          "status": "ready",
+          "is_baseline": true,
+          "interventions": {
+            "fac_office_closure": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "Low (0)"
+            },
+            "fac_offshore_scale": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "£0"
+            },
+            "fac_automation_scale": {
+              "value": 0,
+              "source": "brief_extraction",
+              "display_value": "0 scale"
+            }
+          },
+          "status_reason": "3 intervention(s) ready for analysis",
+          "extraction_metadata": {
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "confidence": "high"
+          },
+          "intervention_details": {
+            "fac_office_closure": {
+              "display_value": "Low (0)",
+              "normalised_value": 0
+            },
+            "fac_offshore_scale": {
+              "unit": "£",
+              "raw_value": 0,
+              "display_value": "£0",
+              "normalised_value": 0
+            },
+            "fac_automation_scale": {
+              "unit": "scale",
+              "raw_value": 0,
+              "display_value": "0 scale",
+              "normalised_value": 0
+            }
+          }
+        }
+      ],
+      "goal_node_id": "goal_ebitda",
+      "bias_findings": [],
+      "model_adjustments": [
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_change_saturation].category",
+          "reason": "Reclassified unreachable factor \"Organisational Change Saturation\" to external with synthesised prior [0.25, 0.75]",
+          "source": "deterministic_sweep",
+          "node_id": "fac_change_saturation"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_iso_risk].category",
+          "reason": "Reclassified unreachable factor \"ISO 27001 Compliance Risk (Offshoring)\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_iso_risk"
+        },
+        {
+          "code": "category_reclassified",
+          "field": "nodes[fac_vendor_pricing].category",
+          "reason": "Reclassified unreachable factor \"Automation Vendor Pricing at Renewal\" to external",
+          "source": "deterministic_sweep",
+          "node_id": "fac_vendor_pricing"
+        }
+      ]
+    },
+    "draft_warnings": [
+      {
+        "id": "goal_no_baseline_value",
+        "edge_ids": [],
+        "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison",
+        "node_ids": [
+          "goal_ebitda"
+        ],
+        "severity": "low",
+        "explanation": "Goal node has no observed_state.value set.",
+        "affected_edge_ids": [],
+        "affected_node_ids": [
+          "goal_ebitda"
+        ]
+      }
+    ],
+    "schema_version": "3.0",
+    "_pipeline_outcome": {
+      "warnings": [],
+      "llm_repair": {
+        "outcome": "skipped",
+        "attempts": 0,
+        "triggered": false,
+        "fallback_reason": null
+      },
+      "rescue_score": 17,
+      "graph_drafted": true,
+      "coaching_status": "complete",
+      "enrichment_status": "complete",
+      "repair_provenance": [
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_automation_scale].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_office_closure].data"
+        },
+        {
+          "code": "CONTROLLABLE_MISSING_DATA",
+          "rule": "CONTROLLABLE_MISSING_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_offshore_scale].data"
+        },
+        {
+          "code": "OBSERVABLE_EXTRA_DATA",
+          "rule": "OBSERVABLE_EXTRA_DATA",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "fallback_default",
+          "node_or_edge_id": "nodes[fac_change_saturation].data"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_change_saturation].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_iso_risk].category"
+        },
+        {
+          "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "nodes[fac_vendor_pricing].category"
+        },
+        {
+          "code": "INBOUND_BUDGET_RESCALED",
+          "rule": "INBOUND_BUDGET_RESCALED",
+          "after": null,
+          "field": "graph",
+          "before": null,
+          "source": "structure",
+          "node_or_edge_id": "edges[*→out_opex_savings]"
+        }
+      ],
+      "validation_status": "passed",
+      "verification_status": "passed",
+      "factor_value_coverage": {
+        "total": 6,
+        "explicit": 2,
+        "fallback_default": 3,
+        "inferred_with_evidence": 1
+      },
+      "graph_structurally_valid": true,
+      "edge_strength_unique_count": 18,
+      "deterministic_sweep_violations": 0
+    },
+    "validation_warnings": [
+      {
+        "code": "OPTION_SIMILARITY",
+        "details": {
+          "jaccard": 1,
+          "optionA": "opt_combined",
+          "optionB": "opt_status_quo"
+        },
+        "message": "Options \"Phased Combination (Offshore + Automate + Leeds)\" and \"Continue Current Operations (Status Quo)\" affect the same factors (Jaccard 1.00). Consider whether they represent genuinely different approaches.",
+        "severity": "info",
+        "suggestion": "Options affect the same factors — consider whether they represent genuinely different approaches"
+      }
+    ]
+  }
+}
