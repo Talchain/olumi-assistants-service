@@ -48,27 +48,37 @@
  * alone, not the badge: the triple without it is still true.
  */
 
+import { DskClaimProvenanceSchema } from '@talchain/schemas/boundary';
+import type { DskClaimProvenance as ContractDskClaimProvenance } from '@talchain/schemas/boundary';
+
 import type { DSKClaim, DSKProtocol } from '../../dsk/types.js';
 import { loadVerifiedDskBundle, _resetDskBundleCache } from './dsk-bundle-record.js';
 
 /**
- * The wire shape, structurally identical to schemas'
- * `DskClaimProvenanceSchema`. Declared here (rather than imported) only so this
- * module has no boundary-schema import in its hot path; the emitted value is
- * parsed against the real contract by `validateProseAndSchemaOrDrop` at the
- * block gate, and `dsk-claim-provenance-wire.test.ts` asserts the two agree.
+ * The wire shape — TAKEN FROM THE CONTRACT, not restated.
+ *
+ * ⚠ THIS WAS A HAND-WRITTEN COPY, AND ITS OWN DEFENCE CITED A GUARD THAT DOES
+ * NOT EXIST. The comment here read "…and `dsk-claim-provenance-wire.test.ts`
+ * asserts the two agree". There is no such file: the name was adapted from the
+ * PROTOCOL arm's `dsk-protocol-provenance-wire.test.ts`, which is real. The
+ * substance of the pin does exist — `__tests__/dsk-claim-record.test.ts`,
+ * describe "the local interface agrees with the pinned contract" — so the
+ * defence was true and its CITATION was false, which is trap 14's shape: a
+ * label nobody re-reads teaches every later reader that a copy is guarded.
+ *
+ * The copy is now gone rather than re-cited. `claim_id`, `protocol_id`, the
+ * non-empty title and the four-value strength enum are all
+ * `DskClaimProvenanceSchema`'s, so they cannot drift from the contract that
+ * `validateProseAndSchemaOrDrop` parses against at the block gate.
  */
-export interface DskClaimProvenance {
-  readonly claim_id: string;
-  readonly claim_title: string;
-  readonly evidence_strength: 'strong' | 'medium' | 'weak' | 'mixed';
-  readonly protocol_id?: string;
-}
+export type DskClaimProvenance = Readonly<ContractDskClaimProvenance>;
 
-/** `DskClaimProvenanceSchema.claim_id` — the claim arms of the id grammar. */
-const CLAIM_ID_RE = /^DSK-(B|T)-\d{3}$/;
-
-/** `DskClaimProvenanceSchema.protocol_id`. */
+/**
+ * `DskClaimProvenanceSchema.protocol_id`, read off the contract rather than
+ * re-spelled. The OPTIONAL protocol id is validated separately from the triple
+ * because a protocol that fails the grammar costs the protocol id alone, not
+ * the badge — so it must be tested BEFORE it is attached.
+ */
 const PROTOCOL_ID_RE = /^DSK-P-\d{3}$/;
 
 interface ClaimRecord {
@@ -123,29 +133,22 @@ function loadClaimIndex(): ReadonlyMap<string, ClaimRecord> | null {
  * bundle bytes.
  */
 export function resolveDskClaimProvenance(claimId: string): DskClaimProvenance | null {
-  if (!CLAIM_ID_RE.test(claimId)) return null;
+  // The id grammar, the non-empty title and the strength enum were four
+  // hand-written checks here. They are ONE `safeParse` against the contract
+  // now: same fail-closed outcome (`null`, never a partial or fabricated
+  // triple), and structurally unable to drift from the schema the block gate
+  // enforces. A tightening at a future pin REDs here instead of silently
+  // dropping every calibration card on staging.
   const record = loadClaimIndex()?.get(claimId);
   if (record === undefined) return null;
 
-  const title = record.claim.title;
-  if (typeof title !== 'string' || title.length === 0) return null;
-
-  const strength = record.claim.evidence_strength;
-  if (
-    strength !== 'strong' &&
-    strength !== 'medium' &&
-    strength !== 'weak' &&
-    strength !== 'mixed'
-  ) {
-    return null;
-  }
-
-  return {
+  const parsed = DskClaimProvenanceSchema.safeParse({
     claim_id: record.claim.id,
-    claim_title: title,
-    evidence_strength: strength,
+    claim_title: record.claim.title,
+    evidence_strength: record.claim.evidence_strength,
     ...(record.protocolId !== undefined ? { protocol_id: record.protocolId } : {}),
-  };
+  });
+  return parsed.success ? parsed.data : null;
 }
 
 /**

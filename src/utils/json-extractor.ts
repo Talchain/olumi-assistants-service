@@ -48,6 +48,14 @@ export interface JsonExtractionResult {
 export const MAX_SELECTABLE_DOCUMENTS = 8;
 
 /**
+ * ROADMAP 2.996 — how many CONSECUTIVE unmatched `{`/`[` the document scan will
+ * probe before giving up. See the note in `enumerateTopLevelJsonDocuments`:
+ * the scan is quadratic in a run of unmatched brackets, and real responses need
+ * ZERO failed probes before each document.
+ */
+const MAX_CONSECUTIVE_FAILED_PROBES = 64;
+
+/**
  * Options for JSON extraction
  */
 export interface JsonExtractionOptions {
@@ -326,6 +334,24 @@ export function enumerateTopLevelJsonDocuments(
 ): Array<{ json: unknown; content: string; startIndex: number }> {
   const documents: Array<{ json: unknown; content: string; startIndex: number }> = [];
   let i = 0;
+  // ⚠ CONSECUTIVE FAILED PROBES ARE BOUNDED, AND THE COST WITHOUT THE BOUND IS
+  // QUADRATIC. Every `{`/`[` runs the full bracket matcher; on a run of
+  // UNMATCHED brackets each probe scans to the end and fails. Measured on this
+  // tip in isolation: 4,000 -> 25.5 ms, 8,000 -> 101.7 ms, 16,000 -> 436.1 ms
+  // (x4 cost for x2 input, twice over). A response is model output on a request
+  // path, so its length is not ours to choose.
+  //
+  // The counter is of FAILED probes and RESETS on every accepted document, so
+  // it bounds a RUN of brace-bearing prose rather than a total: a long, healthy
+  // multi-document response is unaffected. Real data needs ZERO failed probes
+  // before each document, which is what makes this a bound nobody reaches
+  // rather than a behaviour change.
+  //
+  // ⚠ It caps the SELECTOR's contribution, not the hazard: the pre-existing
+  // core scan is the larger half of the cost at that input size, and is rowed
+  // separately. Stated here so the next reader does not mistake this for a fix
+  // to the quadratic response-scan problem in general.
+  let failedProbes = 0;
   while (i < trimmed.length && documents.length < maxDocuments) {
     const ch = trimmed[i];
     if (ch !== "{" && ch !== "[") {
@@ -334,9 +360,11 @@ export function enumerateTopLevelJsonDocuments(
     }
     const match = extractJsonWithBracketMatching(trimmed, i);
     if (!match) {
+      if (++failedProbes >= MAX_CONSECUTIVE_FAILED_PROBES) break;
       i++;
       continue;
     }
+    failedProbes = 0;
     documents.push({ json: match.json, content: match.content, startIndex: i });
     i += match.content.length;
   }
@@ -364,9 +392,16 @@ function selectAcceptedDocument(
 ): JsonExtractionResult | null {
   const { task, model, correlationId, logWarnings = true, includeRawContent = false } = options;
 
-  let budget = MAX_SELECTABLE_DOCUMENTS;
+  // ⚠ THE SEPARATE `budget` COUNTER IS GONE. It was seeded to
+  // `MAX_SELECTABLE_DOCUMENTS`, decremented by the first call below (against
+  // the core result, before the scan begins), and guarded a loop that
+  // `enumerateTopLevelJsonDocuments(trimmed, MAX_SELECTABLE_DOCUMENTS)` already
+  // bounds — so it could only ever subtract from the count the constant's own
+  // name promises. It happened not to bite, because document 0 is skipped by
+  // the identity check below WITHOUT consuming budget; that is a coincidence of
+  // the current control flow, not a property anyone stated. One bound, in one
+  // place, named for what it bounds.
   const accepts = (json: unknown): boolean => {
-    budget--;
     try {
       return acceptDocument(json);
     } catch {
@@ -385,7 +420,6 @@ function selectAcceptedDocument(
   if (documents.length <= 1) return null;
 
   for (let index = 0; index < documents.length; index++) {
-    if (budget <= 0) break;
     const doc = documents[index];
     // Skip the document the core extractor already chose (and we already
     // rejected) rather than paying for the predicate twice. Identified by
