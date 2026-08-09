@@ -16,6 +16,8 @@
  *   → normaliseDraftResponse
  *   → ensureControllableFactorBaselines
  *   → LLMDraftResponse.safeParse       (the adapter's own gate)
+ *   → Graph.safeParse                  (the canonical graph type, to BUILD the
+ *                                       validator's input rather than cast one)
  *   → validateGraph(...).valid         (the deterministic structural validator)
  *
  * There is no second definition of "a good graph" here (trap 21). The order
@@ -45,7 +47,7 @@ import {
 } from "./normalisation.js";
 import { LLMDraftResponse } from "./shared-schemas.js";
 import { validateGraph } from "../../validators/graph-validator.js";
-import type { GraphT } from "../../schemas/graph.js";
+import { Graph } from "../../schemas/graph.js";
 
 /**
  * True when the draft path would accept this document as a usable graph.
@@ -64,8 +66,13 @@ export function isUsableDraftDocument(document: unknown): boolean {
     const parsed = LLMDraftResponse.safeParse(response);
     if (!parsed.success) return false;
 
-    const graph = parsed.data as unknown as { nodes: unknown[]; edges: unknown[] };
-    return validateGraph({ graph: { nodes: graph.nodes, edges: graph.edges } as unknown as GraphT }).valid;
+    // `Graph` is the canonical graph type `validateGraph` declares it operates
+    // on, so parsing through it BUILDS the validator's input rather than
+    // asserting one into existence — no `as unknown as` at this boundary.
+    const graph = Graph.safeParse({ nodes: parsed.data.nodes, edges: parsed.data.edges });
+    if (!graph.success) return false;
+
+    return validateGraph({ graph: graph.data }).valid;
   } catch {
     return false;
   }

@@ -406,9 +406,18 @@ function selectAcceptedDocument(
         "Multi-document response: the first JSON document was rejected by the caller's acceptance predicate; a later complete document was selected (ROADMAP 2.996)"
       );
     }
-    emit("llm.json_extraction.document_selected", {
+    // Reuses the EXISTING extraction event rather than minting a new name.
+    // This is the same question that event already answers — "how was JSON
+    // extracted from this response?" — discriminated by `extraction_method`,
+    // exactly as `code_block` and `bracket_matching` already are. A separate
+    // event name would be a second concept for one question (and would grow a
+    // frozen registry mirrored across four sites).
+    emit(TelemetryEvents.JsonExtractionRequired ?? "llm.json_extraction.required", {
       task,
       model,
+      preamble_length: doc.startIndex,
+      suffix_length: suffixLength,
+      extraction_method: "document_selection",
       document_index: index,
       total_documents: documents.length,
       selected_document_bytes: doc.content.length,
