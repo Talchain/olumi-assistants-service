@@ -76,12 +76,20 @@ export interface JsonExtractionOptions {
    *
    * Two properties this shape guarantees, and they are why it is a predicate
    * rather than a score:
-   *   1. An accepted first document is NEVER displaced — so a complete first
-   *      document followed by a truncated second still yields the first.
+   *   1. A document the predicate ACCEPTS is never displaced.
    *   2. When NO document is accepted, the core extractor's result is returned
-   *      unchanged — so the fix can only ever turn an unusable outcome into a
-   *      usable one; it can never alter an outcome that was already usable, nor
-   *      one that no candidate could rescue.
+   *      unchanged.
+   *
+   * Stated exactly, and this is the whole of it: THE SELECTOR ONLY EVER
+   * REPLACES A DOCUMENT THAT FAILS THE PREDICATE WITH ONE THAT PASSES IT.
+   *
+   * ⚠ It does NOT follow that an outcome which would have been usable is
+   * preserved. That stronger claim needs the predicate to be at least as
+   * PERMISSIVE as the consuming pipeline, and the draft path's predicate is
+   * not — see the gap documented on `isUsableDraftDocument`
+   * (adapters/llm/draft-document-acceptance.ts). A caller whose pipeline
+   * REPAIRS documents before using them can have a repairable document
+   * displaced by a cleanly-valid but different one.
    *
    * The predicate must be TOTAL: a throw is treated as a rejection.
    */

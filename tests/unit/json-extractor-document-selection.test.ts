@@ -65,12 +65,39 @@ describe("extractJsonFromResponse — multi-document selection (2.996)", () => {
   });
 
   describe("the chooser never displaces an accepted first document", () => {
-    it("returns the FIRST document when it is accepted and a later one is truncated", () => {
-      // Discriminating case (trap 19 / requirement 3): first document complete,
-      // second document truncated. A "last document wins" rule picks the wrong one.
+    it("returns the FIRST document when BOTH it and a later document are acceptable", () => {
+      // NB the name: both documents here are COMPLETE and both are acceptable.
+      // This pins the short-circuit — an accepted first document is not even
+      // compared against later candidates. The genuinely-truncated case is the
+      // test below; keeping them apart matters, because only ONE of them can
+      // see a reversed scan order (see the mutant kit's M1 vs M1b).
       const first = { nodes: [{ id: "a" }], edges: [{ from: "a", to: "b" }], marker: "FIRST" };
       const second = { nodes: [{ id: "a" }], edges: [{ from: "a", to: "b" }], marker: "SECOND" };
       const raw = `${JSON.stringify(first)}\n\nActually, let me redo that.\n\n${JSON.stringify(second)}`;
+
+      const result = extractJsonFromResponse(raw, {
+        logWarnings: false,
+        acceptDocument: acceptsGraphWithEdges,
+      });
+      expect(identity(result.json)).toBe(identity(first));
+      expect((result.json as { marker: string }).marker).toBe("FIRST");
+      expect(result.documentIndex).toBeUndefined();
+    });
+
+    it("returns the FIRST document when it is complete and the SECOND is truncated", () => {
+      // The discriminating case the design was required to satisfy: a complete
+      // first document followed by a genuinely truncated one. Previously the
+      // test above CLAIMED this case in its name while its fixture held two
+      // complete documents — so the case was never actually exercised.
+      const first = { nodes: [{ id: "a" }], edges: [{ from: "a", to: "b" }], marker: "FIRST" };
+      const firstText = JSON.stringify(first);
+      const secondText = `{"nodes":[{"id":"a"}],"edges":[{"from":"a","to`; // cut mid-string
+      const raw = `${firstText}\n\nLet me expand that:\n\n${secondText}`;
+
+      // PRECONDITION, pinned in-test: the tail really is unparseable, so this
+      // cannot quietly degrade into "two complete documents" if the fixture
+      // is ever tidied.
+      expect(() => JSON.parse(secondText)).toThrow();
 
       const result = extractJsonFromResponse(raw, {
         logWarnings: false,

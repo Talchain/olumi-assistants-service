@@ -26,11 +26,44 @@
  * and THROWS on a document that carries no `edges` key at all — which is
  * precisely what three of the seven discarded first documents look like.
  *
- * ── The safety argument ──────────────────────────────────────────────────────
- * The selector only ever displaces a document this predicate REJECTS, with one
- * it ACCEPTS. Because the predicate is at least as strict as the draft path's
- * own acceptance, a displacement always swaps a document the pipeline would
- * have rejected for one it accepts. It cannot make a usable draft worse.
+ * ── What is guaranteed, exactly ──────────────────────────────────────────────
+ * THE SELECTOR ONLY EVER REPLACES A DOCUMENT THAT FAILS THIS PREDICATE WITH ONE
+ * THAT PASSES IT. That is the whole guarantee. Because any replacement must
+ * itself pass the full composition above, whatever the user receives is a
+ * structurally valid graph.
+ *
+ * ── ⚠ THE KNOWN GAP — READ THIS BEFORE CHANGING EITHER SIDE ──────────────────
+ * THIS PREDICATE IS STRICTER THAN WHAT THE DRAFT PATH ACTUALLY SHIPS. It asks
+ * "is this document cleanly valid AS IT STANDS?", while the pipeline asks "can
+ * this document be made valid?" — and the pipeline REPAIRS several classes of
+ * defect that `validateGraph` calls errors:
+ *
+ *   - `anthropic.ts` (the dangling-edge filter, `llm.draft.dangling_edges_removed`)
+ *     silently DROPS edges whose endpoints do not exist. `validateGraph` fails
+ *     the same shape with `INVALID_EDGE_REF`.
+ *   - `anthropic.ts` TRIMS over-cap node/edge counts. `validateGraph` fails them
+ *     with `NODE_LIMIT_EXCEEDED` / `EDGE_LIMIT_EXCEEDED`.
+ *   - Stage 4's deterministic sweep (`repair/deterministic-sweep.ts`) ALWAYS
+ *     auto-fixes Bucket A — `NAN_VALUE`, `SIGN_MISMATCH`, `INVALID_EDGE_REF`,
+ *     `GOAL_HAS_OUTGOING`, `DECISION_HAS_INCOMING`, `CYCLE_DETECTED`.
+ *
+ * CONSEQUENCE, demonstrated by execution and not merely argued: a document the
+ * pipeline would have ACCEPTED AFTER REPAIR can be rejected here and displaced
+ * by a different, cleanly-valid document. Injecting ONE dangling edge into the
+ * `armD-3` capture flips this predicate to `false` (`INVALID_EDGE_REF`), where
+ * the adapter alone would have dropped that single edge and kept the other 27.
+ * The harm ceiling is a WORSE BUT VALID graph — never a broken one — which is
+ * why the policy stands; but do not restate it as "cannot make a usable draft
+ * worse", because it can.
+ *
+ * REACHABILITY: constructible, and UNWITNESSED on the measured data. 0 of the
+ * 15 chosen documents in the 2026-08-09 corpus carry a dangling edge, and every
+ * rescue there is genuinely unusable→usable (the seven discarded first
+ * documents fail on `MISSING_GOAL` + `MISSING_BRIDGE` — Bucket C, which the
+ * sweep does NOT repair — or on a missing `edges` key). But the adapter would
+ * not carry a dedicated dangling-edge filter WITH TELEMETRY if it never fired.
+ * Closing the gap means modelling the repairs here, which duplicates pipeline
+ * logic; that trade-off is rowed, not decided in this file.
  *
  * ── Purity ───────────────────────────────────────────────────────────────────
  * `normaliseDraftResponse` MUTATES its argument in place, and the pipeline
