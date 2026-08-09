@@ -25,6 +25,7 @@ import { setTestSink, TelemetryEvents, VALID_EVENT_NAMES } from '../../../utils/
 import {
   buildLensSurface,
   composeFragileEdgeActionPrompt,
+  composeFragileEdgeNaming,
   FRAGILE_EDGE_ACTION_LABEL,
   type BlockBuildCtx,
 } from '../phase3-blocks.js';
@@ -214,6 +215,141 @@ describe('A1-T9 the acceptance turn routes to edit_graph', () => {
     );
     expect(EDIT_GRAPH_POSITIVE_REGEX.test(surface.suggestion.action_prompt!)).toBe(true);
     expect(EDIT_GRAPH_NEGATIVE_REGEX.test(surface.suggestion.action_prompt!)).toBe(false);
+  });
+});
+
+// ============================================================================
+// 2b. CEE #883 — THE GATES ARE ENFORCED ON PRODUCER DATA, NOT JUST ASSERTED ON
+//     THIS LANE'S OWN FIXTURE LABELS.
+//
+//     The assertions ABOVE are all bound to labels this lane chose, and every
+//     one of them dispatches. That is precisely the shape trap 22 warns about:
+//     a corpus from the author's head cannot see the class the author did not
+//     imagine. The gates are evaluated by `route-v2.ts` over the WHOLE message,
+//     and the message CONTAINS PRODUCER-AUTHORED ENDPOINT LABELS — so the veto
+//     set (`flip`, `why`, `compare`, `describe`, `explain`, `show me`,
+//     `tell me`, `set up`, `how does`) is reachable through ORDINARY STRATEGIC
+//     VOCABULARY in a node label. Without a runtime check the block ships, the
+//     lens wins, `scanProse` passes, the user accepts "Adjust this
+//     relationship" — and the model does not change. An inert chip (2.770).
+// ============================================================================
+
+/**
+ * Rewrite the SELECTED edge's labels on a clone, and return the mutated
+ * capture. Bound BY IDENTITY (`from_id`/`to_id` of the edge the pure selector
+ * actually chose), never by a value predicate another row could satisfy.
+ */
+function withSelectedEdgeLabels(from: string, to: string): Enrichment {
+  const mutated = clone(SESSION_A);
+  const chosen = selectFragileEdge(SESSION_A).selected!;
+  const rows = (mutated.robustness as Row).fragile_edges as Row[];
+  const target = rows.find((r) => r.from_id === chosen.fromId && r.to_id === chosen.toId)!;
+  target.from_label = from;
+  target.to_label = to;
+  return mutated;
+}
+
+describe('CEE #883 — a label that vetoes dispatch produces NO offer', () => {
+  // Each row names the VETO TOKEN it exercises, so this is not three spellings
+  // of one case. All are plausible strategic node labels.
+  it.each([
+    ['flip', 'Partner Channel Investment', 'Flip Risk Threshold'],
+    ['why', 'Why Customers Churn', 'Net New ARR Generated'],
+    ['compare', 'Partner Channel Investment', 'Compare Group Uptake'],
+    ['describe', 'Describe Brand Position', 'Net New ARR Generated'],
+    ['show me', 'Show Me Dashboard Usage', 'Net New ARR Generated'],
+    ['set up', 'Set Up Costs', 'Operating Margin'],
+  ])(
+    'veto token %s — the offer is withheld rather than shipped inert',
+    (_token, fromLabel, toLabel) => {
+      // ⭐ PRECONDITION PINNED IN-TEST (trap 13b). Without these two assertions
+      // this case would pass identically if the fixture silently stopped
+      // reproducing the condition — a guard agreeing with itself.
+      const mutated = withSelectedEdgeLabels(fromLabel, toLabel);
+      const chosen = selectFragileEdge(mutated).selected!;
+      // (a) the mutation landed on the edge the selector actually picks
+      expect([chosen.fromLabel, chosen.toLabel]).toStrictEqual([fromLabel, toLabel]);
+      // (b) the prompt these labels compose really would be vetoed at route-v2
+      const wouldShip = composeFragileEdgeActionPrompt(fromLabel, toLabel);
+      expect(EDIT_GRAPH_POSITIVE_REGEX.test(wouldShip)).toBe(true);
+      expect(EDIT_GRAPH_NEGATIVE_REGEX.test(wouldShip)).toBe(true);
+
+      // THE ASSERTION. The lens exists only to carry the offer, so a withheld
+      // offer drops the whole surface — never a card with an inert chip.
+      expect(buildLensSurface(makeFact(mutated), CTX, WINNING_PREV)).toBeNull();
+    },
+  );
+
+  it('POSITIVE CONTROL — a benign label still ships the offer', () => {
+    // Discriminates "the check withholds on a veto" from "the check withholds".
+    // Without this row, deleting the offer entirely would score a clean sweep.
+    const from = 'Channel Partner Momentum';
+    const to = 'Quarterly Retention Rate';
+    const mutated = withSelectedEdgeLabels(from, to);
+    const chosen = selectFragileEdge(mutated).selected!;
+    expect([chosen.fromLabel, chosen.toLabel]).toStrictEqual([from, to]);
+
+    const surface = buildLensSurface(makeFact(mutated), CTX, WINNING_PREV);
+    expect(surface).not.toBeNull();
+    expect(surface!.selection.lens).toBe('fragile_edge_resolution');
+    expect(surface!.suggestion.action_prompt).toBe(composeFragileEdgeActionPrompt(from, to));
+    expect(surface!.suggestion.action_label).toBe(FRAGILE_EDGE_ACTION_LABEL);
+  });
+
+  it('EVERY real label pair in BOTH committed captures dispatches (derived)', () => {
+    // The reason the defect shipped: on real producer data the gate is
+    // currently always satisfied, so nothing in the captures could reveal it.
+    // Recorded as a DERIVED census rather than a hand-listed expectation — if a
+    // future capture carries a veto-word label this goes RED and the withheld
+    // path becomes observable on real data instead of only on a mutation.
+    const pairs: string[] = [];
+    for (const capture of [SESSION_A, SESSION_B2]) {
+      const rows = ((capture.robustness as Row)?.fragile_edges as Row[]) ?? [];
+      for (const r of rows) {
+        pairs.push(composeFragileEdgeActionPrompt(String(r.from_label), String(r.to_label)));
+      }
+    }
+    expect(pairs.length).toBe(18);
+    for (const p of pairs) {
+      expect(EDIT_GRAPH_POSITIVE_REGEX.test(p)).toBe(true);
+      expect(EDIT_GRAPH_NEGATIVE_REGEX.test(p)).toBe(false);
+    }
+  });
+
+  it('WHY THE POSITIVE CONJUNCT SURVIVES MUTATION — demonstrated, not asserted', () => {
+    // ⚠ HONEST DISCLOSURE, measured (CEE #883): deleting the POSITIVE conjunct
+    // from `buildFragileEdgeOffer` leaves this whole file GREEN (42/42), while
+    // deleting the NEGATIVE conjunct turns 6 cases RED. That survivor is a claim
+    // either way, so it is DEMONSTRATED here rather than left unexplained.
+    //
+    // THE CAUSE: the positive verb "Adjust" comes from the TEMPLATE, not from
+    // producer data — so NO endpoint label can defeat the positive gate, and no
+    // label-driven fixture can reach that branch. The conjunct is a
+    // TEMPLATE-DRIFT guard (reword the sentence without an edit verb and it
+    // bites), not a label guard. Keeping it is the fail-closed reading of the
+    // dispatch condition `route-v2.ts` actually evaluates; pretending a label
+    // test covers it would be the vacuity this file exists to avoid.
+    expect(EDIT_GRAPH_POSITIVE_REGEX.test(composeFragileEdgeActionPrompt('', ''))).toBe(true);
+    // …and the labels contribute nothing to that verdict:
+    expect(EDIT_GRAPH_POSITIVE_REGEX.test('Partner Channel Investment')).toBe(false);
+    expect(EDIT_GRAPH_POSITIVE_REGEX.test('Net New ARR Generated')).toBe(false);
+  });
+
+  it('THE CHECKED STRING IS THE SHIPPED STRING — no truncation can re-cut it', () => {
+    // The runtime check runs on the COMPOSED prompt; the block ships
+    // `truncate(prompt, ACTION_PROMPT_MAX)`. Those are the same string only
+    // because the naming guard (BODY_MAX) bounds the labels first. Pinned
+    // behaviourally at the boundary, because raising BODY_MAX or lowering
+    // ACTION_PROMPT_MAX would silently break it — and a truncation can re-cut a
+    // word into a veto token ("Flipper" → "Flip").
+    const half = 'A'.repeat(112);
+    const other = 'B'.repeat(112);
+    const naming = composeFragileEdgeNaming(half, other);
+    expect(naming.length).toBe(300); // exactly BODY_MAX — the widest pair allowed
+    const surface = buildLensSurface(makeFact(withSelectedEdgeLabels(half, other)), CTX, WINNING_PREV);
+    expect(surface).not.toBeNull();
+    expect(surface!.suggestion.action_prompt).toBe(composeFragileEdgeActionPrompt(half, other));
+    expect(surface!.suggestion.action_prompt).not.toContain('…');
   });
 });
 

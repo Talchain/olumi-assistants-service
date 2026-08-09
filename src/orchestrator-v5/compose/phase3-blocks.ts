@@ -82,6 +82,10 @@ import {
 } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../orchestrator/routing/edit-graph-intent-regex.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { bandConfidence } from './confidence-bands.js';
@@ -1354,16 +1358,23 @@ export interface LensSurface {
  * ROADMAP 2.989 — the fragile-edge offer's user-facing parts, composed from the
  * ONE selected relationship. `null` for every other lens.
  *
- * ⚠ THE ACCEPTANCE TEXT HAS TO CLEAR THREE INDEPENDENT GATES, and it is asserted
- * against all three rather than eyeballed (`__tests__/fragile-edge-offer.test.ts`):
+ * ⚠ THE ACCEPTANCE TEXT HAS TO CLEAR THREE INDEPENDENT GATES. Gates 1 and 2 are
+ * ENFORCED AT COMPOSITION TIME on the actual string, not merely asserted in a
+ * test — see `buildFragileEdgeOffer`. (They were test-only until CEE #883's
+ * review, and a test bound to the lane's own fixture labels could not see the
+ * failing class, because the LABELS are producer data and the gates are
+ * evaluated over the whole message.) All three are also pinned by
+ * `__tests__/fragile-edge-offer.test.ts`:
  *   1. `EDIT_GRAPH_POSITIVE_REGEX` must MATCH — otherwise the turn never reaches
  *      the `edit_graph` dispatch and the chip is inert (2.770: no inert chips).
  *      "Adjust" is in the positive verb set.
  *   2. `EDIT_GRAPH_NEGATIVE_REGEX` must NOT match — a meta-question veto. This is
  *      not a formality: the veto set includes `flip`, `explain`, `why`, `tell me`,
- *      `show me`, so the obvious phrasings of a fragility offer ("…that could flip
- *      the result", "tell me the new value") are exactly the ones that would
- *      silently stop dispatching.
+ *      `show me`, `compare`, `describe`, so the obvious phrasings of a fragility
+ *      offer ("…that could flip the result", "tell me the new value") are exactly
+ *      the ones that would silently stop dispatching — AND SO ARE ORDINARY
+ *      ENDPOINT LABELS ("Flip Risk Threshold", "Why Customers Churn"), which is
+ *      why the check has to run on real data rather than on a fixture.
  *   3. `scanProse` — no bare `0.x` decimal, no slug-shaped entity id, no forbidden
  *      phrase. This is why the text names the endpoints by LABEL and carries no
  *      number, and why a label that itself trips a gate DROPS the whole block
@@ -1422,6 +1433,36 @@ function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | nul
   // `BODY_MAX`, truncation would ship a card that names one endpoint and trails
   // off — worse than no offer, because it still carries an action chip.
   if (composeFragileEdgeNaming(edge.fromLabel, edge.toLabel).length > BODY_MAX) return null;
+  // ⭐ FAIL CLOSED ON A PROMPT THAT WOULD NOT DISPATCH — the third fail-closed in
+  // this function, and the one a review had to find (CEE #883). The two routing
+  // gates are evaluated by `route-v2.ts` over the WHOLE acceptance message, and
+  // that message CONTAINS PRODUCER-AUTHORED ENDPOINT LABELS. The veto set is
+  // ordinary strategic vocabulary — `flip`, `why`, `compare`, `describe`,
+  // `explain`, `show me`, `tell me`, `set up`, `how does` — so a perfectly
+  // reasonable label ("Flip Risk Threshold", "Why Customers Churn", "Compare
+  // Group Uptake") makes the composed prompt match the NEGATIVE veto. The block
+  // still ships, the lens still wins, `scanProse` still passes: the user is
+  // offered "Adjust this relationship", accepts, AND THE MODEL DOES NOT CHANGE.
+  // That is an inert chip (2.770 / lens-selector.ts "no inert chips, ever").
+  //
+  // Asserting the gates in a test is NOT this check: the fixture labels are the
+  // lane's own, and a corpus from the author's head cannot see the class the
+  // author did not imagine (CLAUDE.md trap 22). The gate has to be evaluated on
+  // the ACTUAL string, at composition time, on every run.
+  //
+  // The SAME regex objects `route-v2.ts` uses are imported — never a re-declared
+  // copy, which is the hand-maintained-mirror defect (trap 12) and would drift
+  // silently the first time the veto set is edited.
+  //
+  // Derived, not assumed: this string is also the string that SHIPS. The naming
+  // guard above bounds the combined label length to 224 chars, so the composed
+  // prompt is at most 278 and `truncate(…, ACTION_PROMPT_MAX = 300)` is a no-op
+  // on every prompt that reaches here — pinned by test, because raising BODY_MAX
+  // or lowering ACTION_PROMPT_MAX would break that and let a truncation re-cut a
+  // word into a veto token.
+  const actionPrompt = composeFragileEdgeActionPrompt(edge.fromLabel, edge.toLabel);
+  if (!EDIT_GRAPH_POSITIVE_REGEX.test(actionPrompt)) return null;
+  if (EDIT_GRAPH_NEGATIVE_REGEX.test(actionPrompt)) return null;
   return {
     body: composeFragileEdgeBody(selection.body, edge.fromLabel, edge.toLabel),
     // The EDGE identity, with the schema's own `edge` kind — `id` is the
@@ -1436,7 +1477,7 @@ function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | nul
       },
     ],
     actionLabel: FRAGILE_EDGE_ACTION_LABEL,
-    actionPrompt: composeFragileEdgeActionPrompt(edge.fromLabel, edge.toLabel),
+    actionPrompt,
   };
 }
 

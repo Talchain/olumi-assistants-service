@@ -1342,37 +1342,6 @@ export function selectLens(
     ['sensitivity_flip_risk', evaluateSensitivityFlipRisk(signals)],
     ['pre_mortem', evaluatePreMortem(signals)],
     ['evpi_evidence_priority', evaluateEvpiEvidencePriority(signals)],
-    // ── ROADMAP 2.989 — THE FRAGILE-EDGE RESOLUTION LENS. POSITION IS A
-    // RULING AND IT WAS MEASURED, NOT PREFERRED. Read this before moving it.
-    //
-    // THE LOCKED CORE ORDER ABOVE IS UNTOUCHED. This entry sits BELOW all three
-    // core lenses and ABOVE the DSK exercises. Why not lower: replaying
-    // `selectLens` over the two live captures × six `previousAnalysisLens`
-    // states — the same captures `lens-dsk-sequence-2490.test.ts` uses — the
-    // slot is OCCUPIED on 12 of 12 cells and `selectLens` never returns null.
-    // A lens appended at the BOTTOM of this ladder is therefore selected on
-    // ZERO of those cells: structurally dark, which is ROADMAP 2.490's defect
-    // verbatim ("two lenses, one observable, fixed priority ⇒ the lower one is
-    // unreachable by construction"). Shipping a capability no user can reach is
-    // the estate's first chronic failure, so a dark placement was refused.
-    //
-    // Two other no-ladder-change routes were MEASURED AND REFUTED before this
-    // position was taken, and are recorded so they are not re-tried:
-    //   (1) attach the offer to `sensitivity_flip_risk`'s block instead of
-    //       adding a lens — the two subjects DISAGREE on 12 of 12 cells (the
-    //       sensitivity subject is picked from `flip_risk_category`/dominance,
-    //       the edge from producer robustness order), so the card would focus
-    //       one node while its chip offered to change a different one;
-    //   (2) attach it only when the subjects agree — the same 0/12.
-    //
-    // WHY ABOVE THE DSK PAIR, stated as the judgement it is: this lens offers a
-    // MODEL CHANGE the platform can perform on a relationship the run's own
-    // robustness sweep identified; the DSK entries below are reflective
-    // exercises. The bundle names no priority between a DSK protocol and a
-    // non-DSK capability lens (its declared deference is reciprocal and internal
-    // to the pair), so nothing ratified is inverted here. The 2.490 partition is
-    // preserved and pinned: on the live captures both DSK exercises are still
-    // observed in their own walks.
     // DSK slice 1 — below the three locked core lenses (their order is not
     // touched), above the generic what-if explorer: a lens derived from a
     // specific DSK trigger's evidence condition outranks the last-resort
@@ -1480,6 +1449,62 @@ export function selectLens(
     // dominant driver without a decisive leader ⇒ TR-005's dissent).
     ['consider_opposite', evaluateConsiderOpposite(signals)],
     ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
+    // ── ROADMAP 2.989 — THE FRAGILE-EDGE RESOLUTION LENS. POSITION IS A RULING
+    // AND IT WAS MEASURED, NOT PREFERRED. Read this before moving it.
+    //
+    // ⚠ THIS COMMENT WAS WRONG WHEN SHIPPED AND IS CORRECTED HERE (CEE #883
+    // review). It said this entry sits "ABOVE the DSK exercises" and asked "WHY
+    // ABOVE THE DSK PAIR" — while the entry itself was, and still is, BELOW
+    // them. It was also parked 130 lines further up, next to the core lenses,
+    // so it read as the ruling for a position it did not occupy. Both are fixed
+    // by MOVING the comment to the entry it describes rather than by moving the
+    // entry: the position below is the measured one and is unchanged.
+    //
+    // THE ACTUAL POSITION: SECOND FROM THE FOOT. The three locked core lenses
+    // are above it, the DSK pair (`consider_opposite`, `devils_advocacy`) is
+    // ALSO above it, and the only entry below it is the last-resort
+    // `what_if_counterfactual` explorer.
+    //
+    // WHAT THAT POSITION ACHIEVES, MEASURED — the number the original comment
+    // never stated. Replaying `selectLens` through `liveLensExecutorAvailability()`
+    // exactly as `buildLensSurface` calls it, over the two COMMITTED captures ×
+    // all eight `previousAnalysisLens` states (the seven `LensId`s + `null`):
+    // this lens wins the slot on **2 of 16 cells**. Both wins are on session-a
+    // (`prev = 'pre_mortem'` and `prev = 'consider_opposite'`), and both arrive
+    // ONLY as the 2.211 no-repeat DISPLACEMENT alternate — never as the outright
+    // ladder head. session-b2 is **0 of 8**. A FIRST ANALYSIS (`prev = null`) is
+    // **0 of 2**: on a fresh session's first analysis this lens does not fire at
+    // all, so no loop witness can be obtained there.
+    //
+    // ⚠ SCOPE OF THAT FIGURE, stated so it is not generalised (trap 20): it is a
+    // claim about THE TWO COMMITTED CAPTURES ONLY. It is NOT a claim about the
+    // 56-turn census, which is not in this repo and was not replayed here.
+    //
+    // WHY NOT LOWER: appending below `what_if_counterfactual` is the bottom of
+    // the ladder, and on the same cells the slot is otherwise always occupied —
+    // so a bottom entry is selected on ZERO cells: structurally dark, which is
+    // ROADMAP 2.490's defect verbatim ("two lenses, one observable, fixed
+    // priority ⇒ the lower one is unreachable by construction"). Shipping a
+    // capability no user can reach is the estate's first chronic failure, so a
+    // dark placement was refused. 2/16 is small; 0/16 is not a capability.
+    //
+    // WHY NOT HIGHER — i.e. why BELOW the DSK pair, stated as the judgement it
+    // is: the DSK entries derive from a ratified bundle trigger, this one does
+    // not, and the 2.490 partition that made `devils_advocacy` observable at all
+    // is preserved rather than re-litigated by a new neighbour above it. The
+    // bundle names no priority between a DSK protocol and a non-DSK capability
+    // lens (its declared deference is reciprocal and internal to the pair), so
+    // nothing ratified is inverted by this entry sitting under them. Pinned: on
+    // the live captures both DSK exercises are still observed in their own walks.
+    //
+    // Two no-ladder-change routes were MEASURED AND REFUTED before this position
+    // was taken, and are recorded so they are not re-tried:
+    //   (1) attach the offer to `sensitivity_flip_risk`'s block instead of
+    //       adding a lens — the two subjects DISAGREE on 12 of 12 cells (the
+    //       sensitivity subject is picked from `flip_risk_category`/dominance,
+    //       the edge from producer robustness order), so the card would focus
+    //       one node while its chip offered to change a different one;
+    //   (2) attach it only when the subjects agree — the same 0/12.
     ['fragile_edge_resolution', evaluateFragileEdgeResolution(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
   ];
