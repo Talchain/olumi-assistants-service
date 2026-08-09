@@ -47,6 +47,8 @@ import {
   magnitudeSuffixPattern,
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -294,31 +296,38 @@ export function extractStatedQuantities(text: string): Quantity[] {
 // ── the two surfaces ────────────────────────────────────────────────────────
 
 /**
- * Top-level graph keys that are NOT the model: diagnostics, timings, coaching
- * commentary, warnings, quality scores. Coaching is deliberately here — a
- * figure QUOTED BACK in a coaching card was noticed, but it does not
- * parameterise anything, and telling the user it is "in the model" when it
- * parameterises nothing is the confident-false-statement failure the trace
- * measured as loss class 7.
+ * The THREE-WAY top-level classification, in ONE map.
+ *
+ * `prose` = commentary we still search, so a quantity found only there is
+ * reported `prose_only` rather than `absent`. `skip` = diagnostics, timings and
+ * quality scores, searched not at all. ABSENCE FROM THIS MAP MEANS MODEL.
+ *
+ * ⚠ ONE MAP BECAUSE TWO SETS ENCODED ONE CLASSIFICATION AND COULD DISAGREE.
+ * This was `NON_MODEL_TOP_KEYS` + `PROSE_TOP_KEYS`, with all three prose keys
+ * duplicated across both and consumed as `if (!nonModel) … else if (prose) …`.
+ * That shape makes the second branch UNREACHABLE for any key added to the prose
+ * set alone: it would be walked as MODEL content, and a figure quoted only in
+ * commentary would be reported `in_model` — the confident-false-statement the
+ * trace measured as loss class 7, arriving through a one-line edit that looks
+ * obviously correct. A single map cannot express that state (trap 12: derive,
+ * and where you cannot, make the drift impossible rather than merely unlikely).
+ *
+ * Coaching is deliberately `prose`: a figure QUOTED BACK in a coaching card was
+ * noticed, but it parameterises nothing, and saying it is "in the model" is the
+ * failure this module exists to prevent.
  */
-const NON_MODEL_TOP_KEYS: ReadonlySet<string> = new Set([
-  "trace",
-  "_timings",
-  "_pipeline_outcome",
-  "coaching",
-  "draft_warnings",
-  "validation_warnings",
-  "quality",
-  "analysis_ready",
-  "schema_version",
-]);
+type TopKeyClass = "prose" | "skip";
 
-/** Top-level keys that are commentary we still want to search, so a quantity
- *  found only there can be reported as `prose_only` rather than `absent`. */
-const PROSE_TOP_KEYS: ReadonlySet<string> = new Set([
-  "coaching",
-  "draft_warnings",
-  "validation_warnings",
+const TOP_KEY_CLASS: ReadonlyMap<string, TopKeyClass> = new Map<string, TopKeyClass>([
+  ["trace", "skip"],
+  ["_timings", "skip"],
+  ["_pipeline_outcome", "skip"],
+  ["quality", "skip"],
+  ["analysis_ready", "skip"],
+  ["schema_version", "skip"],
+  ["coaching", "prose"],
+  ["draft_warnings", "prose"],
+  ["validation_warnings", "prose"],
 ]);
 
 /**
@@ -365,11 +374,88 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
  * (Independent of the provenance-honesty work in `src/cee/provenance/` — that
  * corrects the labels at the source; this needs no label to be correct.)
  */
+/**
+ * ⚠ THE FIELD LIST IS THE WHOLE CORRECTNESS ARGUMENT, and its asymmetry runs
+ * the DANGEROUS way — which is why it is pinned by a discrimination test rather
+ * than trusted. A field MISSING here means a figure the user really stated goes
+ * unseen, and we then tell them we invented their own number. (Measured:
+ * `observed_state.cap` and `raw_value` were absent from the first version, and
+ * B2's offshore-scale factor — carrying the brief's £2.9m cap — was wrongly
+ * claimed as ours.)
+ *
+ * ⚠ AND IT IS DECLARED ONCE. Three functions walked this list independently
+ * (`collectFactorNumbers`, `collectSuppressorNumbers`, `collectCandidates`), so
+ * "the whole correctness argument" existed in triplicate and a field could be
+ * added to one copy alone. The walk is now shared; only the per-function
+ * `prior` policy differs, and each difference is argued at its own site.
+ */
+const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
+
+/** The objects that may carry a (value…, unit) pair, in precedence order. */
+const CARRIER_KEYS = ["observed_state", "data"] as const;
+
+interface ValueCarrier {
+  /** The carrier's OWN declared unit, verbatim. Taken from the same object as
+   *  the values, so a value can never borrow a unit from elsewhere. */
+  readonly unit: unknown;
+  readonly values: readonly number[];
+}
+
+/**
+ * Every (values…, unit) carrier on a node: the node itself, then
+ * `observed_state`, then `data`.
+ *
+ * ⚠ THE ORDER IS OBSERVABLE and is preserved exactly as the three original
+ * walks had it. `matchCandidate` returns the FIRST compatible candidate, so
+ * candidate order reaches the user as `matched_node_id`.
+ */
+function valueCarriers(node: Record<string, unknown>): ValueCarrier[] {
+  const out: ValueCarrier[] = [];
+  const carriers: Array<Record<string, unknown>> = [node];
+  for (const nested of CARRIER_KEYS) {
+    const v = node[nested];
+    if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
+  }
+  for (const carrier of carriers) {
+    const values: number[] = [];
+    for (const field of VALUE_FIELDS) {
+      const v = carrier[field];
+      if (typeof v === "number" && Number.isFinite(v)) values.push(v);
+    }
+    out.push({ unit: carrier.unit, values });
+  }
+  return out;
+}
+
+/**
+ * The real-world figures quoted in an encoding map's CAPTIONS.
+ *
+ * The map's KEYS are encoded levels, but its captions carry the figures the
+ * model is claiming ("45 roles offshored (~40% saving)"), so a factor whose
+ * caption quotes the brief is not ours. Declared once: this block was
+ * byte-identical in two of the three walks.
+ */
+function encodingCaptionNumbers(node: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  const encoding = node.encoding_map;
+  if (encoding === null || typeof encoding !== "object") return out;
+  for (const caption of Object.values(encoding as Record<string, unknown>)) {
+    if (typeof caption !== "string") continue;
+    for (const m of caption.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
+      out.push(Number(m[0].replace(/,/g, "")));
+    }
+  }
+  return out;
+}
+
 function collectFactorNumbers(node: Record<string, unknown>): number[] {
   const out: number[] = [];
   const push = (v: unknown): void => {
     if (typeof v === "number" && Number.isFinite(v)) out.push(v);
   };
+  // PRIOR POLICY (1 of 3): the DECLARED bounds and value, unconditionally.
+  // This function answers "is there a figure here to own?", for which a
+  // unitless prior counts — a prior IS a number we put on the world.
   const prior = node.prior;
   if (prior !== null && typeof prior === "object") {
     const p = prior as Record<string, unknown>;
@@ -377,45 +463,8 @@ function collectFactorNumbers(node: Record<string, unknown>): number[] {
     push(p.range_max);
     push(p.value);
   }
-  // ⚠ THE FIELD LIST IS THE WHOLE CORRECTNESS ARGUMENT, and its asymmetry runs
-  // the DANGEROUS way — which is why it is pinned by a discrimination test
-  // rather than trusted. A field MISSING here means a figure the user really
-  // stated goes unseen, and we then tell them we invented their own number.
-  // (Measured: `observed_state.cap` and `raw_value` were absent from the first
-  // version, and B2's offshore-scale factor — carrying the brief's £2.9m cap —
-  // was wrongly claimed as ours.)
-  const observed = node.observed_state;
-  if (observed !== null && typeof observed === "object") {
-    const o = observed as Record<string, unknown>;
-    push(o.value);
-    push(o.raw);
-    push(o.raw_value);
-    push(o.cap);
-  }
-  push(node.value);
-  push(node.raw);
-  push(node.raw_value);
-  push(node.cap);
-  const data = node.data;
-  if (data !== null && typeof data === "object") {
-    const d = data as Record<string, unknown>;
-    push(d.value);
-    push(d.raw);
-    push(d.raw_value);
-    push(d.cap);
-  }
-  // The encoding map's KEYS are encoded levels, but its captions carry the
-  // real-world figures the model is claiming ("45 roles offshored (~40%
-  // saving)"), so a factor whose caption quotes the brief is not ours.
-  const encoding = node.encoding_map;
-  if (encoding !== null && typeof encoding === "object") {
-    for (const caption of Object.values(encoding as Record<string, unknown>)) {
-      if (typeof caption !== "string") continue;
-      for (const m of caption.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
-        push(Number(m[0].replace(/,/g, "")));
-      }
-    }
-  }
+  for (const carrier of valueCarriers(node)) out.push(...carrier.values);
+  out.push(...encodingCaptionNumbers(node));
   return out;
 }
 
@@ -437,30 +486,6 @@ function carriesAFigure(node: Record<string, unknown>): boolean {
 }
 
 /**
- * The factors whose figures are OURS.
- *
- * ── ONE AUTHORITY, CONSUMED TWICE ──────────────────────────────────────────
- * ⚠ THIS FUNCTION USED TO RUN ITS OWN MATCHER, and the bug that produced is
- * the sharpest one this module has had. `classify` was converted to
- * unit-aware candidates; this was not, and kept comparing raw values and
- * mantissas out of an unlabelled bag. It therefore fired whenever the user's
- * magnitude NOTATION disagreed with the carrier's declared unit scale —
- * measured on the real b1 graph, 5 of 9 ordinary notations:
- *
- *     "We can spend £1.5m ..."      -> used: fac_marketing_spend      (no clash)
- *     "We can spend £1,500,000 ..." -> used: fac_marketing_spend
- *                                   AND estimated: Marketing Spend    (CLASH)
- *
- * The panel asserted and denied the same node's provenance at once, and the
- * denial was contradicted by our own matcher, which had just certified the
- * figure as the user's.
- *
- * The fix is structural, not an exclusion list: this consumes the SAME
- * `matchCandidate` result `classify` does. A node that produced a match cannot
- * appear here, by construction rather than by suppression — so the two
- * sections can no longer drift apart, whatever notation the user writes in.
- */
-/**
  * The factor's own real-world figures — the ones that could plausibly BE a
  * number the user wrote.
  *
@@ -480,18 +505,12 @@ function carriesAFigure(node: Record<string, unknown>): boolean {
  */
 function collectSuppressorNumbers(node: Record<string, unknown>): number[] {
   const out: number[] = [];
-  const carriers: Array<Record<string, unknown>> = [node];
-  for (const nested of ["observed_state", "data"] as const) {
-    const v = node[nested];
-    if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
-  }
-  for (const carrier of carriers) {
-    const { scale } = parseUnit(carrier.unit);
-    for (const field of ["value", "raw", "raw_value", "cap"] as const) {
-      const v = carrier[field];
-      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+  for (const carrier of valueCarriers(node)) {
+    // The unit is read ONCE per carrier, by the repo's own reader.
+    const { multiplier } = readUnit(typeof carrier.unit === "string" ? carrier.unit : null);
+    for (const v of carrier.values) {
       out.push(v);
-      if (scale !== 1) out.push(v * scale);
+      if (multiplier !== 1) out.push(v * multiplier);
     }
   }
   // ── PRIOR BOUNDS: real-world magnitudes only ──────────────────────────
@@ -508,6 +527,12 @@ function collectSuppressorNumbers(node: Record<string, unknown>): number[] {
   // coincidence with one is a genuine cannot-tell. Excluding those wholesale
   // would trade a recoverable silence for a false ASSERTION about the user's
   // own number — the harm this whole surface exists to prevent.
+  //
+  // PRIOR POLICY (2 of 3): ANY prior value outside the unit interval — a
+  // different rule from `collectFactorNumbers`' declared-bounds walk above and
+  // from `collectCandidates`, which admits no prior at all. The three run in
+  // opposite safe directions and were each established by an earlier review
+  // round; they are deliberately NOT unified.
   const prior = node.prior;
   if (prior !== null && typeof prior === "object") {
     for (const v of Object.values(prior as Record<string, unknown>)) {
@@ -517,16 +542,7 @@ function collectSuppressorNumbers(node: Record<string, unknown>): number[] {
     }
   }
 
-  // Encoding-map captions carry real-world figures ("45 roles offshored").
-  const encoding = node.encoding_map;
-  if (encoding !== null && typeof encoding === "object") {
-    for (const caption of Object.values(encoding as Record<string, unknown>)) {
-      if (typeof caption !== "string") continue;
-      for (const m of caption.matchAll(/\d[\d,]*(?:\.\d+)?/g)) {
-        out.push(Number(m[0].replace(/,/g, "")));
-      }
-    }
-  }
+  out.push(...encodingCaptionNumbers(node));
   return out;
 }
 
@@ -602,6 +618,34 @@ function magnitudeCoincidesWithSomethingWritten(
   return false;
 }
 
+/**
+ * The factors whose figures are OURS.
+ *
+ * ── ONE AUTHORITY, CONSUMED TWICE ──────────────────────────────────────────
+ * ⚠ THIS FUNCTION USED TO RUN ITS OWN MATCHER, and the bug that produced is
+ * the sharpest one this module has had. `classify` was converted to
+ * unit-aware candidates; this was not, and kept comparing raw values and
+ * mantissas out of an unlabelled bag. It therefore fired whenever the user's
+ * magnitude NOTATION disagreed with the carrier's declared unit scale —
+ * measured on the real b1 graph, 5 of 9 ordinary notations:
+ *
+ *     "We can spend £1.5m ..."      -> used: fac_marketing_spend      (no clash)
+ *     "We can spend £1,500,000 ..." -> used: fac_marketing_spend
+ *                                   AND estimated: Marketing Spend    (CLASH)
+ *
+ * The panel asserted and denied the same node's provenance at once, and the
+ * denial was contradicted by our own matcher, which had just certified the
+ * figure as the user's.
+ *
+ * The fix is structural, not an exclusion list: this consumes the SAME
+ * `matchCandidate` result `classify` does. A node that produced a match cannot
+ * appear here, by construction rather than by suppression — so the two
+ * sections can no longer drift apart, whatever notation the user writes in.
+ *
+ * (This block sat above `collectSuppressorNumbers` until 2026-08-09, so every
+ * tool attached it to the wrong function and the rationale was invisible at the
+ * line a tidy-up would delete.)
+ */
 function deriveInferredFactors(
   graph: Record<string, unknown>,
   matchedNodeIds: ReadonlySet<string>,
@@ -627,15 +671,26 @@ function deriveInferredFactors(
     // user's figure is theirs, full stop. This is what makes the two sections
     // structurally incapable of contradicting each other.
     //
-    // ⚠ IT CANNOT CURRENTLY BITE, AND THAT IS DELIBERATE — DEMONSTRATED, not
-    // assumed. A numeric match compares the same underlying magnitudes the
-    // coincidence guard below does, so today every matched node is ALSO
-    // coincidence-suppressed: removing this line leaves 0 clashes across 12
-    // notations. It stays because the no-contradiction property must rest on
-    // the AUTHORITY, not on a heuristic that happens to subsume it — narrow the
-    // guard below (as B3-2 rightly did) and this becomes load-bearing
-    // immediately. Same shape as the topology exclusion: a second line of
-    // defence against a configuration today's code does not produce.
+    // ⚠ NO MEASURED NOTATION MAKES THIS BITE — BUT SIGNED MONEY DOES, AND THE
+    // CLAIM THAT IT "CANNOT" WAS CORPUS-BOUNDED, NOT STRUCTURAL.
+    //
+    // What was measured: across 12 unsigned notations a numeric match compares
+    // the same magnitudes the coincidence guard below does, so every matched
+    // node was ALSO coincidence-suppressed and removing this line left 0
+    // clashes. What that measurement could not see is that the two readers
+    // disagree on SIGN:
+    //
+    //   · `extractStatedQuantities` carries one (`(?<msign>-)?`), so "-£2m"
+    //     yields -2,000,000;
+    //   · `BRIEF_NUMBER_RE` has NO sign group, so `numericTokensIn` yields the
+    //     UNSIGNED 2 and 2,000,000.
+    //
+    // For a carrier holding -2 under "£m" the matcher therefore fires while the
+    // coincidence guard does not, and this line is the ONLY thing preventing
+    // the round-3 contradiction — a panel asserting and denying one node's
+    // provenance at once. Pinned by the signed-money arms of
+    // `not-modelled-manifest.unit-authority.test.ts`; before those it was
+    // untested, which is why the old note here could drift unchallenged.
     if (matchedNodeIds.has(id)) continue;
     // CANNOT TELL — claimed by neither section. See the note above.
     if (magnitudeCoincidesWithSomethingWritten(node, briefNumbers)) continue;
@@ -717,34 +772,52 @@ interface Candidate {
   readonly label: string;
   /** Real-world value, already scaled by its declared unit (1.5 "£m" -> 1.5e6). */
   readonly value: number;
-  readonly unitClass: "money" | "percent" | "other";
-  /** Currency symbol for money candidates, so € never matches £. */
-  readonly symbol: string | null;
+  /** `currency` / `percent` / `plain`, as `readUnit` classifies it. */
+  readonly unitKind: AmountKind;
+  /** ISO code for currency candidates, so EUR never matches GBP. */
+  readonly currencyCode: string | null;
   /** The unit string the model declared, verbatim. A count can only match a
    *  carrier that declares the same unit family. */
   readonly declaredUnit: string | null;
 }
 
-const CURRENCY_SYMBOLS = ["£", "€", "$"] as const;
-
-/** Parse a declared unit string into a class, a currency symbol and a scale. */
-function parseUnit(unit: unknown): {
-  unitClass: Candidate["unitClass"];
-  symbol: string | null;
-  scale: number;
-} {
-  if (typeof unit !== "string" || unit.trim().length === 0) {
-    return { unitClass: "other", symbol: null, scale: 1 };
-  }
-  const u = unit.trim();
-  if (u === "%" || /percent/i.test(u)) return { unitClass: "percent", symbol: null, scale: 1 };
-  const symbol = CURRENCY_SYMBOLS.find((c) => u.includes(c)) ?? null;
-  if (symbol !== null) {
-    const suffix = u.replace(symbol, "").trim();
-    return { unitClass: "money", symbol, scale: resolveMagnitude(suffix) };
-  }
-  return { unitClass: "other", symbol: null, scale: 1 };
-}
+/**
+ * ⚠ NO CURRENCY VOCABULARY LIVES HERE EITHER, AND FOR THE SAME REASON THE
+ * MAGNITUDE LIST DOES NOT (see the note above `MONTHS`).
+ *
+ * This module shipped with `CURRENCY_SYMBOLS = ["£","€","$"]` and a private
+ * `parseUnit`, re-deriving two facts the repo already owned canonically:
+ *
+ *   · `cee/extraction/numeric-parser.ts` `CURRENCY_SYMBOL_TO_CODE` — ten
+ *     entries, exported under ROADMAP 2.972 with a header saying in terms that
+ *     "a second hand-written currency vocabulary is exactly the mirror trap 12
+ *     describes";
+ *   · `cee/provenance/stated-amounts.ts` `readUnit()` — which returns
+ *     `{kind, currencyCode, multiplier}`, a strict SUPERSET of `parseUnit`'s
+ *     `{unitClass, symbol, scale}`, and landed in `db985bbe` — the base commit
+ *     of the very diff that added the copy.
+ *
+ * The copy carried two live defects, both now pinned by
+ * `not-modelled-manifest.unit-authority.test.ts`:
+ *
+ *   1. `unit: "GBP"` was UNMATCHABLE. It read as `unitClass: "other"`, so
+ *      `unitCompatible` was false for every money quantity and a figure the
+ *      model genuinely carries was reported to the user as "Not modelled yet".
+ *      GBP is producer vocabulary, not a synthetic edge: `cqe/rules.ts`
+ *      `normaliseCurrencyUnit` returns it and `schemas/cee-v3.ts` documents the
+ *      field as "e.g. 'GBP', 'USD'".
+ *   2. `A$m` MIS-SCALED. `CURRENCY_SYMBOLS.find((c) => u.includes(c))` is
+ *      unordered, so `A$` matched on `$`, left the suffix `Am`, and yielded
+ *      scale 1 under the wrong currency — certifying a bare "$2" statement as
+ *      the source of an A$2,000,000 carrier. `alternationOf`
+ *      (`stated-amounts.ts:111`) sorts longest-first precisely to prevent this.
+ *
+ * What stays here is what is genuinely this module's own and belongs nowhere
+ * else: the `kind` classification, dates and periods, the count-unit family
+ * logic, `char_offset` identity, and the three-state verdict.
+ */
+const briefCurrencyCode = (symbol: string | null): string | null =>
+  symbol === null ? null : CURRENCY_SYMBOL_TO_CODE[symbol] ?? null;
 
 /**
  * Numeric candidates come ONLY from node/option value carriers that declare a
@@ -754,11 +827,17 @@ function parseUnit(unit: unknown): {
  * DELIBERATELY EXCLUDED. Those numbers are how the model computes, not what it
  * is claiming about the world, and matching against them is how a stated
  * quantity gets "found" in a model that never carried it.
+ *
+ * ⚠ THE `edges` SUBTREE IS EXCLUDED AND `SCOPE.model_surface` IS DERIVED FROM
+ * THIS CONSTANT so the user-facing sentence cannot claim otherwise. It did:
+ * it advertised "node, edge and option values" while this walked only nodes and
+ * options. Edge LABELS are still text-searched (they are strings under a
+ * non-skip top-level key); edge VALUES are not.
  */
+const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
 function collectCandidates(graph: Record<string, unknown>): Candidate[] {
   const out: Candidate[] = [];
-  const collections = ["nodes", "options"] as const;
-  for (const key of collections) {
+  for (const key of CANDIDATE_COLLECTIONS) {
     const entries = graph[key];
     if (!Array.isArray(entries)) continue;
     for (const raw of entries) {
@@ -768,25 +847,20 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
       const label = typeof node.label === "string" ? node.label : null;
       if (nodeId === null || label === null) continue;
 
-      // Each carrier is (values..., unit) taken from the SAME object, so a
-      // value can never borrow a unit from elsewhere.
-      const carriers: Array<Record<string, unknown>> = [node];
-      for (const nested of ["observed_state", "data"] as const) {
-        const v = node[nested];
-        if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
-      }
-      for (const carrier of carriers) {
-        const { unitClass, symbol, scale } = parseUnit(carrier.unit);
-        for (const field of ["value", "raw", "raw_value", "cap"] as const) {
-          const v = carrier[field];
-          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      // PRIOR POLICY (3 of 3): none at all. This asks "could this be the
+      // user's figure?", and a unitless prior bound is exactly how a stated
+      // quantity gets "found" in a model that never carried it.
+      for (const carrier of valueCarriers(node)) {
+        const declaredUnit = typeof carrier.unit === "string" ? carrier.unit : null;
+        const { kind, currencyCode, multiplier } = readUnit(declaredUnit);
+        for (const v of carrier.values) {
           out.push({
             nodeId,
             label,
-            value: v * scale,
-            unitClass,
-            symbol,
-            declaredUnit: typeof carrier.unit === "string" ? carrier.unit : null,
+            value: v * multiplier,
+            unitKind: kind,
+            currencyCode: currencyCode ?? null,
+            declaredUnit,
           });
         }
       }
@@ -794,49 +868,6 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
   }
   return out;
 }
-
-interface Surfaces {
-  readonly candidates: readonly Candidate[];
-  readonly modelStrings: readonly string[];
-  readonly proseStrings: readonly string[];
-}
-
-function splitSurfaces(graph: Record<string, unknown>): Surfaces {
-  const modelStrings: string[] = [];
-  const proseStrings: string[] = [];
-
-  const walkText = (node: unknown, inProse: boolean): void => {
-    if (node === null || node === undefined) return;
-    if (typeof node === "string") {
-      (inProse ? proseStrings : modelStrings).push(node);
-      return;
-    }
-    if (Array.isArray(node)) {
-      for (const v of node) walkText(v, inProse);
-      return;
-    }
-    if (typeof node === "object") {
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-        if (k === "widening_log") continue;
-        walkText(v, inProse || PROSE_KEYS.has(k));
-      }
-    }
-  };
-
-  for (const [k, v] of Object.entries(graph)) {
-    if (!NON_MODEL_TOP_KEYS.has(k)) walkText(v, false);
-    else if (PROSE_TOP_KEYS.has(k)) walkText(v, true);
-  }
-
-  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
-}
-
-// ── matching ────────────────────────────────────────────────────────────────
-
-const numbersEqual = (a: number, b: number): boolean =>
-  a === b || Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b)) * 1e-9;
-
-const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const MONTH_CANON: Readonly<Record<string, string>> = {
   january: "jan",
@@ -853,10 +884,86 @@ const MONTH_CANON: Readonly<Record<string, string>> = {
   december: "dec",
 };
 
-/** So a brief's "January 2027" matches a model label reading "(Jan 2027)". */
+/**
+ * So a brief's "January 2027" matches a model label reading "(Jan 2027)".
+ *
+ * Idempotent: every value in `MONTH_CANON` is either absent from its key set or
+ * maps to itself, so canonicalising twice equals canonicalising once. That is
+ * what lets the graph surface be canonicalised ONCE at build time (below)
+ * instead of per quantity.
+ */
 const canonicaliseMonths = (s: string): string =>
   s.replace(/\b([a-z]+)\b/gi, (w) => MONTH_CANON[w.toLowerCase()] ?? w);
 
+interface Surfaces {
+  readonly candidates: readonly Candidate[];
+  /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
+  readonly modelStrings: readonly string[];
+  /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
+  readonly proseStrings: readonly string[];
+}
+
+/**
+ * ⚠ THE SURFACES ARE CANONICALISED HERE, ONCE — NOT PER QUANTITY.
+ *
+ * `appearsInStrings` used to call `canonicaliseMonths(s)` inside its own
+ * `strings.some(...)`, i.e. once per (quantity x string): it re-canonicalised
+ * the ENTIRE graph surface Q times, and a profile put 87.1% of all self time in
+ * that one call and its callback. The graph surface does not depend on the
+ * quantity, so the work is hoisted to where it is done once. Measured on the
+ * three real cold-read captures, and on the 8,000-char `brief_text` DB ceiling,
+ * in the PR that made this change.
+ *
+ * The transform is idempotent (see `canonicaliseMonths`), so canonical strings
+ * stored here read identically to the per-call form they replace.
+ */
+function splitSurfaces(graph: Record<string, unknown>): Surfaces {
+  const modelStrings: string[] = [];
+  const proseStrings: string[] = [];
+
+  const walkText = (node: unknown, inProse: boolean): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      (inProse ? proseStrings : modelStrings).push(canonicaliseMonths(node));
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const v of node) walkText(v, inProse);
+      return;
+    }
+    if (typeof node === "object") {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (k === "widening_log") continue;
+        walkText(v, inProse || PROSE_KEYS.has(k));
+      }
+    }
+  };
+
+  for (const [k, v] of Object.entries(graph)) {
+    // Absence from the map means MODEL. `prose` is searched and reported as
+    // commentary; `skip` is not searched at all.
+    const cls = TOP_KEY_CLASS.get(k);
+    if (cls === undefined) walkText(v, false);
+    else if (cls === "prose") walkText(v, true);
+  }
+
+  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
+}
+
+// ── matching ────────────────────────────────────────────────────────────────
+
+const numbersEqual = (a: number, b: number): boolean =>
+  a === b || Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b)) * 1e-9;
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Does this quantity appear, as written, in one of these strings?
+ *
+ * ⚠ `strings` MUST ALREADY BE MONTH-CANONICAL — `splitSurfaces` does that once
+ * for the whole graph. Only the quantity's own literal is canonicalised here,
+ * which is O(1) per call rather than O(graph).
+ */
 function appearsInStrings(q: Quantity, strings: readonly string[]): boolean {
   const literal = canonicaliseMonths(q.literal.trim());
   // Boundary-guarded so "9%" does not match inside "129%", and the leading
@@ -865,7 +972,7 @@ function appearsInStrings(q: Quantity, strings: readonly string[]): boolean {
     `(?<![\\w.])${escapeRe(literal).replace(/\\?\s+/g, "\\s+")}(?![\\w])`,
     "i",
   );
-  return strings.some((s) => re.test(canonicaliseMonths(s)));
+  return strings.some((s) => re.test(s));
 }
 
 /**
@@ -884,13 +991,22 @@ function appearsInStrings(q: Quantity, strings: readonly string[]): boolean {
  */
 function unitCompatible(q: Quantity, c: Candidate): boolean {
   switch (q.kind) {
-    case "money":
+    case "money": {
       // Same currency, or it is not the user's figure. The trace measured a
-      // real €900k -> £1.6m swap; a matcher blind to the symbol would have
+      // real €900k -> £1.6m swap; a matcher blind to the currency would have
       // reported that swap as the user's own number.
-      return c.unitClass === "money" && c.symbol === q.unit;
+      //
+      // Compared as ISO CODES on both sides, via the canonical map: the brief
+      // states a SYMBOL ("£") and the model may declare either form ("£m" or
+      // "GBP"). Comparing symbols made the code form unmatchable; comparing
+      // codes makes the two spellings of one currency agree and still keeps
+      // different currencies apart.
+      if (c.unitKind !== "currency" || c.currencyCode === null) return false;
+      const stated = briefCurrencyCode(q.unit);
+      return stated !== null && stated === c.currencyCode;
+    }
     case "percent":
-      return c.unitClass === "percent";
+      return c.unitKind === "percent";
     case "count": {
       // ⚠ A COUNT MUST NAME ITS UNIT, AND THE CARRIER MUST DECLARE THE SAME
       // ONE. Measured 2026-08-09 against the real graphs: allowing a count to
@@ -940,8 +1056,16 @@ function classify(
 const SCOPE = {
   searched:
     "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+  // ⚠ DERIVED FROM `CANDIDATE_COLLECTIONS`, NOT RESTATED. This sentence is
+  // USER-VISIBLE COPY describing what we searched, and it was WRONG: it read
+  // "node, edge and option values" while `collectCandidates` walks only
+  // `nodes` and `options` — excluding the `edges` subtree deliberately, and
+  // saying so in its own docstring. Telling a user we searched edge values
+  // while reporting their figure "not modelled" is the confident-false
+  // statement this whole module exists to prevent, so the noun list is now
+  // generated from the constant that decides it and cannot drift again.
   model_surface: [
-    "node, edge and option values, caps, units, labels and encoding maps",
+    `${CANDIDATE_COLLECTIONS.map((c) => c.replace(/s$/, "")).join(" and ")} values, caps, units, labels and encoding maps`,
   ],
   prose_surface: ["coaching cards", "draft warnings", "validation warnings"],
   excluded_from_search: [

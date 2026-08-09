@@ -42,21 +42,23 @@
  * cite science the bundle has withdrawn.
  */
 
+import { DskProtocolProvenanceSchema } from '@talchain/schemas/boundary';
+import type { DskProtocolProvenance as ContractDskProtocolProvenance } from '@talchain/schemas/boundary';
+
 import type { DSKProtocol } from '../../dsk/types.js';
 import { loadVerifiedDskBundle, _resetDskBundleCache } from './dsk-bundle-record.js';
 
 /**
- * The wire shape, structurally identical to schemas'
- * `DskProtocolProvenanceSchema`. Declared here (rather than imported) only so
- * this module has no boundary-schema import in its hot path; the emitted value
- * is parsed against the real contract by `validateProseAndSchemaOrDrop` at the
- * block gate, and `dsk-protocol-provenance-wire.test.ts` asserts the two agree.
+ * The wire shape — TAKEN FROM THE CONTRACT, not restated.
+ *
+ * The id grammar, the non-empty title and the four-value strength enum are all
+ * `DskProtocolProvenanceSchema`'s, so they cannot drift from the contract
+ * `validateProseAndSchemaOrDrop` parses against at the block gate.
+ * `dsk-protocol-provenance-wire.test.ts` asserts the emitted triple is accepted
+ * on a real block shape (that file exists — unlike the CLAIM arm's citation,
+ * which named a file that never did; see `dsk-claim-record.ts`).
  */
-export interface DskProtocolProvenance {
-  readonly protocol_id: string;
-  readonly protocol_title: string;
-  readonly evidence_strength: 'strong' | 'medium' | 'weak' | 'mixed';
-}
+export type DskProtocolProvenance = Readonly<ContractDskProtocolProvenance>;
 
 /** `DSKObjectBase.id` narrowed to the protocol arm. */
 const PROTOCOL_ID_RE = /^DSK-P-\d{3}$/;
@@ -102,21 +104,14 @@ export function resolveDskProtocolProvenance(
   if (!PROTOCOL_ID_RE.test(protocolId)) return null;
   const record = loadProtocolIndex()?.get(protocolId);
   if (record === undefined) return null;
-  if (typeof record.title !== 'string' || record.title.length === 0) return null;
-  const strength = record.evidence_strength;
-  if (
-    strength !== 'strong' &&
-    strength !== 'medium' &&
-    strength !== 'weak' &&
-    strength !== 'mixed'
-  ) {
-    return null;
-  }
-  return {
+  // One `safeParse` against the contract, same fail-closed outcome as the four
+  // hand-written checks it replaces (`null`, never a partial triple).
+  const parsed = DskProtocolProvenanceSchema.safeParse({
     protocol_id: record.id,
     protocol_title: record.title,
-    evidence_strength: strength,
-  };
+    evidence_strength: record.evidence_strength,
+  });
+  return parsed.success ? parsed.data : null;
 }
 
 /**
