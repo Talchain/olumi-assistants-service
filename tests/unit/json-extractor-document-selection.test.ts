@@ -84,20 +84,26 @@ describe("extractJsonFromResponse — multi-document selection (2.996)", () => {
       expect(result.documentIndex).toBeUndefined();
     });
 
-    it("returns the FIRST document when it is complete and the SECOND is truncated", () => {
-      // The discriminating case the design was required to satisfy: a complete
-      // first document followed by a genuinely truncated one. Previously the
-      // test above CLAIMED this case in its name while its fixture held two
-      // complete documents — so the case was never actually exercised.
-      const first = { nodes: [{ id: "a" }], edges: [{ from: "a", to: "b" }], marker: "FIRST" };
-      const firstText = JSON.stringify(first);
-      const secondText = `{"nodes":[{"id":"a"}],"edges":[{"from":"a","to`; // cut mid-string
-      const raw = `${firstText}\n\nLet me expand that:\n\n${secondText}`;
+    it("NEVER selects a TRUNCATED later document, even when the first is rejected", () => {
+      // This is the truncation case that can actually go wrong, and it is the
+      // direction that matters: the first document is REJECTED, so the selector
+      // does look further — and the only thing after it is a cut-off tail.
+      // Today the tail is not a document at all and the core result stands.
+      //
+      // The hazard is concrete, not hypothetical: `closeTruncatedJson` lives in
+      // this same module and already salvages cut-off drafts elsewhere. Wiring
+      // it into enumeration would make this tail "acceptable" and silently
+      // promote PARTIAL data over the model's stated first answer.
+      const first = { nodes: [], edges: [], marker: "FIRST" };
+      // Cut AFTER a complete edge, so a salvage would yield an acceptable graph.
+      const truncatedTail = `{"nodes":[{"id":"a"}],"edges":[{"from":"a","to":"b"},{"from":"a","to`;
+      const raw = `${JSON.stringify(first)}\n\nLet me expand that:\n\n${truncatedTail}`;
 
-      // PRECONDITION, pinned in-test: the tail really is unparseable, so this
-      // cannot quietly degrade into "two complete documents" if the fixture
-      // is ever tidied.
-      expect(() => JSON.parse(secondText)).toThrow();
+      // PRECONDITIONS pinned in-test, so this cannot quietly stop discriminating:
+      // the tail is genuinely unparseable, and the first document is genuinely
+      // rejected (otherwise the short-circuit would make the test vacuous).
+      expect(() => JSON.parse(truncatedTail)).toThrow();
+      expect(acceptsGraphWithEdges(first)).toBe(false);
 
       const result = extractJsonFromResponse(raw, {
         logWarnings: false,
