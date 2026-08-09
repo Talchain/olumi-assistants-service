@@ -236,6 +236,21 @@ export const TelemetryEvents = {
   CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
   CeeElicitBeliefFailed: "cee.elicit_belief.failed",
 
+  // Wave-1 Lane D (PR1 fidelity closure, ROADMAP 2.967) — context-integrity
+  // observability triad. Content-free; log-only (no Datadog mapping).
+  // Registry minted up front by the wave's step-zero PR; emit sites land in
+  // Lane D's own PR. routed: a state/provenance question classified and
+  // routed ('guard' | 'llm') at state-query-guard. Payload: question_class,
+  // route + contextToTelemetry ids — NO question text.
+  CeeContextIntegrityRouted: "cee.context_integrity.routed",
+  // derived: the scenario-graph route computed the retention ledger. Payload:
+  // status + counts only (total / in_model / prose_only / absent / truncated)
+  // — NEVER atom text or brief content.
+  CeeContextIntegrityDerived: "cee.context_integrity.derived",
+  // unavailable: the ledger could not be derived — an honest unknown, never a
+  // silent skip. Payload: unavailable_reason ('no_brief_text' | 'no_graph').
+  CeeContextIntegrityUnavailable: "cee.context_integrity.unavailable",
+
   CeeUtilityWeightRequested: "cee.utility_weight.requested",
   CeeUtilityWeightSucceeded: "cee.utility_weight.succeeded",
   CeeUtilityWeightFailed: "cee.utility_weight.failed",
@@ -712,6 +727,22 @@ export const TelemetryEvents = {
   // has a single trigger, or the history input is not reaching the selector) —
   // which is the broken-alarm question this event exists to make answerable.
   V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
+  // Wave-1 Lane A (PR2 scientific loop, ROADMAP 2.989/3.17) — the fragile-edge
+  // selector's decision. ONE event covers both SELECTED and REFUSED arms (kin:
+  // the may-recommend-nothing default of lens_suggestion_emitted above).
+  // Payload: rationale_code (closed enum), e_value_joined (boolean),
+  // stability_band ('degenerate' | 'usable'), refusal_reason (closed enum |
+  // null) — NO user text, NO edge labels. Content-free; log-only (no Datadog
+  // mapping). Registry minted up front by the wave's step-zero PR; the emit
+  // site lands in Lane A's own PR (select-fragile-edge.ts).
+  V5FragileEdgeSelection: "v5.capability.fragile_edge_selection",
+  // Wave-1 Lane A (PR2) — the fragile-edge OFFER reached the composed
+  // response (phase3-blocks emit seam, PERMITTED branch only — surviving
+  // construction is not reaching the wire, per lens_companion_emitted above).
+  // Payload: action_intent, signal_code (closed enums),
+  // graph_hash_at_generation (16-hex prefix) — the loop witness correlates
+  // acceptance against this hash. Content-free; log-only.
+  V5FragileEdgeOfferEmitted: "v5.capability.fragile_edge_offer_emitted",
   // Wave-3 σ (ROADMAP 1.203) — the field-level claim-safety cage
   // (`isClaimUsable`/`composeCagedField`) evaluated whether a surface may claim
   // about a science-bearing enrichment field. Payload: field (name only),
@@ -1280,6 +1311,20 @@ export const TelemetryEvents = {
   // graph content or labels. Non-blocking contract: emit/save failures log
   // and NEVER affect the turn result.
   V5ModelVersionCreated: "v5.model_versions.version_created",
+
+  // Wave-1 Lane C (PR4 collaboration) — a collab write was REFUSED at the
+  // route/service boundary (invalid participant token, closed round,
+  // reveal-while-open, guest scenario, parse failure). A refusal leaves NO
+  // DB row, so this event is its only trace — the loud-refusal alarm for the
+  // N-suite's blindness/token-boundary invariants. Payload: code (closed
+  // enum), round_id — NEVER participant identity beyond server ids, NEVER
+  // expression content. Content-free; log-only (no Datadog mapping).
+  // Registry minted up front by the wave's step-zero PR; emit sites land in
+  // Lane C's own PRs. NOTE: round/append lifecycle is deliberately NOT
+  // minted here — the collab DB tables (round_events, elicitation_events)
+  // are the durable evidence substrate, and a log twin failed the wave's
+  // materiality test.
+  V5CollabWriteRefused: "v5.collab.write_refused",
 
   // Decision Records — commit-seam capture hook (ROADMAP 3.1, CEE half;
   // UNCONDITIONAL since #539 deleted CEE_DECISION_RECORD_CAPTURE, Paul's
@@ -1922,6 +1967,16 @@ export const TelemetryEvents = {
   // applied_something (whether the edit landed ANY graph at all — the field
   // that separates the two failure branches).
   V5ConfigureOptionOutcomeUnhonoured: "v5.edit_graph.configure_option_outcome_unhonoured",
+
+  // Wave-1 Lane B (PR3 mutation correctness, ROADMAP 3.16) — the edit turn
+  // named a target entity that does not exist in the persisted graph; the
+  // resolver must clarify, never guess (the wrong-object defect class this
+  // lane exists to close). Payload: request_id, scenario_id,
+  // resolution_match_type, resolution_confidence, counts only — NEVER the
+  // user's text or entity labels. Content-free; log-only (no Datadog
+  // mapping). Registry minted up front by the wave's step-zero PR; the emit
+  // site lands in Lane B's own PR (edit-graph-dispatch seam).
+  V5EditGraphTargetNotNamedInGraph: "v5.edit_graph.target_not_named_in_graph",
 
   // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
   // read for its option-label anchor. Until 2.308 the labels came only from
