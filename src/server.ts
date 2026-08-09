@@ -1170,10 +1170,17 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeScenarioGraphRegisterRouteV1(app);
   await ceeElicitBeliefRouteV1(app);
   // COLLAB U-S0 (ROADMAP 2.686/2.909/2.910) — blind elicitation rounds.
-  // Registered UNCONDITIONALLY (no dark launches, no new env gate). Each
-  // module mounts its handlers at BOTH the contract-pinned /collab/v1/*
-  // prefix and a browser-reachable /assist/v1/collab/* alias — see
-  // src/collab/route-support.ts for why the pinned prefix alone is dark.
+  // Registered UNCONDITIONALLY (no dark launches, no new env gate).
+  //
+  // Each module mounts its handlers at EXACTLY ONE prefix: the contract-pinned
+  // /collab/v1/*. `collabPaths()` returns a single path. An earlier draft also
+  // aliased these under /assist/v1/collab/* to ride the existing /bff/cee/*
+  // seam; that alias was WITHDRAWN — two entrances to one room is one too many
+  // when the room is a privacy boundary.
+  //
+  // Browser reachability comes from the UI's `/bff/collab/*` edge function,
+  // which rewrites to this prefix and forwards x-collab-participant-token. See
+  // src/collab/route-support.ts for why no pre-existing seam reaches here.
   // The store is constructed lazily per request, so these routes are inert
   // until called and require no new tables at boot.
   await collabRoundsRouteV1(app);

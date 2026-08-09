@@ -251,10 +251,24 @@ GRANT SELECT ON public.elicitation_events       TO authenticated;
 --   • rounds/participants get UPDATE, because `status` and `pseudonym` are
 --     materialised columns the service maintains;
 --   • the two APPEND-ONLY EVENT tables get SELECT+INSERT ONLY — no UPDATE, no
---     DELETE, for anyone but the table owner. A contribution, once made, cannot
---     be edited or erased by the application. That is INV-C at the grant layer,
---     and it is what makes "append-only" a property of the database rather than
---     a promise made by the code.
+--     DELETE, for anyone but the table owner. So a contribution, once made,
+--     cannot be EDITED at all, and cannot be individually deleted by the
+--     application. That is INV-C at the grant layer, and it holds even for
+--     service_role, which carries BYPASSRLS — measured: BYPASSRLS defeats RLS,
+--     not a missing GRANT.
+--
+--     ⚠ SCOPE OF THAT CLAIM, STATED HONESTLY: it is NOT "these rows can never
+--     be removed". `ON DELETE CASCADE` from `scenarios` is a delete path no
+--     grant audit can see — PostgreSQL runs referential actions as internal
+--     triggers under the referencing table's owner, so neither the absent
+--     DELETE grant nor FORCE RLS blocks a cascade. Deleting a scenario still
+--     removes its rounds and their events.
+--
+--     That is deliberate (a deleted scenario should not leave orphaned panel
+--     data) and it does NOT weaken what this feature depends on: there is no
+--     UPDATE path at all, so an attribution cannot be forged, re-pointed or
+--     silently edited. Destroying a whole parent is a different operation from
+--     rewriting a contribution.
 GRANT SELECT, INSERT, UPDATE ON public.elicitation_rounds       TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.elicitation_participants TO service_role;
 GRANT SELECT, INSERT         ON public.round_events             TO service_role;

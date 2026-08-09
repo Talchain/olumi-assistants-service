@@ -284,6 +284,16 @@ export interface RevealView {
   graph_version_ref: string;
   per_target: Array<{
     target: ElicitationTarget;
+    /**
+     * The owner-authored label from the round's target manifest — the words the
+     * panel was actually asked about.
+     *
+     * ⚠ NOT cosmetic. A reveal heading that reads `factor-churn-risk` obscures
+     * WHERE two people disagree, which is the one thing this view exists to
+     * make obvious. It carries no new information: participants already saw
+     * this exact string in their packet.
+     */
+    label: string;
     model_value_at_version: number | null;
     /** Latest-per-participant fold. Counting unit = distinct participants. */
     responses: RevealPerTargetRow[];

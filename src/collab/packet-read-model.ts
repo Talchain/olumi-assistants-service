@@ -190,6 +190,7 @@ export async function assembleRevealView(
     graph_version_ref: round.graph_version_ref,
     per_target: targets.map((t) => ({
       target: { kind: t.target.kind, id: t.target.id },
+      label: t.label,
       model_value_at_version: modelValues[t.target.id] ?? null,
       // EXPLICIT six-key projection per response. `supabase_user_id` and
       // `token_hash` live on the participant row and must never reach here;

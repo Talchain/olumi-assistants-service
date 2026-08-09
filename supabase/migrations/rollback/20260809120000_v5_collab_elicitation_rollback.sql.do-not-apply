@@ -6,9 +6,12 @@
 -- pressure. Applying it is a deliberate operator act, never part of a deploy.
 --
 -- ⚠⚠ THIS IS DESTRUCTIVE AND IRREVERSIBLE. It drops the elicitation tables and
--- every contribution in them. The event tables are APPEND-ONLY BY GRANT, which
--- means there is no other way to remove a contribution — that is the point of
--- the posture, and it is exactly why this file must not be run casually.
+-- every contribution in them. The event tables are APPEND-ONLY BY GRANT: no
+-- role but the owner can UPDATE or individually DELETE a contribution, so this
+-- file is one of only two ways panel data goes away — the other being an
+-- `ON DELETE CASCADE` when a whole parent `scenario` is deleted. Neither is a
+-- path the application can take against a single row, which is the point of the
+-- posture and exactly why this file must not be run casually.
 --
 -- BEFORE RUNNING, take an export if any real panel data exists:
 --   \copy (SELECT * FROM public.elicitation_events)             TO 'elicitation_events.csv'      CSV HEADER
