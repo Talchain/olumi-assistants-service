@@ -18,6 +18,14 @@ import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 
 export type EditTurnOutcome =
   | 'success'
+  /**
+   * ROADMAP 2.1003 — a graph WAS applied and committed, and the
+   * user-meaningful model is byte-identical to the pre-edit model. Measured
+   * on deployed staging as `operations_count = 1, status = "applied",
+   * noop = false` on an identical replay. It is NOT a flavour of `success`:
+   * an aggregate over `outcome === 'success'` must stop counting it.
+   */
+  | 'applied_unchanged'
   | 'rejected'
   | 'no_op'
   | 'clarify'
@@ -53,6 +61,14 @@ export type EditTurnEventFields = {
   graph_edges_before: number;
   graph_edges_after: number;
   operations_count: number;
+  /**
+   * ROADMAP 2.1003 — did the user-meaningful model actually move?
+   * `null` = no verdict available (no applied graph / no pre-edit graph).
+   * The rate that matters is `model_changed === false` among turns whose
+   * outcome claims success — NOT `operations_count === 0`, which is blind to
+   * every no-op-reported-as-success turn.
+   */
+  model_changed: boolean | null;
   plot_outcome: string;
   repair_attempts: number;
   latency_ms: number;
@@ -117,7 +133,17 @@ export function deriveEditTurnFieldsFromResult(
 
   let outcome: EditTurnOutcome;
   if (opts.proposalEarlyEmitted) outcome = 'proposal';
-  else if (opts.successfulAppliedMutation) outcome = 'success';
+  // ROADMAP 2.1003 — THE METRIC THAT MATTERS, named before the fix so the fix
+  // is not judged by the metric it was designed to move (trap 23).
+  // The harm is `model_changed === false` among turns whose outcome CLAIMS
+  // success. `operations_count === 0` is NOT the metric and a dashboard built
+  // on it scores every measured no-op-success turn as a success: all three
+  // captured replays reported `operations_count = 1, status = applied`.
+  // `applied_unchanged` is therefore a distinct outcome, not a flavour of
+  // success — an aggregate over `outcome === 'success'` must stop counting it.
+  else if (opts.successfulAppliedMutation) {
+    outcome = editResult.modelUnchanged === true ? 'applied_unchanged' : 'success';
+  }
   else if (editResult.wasRejected) outcome = 'rejected';
   else if (opts.deterministicClarify && operationsCount === 0) outcome = 'clarify';
   else if (operationsCount === 0) outcome = 'no_op';
@@ -143,6 +169,7 @@ export function deriveEditTurnFieldsFromResult(
     graph_nodes_after: nodesAfter,
     graph_edges_after: edgesAfter,
     operations_count: operationsCount,
+    model_changed: editResult.modelUnchanged === undefined ? null : !editResult.modelUnchanged,
     plot_outcome: d?.plot_outcome ?? 'skipped',
     repair_attempts: d?.repair_attempts ?? 0,
   };
@@ -176,6 +203,9 @@ export function finaliseEditTurnEvent(
     graph_edges_before: ev.graph_edges_before,
     graph_edges_after: ev.graph_edges_after ?? ev.graph_edges_before,
     operations_count: ev.operations_count ?? 0,
+    // ROADMAP 2.1003 — `null` means "no verdict", never "unchanged". A branch
+    // that never set it must not be counted either way.
+    model_changed: ev.model_changed ?? null,
     plot_outcome: ev.plot_outcome ?? 'skipped',
     repair_attempts: ev.repair_attempts ?? 0,
     latency_ms: ev.latency_ms ?? 0,

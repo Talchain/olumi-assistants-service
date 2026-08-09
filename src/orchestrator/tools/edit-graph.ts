@@ -33,6 +33,9 @@ import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 // stringified-payload schema (Lane 26 v8-aux-field trick applied to
 // value/old_value) — see GRAMMAR BUDGET (v2) in anthropic-edit-graph-schema.ts.
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
+// ROADMAP 2.1003 — mutation-correctness seam. Both are PURE and locally owned.
+import { reconcileDisplayAnchors } from "./display-anchor-reconcile.js";
+import { evaluateEditModelChange } from "../../orchestrator-v5/routing/edit-outcome-binding.js";
 // ROADMAP 2.474 / A3 — ONE definition of the complexity budget, shared with the
 // structural-edit batch splitter (see patch-budget-limits.ts for why).
 import {
@@ -137,6 +140,30 @@ export interface EditGraphResult {
   routeMetadata?: RouteMetadata;
   /** Structured receipt for successful edits. Absent on rejected edits. */
   appliedChanges?: AppliedChanges;
+  /**
+   * ROADMAP 2.1003 — "did the user-meaningful model actually move?"
+   *
+   * `true`  — a graph was applied and it is IDENTICAL to the pre-edit graph
+   *           (the measured identical-replay case: PLoT applied one operation,
+   *           the graph did not move, and the product said "Applied edit").
+   * `false` — the model moved.
+   * `undefined` — no verdict available (no applied graph, or no pre-edit
+   *           graph). A GUESS IS NOT A VERDICT: consumers must not render
+   *           "no change" copy from `undefined`.
+   *
+   * ⚠ TRAP 21 — this is NOT `isSuccessfulAppliedMutation` and must never be
+   * folded into it. That predicate answers "is there a graph to commit?" and
+   * has 12+ readers (persistence, analysis_ready, fact emission, the GM gate).
+   * This one answers "did anything change?" and is consumed ONLY by the
+   * confirmation copy, the turn event, and the edit fact summary.
+   */
+  modelUnchanged?: boolean;
+  /**
+   * ROADMAP 2.1003 — ids of nodes whose `display_value` was recomputed or
+   * cleared because this edit moved their observed state. Content-free count
+   * only reaches telemetry; the ids are here for the receipt/diagnostics.
+   */
+  displayAnchorsRepaired?: string[];
   /**
    * Canonical PatchOperation[] applied on the success path. Exposed for
    * downstream consumers (V5 edit-graph fact builder — DL-7 PR B) that
@@ -255,6 +282,19 @@ export interface EditTargetResolutionResult {
   confidence: EditResolutionConfidence;
   alternatives: Array<{ id: string; label: string }>;
   candidate_labels: string[];
+  /**
+   * ROADMAP 2.1003 — set when the resolution came from the TOKEN-OVERLAP arm,
+   * i.e. a fuzzy match that reports itself as `exact_label` at `high`
+   * confidence although nothing exact happened. Deliberately a separate field
+   * rather than a demotion of `confidence`: `confidence === 'high'` is also
+   * read by `buildProposedChanges` for compound-label protection, and
+   * rewriting a shared field to reach one consumer is the trap-21 defect.
+   *
+   * Exactly one reader: `determineEditResolutionMode`, which demotes to
+   * `propose_and_confirm` (consent, not refusal) so a heuristically picked
+   * entity is named to the user before anything is written.
+   */
+  heuristic_match?: true;
   /**
    * REVIEW-573 C-1 — set when `preferOptionTargetForOptionConfiguration`
    * REDIRECTED the resolution to a single named option over a wider match
@@ -443,9 +483,37 @@ function buildProposeAndConfirmText(
   return `I have changes in mind for ${list}${more}, but I need the specifics to apply them directly. Reply with the exact changes you'd like and I'll make them one at a time.`;
 }
 
+/**
+ * ROADMAP 2.1003 — does the message carry an EXPLICIT structural verb?
+ *
+ * `classifyEditIntent` returns `'structural'` from two very different places:
+ * this predicate firing, and the FINAL `return 'structural'` — the DEFAULT
+ * taken when a message is neither recognisably option-configuration nor
+ * recognisably a value update. Those are different facts wearing one name
+ * (trap 21), and `determineEditResolutionMode` unconditionally auto-applies
+ * both.
+ *
+ * Measured by execution at `6b8698a4`: "Change the Salesforce annual licence
+ * fee to £30,000" reaches the DEFAULT, because `hasValueTarget` is a
+ * hand-maintained vocabulary (`cost|price|pay|churn|percent|%|…`) that does
+ * not contain "fee". An ordinary value edit whose noun is outside the
+ * vocabulary is therefore classified structural by fallthrough and
+ * auto-applies with no confidence, compound or low-impact check ever running.
+ *
+ * Exposed so the resolution-mode gate can tell the two apart. It does NOT
+ * change `classifyEditIntent`'s output — widening that vocabulary is a
+ * natural-language predicate change that needs a corpus from outside the
+ * author's head (trap 22) and is handed back, not attempted here.
+ */
+export function hasExplicitStructuralVerb(editDescription: string): boolean {
+  return STRUCTURAL_VERB_RE.test(editDescription.toLowerCase());
+}
+
+const STRUCTURAL_VERB_RE = /\b(add node|remove node|delete node|add edge|remove edge|delete edge|connect|disconnect|link|unlink|rewire|restructure|replace|insert|create|new factor|new outcome|new risk|new option|add (?:a |an )?(?:new )?(?:[a-z0-9_-]+\s+){0,2}(?:factor|outcome|risk|option|node|edge))\b/;
+
 export function classifyEditIntent(editDescription: string): EditIntentCategory {
   const message = editDescription.toLowerCase();
-  const hasStructuralVerb = /\b(add node|remove node|delete node|add edge|remove edge|delete edge|connect|disconnect|link|unlink|rewire|restructure|replace|insert|create|new factor|new outcome|new risk|new option|add (?:a |an )?(?:new )?(?:[a-z0-9_-]+\s+){0,2}(?:factor|outcome|risk|option|node|edge))\b/.test(message);
+  const hasStructuralVerb = STRUCTURAL_VERB_RE.test(message);
   const hasOptionConfigVerb = /\b(configure|set|adjust|update|change|tune|edit)\b/.test(message)
     && /\b(option|intervention)\b/.test(message);
   const hasValueUpdateVerb = /\b(set|lower|raise|increase|decrease|reduce|boost|make|adjust|update|tune|change|add)\b/.test(message);
@@ -862,14 +930,31 @@ export function resolveEditTarget(
   // "competitor pressure" → "Competitive Pressure" via substring containment.
   const tokenMatches = resolveTokenOverlapMatches(normalisedMessage, targets);
   if (tokenMatches.length > 0) {
-    return (
-      preferOptionTargetForOptionConfiguration(editDescription, intentCategory, tokenMatches)
-      ?? buildResolutionResult(
+    const preferred = preferOptionTargetForOptionConfiguration(editDescription, intentCategory, tokenMatches);
+    if (preferred) return preferred;
+    // ROADMAP 2.1003 — this arm is a FUZZY match, and it reports itself as
+    // `exact_label` at `high` confidence although nothing exact happened.
+    // Measured at HEAD by execution: "Change the Salesforce annual licence
+    // fee to £30,000", against a graph with NO Salesforce node, resolves to
+    // `fac_annual_crm_cost` ("Annual CRM Licence Cost") at `exact_label` /
+    // `high` and routes to `auto_apply` — a different object than the user
+    // named, silently. The overlap predicate is one-directional: it measures
+    // how much of the LABEL the message covers and never asks whether the
+    // message's own most distinctive token exists anywhere in the graph.
+    //
+    // The stamp is a separately-named field, NOT a change to `confidence`.
+    // `confidence === 'high'` has another reader (`buildProposedChanges`
+    // uses it to protect a label containing compound separators), and
+    // rewriting a shared field to reach one consumer is the trap-21 defect
+    // this seam exists to stop. One new field, one new reader.
+    return {
+      ...buildResolutionResult(
         tokenMatches.length === 1 ? 'exact_label' : 'ambiguous',
         tokenMatches.length === 1 ? 'high' : 'medium',
         tokenMatches,
-      )
-    );
+      ),
+      heuristic_match: true,
+    };
   }
 
   if (containsCoreferenceReference(editDescription)) {
@@ -904,6 +989,40 @@ export function determineEditResolutionMode(
     return 'no_edit_answer';
   }
 
+  // ⚠⚠ ROADMAP 2.1003 — THE ROUTING DEMOTION IS DELIBERATELY **NOT** HERE.
+  //
+  // The identity harm is real and reproduces at this tip by execution:
+  //   resolveEditTarget('Change the Salesforce annual licence fee to £30,000')
+  //   against a graph with NO Salesforce node returns
+  //   { match_type: 'exact_label', confidence: 'high',
+  //     resolved_target.id: 'fac_annual_crm_cost' }  and this function
+  //   returns 'auto_apply' — a different object than the user named, silently.
+  //
+  // AND THE ROOT CAUSE IS NOT THE CONFIDENCE PATH. Measured:
+  // `classifyEditIntent` requires `hasValueUpdateVerb && hasValueTarget` for
+  // 'parameter_update', and `hasValueTarget` is a hand-maintained vocabulary
+  // (`cost|price|pay|churn|percent|%|…`) that does not contain "fee". The
+  // message therefore falls through to the FINAL `return 'structural'` — the
+  // DEFAULT — and the structural early-return below auto-applies
+  // unconditionally, before any confidence, compound or low-impact check runs.
+  // (The honest phrasing "…annual CRM licence COST…" contains "cost", becomes
+  // 'parameter_update', and confirms. The product was STRICTEST with the user
+  // who named the object correctly.)
+  //
+  // A demotion gated on `heuristic_match` was built here and WITHDRAWN after
+  // it was measured breaking a legitimate rename: "Rename the setup factor"
+  // token-overlaps "Setup Complexity" at exactly 0.5, so it is a heuristic
+  // match too, and the demotion stopped it applying
+  // (`normal-path-value-op-canonicalisation.test.ts` > "flag ON — a benign
+  // rename still APPLIES on a V3-invalid base" went RED).
+  //
+  // That is trap 22 landing on its feet: a predicate over natural language,
+  // whose corpus came from the author's head, met a class the author did not
+  // imagine — and an EXISTING TEST, not my own kit, is what caught it. The
+  // correct next step is the brief's B4 obligation (the 27 captured edit-turn
+  // messages as a table-driven corpus), which this lane does not have. Routing
+  // is therefore UNCHANGED here; `heuristic_match` is carried as an honest
+  // FACT so the class can be measured before anyone changes behaviour on it.
   if (intentCategory === 'structural') {
     // Structural edits still pass through the full edit_graph validation flow.
     return 'auto_apply';
@@ -3492,6 +3611,53 @@ export async function handleEditGraph(
     }
 
     // ---- Success: build block ----
+    //
+    // ROADMAP 2.1003 (a) — DISPLAY-ANCHOR RECONCILIATION.
+    // This is the single convergence point: every branch that can set
+    // `appliedGraph` (PLoT at ~:3067, and the three local-apply branches)
+    // has already run. A node whose observed state just moved must not keep
+    // the display string that described its OLD value — measured on deployed
+    // staging, a receipt carried `observed_state.value = 40` beside
+    // `display_value = "20%"` and the canvas showed 20% before AND after
+    // reload. Only nodes the edit actually moved are touched (see the module
+    // header for why a blanket rewrite would be a breadth defect).
+    //
+    // The hash is recomputed locally ONLY when reconciliation changed bytes.
+    // When it did not, PLoT's canonical `graph_hash` is left exactly as it
+    // was — the turn is byte-identical to today.
+    let displayAnchorsRepaired: string[] = [];
+    if (appliedGraph) {
+      // Total by construction, for the same reason and with the same caveat
+      // as the guard in `edit-outcome-binding.ts`: this runs on the critical
+      // path of every edit, so it must never cost the user an edit that
+      // otherwise succeeded. Not claimed to have been observed firing.
+      const reconciled = (() => {
+        try {
+          return reconcileDisplayAnchors(context.graph, appliedGraph);
+        } catch {
+          return { graph: appliedGraph as GraphV3T, repairedNodeIds: [] as string[] };
+        }
+      })();
+      if (reconciled.repairedNodeIds.length > 0) {
+        appliedGraph = reconciled.graph;
+        appliedGraphHash = computeGraphHash(appliedGraph);
+        displayAnchorsRepaired = reconciled.repairedNodeIds;
+        log.info(
+          { request_id: requestId, repaired_display_anchor_count: displayAnchorsRepaired.length },
+          'edit_graph: reconciled stale display anchors on mutated nodes',
+        );
+      }
+    }
+
+    // ROADMAP 2.1003 (b) — THE NO-CHANGE VERDICT.
+    // One locally-owned whitelist comparator over BOTH graphs. Never PLoT's
+    // `graph_hash`: that is a different function over a different projection,
+    // and comparing it against a locally computed value reads "changed" on
+    // every PLoT-served turn — a guard that silently stops discriminating.
+    const modelChange = appliedGraph
+      ? evaluateEditModelChange(context.graph, appliedGraph)
+      : { verdict: 'not_applicable' as const, beforeHash: null, afterHash: null };
+
     const latencyMs = Date.now() - startTime;
 
     // Collect validation warnings: LLM warnings + PLoT warnings + skip notice
@@ -3790,6 +3956,13 @@ export async function handleEditGraph(
       // surfaces them on the public result for downstream projection.
       operations,
       operation_meta: operationMeta,
+      // ROADMAP 2.1003 — `not_applicable` stays `undefined` deliberately:
+      // a guess is not a verdict, and a consumer must be able to tell
+      // "we know it did not change" from "we could not tell".
+      ...(modelChange.verdict !== 'not_applicable' && {
+        modelUnchanged: modelChange.verdict === 'unchanged',
+      }),
+      ...(displayAnchorsRepaired.length > 0 && { displayAnchorsRepaired }),
       ...(suggestedActions.length > 0 && { suggestedActions }),
       diagnostics: diagnostics(),
       routeMetadata: routeMetadata(),
