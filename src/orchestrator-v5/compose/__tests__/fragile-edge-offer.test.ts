@@ -99,7 +99,8 @@ const WINNING_PREV = 'consider_opposite' as const;
 
 // ============================================================================
 // 0. TELEMETRY NAME VALIDATION — load-bearing. The CI telemetry workflow only
-//    inspects string-literal `emit("...")` calls, so an emit through
+//    inspects string-literal emit calls (a quoted name passed directly), so an
+//    emit through
 //    `TelemetryEvents.X` is guarded ONLY by this assertion.
 // ============================================================================
 
