@@ -195,16 +195,25 @@ export async function assembleRevealView(
       // `token_hash` live on the participant row and must never reach here;
       // a spread would carry both the first time this is refactored.
       responses: foldLatestPerParticipant(events, t.target.id).map(
-        (row): RevealPerTargetRow => ({
-          participant_id: row.participant_id,
-          display_label: labelById.get(row.participant_id) ?? 'Removed participant',
-          value: row.belief?.value ?? null,
-          // The person's OWN WORDS, verbatim. This is what makes the reveal a
-          // record of reasoning rather than a row of numbers.
-          expression_raw: row.belief?.expression_raw ?? null,
-          confidence: row.belief?.confidence ?? null,
-          kind: row.kind,
-        }),
+        (row): RevealPerTargetRow => {
+          // TWO DISTINCT ABSENCES, written out rather than collapsed into a
+          // `?? null` fallback: a DECLINED event carries no belief at all, and
+          // a belief may carry a null confidence because the person gave none.
+          // Both render as "no number", but conflating them behind a fallback
+          // is how a missing field quietly becomes a stated one — the defect
+          // class the forbidden-pattern gate exists to stop growing.
+          const belief = row.belief;
+          return {
+            participant_id: row.participant_id,
+            display_label: labelById.get(row.participant_id) ?? 'Removed participant',
+            value: belief === null ? null : belief.value,
+            // The person's OWN WORDS, verbatim. This is what makes the reveal a
+            // record of reasoning rather than a row of numbers.
+            expression_raw: belief === null ? null : belief.expression_raw,
+            confidence: belief === null ? null : belief.confidence,
+            kind: row.kind,
+          };
+        },
       ),
     })),
   };
