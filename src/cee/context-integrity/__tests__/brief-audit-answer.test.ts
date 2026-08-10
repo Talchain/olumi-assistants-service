@@ -125,6 +125,26 @@ describe("isBriefAuditQuestion", () => {
   it("a brief referent alone is not enough", () => {
     expect(isBriefAuditQuestion("My brief is quite long.")).toBe(false);
   });
+
+  /**
+   * THE AMBIGUOUS PAIR, kept apart by the retention-verb conjunct. These two
+   * differ by ONE verb and mean different things, and the difference is not
+   * recoverable from punctuation or length (trap 22f) — so the ambiguous one
+   * stays with the existing session-edit behaviour rather than being guessed at.
+   */
+  it('"which of my numbers did you USE" is an audit question', () => {
+    expect(isBriefAuditQuestion("Which of my numbers did you use?")).toBe(true);
+  });
+
+  it('"did you CHANGE my numbers" is left to the session-edit guard', () => {
+    // After a value edit this is a session-edit question, and answering it with
+    // a brief-fidelity report would be the lie the gap is worth avoiding.
+    expect(isBriefAuditQuestion("Did you change my numbers?")).toBe(false);
+  });
+
+  it('"did you update my figures" is likewise left alone', () => {
+    expect(isBriefAuditQuestion("Did you update my figures?")).toBe(false);
+  });
 });
 
 describe("composeBriefAuditAnswer", () => {

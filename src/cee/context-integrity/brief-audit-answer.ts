@@ -191,7 +191,9 @@ const WEAK_INPUT_REFERENT_PATTERNS: readonly RegExp[] = [
  */
 const RETENTION_VERB_PATTERNS: readonly RegExp[] = [
   /\bus(?:e|ed|ing)\b/i,
-  /\bkeep|kept\b/i,
+  // Both alternatives carry their own anchors: `/\bkeep|kept\b/` would parse as
+  // `(\bkeep)|(kept\b)` and silently lose an anchor on each side.
+  /\bkeeps?\b|\bkept\b/i,
   /\binclud(?:e|ed)\b/i,
   /\bcaptur(?:e|ed)\b/i,
   /\breflect(?:ed)?\b/i,
