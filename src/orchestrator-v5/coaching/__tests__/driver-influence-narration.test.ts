@@ -169,7 +169,7 @@ describe('DGAI #341 — headline driver claim derives from influence_score', () 
       status_kind: 'ok',
     });
     expect(text).not.toBeNull();
-    expect(text).toContain('currently leads by 72 percentage points');
+    expect(text).toContain('came out ahead in 86% of runs of this model');
     expect(text).not.toContain('strongest driver');
     expect(text).not.toContain('Market Timing Pressure');
     // Wiring check: the composed text passes the registry allowlist so the

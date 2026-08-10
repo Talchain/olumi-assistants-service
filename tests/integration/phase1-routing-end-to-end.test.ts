@@ -182,7 +182,7 @@ describe('phase 1 routing end-to-end — execute turn via tool-use', () => {
     // "registry-driven confirmation reaches the wire after the
     // routing orientation" — stays intact regardless of which branch
     // of the headline builder fired.
-    expect(response.assistant_text).toMatch(/Ran analysis on your current scenario\.|currently leads/);
+    expect(response.assistant_text).toMatch(/Ran analysis on your current scenario\.|came out ahead in/);
 
     // BI-01
     const started = events.filter((e) => e.event === 'turn_executor.started');

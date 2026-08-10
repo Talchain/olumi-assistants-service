@@ -11,15 +11,24 @@
  * Invariants:
  *  - No LLM call. No I/O. No graph mutation. No telemetry side effects on
  *    the valid path (margin inputs are pre-validated finite probabilities).
- *  - No raw decimals. win_probability renders as an integer %; the
- *    winner->runner-up margin renders as an integer "<N> percentage points"
- *    via the SSOT formatProbabilityMargin.
+ *  - No raw decimals. The leading option's win_probability renders as an
+ *    integer % and is the ONLY statistic this headline states.
+ *  - ⚠ THE WINNER->RUNNER-UP MARGIN IS NEVER DISPLAYED. It still DECIDES
+ *    (hasMeaningfulLead, the near-tie verdict) but it is not shown, because a
+ *    difference of two P(argmax) values is not a difference in outcome, cost
+ *    or benefit — and it inflates when a THIRD option collapses, so the same
+ *    leader can read "leads by 42 points" and "leads by 92 points" on runs it
+ *    performed identically in. Decide on the gap; report the leader's own
+ *    probability. See `leadClause` in computeHeadline for the full rationale.
  *  - No internal IDs leak (winner / driver / fragility labels are guarded
  *    against ID-shaped strings).
  *  - One short sentence, or one + one status-suffix sentence — never more.
  *    Maximum {@link MAX_HEADLINE_CHARS} characters including any suffix.
- *  - Uses "currently leads", "provisional", "sensitive to" — never
- *    "best" / "recommended" / "winner".
+ *  - Uses "came out ahead in N% of runs of this model" (numbered bands),
+ *    "currently leads" (the number-free floor), "provisional", "sensitive to"
+ *    — never "best" / "recommended" / "winner". The scope clause "of this
+ *    model" is mandatory on every numbered band: the statistic is arithmetic
+ *    over the drafted graph's assumptions, not a measurement of the world.
  *  - "currently leads" is emitted ONLY when the leading option has a
  *    finite win_probability ≥ {@link MIN_LEAD_PROBABILITY} AND, if a
  *    runner-up exists in the same source, the margin is at least
@@ -693,8 +702,68 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // decimal. In the meaningful-lead branch the margin is guaranteed
   // ≥ MIN_LEAD_MARGIN (≥ 5pp), so it always renders as a plural integer
   // "<N> percentage points".
+  //
+  // ⚠ NO LONGER USER-FACING. `marginText` still decides WHETHER a numbered
+  // shape is available (a null margin means single-option, which has no
+  // meaningful runner-up to have led over) but its TEXT is never emitted —
+  // see `leadClause` below for why the pp gap could not stay on screen.
   const marginText = marginPointsText(winner);
-  const marginFragment = marginText !== null ? ` by ${marginText}` : '';
+
+  // ==========================================================================
+  // The lead clause: the LEADER'S OWN win probability, never the gap
+  // ==========================================================================
+  //
+  // ⚠ WHAT THE OLD COPY CLAIMED, AND WHY IT WAS WITHDRAWN. This slot used to
+  // render ` by ${marginText}` — "currently leads by 95 percentage points",
+  // the difference between two `P(argmax)` statistics. Three things were wrong
+  // with it, and only the third is fixable by wording:
+  //
+  //  1. CATEGORY ERROR. It is not a difference in outcome, cost or benefit.
+  //     "Leads by 95 percentage points" invites "95% better", which it
+  //     emphatically is not — nothing about the leader being 95pp clear of the
+  //     runner-up says the DECISION is 95% better, or better at all by any
+  //     amount the user cares about.
+  //  2. IT INFLATES BY CONSTRUCTION, and this is the part no threshold can
+  //     repair. The gap is a function of the WHOLE FIELD, so a third option
+  //     collapsing widens it with no improvement whatever in the leader. A
+  //     92pp headline was measured on a run whose runner-up had itself fallen
+  //     to 4%: the number moved because someone else got worse. A statistic
+  //     that grows when the field decays cannot be the sentence a user reads
+  //     as the strength of their leading option.
+  //  3. It was the most confident sentence the product emitted, and confidence
+  //     is exactly what a derived-difference statistic has least claim to.
+  //
+  // WHAT REPLACES IT, and why it is one call away rather than a new
+  // computation: `winner.winnerProb` is the leader's own win probability,
+  // already resolved from the SAME source array as the label (see
+  // resolveWinner), already guaranteed finite and in [0, 1], and already
+  // rendered as an integer percentage by the single-option Case D below. So
+  // this is a DISPLAY change end to end — no new field, no new derivation, no
+  // boundary crossed, and nothing for a consumer on an older schema pin to
+  // drop.
+  //
+  // ⚠ "OF THIS MODEL" IS LOAD-BEARING — DO NOT SHORTEN IT. `win_probability`
+  // is the share of Monte Carlo runs OF THE DRAFTED MODEL in which this option
+  // came out on top. It is arithmetic over the assumptions in the graph, not a
+  // measurement of the world, and the model's numbers are mostly the product's
+  // own estimates. Without the scope clause "came out ahead in 72% of runs"
+  // reads as a finding; with it, the sentence tells the truth about what was
+  // counted. It costs five words and is the difference between a user reading
+  // the number as evidence and reading it as a projection of their own inputs.
+  //
+  // The GATES ARE UNTOUCHED. `hasMeaningfulLead` still gates on the margin
+  // (≥ MIN_LEAD_MARGIN) and the near-tie verdict still owns closeness — the
+  // margin remains the right thing to DECIDE on, because "is this lead real?"
+  // genuinely is a question about the gap. It is only the wrong thing to
+  // DISPLAY. Deciding on the gap and reporting the leader's own probability is
+  // the whole shape of this change.
+  const leadPercent = Math.round(winnerProbability * 100);
+  const leadClause = `came out ahead in ${leadPercent}% of runs of this model`;
+
+  // The number-free shed form, kept verbatim for the bands that must not carry
+  // a statistic: the Case E floor (every enriching gate declined the run) and
+  // the length-shed A→C / B variants, where dropping the clause IS the shed.
+  const LEADS_PLAIN = 'currently leads';
 
   // Doctrine D-W (ROADMAP 2.52): the DECLARED leader (PLoT's leading_option_id)
   // is NOT the highest raw win_probability — a runner-up strictly edges it on
@@ -796,14 +865,14 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // cautionReasonText.
       const cautionTail =
         `, but treat this as provisional: ${cautionReasonText(caution)}.${suffix}`;
-      const caseA = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
+      const caseA = `${winnerLabel} ${leadClause}${cautionTail}`;
       if (caseA.length <= lengthCap) {
         return {
           text: caseA,
           descriptor: buildDescriptor('A', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
-      const caseC = `${winnerLabel} currently leads${cautionTail}`;
+      const caseC = `${winnerLabel} ${LEADS_PLAIN}${cautionTail}`;
       if (caseC.length <= lengthCap) {
         return {
           text: caseC,
@@ -816,14 +885,14 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // direction claim — "strongest driver" is a magnitude / salience
       // statement, so the PR #221 direction-honest path is not engaged here.
       const driverTail = ` because ${driverLabel} is the strongest driver.${suffix}`;
-      const caseBMargin = `${winnerLabel} currently leads${marginFragment}${driverTail}`;
+      const caseBMargin = `${winnerLabel} ${leadClause}${driverTail}`;
       if (caseBMargin.length <= lengthCap) {
         return {
           text: caseBMargin,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
-      const caseB = `${winnerLabel} currently leads${driverTail}`;
+      const caseB = `${winnerLabel} ${LEADS_PLAIN}${driverTail}`;
       if (caseB.length <= lengthCap) {
         return {
           text: caseB,
@@ -834,7 +903,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     } else if (marginText !== null) {
       // No driver, no fragility, but a margin is available — surface it
       // (preferred over a bare probability number per the copy priority order).
-      const caseDMargin = `${winnerLabel} currently leads${marginFragment}.${suffix}`;
+      const caseDMargin = `${winnerLabel} ${leadClause}.${suffix}`;
       if (caseDMargin.length <= lengthCap) {
         return {
           text: caseDMargin,
@@ -847,9 +916,16 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // existing probability sentence as the most informative honest floor.
       // The probability guard already enforced ≥ MIN_LEAD_PROBABILITY so the
       // rendered integer percentage is always ≥ 40%.
-      const pct = Math.round(winnerProbability * 100);
+      // ⚠ THIS BAND CARRIED THE SAME CATEGORY ERROR IN A SECOND DIALECT, and
+      // it is converted here rather than left alone. "Currently leads with 98%
+      // probability" states the right NUMBER with the wrong NOUN: a reader asks
+      // "98% probability of WHAT?" and the honest answer — "of being the
+      // argmax across simulations of the model we drafted" — is nowhere in the
+      // sentence. Left as it was, the product would have shipped two phrasings
+      // of one statistic, which is the drift this module's derive-don't-mirror
+      // rules exist to prevent. Same clause, same scope, one vocabulary.
       const caseD =
-        `${winnerLabel} currently leads with ${pct}% probability.` +
+        `${winnerLabel} ${leadClause}.` +
         ` Run the follow-up checks before treating this as final.${suffix}`;
       if (caseD.length <= lengthCap) {
         return {
@@ -897,7 +973,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       //                  margin and let "close call" carry the tie verdict.
       //                  Overclaiming a tie is the mirror-image dishonesty of
       //                  overclaiming a lead; neither is acceptable.
-      const caseTied = tieHeadlineText(tieReason, winnerLabel, marginFragment, suffix);
+      const caseTied = tieHeadlineText(tieReason, winnerLabel, leadClause, suffix);
       if (caseTied.length <= lengthCap) {
         return {
           text: caseTied,
@@ -907,7 +983,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     } else if (marginText !== null) {
       // 1pp < margin < 5pp: a small but real lead — state it, flag closeness.
       const caseClose =
-        `${winnerLabel} currently leads${marginFragment}, but the options are close.${suffix}`;
+        `${winnerLabel} ${leadClause}, but the options are close.${suffix}`;
       if (caseClose.length <= lengthCap) {
         return {
           text: caseClose,
@@ -956,11 +1032,11 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // `else if` must have been skipped; the latter only when
   // `winnerProbability < MIN_LEAD_PROBABILITY`. `'override'` implies a runner-up
   // exists (tieReason is null for single-option sources) and a rounded margin
-  // > 1pp, so `marginFragment` is always populated here.
+  // > 1pp, so a runner-up exists and the numbered lead clause is available.
   if (tieReason === 'override' && winner.runnerUpProb !== null) {
     const marginRaw = winnerProbability - winner.runnerUpProb;
     if (marginRaw > 0) {
-      const caseTied = tieHeadlineText(tieReason, winnerLabel, marginFragment, suffix);
+      const caseTied = tieHeadlineText(tieReason, winnerLabel, leadClause, suffix);
       if (caseTied.length <= lengthCap) {
         return {
           text: caseTied,
@@ -1041,7 +1117,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         `, but treat this as provisional: ${scReason}.${suffix}`;
       // Prefer the margin-bearing shape (Case A grammar); shed the margin under
       // the length cap (Case C grammar) before giving up to Case E.
-      const scWithMargin = `${winnerLabel} currently leads${marginFragment}${cautionTail}`;
+      const scWithMargin = `${winnerLabel} ${leadClause}${cautionTail}`;
       if (marginText !== null && scWithMargin.length <= lengthCap) {
         return {
           text: scWithMargin,
@@ -1053,7 +1129,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // the winner is within the soft-confidence band [0.30, 0.40) (the entry
       // condition's lower floor already excluded the very weak < 0.30 leads), so
       // it is a caveated, bounded fallback — not a free-for-all sub-40% claim.
-      const scNoMargin = `${winnerLabel} currently leads${cautionTail}`;
+      const scNoMargin = `${winnerLabel} ${LEADS_PLAIN}${cautionTail}`;
       if (scNoMargin.length <= lengthCap) {
         return {
           text: scNoMargin,
@@ -1069,7 +1145,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // non-overclaiming "{Label} currently leads." (+ status suffix).
   // No "best", "winner", "recommended", "optimal", "preferred". No
   // probability number. No driver/fragility clauses.
-  const caseE = `${winnerLabel} currently leads.${suffix}`;
+  const caseE = `${winnerLabel} ${LEADS_PLAIN}.${suffix}`;
   const reason = deriveCaseEReason(winner, driverLabel, hasFragility);
   if (caseE.length <= lengthCap) {
     return {
@@ -1107,12 +1183,12 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
 function tieHeadlineText(
   tieReason: 'margin' | 'override',
   winnerLabel: string,
-  marginFragment: string,
+  leadClause: string,
   suffix: string,
 ): string {
   return tieReason === 'margin'
     ? `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`
-    : `${winnerLabel} currently leads${marginFragment}, but the analysis treats this as a close call.${suffix}`;
+    : `${winnerLabel} ${leadClause}, but the analysis treats this as a close call.${suffix}`;
 }
 
 function buildDescriptor(
@@ -1821,10 +1897,29 @@ const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
 const CAUTION_REASON_PATTERN =
   '(?:the result is sensitive to .+?|the link between .+? and .+? is fragile|the result is not highly stable)';
 
+/**
+ * Grammar source for the lead clause emitted by `leadClause` in
+ * `computeHeadline` — "{label} came out ahead in {N}% of runs of this model".
+ *
+ * ⚠ THE OLD ALTERNATIVE IS DELIBERATELY GONE, NOT KEPT AS A TOLERATED LEGACY.
+ * This allowlist is the SECOND line of defence: anything it admits, a future
+ * regression may emit to the wire unchallenged. Leaving
+ * "leads by \\d+ percentage points" in the grammar would leave the retired
+ * category error one bug away from shipping again, with the egress guard
+ * silently blessing it. Retiring the copy means retiring its grammar in the
+ * same commit — the pin for that is in
+ * analysis-result-headline-win-probability.test.ts, which asserts the old
+ * sentence is REJECTED here rather than merely absent from the builder.
+ *
+ * The percentage is `\\d{1,3}` — an integer, matching the content defences'
+ * no-raw-decimals rule and the `Math.round` at the emission site.
+ */
+const LEAD_CLAUSE_RE_SRC = 'came out ahead in \\d{1,3}% of runs of this model';
+
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case A: winner + margin + provisional caution naming the fragile reason.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points?, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
   ),
   // Case C: provisional caution naming the fragile reason, no margin.
   new RegExp(
@@ -1832,7 +1927,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case B (with margin): winner + margin + driver.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points? because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC} because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
   ),
   // Case B (no margin): winner + driver.
   new RegExp(
@@ -1840,30 +1935,46 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case D (margin only): winner + margin.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points?\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.${TAIL_PATTERN}$`,
   ),
   // Case D (probability): winner + integer-percentage probability + nudge.
   new RegExp(
-    `^.+? currently leads with \\d{1,3}% probability\\. Run the follow-up checks before treating this as final\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}\\. Run the follow-up checks before treating this as final\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (close): small but real lead, flagged as close.
   new RegExp(
-    `^.+? currently leads by \\d{1,3} percentage points?, but the options are close\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the options are close\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
     `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
-  // flagged as a tie — the winner is nominally ahead by N points but the
-  // analysis treats it as a close call. Emitted by both the
-  // >= MIN_LEAD_PROBABILITY near-tie branch and the sub-0.40 tie-override
-  // preemption via tieHeadlineText. The margin fragment is optional so the
-  // rare number-free override form ("… currently leads, but the analysis
-  // treats this as a close call.") also survives the egress allowlist rather
-  // than being silently swapped for the locked template.
+  // flagged as a tie — the winner is nominally ahead but the analysis treats it
+  // as a close call. Emitted by both the >= MIN_LEAD_PROBABILITY near-tie
+  // branch and the sub-0.40 tie-override preemption via tieHeadlineText.
+  //
+  // ⚠ THE NUMBER-FREE OVERRIDE FORM IS NO LONGER ADMITTED, AND THAT IS
+  // DELIBERATE. This comment used to say the margin fragment was optional "so
+  // the rare number-free override form ('… currently leads, but the analysis
+  // treats this as a close call.') also survives the egress allowlist". That
+  // allowance existed because the OLD margin fragment could be empty. It cannot
+  // happen now: `leadClause` is built from the leader's own win probability,
+  // which `resolveWinner` guarantees is finite for every winner this module
+  // returns, so every override emission carries its number by construction —
+  // the number-free form is unreachable from any builder path.
+  //
+  // It is therefore removed from the grammar rather than tolerated, on the same
+  // reasoning that retired the pp phrasing: this allowlist is the SECOND LINE
+  // OF DEFENCE, so every shape it admits is a shape some future regression may
+  // put on the wire unchallenged. An allowlist should admit exactly what the
+  // builder can emit — no less (or honest copy is silently swapped for the
+  // locked template) and no more (or the guard stops discriminating). If a
+  // number-free override form is ever wanted back, the builder must emit it AND
+  // this alternation must be widened to `(?:${LEAD_CLAUSE_RE_SRC}|currently
+  // leads)` in the same commit.
   new RegExp(
-    `^.+? currently leads(?: by \\d{1,3} percentage points?)?, but the analysis treats this as a close call\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the analysis treats this as a close call\\.${TAIL_PATTERN}$`,
   ),
   // Doctrine D-W (ROADMAP 2.52): leader-trails-argmax honest disambiguation —
   // "{leader} leads overall, though {runner-up} has marginally better raw

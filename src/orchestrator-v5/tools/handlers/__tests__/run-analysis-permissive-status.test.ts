@@ -133,7 +133,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     });
 
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price currently leads by 24 percentage points/);
+    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0]!;
     expect(fact.fact_type).toBe('run_analysis');
@@ -149,7 +149,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price currently leads by 24 percentage points/);
+    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
   });
 
   it('analysis_status="completed" succeeds with Case D headline', async () => {
@@ -158,7 +158,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price currently leads by 24 percentage points/);
+    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
   });
 
   it('analysis_status="partial" succeeds with Case D headline + partial caveat suffix', async () => {
@@ -171,7 +171,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price currently leads by 24 percentage points/);
+    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
     expect(outcome.assistant_text).toContain('provisional');
     // Card/chat parity: summary equals assistant_text.
     const fact = outcome.handler_facts[0]!;
@@ -211,7 +211,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price currently leads by 24 percentage points/);
+    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
     expect(outcome.assistant_text).toContain('treat the result with caution');
 
     const warnCall = warnSpy.mock.calls.find((c) => {

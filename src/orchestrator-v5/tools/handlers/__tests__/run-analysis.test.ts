@@ -137,7 +137,7 @@ describe('run_analysis handler — happy path', () => {
     // on the lone fragile edge, no graph nodes to map against), so the
     // driver-with-margin shape (Case B) fires.
     expect(outcome.assistant_text).toBe(
-      'Option A currently leads by 24 percentage points because Price is the strongest driver.',
+      'Option A came out ahead in 62% of runs of this model because Price is the strongest driver.',
     );
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
@@ -308,7 +308,7 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      `Option A currently leads by 24 percentage points because Price is the strongest driver.${REDUCED_SUFFIX}`,
+      `Option A came out ahead in 62% of runs of this model because Price is the strongest driver.${REDUCED_SUFFIX}`,
     );
   });
 
@@ -341,7 +341,7 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      'Option A currently leads by 24 percentage points because Price is the strongest driver.',
+      'Option A came out ahead in 62% of runs of this model because Price is the strongest driver.',
     );
   });
 });
@@ -486,7 +486,7 @@ describe('run_analysis handler — freshness fields on the fact', () => {
 
 describe('run_analysis handler — assistant_text ownership contract', () => {
   const allowedTemplates: readonly string[] = Object.values(RUN_ANALYSIS_ASSISTANT_TEMPLATES);
-  const HEADLINE_SHAPE = / currently leads\b/;
+  const HEADLINE_SHAPE = / came out ahead in \d{1,3}% of runs of this model\b/;
 
   it('DEFAULT template matches the locked string exactly', () => {
     expect(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT).toBe('Ran analysis on your current scenario.');
@@ -663,7 +663,7 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     expect(fact.result.leading_option_id).toBe('oc_a');
     // option_comparison shape yields a Case D headline (winner + probability,
     // no driver/fragility data in this synthetic fixture).
-    expect(outcome.assistant_text).toContain('OC A currently leads');
+    expect(outcome.assistant_text).toContain('OC A came out ahead in');
   });
 
   it('record with only option_label (no option_id) uses the label as id', async () => {
@@ -866,7 +866,7 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
     const outcome = await handler(makeInvocation());
     // Single option at 100% → Case D headline (winner + probability).
     expect(outcome.assistant_text).toBe(
-      'X currently leads with 100% probability. Run the follow-up checks before treating this as final.',
+      'X came out ahead in 100% of runs of this model. Run the follow-up checks before treating this as final.',
     );
   });
 
@@ -1010,7 +1010,7 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_only');
     // Minimal fixture has a single option at 1.0 → Case D headline.
-    expect(outcome.assistant_text).toContain('currently leads with 100% probability');
+    expect(outcome.assistant_text).toContain('came out ahead in 100% of runs of this model');
   });
 
   it('larger fixture (3 options) selects the top-prob option deterministically', async () => {
@@ -1274,7 +1274,7 @@ describe('run_analysis handler — numeric integrity guard', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toContain('Option A currently leads');
+    expect(outcome.assistant_text).toContain('Option A came out ahead in');
     expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });
@@ -1390,7 +1390,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     // The engine's constraint warning alone must NOT change the message when
     // the user ratified nothing — this is the byte-parity guarantee, and it
     // is what proves the assertions in the next test are not vacuous.
-    expect(outcome.assistant_text).toContain('currently leads');
+    expect(outcome.assistant_text).toContain('came out ahead in');
     expect(outcome.assistant_text).not.toContain('could not be checked');
   });
 
@@ -1455,7 +1455,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      'Option A currently leads by 24 percentage points because Price is the strongest driver.',
+      'Option A came out ahead in 62% of runs of this model because Price is the strongest driver.',
     );
   });
 });

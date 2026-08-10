@@ -237,7 +237,7 @@ describe('shared status-aware winner — site 4: run_analysis headline (resolveW
     });
     expect(out).not.toBeNull();
     expect(out!).toContain('Option A');
-    expect(out!).toContain('currently leads');
+    expect(out!).toContain('came out ahead in');
     // Never the failed rival.
     expect(out!).not.toContain('Option B');
   });
@@ -257,7 +257,7 @@ describe('shared status-aware winner — site 4: run_analysis headline (resolveW
     });
     expect(out).not.toBeNull();
     expect(out!).toContain('Option B');
-    expect(out!).toContain('50 percentage points'); // B 0.90 - A 0.40
+    expect(out!).toContain('90% of runs of this model'); // B 0.90 - A 0.40
   });
 });
 

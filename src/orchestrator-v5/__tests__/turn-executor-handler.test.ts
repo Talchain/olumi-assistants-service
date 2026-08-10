@@ -262,7 +262,7 @@ describe('turn-executor × run_analysis via tool-use — happy path', () => {
     // FIRST_ANALYSIS_COMPLETE signal and compose appends its coaching text
     // after the confirmation. Both pieces must be present; order is
     // confirmation then coaching (composeToolCallResponse).
-    expect(response.assistant_text).toMatch(/ currently leads\b/);
+    expect(response.assistant_text).toMatch(/ came out ahead in \d{1,3}% of runs of this model\b/);
     expect(response.assistant_text).toContain('first analysis');
   });
 

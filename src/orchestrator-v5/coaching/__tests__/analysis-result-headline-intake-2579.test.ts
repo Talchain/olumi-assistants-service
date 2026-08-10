@@ -108,7 +108,7 @@ describe('2.579 — the ranking is withheld when the intake lost an option', () 
     // (trap 19): the control has to name THE RETROFIT. `expect(text).not
     // .toBeNull()` would be satisfied by a headline naming any of the four.
     expect(text).toContain('Energy-Efficiency Retrofit');
-    expect(text).toContain('currently leads');
+    expect(text).toContain('came out ahead in');
   });
 
   it('POSITIVE CONTROL — the SAME result names the leader when the brief never enumerated', () => {

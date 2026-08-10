@@ -166,7 +166,7 @@ function runEnvelope(): Record<string, unknown> {
 
 function handlerOutcome() {
   return {
-    assistant_text: 'Launch now currently leads by 24 percentage points.',
+    assistant_text: 'Launch now came out ahead in 62% of runs of this model.',
     handler_facts: [
       {
         fact_type: 'run_analysis' as const,
