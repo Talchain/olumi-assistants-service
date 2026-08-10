@@ -4,7 +4,7 @@
  * Codex expert session, 5 Aug 2026, deployed staging, CEE `e82738b`
  * (`PHASE0-EVIDENCE-2026-07-28/expert-session-2026-08-05-raw/run3/`): a brief
  * that enumerated FIVE options produced a FOUR-option graph, and the analysis
- * shipped "Energy-Efficiency Retrofit came out ahead in 9% of runs of this model"
+ * shipped "Energy-Efficiency Retrofit currently leads by 9 percentage points"
  * over a candidate set it was missing a candidate from. `a new retail
  * concession` never got a chance to win.
  *

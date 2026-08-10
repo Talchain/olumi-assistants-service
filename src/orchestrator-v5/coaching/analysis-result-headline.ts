@@ -714,7 +714,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // ==========================================================================
   //
   // ⚠ WHAT THE OLD COPY CLAIMED, AND WHY IT WAS WITHDRAWN. This slot used to
-  // render ` by ${marginText}` — "came out ahead in 95% of runs of this model",
+  // render ` by ${marginText}` — "currently leads by 95 percentage points",
   // the difference between two `P(argmax)` statistics. Three things were wrong
   // with it, and only the third is fixable by wording:
   //
@@ -831,7 +831,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // cosmetic: `hasMeaningfulLead` gates purely on `margin >= MIN_LEAD_MARGIN`
   // (5pp), so an upstream-flagged tie with (say) an 8pp margin never REACHED
   // that branch — it took the confident path above and emitted
-  // "{X} came out ahead in 8% of runs of this model", which is precisely the
+  // "{X} currently leads by 8 percentage points", which is precisely the
   // headline the round-4 review flagged. The override has to be consulted
   // BEFORE the gate or it cannot bite at all.
   //

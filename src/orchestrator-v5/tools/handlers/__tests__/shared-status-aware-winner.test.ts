@@ -164,7 +164,7 @@ describe('shared status-aware winner — site 3: decision-review enricher', () =
 // ---------------------------------------------------------------------------
 
 // All three options FAILED to compute. A status-blind selector crowns the
-// top (B, 0.90) and prints "Option B came out ahead in 50% of runs of this model"
+// top (B, 0.90) and prints "Option B currently leads by 50 percentage points"
 // over a 100%-failed run.
 function allFailedHeadlineEnrichment(): Record<string, unknown> {
   return {

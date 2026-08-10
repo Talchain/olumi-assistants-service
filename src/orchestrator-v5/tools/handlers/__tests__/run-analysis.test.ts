@@ -1340,7 +1340,7 @@ describe('run_analysis headline — no verbatim wire-block duplication (Area D)'
 // £2,500; CEE replies "Added constraint: …"; PLoT returns
 // CONSTRAINT_OUT_OF_DOMAIN and withholds goal-fit under
 // CONSTRAINT_TARGET_UNRELIABLE; CEE nevertheless leads with "MacBook Pro
-// came out ahead in 18% of runs of this model" and discloses nothing in the
+// currently leads by 18 percentage points" and discloses nothing in the
 // primary message.
 //
 // Required behaviour: while any user-ratified hard constraint is not
