@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  ALL_LENS_IDS,
   INTERVENTION_TIER_ORDER,
   tierForCandidate,
   type InterventionTier,
@@ -74,16 +75,11 @@ const CTX: BlockBuildCtx = {
   graph_hash_at_generation: 'gh_2692000000000001',
 };
 
-const ALL_PREV: (LensId | null)[] = [
-  null,
-  'sensitivity_flip_risk',
-  'pre_mortem',
-  'evpi_evidence_priority',
-  'fragile_edge_resolution',
-  'consider_opposite',
-  'devils_advocacy',
-  'what_if_counterfactual',
-];
+// DERIVED from the compile-exhaustive tier map (2.692 slice 2) — this was a
+// hand-typed list of the seven then-existing lenses, i.e. exactly the mirror
+// the census's own comment warns about: a new LensId would have silently
+// shrunk "all previousAnalysisLens states" without a red anywhere.
+const ALL_PREV: (LensId | null)[] = [null, ...ALL_LENS_IDS];
 
 let sink: { event: string; data: Record<string, unknown> }[] = [];
 beforeEach(() => {

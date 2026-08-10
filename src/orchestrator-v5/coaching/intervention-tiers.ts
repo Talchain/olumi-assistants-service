@@ -98,15 +98,16 @@
  *   establishes that it is the only one. **Escalated with a corrected premise
  *   rather than shipped silently, per 2.490 doctrine.**
  *
- * ── SCOPE HONESTY ────────────────────────────────────────────────────────────
- * `resolve_disagreement` has NO members in this slice. It is declared because it
- * is the design's T1/T2 — an unanswered `edge_adjudication` override, and a
- * `validation.status === 'contested'` edge with no adjudication fact — whose
- * inputs (`prior_facts`, the persisted graph) live in `compose.ts`'s closure and
- * are NOT threaded to the selector today. Declaring the tier makes the extension
- * point real rather than retrofitted; implementing an evaluator with nothing
- * feeding it would ship a dark capability, which is the failure this whole file
- * is arguing against.
+ * ── SCOPE ────────────────────────────────────────────────────────────────────
+ * `resolve_disagreement` gained its two designed members in the 2.692 slice-2
+ * lane (the design's T1/T2): `override_stress_test` (an unanswered
+ * `edge_adjudication` override — 2.690 CH-1) and `disagreement_resolution`
+ * (a `validation.status === 'contested'` edge with no adjudication fact —
+ * 2.692 §1.4 I-DISAGREE). The previously-missing inputs are now threaded as
+ * `LensSelectorOptions.judgementSignals`, derived once per turn in compose
+ * (`compose/judgement-signals.ts`) and STRIPPED in the lens-history replay —
+ * so the tier fires only when a caller feeds it, and selection with no feed is
+ * byte-identical to the memberless build (pinned).
  */
 
 import type { LensId } from '../compose/lens-selector.js';
@@ -182,6 +183,11 @@ const TIER_BY_LENS: Readonly<Record<LensId, InterventionTier>> = Object.freeze({
   sensitivity_flip_risk: 'orient',
   pre_mortem: 'challenge_premortem',
   evpi_evidence_priority: 'estimate',
+  // ROADMAP 2.692 slice 2 — the tier's two designed members (T1/T2). Within
+  // the tier the ladder order decides, and T1 sits above T2 there (CH-1
+  // outranks — 2.690 §B.3).
+  override_stress_test: 'resolve_disagreement',
+  disagreement_resolution: 'resolve_disagreement',
   // ⛔ `resolve_uncertainty` HAS NO MEMBER, DELIBERATELY — see the tier's own
   // note on {@link InterventionTier}. It is not an empty slot waiting to be
   // filled; it is a slot held open by a live science ban.
@@ -190,6 +196,16 @@ const TIER_BY_LENS: Readonly<Record<LensId, InterventionTier>> = Object.freeze({
   fragile_edge_resolution: 'resolve_model_defect',
   what_if_counterfactual: 'explore',
 });
+
+/**
+ * Every lens id, DERIVED from the compile-exhaustive tier map — never a second
+ * hand-typed list for callers (censuses, prev-state sweeps) to let drift. The
+ * map is `Record<LensId, …>`, so this is complete over the union by the same
+ * compiler guarantee that forces a new lens to declare its tier.
+ */
+export const ALL_LENS_IDS: readonly LensId[] = Object.freeze(
+  Object.keys(TIER_BY_LENS) as LensId[],
+);
 
 /** The tier a candidate competes in. Total over `LensId` by construction. */
 export function tierForCandidate(lens: LensId): InterventionTier {

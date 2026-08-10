@@ -92,6 +92,15 @@ import {
   composeFragileEdgeBody,
   isFragileEdgeOfferComposable,
 } from '../coaching/fragile-edge-offer-text.js';
+// ROADMAP 2.692 slice 2 — the judgement offers' text + composability, in the
+// same pure-leaf shape for the same two-consumer reason.
+import {
+  composeDisagreementBody,
+  composeOverrideBody,
+  isDisagreementOfferComposable,
+  isOverrideOfferComposable,
+} from '../coaching/judgement-offer-text.js';
+import type { JudgementSignals } from './judgement-signals.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { bandConfidence } from './confidence-bands.js';
@@ -129,9 +138,11 @@ import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
+  disagreementResolutionSignals,
   evidenceSignals,
   fragileEdgeOfferSignals,
   guidanceSignalsForCoachingKind,
+  overrideStressTestSignals,
   reviewCardSignals,
 } from './guidance-signals.js';
 // ROADMAP 2.989 — the fragile-edge selector (pure) and the PER-FACT withheld
@@ -1559,6 +1570,56 @@ function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | nul
   };
 }
 
+/** ROADMAP 2.692 slice 2 — a judgement lens's minted offer: the named body and
+ *  the identity-bound edge ref. No action fields in v1 (the follow-through is
+ *  conversational for T1 and the Model tab's contested cards for T2 — no chip,
+ *  so no inert chip). */
+interface JudgementLensOffer {
+  readonly body: string;
+  readonly targetRefs: readonly TargetRef[];
+}
+
+/**
+ * Build the offer for the two judgement lenses (2.690 CH-1 / 2.692 I-DISAGREE),
+ * or `null` for every other lens.
+ *
+ * Same backstop stance as {@link buildFragileEdgeOffer}: the SAME pure
+ * composability leafs run at eligibility inside `selectLens`, so the fail-closed
+ * arms here are unreachable through the live path — they stay because a lens id
+ * and its payload travelling as two fields is exactly the pairing a future
+ * refactor can break, and the honest failure is NO OFFER, never a half one.
+ */
+function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer | null {
+  if (selection.lens !== 'override_stress_test' && selection.lens !== 'disagreement_resolution') {
+    return null;
+  }
+  const edge = selection.judgementEdge;
+  if (edge === undefined) return null;
+  const composable =
+    selection.lens === 'override_stress_test'
+      ? isOverrideOfferComposable(edge.fromLabel, edge.toLabel)
+      : isDisagreementOfferComposable(edge.fromLabel, edge.toLabel);
+  if (!composable) return null;
+  const body =
+    selection.lens === 'override_stress_test'
+      ? composeOverrideBody(selection.body, edge.fromLabel, edge.toLabel)
+      : composeDisagreementBody(selection.body, edge.fromLabel, edge.toLabel);
+  return {
+    body,
+    // The same `from→to` composite identity the fragile-edge offer uses — one
+    // spelling of edge identity across every lens that points at one (and the
+    // spelling `adjust-edge-strength`'s parseEdgeId accepts, should a later
+    // slice add an action chip).
+    targetRefs: [
+      {
+        id: `${edge.fromId}→${edge.toId}`,
+        label: `${edge.fromLabel} → ${edge.toLabel}`,
+        kind: 'edge' as const,
+      },
+    ],
+  };
+}
+
 /**
  * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
  * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
@@ -1611,6 +1672,11 @@ export function buildLensSurface(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
   previousAnalysisLens?: LensId | null,
+  // ROADMAP 2.692 slice 2 — the turn's judgement feed, derived ONCE in compose
+  // (`deriveJudgementSignals`) and threaded here exactly like
+  // `previousAnalysisLens`. Omitted ⇒ the judgement lenses never fire and the
+  // surface is byte-identical to the pre-change build (pinned).
+  judgementSignals?: JudgementSignals,
 ): LensSurface | null {
   // ROADMAP 2.989 — ONE derivation of the fragile-edge decision for this turn,
   // computed HERE and threaded into the selector, because this site has to emit
@@ -1644,6 +1710,9 @@ export function buildLensSurface(
     // null ⇒ byte-identical to the pre-amendment selection.
     previousAnalysisLens: previousAnalysisLens ?? null,
     fragileEdge: fragileEdgeDecision,
+    // ROADMAP 2.692 slice 2 — the judgement feed. Spread-if-present so an
+    // unthreaded caller's options object stays byte-identical to today's.
+    ...(judgementSignals !== undefined ? { judgementSignals } : {}),
   });
   const selection = ranking.chosen;
   if (selection === null) {
@@ -1679,20 +1748,39 @@ export function buildLensSurface(
   // relationship nor a chip is a card about nothing.
   if (selection.lens === 'fragile_edge_resolution' && offer === null) return null;
 
+  // ROADMAP 2.692 slice 2 — the judgement offer, present on exactly the two
+  // judgement lenses; same backstop stance (eligibility already asked the same
+  // pure predicate, so a null here is unreachable through the live path).
+  const judgementOffer = buildJudgementLensOffer(selection);
+  if (
+    (selection.lens === 'override_stress_test' ||
+      selection.lens === 'disagreement_resolution') &&
+    judgementOffer === null
+  ) {
+    return null;
+  }
+
   const candidate = {
     ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
     type: 'coaching' as const,
     coaching_kind: 'strengthen' as const,
     title: truncate(selection.title, TITLE_MAX),
-    body: truncate(offer?.body ?? selection.body, BODY_MAX),
+    body: truncate(judgementOffer?.body ?? offer?.body ?? selection.body, BODY_MAX),
     source: 'deterministic_signal' as const,
-    target_refs: (offer?.targetRefs ?? []) as readonly TargetRef[],
+    target_refs: (judgementOffer?.targetRefs ?? offer?.targetRefs ?? []) as readonly TargetRef[],
     priority_rank: 15,
     // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
     // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM)
-    // — except on the fragile-edge offer, whose detector class is result
-    // fragility (see `guidance-signals.ts::fragileEdgeOfferSignals`).
-    ...(offer !== null ? fragileEdgeOfferSignals() : guidanceSignalsForCoachingKind('strengthen')),
+    // — except on the fragile-edge offer (detector class: result fragility) and
+    // the two judgement lenses (detector classes: the user's own override / the
+    // validation pipeline's contested verdict — see `guidance-signals.ts`).
+    ...(selection.lens === 'override_stress_test'
+      ? overrideStressTestSignals()
+      : selection.lens === 'disagreement_resolution'
+        ? disagreementResolutionSignals()
+        : offer !== null
+          ? fragileEdgeOfferSignals()
+          : guidanceSignalsForCoachingKind('strengthen')),
     // ROADMAP 2.989 — the ACTION. ⚠ NO `action_intent`, and that is derived,
     // not forgotten. `ActionIntentLiteral` is a CLOSED 15-value schema enum with
     // no edge-mutation member; its nearest value, `edit_factor`, would state a
@@ -1967,8 +2055,20 @@ export function buildLensCompanionBlocks(
     // the `edit_graph` turn the suggestion's own action chip dispatches. A
     // companion would be a second structured artefact about an offer whose
     // whole point is one acceptance.
+    //
+    // ROADMAP 2.692 slice 2 — the two judgement lenses ALSO declare no
+    // companion in v1, stated rather than defaulted: neither trigger is a DSK
+    // bundle trigger, so a P-003-provenanced ExerciseBlock would claim a
+    // protocol derivation these rules do not have (the false-label class the
+    // provenance attestation exists to kill). Their follow-through is the
+    // conversation (T1) and the Model tab's contested cards (T2). Design
+    // 2.690 §B.5 names the P-003 companion reuse as a candidate for a LATER
+    // slice — with honest copy — and that is a reviewed addition here, not a
+    // default.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
+    case 'override_stress_test':
+    case 'disagreement_resolution':
     case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
       return [];

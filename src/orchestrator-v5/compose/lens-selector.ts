@@ -128,6 +128,11 @@ import {
 import { isRawFragile } from '../coaching/robustness-honesty.js';
 import { isFragileEdgeOfferComposable } from '../coaching/fragile-edge-offer-text.js';
 import {
+  isDisagreementOfferComposable,
+  isOverrideOfferComposable,
+} from '../coaching/judgement-offer-text.js';
+import type { JudgementEdgeRef, JudgementSignals } from './judgement-signals.js';
+import {
   tierForCandidate,
   tierRank,
   type InterventionTier,
@@ -154,6 +159,12 @@ export type LensId =
   | 'sensitivity_flip_risk'
   | 'pre_mortem'
   | 'evpi_evidence_priority'
+  // ROADMAP 2.692 slice 2 — the `resolve_disagreement` tier's two members
+  // (2.690 CH-1 and 2.692 §1.4 I-DISAGREE). Fed by `judgementSignals` on
+  // `LensSelectorOptions` — never by the fact — and therefore ABSENT from every
+  // selection when the caller passes no signals (pinned byte-identical).
+  | 'override_stress_test'
+  | 'disagreement_resolution'
   | 'fragile_edge_resolution'
   | 'consider_opposite'
   | 'devils_advocacy'
@@ -199,7 +210,13 @@ export type LensRationaleCode =
   // devils_advocacy (DSK-TR-005 → DSK-P-005 devil's advocate)
   | 'DOMINANT_FACTOR_DISSENT' // one factor carries the result and the analysis is not already challenging it
   // what_if_counterfactual (wave-3 λ extension, executor-gated)
-  | 'WHATIF_EXPLORE_DRIVER'; // a top-influence factor is worth a counterfactual probe
+  | 'WHATIF_EXPLORE_DRIVER' // a top-influence factor is worth a counterfactual probe
+  // override_stress_test (2.690 CH-1) — an explicit user override no analysis
+  // has yet absorbed: the product's highest-signal judgement moment.
+  | 'OVERRIDE_UNANSWERED'
+  // disagreement_resolution (2.692 I-DISAGREE) — a contested edge the two-pass
+  // pipeline surfaced and no adjudication fact has settled.
+  | 'CONTESTED_UNADJUDICATED';
 
 /**
  * The science-bearing enrichment FIELD each lens grounds its claim in. Wave-3 σ
@@ -220,7 +237,16 @@ export type LensGroundingField =
   // selector reads it as a structured gate only and no quantity from it may
   // ever be surfaced. Declaring it here would ask the cage a question whose
   // only answer is `tier3_denied`.
-  | 'robustness';
+  | 'robustness'
+  // ROADMAP 2.692 slice 2 — the two judgement lenses' claims ground in
+  // PERSISTED JUDGEMENT STATE, not in a science-bearing enrichment field: the
+  // `edge_adjudication` fact (T1) and the validation pipeline's contested
+  // verdict on the persisted graph (T2). Neither is on the cage's enrichment
+  // allow-list, so the cage's answer is `not_allowlisted` — which is TRUE and
+  // is the honest live verdict: no value from either source is ever surfaced
+  // (the cards are prose-only, magnitudes banned by design §4).
+  | 'judgement_fact'
+  | 'graph_validation';
 
 /**
  * Wave-4 δ2 (ROADMAP 1.202) — the specific graph node this lens POINTS AT, for
@@ -297,6 +323,15 @@ export interface LensSelection {
    * block mint projects it into `target_refs` and the action prompt.
    */
   readonly fragileEdge?: FragileEdgeSelection;
+  /**
+   * ROADMAP 2.692 slice 2 — the ONE edge a judgement lens is about. Present
+   * exactly when `lens` is `override_stress_test` or `disagreement_resolution`
+   * (their evaluators are the only producers of the key). Same rationale as
+   * {@link fragileEdge}: one selection, threaded — the block mint projects it
+   * into the naming sentence and `target_refs`, never a re-derivation.
+   * CEE-INTERNAL — never a wire field.
+   */
+  readonly judgementEdge?: JudgementEdgeRef;
 }
 
 // ============================================================================
@@ -479,6 +514,16 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
   sensitivity_flip_risk: true,
   pre_mortem: true,
   evpi_evidence_priority: true,
+  // ROADMAP 2.692 slice 2: T1's executor is the conversational stress-test of
+  // the value the user set (chat is always live — the same class as
+  // pre_mortem's review-path form); T2's is the Model tab's contested-edge
+  // adjudication surface, which ships in the UI and is fed by the SAME
+  // persisted `validation` verdict this lens fires on — the recommendation
+  // points at a resolution surface that exists exactly when the trigger does.
+  // Neither lens ships an action chip in v1, so there is no dispatch leg to
+  // gate (no inert chips by construction).
+  override_stress_test: true,
+  disagreement_resolution: true,
   // ROADMAP 2.989: the executor is the `edit_graph` path, which is live and
   // ungated — the composed acceptance turn passes EDIT_GRAPH_POSITIVE_REGEX,
   // clears EDIT_GRAPH_NEGATIVE_REGEX (asserted in-test against the imported
@@ -540,6 +585,23 @@ export interface LensSelectorOptions {
    * selection. Pinned by a threaded-vs-omitted equality test.
    */
   readonly fragileEdge?: FragileEdgeDecision;
+  /**
+   * ROADMAP 2.692 slice 2 (+ 2.690 §B.5's ratified FEED) — this turn's
+   * human-judgement signal bag, derived ONCE per turn in the compose caller
+   * (`deriveJudgementSignals` over `prior_facts` + the hash-gated persisted
+   * graph) and passed to BOTH same-turn `selectLens` call sites.
+   *
+   * Omitted / empty ⇒ the two judgement lenses never fire and the selection is
+   * BYTE-IDENTICAL to the pre-change behaviour (pinned) — the same fail-safe
+   * direction as `previousAnalysisLens`: an unavailable input can only cost a
+   * recommendation, never manufacture or suppress one elsewhere.
+   *
+   * ⚠ STRIPPED IN THE LENS-HISTORY REPLAY (`lens-history.ts`): the contested
+   * set as of an earlier turn is unreconstructible from current state, so the
+   * replay must not feed today's signals to yesterday's selection. See the
+   * strip note there for the disclosed one-directional cost.
+   */
+  readonly judgementSignals?: JudgementSignals;
 }
 
 function isLensExecutorAvailable(lens: LensId, options?: LensSelectorOptions): boolean {
@@ -658,6 +720,19 @@ interface AnalysisSignals {
    * disagree about which relationship the turn is about.
    */
   readonly fragileEdge: FragileEdgeDecision;
+  /**
+   * ROADMAP 2.692 slice 2 — the run's `edge_e_values` identities + values,
+   * read for ONE purpose: the T2 in-tier ordering's first leg (lowest e-value
+   * among contested-unadjudicated edges = the most load-bearing disagreement).
+   * ⚠ `edge_e_values` is a RATIFIED TIER-3 DENY field: this is a structured
+   * ORDERING gate only — no quantity from it is ever surfaced (the same
+   * posture as `selectFragileEdge`'s join).
+   */
+  readonly edgeEValues: readonly {
+    readonly fromId: string;
+    readonly toId: string;
+    readonly eValue: number;
+  }[];
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -726,6 +801,23 @@ function readAnalysisSignals(
   const confidenceTier =
     tier === 'strong' || tier === 'fair' || tier === 'needs_work' ? tier : null;
 
+  // 2.692 slice 2 — top-level `edge_e_values[]` identities for the T2 ordering
+  // join. Defensive per row: absent/malformed identity or non-finite value ⇒
+  // the ROW is skipped (absent ≠ zero), never defaulted.
+  const edgeEValues: { fromId: string; toId: string; eValue: number }[] = [];
+  const ev = enrichment.edge_e_values;
+  if (Array.isArray(ev)) {
+    for (const raw of ev) {
+      const e = readRecord(raw);
+      if (e === null) continue;
+      const fromId = typeof e.from_id === 'string' && e.from_id.length > 0 ? e.from_id : null;
+      const toId = typeof e.to_id === 'string' && e.to_id.length > 0 ? e.to_id : null;
+      const eValue = finiteNumberOrNull(e.e_value);
+      if (fromId === null || toId === null || eValue === null) continue;
+      edgeEValues.push({ fromId, toId, eValue });
+    }
+  }
+
   return {
     factors,
     optionWinProbabilities,
@@ -736,6 +828,7 @@ function readAnalysisSignals(
     // decision telemetry without a second derivation); otherwise computed here
     // from the same enrichment — the function is pure, so both routes agree.
     fragileEdge: fragileEdge ?? selectFragileEdge(enrichment),
+    edgeEValues,
   };
 }
 
@@ -753,6 +846,8 @@ interface EvaluatorHit {
   readonly subjectFactorId: string | null;
   /** ROADMAP 2.989 — set ONLY by {@link evaluateFragileEdgeResolution}. */
   readonly fragileEdge?: FragileEdgeSelection;
+  /** ROADMAP 2.692 slice 2 — set ONLY by the two judgement-lens evaluators. */
+  readonly judgementEdge?: JudgementEdgeRef;
 }
 
 /**
@@ -907,6 +1002,76 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | 
     return { code: 'MATERIAL_EVPI', subjectFactorId: best.factorId };
   }
   return null;
+}
+
+/**
+ * ROADMAP 2.692 slice 2, T1 (2.690 CH-1) — UNANSWERED HUMAN JUDGEMENT.
+ *
+ * Fires when the caller's judgement feed carries ≥1 overridden adjudication no
+ * analysis has yet absorbed. The I-B5 fire-once ORDERING lives in the
+ * DERIVATION (`compose/judgement-signals.ts` — a spent override never enters
+ * the bag), not here: the evaluator is a pure head-read so the replay-purity
+ * property ("selection is a function of (fact, options)") holds trivially.
+ * Head = the newest unanswered override (the bag is newest-first, deduped per
+ * edge). No signals / empty bag ⇒ null — absent ≠ fire (I-B6).
+ *
+ * `subjectFactorId` is null by construction: the subject is an EDGE, and
+ * {@link LensSubjectRef} is factor-only — the `focus` directive falls through
+ * to the v1 highlight rather than fabricating a factor target.
+ */
+function evaluateOverrideStressTest(
+  judgement: JudgementSignals | undefined,
+): EvaluatorHit | null {
+  const head = judgement?.overriddenUnanswered[0];
+  if (head === undefined) return null;
+  return { code: 'OVERRIDE_UNANSWERED', subjectFactorId: null, judgementEdge: head };
+}
+
+/**
+ * ROADMAP 2.692 slice 2, T2 (I-DISAGREE) — UNRESOLVED DISAGREEMENT, the
+ * design's "heart of 2.692": the contested-unadjudicated join, computed in the
+ * derivation; this evaluator applies the design §2.1 IN-TIER ORDER over it:
+ *
+ *   leg 1 — when ≥1 member joins this run's `edge_e_values` on (from,to):
+ *           LOWEST e-value wins (the most load-bearing disagreement). The
+ *           e-value is a TIER-3 DENY quantity used as a structured ordering
+ *           gate only — never surfaced.
+ *   leg 2 — otherwise: HIGHEST `validation.max_divergence` (the pipeline's own
+ *           disagreement score); rows with no finite divergence sort last.
+ *   tie   — canonical (from,to) lexicographic (the bag's base order, which the
+ *           stable sorts below preserve).
+ *
+ * Fire-once is the JOIN ITSELF: an adjudication fact removes the edge from the
+ * bag at derivation — structurally spent, replay-safe, no ledger.
+ */
+function evaluateDisagreementResolution(
+  signals: AnalysisSignals,
+  judgement: JudgementSignals | undefined,
+): EvaluatorHit | null {
+  const set = judgement?.contestedUnadjudicated;
+  if (set === undefined || set.length === 0) return null;
+
+  const joined = set
+    .map((s) => ({
+      s,
+      eValue:
+        signals.edgeEValues.find((e) => e.fromId === s.fromId && e.toId === s.toId)
+          ?.eValue ?? null,
+    }))
+    .filter((j): j is { s: (typeof set)[number]; eValue: number } => j.eValue !== null);
+
+  let head: (typeof set)[number];
+  if (joined.length > 0) {
+    // Stable sort over the lexicographic base order ⇒ ties resolve canonically.
+    head = [...joined].sort((a, b) => a.eValue - b.eValue)[0]!.s;
+  } else {
+    head = [...set].sort((a, b) => {
+      const da = a.maxDivergence ?? Number.NEGATIVE_INFINITY;
+      const db = b.maxDivergence ?? Number.NEGATIVE_INFINITY;
+      return db - da;
+    })[0]!;
+  }
+  return { code: 'CONTESTED_UNADJUDICATED', subjectFactorId: null, judgementEdge: head };
 }
 
 /**
@@ -1125,6 +1290,10 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   sensitivity_flip_risk: 'Strengthen your model: pressure-test the key driver',
   pre_mortem: 'Strengthen your model: run a quick pre-mortem',
   evpi_evidence_priority: 'Strengthen your model: focus your evidence-gathering',
+  // 2.692 slice 2 — verb-first per the design's copy keys ("Stress-test the
+  // value you set" / "Resolve this disagreement"), in the shared title family.
+  override_stress_test: 'Strengthen your model: stress-test the value you set',
+  disagreement_resolution: 'Strengthen your model: resolve this disagreement',
   fragile_edge_resolution: 'Strengthen your model: firm up the relationship carrying the result',
   consider_opposite: 'Strengthen your model: argue the other side',
   devils_advocacy: 'Strengthen your model: challenge the main assumption',
@@ -1191,6 +1360,18 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   // leads is settled; HOW FAR ahead it is, is not. So the honest lens keeps
   // pointing at the same driver and re-aims the claim from the ranking to the
   // margin. No flip verb appears in any of these three.
+  // ── ROADMAP 2.692 slice 2 — the two judgement-lens tails ───────────────────
+  // ⚠ THESE STRINGS ARE TAILS, NOT WHOLE BODIES (the fragile-edge pattern):
+  // `coaching/judgement-offer-text.ts` puts the sentence that NAMES the edge
+  // FIRST and appends these, because truncation eats the end of the body. The
+  // sentences are design 2.692 §4's licensed evidence claims: T1 is licensed by
+  // the adjudication fact + its closed verdict enum; T2 by the contested
+  // verdict + the empty adjudication join. No magnitudes, no verdict language,
+  // no leader — the target is an ISSUE by construction.
+  OVERRIDE_UNANSWERED:
+    'Worth stress-testing the value you set, so the next analysis rests on it honestly.',
+  CONTESTED_UNADJUDICATED:
+    'Resolving that disagreement is worth more than refining numbers computed through it.',
   SENSITIVITY_ISOLATED_NO_FLIP:
     'This factor moves the result more than any other. The analysis swept its whole tested range and the ranking never changed, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
   SENSITIVITY_CORRELATED_NO_FLIP:
@@ -1249,6 +1430,12 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   // factor_sensitivity.
   CLEAR_WINNER_DISCONFIRMATION: 'option_comparison',
   DOMINANT_FACTOR_DISSENT: 'factor_sensitivity',
+  // 2.692 slice 2: the judgement lenses' claims ground in persisted judgement
+  // state, not in an enrichment field — see the LensGroundingField note. The
+  // cage's live answer for both is `not_allowlisted`, which is true: these
+  // cards are prose-only and surface no value from any source.
+  OVERRIDE_UNANSWERED: 'judgement_fact',
+  CONTESTED_UNADJUDICATED: 'graph_validation',
   // The what-if claim is about the OUTCOME (option win probability) → grounds in
   // option_comparison, which is deliberately NOT allow-listed, so the σ cage
   // DENIES surfacing its value: the counterfactual outcome number stays omitted
@@ -1298,6 +1485,9 @@ function buildSelection(
     // the key is itself the "this is not an edge lens" assertion and existing
     // `toStrictEqual` comparisons against other lenses stay exact.
     ...(hit.fragileEdge !== undefined ? { fragileEdge: hit.fragileEdge } : {}),
+    // ROADMAP 2.692 slice 2: same pattern — present exactly on the two
+    // judgement lenses, absent everywhere else.
+    ...(hit.judgementEdge !== undefined ? { judgementEdge: hit.judgementEdge } : {}),
     // ROADMAP 2.211 / 2.211-①: present ONLY on a displacement (either cause),
     // so the absence of the keys is itself the "the head lens won normally"
     // assertion (and `toStrictEqual` against a pre-amendment selection stays
@@ -1432,10 +1622,26 @@ export interface InterventionRanking {
  * disagree about what is composable.
  */
 function isInterventionComposable(lens: LensId, hit: EvaluatorHit): boolean {
-  if (lens !== 'fragile_edge_resolution') return true;
-  const edge = hit.fragileEdge;
-  if (edge === undefined) return false;
-  return isFragileEdgeOfferComposable(edge.fromLabel, edge.toLabel);
+  if (lens === 'fragile_edge_resolution') {
+    const edge = hit.fragileEdge;
+    if (edge === undefined) return false;
+    return isFragileEdgeOfferComposable(edge.fromLabel, edge.toLabel);
+  }
+  // ROADMAP 2.692 slice 2 — the judgement offers must be able to NAME their
+  // edge inside the body cap (labels are user/producer-authored and unbounded).
+  // Same pure leafs the block mint uses, so the two cannot disagree. There is
+  // no dispatch-regex leg: these lenses ship no action chip in v1.
+  if (lens === 'override_stress_test') {
+    const edge = hit.judgementEdge;
+    if (edge === undefined) return false;
+    return isOverrideOfferComposable(edge.fromLabel, edge.toLabel);
+  }
+  if (lens === 'disagreement_resolution') {
+    const edge = hit.judgementEdge;
+    if (edge === undefined) return false;
+    return isDisagreementOfferComposable(edge.fromLabel, edge.toLabel);
+  }
+  return true;
 }
 
 /**
@@ -1580,6 +1786,19 @@ export function rankInterventions(
     // silently invert the order shipped here: they separate onto their own
     // declared observables instead (decisive leader ⇒ TR-003's disconfirmation;
     // dominant driver without a decisive leader ⇒ TR-005's dissent).
+    // ── ROADMAP 2.692 slice 2 — the `resolve_disagreement` tier's two members,
+    // in the band BOTH prior designs ratified (2.690 §B.3 sequencing, adopted
+    // by 2.692 §2.2): below the locked core three, above `consider_opposite`.
+    // The physical position here matches the TIER order (`intervention-tiers.ts`
+    // places `resolve_disagreement` between `estimate` and `challenge_protocol`),
+    // so the ladder and the tier sort agree by construction rather than by the
+    // stable-sort accident. Within the tier, T1 outranks T2 — an explicit user
+    // override the analysis has not absorbed is the product's highest-signal
+    // judgement moment (2.690's ruling, the 0.34.0 wire comment's own words).
+    // Both read the CALLER-DERIVED judgement feed, never the fact: no signals ⇒
+    // both null ⇒ byte-identical selection (the absent-input identity pin).
+    ['override_stress_test', evaluateOverrideStressTest(options?.judgementSignals)],
+    ['disagreement_resolution', evaluateDisagreementResolution(signals, options?.judgementSignals)],
     ['consider_opposite', evaluateConsiderOpposite(signals)],
     ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
     // ── ROADMAP 2.989 — THE FRAGILE-EDGE RESOLUTION LENS. POSITION IS A RULING
