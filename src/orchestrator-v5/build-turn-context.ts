@@ -41,7 +41,7 @@ import {
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildFactorScaleMap,
-  projectInterventionsToRawScale,
+  projectRequestInterventionsToWireScale,
   summariseConversions,
   summaryIsNoteworthy,
   type InterventionConversion,
@@ -1791,22 +1791,28 @@ function projectOptionsToRawScale(
     }
   }
 
-  const egressConversions: InterventionConversion[] = [];
-  const projected = options.map((option) => {
+  // The scale decision is REQUEST-level, not per-option: PLoT's normalisation gate
+  // keys on whether ANY value in the request exceeds 1, so a promotion inside one
+  // option changes how EVERY other option's factors are interpreted. Collect the
+  // whole request first, then project it to a single wire scale.
+  const rawObjectsPerOption = options.map((option) => {
     const optionNode = optionNodesById.get(option.option_id);
-    const rawObjects = optionNode ? mergeInterventionSourceObjects(optionNode) : {};
-    const { interventions, conversions } = projectInterventionsToRawScale(rawObjects, factorScaleById);
-    for (const conv of conversions) egressConversions.push(conv);
-    return {
-      id: option.option_id,
-      option_id: option.option_id,
-      label: option.label,
-      interventions,
-    };
+    return optionNode ? mergeInterventionSourceObjects(optionNode) : {};
   });
+  const requestProjection = projectRequestInterventionsToWireScale(
+    rawObjectsPerOption,
+    factorScaleById,
+  );
+  const egressConversions: InterventionConversion[] = requestProjection.conversions;
+  const projected = options.map((option, index) => ({
+    id: option.option_id,
+    option_id: option.option_id,
+    label: option.label,
+    interventions: requestProjection.perOption[index] ?? {},
+  }));
 
   const conversionSummary = summariseConversions(egressConversions);
-  if (summaryIsNoteworthy(conversionSummary)) {
+  if (summaryIsNoteworthy(conversionSummary) || requestProjection.demoted) {
     log.info(
       {
         event: 'run_analysis.intervention_scale_egress',
@@ -1816,8 +1822,27 @@ function projectOptionsToRawScale(
         cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
         inconsistent_scale_factors: conversionSummary.inconsistent_scale_factors,
         ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
+        // Request-level homogeneity (2026-08-10): ids + booleans only, no magnitudes.
+        scale_demoted: requestProjection.demoted,
+        demoted_factors: requestProjection.demotedFactors,
+        wire_all_within_unit_interval: requestProjection.allWithinUnitInterval,
       },
       'run_analysis egress intervention value-scale projection (redacted; no magnitudes)',
+    );
+  }
+  if (requestProjection.blockedByStatedRawScale) {
+    // Mixed scale we must NOT auto-resolve: an explicit user-stated raw_value above 1
+    // is not ours to rewrite. Surfaced rather than silently shipped — this is the
+    // residual case the root-cause fix (graph-level convention evidence) must close.
+    log.warn(
+      {
+        event: 'run_analysis.intervention_scale_mixed_unresolved',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
+        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
+      },
+      'run_analysis outbound payload is mixed-scale and carries an explicit raw_value above 1 — NOT demoted (a stated magnitude must not be rewritten); PLoT will renormalise the whole request',
     );
   }
 

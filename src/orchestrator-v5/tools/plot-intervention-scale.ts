@@ -379,6 +379,122 @@ export function projectInterventionsToRawScale(
 }
 
 /**
+ * The outcome of projecting an ENTIRE request's interventions to one wire scale.
+ * `perOption` mirrors the input order exactly.
+ */
+export interface RequestScaleProjection {
+  /** Per-option `factorId → number` maps, in input order. */
+  readonly perOption: Array<Record<string, number>>;
+  /** Redaction-safe conversion records (no magnitudes), flattened across options. */
+  readonly conversions: InterventionConversion[];
+  /** True when rule 2's promotion was suppressed to keep the request homogeneous. */
+  readonly demoted: boolean;
+  /** Factor ids whose rule-2 promotion was suppressed (redaction-safe: ids only). */
+  readonly demotedFactors: string[];
+  /**
+   * True when every emitted value is <= 1, i.e. PLoT's request-level gate will
+   * SKIP normalisation. Deliberately NOT called "homogeneous": a consistently-RAW
+   * request is also homogeneous and this flag is false for it.
+   */
+  readonly allWithinUnitInterval: boolean;
+  /**
+   * True when the request is mixed but could NOT be demoted, because an explicit
+   * user-stated `raw_value` (rule 1) is itself above 1. Demoting that would
+   * rewrite a magnitude CEE does not own, so we ship as-is and surface loudly.
+   */
+  readonly blockedByStatedRawScale: boolean;
+}
+
+/**
+ * Project an ENTIRE request's interventions to ONE wire scale.
+ *
+ * WHY THIS EXISTS — two authorities, two different questions (2026-08-10).
+ * `resolveRawInterventionValue` answers "is this INTERVENTION raw or normalised?"
+ * PER VALUE. PLoT's normalisation gate answers "is this REQUEST raw or
+ * normalised?" PER REQUEST: if every value is within [0,1] it treats them as
+ * already normalised and skips; if ANY value exceeds 1 it normalises the WHOLE
+ * request against each factor's cap. Each rule is correct alone. Composed, a
+ * single rule-2 promotion flips the gate for every OTHER factor, and the factors
+ * deliberately left at unit scale (`ambiguous_no_evidence` / `no_cap`) are then
+ * divided by their caps — silently annihilating them.
+ *
+ * Measured on the deployed quartet (CEE cab59b7 / PLoT b9f6b5a / ISL 28fe0c9):
+ * the mixed request inflated P(Switch) 0.7360 → 0.9584 on capture `pre-deploy/s3`
+ * by reducing an £18,000 switching cost to ~0.0000288, i.e. making the costly
+ * option free while it kept its full capability gain. A self-consistent request
+ * returns 0.7360333333333333 in EITHER scale — the mixture is the whole defect.
+ *
+ * THE RULE: if rule 2 promoted anything while unit-scale siblings remain, suppress
+ * rule 2 for the request (DEMOTE). Demote rather than promote because promotion
+ * would have to assert a normalised convention for factors that provably cannot
+ * evidence one (their observed baseline is 0, and zero is scale-ambiguous — see
+ * `buildFactorScaleMap`). Demote assumes nothing new; both land on the same
+ * numbers. An explicit `raw_value` above 1 is NOT ours to rewrite, so a request
+ * carrying one is shipped unchanged and flagged via `blockedByStatedRawScale`.
+ */
+export function projectRequestInterventionsToWireScale(
+  perOptionRawObjects: ReadonlyArray<Record<string, unknown>>,
+  factorScaleById: ReadonlyMap<string, FactorScaleInfo>,
+): RequestScaleProjection {
+  // Pass 1 — resolve every intervention independently (the per-value rule).
+  const resolved = perOptionRawObjects.map((rawObjects) =>
+    Object.entries(rawObjects).map(([factorId, rawObject]) => ({
+      factorId,
+      result: resolveRawInterventionValue(rawObject, factorScaleById.get(factorId)),
+    })),
+  );
+  const present = resolved.flat().filter((r) => r.result.value !== null);
+
+  // Request-level homogeneity decision.
+  const promotedByCap = present.filter((r) => r.result.rule === 'cap_denormalised');
+  const unitScaleSiblings = present.some(
+    (r) => r.result.rule === 'ambiguous_no_evidence' || r.result.rule === 'no_cap',
+  );
+  // A value above 1 that CEE did NOT derive — an explicit user-stated raw_value, or
+  // an already-raw passthrough. Demoting these would corrupt a magnitude we do not own.
+  const statedRawAboveOne = present.some(
+    (r) =>
+      (r.result.rule === 'raw_value_used' || r.result.rule === 'passthrough') &&
+      r.result.value !== null &&
+      r.result.value > 1,
+  );
+
+  const mixed = promotedByCap.length > 0 && unitScaleSiblings;
+  const demote = mixed && !statedRawAboveOne;
+
+  const perOption: Array<Record<string, number>> = [];
+  const conversions: InterventionConversion[] = [];
+  const demotedFactors: string[] = [];
+  for (const entries of resolved) {
+    const interventions: Record<string, number> = {};
+    for (const { factorId, result } of entries) {
+      if (result.value === null) continue;
+      // Demotion re-emits the PRE-promotion value, which rule 2 recorded as
+      // `inputValue` — never a re-derived `value / cap`, so no rounding is introduced.
+      const demotedHere = demote && result.rule === 'cap_denormalised' && result.inputValue !== null;
+      interventions[factorId] = demotedHere ? result.inputValue! : result.value;
+      if (demotedHere && !demotedFactors.includes(factorId)) demotedFactors.push(factorId);
+      conversions.push({
+        factor_id: factorId,
+        rule: result.rule,
+        inconsistent: result.inconsistent,
+      });
+    }
+    perOption.push(interventions);
+  }
+
+  const allWithinUnitInterval = perOption.every((o) => Object.values(o).every((v) => v <= 1));
+  return {
+    perOption,
+    conversions,
+    demoted: demote && demotedFactors.length > 0,
+    demotedFactors,
+    allWithinUnitInterval,
+    blockedByStatedRawScale: mixed && statedRawAboveOne,
+  };
+}
+
+/**
  * Redaction-safe aggregate of conversions for a single snapshot load. Carries
  * rule counts and factor-id lists ONLY — never input/output magnitudes or caps
  * — so the diagnostic logged from it cannot leak business values.
