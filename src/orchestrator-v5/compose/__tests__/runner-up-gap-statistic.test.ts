@@ -147,6 +147,30 @@ const MUST_NOT_TRIP: ReadonlyArray<readonly [string, string]> = [
     'The user stated a 15 percentage point uplift in win rate for the partner channel.',
   ],
   ['a flip_threshold display value', '33 percentage points'],
+  /**
+   * ⚠ THIS PAIR EXISTS BECAUSE A MUTANT SURVIVED, AND IT IS THE ONLY THING
+   * PINNING THE BINDER WINDOW (CLAUDE.md trap 13c — a survivor is a claim, and
+   * an unpinned constant is a claim nobody made).
+   *
+   * Widening `{0,25}` to `{0,120}` left all 46 cases GREEN: every attributive
+   * twin above happens to carry a COMMA, which the `[^,.!?;:]` class blocks
+   * whatever the window is. So the NUMBER was doing no measurable work and a
+   * future widening — the exact trap-22b over-reach this reader is built to
+   * avoid — would have shipped silently.
+   *
+   * These two sentences are comma-free, put a factor quantity 60+ characters
+   * downstream of a ranking word, and are LEGITIMATE: they state how far a
+   * FACTOR moves the outcome, not how far one option is from another. They
+   * survive at 25 and are wrongly redacted at 120.
+   */
+  [
+    'window pin A: a comma-free factor sensitivity far downstream of a ranking word',
+    'Option A leads in most runs and the conversion assumption alone moves the result by 12 percentage points.',
+  ],
+  [
+    'window pin B: the same shape on a different factor',
+    'Plan A leads on the current evidence and a single retention assumption shifts the outcome by 9 percentage points.',
+  ],
 ];
 
 describe('findRunnerUpGapCodes — the measured corpus', () => {
@@ -162,7 +186,7 @@ describe('findRunnerUpGapCodes — the measured corpus', () => {
     // Trap 13: an absence assertion needs a positive control. If either arm
     // were empty, every `it.each` above would vacuously pass.
     expect(MUST_TRIP.length).toBeGreaterThanOrEqual(18);
-    expect(MUST_NOT_TRIP.length).toBeGreaterThanOrEqual(16);
+    expect(MUST_NOT_TRIP.length).toBeGreaterThanOrEqual(18);
   });
 });
 
