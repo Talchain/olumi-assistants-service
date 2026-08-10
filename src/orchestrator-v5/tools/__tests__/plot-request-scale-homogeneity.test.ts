@@ -591,4 +591,70 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     const noCapOut = projectRequestInterventionsToWireScale(req, noCapMap);
     expect(noCapOut.mixedUnresolved, 'a no-cap factor with values astride 1 declares its own raw-ness').toBe(false);
   });
+
+  it('⭐ RATIFIED (round 5): a USER-AUTHORED no-cap factor astride 1 is INTENDED relative-comparison semantics — never blocked', () => {
+    // PINNED SO THE NEXT LANE CANNOT RE-LITIGATE THIS BLIND.
+    //
+    // A round-4b attempt removed the same-factor exemption outright, on the
+    // reading that PLoT "corrupts" the unit-scale member of such a pair. Measured
+    // against the real normaliser at b9f6b5a7, values [1.2, 0.9] on a no-cap
+    // factor:  deriveRange -> { min: 0.84, max: 1.26, source: 'inferred_spread' }
+    //          ISL receives 0.857 and 0.1428 — ORDERING PRESERVED, ratios not.
+    // A no-cap factor has NO absolute reference; PLoT deliberately derives one
+    // from the values themselves and denormalises outputs on the way back. So
+    // "ISL must receive 0.9 verbatim" was an ASSUMPTION, never a stated contract,
+    // and this is ratified as intended relative comparison (orchestrator ruling,
+    // round 5). Removing the exemption broke 102 tests across 8 files on exactly
+    // this shape — `{ fac_price: 1.2 }` vs `{ fac_price: 0.9 }`, the most ordinary
+    // two-option comparison in the product.
+    //
+    // The deeper ISL no-cap semantics write-up is rowed to PR2, not to this lane.
+    const noCapMap = buildFactorScaleMap([{ id: SWITCH_COST, kind: 'factor', observed_state: { value: 12 } }]);
+    const req = [{ [SWITCH_COST]: iv(1.2) }, { [SWITCH_COST]: iv(0.9) }];
+    // PIN THE PRECONDITION: both emissions are no_cap and they really do straddle 1.
+    const rules = req.map((r) => projectInterventionsToRawScale(r, noCapMap).conversions[0]?.rule);
+    expect(rules).toEqual(['no_cap', 'no_cap']);
+
+    const out = projectRequestInterventionsToWireScale(req, noCapMap);
+    expect(
+      out.mixedUnresolved,
+      'a user-authored value set defines its own comparison frame — blocking it is the round-4b regression',
+    ).toBe(false);
+    expect(out.demoted, 'and nothing is rewritten').toBe(false);
+  });
+
+  it('⭐ M20c (round 5): a CEE-SYNTHESISED value must not establish the scale frame for a user value', () => {
+    // THE RULING: a value CEE manufactured is not evidence about the user's request.
+    //
+    // `scaffoldUnconfiguredOptions` fills an unconfigured option from each factor's
+    // observed_state, so a no-cap factor gains CEE's own raw neutral (12) beside the
+    // user's unit-scale 0.5. That placeholder then satisfied the same-factor
+    // exemption — CEE manufacturing the evidence that exempted the user's value from
+    // protection. Measured against real PLoT b9f6b5a7: the user's 0.5 reaches ISL as
+    // 0.03496 (14.3x suppression) while CEE self-reported `mixedUnresolved: false`.
+    //
+    // Note the contrast with the RATIFIED case directly above: identical wire
+    // numbers, opposite verdicts — because the difference is PROVENANCE, not shape.
+    const noCapNode = { id: SWITCH_COST, kind: 'factor', observed_state: { value: 12 } };
+    const map = buildFactorScaleMap([capabilityNodePct, noCapNode]);
+    const req = [
+      { [CAPABILITY]: iv(0.8), [SWITCH_COST]: iv(0.5) },                        // the user's option
+      { [CAPABILITY]: { value: 0.35, raw_value: 35 }, [SWITCH_COST]: iv(12) },  // scaffolded neutrals
+    ];
+    // PIN THE PRECONDITIONS: the user's 0.5 reaches the wire unpromoted, and the
+    // synthesised neutral really is the value pushing the factor outside [0,1].
+    expect(projectInterventionsToRawScale(req[0]!, map).interventions[SWITCH_COST]).toBe(0.5);
+    expect(projectInterventionsToRawScale(req[1]!, map).interventions[SWITCH_COST]).toBe(12);
+
+    // Option index 1 is CEE-synthesised in its entirety.
+    const out = projectRequestInterventionsToWireScale(req, map, [
+      new Set<string>(),
+      new Set([CAPABILITY, SWITCH_COST]),
+    ]);
+    expect(
+      out.mixedUnresolved,
+      "a scaffolded placeholder is not a declaration — the user's unit-scale value is still stranded",
+    ).toBe(true);
+    expect(out.unresolvedFactorIds, 'the ask must name the factor the user can fix').toContain(SWITCH_COST);
+  });
 });

@@ -535,11 +535,24 @@ export interface RequestScaleProjection {
 export function projectRequestInterventionsToWireScale(
   perOptionRawObjects: ReadonlyArray<Record<string, unknown>>,
   factorScaleById: ReadonlyMap<string, FactorScaleInfo>,
+  /**
+   * Per option index, the factor ids whose intervention CEE SYNTHESISED rather
+   * than the user authoring it — today, `scaffoldUnconfiguredOptions`' neutral
+   * placeholders. Omitted / empty means "every value is the user's", which is
+   * what every non-scaffolded request is.
+   *
+   * It exists for exactly one decision: a synthesised value may not establish
+   * the scale reference frame for a user's value (see `strandedUnitScale`). It
+   * is CEE-internal and crosses no service boundary — the wire payload is
+   * unchanged.
+   */
+  synthesisedByOption?: ReadonlyArray<ReadonlySet<string>>,
 ): RequestScaleProjection {
   // Pass 1 — resolve every intervention independently (the per-value rule).
-  const resolved = perOptionRawObjects.map((rawObjects) =>
+  const resolved = perOptionRawObjects.map((rawObjects, optionIndex) =>
     Object.entries(rawObjects).map(([factorId, rawObject]) => ({
       factorId,
+      optionIndex,
       result: resolveRawInterventionValue(rawObject, factorScaleById.get(factorId)),
     })),
   );
@@ -559,20 +572,39 @@ export function projectRequestInterventionsToWireScale(
   // Which FATE a stranded value meets is per-factor, derived from PLoT's range
   // chain at b9f6b5a (`deriveRange`, 7 tiers): a CAPPED factor always divides
   // by its cap (tier 0 — authoritative), so an unproven [0,1] value on it is
-  // annihilated whenever ANY sibling fires the gate. A NO-CAP factor
-  // normalises by a range derived from its OWN values (spread/baseline tiers),
-  // so an in-range value on it is stranded only when a DIFFERENT factor trips
-  // the gate — a factor carrying values on both sides of 1 has declared its
-  // own values raw, and PLoT treats them coherently within their own spread.
+  // annihilated whenever ANY sibling fires the gate. A NO-CAP factor has no
+  // absolute reference and normalises by a range derived from its OWN values
+  // (spread/baseline tiers), so a factor carrying values on both sides of 1
+  // defines its own comparison frame and is NOT stranded by its own spread.
   // Encoded codes are never magnitudes: stranded regardless (Finding B).
-  const outsideFactorIds = new Set(outsideUnitInterval.map((r) => r.factorId));
+  //
+  // ROUND 5 — WHOSE VALUES DEFINE THAT FRAME. The exemption above is sound only
+  // for a value set the USER authored. `scaffoldUnconfiguredOptions` fills an
+  // unconfigured option from each factor's observed_state, so a no-cap factor
+  // gains CEE's own raw neutral (12) beside the user's unit-scale 0.5 — and a
+  // provenance-blind exemption let that placeholder establish the frame, i.e.
+  // CEE manufacturing the evidence that exempted the user's value from
+  // protection. Measured against real PLoT b9f6b5a7: the user's 0.5 reached ISL
+  // at 0.03496 (14.3x) under a self-reported `mixedUnresolved: false`.
+  //
+  // A value CEE manufactured is not evidence about the user's request, so only
+  // USER-AUTHORED out-of-range values grant the exemption. Note what is NOT
+  // being claimed: for a user-authored set, PLoT's ordering-preserving spread
+  // normalisation is the INTENDED relative comparison (ratified round 5) — an
+  // earlier attempt to treat it as corruption removed the exemption outright and
+  // blocked 102 legitimate requests on the ordinary `{1.2} vs {0.9}` shape.
+  const userAuthoredOutsideFactorIds = new Set(
+    outsideUnitInterval
+      .filter((r) => synthesisedByOption?.[r.optionIndex]?.has(r.factorId) !== true)
+      .map((r) => r.factorId),
+  );
   const strandedUnitScale = present.some(
     (r) =>
       !r.result.rawScaleEmission &&
       r.result.value !== null &&
       r.result.value >= 0 &&
       r.result.value <= 1 &&
-      (r.result.rule !== 'no_cap' || !outsideFactorIds.has(r.factorId)),
+      (r.result.rule !== 'no_cap' || !userAuthoredOutsideFactorIds.has(r.factorId)),
   );
   const mixed = outsideUnitInterval.length > 0 && strandedUnitScale;
   // Demotion = re-emitting every raw-scale value in its KNOWN unit-interval

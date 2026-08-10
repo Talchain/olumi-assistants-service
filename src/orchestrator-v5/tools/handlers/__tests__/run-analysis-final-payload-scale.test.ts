@@ -201,6 +201,92 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
     expect(nextStep.toLowerCase(), 'the copy must say what to do: state the unit/scale').toMatch(/unit|scale/);
   });
 
+  it("⭐ (a2, round 5) the scaffold's OWN neutral must not un-strand a user value — it routes to the ask", async () => {
+    // The user configures a coherent pair: a proven-convention capped factor (0.72)
+    // and a NO-CAP factor at unit scale (0.5). Adding ONE unconfigured option makes
+    // the scaffold fill it from each factor's observed_state, so the no-cap factor
+    // gains CEE's own raw neutral (12). Under the provenance-blind exemption that
+    // placeholder made the factor look "self-declared raw", the user's 0.5 stopped
+    // counting as stranded, and the request shipped mixed: real PLoT (b9f6b5a7)
+    // delivered that 0.5 to ISL as 0.03496 under `mixedUnresolved: false`.
+    //
+    // A value CEE manufactured is not evidence about the user's request, so this
+    // takes the unresolved -> stop -> ask path instead.
+    const NO_CAP = { id: 'f_nc', kind: 'factor', label: 'Switching Cost', observed_state: { value: 12 } };
+    const graph = graphWith(
+      [
+        { id: 'opt_a', kind: 'option', label: 'Committed', interventions: { f_cd: { value: 0.72 }, f_nc: { value: 0.5 } } },
+        { id: 'opt_b', kind: 'option', label: 'Added later' },
+      ],
+      [
+        { from: 'opt_a', to: 'f_cd' },
+        { from: 'opt_a', to: 'f_nc' },
+        { from: 'opt_b', to: 'f_cd' },
+        { from: 'opt_b', to: 'f_nc' },
+      ],
+      [COST_DRIVER, NO_CAP],
+    );
+    const snapshot: RunAnalysisScenarioSnapshot = {
+      graph,
+      rawPersistedGraph: graph,
+      goal_node_id: 'g',
+      options: [
+        { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_cd: { value: 0.72 }, f_nc: { value: 0.5 } } },
+        { id: 'opt_b', option_id: 'opt_b', label: 'Added later', interventions: {} },
+      ],
+    };
+    const { client, run } = makeCapturingPlotClient();
+    const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: makeReader(snapshot) });
+
+    let thrown: unknown = null;
+    try {
+      await handler(makeInvocation());
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(run, 'a request whose coherence rests on a CEE placeholder must NOT compute').not.toHaveBeenCalled();
+    expect(thrown, 'it must fail typed, never silently').toBeInstanceOf(HandlerInvocationFailedError);
+    const failure = thrown as HandlerInvocationFailedError;
+    expect(failure.cause_kind).toBe('analysis_not_ready');
+    const nextStep = (failure.details as { next_step?: string }).next_step ?? '';
+    expect(nextStep, 'the copy must name the factor the user can fix').toContain('Switching Cost');
+  });
+
+  it('⭐ (a3, round 5) a USER-AUTHORED astride-1 no-cap request still computes — the ratified case, at the seam', async () => {
+    // The opposite-direction twin of (a2): same factor, same astride-1 shape, but
+    // BOTH values are the user's own and every option is configured (no scaffold).
+    // This must keep computing — it is the 102-test shape the round-4b removal broke.
+    const NO_CAP = { id: 'f_nc', kind: 'factor', label: 'Switching Cost', observed_state: { value: 12 } };
+    const graph = graphWith(
+      [
+        { id: 'opt_a', kind: 'option', label: 'A', interventions: { f_nc: { value: 1.2 } } },
+        { id: 'opt_b', kind: 'option', label: 'B', interventions: { f_nc: { value: 0.9 } } },
+      ],
+      [
+        { from: 'opt_a', to: 'f_nc' },
+        { from: 'opt_b', to: 'f_nc' },
+      ],
+      [NO_CAP],
+    );
+    const snapshot: RunAnalysisScenarioSnapshot = {
+      graph,
+      rawPersistedGraph: graph,
+      goal_node_id: 'g',
+      options: [
+        { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { f_nc: { value: 1.2 } } },
+        { id: 'opt_b', option_id: 'opt_b', label: 'B', interventions: { f_nc: { value: 0.9 } } },
+      ],
+    };
+    const { client, run } = makeCapturingPlotClient();
+    const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: makeReader(snapshot) });
+
+    await handler(makeInvocation());
+
+    const wire = finalWireValues(run);
+    expect(wire.map((w) => w.value), 'the user values must cross the wire untouched').toEqual([1.2, 0.9]);
+  });
+
   it('(B) encoded stranded beside a raw promotion: the request demotes and the encoded code ships VERBATIM', async () => {
     // Round-3 review finding B, executed against real PLoT b9f6b5a: wire
     // {72000, encoded 1} shipped mixedUnresolved:false and PLoT renormalised

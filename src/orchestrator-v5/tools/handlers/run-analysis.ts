@@ -431,9 +431,29 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         ? (opt.interventions as Record<string, unknown>)
         : {},
     );
+    // ROUND 5 — provenance for the scale decision. `scaffoldOutcome.scaffolded`
+    // already records exactly which factor ids CEE placeholder-filled on which
+    // option, so nothing new has to be derived or remembered: the marker is read
+    // off the scaffold's own disclosure record. A synthesised value must not
+    // establish the scale reference frame for a value the user authored.
+    const scaffoldedFactorIdsByOptionId = new Map<string, ReadonlySet<string>>();
+    for (const record of scaffoldOutcome.scaffolded) {
+      scaffoldedFactorIdsByOptionId.set(record.option_id, new Set(record.factor_ids));
+    }
+    const EMPTY_SYNTHESISED: ReadonlySet<string> = new Set<string>();
+    const synthesisedByOption = scaffoldedOptions.map((opt) => {
+      const optionId =
+        typeof opt.option_id === 'string' && opt.option_id.length > 0
+          ? opt.option_id
+          : typeof opt.id === 'string' && opt.id.length > 0
+            ? opt.id
+            : null;
+      return (optionId !== null ? scaffoldedFactorIdsByOptionId.get(optionId) : undefined) ?? EMPTY_SYNTHESISED;
+    });
     const requestProjection = projectRequestInterventionsToWireScale(
       rawObjectsPerOption,
       factorScaleById,
+      synthesisedByOption,
     );
     const conversionSummary = summariseConversions(requestProjection.conversions);
     if (summaryIsNoteworthy(conversionSummary) || requestProjection.demoted) {
