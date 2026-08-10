@@ -22,6 +22,10 @@ import { HandlerInvocationFailedError } from '../../handler-errors.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { config } from '../../../../config/index.js';
 import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
+import {
+  buildFactorScaleMap,
+  projectRequestInterventionsToWireScale,
+} from '../../plot-intervention-scale.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { SessionReadError } from '../../../session/store.js';
 import type { SessionStore } from '../../../session/store.js';
@@ -132,11 +136,20 @@ describe('EP2 integration — loadScenarioSnapshotForRunAnalysis (run-time seam)
     setGuard(true);
     const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeBrokenF1()));
     const opt = snap.options.find((o) => (o as Dict).option_id === 'opt_hybrid') as Dict;
-    // UPDATED 2026-07-20 (O-7 wave 2): the CEE→PLoT egress scale net is now
-    // UNCONDITIONAL (CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted, live-true on
-    // staging), so the canonicalised 0.8 (normalised, cap 150000) projects
-    // outbound as RAW user-scale 120000 — the convention PLoT consumes.
-    expect(optInterventions(opt).fac_annual_cost).toBeCloseTo(120000, 6);
+    // UPDATED round 4 (final-payload enforcement): the loader returns the
+    // canonicalised intervention OBJECT (0.8 normalised, cap 150000) — the ONE
+    // request-level projection now runs in run_analysis after the scaffold.
+    // Both halves of the original intent are asserted: the guard canonicalised
+    // the node.data option (object present, configured), AND the run-path
+    // projection resolves it to RAW user-scale 120000.
+    const ivObject = optInterventions(opt).fac_annual_cost as Record<string, unknown>;
+    expect(ivObject).toMatchObject({ value: expect.any(Number) });
+    const scaleMap = buildFactorScaleMap((snap.graph as { nodes: unknown }).nodes);
+    const projected = projectRequestInterventionsToWireScale(
+      [{ fac_annual_cost: ivObject }],
+      scaleMap,
+    );
+    expect(projected.perOption[0]!.fac_annual_cost).toBeCloseTo(120000, 6);
     // rawPersistedGraph is the canonical graph → graph_hash_at_run is over the canonical projection.
     const parsed = GraphStateIngressSchema.safeParse(snap.rawPersistedGraph);
     expect(parsed.success).toBe(true);

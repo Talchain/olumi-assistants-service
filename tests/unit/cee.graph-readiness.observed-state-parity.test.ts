@@ -149,9 +149,14 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
     expect(outcome.scaffolded.map((s) => s.option_id)).toEqual(["opt_b"]);
     const scaffoldedOptB = outcome.options.find(
       (o) => (o as { option_id?: string }).option_id === "opt_b",
-    ) as { interventions: Record<string, number> };
-    // The scaffold used the observed_state rung → the EXACT run-path value.
-    expect(scaffoldedOptB.interventions.fac_price).toBe(expected.value);
+    ) as { interventions: Record<string, unknown> };
+    // Round 4: the scaffold emits the observed_state CANDIDATE OBJECT (the one
+    // request-level projection downstream owns the wire). EXACT parity holds
+    // one seam later: the run-path resolver over the emitted object yields the
+    // same value as over the observed_state candidate directly.
+    const emitted = scaffoldedOptB.interventions.fac_price;
+    const viaEmitted = resolveRawInterventionValue(emitted, factorScale);
+    expect(viaEmitted.value).toBe(expected.value);
 
     // The advertised plan (what /graph-readiness returns) agrees.
     const plan = computeScaffoldPlan({
