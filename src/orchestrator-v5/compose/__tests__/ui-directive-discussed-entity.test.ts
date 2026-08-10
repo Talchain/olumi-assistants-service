@@ -276,17 +276,23 @@ describe('row 7 — the workspace follows the conversation', () => {
 });
 
 describe('row 7 — never fires on a turn the user did not initiate', () => {
-  // TWO independent mechanisms enforce this, and each needs its OWN pin:
-  //   (a) `facts.length > 0` — pinned by graph-lookup-fallback.test.ts's
-  //       "prior-fact FRESH lifecycle rebuild ... emits ZERO directives", whose
-  //       turn carries no handler facts at all;
-  //   (b) ORDERING — row 7 runs BEFORE the lifecycle rebuild pushes its blocks.
-  // Mechanism (b) is invisible to that test (its `facts` is empty, so gate (a)
-  // already stops it). This test is the pin on (b): a turn that HAS a
-  // current-turn fact AND triggers a lifecycle rebuild. If row 7 is moved below
-  // the rebuild, it will find the re-presented cards' refs and emit — and this
-  // REDs. Without this, moving row 7 would silently reintroduce the behaviour
-  // the ruling removed.
+  // ⚠ MEASURED, NOT ASSUMED — and the first version of this comment was WRONG.
+  // It claimed two INDEPENDENT mechanisms (`facts.length > 0` and ORDERING),
+  // each needing its own pin. A mutant settled it: deleting the `facts.length`
+  // gate left every spec GREEN. It is not independently load-bearing for the
+  // DIRECTIVE outcome, because with the ordering correct there are no blocks to
+  // scan yet on a rebuild-only turn — row 7 finds nothing either way.
+  //
+  // What is actually true:
+  //   (a) ORDERING is the load-bearing mechanism — row 7 runs BEFORE the
+  //       lifecycle rebuild pushes its blocks. Pinned by THIS test (a turn that
+  //       HAS a current-turn fact AND triggers a rebuild); the restored
+  //       zero-directive test in graph-lookup-fallback.test.ts is structurally
+  //       BLIND to it, because its `facts` is empty.
+  //   (b) `facts.length > 0` is defence-in-depth whose only observable effect
+  //       is suppressing a SPURIOUS suppression-telemetry event on a turn that
+  //       was never a candidate. Pinned by the telemetry-silence test below —
+  //       an unpinned redundant guard is a guard agreeing with itself.
   it('a current-turn fact + a FRESH lifecycle rebuild: row 7 never points at a REBUILT card', () => {
     const env = composeToolCallResponse({
       ...BASE_INPUT,
@@ -324,6 +330,38 @@ describe('row 7 — never fires on a turn the user did not initiate', () => {
     // …and yet NO directive was emitted from them.
     expect(directives(env)).toHaveLength(0);
     expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(0);
+  });
+
+  it('a rebuild-only turn emits NO row-7 telemetry at all — not even a suppression', () => {
+    // This is the pin on the `facts.length > 0` gate, which the mutant above
+    // showed has no effect on the DIRECTIVE outcome. Its real job is here: a
+    // turn that was never a candidate must not emit a suppression event either.
+    // A spurious `no_discussed_entity` on every rehydration would be exactly
+    // the broken-alarm noise the reason tags exist to avoid — a drop that
+    // "fires" constantly stops carrying information.
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [],
+      persistedGraph: GRAPH,
+      lifecycle: {
+        priorFacts: [analysisFact({ leadingOptionId: 'opt_x' })],
+        freshness: {
+          freshness: 'fresh',
+          selected_fact_index: 0,
+          graph_hash_at_run: GRAPH_HASH,
+          current_graph_hash: GRAPH_HASH,
+          reason: 'graph_hash_match',
+          computed_at: '2026-08-10T09:00:00.000Z',
+        },
+        requestId: 'req-row7-silence',
+        scenarioId: 'scen-discussed',
+      } as unknown as Parameters<typeof composeToolCallResponse>[0]['lifecycle'],
+    });
+    // POSITIVE CONTROL: the rebuild really did compose cards naming entities.
+    expect(blocksWithRefs(env).length).toBeGreaterThan(0);
+    expect(directives(env)).toHaveLength(0);
+    expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(0);
+    expect(suppressions().filter((e) => e.data.fact_type === DISCUSSED_ENTITY_TAG)).toHaveLength(0);
   });
 });
 
