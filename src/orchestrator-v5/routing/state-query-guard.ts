@@ -34,6 +34,10 @@
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import {
+  isBriefAuditQuestion,
+  tryBriefAuditAnswer,
+} from '../../cee/context-integrity/brief-audit-answer.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { SuggestedAction } from '../compose/types.js';
@@ -52,6 +56,17 @@ export type StateQueryGuardOutcome =
   | {
       readonly matched: true;
       readonly dispatch: 'no_recent_changes';
+      readonly assistant_text: string;
+    }
+  /**
+   * ROADMAP 2.975 — the user asked what became of THEIR BRIEF, not what
+   * changed in this session. Answered from the derived not-modelled manifest;
+   * see `cee/context-integrity/brief-audit-answer.ts` for why the two questions
+   * must not share an answer.
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'brief_audit';
       readonly assistant_text: string;
     };
 
@@ -259,7 +274,18 @@ const EDIT_VERB_PATTERN =
  */
 export function isStateQueryQuestionShape(message: string): boolean {
   if (EDIT_VERB_PATTERN.test(message)) return false;
-  if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
+  // ROADMAP 2.975 — a BRIEF-AUDIT question is a question, so it must be
+  // suppressed from `edit_graph` routing for exactly the same reason a
+  // session-edit question is: *"which numbers did you change or reinterpret?"*
+  // carries the edit verb `change` and would otherwise be hijacked into an
+  // attempt to MUTATE the model the user is asking about. Widening suppression
+  // fails safe; narrowing it would let the route claim a question as an edit.
+  if (
+    !STATE_QUERY_PATTERNS.some((pat) => pat.test(message)) &&
+    !isBriefAuditQuestion(message)
+  ) {
+    return false;
+  }
   if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(message))) return false;
   return true;
 }
@@ -267,6 +293,26 @@ export function isStateQueryQuestionShape(message: string): boolean {
 export interface TryStateQueryGuardInput {
   readonly message: string;
   readonly contextPack: Pick<ContextPack, 'recent_changes'>;
+  /**
+   * ROADMAP 2.975 — the persisted brief and graph, for answering a BRIEF-AUDIT
+   * question ("what did you keep from my brief?") rather than a session-edit
+   * one.
+   *
+   * ⚠ MUST BE THE FULL PERSISTED BRIEF (`TurnContext.scenarioBriefText`), NOT
+   * `ContextPack.brief`. The pack's copy is hard-sliced at
+   * `CONTEXT_PACK_BRIEF_CHAR_CAP` (2,000 chars) — B2 of the trace corpus
+   * persists at 2,078 — and a truncated brief would silently shorten the list
+   * of figures we claim to have looked for, turning "I could not see it" into
+   * "you did not say it". Both fields are loaded in ONE round trip by
+   * `loadGraphAndBriefText`, so the untruncated pair is already in hand.
+   *
+   * Omitted by callers that have no scenario state; the guard then declines the
+   * turn rather than answering, and never deflects.
+   */
+  readonly briefAudit?: {
+    readonly briefText: string | null;
+    readonly graph: unknown;
+  };
 }
 
 export function tryStateQueryGuard(
@@ -277,6 +323,32 @@ export function tryStateQueryGuard(
   if (EDIT_VERB_PATTERN.test(input.message)) {
     return { matched: false };
   }
+
+  // ROADMAP 2.975 — SEPARATE THE TWO QUESTIONS BEFORE EITHER ARM CLAIMS ONE.
+  //
+  // This runs BEFORE the session-edit arms, and returns unconditionally, so a
+  // brief-audit question can never reach `no_recent_changes`. That ordering is
+  // the fix: the measured defect was not bad copy, it was the edit-history arm
+  // answering a question about the brief. Whichever way this branch resolves,
+  // the user does not get told about edit history.
+  //
+  // The compound bail-out is checked first so "what did you leave out? add a
+  // constraint" still reaches the LLM, which can handle both halves.
+  if (isBriefAuditQuestion(input.message)) {
+    if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
+      return { matched: false };
+    }
+    if (input.briefAudit === undefined) return { matched: false };
+    const answer = tryBriefAuditAnswer(
+      input.briefAudit.briefText,
+      input.briefAudit.graph,
+    );
+    // `null` = the manifest could not look. Falling through hands the turn to
+    // the grounded conversational path rather than asserting a zero.
+    if (answer === null) return { matched: false };
+    return { matched: true, dispatch: 'brief_audit', assistant_text: answer };
+  }
+
   const recent = input.contextPack.recent_changes;
   // Two phrase classes:
   //   - STATE_QUERY_PATTERNS: legacy named follow-ups ("what changed",

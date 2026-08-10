@@ -126,6 +126,14 @@ export type StateQueryGuardOutcomeForLog =
   | 'unmatched'
   | 'with_recent_change'
   | 'no_recent_changes'
+  /**
+   * ROADMAP 2.975 — the turn asked what became of the user's BRIEF, and was
+   * answered from the derived not-modelled manifest rather than from edit
+   * history. Distinguished from `no_recent_changes` because conflating them is
+   * the defect this row closed: before it, every brief-audit question landed in
+   * that bucket and the dashboards read it as a healthy honest answer.
+   */
+  | 'brief_audit'
   | 'not_evaluated';
 
 /**

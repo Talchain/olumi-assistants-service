@@ -427,6 +427,7 @@ import {
   buildRoutingLog,
   writeRoutingLog,
   type RoutingLog,
+  type StateQueryGuardOutcomeForLog,
 } from './routing/routing-log.js';
 import type {
   CoachingMode,
@@ -1374,11 +1375,12 @@ export async function runTurnExecutor(
   // `'with_recent_change'` / `'no_recent_changes'` once the guard fires.
   // Threaded into the routing log (and from there to dashboards) so the
   // misroute class stays observable in production.
-  let stateQueryGuardOutcomeForLog:
-    | 'unmatched'
-    | 'with_recent_change'
-    | 'no_recent_changes'
-    | 'not_evaluated' = 'not_evaluated';
+  // ROADMAP 2.975 — typed from the routing-log's OWN declaration rather than
+  // re-spelled here. The inline copy this replaces was a hand-maintained mirror
+  // (CLAUDE.md trap 12): it had to be edited in lockstep with the canonical
+  // union, and adding the brief-audit outcome is precisely the edit that would
+  // have drifted.
+  let stateQueryGuardOutcomeForLog: StateQueryGuardOutcomeForLog = 'not_evaluated';
   // Compute the successful-mutation-fact count ONCE at function entry so
   // every turn class (including those where an earlier pre-route —
   // short-confirm, deterministic value-update — synthesises a routing
@@ -6397,6 +6399,18 @@ export async function runTurnExecutor(
         const stateQueryOutcome = tryStateQueryGuard({
           message: payload.message,
           contextPack,
+          // ROADMAP 2.975 — the FULL persisted pair, both loaded in the same
+          // round trip by `loadGraphAndBriefText`. Deliberately NOT
+          // `contextPack.brief`, which is hard-sliced at 2,000 chars: a
+          // truncated brief would shorten the list of figures we claim to have
+          // looked for, and report a figure the user DID state as one they
+          // did not. On a degraded read `persistedGraph` is null, the manifest
+          // reports `unavailable`, and the guard declines rather than
+          // answering — never a reassuring zero.
+          briefAudit: {
+            briefText: context.scenarioBriefText,
+            graph: context.persistedGraph,
+          },
         });
 
         // The successful-mutation count is computed once at function
