@@ -122,6 +122,19 @@ function buildNodeLabelLookup(graph: Record<string, unknown> | null): ReadonlyMa
   return lookup;
 }
 
+/**
+ * ONE composite-key spelling for the (from,to) join. `JSON.stringify` makes
+ * the key collision-proof for ANY id contents (an id containing the separator
+ * cannot forge a different pair), and there is exactly one definition so the
+ * three join sites cannot drift apart. (The first byte of this file carried a
+ * NUL as the separator — the exact trap-17 class that makes a source file
+ * silently invisible to grep; caught by a NUL sweep with a positive control
+ * and replaced with this helper.)
+ */
+function edgeKey(fromId: string, toId: string): string {
+  return JSON.stringify([fromId, toId]);
+}
+
 /** Canonical (from,to) tie-break used by both signal classes. */
 function compareEdgeIdentity(a: JudgementEdgeRef, b: JudgementEdgeRef): number {
   if (a.fromId !== b.fromId) return a.fromId < b.fromId ? -1 : 1;
@@ -182,7 +195,7 @@ export function deriveJudgementSignals(
   for (const adj of adjudications) {
     if (adj.verdict !== 'overridden') continue;
     if (adj.index >= latestAnalysisIndex) continue; // answered — structurally spent
-    const key = `${adj.fromId} ${adj.toId}`;
+    const key = edgeKey(adj.fromId, adj.toId);
     if (overriddenSeen.has(key)) continue; // newest per edge (array order = newest-first)
     overriddenSeen.add(key);
     const ref = resolveRef(adj.fromId, adj.toId);
@@ -193,7 +206,7 @@ export function deriveJudgementSignals(
   // ── T2: contested in the persisted graph AND no adjudication fact (ANY
   // verdict, ANY recency in the window) for the same (from,to).
   const adjudicatedEdges = new Set<string>(
-    adjudications.map((a) => `${a.fromId} ${a.toId}`),
+    adjudications.map((a) => edgeKey(a.fromId, a.toId)),
   );
   const contestedUnadjudicated: ContestedUnadjudicatedSignal[] = [];
   const edges = graph === null ? null : graph.edges;
@@ -207,7 +220,7 @@ export function deriveJudgementSignals(
       const validation = readRecord(edge.validation);
       if (validation === null) continue;
       if (validation.status !== 'contested') continue;
-      if (adjudicatedEdges.has(`${fromId} ${toId}`)) continue; // spent by the join
+      if (adjudicatedEdges.has(edgeKey(fromId, toId))) continue; // spent by the join
       const ref = resolveRef(fromId, toId);
       if (ref === null) continue;
       const rawDivergence = validation.max_divergence;
