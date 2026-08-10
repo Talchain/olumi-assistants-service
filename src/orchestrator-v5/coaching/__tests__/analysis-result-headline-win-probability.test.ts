@@ -181,6 +181,60 @@ describe('headline states the leader’s own win probability, not the gap', () =
   });
 
   // ==========================================================================
+  // The rounding itself — the one quantity this change exists to produce
+  // ==========================================================================
+
+  it('the percentage is ROUNDED, not truncated (0.615 → 62%, never 61%)', () => {
+    // ⚠ WHY A DEDICATED CASE FOR ONE ARITHMETIC OPERATOR. Every other test here
+    // uses a probability whose ×100 is already an integer (0.62, 0.91, 0.52),
+    // so `Math.round` and `Math.floor` agree on all of them and the whole suite
+    // passes with the operator swapped. A mutant that survives the entire
+    // battery on the exact statistic the change exists to state is an UNPINNED
+    // PROPERTY, not an equivalent one — and it is unpinned precisely where it
+    // matters most, because rounding is the last step between the engine's
+    // number and the sentence a user reads.
+    //
+    // 0.615 is the discriminator: `0.615 * 100` is 61.5, so round → 62 and
+    // floor → 61. Half-up is the correct choice — it is what the single-option
+    // Case D band has always used, and truncation would bias EVERY displayed
+    // figure downward, understating the leader on average by half a point for
+    // no reason a user could discover.
+    const out = buildAnalysisResultHeadline({
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.615 },
+          { option_id: 'opt_b', option_label: 'Stay on Salesforce', win_probability: 0.385 },
+        ],
+        robustness: { level: 'moderate' },
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Switch to HubSpot came out ahead in 62% of runs of this model.');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
+  it('a probability just under certainty rounds to 100%, and stays an integer', () => {
+    // The upper-boundary partner: 0.999 → 100 under round, 99 under floor. Also
+    // guards the grammar's `\d{1,3}` slot at three digits and re-asserts the
+    // no-raw-decimals content defence at the value most likely to leak one.
+    const out = buildAnalysisResultHeadline({
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.999 },
+          { option_id: 'opt_b', option_label: 'Stay on Salesforce', win_probability: 0.001 },
+        ],
+        robustness: { level: 'moderate' },
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Switch to HubSpot came out ahead in 100% of runs of this model.');
+    expect(out!).not.toMatch(/\d+\.\d+/);
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
+  // ==========================================================================
   // Bands that must NOT acquire a number — the corpus in the other direction
   // ==========================================================================
 

@@ -1950,13 +1950,29 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
     `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
-  // flagged as a tie — the winner is nominally ahead by N points but the
-  // analysis treats it as a close call. Emitted by both the
-  // >= MIN_LEAD_PROBABILITY near-tie branch and the sub-0.40 tie-override
-  // preemption via tieHeadlineText. The margin fragment is optional so the
-  // rare number-free override form ("… currently leads, but the analysis
-  // treats this as a close call.") also survives the egress allowlist rather
-  // than being silently swapped for the locked template.
+  // flagged as a tie — the winner is nominally ahead but the analysis treats it
+  // as a close call. Emitted by both the >= MIN_LEAD_PROBABILITY near-tie
+  // branch and the sub-0.40 tie-override preemption via tieHeadlineText.
+  //
+  // ⚠ THE NUMBER-FREE OVERRIDE FORM IS NO LONGER ADMITTED, AND THAT IS
+  // DELIBERATE. This comment used to say the margin fragment was optional "so
+  // the rare number-free override form ('… currently leads, but the analysis
+  // treats this as a close call.') also survives the egress allowlist". That
+  // allowance existed because the OLD margin fragment could be empty. It cannot
+  // happen now: `leadClause` is built from the leader's own win probability,
+  // which `resolveWinner` guarantees is finite for every winner this module
+  // returns, so every override emission carries its number by construction —
+  // the number-free form is unreachable from any builder path.
+  //
+  // It is therefore removed from the grammar rather than tolerated, on the same
+  // reasoning that retired the pp phrasing: this allowlist is the SECOND LINE
+  // OF DEFENCE, so every shape it admits is a shape some future regression may
+  // put on the wire unchallenged. An allowlist should admit exactly what the
+  // builder can emit — no less (or honest copy is silently swapped for the
+  // locked template) and no more (or the guard stops discriminating). If a
+  // number-free override form is ever wanted back, the builder must emit it AND
+  // this alternation must be widened to `(?:${LEAD_CLAUSE_RE_SRC}|currently
+  // leads)` in the same commit.
   new RegExp(
     `^.+? ${LEAD_CLAUSE_RE_SRC}, but the analysis treats this as a close call\\.${TAIL_PATTERN}$`,
   ),
