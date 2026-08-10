@@ -1359,6 +1359,15 @@ export function findProvenUncoveredBounds(
   for (const s of splitSentences(normaliseEvidenceText(brief))) {
     // S1 outranks the construction verdict in the partition; it outranks the
     // mint for the same reason. A user who said they had not decided is asked.
+    //
+    // ⚠ ALSO DEFENCE IN DEPTH, AND DEMONSTRATED RATHER THAN ASSERTED (trap
+    // 13c). A mutant deleting this screen SURVIVES, because a minted row is
+    // deliberately routed back through `partitionUnprovenDirection`, whose own
+    // S1 then withholds it: executed on "We are still deciding the target, so
+    // do not let CSAT drop below 85% for now.", the would-be-minted row comes
+    // back `unresolved / explicit_ambiguity`. The redundancy is the DESIGN
+    // working — the mint is a candidate, not a verdict — and this screen stays
+    // so the mint does not depend on a downstream gate to stay honest.
     if (hasExplicitAmbiguity(s.text)) continue;
 
     const matches = findT1Matches(s.text);
