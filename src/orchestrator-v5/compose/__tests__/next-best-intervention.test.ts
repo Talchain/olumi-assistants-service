@@ -83,7 +83,6 @@ const ALL_PREV: (LensId | null)[] = [
   'consider_opposite',
   'devils_advocacy',
   'what_if_counterfactual',
-  'uncertainty_reduction_priority',
 ];
 
 let sink: { event: string; data: Record<string, unknown> }[] = [];
@@ -152,23 +151,41 @@ describe('§2 tier order is the single ordering authority', () => {
       'consider_opposite',
       'devils_advocacy',
       'what_if_counterfactual',
-      'uncertainty_reduction_priority',
     ];
     for (const lens of lenses) {
       expect(INTERVENTION_TIER_ORDER).toContain(tierForCandidate(lens));
     }
   });
 
-  it('places the new tier in the RATIFIED band: below the locked core three, above the DSK pair', () => {
-    // 2.690 §B.3 sequencing, adopted by 2.692 §2.2. Pinned so a permutation is a
-    // reviewed change, never a silent drift — and so the census below re-measures.
+  it('⛔ resolve_uncertainty is MEMBERLESS BY RULING, and stays that way', () => {
+    // Someone WILL try to populate this tier — an empty slot reads as an
+    // oversight. It is not: a lens for it was built, measured, and removed
+    // before merge because ISL's user-facing-language ban is LIVE and its
+    // gating condition ("pending doctrine") is unmet — the shipped constant at
+    // ISL `staging` 28fe0c95 is still `provisional_doctrine_v0`. Populating it
+    // without clearing that gate ships user-facing scientific copy past a live
+    // ban. Read `coaching/uncertainty-priority.ts` first; the gate and the
+    // re-add checklist are in its header.
+    const lenses: LensId[] = [
+      'sensitivity_flip_risk',
+      'pre_mortem',
+      'evpi_evidence_priority',
+      'consider_opposite',
+      'devils_advocacy',
+      'fragile_edge_resolution',
+      'what_if_counterfactual',
+    ];
+    expect(lenses.filter((l) => tierForCandidate(l) === 'resolve_uncertainty')).toStrictEqual([]);
+    // The tier is DECLARED, not deleted — the extension point is real, and the
+    // band it holds (below the locked core three, above the DSK pair) is the one
+    // 2.690 §B.3 / 2.692 §2.2 ratified, so a re-add lands where it was measured.
     const rank = (t: InterventionTier): number => INTERVENTION_TIER_ORDER.indexOf(t);
-    const newTier = rank(tierForCandidate('uncertainty_reduction_priority'));
+    expect(INTERVENTION_TIER_ORDER).toContain('resolve_uncertainty');
     for (const core of ['sensitivity_flip_risk', 'pre_mortem', 'evpi_evidence_priority'] as const) {
-      expect(rank(tierForCandidate(core))).toBeLessThan(newTier);
+      expect(rank(tierForCandidate(core))).toBeLessThan(rank('resolve_uncertainty'));
     }
     for (const below of ['consider_opposite', 'devils_advocacy'] as const) {
-      expect(newTier).toBeLessThan(rank(tierForCandidate(below)));
+      expect(rank('resolve_uncertainty')).toBeLessThan(rank(tierForCandidate(below)));
     }
   });
 
@@ -224,11 +241,16 @@ describe('§2b reachability census over the whole in-repo evidence base', () => 
         wins.set(key, (wins.get(key) ?? 0) + 1);
       }
     }
-    expect(cells).toBe(18);
-    // The finding: the tier fires (its trigger is live on session-b2) and still
-    // never takes the slot at this placement.
-    expect(selectUncertaintyPriority(clone(SESSION_B2)).selected).not.toBeNull();
-    expect(wins.get('uncertainty_reduction_priority') ?? 0).toBe(0);
+    // 2 captures x 8 previousAnalysisLens states (the seven LensIds + null).
+    // DERIVED, not a hand-typed constant: it must track ALL_PREV, so removing a
+    // lens moves it and a stale number goes RED instead of quietly shrinking the
+    // census — the "a new spec collecting zero is invisible to every aggregate"
+    // failure, one level down.
+    expect(cells).toBe(2 * ALL_PREV.length);
+    // The derivation is STILL LIVE on session-b2 — it is the CONSUMER that was
+    // removed, not the signal. Pinned so the re-add has a measured starting
+    // point and so "there was nothing to show anyway" cannot be claimed later.
+    expect(selectUncertaintyPriority(clone(SESSION_B2)).selected?.factorId).toBe('fac_energy');
     // And the pins the safe permutation protects: both DSK exercises and the
     // fragile-edge offer remain reachable, exactly as before this change.
     expect(wins.get('consider_opposite') ?? 0).toBeGreaterThan(0);
@@ -320,7 +342,7 @@ describe('§3 an uncomposable offer never becomes eligible (row 2.1024)', () => 
 // §4 — the new statistically-gated uncertainty tier
 // ============================================================================
 
-describe('§4 resolve_uncertainty fires only on a producer-RESOLVED VOI row', () => {
+describe('§4 the uncertainty derivation (live, unwired — its lens is ruling-blocked)', () => {
   it('MEASURED: session-b2 carries exactly one resolved p_win_sensitivity row', () => {
     // Pins the fixture's own precondition in-test (trap 13b third face), so the
     // assertions below are provably the code's doing and not the fixture's.
@@ -330,43 +352,27 @@ describe('§4 resolve_uncertainty fires only on a producer-RESOLVED VOI row', ()
     expect(aRows.filter((r) => r.status === 'resolved')).toHaveLength(0);
   });
 
-  it('becomes an ELIGIBLE candidate bound to the resolved factor BY IDENTITY', () => {
-    // ⚠ ELIGIBLE, not SELECTED. At the shipped (ratified) tier band this
-    // candidate never takes the slot on either capture — §2b records that as the
-    // escalation it is. What IS asserted here is that the intervention exists,
-    // fires on the right run, and points at the right factor by identity, so a
-    // permutation of INTERVENTION_TIER_ORDER lights a correct capability rather
-    // than a half-built one.
-    const ranking = rankInterventions(makeFact(clone(SESSION_B2)), {
-      previousAnalysisLens: null,
-    });
-    const candidate = ranking.candidates.find(
-      (c) => c.lens === 'uncertainty_reduction_priority',
-    );
-    expect(candidate?.rationaleCode).toBe('RESOLVED_PWIN_SENSITIVITY');
-    expect(candidate?.tier).toBe('resolve_uncertainty');
-    // Bound by identity, never by a value predicate another factor could satisfy.
+  it('binds the resolved factor BY IDENTITY, and no lens consumes it', () => {
+    // ⛔ The consumer was removed on a science ruling; the DERIVATION is
+    // untouched and still correct. Asserted directly against the reader so the
+    // work is protected while it waits, and so a re-add starts from a green,
+    // identity-bound base rather than from scratch.
     expect(selectUncertaintyPriority(clone(SESSION_B2)).selected?.factorId).toBe('fac_energy');
+    const ranking = rankInterventions(makeFact(clone(SESSION_B2)), { previousAnalysisLens: null });
+    const all = [...ranking.candidates.map((c) => c.lens), ...ranking.ineligible.map((c) => c.lens)];
+    expect(all).not.toContain('uncertainty_reduction_priority' as unknown as LensId);
   });
 
-  it('DISCRIMINATING PAIR: demote only THIS row and the candidate disappears; demote another and it stays', () => {
-    // Break-for-the-named-object → RED; break-for-a-different-object → GREEN.
-    // Neither mutant alone shows binding; the pair does (trap 19).
+  it('DISCRIMINATING PAIR: demote only THIS row and it refuses; demote another and it still fires', () => {
+    // Break-for-the-named-object → refusal; break-for-a-different-object →
+    // unchanged. Neither alone shows binding; the pair does (trap 19).
     const demoteHead = clone(SESSION_B2);
     (demoteHead.p_win_sensitivity as Record<string, unknown>[])[0]!.status = 'below_resolution';
-    expect(
-      rankInterventions(makeFact(demoteHead)).candidates.some(
-        (c) => c.lens === 'uncertainty_reduction_priority',
-      ),
-    ).toBe(false);
+    expect(selectUncertaintyPriority(demoteHead).selected).toBeNull();
 
     const demoteOther = clone(SESSION_B2);
     (demoteOther.p_win_sensitivity as Record<string, unknown>[])[1]!.status = 'below_resolution';
-    expect(
-      rankInterventions(makeFact(demoteOther)).candidates.some(
-        (c) => c.lens === 'uncertainty_reduction_priority',
-      ),
-    ).toBe(true);
+    expect(selectUncertaintyPriority(demoteOther).selected?.factorId).toBe('fac_energy');
   });
 
   it('names a SUPPRESSED attribution apart from a quiet run', () => {
@@ -389,8 +395,7 @@ describe('§4 resolve_uncertainty fires only on a producer-RESOLVED VOI row', ()
     const decision = selectUncertaintyPriority(clone(SESSION_A));
     expect(decision.selected).toBeNull();
     expect(decision.refusalReason).toBe('no_resolved_row');
-    const sel = selectLens(makeFact(clone(SESSION_A)), { previousAnalysisLens: null });
-    expect(sel?.lens).not.toBe('uncertainty_reduction_priority');
+    expect(selectUncertaintyPriority(clone(SESSION_A)).selected).toBeNull();
   });
 
   it('consumes the PRODUCER order and never re-ranks it', () => {

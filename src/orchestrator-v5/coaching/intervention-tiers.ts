@@ -45,12 +45,15 @@
  *     **zero consumers of that field**. (⚠ It is NOT value-of-information and
  *     must never be described as one; see `coaching/uncertainty-priority.ts`
  *     for the producer bytes and the premise they refute.)
- *   - Placed anywhere BELOW `orient`, `resolve_uncertainty` is selected on
- *     **0 of 16** cells on these captures. ⚠ Say ELIGIBLE-AND-OUTRANKED, not
- *     "dark": on session-b2 the trigger FIRES and the candidate ranks third, so
- *     it is in the race and losing it — a different thing from a rule that
- *     cannot fire, and it means any run whose higher tiers are silent puts this
- *     lens on a user's screen.
+ *   - Placed anywhere BELOW `orient`, the candidate was selected on **0 of 16**
+ *     cells on these captures — ELIGIBLE-AND-OUTRANKED, never "dark": on
+ *     session-b2 the trigger FIRED and it ranked third. That distinction is what
+ *     made the copy gate blocking rather than academic: a run whose higher tiers
+ *     are all silent would have put the text on a user's screen, and an
+ *     adversarial review built exactly such an enrichment. **The lens has since
+ *     been removed on the science ruling; the measurement is kept because it is
+ *     what the tier order was chosen against, and because it is the evidence the
+ *     re-add will be judged on.**
  *   - Placed ABOVE `orient` it is reachable — and this lane MEASURED what that
  *     costs, by shipping it that way first and running the existing suites:
  *     **it takes the head on every session-b2 cell, the no-repeat rule then
@@ -123,7 +126,21 @@ export type InterventionTier =
   | 'estimate'
   /** A disagreement the system itself surfaced and the team has not settled. */
   | 'resolve_disagreement'
-  /** An uncertainty the run's OWN statistics licensed as worth reducing. */
+  /**
+   * An uncertainty the run's OWN statistics licensed as worth reducing.
+   *
+   * ⛔ NO MEMBERS, AND THAT IS A RULING — NOT AN EMPTY SLOT TO BE HELPFULLY
+   * FILLED. A lens (`uncertainty_reduction_priority`, over ISL's
+   * noise-floor-gated `p_win_sensitivity`) was built for this tier, reviewed,
+   * measured, and REMOVED before merge because ISL's user-facing-language ban is
+   * LIVE: its gating condition — "pending doctrine" — is unmet at ISL `staging`
+   * `28fe0c95`, where the shipped constant is still
+   * `EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"`. The derivation, the
+   * reviewed copy, the prohibition guard and the exact re-add checklist all
+   * survive at `coaching/uncertainty-priority.ts`; its header carries the full
+   * gate and what would lift it. **Populating this tier without clearing that
+   * gate ships user-facing scientific copy past a live ban.**
+   */
   | 'resolve_uncertainty'
   /** A ratified DSK protocol: argue the other side, or challenge the driver. */
   | 'challenge_protocol'
@@ -165,7 +182,9 @@ const TIER_BY_LENS: Readonly<Record<LensId, InterventionTier>> = Object.freeze({
   sensitivity_flip_risk: 'orient',
   pre_mortem: 'challenge_premortem',
   evpi_evidence_priority: 'estimate',
-  uncertainty_reduction_priority: 'resolve_uncertainty',
+  // ⛔ `resolve_uncertainty` HAS NO MEMBER, DELIBERATELY — see the tier's own
+  // note on {@link InterventionTier}. It is not an empty slot waiting to be
+  // filled; it is a slot held open by a live science ban.
   consider_opposite: 'challenge_protocol',
   devils_advocacy: 'challenge_protocol',
   fragile_edge_resolution: 'resolve_model_defect',

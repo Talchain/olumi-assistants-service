@@ -128,10 +128,6 @@ import {
 import { isRawFragile } from '../coaching/robustness-honesty.js';
 import { isFragileEdgeOfferComposable } from '../coaching/fragile-edge-offer-text.js';
 import {
-  selectUncertaintyPriority,
-  type UncertaintyPriorityDecision,
-} from '../coaching/uncertainty-priority.js';
-import {
   tierForCandidate,
   tierRank,
   type InterventionTier,
@@ -161,15 +157,15 @@ export type LensId =
   | 'fragile_edge_resolution'
   | 'consider_opposite'
   | 'devils_advocacy'
-  | 'what_if_counterfactual'
-  /**
-   * ROADMAP 2.692 — the uncertainty this run's result is most SENSITIVE to,
-   * named only when ISL's own noise-floor test resolved it. See
-   * {@link evaluateUncertaintyReductionPriority} and
-   * `coaching/uncertainty-priority.ts` — including the refuted premise that this
-   * quantity is a value-of-information.
-   */
-  | 'uncertainty_reduction_priority';
+  | 'what_if_counterfactual';
+// ⛔ ROADMAP 2.692 — `uncertainty_reduction_priority` WAS a member here and was
+// REMOVED before merge on a science ruling, not dropped for want of a use. The
+// derivation survives, unwired, at `coaching/uncertainty-priority.ts`, whose
+// header carries the gate (ISL's live user-facing-language ban, unmet gating
+// condition `provisional_doctrine_v0`) and the exact re-add checklist. Its
+// reviewed copy is parked there too. Do NOT re-add it here without clearing
+// that gate — the compile-exhaustive tables below will walk you through the
+// rest, which is the harness working as intended.
 
 /**
  * The specific signal that TRIGGERED the lens. Distinct from `LensId` so
@@ -198,12 +194,6 @@ export type LensRationaleCode =
   // graph is the thing most worth resolving next, and the platform can perform
   // the change. See `coaching/select-fragile-edge.ts` for the gates.
   | 'FRAGILE_EDGE_RESOLVABLE'
-  // uncertainty_reduction_priority (ROADMAP 2.692) — ISL's `p_win_sensitivity`
-  // marked ONE factor `status: 'resolved'`, i.e. removing that factor's
-  // uncertainty moved the run's metric by more than its own noise floor. ⚠ This
-  // is NOT a value-of-information claim and must never be copy-written as one —
-  // the producer states it "structurally cannot capture option-switching".
-  | 'RESOLVED_PWIN_SENSITIVITY'
   // consider_opposite (DSK-TR-003 → DSK-P-003 disconfirmation)
   | 'CLEAR_WINNER_DISCONFIRMATION' // a decisive, attested-non-fragile leader invites structured disconfirmation
   // devils_advocacy (DSK-TR-005 → DSK-P-005 devil's advocate)
@@ -230,13 +220,7 @@ export type LensGroundingField =
   // selector reads it as a structured gate only and no quantity from it may
   // ever be surfaced. Declaring it here would ask the cage a question whose
   // only answer is `tier3_denied`.
-  | 'robustness'
-  // ROADMAP 2.692 — the uncertainty lens grounds in the field its claim is
-  // about. `p_win_sensitivity` is NOT on the Tier-2 allow-list, so the cage's
-  // answer is `not_allowlisted`: a live, organically-observable DENIAL, exactly
-  // like `option_comparison` today. The lens ships number-free, so the denial
-  // costs nothing and the cage becomes a live caller on the real field.
-  | 'p_win_sensitivity';
+  | 'robustness';
 
 /**
  * Wave-4 δ2 (ROADMAP 1.202) — the specific graph node this lens POINTS AT, for
@@ -510,11 +494,6 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
   consider_opposite: true,
   devils_advocacy: true,
   what_if_counterfactual: false,
-  // ROADMAP 2.692: the executor is the SAME live `gather_evidence` /
-  // investigate-this-factor path the EVPI lens already points at — the offer is
-  // "test this assumption first", which the user can act on today. No new
-  // transport, no producer-content dependency: intrinsically present.
-  uncertainty_reduction_priority: true,
 };
 
 /** Options threading caller-owned, non-deterministic state into the otherwise-pure
@@ -679,12 +658,6 @@ interface AnalysisSignals {
    * disagree about which relationship the turn is about.
    */
   readonly fragileEdge: FragileEdgeDecision;
-  /**
-   * ROADMAP 2.692 — the uncertainty-priority decision for this run (both arms).
-   * Read here rather than threaded, so the selector stays a pure, total function
-   * of `fact.result.enrichment` — the property `lens-history.ts` replays on.
-   */
-  readonly uncertaintyPriority: UncertaintyPriorityDecision;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -763,9 +736,6 @@ function readAnalysisSignals(
     // decision telemetry without a second derivation); otherwise computed here
     // from the same enrichment — the function is pure, so both routes agree.
     fragileEdge: fragileEdge ?? selectFragileEdge(enrichment),
-    // Pure and total over the same enrichment — no option, no threading, so
-    // the replay in `lens-history.ts` reproduces it by construction.
-    uncertaintyPriority: selectUncertaintyPriority(enrichment),
   };
 }
 
@@ -1020,31 +990,6 @@ function evaluateFragileEdgeResolution(signals: AnalysisSignals): EvaluatorHit |
   return { code: 'FRAGILE_EDGE_RESOLVABLE', subjectFactorId: null, fragileEdge: edge };
 }
 
-/**
- * Rule 0 (ROADMAP 2.692) — THE UNCERTAINTY THIS RESULT IS MOST SENSITIVE TO.
- *
- * Fires when, and only when, the shared pure reader
- * (`coaching/uncertainty-priority.ts`) found a `p_win_sensitivity` row that
- * ISL's OWN noise-floor test marked `status: 'resolved'`. There is no threshold
- * of this rule's own — the trigger IS the producer's verdict, so CEE never
- * re-derives a statistical label from rounded wire values.
- *
- * ⚠ READ `coaching/uncertainty-priority.ts` BEFORE TOUCHING THE COPY. The design
- * brief this rule was commissioned from files `p_win_sensitivity` under "real
- * per-factor EVPI"; the producer says at its own bytes that it is "NOT
- * value-of-information" and "structurally cannot capture option-switching", and
- * that "calling it EVPI was a mislabel". The copy below therefore claims
- * SENSITIVITY, never decision value.
- *
- * `subjectFactorId` IS set: the subject is a factor by construction (the row is
- * keyed by `factor_id`), so the `focus` directive can point at it honestly.
- */
-function evaluateUncertaintyReductionPriority(signals: AnalysisSignals): EvaluatorHit | null {
-  const selected = signals.uncertaintyPriority.selected;
-  if (selected === null) return null;
-  return { code: 'RESOLVED_PWIN_SENSITIVITY', subjectFactorId: selected.factorId };
-}
-
 function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null {
   const raw = signals.rawRobustness;
   if (raw === null || raw.level === null) return null;
@@ -1184,7 +1129,6 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   consider_opposite: 'Strengthen your model: argue the other side',
   devils_advocacy: 'Strengthen your model: challenge the main assumption',
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
-  uncertainty_reduction_priority: 'Strengthen your model: pin down the assumption this run is most sensitive to',
 };
 
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
@@ -1238,47 +1182,6 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:
     'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
-  // ── ROADMAP 2.692 — the resolved sensitivity priority ──────────────────────
-  // ⚠ EVERY CLAUSE HERE IS BOUNDED BY THE PRODUCER'S OWN SEMANTICS, and the
-  // three things it must NOT say are as load-bearing as what it does say:
-  //   (a) NOT "this would change your decision" / "which option wins". ISL:
-  //       "holding the decision fixed, it structurally cannot capture
-  //       option-switching" (`response_v2.py:1766-1771`). The decision is held
-  //       FIXED at the recommended option across every pass.
-  //   (b) NOT "value of information" or "worth X". ISL: "calling it EVPI was a
-  //       mislabel" (`robustness_analyzer_v2.py:7473-7485`). The genuine VOI
-  //       quantities are `decision_evpi` / `factor_evppi`, in outcome units,
-  //       and both read below resolution on 2/2 committed captures.
-  //   (c) NO MAGNITUDE, and no naming of WHICH metric moved. `metric_type` is
-  //       `p_win_recommended` OR `p_joint_goal` depending on whether the run
-  //       carried goal constraints, so "the chance your front-runner wins"
-  //       would be FALSE on a joint-goal run. The copy stays metric-neutral.
-  //   (d) NOT "of everything uncertain here". FALSE SCOPE, and it is a fact
-  //       about the sweep's INPUT, not loose wording: the sweep ranks only
-  //       `request.parameter_uncertainties`. Edge and structural uncertainty
-  //       run in BOTH arms and are never ranked, so they cannot appear in this
-  //       ordering at all. The copy names the scope it actually ranks.
-  //   (e) NOT "its own measurement noise". The floor is `1.96*sqrt(0.5/n)` —
-  //       a function of the SAMPLE COUNT alone, identical for every factor in
-  //       the run. It is the RUN's floor, not the factor's.
-  //
-  // ⚠⚠ ALL FIVE WERE DERIVED CORRECTLY AND THE FIRST SHIPPED COPY STILL
-  // VIOLATED (a) IN SUBSTANCE, avoiding every banned WORD: "the picture
-  // steadies more than it would from anything else you could look into" is a
-  // comparative value-of-information claim wearing plain English. Caught by
-  // adversarial review, not by this comment — which is why the prohibitions are
-  // now MECHANICAL, in `__tests__/uncertainty-copy-claim-shapes.test.ts`. A
-  // comment is not a guard (trap 13c, one level up: a correct oracle and an
-  // expectation that slipped past it).
-  // The hedge in the last sentence is ISL's own: its science validation says
-  // "treat `resolved` as 'distinguishable from noise at 95%', not 'real'"
-  // (`docs/science-validation/REPORT.md:362-364`) — roughly one in twenty
-  // truly-zero factors will be labelled resolved. Stating the strength of the
-  // evidence beside the recommendation is the differentiator, not a caveat to
-  // be tidied away.
-  RESOLVED_PWIN_SENSITIVITY:
-    "Of the parameter uncertainties this run measured, the headline number moves most with one: pinning down what you believe about it would steady that number most. This ranks how far the number moves, not what you should do. It cleared the run's noise floor — a strong hint, not a settled fact.",
-
   // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
   // What is TRUE on these turns and what is NOT, because the copy turns on it:
   // the robustness Monte Carlo reports the result is not stable (`is_robust:
@@ -1352,12 +1255,6 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   // until Neil rules (doctrine-pending) — an honest double-lock alongside the
   // 1.195 enable gate.
   WHATIF_EXPLORE_DRIVER: 'option_comparison',
-  // 2.692: the claim is about the run's sensitivity to one factor's uncertainty
-  // → the field that computed it. Deliberately NOT `factor_sensitivity`, which
-  // is a DIFFERENT producer quantity (PLoT's OAT influence/heuristic block);
-  // grounding a claim in a field it did not come from is the wrong-field
-  // MISLABEL class the cage's own header says it cannot catch.
-  RESOLVED_PWIN_SENSITIVITY: 'p_win_sensitivity',
 };
 
 /**
@@ -1743,10 +1640,6 @@ export function rankInterventions(
     //   (2) attach it only when the subjects agree — the same 0/12.
     ['fragile_edge_resolution', evaluateFragileEdgeResolution(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
-    // ROADMAP 2.692 — position in THIS list is the within-tier order only; the
-    // tier order below is what places it against the others. Appended here (not
-    // spliced) precisely so the locked ladder's own sequence is untouched.
-    ['uncertainty_reduction_priority', evaluateUncertaintyReductionPriority(signals)],
   ];
   const eligible: { lens: LensId; hit: EvaluatorHit; tier: InterventionTier }[] = [];
   const ineligible: IneligibleIntervention[] = [];

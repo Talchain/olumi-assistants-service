@@ -1893,19 +1893,10 @@ export function buildLensCompanionBlocks(
     // the `edit_graph` turn the suggestion's own action chip dispatches. A
     // companion would be a second structured artefact about an offer whose
     // whole point is one acceptance.
-    // ROADMAP 2.692 — `uncertainty_reduction_priority` likewise declares NO
-    // companion, and the reason is a claim boundary rather than an omission. Its
-    // only structured artefact would be the `p_win_sensitivity` ranking itself,
-    // which CEE's own manifest licenses for "a DETERMINISTIC composer rendering a
-    // RANKING with no magnitudes" — a surface that already SHIPS, in the UI.
-    // Minting a second, turn-scoped copy of it here would be two producers for
-    // one ranking, and the only thing a companion could add is the magnitude the
-    // licence withholds.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
     case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
-    case 'uncertainty_reduction_priority':
       return [];
     default: {
       // Exhaustiveness is kept by the `never` binding (a new LensId fails the

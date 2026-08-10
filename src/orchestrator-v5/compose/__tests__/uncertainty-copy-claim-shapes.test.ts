@@ -1,6 +1,12 @@
 /**
  * ROADMAP 2.692 — THE CLAIM-SHAPE GUARD for the uncertainty lens's copy.
  *
+ * ⛔ STATUS: the copy this guards is PARKED and RENDERED NOWHERE. Its lens was
+ * removed before merge because ISL's user-facing-language ban is live and its
+ * gating condition is unmet. The guard stays green and stays running so the copy
+ * cannot rot while it waits — see `coaching/uncertainty-priority.ts` for the
+ * gate, and what would lift it.
+ *
  * ⚠ WHY A SEPARATE GUARD, WHEN THE ORACLE WAS ALREADY CORRECT. The producer
  * prohibitions were derived correctly from ISL's own bytes and written into
  * `lens-selector.ts`'s copy comment — and the shipped copy then violated them
@@ -44,10 +50,19 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { BODY_BY_RATIONALE, TITLE_BY_LENS } from '../lens-selector.js';
+import {
+  UNCERTAINTY_PRIORITY_BODY_PENDING_DOCTRINE,
+  UNCERTAINTY_PRIORITY_TITLE_PENDING_DOCTRINE,
+} from '../../coaching/uncertainty-priority.js';
 
-const BODY = BODY_BY_RATIONALE.RESOLVED_PWIN_SENSITIVITY;
-const TITLE = TITLE_BY_LENS.uncertainty_reduction_priority;
+// ⛔ THE COPY IS PARKED, NOT WIRED — the lens that rendered it was removed before
+// merge on a live ISL science ban (see `coaching/uncertainty-priority.ts`). This
+// guard deliberately still runs: parked copy that nothing checks is copy that
+// rots quietly, and the whole point of parking it is that the re-add is short
+// and mechanical rather than a rebuild. It binds to the constants directly, so
+// it neither depends on nor resurrects the lens.
+const BODY = UNCERTAINTY_PRIORITY_BODY_PENDING_DOCTRINE;
+const TITLE = UNCERTAINTY_PRIORITY_TITLE_PENDING_DOCTRINE;
 const COPY = `${TITLE} ${BODY}`.toLowerCase();
 
 /**
