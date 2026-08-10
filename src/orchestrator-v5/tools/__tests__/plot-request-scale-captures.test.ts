@@ -14,6 +14,8 @@
  * re-executed here — CI has no PLoT. `ceeReportedWinProbabilities` is carried in
  * the fixture as the observed live value for context, not as an assertion.
  */
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect } from 'vitest';
 
 import {
@@ -22,7 +24,13 @@ import {
   projectRequestInterventionsToWireScale,
 } from '../plot-intervention-scale.js';
 
-import captures from './fixtures/staging-draft-captures-2026-08-10.json' with { type: 'json' };
+// Read the fixture from disk rather than importing it: an import attribute
+// (`with { type: 'json' }`) needs `--module esnext|node18|node20|nodenext|preserve`,
+// which this repo's typecheck config does not set, and the drift ratchet sees test
+// files even though `tsconfig.build.json` excludes them.
+const captures: unknown = JSON.parse(
+  readFileSync(new URL('./fixtures/staging-draft-captures-2026-08-10.json', import.meta.url), 'utf8'),
+);
 
 interface Capture {
   capture: string;
