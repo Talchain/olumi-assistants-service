@@ -183,6 +183,92 @@ describe("S1 · constraint is sourced from the live producer, never from prose",
   });
 });
 
+/**
+ * ── THE CLASSES MY CAPTURED CORPUS DOES NOT CONTAIN ────────────────────────
+ *
+ * Four real briefs are evidence about the shapes they happen to contain, and
+ * silent about every shape they do not. The mutation kit made that concrete:
+ * two mutants that break the classifier SURVIVED, not because the guards are
+ * equivalent but because no captured brief reaches those branches. A corpus
+ * that omits a class the contract admits cannot certify the code over that
+ * class — so the omitted classes are constructed here, deliberately, from the
+ * producer's own declared shape.
+ *
+ * The graphs below are hand-built ON PURPOSE and say nothing about the wire.
+ * They exist to exercise `goal_constraints[]` rows the drafting model is
+ * PERMITTED to emit — `value` is optional in the grammar, and `source_quote` is
+ * a model CLAIM about the brief, not proof of one.
+ */
+describe("S1 · producer rows the captured corpus never contained", () => {
+  function graphWithConstraintRow(row: Record<string, unknown>) {
+    return { nodes: [{ id: "out_csat", kind: "outcome", label: "CSAT" }], edges: [], goal_constraints: [row] };
+  }
+  const BRIEF = "Do not let CSAT drop below 85% — that is a hard limit for the board.";
+
+  it("PRECONDITION: an ordinary row over this brief DOES classify — so a null below means the guard fired, not that nothing was found", () => {
+    // Without this, every "not a constraint" assertion here could pass because
+    // the fixture never classified anything in the first place (trap 13).
+    const m = deriveNotModelledManifest(
+      BRIEF,
+      graphWithConstraintRow({
+        node_id: "out_csat",
+        value: 85,
+        unit: "%",
+        source_quote: "Do not let CSAT drop below 85%",
+      }),
+    );
+    const item = (m.quantities!.items as NotModelledItem[]).find((i) => i.literal === "85%")!;
+    expect(item.stated_kind).toBe("constraint");
+  });
+
+  it("classifies nothing from a row with NO value — a quote alone cannot say which figure it is about", () => {
+    // `value` is optional in the producer's grammar. Position alone would mark
+    // EVERY quantity inside the quoted span, and a limit sentence routinely
+    // contains figures that are not the limit.
+    const m = deriveNotModelledManifest(
+      BRIEF,
+      graphWithConstraintRow({ node_id: "out_csat", source_quote: "Do not let CSAT drop below 85%" }),
+    );
+    for (const item of m.quantities!.items) expect(item.stated_kind).toBe("figure");
+  });
+
+  it("THE FABRICATION GATE: an unlocatable source_quote classifies nothing", () => {
+    // A model quote is a CLAIM about the brief. The estate has measured a
+    // hallucinated figure receiving `from_brief` provenance identically to a
+    // quoted one, so substring verification is an invariant, not a courtesy.
+    // A quote that cannot be located must classify NOTHING — never fall back to
+    // "somewhere in the brief".
+    const m = deriveNotModelledManifest(
+      BRIEF,
+      graphWithConstraintRow({
+        node_id: "out_csat",
+        value: 85,
+        unit: "%",
+        source_quote: "The board mandated a 85% floor in the Q3 offsite",
+      }),
+    );
+    for (const item of m.quantities!.items) expect(item.stated_kind).toBe("figure");
+  });
+
+  it("locates a quote whose whitespace differs from the brief's — a newline is not a fabrication", () => {
+    // OPPOSITE-DIRECTION TWIN of the gate above. Failing closed on a real quote
+    // that merely wrapped differently would silently under-classify, which is
+    // the same harm pointed the other way.
+    const wrapped = "Do not let CSAT\n  drop below 85% — that is a hard limit.";
+    const m = deriveNotModelledManifest(
+      wrapped,
+      graphWithConstraintRow({
+        node_id: "out_csat",
+        value: 85,
+        unit: "%",
+        source_quote: "Do not let CSAT drop below 85%",
+      }),
+    );
+    const item = (m.quantities!.items as NotModelledItem[]).find((i) => i.literal === "85%")!;
+    expect(item.stated_kind).toBe("constraint");
+  });
+});
+
 describe("S1 · the adoption manifest — no kind ships dark", () => {
   it("partitions all eight kinds into sourced and unsourced, with no overlap and no omission", () => {
     const m = derive(LIVE);
@@ -202,6 +288,31 @@ describe("S1 · the adoption manifest — no kind ships dark", () => {
       const producer = m.stated_kinds.producers[kind];
       expect(typeof producer, `producer named for ${kind}`).toBe("string");
       expect((producer ?? "").length, `producer non-empty for ${kind}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("DEMONSTRATES every sourced kind actually producing, across the whole corpus", () => {
+    // ⚠ NAMING A PRODUCER IS NOT HAVING ONE. The mutation kit proved it: adding
+    // `disagreement: "none"` to the producer map moved a kind into `sourced`
+    // and every other assertion here stayed green — a guard agreeing with
+    // itself. The estate's named failure mode is meaning fields that shipped
+    // with a declared producer and no output, dark from birth.
+    //
+    // So the claim is checked the only way it can be: a kind may sit in
+    // `sourced` ONLY if some real captured brief actually yields an item of
+    // that kind. If a future kind is genuinely sourced but appears in none of
+    // these four briefs, this test SHOULD fail — that is exactly the moment
+    // someone must add a capture that demonstrates it, or move it to
+    // `unsourced` and be honest.
+    const observed = new Set<StatedKind>();
+    for (const cap of [LIVE, B1, B2, B3]) {
+      for (const item of derive(cap).quantities!.items) observed.add(item.stated_kind);
+    }
+    for (const kind of derive(LIVE).stated_kinds.sourced) {
+      expect(
+        observed.has(kind),
+        `${kind} is declared sourced but no captured brief produces one`,
+      ).toBe(true);
     }
   });
 
