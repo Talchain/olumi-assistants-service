@@ -82,10 +82,16 @@ import {
 } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+// ROADMAP 2.1024 — the offer text + its composability gates, in a pure leaf the
+// SELECTOR can also import (it cannot import this module: config/telemetry side
+// effects, and a cycle). One definition, two consumers.
 import {
-  EDIT_GRAPH_NEGATIVE_REGEX,
-  EDIT_GRAPH_POSITIVE_REGEX,
-} from '../../orchestrator/routing/edit-graph-intent-regex.js';
+  COACHING_BLOCK_BODY_MAX,
+  FRAGILE_EDGE_ACTION_LABEL,
+  composeFragileEdgeActionPrompt,
+  composeFragileEdgeBody,
+  isFragileEdgeOfferComposable,
+} from '../coaching/fragile-edge-offer-text.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { bandConfidence } from './confidence-bands.js';
@@ -165,7 +171,11 @@ const TITLE_MAX = 80;
  * `v5.capability.lens_companion_truncated`, never silently swallowed.
  */
 export const WARNING_SIGNS_MAX = 3;
-const BODY_MAX = 300;
+// ROADMAP 2.1024 — SINGLE-SOURCED with the selector's composability predicate.
+// The length gate that decides ELIGIBILITY and the truncation applied HERE must
+// be one number; two copies is the mirror class and fails silently (a card that
+// names half a relationship).
+const BODY_MAX = COACHING_BLOCK_BODY_MAX;
 const ACTION_LABEL_MAX = 40;
 /**
  * Contract max for `action_prompt` (`PHASE3_ACTION_PROMPT_MAX`, schemas
@@ -1395,30 +1405,20 @@ interface FragileEdgeOffer {
   readonly actionPrompt: string;
 }
 
-/** The label the acceptance chip carries. Producer-authored, fixed. */
-export const FRAGILE_EDGE_ACTION_LABEL = 'Adjust this relationship';
-
-/** Compose the acceptance turn. Exported so the routing gates can be asserted on
- *  the EXACT string the block ships, not on a re-spelling of it. */
-export function composeFragileEdgeActionPrompt(fromLabel: string, toLabel: string): string {
-  return `Adjust the strength of the link from ${fromLabel} to ${toLabel} in my model.`;
-}
-
 /**
- * The sentence that NAMES the relationship. It LEADS the body, and the lens's
- * generic tail follows — because the body is truncated at {@link BODY_MAX} and
- * a naming sentence placed last is the first thing truncation eats (measured:
- * the naming-last ordering silently dropped the second endpoint label on the
- * live capture, so the card named half a relationship).
+ * ROADMAP 2.1024 — the offer's TEXT now lives in a PURE LEAF
+ * (`coaching/fragile-edge-offer-text.ts`) so `lens-selector.ts` can ask "is this
+ * offer composable?" at ELIGIBILITY, before the lens wins the slot. Re-exported
+ * from here unchanged so this module's public surface — and every existing
+ * caller and spec that imports these from it — is untouched. One definition, two
+ * consumers; never a copy.
  */
-export function composeFragileEdgeNaming(fromLabel: string, toLabel: string): string {
-  return `On this run the link from ${fromLabel} to ${toLabel} is the relationship the result leans on most.`;
-}
-
-/** Naming sentence first, the lens's generic tail second. */
-export function composeFragileEdgeBody(base: string, fromLabel: string, toLabel: string): string {
-  return `${composeFragileEdgeNaming(fromLabel, toLabel)} ${base}`;
-}
+export {
+  FRAGILE_EDGE_ACTION_LABEL,
+  composeFragileEdgeActionPrompt,
+  composeFragileEdgeNaming,
+  composeFragileEdgeBody,
+} from '../coaching/fragile-edge-offer-text.js';
 
 function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | null {
   if (selection.lens !== 'fragile_edge_resolution') return null;
@@ -1432,7 +1432,13 @@ function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | nul
   // and are not length-bounded; if the naming sentence alone would not survive
   // `BODY_MAX`, truncation would ship a card that names one endpoint and trails
   // off — worse than no offer, because it still carries an action chip.
-  if (composeFragileEdgeNaming(edge.fromLabel, edge.toLabel).length > BODY_MAX) return null;
+  // ⚠ ROADMAP 2.1024 — this is now a BACKSTOP, not the live gate. The SAME pure
+  // predicate runs at eligibility inside `selectLens`, so a non-composable offer
+  // never wins the slot and this branch is unreachable through the live path.
+  // It stays because a lens id and its payload travelling as two separate fields
+  // is exactly the pairing a future refactor can break, and the honest failure
+  // is NO OFFER, never a half one. Same function, so the two cannot disagree.
+  if (!isFragileEdgeOfferComposable(edge.fromLabel, edge.toLabel)) return null;
   // ⭐ FAIL CLOSED ON A PROMPT THAT WOULD NOT DISPATCH — the third fail-closed in
   // this function, and the one a review had to find (CEE #883). The two routing
   // gates are evaluated by `route-v2.ts` over the WHOLE acceptance message, and
@@ -1461,8 +1467,6 @@ function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | nul
   // or lowering ACTION_PROMPT_MAX would break that and let a truncation re-cut a
   // word into a veto token.
   const actionPrompt = composeFragileEdgeActionPrompt(edge.fromLabel, edge.toLabel);
-  if (!EDIT_GRAPH_POSITIVE_REGEX.test(actionPrompt)) return null;
-  if (EDIT_GRAPH_NEGATIVE_REGEX.test(actionPrompt)) return null;
   return {
     body: composeFragileEdgeBody(selection.body, edge.fromLabel, edge.toLabel),
     // The EDGE identity, with the schema's own `edge` kind — `id` is the
@@ -1863,10 +1867,19 @@ export function buildLensCompanionBlocks(
     // the `edit_graph` turn the suggestion's own action chip dispatches. A
     // companion would be a second structured artefact about an offer whose
     // whole point is one acceptance.
+    // ROADMAP 2.692 — `uncertainty_reduction_priority` likewise declares NO
+    // companion, and the reason is a claim boundary rather than an omission. Its
+    // only structured artefact would be the `p_win_sensitivity` ranking itself,
+    // which CEE's own manifest licenses for "a DETERMINISTIC composer rendering a
+    // RANKING with no magnitudes" — a surface that already SHIPS, in the UI.
+    // Minting a second, turn-scoped copy of it here would be two producers for
+    // one ranking, and the only thing a companion could add is the magnitude the
+    // licence withholds.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
     case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
+    case 'uncertainty_reduction_priority':
       return [];
     default: {
       // Exhaustiveness is kept by the `never` binding (a new LensId fails the

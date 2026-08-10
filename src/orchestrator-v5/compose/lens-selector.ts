@@ -126,6 +126,16 @@ import {
   type FragileEdgeSelection,
 } from '../coaching/select-fragile-edge.js';
 import { isRawFragile } from '../coaching/robustness-honesty.js';
+import { isFragileEdgeOfferComposable } from '../coaching/fragile-edge-offer-text.js';
+import {
+  selectUncertaintyPriority,
+  type UncertaintyPriorityDecision,
+} from '../coaching/uncertainty-priority.js';
+import {
+  tierForCandidate,
+  tierRank,
+  type InterventionTier,
+} from '../coaching/intervention-tiers.js';
 import {
   bandConfidence,
   isLensLowConfidence,
@@ -151,7 +161,15 @@ export type LensId =
   | 'fragile_edge_resolution'
   | 'consider_opposite'
   | 'devils_advocacy'
-  | 'what_if_counterfactual';
+  | 'what_if_counterfactual'
+  /**
+   * ROADMAP 2.692 — the uncertainty this run's result is most SENSITIVE to,
+   * named only when ISL's own noise-floor test resolved it. See
+   * {@link evaluateUncertaintyReductionPriority} and
+   * `coaching/uncertainty-priority.ts` — including the refuted premise that this
+   * quantity is a value-of-information.
+   */
+  | 'uncertainty_reduction_priority';
 
 /**
  * The specific signal that TRIGGERED the lens. Distinct from `LensId` so
@@ -180,6 +198,12 @@ export type LensRationaleCode =
   // graph is the thing most worth resolving next, and the platform can perform
   // the change. See `coaching/select-fragile-edge.ts` for the gates.
   | 'FRAGILE_EDGE_RESOLVABLE'
+  // uncertainty_reduction_priority (ROADMAP 2.692) — ISL's `p_win_sensitivity`
+  // marked ONE factor `status: 'resolved'`, i.e. removing that factor's
+  // uncertainty moved the run's metric by more than its own noise floor. ⚠ This
+  // is NOT a value-of-information claim and must never be copy-written as one —
+  // the producer states it "structurally cannot capture option-switching".
+  | 'RESOLVED_PWIN_SENSITIVITY'
   // consider_opposite (DSK-TR-003 → DSK-P-003 disconfirmation)
   | 'CLEAR_WINNER_DISCONFIRMATION' // a decisive, attested-non-fragile leader invites structured disconfirmation
   // devils_advocacy (DSK-TR-005 → DSK-P-005 devil's advocate)
@@ -206,7 +230,13 @@ export type LensGroundingField =
   // selector reads it as a structured gate only and no quantity from it may
   // ever be surfaced. Declaring it here would ask the cage a question whose
   // only answer is `tier3_denied`.
-  | 'robustness';
+  | 'robustness'
+  // ROADMAP 2.692 — the uncertainty lens grounds in the field its claim is
+  // about. `p_win_sensitivity` is NOT on the Tier-2 allow-list, so the cage's
+  // answer is `not_allowlisted`: a live, organically-observable DENIAL, exactly
+  // like `option_comparison` today. The lens ships number-free, so the denial
+  // costs nothing and the cage becomes a live caller on the real field.
+  | 'p_win_sensitivity';
 
 /**
  * Wave-4 δ2 (ROADMAP 1.202) — the specific graph node this lens POINTS AT, for
@@ -480,6 +510,11 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
   consider_opposite: true,
   devils_advocacy: true,
   what_if_counterfactual: false,
+  // ROADMAP 2.692: the executor is the SAME live `gather_evidence` /
+  // investigate-this-factor path the EVPI lens already points at — the offer is
+  // "test this assumption first", which the user can act on today. No new
+  // transport, no producer-content dependency: intrinsically present.
+  uncertainty_reduction_priority: true,
 };
 
 /** Options threading caller-owned, non-deterministic state into the otherwise-pure
@@ -644,6 +679,12 @@ interface AnalysisSignals {
    * disagree about which relationship the turn is about.
    */
   readonly fragileEdge: FragileEdgeDecision;
+  /**
+   * ROADMAP 2.692 — the uncertainty-priority decision for this run (both arms).
+   * Read here rather than threaded, so the selector stays a pure, total function
+   * of `fact.result.enrichment` — the property `lens-history.ts` replays on.
+   */
+  readonly uncertaintyPriority: UncertaintyPriorityDecision;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -722,6 +763,9 @@ function readAnalysisSignals(
     // decision telemetry without a second derivation); otherwise computed here
     // from the same enrichment — the function is pure, so both routes agree.
     fragileEdge: fragileEdge ?? selectFragileEdge(enrichment),
+    // Pure and total over the same enrichment — no option, no threading, so
+    // the replay in `lens-history.ts` reproduces it by construction.
+    uncertaintyPriority: selectUncertaintyPriority(enrichment),
   };
 }
 
@@ -976,6 +1020,31 @@ function evaluateFragileEdgeResolution(signals: AnalysisSignals): EvaluatorHit |
   return { code: 'FRAGILE_EDGE_RESOLVABLE', subjectFactorId: null, fragileEdge: edge };
 }
 
+/**
+ * Rule 0 (ROADMAP 2.692) — THE UNCERTAINTY THIS RESULT IS MOST SENSITIVE TO.
+ *
+ * Fires when, and only when, the shared pure reader
+ * (`coaching/uncertainty-priority.ts`) found a `p_win_sensitivity` row that
+ * ISL's OWN noise-floor test marked `status: 'resolved'`. There is no threshold
+ * of this rule's own — the trigger IS the producer's verdict, so CEE never
+ * re-derives a statistical label from rounded wire values.
+ *
+ * ⚠ READ `coaching/uncertainty-priority.ts` BEFORE TOUCHING THE COPY. The design
+ * brief this rule was commissioned from files `p_win_sensitivity` under "real
+ * per-factor EVPI"; the producer says at its own bytes that it is "NOT
+ * value-of-information" and "structurally cannot capture option-switching", and
+ * that "calling it EVPI was a mislabel". The copy below therefore claims
+ * SENSITIVITY, never decision value.
+ *
+ * `subjectFactorId` IS set: the subject is a factor by construction (the row is
+ * keyed by `factor_id`), so the `focus` directive can point at it honestly.
+ */
+function evaluateUncertaintyReductionPriority(signals: AnalysisSignals): EvaluatorHit | null {
+  const selected = signals.uncertaintyPriority.selected;
+  if (selected === null) return null;
+  return { code: 'RESOLVED_PWIN_SENSITIVITY', subjectFactorId: selected.factorId };
+}
+
 function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null {
   const raw = signals.rawRobustness;
   if (raw === null || raw.level === null) return null;
@@ -1115,6 +1184,7 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   consider_opposite: 'Strengthen your model: argue the other side',
   devils_advocacy: 'Strengthen your model: challenge the main assumption',
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
+  uncertainty_reduction_priority: 'Strengthen your model: test the assumption this result is most sensitive to',
 };
 
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
@@ -1168,6 +1238,29 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:
     'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
+  // ── ROADMAP 2.692 — the resolved sensitivity priority ──────────────────────
+  // ⚠ EVERY CLAUSE HERE IS BOUNDED BY THE PRODUCER'S OWN SEMANTICS, and the
+  // three things it must NOT say are as load-bearing as what it does say:
+  //   (a) NOT "this would change your decision" / "which option wins". ISL:
+  //       "holding the decision fixed, it structurally cannot capture
+  //       option-switching" (`response_v2.py:1766-1771`). The decision is held
+  //       FIXED at the recommended option across every pass.
+  //   (b) NOT "value of information" or "worth X". ISL: "calling it EVPI was a
+  //       mislabel" (`robustness_analyzer_v2.py:7473-7485`). The genuine VOI
+  //       quantities are `decision_evpi` / `factor_evppi`, in outcome units,
+  //       and both read below resolution on 2/2 committed captures.
+  //   (c) NO MAGNITUDE, and no naming of WHICH metric moved. `metric_type` is
+  //       `p_win_recommended` OR `p_joint_goal` depending on whether the run
+  //       carried goal constraints, so "the chance your front-runner wins"
+  //       would be FALSE on a joint-goal run. The copy stays metric-neutral.
+  // The hedge in the last sentence is ISL's own: its science validation says
+  // "treat `resolved` as 'distinguishable from noise at 95%', not 'real'"
+  // (`docs/science-validation/REPORT.md:362-364`) — roughly one in twenty
+  // truly-zero factors will be labelled resolved. Stating the strength of the
+  // evidence beside the recommendation is the differentiator, not a caveat to
+  // be tidied away.
+  RESOLVED_PWIN_SENSITIVITY:
+    'Of everything still uncertain here, this result moves most with one factor: settle what you believe about it and the picture steadies more than it would from anything else you could look into. This run separated it from its own measurement noise, which is a strong hint rather than a settled fact.',
 
   // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
   // What is TRUE on these turns and what is NOT, because the copy turns on it:
@@ -1242,6 +1335,12 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   // until Neil rules (doctrine-pending) — an honest double-lock alongside the
   // 1.195 enable gate.
   WHATIF_EXPLORE_DRIVER: 'option_comparison',
+  // 2.692: the claim is about the run's sensitivity to one factor's uncertainty
+  // → the field that computed it. Deliberately NOT `factor_sensitivity`, which
+  // is a DIFFERENT producer quantity (PLoT's OAT influence/heuristic block);
+  // grounding a claim in a field it did not come from is the wrong-field
+  // MISLABEL class the cage's own header says it cannot catch.
+  RESOLVED_PWIN_SENSITIVITY: 'p_win_sensitivity',
 };
 
 /**
@@ -1330,8 +1429,128 @@ export function selectLens(
   fact: RunAnalysisHandlerFact,
   options?: LensSelectorOptions,
 ): LensSelection | null {
+  return rankInterventions(fact, options).chosen;
+}
+
+// ============================================================================
+// ROADMAP 2.692 — THE RANKED CANDIDATE LIST, EXPOSED
+// ============================================================================
+
+/**
+ * Why a candidate never entered the race. Closed enum — a skip is an OUTCOME,
+ * not a non-event, and an unobservable skip is how three capabilities in this
+ * module shipped dark before anyone measured them.
+ */
+export type InterventionIneligibleReason =
+  /** The lens's own trigger did not fire on this run's enrichment. */
+  | 'trigger_not_fired'
+  /** The platform cannot honestly RUN the method this lens points at. */
+  | 'executor_unavailable'
+  /** A DSK protocol contraindicated by what ran on the previous analysis turn. */
+  | 'contraindicated_after_previous'
+  /**
+   * ROADMAP 2.1024 — the trigger fired but the OFFER could not be composed into
+   * a dispatchable turn from this run's producer-authored labels. Previously
+   * this was discovered AFTER the lens had won the slot, and it dropped the
+   * whole coaching card; now it never enters the race and the slot passes on.
+   */
+  | 'offer_not_composable';
+
+/** Why an ELIGIBLE candidate did not take the slot. `null` on the chosen one. */
+export type InterventionNotSelectedReason =
+  /** A higher tier (or a higher rung of the same tier) took the slot. */
+  | 'outranked'
+  /** It WAS the slot head and the no-immediate-repeat tie-break moved it. */
+  | 'displaced_head'
+  /** It was the eligible head and stepped aside under the 2.211-① yield. */
+  | 'yielded';
+
+export interface RankedIntervention {
+  readonly lens: LensId;
+  readonly tier: InterventionTier;
+  readonly rationaleCode: LensRationaleCode;
+  readonly notSelectedReason: InterventionNotSelectedReason | null;
+}
+
+export interface IneligibleIntervention {
+  readonly lens: LensId;
+  readonly reason: InterventionIneligibleReason;
+}
+
+/**
+ * The whole race, not just its winner.
+ *
+ * ⚠ WHY THIS TYPE EXISTS. The selector always BUILT a ranked list and then threw
+ * all but one element away at the return. Everything downstream — telemetry,
+ * reviews, every "is this capability reachable?" question — had to be answered
+ * by hand-written replay scripts, three times, after three capabilities had
+ * already shipped dark (2.490, 2.989, and this lane's own finding about
+ * `p_win_sensitivity`). The ranking is now a first-class, testable value, so the
+ * next placement question is a census against real captures rather than a guess.
+ */
+export interface InterventionRanking {
+  /**
+   * Every ELIGIBLE candidate in TIER order (`intervention-tiers.ts`), with the
+   * locked method ladder as the within-tier order. This is the RANKING; the
+   * tie-breaks below decide which of them takes the single slot.
+   */
+  readonly candidates: readonly RankedIntervention[];
+  /** Every candidate that never entered the race, with its closed reason. */
+  readonly ineligible: readonly IneligibleIntervention[];
+  /** The one selection, or `null` — may-recommend-nothing is still first-class. */
+  readonly chosen: LensSelection | null;
+}
+
+/**
+ * Can this candidate's user-facing offer actually be composed and dispatched
+ * from THIS run's producer data? (ROADMAP 2.1024.)
+ *
+ * A per-candidate ELIGIBILITY predicate, deliberately a new named concept rather
+ * than a conjunct bolted onto `isLensExecutorAvailable`: "the platform can run
+ * this method" and "this run's data can be phrased into a dispatchable offer"
+ * are different questions with different failure modes, and CLAUDE.md trap 21 is
+ * the record of what happens when two such questions share one predicate.
+ *
+ * Total over `LensId`: every lens whose offer has no composition step is
+ * trivially composable, and the ONE lens that composes an offer answers with the
+ * same pure leaf the block mint uses (`coaching/fragile-edge-offer-text.ts`) —
+ * one function, two callers, so the eligibility test and the composition cannot
+ * disagree about what is composable.
+ */
+function isInterventionComposable(lens: LensId, hit: EvaluatorHit): boolean {
+  if (lens !== 'fragile_edge_resolution') return true;
+  const edge = hit.fragileEdge;
+  if (edge === undefined) return false;
+  return isFragileEdgeOfferComposable(edge.fromLabel, edge.toLabel);
+}
+
+/**
+ * Rank every candidate intervention for this analysis and choose at most one.
+ *
+ * The ladder below is UNCHANGED and is still the only method ordering in this
+ * file. What is added above it is the lexicographic TIER order
+ * (`coaching/intervention-tiers.ts`), which asks a different question — what
+ * KIND of issue is most worth resolving — and uses the ladder as the within-tier
+ * tie-break. Both tie-breaks (2.211-① correlated yield, 2.211 no-immediate-repeat
+ * with its 2.490 sequence exception) run afterwards over the tier-ordered list,
+ * exactly as they ran over the ladder before.
+ *
+ * ⚠ ONE DISCLOSED CONSEQUENCE OF A TOP TIER, stated rather than discovered: on a
+ * run where `resolve_uncertainty` fires, it takes the slot from whatever would
+ * otherwise have won it — including, on the shape measured in session-b2, the
+ * `devils_advocacy` cell that ROADMAP 2.490's sequence rule exists to protect.
+ * 2.490's guarantee is preserved on every run where the tier is EMPTY, which is
+ * 1 of the 2 committed captures and — per the l47 depth finding the design
+ * records — the common case. That is the honest shape of the trade: a
+ * statistically-gated recommendation outranks an ungated exercise on the runs
+ * where the statistics licensed it, and nowhere else.
+ */
+export function rankInterventions(
+  fact: RunAnalysisHandlerFact,
+  options?: LensSelectorOptions,
+): InterventionRanking {
   const signals = readAnalysisSignals(fact, options?.fragileEdge);
-  if (signals === null) return null;
+  if (signals === null) return { candidates: [], ineligible: [], chosen: null };
 
   // THE PRIORITY LADDER, unchanged and still the only ordering in this file.
   // Materialised as a list rather than four sequential early-returns purely so
@@ -1507,22 +1726,75 @@ export function selectLens(
     //   (2) attach it only when the subjects agree — the same 0/12.
     ['fragile_edge_resolution', evaluateFragileEdgeResolution(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
+    // ROADMAP 2.692 — position in THIS list is the within-tier order only; the
+    // tier order below is what places it against the others. Appended here (not
+    // spliced) precisely so the locked ladder's own sequence is untouched.
+    ['uncertainty_reduction_priority', evaluateUncertaintyReductionPriority(signals)],
   ];
-  const eligible: { lens: LensId; hit: EvaluatorHit }[] = [];
+  const eligible: { lens: LensId; hit: EvaluatorHit; tier: InterventionTier }[] = [];
+  const ineligible: IneligibleIntervention[] = [];
   for (const [lens, hit] of ladder) {
-    if (hit === null || !isLensExecutorAvailable(lens, options)) continue;
+    if (hit === null) {
+      ineligible.push({ lens, reason: 'trigger_not_fired' });
+      continue;
+    }
+    if (!isLensExecutorAvailable(lens, options)) {
+      ineligible.push({ lens, reason: 'executor_unavailable' });
+      continue;
+    }
     // DSK "do not run immediately after" — applied at ELIGIBILITY, before both
     // tie-breaks, so neither the correlated yield nor the no-repeat promotion
     // can hand the slot to a contraindicated protocol. See
     // CONTRAINDICATED_IMMEDIATELY_AFTER for why the diversity rule alone
     // produced the forbidden sequence.
-    if (isContraindicatedAfter(lens, options?.previousAnalysisLens)) continue;
-    eligible.push({ lens, hit });
+    if (isContraindicatedAfter(lens, options?.previousAnalysisLens)) {
+      ineligible.push({ lens, reason: 'contraindicated_after_previous' });
+      continue;
+    }
+    // ROADMAP 2.1024 — the SAME stage, for the same reason: an intervention the
+    // platform cannot phrase into a dispatchable offer must not win the slot and
+    // then take the whole card down with it.
+    if (!isInterventionComposable(lens, hit)) {
+      ineligible.push({ lens, reason: 'offer_not_composable' });
+      continue;
+    }
+    eligible.push({ lens, hit, tier: tierForCandidate(lens) });
   }
 
-  // Load-bearing negative: no lens whose evidence fired has an available executor.
-  const eligibleHead = eligible[0];
-  if (eligibleHead === undefined) return null;
+  // THE TIER ORDER. A STABLE sort by tier rank, so the locked method ladder
+  // survives verbatim as the within-tier order — `Array.prototype.sort` is
+  // required to be stable (ECMA-262 §23.1.3.30), and the comparator returns 0
+  // for same-tier pairs, so their ladder order is preserved by the spec rather
+  // than by luck.
+  const tierOrdered = [...eligible].sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
+
+  const candidatesInTierOrder: RankedIntervention[] = tierOrdered.map((e) => ({
+    lens: e.lens,
+    tier: e.tier,
+    rationaleCode: e.hit.code,
+    notSelectedReason: 'outranked' as InterventionNotSelectedReason | null,
+  }));
+
+  function finish(
+    chosen: LensSelection | null,
+    marks: ReadonlyMap<LensId, InterventionNotSelectedReason>,
+  ): InterventionRanking {
+    return {
+      candidates: candidatesInTierOrder.map((c) => ({
+        ...c,
+        notSelectedReason:
+          c.lens === chosen?.lens ? null : (marks.get(c.lens) ?? 'outranked'),
+      })),
+      ineligible,
+      chosen,
+    };
+  }
+
+  // Load-bearing negative: no lens whose evidence fired has an available executor
+  // (or every one that did could not be composed). Recommending NOTHING is a
+  // first-class outcome and must never be manufactured away.
+  const eligibleHead = tierOrdered[0];
+  if (eligibleHead === undefined) return finish(null, new Map());
 
   // ROADMAP 2.211-① — THE CORRELATED-ONLY YIELD (founder-ratified; module
   // header). Two conditions, both required:
@@ -1539,15 +1811,18 @@ export function selectLens(
   // An ISOLATED or DOMINANT_DRIVER hit never yields. The order of the OTHER
   // lenses is untouched — this narrows rule 1's trigger; it does not re-rank
   // the locked ladder.
-  let slotOrder: readonly { lens: LensId; hit: EvaluatorHit }[] = eligible;
+  const marks = new Map<LensId, InterventionNotSelectedReason>();
+  let slotOrder: readonly { lens: LensId; hit: EvaluatorHit; tier: InterventionTier }[] =
+    tierOrdered;
   let yieldedLens: LensId | undefined;
   if (
     eligibleHead.lens === 'sensitivity_flip_risk' &&
     CORRELATED_YIELD_CODES.has(eligibleHead.hit.code) &&
-    eligible.length > 1
+    tierOrdered.length > 1
   ) {
-    slotOrder = [...eligible.slice(1), eligibleHead];
+    slotOrder = [...tierOrdered.slice(1), eligibleHead];
     yieldedLens = eligibleHead.lens;
+    marks.set(eligibleHead.lens, 'yielded');
   }
 
   const head = slotOrder[0]!;
@@ -1621,13 +1896,20 @@ export function selectLens(
     options.previousAnalysisLens === head.lens &&
     runnerUp !== undefined
   ) {
-    return buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat');
+    marks.set(head.lens, 'displaced_head');
+    return finish(
+      buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat'),
+      marks,
+    );
   }
 
-  return buildSelection(
-    head.lens,
-    head.hit,
-    yieldedLens,
-    yieldedLens !== undefined ? 'correlated_yield' : undefined,
+  return finish(
+    buildSelection(
+      head.lens,
+      head.hit,
+      yieldedLens,
+      yieldedLens !== undefined ? 'correlated_yield' : undefined,
+    ),
+    marks,
   );
 }

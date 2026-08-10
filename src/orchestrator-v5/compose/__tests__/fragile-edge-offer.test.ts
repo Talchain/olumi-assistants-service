@@ -274,9 +274,27 @@ describe('CEE #883 — a label that vetoes dispatch produces NO offer', () => {
       expect(EDIT_GRAPH_POSITIVE_REGEX.test(wouldShip)).toBe(true);
       expect(EDIT_GRAPH_NEGATIVE_REGEX.test(wouldShip)).toBe(true);
 
-      // THE ASSERTION. The lens exists only to carry the offer, so a withheld
-      // offer drops the whole surface — never a card with an inert chip.
-      expect(buildLensSurface(makeFact(mutated), CTX, WINNING_PREV)).toBeNull();
+      // ⭐ THE ASSERTION, AMENDED BY ROADMAP 2.1024 — and the amendment is the
+      // whole point of that row, so read it before "restoring" the old one.
+      //
+      // This used to assert `buildLensSurface(...) === null`: a withheld offer
+      // dropped the ENTIRE coaching card. The offer half was right; the drop was
+      // the defect. The lens had already won the single proactive slot, so a run
+      // with six other live triggers shipped NO intervention at all because the
+      // seventh could not be phrased — and it did so QUIETLY, returning before
+      // `lens_suggestion_emitted` fired while `fragile_edge_selection` reported
+      // `refusal_reason: null`. The one alarm that fired said nothing was wrong.
+      //
+      // Composability is now an ELIGIBILITY predicate inside `selectLens`, so a
+      // non-composable offer never enters the race and the slot passes on by the
+      // ordinary rules. What this case must still prove is UNCHANGED and is
+      // asserted directly: the OFFER is withheld — no fragile-edge lens, no
+      // action chip, never an inert one.
+      const surface = buildLensSurface(makeFact(mutated), CTX, WINNING_PREV);
+      expect(surface).not.toBeNull();
+      expect(surface!.selection.lens).not.toBe('fragile_edge_resolution');
+      expect(surface!.suggestion.action_prompt).toBeUndefined();
+      expect(surface!.suggestion.action_label).toBeUndefined();
     },
   );
 
