@@ -39,7 +39,7 @@ const unproven = (cap: number, unit = '£'): FactorScaleInfo => ({ cap, unit });
 describe('resolveRawInterventionValue — raw_value precedence (raw_value_used)', () => {
   it('prefers a finite numeric raw_value (already user-scale)', () => {
     const r = resolveRawInterventionValue({ value: 0.25, raw_value: 5000, unit: '£' }, proven(20000));
-    expect(r).toEqual({ value: 5000, rule: 'raw_value_used', inputValue: 0.25, inconsistent: false });
+    expect(r).toMatchObject({ value: 5000, rule: 'raw_value_used', inputValue: 0.25, inconsistent: false });
   });
 
   it('regression fixture: {value:0.25, raw_value:5000, cap:20000, unit:£} → 5000, not 0.25', () => {
@@ -63,13 +63,13 @@ describe('resolveRawInterventionValue — raw_value precedence (raw_value_used)'
 
   it('uses a NUMERIC-string raw_value (e.g. "5000") as the user-scale value', () => {
     const r = resolveRawInterventionValue({ value: 0.25, raw_value: '5000' }, proven(20000));
-    expect(r).toEqual({ value: 5000, rule: 'raw_value_used', inputValue: 0.25, inconsistent: false });
+    expect(r).toMatchObject({ value: 5000, rule: 'raw_value_used', inputValue: 0.25, inconsistent: false });
   });
 
   it('a non-numeric / formatted string raw_value (e.g. "£5k") does NOT suppress; falls to factor evidence', () => {
     const r = resolveRawInterventionValue({ value: 0.25, raw_value: '£5k' }, proven(20000));
     // Not encoded, not parseable → factor evidence denormalises to 5000, not 0.25.
-    expect(r).toEqual({ value: 5000, rule: 'cap_denormalised', inputValue: 0.25, inconsistent: false });
+    expect(r).toMatchObject({ value: 5000, rule: 'cap_denormalised', inputValue: 0.25, inconsistent: false });
   });
 
   it('flags inconsistency when a raw-looking value (>1) disagrees with a stale raw_value', () => {
@@ -90,12 +90,12 @@ describe('resolveRawInterventionValue — raw_value precedence (raw_value_used)'
 describe('resolveRawInterventionValue — cap denormalisation (cap_denormalised, evidence-gated)', () => {
   it('denormalises a [0,1] value via cap when the factor PROVES the normalised convention', () => {
     const r = resolveRawInterventionValue({ value: 0.25 }, proven(20000));
-    expect(r).toEqual({ value: 5000, rule: 'cap_denormalised', inputValue: 0.25, inconsistent: false });
+    expect(r).toMatchObject({ value: 5000, rule: 'cap_denormalised', inputValue: 0.25, inconsistent: false });
   });
 
   it('does NOT multiply a [0,1] value when the factor lacks evidence (no silent corruption)', () => {
     const r = resolveRawInterventionValue({ value: 0.25 }, unproven(20000));
-    expect(r).toEqual({
+    expect(r).toMatchObject({
       value: 0.25,
       rule: 'ambiguous_no_evidence',
       inputValue: 0.25,
@@ -105,17 +105,17 @@ describe('resolveRawInterventionValue — cap denormalisation (cap_denormalised,
 
   it('treats value === 1.0 as the full cap (with evidence)', () => {
     const r = resolveRawInterventionValue({ value: 1 }, proven(100000));
-    expect(r).toEqual({ value: 100000, rule: 'cap_denormalised', inputValue: 1, inconsistent: false });
+    expect(r).toMatchObject({ value: 100000, rule: 'cap_denormalised', inputValue: 1, inconsistent: false });
   });
 
   it('treats value === 0 as 0 (with evidence)', () => {
     const r = resolveRawInterventionValue({ value: 0 }, proven(100000));
-    expect(r).toEqual({ value: 0, rule: 'cap_denormalised', inputValue: 0, inconsistent: false });
+    expect(r).toMatchObject({ value: 0, rule: 'cap_denormalised', inputValue: 0, inconsistent: false });
   });
 
   it('denormalises a bare-number [0,1] value via cap (with evidence)', () => {
     const r = resolveRawInterventionValue(0.5, proven(80000));
-    expect(r).toEqual({ value: 40000, rule: 'cap_denormalised', inputValue: 0.5, inconsistent: false });
+    expect(r).toMatchObject({ value: 40000, rule: 'cap_denormalised', inputValue: 0.5, inconsistent: false });
   });
 
   it('passes a bare-number [0,1] value through when evidence is absent', () => {
@@ -139,22 +139,22 @@ describe('resolveRawInterventionValue — cap denormalisation (cap_denormalised,
 describe('resolveRawInterventionValue — passthrough (already-raw)', () => {
   it('passes through an already-raw value (> 1) on a capped factor — never multiplied again', () => {
     const r = resolveRawInterventionValue({ value: 25000 }, proven(100000));
-    expect(r).toEqual({ value: 25000, rule: 'passthrough', inputValue: 25000, inconsistent: false });
+    expect(r).toMatchObject({ value: 25000, rule: 'passthrough', inputValue: 25000, inconsistent: false });
   });
 
   it('passes through a bare already-raw value (> 1)', () => {
     const r = resolveRawInterventionValue(9000, proven(20000));
-    expect(r).toEqual({ value: 9000, rule: 'passthrough', inputValue: 9000, inconsistent: false });
+    expect(r).toMatchObject({ value: 9000, rule: 'passthrough', inputValue: 9000, inconsistent: false });
   });
 
   it('passes through a negative value on a capped factor (outside [0,1])', () => {
     const r = resolveRawInterventionValue({ value: -0.4 }, proven(100000));
-    expect(r).toEqual({ value: -0.4, rule: 'passthrough', inputValue: -0.4, inconsistent: false });
+    expect(r).toMatchObject({ value: -0.4, rule: 'passthrough', inputValue: -0.4, inconsistent: false });
   });
 
   it('passes through when the factor has no cap', () => {
     const r = resolveRawInterventionValue({ value: 0.25 }, { unit: '£' });
-    expect(r).toEqual({ value: 0.25, rule: 'no_cap', inputValue: 0.25, inconsistent: false });
+    expect(r).toMatchObject({ value: 0.25, rule: 'no_cap', inputValue: 0.25, inconsistent: false });
   });
 
   it('passes through when there is no factor scale info at all', () => {
@@ -176,7 +176,7 @@ describe('resolveRawInterventionValue — encoded categorical/boolean preservati
       { value: 2, value_type: 'categorical', raw_value: 'UK', encoding_map: { UK: 2 } },
       proven(5),
     );
-    expect(r).toEqual({ value: 2, rule: 'encoded_verbatim', inputValue: 2, inconsistent: false });
+    expect(r).toMatchObject({ value: 2, rule: 'encoded_verbatim', inputValue: 2, inconsistent: false });
   });
 
   it('never scales a boolean encoded value', () => {
@@ -217,7 +217,7 @@ describe('resolveRawInterventionValue — encoded categorical/boolean preservati
 describe('resolveRawInterventionValue — membership (drop non-numeric)', () => {
   it('drops an object with no finite numeric value', () => {
     const r = resolveRawInterventionValue({ raw_value: 5000 }, proven(20000));
-    expect(r).toEqual({ value: null, rule: 'dropped', inputValue: null, inconsistent: false });
+    expect(r).toMatchObject({ value: null, rule: 'dropped', inputValue: null, inconsistent: false });
   });
 
   it('drops null / arrays / strings / NaN', () => {

@@ -74,7 +74,10 @@ describe('B3 — net-OFF prior-midpoint scale guard', () => {
     const optNew = out.options.find(
       (o) => (o as { option_id?: string }).option_id === 'opt_new',
     ) as { interventions?: Record<string, number> };
-    expect(optNew.interventions).toEqual({ fac_money: 0.4 });
+    // Round 4: the scaffold emits the CANDIDATE OBJECT (the single request-level
+    // projection downstream owns the wire number) — the selected midpoint is
+    // unchanged, carried as the candidate's `value`.
+    expect(optNew.interventions).toEqual({ fac_money: { value: 0.4 } });
   });
 });
 

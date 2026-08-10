@@ -86,7 +86,10 @@ function buildGraph() {
           // no raw_value, factor proves normalisation → 0.5 * 100000 = 50000.
           fac_budget: { value: 0.5, unit: '£', source: 'user_specified', target_match: tm('fac_budget') },
           // already-raw (> 1) on a capped factor → passthrough 9000.
-          fac_already_raw: { value: 9000, unit: '£', source: 'user_specified', target_match: tm('fac_already_raw') },
+          // Round 4: carries its consistent pair (0.45 * 20000 = 9000) so the
+          // request is demotable; the pair-less bare-9000 variant (undemotable
+          // → typed block) is pinned in run-analysis-final-payload-scale.test.ts.
+          fac_already_raw: { value: 0.45, raw_value: 9000, unit: '£', source: 'user_specified', target_match: tm('fac_already_raw') },
           // uncapped factor → passthrough 0.3.
           fac_rate: { value: 0.3, source: 'user_specified', target_match: tm('fac_rate') },
           // categorical encoded value → passthrough 1, never scaled.
@@ -136,42 +139,21 @@ function buildGraph() {
 
 describe('run_analysis egress value-scale — loadScenarioSnapshotForRunAnalysis (unconditional)', () => {
 
-  it('denormalises capped interventions to raw user-scale; never multiplies an unproven [0,1]', async () => {
+  it('the loader preserves the ORIGINAL intervention objects — no projection before the scaffold (round 4)', async () => {
+    // ROUND 4: the loader no longer projects to wire numbers — the one
+    // request-level projection runs in run_analysis AFTER the scaffold (the
+    // round-3 TOCTOU fix). The loader's job is faithful merge: raw_value /
+    // value / unit fields survive untouched for the downstream projection.
     const store = createNoopSessionStore({ loadGraphResult: buildGraph() });
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO_ID, REQUEST_ID, store);
 
     expect(snapshot.goal_node_id).toBe('goal_g');
-
     const byId = Object.fromEntries(snapshot.options.map((o) => [o.option_id, o.interventions]));
-
-    // edit_graph style (intervention carries raw_value, plus mixed branches).
-    expect(byId.opt_edit).toEqual({
-      fac_spend: 5000, // raw_value preferred (regression fixture: 0.25 → 5000)
-      fac_budget: 50000, // 0.5 * 100000 cap_denormalised (factor evidence present)
-      fac_already_raw: 9000, // already raw (> 1) passthrough — NOT 9000*20000
-      fac_rate: 0.3, // uncapped passthrough
-      fac_region: 1, // categorical preserved
-      fac_ambiguous: 0.4, // capped but NO evidence → passthrough, NOT 0.4*50000
-    });
-
-    // brief-extraction style (no raw_value; denormalised via proven factor
-    // normalisation) — the SAME boundary protection applies.
-    expect(byId.opt_draft).toEqual({ fac_spend: 5000 }); // 0.25 * 20000
-  });
-
-  it('regression fixture: value 0.25 / raw_value 5000 / cap 20000 / unit £ → 5000, never 0.25', async () => {
-    const store = createNoopSessionStore({ loadGraphResult: buildGraph() });
-    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO_ID, REQUEST_ID, store);
-    const optEdit = snapshot.options.find((o) => o.option_id === 'opt_edit')!;
-    expect(optEdit.interventions.fac_spend).toBe(5000);
-    expect(optEdit.interventions.fac_spend).not.toBe(0.25);
-  });
-
-  it('does not silently corrupt a [0,1] value on a capped factor lacking evidence', async () => {
-    const store = createNoopSessionStore({ loadGraphResult: buildGraph() });
-    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO_ID, REQUEST_ID, store);
-    const optEdit = snapshot.options.find((o) => o.option_id === 'opt_edit')!;
-    expect(optEdit.interventions.fac_ambiguous).toBe(0.4); // not 0.4 * 50000
+    const optEdit = byId.opt_edit as Record<string, Record<string, unknown>>;
+    expect(optEdit.fac_spend).toMatchObject({ value: 0.25, raw_value: 5000 });
+    expect(optEdit.fac_ambiguous).toMatchObject({ value: 0.4 });
+    const optDraft = byId.opt_draft as Record<string, Record<string, unknown>>;
+    expect(optDraft.fac_spend).toMatchObject({ value: 0.25 });
   });
 
   it('does not mutate the persisted graph (read-only egress)', async () => {
@@ -284,7 +266,20 @@ describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-le
     return { handler, plotClient, invocation, getPayload: () => capturedPayload };
   }
 
-  it('sends RAW user-scale intervention values in the /v2/run payload (unconditional)', async () => {
+  it('sends the /v2/run payload in ONE COHERENT SCALE — unit here, because stranded siblings force a demote (round 4)', async () => {
+    // ROUND 4 REFINEMENT of "sends RAW user-scale values unconditionally".
+    // This fixture mixes raw-scale emissions (5000 / 50000 / 9000) with values
+    // PLoT's fired gate would CORRUPT: an unproven 0.4 on a 50000-cap factor
+    // (annihilated to 0.000008) and an encoded region code 1 (renormalised —
+    // Finding B). Round 3 shipped that wire as-is. The coherent form of THIS
+    // request is unit scale: every raw value with a known unit form demotes,
+    // and the stranded values ship verbatim with the gate skipped. The
+    // magnitudes are unchanged — 5000 on a 20000-cap factor IS 0.25 — and
+    // PLoT was proven (live, b9f6b5a) to compute identical results for the
+    // two coherent forms. `fac_already_raw` carries a consistent 0.45 pair in
+    // this round's fixture so the request is demotable at all; the UNDEMOTABLE
+    // variant of this shape must BLOCK instead, and is pinned in
+    // run-analysis-final-payload-scale.test.ts.
     const { handler, plotClient, invocation, getPayload } = makeCapturingHandler();
     await handler(invocation);
 
@@ -294,15 +289,22 @@ describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-le
     const options = payload!.options as Array<{ option_id: string; interventions: Record<string, number> }>;
     const optEdit = options.find((o) => o.option_id === 'opt_edit')!;
     expect(optEdit.interventions).toEqual({
-      fac_spend: 5000,
-      fac_budget: 50000,
-      fac_already_raw: 9000,
-      fac_rate: 0.3,
-      fac_region: 1,
-      fac_ambiguous: 0.4,
+      fac_spend: 0.25, // raw 5000 demoted to its consistent unit form (0.25 * 20000 = 5000)
+      fac_budget: 0.5, // cap-denormalised 50000 demoted back to its pre-image
+      fac_already_raw: 0.45, // consistent pair 0.45 / 9000 demoted (0.45 * 20000 = 9000)
+      fac_rate: 0.3, // uncapped — verbatim
+      fac_region: 1, // categorical code — verbatim (Finding B)
+      fac_ambiguous: 0.4, // unproven [0,1] — verbatim, NOT annihilated
     });
     const optDraft = options.find((o) => o.option_id === 'opt_draft')!;
-    expect(optDraft.interventions).toEqual({ fac_spend: 5000 });
+    expect(optDraft.interventions).toEqual({ fac_spend: 0.25 });
+
+    // The coherence postcondition, on the final bytes.
+    for (const o of options) {
+      for (const [factorId, v] of Object.entries(o.interventions)) {
+        expect(v >= 0 && v <= 1, `${o.option_id}/${factorId} within [0,1]; got ${v}`).toBe(true);
+      }
+    }
   });
 
 });

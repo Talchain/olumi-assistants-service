@@ -113,6 +113,39 @@ export interface InterventionScaleResult {
    * (`[0,1]`, cap present), or `value` itself for a raw-looking value (`>1`).
    */
   readonly inconsistent: boolean;
+  /**
+   * FATE under PLoT's request-level normalisation (round 4 — Finding B closed
+   * the rule-name enumeration for good): `true` when the emitted value is a RAW
+   * user-scale magnitude, so PLoT dividing it by the factor's cap/derived range
+   * is the CORRECT operation. `false` when re-scaling would corrupt it — an
+   * unproven `[0,1]` value (`ambiguous_no_evidence`), a value with no cap
+   * (`no_cap`), or an ENCODED CATEGORY (`encoded_verbatim` — `1` means "buy",
+   * not a magnitude). The request projection classifies stranded siblings by
+   * THIS field plus the value, never by rule name.
+   */
+  readonly rawScaleEmission: boolean;
+  /**
+   * True when the emitted number is a CATEGORY CODE, not a magnitude (`2` means
+   * "outsource"). A code outside [0,1] fires PLoT's gate by itself and is then
+   * rescaled by it (measured at b9f6b5a: 2 → 1) — it can never cross the wire
+   * faithfully, so its request is unresolvable regardless of siblings. Distinct
+   * from `rawScaleEmission === false`, which also covers no-cap MAGNITUDES that
+   * ship fine outside [0,1] (PLoT derives their range from their own values).
+   */
+  readonly codeNotMagnitude?: boolean;
+  /**
+   * The FAITHFUL unit-interval representation of this emission, when one is
+   * KNOWN — the precondition for request-level demotion:
+   *   - `cap_denormalised`: the input value (the promotion's own pre-image);
+   *   - `raw_value_used` with a CONSISTENT pair on a usable cap
+   *     (`value ∈ [0,1]` and `value * cap ≈ raw_value`): the value field —
+   *     the author's own unit representation of the same magnitude.
+   * `undefined` everywhere else: an inconsistent pair, a bare passthrough, an
+   * encoded code, or a no-cap value has no known unit form, so demoting it
+   * would fabricate one. This field is what makes demotability VALUE-derived
+   * rather than rule-name-derived (the round-2 lesson, applied to demotion).
+   */
+  readonly unitIntervalEquivalent?: number;
 }
 
 /**
@@ -195,7 +228,7 @@ export function resolveRawInterventionValue(
   // Mirror `extractNumericIntervention`'s notion of "object": any non-null
   // object (arrays included — they simply have no finite `.value`).
   if (intervention === null || typeof intervention !== 'object') {
-    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false };
+    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false, rawScaleEmission: false };
   }
   const obj = intervention as Record<string, unknown>;
   const value = obj.value;
@@ -203,11 +236,12 @@ export function resolveRawInterventionValue(
   // present only when it has a finite numeric `value`. Anything else is
   // dropped exactly as the pre-existing numeric projection dropped it.
   if (!isFiniteNumber(value)) {
-    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false };
+    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false, rawScaleEmission: false };
   }
-  // Encoded categorical/boolean → preserve verbatim, never scale.
+  // Encoded categorical/boolean → preserve verbatim, never scale. A code is
+  // NOT a raw magnitude: PLoT re-scaling it corrupts it (Finding B).
   if (isEncodedIntervention(obj)) {
-    return { value, rule: 'encoded_verbatim', inputValue: value, inconsistent: false };
+    return { value, rule: 'encoded_verbatim', inputValue: value, inconsistent: false, rawScaleEmission: false, codeNotMagnitude: true };
   }
   // Coerce raw_value to a number (accepts numeric strings like "5000"); a
   // non-numeric string falls through to the factor-evidence path.
@@ -234,23 +268,42 @@ function scaleNumeric(
     } else {
       inconsistent = !approxEqual(value, rawValue);
     }
-    return { value: rawValue, rule: 'raw_value_used', inputValue: value, inconsistent };
+    // A CONSISTENT pair on a usable cap carries its own unit representation:
+    // `value` and `raw_value` are the same magnitude in two scales, proven by
+    // `value * cap ≈ raw_value`. That, and only that, makes rule 1 demotable.
+    const pairProvesUnitForm =
+      !inconsistent && capUsable && value >= 0 && value <= 1;
+    return {
+      value: rawValue,
+      rule: 'raw_value_used',
+      inputValue: value,
+      inconsistent,
+      rawScaleEmission: true,
+      ...(pairProvesUnitForm ? { unitIntervalEquivalent: value } : {}),
+    };
   }
 
   // 2/3. Cap-based handling requires a usable cap.
   if (!capUsable) {
-    return { value, rule: 'no_cap', inputValue: value, inconsistent: false };
+    return { value, rule: 'no_cap', inputValue: value, inconsistent: false, rawScaleEmission: false };
   }
 
   // Already-raw-looking (outside the unit interval) → pass through. This is the
   // guard that stops a second multiplication after Phase 2 prompt clean-up.
   if (value < 0 || value > 1) {
-    return { value, rule: 'passthrough', inputValue: value, inconsistent: false };
+    return { value, rule: 'passthrough', inputValue: value, inconsistent: false, rawScaleEmission: true };
   }
 
   // [0,1] on a capped factor: ONLY denormalise with proven factor evidence.
   if (factor?.normalisedConvention === true) {
-    return { value: value * cap, rule: 'cap_denormalised', inputValue: value, inconsistent: false };
+    return {
+      value: value * cap,
+      rule: 'cap_denormalised',
+      inputValue: value,
+      inconsistent: false,
+      rawScaleEmission: true,
+      unitIntervalEquivalent: value,
+    };
   }
 
   // [0,1] on a capped factor with no evidence → do NOT silently corrupt a
@@ -260,6 +313,7 @@ function scaleNumeric(
     rule: 'ambiguous_no_evidence',
     inputValue: value,
     inconsistent: false,
+    rawScaleEmission: false,
   };
 }
 
@@ -376,6 +430,269 @@ export function projectInterventionsToRawScale(
     conversions.push({ factor_id: factorId, rule: result.rule, inconsistent: result.inconsistent });
   }
   return { interventions, conversions };
+}
+
+/**
+ * The demotion postcondition, as a directly-testable predicate.
+ *
+ * Demotion exists to put the WHOLE request inside [0,1] so PLoT's request-level gate
+ * skips. Choosing to demote and not achieving that means the payload is still mixed
+ * and the analysis is still computing on corrupted input.
+ *
+ * ⚠ HONEST SCOPE: given correct decision predicates this is UNREACHABLE end-to-end —
+ * a mutant that neuters the call inside `projectRequestInterventionsToWireScale`
+ * survives, because no reachable request violates it. It is defence in depth against
+ * a FUTURE predicate change, which is exactly when it earns its place. Its logic is
+ * pinned here rather than only through the caller so the check itself cannot rot into
+ * a no-op unnoticed.
+ */
+export function isDemotionPostconditionViolated(
+  demoteChosen: boolean,
+  allWithinUnitInterval: boolean,
+): boolean {
+  return demoteChosen && !allWithinUnitInterval;
+}
+
+/**
+ * The outcome of projecting an ENTIRE request's interventions to one wire scale.
+ * `perOption` mirrors the input order exactly.
+ */
+export interface RequestScaleProjection {
+  /** Per-option `factorId → number` maps, in input order. */
+  readonly perOption: Array<Record<string, number>>;
+  /** Redaction-safe conversion records (no magnitudes), flattened across options. */
+  readonly conversions: InterventionConversion[];
+  /** True when rule 2's promotion was suppressed to keep the request homogeneous. */
+  readonly demoted: boolean;
+  /** Factor ids whose rule-2 promotion was suppressed (redaction-safe: ids only). */
+  readonly demotedFactors: string[];
+  /**
+   * True when every emitted value is <= 1, i.e. PLoT's request-level gate will
+   * SKIP normalisation. Deliberately NOT called "homogeneous": a consistently-RAW
+   * request is also homogeneous and this flag is false for it.
+   */
+  readonly allWithinUnitInterval: boolean;
+  /**
+   * Count of emitted values OUTSIDE [0,1], per rule — sign-symmetric, matching the
+   * producer's gate. MAGNITUDE-FREE by construction: it
+   * carries how MANY values crossed the gate threshold, never what they were, so it
+   * preserves the no-magnitudes property the egress diagnostic was designed around.
+   *
+   * WHY: the diagnostic previously recorded rule COUNTS and factor ids only, which
+   * cannot tell whether an `encoded_verbatim` or `no_cap` value left [0,1] — so a
+   * request corrupted by an encoded category, or by a NEGATIVE magnitude, classified
+   * as CLEAN. With this field a corrupted run is derivable: any value outside [0,1]
+   * AND a stranded unit-scale sibling (`ambiguous_no_evidence_factors` non-empty).
+   */
+  readonly outsideUnitIntervalByRule: Record<string, number>;
+  /**
+   * INVARIANT VIOLATION: demotion was chosen and still did not bring the request
+   * inside [0,1]. Should be unreachable — it means the decision predicates and the
+   * postcondition disagree, and the request is still computing on corrupted input.
+   */
+  readonly postconditionViolated: boolean;
+  /**
+   * True when the request is mixed and CEE must NOT auto-resolve it — because the
+   * value above 1 is a magnitude CEE does not own (an explicit `raw_value`, an
+   * already-raw passthrough, or an ENCODED category) — or when demotion was chosen
+   * and failed its postcondition. Surfaced loudly; never silently shipped.
+   */
+  readonly mixedUnresolved: boolean;
+  /**
+   * Factor ids carrying undemotable out-of-range values — the ones the user can
+   * fix by stating a unit/scale. Empty when the request is coherent or demotable.
+   */
+  readonly unresolvedFactorIds: string[];
+}
+
+/**
+ * Project an ENTIRE request's interventions to ONE wire scale.
+ *
+ * WHY THIS EXISTS — two authorities, two different questions (2026-08-10).
+ * `resolveRawInterventionValue` answers "is this INTERVENTION raw or normalised?"
+ * PER VALUE. PLoT's normalisation gate answers "is this REQUEST raw or
+ * normalised?" PER REQUEST: if every value is within [0,1] it treats them as
+ * already normalised and skips; if ANY value exceeds 1 it normalises the WHOLE
+ * request against each factor's cap. Each rule is correct alone. Composed, a
+ * single rule-2 promotion flips the gate for every OTHER factor, and the factors
+ * deliberately left at unit scale (`ambiguous_no_evidence` / `no_cap`) are then
+ * divided by their caps — silently annihilating them.
+ *
+ * Measured on the deployed quartet (CEE cab59b7 / PLoT b9f6b5a / ISL 28fe0c9):
+ * the mixed request inflated P(Switch) 0.7360 → 0.9584 on capture `pre-deploy/s3`
+ * by reducing an £18,000 switching cost to ~0.0000288, i.e. making the costly
+ * option free while it kept its full capability gain. A self-consistent request
+ * returns 0.7360333333333333 in EITHER scale — the mixture is the whole defect.
+ *
+ * THE RULE: if rule 2 promoted anything while unit-scale siblings remain, suppress
+ * rule 2 for the request (DEMOTE). Demote rather than promote because promotion
+ * would have to assert a normalised convention for factors that provably cannot
+ * evidence one (their observed baseline is 0, and zero is scale-ambiguous — see
+ * `buildFactorScaleMap`). Demote assumes nothing new; both land on the same
+ * numbers. An explicit `raw_value` above 1 is NOT ours to rewrite, so a request
+ * carrying one is shipped unchanged and flagged via `blockedByStatedRawScale`.
+ */
+export function projectRequestInterventionsToWireScale(
+  perOptionRawObjects: ReadonlyArray<Record<string, unknown>>,
+  factorScaleById: ReadonlyMap<string, FactorScaleInfo>,
+  /**
+   * Per option index, the factor ids whose intervention CEE SYNTHESISED rather
+   * than the user authoring it — today, `scaffoldUnconfiguredOptions`' neutral
+   * placeholders. Omitted / empty means "every value is the user's", which is
+   * what every non-scaffolded request is.
+   *
+   * It exists for exactly one decision: a synthesised value may not establish
+   * the scale reference frame for a user's value (see `strandedUnitScale`). It
+   * is CEE-internal and crosses no service boundary — the wire payload is
+   * unchanged.
+   */
+  synthesisedByOption?: ReadonlyArray<ReadonlySet<string>>,
+): RequestScaleProjection {
+  // Pass 1 — resolve every intervention independently (the per-value rule).
+  const resolved = perOptionRawObjects.map((rawObjects, optionIndex) =>
+    Object.entries(rawObjects).map(([factorId, rawObject]) => ({
+      factorId,
+      optionIndex,
+      result: resolveRawInterventionValue(rawObject, factorScaleById.get(factorId)),
+    })),
+  );
+  const present = resolved.flat().filter((r) => r.result.value !== null);
+
+  // ---- Request-level decision: VALUE + FATE, never rule names (round 4) ----
+  // PLoT's gate is sign-symmetric and request-level: any value outside [0,1]
+  // flips cap/range normalisation for the WHOLE request. Under a fired gate,
+  // re-scaling is CORRECT exactly for raw-scale magnitudes (`rawScaleEmission`)
+  // and CORRUPTS everything else — an unproven [0,1] value, a no-cap value, or
+  // an encoded CATEGORY (Finding B: "buy"=1 renormalised to 0.5). Two earlier
+  // revisions enumerated rule names here and each missed a rule; both
+  // predicates now read the emitted value and its declared fate.
+  const outsideUnitInterval = present.filter(
+    (r) => r.result.value !== null && (r.result.value < 0 || r.result.value > 1),
+  );
+  // Which FATE a stranded value meets is per-factor, derived from PLoT's range
+  // chain at b9f6b5a (`deriveRange`, 7 tiers): a CAPPED factor always divides
+  // by its cap (tier 0 — authoritative), so an unproven [0,1] value on it is
+  // annihilated whenever ANY sibling fires the gate. A NO-CAP factor has no
+  // absolute reference and normalises by a range derived from its OWN values
+  // (spread/baseline tiers), so a factor carrying values on both sides of 1
+  // defines its own comparison frame and is NOT stranded by its own spread.
+  // Encoded codes are never magnitudes: stranded regardless (Finding B).
+  //
+  // ROUND 5 — WHOSE VALUES DEFINE THAT FRAME. The exemption above is sound only
+  // for a value set the USER authored. `scaffoldUnconfiguredOptions` fills an
+  // unconfigured option from each factor's observed_state, so a no-cap factor
+  // gains CEE's own raw neutral (12) beside the user's unit-scale 0.5 — and a
+  // provenance-blind exemption let that placeholder establish the frame, i.e.
+  // CEE manufacturing the evidence that exempted the user's value from
+  // protection. Measured against real PLoT b9f6b5a7: the user's 0.5 reached ISL
+  // at 0.03496 (14.3x) under a self-reported `mixedUnresolved: false`.
+  //
+  // A value CEE manufactured is not evidence about the user's request, so only
+  // USER-AUTHORED out-of-range values grant the exemption. Note what is NOT
+  // being claimed: for a user-authored set, PLoT's ordering-preserving spread
+  // normalisation is the INTENDED relative comparison (ratified round 5) — an
+  // earlier attempt to treat it as corruption removed the exemption outright and
+  // blocked 102 legitimate requests on the ordinary `{1.2} vs {0.9}` shape.
+  const userAuthoredOutsideFactorIds = new Set(
+    outsideUnitInterval
+      .filter((r) => synthesisedByOption?.[r.optionIndex]?.has(r.factorId) !== true)
+      .map((r) => r.factorId),
+  );
+  const strandedUnitScale = present.some(
+    (r) =>
+      !r.result.rawScaleEmission &&
+      r.result.value !== null &&
+      r.result.value >= 0 &&
+      r.result.value <= 1 &&
+      (r.result.rule !== 'no_cap' || !userAuthoredOutsideFactorIds.has(r.factorId)),
+  );
+  const mixed = outsideUnitInterval.length > 0 && strandedUnitScale;
+  // Demotion = re-emitting every raw-scale value in its KNOWN unit-interval
+  // form so the gate skips and the stranded values survive verbatim. Possible
+  // only when every outside value carries `unitIntervalEquivalent`; a value
+  // without one (bare passthrough, inconsistent pair, encoded code) is a
+  // magnitude CEE does not own and blocks the whole demote.
+  const undemotable = outsideUnitInterval.filter((r) => r.result.unitIntervalEquivalent === undefined);
+  // An ENCODED code outside [0,1] (e.g. `outsource: 2`) fires PLoT's gate by
+  // itself and is then rescaled BY that gate — measured at b9f6b5a: code 2
+  // reaches ISL as 1, regardless of siblings. Such a value can never cross the
+  // wire faithfully, so its request is unresolvable even with no stranded
+  // sibling (the 15 both-pipelines-corrupt cases in the round-4 differential).
+  const encodedOutside = outsideUnitInterval.filter((r) => r.result.codeNotMagnitude === true);
+  const demote = mixed && undemotable.length === 0;
+  const perOption: Array<Record<string, number>> = [];
+  const conversions: InterventionConversion[] = [];
+  const demotedFactors: string[] = [];
+  for (const entries of resolved) {
+    const interventions: Record<string, number> = {};
+    for (const { factorId, result } of entries) {
+      if (result.value === null) continue;
+      // When the request demotes, EVERY emission with a known unit form is
+      // re-emitted in it — not only the outside ones. A raw-scale 0.5 (unit
+      // 0.005 × cap 100) left behind in a demoted request would be read by
+      // PLoT's skipped gate as unit 0.5: a 100× inflation.
+      const demotedHere = demote && result.unitIntervalEquivalent !== undefined;
+      interventions[factorId] = demotedHere ? result.unitIntervalEquivalent! : result.value;
+      if (demotedHere && !demotedFactors.includes(factorId)) demotedFactors.push(factorId);
+      conversions.push({
+        factor_id: factorId,
+        rule: result.rule,
+        inconsistent: result.inconsistent,
+      });
+    }
+    perOption.push(interventions);
+  }
+
+  // ---- POSTCONDITION, ASSERTED RATHER THAN LOGGED ----
+  // Demotion exists for exactly one purpose: to put the whole request inside [0,1] so
+  // PLoT's gate SKIPS. If we chose to demote and did not achieve that, the payload is
+  // still mixed and the analysis is still computing on corrupted input — so the claim
+  // "demoted" would be a lie. This assertion is what catches the whole defect class
+  // WITHOUT anyone having to enumerate the rules in advance; it would have caught the
+  // encoded-category case before anybody thought of `encoded_verbatim`.
+  // Written against the SPEC ([0,1]), not against the failure mode being fixed. An
+  // earlier revision wrote `v <= 1` and therefore inherited the exact blind spot the
+  // assertion exists to catch.
+  const allWithinUnitInterval = perOption.every((o) =>
+    Object.values(o).every((v) => v >= 0 && v <= 1),
+  );
+  const postconditionViolated = isDemotionPostconditionViolated(demote, allWithinUnitInterval);
+  // Counted from the EMITTED values (post-demotion), i.e. what actually reaches PLoT
+  // and therefore what actually decides its gate. Counts only — never magnitudes.
+  const outsideUnitIntervalByRule: Record<string, number> = {};
+  for (const entries of resolved) {
+    for (const { factorId, result } of entries) {
+      if (result.value === null) continue;
+      const emitted = perOption[resolved.indexOf(entries)]?.[factorId];
+      if (emitted !== undefined && (emitted < 0 || emitted > 1)) {
+        outsideUnitIntervalByRule[result.rule] = (outsideUnitIntervalByRule[result.rule] ?? 0) + 1;
+      }
+    }
+  }
+  // Factor ids the user can actually fix: the magnitudes CEE does not own
+  // (undemotable outside values). Ids only — redaction-safe, resolved to labels
+  // by the caller for user copy.
+  const unresolvedFactorIds: string[] = [];
+  for (const r of mixed ? undemotable : []) {
+    if (!unresolvedFactorIds.includes(r.factorId)) unresolvedFactorIds.push(r.factorId);
+  }
+  for (const r of encodedOutside) {
+    if (!unresolvedFactorIds.includes(r.factorId)) unresolvedFactorIds.push(r.factorId);
+  }
+  return {
+    perOption,
+    conversions,
+    demoted: demote && !postconditionViolated && demotedFactors.length > 0,
+    demotedFactors,
+    allWithinUnitInterval,
+    outsideUnitIntervalByRule,
+    postconditionViolated,
+    // A mixed request we must NOT auto-resolve, OR one where demotion failed to make
+    // the request homogeneous. Either way it is unresolved and must not be shipped as
+    // if it were fine.
+    mixedUnresolved: (mixed && undemotable.length > 0) || encodedOutside.length > 0 || postconditionViolated,
+    unresolvedFactorIds,
+  };
 }
 
 /**
