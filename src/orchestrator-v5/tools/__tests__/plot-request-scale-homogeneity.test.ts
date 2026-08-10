@@ -368,4 +368,43 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     expect(isDemotionPostconditionViolated(false, false), 'no demote chosen = no claim made = no violation').toBe(false);
     expect(isDemotionPostconditionViolated(false, true)).toBe(false);
   });
+
+  it('by_rule_above_one makes the A1 corruption DERIVABLE from the diagnostic (it used to classify CLEAN)', () => {
+    // The pre-existing diagnostic carried rule COUNTS and factor ids and no magnitudes,
+    // so it could not tell that an encoded `2` had crossed PLoT's gate threshold. This
+    // request has zero cap_denormalised, so the old classifier scored it CLEAN while a
+    // £0-baselined cost was being divided by 25000.
+    const req = [{ [CATEGORY]: encodedIv(2), [SWITCH_COST]: iv(0.72) }];
+    const map = buildFactorScaleMap([categoryNode, ...costNodes]);
+    const out = projectRequestInterventionsToWireScale(req, map);
+
+    expect(out.aboveOneByRule, 'the encoded category above 1 must be counted, by rule').toEqual({
+      encoded_verbatim: 1,
+    });
+    // The classifier a log consumer can now write, with no magnitudes involved:
+    const anyAboveOne = Object.values(out.aboveOneByRule).reduce((a, b) => a + b, 0) > 0;
+    const strandedSibling = out.conversions.some((c) => c.rule === 'ambiguous_no_evidence');
+    expect(anyAboveOne && strandedSibling, 'A1 must now classify as CORRUPTED').toBe(true);
+  });
+
+  it('by_rule_above_one carries counts only, and is empty for a genuinely clean request', () => {
+    const map = buildFactorScaleMap([capabilityNodeUnit, ...costNodes]);
+    const out = projectRequestInterventionsToWireScale(perOptionRawObjects, map);
+    expect(out.aboveOneByRule, 'an all-unit-scale request has nothing above 1').toEqual({});
+    // Magnitude-free: every value in the record is a count, never a magnitude.
+    for (const v of Object.values(out.aboveOneByRule)) expect(Number.isInteger(v)).toBe(true);
+  });
+
+  it('counts the EMITTED values, so a successful demotion leaves nothing above 1', () => {
+    // pre-deploy/s3 shape: rule 2 promotes capability to 80, then demotion undoes it.
+    const out = projectRequestInterventionsToWireScale(
+      perOptionRawObjects,
+      buildFactorScaleMap([capabilityNodePct, ...costNodes]),
+    );
+    expect(out.demoted).toBe(true);
+    expect(
+      out.aboveOneByRule,
+      'after a successful demote nothing reaches PLoT above 1, so the count must be empty',
+    ).toEqual({});
+  });
 });

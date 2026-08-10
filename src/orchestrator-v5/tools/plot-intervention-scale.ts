@@ -419,6 +419,18 @@ export interface RequestScaleProjection {
    */
   readonly allWithinUnitInterval: boolean;
   /**
+   * Count of emitted values ABOVE 1, per rule. MAGNITUDE-FREE by construction: it
+   * carries how MANY values crossed the gate threshold, never what they were, so it
+   * preserves the no-magnitudes property the egress diagnostic was designed around.
+   *
+   * WHY: the diagnostic previously recorded rule COUNTS and factor ids only, which
+   * cannot tell whether an `encoded_verbatim` or `no_cap` value exceeded 1 — so a
+   * request corrupted by an encoded category classified as CLEAN. With this field a
+   * corrupted run is derivable exactly: any value above 1 AND a stranded unit-scale
+   * sibling (`ambiguous_no_evidence_factors` non-empty).
+   */
+  readonly aboveOneByRule: Record<string, number>;
+  /**
    * INVARIANT VIOLATION: demotion was chosen and still did not bring the request
    * inside [0,1]. Should be unreachable — it means the decision predicates and the
    * postcondition disagree, and the request is still computing on corrupted input.
@@ -533,12 +545,25 @@ export function projectRequestInterventionsToWireScale(
   // encoded-category case before anybody thought of `encoded_verbatim`.
   const allWithinUnitInterval = perOption.every((o) => Object.values(o).every((v) => v <= 1));
   const postconditionViolated = isDemotionPostconditionViolated(demote, allWithinUnitInterval);
+  // Counted from the EMITTED values (post-demotion), i.e. what actually reaches PLoT
+  // and therefore what actually decides its gate. Counts only — never magnitudes.
+  const aboveOneByRule: Record<string, number> = {};
+  for (const entries of resolved) {
+    for (const { factorId, result } of entries) {
+      if (result.value === null) continue;
+      const emitted = perOption[resolved.indexOf(entries)]?.[factorId];
+      if (emitted !== undefined && emitted > 1) {
+        aboveOneByRule[result.rule] = (aboveOneByRule[result.rule] ?? 0) + 1;
+      }
+    }
+  }
   return {
     perOption,
     conversions,
     demoted: demote && !postconditionViolated && demotedFactors.length > 0,
     demotedFactors,
     allWithinUnitInterval,
+    aboveOneByRule,
     postconditionViolated,
     // A mixed request we must NOT auto-resolve, OR one where demotion failed to make
     // the request homogeneous. Either way it is unresolved and must not be shipped as
