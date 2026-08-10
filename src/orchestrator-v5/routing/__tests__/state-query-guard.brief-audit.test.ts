@@ -43,7 +43,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
-import { tryStateQueryGuard } from '../state-query-guard.js';
+import {
+  isStateQueryQuestionShape,
+  tryStateQueryGuard,
+} from '../state-query-guard.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -222,6 +225,46 @@ describe('ROADMAP 2.975 — brief-audit questions are not answered from edit his
       });
       const text = outcome.matched ? outcome.assistant_text : '';
       expect(text).not.toContain(CANNED_DEFLECTION);
+    });
+  });
+
+  /**
+   * Found by mutation M12: nothing pinned the ROUTE-LEVEL half.
+   *
+   * `isStateQueryQuestionShape` is what stops `route-v2` hijacking a question
+   * into `edit_graph`, and what suppresses the mutation warrant
+   * (`mutation-warrant.ts:221`). The captured audit question carries the edit
+   * verb `change` — *"which numbers did you change or reinterpret?"* — so
+   * without this the route could answer a question ABOUT the model by MUTATING
+   * the model. Every other assertion in this file passed with it removed.
+   */
+  describe('audit questions are suppressed from edit routing at the route', () => {
+    for (const [label, message] of [
+      ['T4_FOURQ', CAPTURED_FOUR_QUESTION_AUDIT],
+      ['T4C_EXCLUDED', CAPTURED_EXCLUDED_QUESTION],
+    ] as const) {
+      it(`${label}: is question-shaped, so edit_graph cannot claim it`, () => {
+        expect(isStateQueryQuestionShape(message)).toBe(true);
+      });
+    }
+
+    it('a bare omission question is question-shaped', () => {
+      expect(isStateQueryQuestionShape('What did you leave out?')).toBe(true);
+    });
+
+    it('an imperative edit is still NOT question-shaped', () => {
+      // The suppressor must not swallow real edits, or nothing could be edited.
+      expect(
+        isStateQueryQuestionShape('Add a constraint below 50000.'),
+      ).toBe(false);
+    });
+
+    it('a compound audit-plus-edit turn is left to normal routing', () => {
+      expect(
+        isStateQueryQuestionShape(
+          'What did you leave out of my brief? Add a constraint below 50000.',
+        ),
+      ).toBe(false);
     });
   });
 

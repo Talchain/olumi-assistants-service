@@ -286,6 +286,47 @@ describe("composeBriefAuditAnswer", () => {
     }
   });
 
+  /**
+   * Found by mutation M10b: widening the `prose_only` filter to swallow
+   * `in_model` items survived every other assertion, while telling the user
+   * that a figure the model IS using "is not driving anything". The absent-list
+   * tests could not see it, because they only ever assert what IS present.
+   *
+   * This is the paired negative: a figure the manifest classes as carried must
+   * not appear under either of the two loss headings.
+   */
+  describe("a figure the model DID use is never reported as a loss", () => {
+    function sectionsFor(capture: { brief_text: string; graph: unknown }) {
+      const manifest = deriveNotModelledManifest(capture.brief_text, capture.graph);
+      const answer = composeBriefAuditAnswer(manifest) ?? "";
+      const paragraphs = answer.split("\n\n");
+      return {
+        manifest,
+        lossSections: paragraphs.filter(
+          (p) => p.startsWith("Not in the model:") || p.startsWith("Mentioned in the commentary"),
+        ),
+      };
+    }
+
+    for (const [name, capture] of [
+      ["B1", B1],
+      ["B2", B2],
+    ] as const) {
+      it(`${name}: no in_model figure appears under a loss heading`, () => {
+        const { manifest, lossSections } = sectionsFor(capture);
+        const inModel = manifest.quantities!.items.filter((i) => i.verdict === "in_model");
+        expect(inModel.length).toBeGreaterThan(0);
+        // Bound by IDENTITY: each carried item's own literal, not a value
+        // predicate some other quantity could satisfy.
+        for (const item of inModel) {
+          for (const section of lossSections) {
+            expect(section).not.toContain(item.literal);
+          }
+        }
+      });
+    }
+  });
+
   describe("beyond the cap, the overflow AND the ordering are disclosed", () => {
     /**
      * A LENGTH PROBE, not a fidelity claim: two real briefs concatenated to
