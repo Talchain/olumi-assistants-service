@@ -363,9 +363,27 @@ export function handleUnreachableFactors(
       // cost real defects; the ruling is producer-side disambiguation, and the
       // producer-side answer is `declared_scale` above.
       //
-      // So: stamp the scale, withhold the rendering, and make the withholding
-      // VISIBLE as an open modelling issue rather than a blank. The formatter
-      // fix belongs in `display-value.ts`, which is frozen for this lane.
+      // So: stamp the scale and withhold the rendering. The formatter fix
+      // belongs in `display-value.ts`, which is frozen for this lane.
+      //
+      // ⚠⚠ THE WITHHOLDING IS TELEMETRY-ONLY TODAY — IT IS NOT USER-VISIBLE,
+      // AND AN EARLIER VERSION OF THIS COMMENT CLAIMED OTHERWISE.
+      //
+      // `boundary.ts:104` filters deterministic repairs through
+      // `REPAIR_CODE_TO_ADJUSTMENT`, a hand-maintained allowlist carrying
+      // exactly one entry (`UNREACHABLE_FACTOR_RECLASSIFIED`). This code is not
+      // on it, so the repair reaches `ctx.deterministicRepairs` and the logs and
+      // stops there — it never becomes a `model_adjustments` row and the user
+      // never sees it. The channel itself is live (the allowlisted code appears
+      // 33x in a real deployed capture); this code simply is not on it.
+      //
+      // Putting it on the channel is NOT a local edit: `ModelAdjustmentCode` is
+      // a CLOSED 5-value enum in the shared contract, so a new code is a
+      // four-repo train. Rowed separately rather than smuggled into this PR.
+      //
+      // Until then the honest description of this branch is: the value is
+      // preserved, the scale is declared, the rendering is suppressed, and the
+      // suppression is recorded where engineers can see it and users cannot.
       const withholdUnit = scale === "ratio";
       if (data.unit !== undefined && !withholdUnit) {
         (node as any).unit = data.unit;

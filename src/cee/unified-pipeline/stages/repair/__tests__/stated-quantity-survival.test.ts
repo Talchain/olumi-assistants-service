@@ -16,15 +16,24 @@
  * deletes `data.value`, deletes `data` entirely, and synthesises a uniform
  * prior in its place. The unit, the raw magnitude and the cap go with `data`.
  *
- * ── THE ORACLE IS NOT MINE ─────────────────────────────────────────────────
+ * ── WHERE THE ORACLE COMES FROM, STATED PRECISELY ──────────────────────────
  * CLAUDE.md trap 22: a corpus drawn from the author's head cannot see the class
- * the author did not imagine — the defect that killed ROADMAP 2.714. Every
- * fixture below is a REAL CAPTURE from the deployed system, committed by a
- * different lane at `src/cee/context-integrity/__tests__/fixtures/*.cold-read.json`,
- * and every expectation is derived from the PRODUCER's declared semantics at
- * the bytes (`synthesisePriorFromBaseline`'s own docstring, the live draft
- * prompt's MODEL UNIT TYPES table, `DECLARED_SCALE_BOUNDS` in the vendored
- * contract) — never from my reading of what a field ought to mean.
+ * the author did not imagine — the defect that killed ROADMAP 2.714. So it is
+ * worth being exact about which parts here are external and which are mine, and
+ * an earlier version of this comment was not.
+ *
+ * EXTERNAL: the `*.cold-read.json` captures — real graphs from the deployed
+ * system, committed by a different lane — and the atom inventory they are
+ * graded against. ONE test below reads a capture directly (the `fac_nrr`
+ * regression pin); the rest are SCAFFOLDED graphs whose VALUES come from those
+ * captures or from the producer's own docstring.
+ *
+ * MINE: the structured expectations. Every one is derived from the PRODUCER's
+ * declared semantics at the bytes (`synthesisePriorFromBaseline`'s docstring,
+ * the live draft prompt's MODEL UNIT TYPES table, `DECLARED_SCALE_BOUNDS` in
+ * the vendored contract) rather than from my reading of what a field ought to
+ * mean — but they are still my derivations, and a mutant kit scores their
+ * sensitivity, never their correctness (trap 13c).
  *
  * ── WHAT THIS SUITE DOES NOT CLAIM ─────────────────────────────────────────
  * It says nothing about what the UI renders. `display-value.ts` is frozen for
@@ -296,12 +305,18 @@ describe("A — the stated magnitude and its unit survive reclassification", () 
       "promoting '%' here would render '56% to 1.68%' through the frozen formatter",
     ).toBeUndefined();
 
+    // ⚠ THIS ASSERTS THE INTERNAL REPAIR ARRAY, NOT A USER-VISIBLE SURFACE.
+    // `boundary.ts:104` filters repairs through a one-entry allowlist that does
+    // not carry this code, so it never becomes a `model_adjustments` row. The
+    // withholding is TELEMETRY-ONLY today; putting it on the user-visible
+    // channel needs a new `ModelAdjustmentCode`, which is a closed enum in the
+    // shared contract and therefore a four-repo train. Rowed separately.
     const withheld = result.repairs.find(
       (r) => r.code === "STATED_UNIT_WITHHELD_RATIO_SCALE",
     );
     expect(
       withheld,
-      "the withheld unit must surface as an open modelling issue, not vanish",
+      "the withheld unit must at least be recorded for engineers, not vanish",
     ).toBeDefined();
     expect(withheld!.path).toBe("nodes[fac_nrr].unit");
 

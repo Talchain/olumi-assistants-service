@@ -411,6 +411,48 @@ function extractPrimaryGoal(brief: string): CompoundGoalExtractionResult["primar
 /**
  * Extract upper bound constraints (operator: <=).
  */
+/**
+ * A NEGATION OR PREVENTION lead — the words that reverse the meaning of a
+ * `below|under` bound sitting after them in the same clause.
+ *
+ * ⚠ DELIBERATELY WIDER THAN `NEGATION_LEAD`, AND FOR A DIFFERENT JOB.
+ * `NEGATION_LEAD` gates a pattern that MINTS a correct floor, so it must be
+ * tight — a false positive there invents a constraint. This one gates a
+ * SUPPRESSION, so it must be broad: a false positive drops a row (a gap), a
+ * false negative ships an inverted one (a confidently wrong limit that
+ * penalises exactly the options honouring it). The two failure modes are not
+ * remotely symmetric, so the two predicates are not the same predicate.
+ *
+ * Found by an adversarial corpus written outside this lane: "do not let gross
+ * margin drop below 78%", "without letting gross margin GO below 78%", "will
+ * not ALLOW it to drop below 78%" all reached the wire as
+ * `fac_gross_margin <= 0.78` — right node, inverted operator, `explicit` at
+ * 0.85 confidence, negation stripped from the quote, labelled "Keep gross
+ * margin at or below 78%".
+ */
+const NEGATION_OR_PREVENTION_LEAD =
+  /\b(?:without|not|never|no|cannot|can't|won't|shan't|shouldn't|mustn't|wouldn't|couldn't|avoid|avoids|avoiding|prevent|prevents|preventing|stop|stops|stopping|refuse|refuses|refusing|protect|protects|protecting|guard|guards|guarding)\b/i;
+
+/**
+ * The clause containing `index`, looking backwards.
+ *
+ * ⚠ THE TERMINATOR MUST BE FOLLOWED BY WHITESPACE. Cutting on a bare
+ * `[.!?]` also cuts the DECIMAL POINT — "£1.5 million" becomes "1" — which is
+ * literally how ROADMAP 2.714 died: a magnitude guard its own header called
+ * "the most important line here" could not fire, because the window handed to
+ * it had been truncated before the magnitude word (CLAUDE.md trap 22). The
+ * semicolon is included because a stressed executive writes "we want growth;
+ * without dropping margin below 78%".
+ */
+function clauseBefore(brief: string, index: number): string {
+  const head = brief.slice(0, index);
+  let cut = 0;
+  for (const m of head.matchAll(/[.!?;]\s/g)) {
+    cut = (m.index ?? 0) + m[0].length;
+  }
+  return head.slice(cut);
+}
+
 /** A half-open character span of the brief already claimed by a stronger reading. */
 type Span = readonly [number, number];
 
@@ -483,6 +525,27 @@ function extractUpperBoundConstraints(
     while ((match = pattern.exec(brief)) !== null) {
       // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
       if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      // ── SUPPRESS RATHER THAN INVERT ────────────────────────────────────
+      // A `below|under` reading whose clause is negated is a FLOOR wearing a
+      // ceiling's words. `NEGATED_FLOOR_PATTERNS` mints the correct row for the
+      // phrasings it recognises; for every phrasing it does not, the honest
+      // output is NOTHING.
+      //
+      // A missing constraint is a gap. An inverted one is scored by ISL
+      // (operator and value survive all 19 hops to the engine) and penalises
+      // precisely the options that honour the limit. We do not attempt to
+      // invert-correctly here — guessing the right operator from arbitrary
+      // English is the 2.714 failure mode, and this estate has the scar.
+      //
+      // Precedent: ROADMAP 2.653 drops rows whose operator is the inverse of
+      // the sentence rather than repairing them.
+      if (
+        /\b(?:below|under)\b/i.test(match[0]) &&
+        NEGATION_OR_PREVENTION_LEAD.test(clauseBefore(brief, match.index ?? 0) + " " + match[0])
+      ) {
+        continue;
+      }
       // Pattern groups vary, normalize them
       let targetName: string;
       let valueStr: string;
@@ -1209,6 +1272,24 @@ export function extractCompoundGoals(
   // ⚠ ORDER IS LOAD-BEARING. Negated floors run FIRST and claim their spans, so
   // the simple `X below Y` reading cannot re-derive an inverted ceiling from the
   // floor's own words. See NEGATED_FLOOR_PATTERNS.
+  // ⚠⚠ THE SPAN CLAIM IS NO LONGER INDEPENDENTLY OBSERVABLE — SAY SO, DO NOT
+  // LET THE NEXT READER ASSUME IT BITES. Since the clause-level suppression
+  // landed in `extractUpperBoundConstraints`, THREE mutants that disable this
+  // mechanism all SURVIVE the full 133-test suite: removing the claim from the
+  // upper path, from both paths, and removing the intra-floor overlap guard.
+  // The suppression subsumes it, because every phrasing that matches a floor
+  // pattern necessarily carries a `NEGATION_LEAD`, and that set is a subset of
+  // `NEGATION_OR_PREVENTION_LEAD`.
+  //
+  // It is KEPT rather than deleted, and the distinction from the
+  // `dropSubjectlessDuplicates` pass deleted earlier in this PR is deliberate:
+  // that was a no-op pass over results, whereas this is a guard of a DIFFERENT
+  // KIND — positional/structural, where the suppression is lexical. They fail
+  // differently: the suppression fails on a negation word absent from its list
+  // (M13 proves that list is load-bearing), this fails on a phrasing the floor
+  // patterns do not match. CLAUDE.md trap 12d: two guards of different kinds
+  // are not redundant, and neither supersedes the other — ship both.
+  //
   // ⚠ THE SPAN CLAIM IS ALSO WHAT KILLS THE SUBJECT-LESS DUPLICATE. A first cut
   // of this fix also carried a `dropSubjectlessDuplicates` pass, on the theory
   // that B1's `fac_unspecified` row needed its own screen. A mutant that

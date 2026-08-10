@@ -37,7 +37,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { extractCompoundGoals } from "../index.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { extractCompoundGoals, remapConstraintTargets } from "../index.js";
 
 const B1_MARGIN =
   "The goal is to get to £20m ARR by end of FY28 without dropping gross margin below 78%.";
@@ -120,6 +122,79 @@ describe("D — a negated bound keeps the user's polarity", () => {
   });
 });
 
+/**
+ * ── THE ADVERSARIAL CORPUS ────────────────────────────────────────────────
+ *
+ * ⚠ THESE PHRASINGS ARE NOT MINE, AND THAT IS THE ENTIRE POINT.
+ *
+ * The first cut of this fix handled the corpus sentence and the negation
+ * idioms I happened to think of. An independent reviewer then wrote the list
+ * below — from outside this lane — and every one of them still reached the
+ * wire as `fac_gross_margin <= 0.78`: the right node, the INVERTED operator,
+ * `provenance: "explicit"` at `confidence: 0.85`, the negation stripped from
+ * the quote, under a label reading "Keep gross margin at or below 78%".
+ *
+ * That is CLAUDE.md trap 22 landing on the very fix written while citing it: a
+ * corpus drawn from the author's head cannot see the class the author did not
+ * imagine, and a mutant kit scores sensitivity, never breadth.
+ *
+ * The fix is SUPPRESSION, not correction. Where the floor patterns recognise
+ * the phrasing they mint a correct `>=`; everywhere else the honest output is
+ * no row at all. A missing constraint is a gap; an inverted one is scored by
+ * ISL and penalises exactly the options that honour the limit.
+ */
+describe("D — no negated bound reaches the wire inverted (adversarial corpus)", () => {
+  it.each([
+    // negation lead outside NEGATION_LEAD
+    "Do not let gross margin drop below 78%.",
+    "We do not want gross margin to drop below 78%.",
+    // fall-verbs outside {drop, fall, slip, dip}
+    "without letting gross margin go below 78%",
+    "We will not allow gross margin to drop below 78%.",
+    "Avoid letting gross margin sink below 78%.",
+    // subject shapes that break a bare \w+ capture
+    "Do not let the group's blended gross margin drop below 78%.",
+    "We must not let gross-margin fall below 78%.",
+    // clause-level, semicolon separated
+    "Growth is the priority; without dropping gross margin below 78%.",
+    // ⚠ THE 2.714 DECIMAL-POINT KILLER, REPRODUCED IN THIS LANE'S OWN CODE.
+    // `clauseBefore` cuts on `[.!?;]\s` — the trailing \s is load-bearing, and
+    // these two sentences are what prove it. Mutating the cut to a bare
+    // `[.!?]` makes it cut inside "£1.5m", which discards the "Do not"/"will
+    // not" ahead of it, and BOTH sentences then emit an INVERTED
+    // `<= 0.78` (measured: two rows each). That is the exact mechanism that
+    // killed ROADMAP 2.714 — a guard its own header called "the most important
+    // line here" could not fire, because the window handed to it had been
+    // truncated at a decimal point before the magnitude word.
+    "Do not let the £1.5m marketing spend push gross margin below 78%.",
+    "We will not let the £2.5m programme drag gross margin below 78%.",
+  ])("emits no inverted ceiling for: %s", (brief) => {
+    for (const c of withValue(constraintsOf(brief), 0.78)) {
+      expect(
+        c.operator,
+        `this sentence states a FLOOR, but a row reached the output as ` +
+          `${c.operator} 0.78 (label: ${JSON.stringify(c.label)}). An inverted ` +
+          `floor is scored by ISL and penalises the options that honour it.`,
+      ).not.toBe("<=");
+    }
+  });
+
+  /**
+   * DISCRIMINATING HALF. Suppression must not eat a legitimate ceiling. These
+   * carry no negation in the clause and must survive byte-identically.
+   */
+  it.each([
+    { brief: "Keep churn under 4% next year.", value: 0.04 },
+    { brief: "Reach 800 customers while keeping churn under 4%.", value: 0.04 },
+    { brief: "Keep support cost under £2.9m.", value: 2_900_000 },
+    { brief: "Marketing spend is capped at £1.5m.", value: 1_500_000 },
+  ])("preserves the genuine ceiling in: $brief", ({ brief, value }) => {
+    const rows = withValue(constraintsOf(brief), value);
+    expect(rows.length, "a legitimate ceiling was suppressed").toBeGreaterThan(0);
+    for (const c of rows) expect(c.operator).toBe("<=");
+  });
+});
+
 describe("D — a bare subject-less bound does not duplicate a specific one", () => {
   /**
    * The second B1 row — `targetName: "unspecified"`, `fac_unspecified` — comes
@@ -181,5 +256,120 @@ describe("D — the corpus's hard limits reach the enforceable carrier", () => {
         `survive as an inert cap, which PLoT does not score`,
     ).toBeGreaterThan(0);
     expect(rows[0].operator).toBe(operator);
+  });
+});
+
+/**
+ * ── ⚠ EXTRACTION IS NOT ARRIVAL ────────────────────────────────────────────
+ *
+ * CLAUDE.md trap 16-INVERSE: a code path can be fully live while the DATA
+ * cannot reach it, and only a producer-side derivation or a real capture tells
+ * the two apart. Every test above measures the EXTRACTOR. This one measures
+ * what survives `remapConstraintTargets` against the node ids of the REAL
+ * DEPLOYED B1 GRAPH — because a constraint whose `node_id` matches nothing is
+ * dropped, and never reaches PLoT at all.
+ *
+ * The measured result is uncomfortable and is pinned here precisely so nobody
+ * inherits the extractor-scoped number as if it were the wire-scoped one:
+ * the real B1 graph has NO gross-margin node, so the headline atom B1-A08 is
+ * extracted correctly and then lands NOWHERE.
+ *
+ * This is still a strict improvement — pristine landed zero — but "3 correct"
+ * is a claim about extraction, and only the count below is a claim about the
+ * wire.
+ */
+describe("D — what actually reaches the wire, against the real B1 node set", () => {
+  const capture = JSON.parse(
+    readFileSync(
+      resolve(
+        process.cwd(),
+        "src/cee/context-integrity/__tests__/fixtures/b1-growth.cold-read.json",
+      ),
+      "utf8",
+    ),
+  );
+  const graph = capture.graph ?? capture;
+  const nodeIds: string[] = graph.nodes.map((n: any) => n.id);
+  const nodeLabels = new Map<string, string>(
+    graph.nodes.map((n: any) => [n.id, n.label]),
+  );
+  const B1 = readFileSync(
+    "/Users/paulslee/Documents/GitHub/olumi-docs/PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/briefs/B1.txt",
+    "utf8",
+  );
+
+  it("the real graph genuinely has no gross-margin node (the reason A08 cannot land)", () => {
+    const marginish = nodeIds.filter((id) => /margin/i.test(id));
+    expect(marginish, "a margin node exists — this pin's premise is stale").toEqual([]);
+    // and the headcount node is not spelled the way the extractor names it
+    expect(nodeIds).toContain("fac_headcount_budget");
+    expect(nodeIds).not.toContain("fac_people");
+  });
+
+  it("3 extracted -> 1 reaches the wire: extraction count is NOT arrival count", () => {
+    const extracted = (extractCompoundGoals(B1) as any).constraints ?? [];
+    const result = remapConstraintTargets(extracted, nodeIds, nodeLabels) as any;
+    // ⚠ `remapped` is a COUNT, not the array. The surviving rows are
+    // `result.constraints` — a shape confusion that silently made an earlier
+    // version of this test assert nothing at all.
+    const survivors = result.constraints ?? [];
+
+    expect(extracted.length, "extractor-scoped count").toBe(3);
+    expect(
+      survivors.length,
+      "wire-scoped count — if this moves, the PR body's claim must move with it",
+    ).toBe(1);
+    expect(result.rejected_no_match).toBe(2);
+
+    // The one that lands is the marketing cap, bound by IDENTITY.
+    expect(survivors[0].targetNodeId).toBe("fac_marketing_spend");
+    expect(survivors[0].operator).toBe("<=");
+    expect(survivors[0].value).toBe(1_500_000);
+
+    // Every survivor targets a node that genuinely exists.
+    for (const c of survivors) expect(nodeIds).toContain(c.targetNodeId);
+
+    // THE HEADLINE ATOM DOES NOT LAND. B1-A08's margin floor is extracted with
+    // the correct polarity and then dropped, because the real graph has no
+    // margin node to bind it to. Pinned so the PR's extractor-scoped result is
+    // never inherited as a wire-scoped one. Closing this needs the DRAFTER to
+    // mint a margin node — a separate lane.
+    expect(survivors.map((c: any) => c.targetNodeId)).not.toContain("fac_gross_margin");
+  });
+});
+
+/**
+ * ── ⚠ DISCLOSED, NOT FIXED: THE RETRACTION CLASS ──────────────────────────
+ *
+ * A constraint the user STATES AND THEN WITHDRAWS in the same brief is still
+ * extracted as live. Pristine had this defect too — but pristine produced an
+ * INVERTED row, and head produces a correctly-polarised one, so head is wrong
+ * MORE CONVINCINGLY. That is a real cost of this PR and it is recorded here
+ * rather than left for someone to discover.
+ *
+ * It is the same family as the values ROADMAP 2.714 was measured committing
+ * after the user had "negated or retracted" them. Closing it needs discourse
+ * scope — which clause supersedes which — and guessing that from arbitrary
+ * English is exactly what killed 2.714. Rowed, not guessed at.
+ *
+ * ⚠ THIS TEST PINS THE DEFECT, NOT THE DESIRED BEHAVIOUR. It is a tripwire: if
+ * someone fixes the retraction class, this REDs and they delete it. It must
+ * never be read as a specification.
+ */
+describe("D — retraction class (DISCLOSED DEFECT, pinned as a tripwire)", () => {
+  it("still extracts a constraint the same sentence retracts", () => {
+    const brief =
+      "We initially said gross margin must not drop below 78%, but that constraint has since been removed.";
+    const rows = constraintsOf(brief).filter((c) => c.value === 0.78);
+
+    // Today: a row survives. When this stops being true the fix has landed.
+    expect(
+      rows.length,
+      "the retraction class appears to be FIXED — delete this tripwire and its docblock",
+    ).toBeGreaterThan(0);
+
+    // And at least the polarity is no longer inverted, which is the only part
+    // this PR improved.
+    for (const c of rows) expect(c.operator).toBe(">=");
   });
 });
