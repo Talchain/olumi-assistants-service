@@ -117,6 +117,103 @@ describe("isBriefAuditQuestion", () => {
     }
   });
 
+  /**
+   * ROUND 3 — HYPOTHETICAL TURNS MUST NOT BE CLAIMED.
+   *
+   * Round 2 added `assume` to the inference verbs and bought a NEW stolen turn:
+   * *"Assuming you keep the 3-day policy, what happens to attrition?"* has no
+   * edit and no ambiguity, and it started receiving a fidelity report with zero
+   * LLM calls, where before this PR it reached the LLM. On that class the user
+   * is STRICTLY WORSE OFF than before — this row's own harm class in mirror.
+   *
+   * ⭐ THE MECHANISM IS A PRINCIPLE THIS MODULE ALREADY STATED AND DID NOT
+   * IMPLEMENT. {@link AUDIT_FRAME_PATTERNS} says it is "deliberately
+   * second-person and past-tense" because "a present-tense imperative is a
+   * request, not an audit". Two things broke that:
+   *   1. the inference verb only had to CO-OCCUR with a frame match anywhere in
+   *      the sentence, never to be part of the audit construction — `assume` is
+   *      imperative and `you keep` satisfied the frame from inside the
+   *      conditional clause;
+   *   2. the frame itself admitted BARE PRESENT-TENSE verbs (`keep`, `use`),
+   *      which is exactly what a conditional clause contains.
+   *
+   * Both had to go, and measurement is what established that: binding alone
+   * still lost *"Assuming you keep my assumptions…"* through the retention
+   * path, and past-tense alone still lost *"Assume the CTO is right … the
+   * engineering cost you used"* through unbound inference. Neither half is
+   * sufficient; the pair reaches zero.
+   *
+   * ⚠ CORPUS PROVENANCE, stated because it is the whole basis of the claim
+   * (trap 22c). The CONDITIONAL CONTENT below is verbatim from the frozen
+   * briefs — "3-day", "attach were 100%", "if he's right"/40% reuse, "a 10%
+   * across-the-board RIF", "60% of revenue", "if we don't do it", "if we wait a
+   * year" — and two entries are real captured product utterances. Only the
+   * follow-up question frame around that content is constructed. It is NOT a
+   * corpus of wholly real turns, and it is NOT drawn from the reviewer's list.
+   */
+  describe("ROUND 3: hypothetical and what-if turns are never claimed", () => {
+    const hypotheticals: readonly (readonly [string, string])[] = [
+      ["B2 '3-day' (the cleanest case)", "Assuming you keep the 3-day policy, what happens to attrition?"],
+      ["B3 'attach were 100%'", "Assuming attach were 100%, which it won't be, what happens to the revenue you use?"],
+      ["B1 'if he's right' / 40% reuse", "Assume the CTO is right and reuse is 40%: does the engineering cost you used double?"],
+      ["B1 'if we wait a year'", "Suppose we wait a year. Do you keep the same Germany window?"],
+      ["B3 'if we don't do it'", "If we don't do it, does the copilot velocity you assumed still hold?"],
+      ["REAL CAPTURE: premortem chip", "Imagine this decision went wrong. What would have caused it?"],
+      ["REAL CAPTURE: assumptions chip", "Which assumptions in this model matter most to check before I run the analysis?"],
+      ["B2 Dana's '10% across-the-board RIF'", "Assuming you keep Dana's 10% across-the-board RIF, what happens to CSAT?"],
+      ["B3 '60% of revenue'", "Assuming the legal clearance fails and we lose 60% of revenue, what do you use then?"],
+      ["names 'my assumptions' (retention path)", "Assuming you keep my assumptions, what happens to the goal?"],
+      ["counterfactual on a used figure", "What if the £2.9m you used were actually £3.5m?"],
+      ["forward-looking, no audit", "If we close Leeds in March, what happens to the model?"],
+    ];
+
+    for (const [label, message] of hypotheticals) {
+      it(`${label}: is left to the LLM, not answered as a brief audit`, () => {
+        expect(isBriefAuditQuestion(message)).toBe(false);
+      });
+    }
+  });
+
+  /**
+   * THE BOUNDARY, IN BOTH DIRECTIONS. A conditional clause must not disqualify
+   * a genuine audit question, or the fix for one stolen turn steals another.
+   */
+  describe("ROUND 3: the imperative/frame boundary, both directions", () => {
+    it("an audit question SURVIVES a conditional clause around it", () => {
+      expect(
+        isBriefAuditQuestion(
+          "If you had to pick one, what did you leave out of my brief?",
+        ),
+      ).toBe(true);
+    });
+
+    it("an audit question survives a conditional AND an inference verb", () => {
+      expect(
+        isBriefAuditQuestion(
+          "Assuming the model is roughly right, what did you infer rather than take from my brief?",
+        ),
+      ).toBe(true);
+    });
+
+    it("a present-tense INTERROGATIVE audit is still claimed", () => {
+      // "do you" is interrogative; a conditional clause does not produce it.
+      expect(isBriefAuditQuestion("Which of my figures do you use?")).toBe(true);
+    });
+
+    it("a bare present-tense imperative is not an audit", () => {
+      expect(isBriefAuditQuestion("Use my brief to rebuild the model.")).toBe(false);
+    });
+
+    it("an inference verb far from the frame does not bind to it", () => {
+      // The verb must be part of the audit construction, not merely present.
+      expect(
+        isBriefAuditQuestion(
+          "Assume nothing changes for now, and tell me what the analysis said.",
+        ),
+      ).toBe(false);
+    });
+  });
+
   it("an audit frame alone is not enough", () => {
     // "did you" with no brief referent and no omission verb.
     expect(isBriefAuditQuestion("Did you run the analysis?")).toBe(false);

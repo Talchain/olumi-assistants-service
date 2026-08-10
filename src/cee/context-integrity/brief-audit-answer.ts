@@ -151,17 +151,40 @@ export function isBriefAuditQuestion(message: string): boolean {
 /**
  * Conjunct 1 — the question is about what the SYSTEM did, in the past.
  *
- * Deliberately second-person and past-tense. A present-tense imperative
- * ("use my brief") is a request, not an audit.
+ * ⚠⚠ THIS DOCSTRING WAS RIGHT AND THE PATTERNS DID NOT IMPLEMENT IT, WHICH IS
+ * HOW ROUND 2 STOLE HYPOTHETICAL TURNS. It said "deliberately second-person and
+ * past-tense", then listed the BARE PRESENT forms `keep` and `use` — and a
+ * conditional clause is made of exactly those:
+ *
+ *   "Assuming you keep the 3-day policy, what happens to attrition?"
+ *                 ^^^^^^^^ satisfied the frame from inside the hypothetical
+ *
+ * That turn has no edit and no ambiguity, and it began receiving a fidelity
+ * report with zero LLM calls where it previously reached the LLM: strictly
+ * worse than before the row existed.
+ *
+ * The frame is now genuinely restricted to constructions that report on a
+ * COMPLETED action or ASK about one:
+ *   · `did you` / `have you`  — interrogative past
+ *   · `do you`                — interrogative present. Kept deliberately:
+ *     "which of my figures do you use?" is a real audit question, and a
+ *     conditional clause never produces "do you". Dropping it lost that
+ *     question for no gain, measured.
+ *   · `you <PAST-TENSE verb>` — "what you kept", "everything you left out"
+ *
+ * A bare present-tense verb ("use my brief", "you keep X") is a request or a
+ * supposition, never a report. That distinction is the whole conjunct.
  */
 const AUDIT_FRAME_PATTERNS: readonly RegExp[] = [
-  // "what did you keep", "which parts of my brief did you leave out",
-  // "did you use my ARR figure"
+  // "what did you keep", "which parts of my brief did you leave out"
   /\bdid\s+you\b/i,
-  // "what you kept", "everything you left out", "what you inferred"
-  /\byou\s+(?:kept|keep|used|use|left|dropped|omitted|ignored|inferred|included|excluded|discarded|captured|missed|reinterpreted)\b/i,
   // "have you left anything out", "have you used my numbers"
   /\bhave\s+you\b/i,
+  // "which of my figures do you use?" — interrogative, not conditional.
+  /\bdo\s+you\b/i,
+  // "what you kept", "everything you left out", "what you inferred".
+  // PAST TENSE ONLY: `keep`/`use` are what a conditional clause is built from.
+  /\byou\s+(?:kept|used|left|dropped|omitted|ignored|inferred|included|excluded|discarded|captured|missed|reinterpreted)\b/i,
 ];
 
 /**
@@ -236,15 +259,34 @@ const RETENTION_VERB_PATTERNS: readonly RegExp[] = [
  * session-edit arm owns, and putting them here would answer "what did you just
  * change?" with a report about the brief.
  */
+/**
+ * ⚠ BOUND TO THE FRAME, NOT MERELY CO-OCCURRING WITH IT. Round 2 tested these
+ * verbs anywhere in the sentence, so `Assuming` at the head of a conditional
+ * paired with a frame match further along and claimed the turn. The verb must
+ * be the OBJECT OF THE AUDIT CONSTRUCTION — "did you ... infer" — which is what
+ * distinguishes a question about our inference from a supposition offered to us.
+ *
+ * The gap is measured in WORDS, not characters, and deliberately so: this
+ * estate has already burned four rounds on a predicate discriminated by
+ * "two arbitrary length constants with hard cliffs on either side"
+ * (CLAUDE.md trap 22f). Nought-to-three words is a grammatical claim — the verb
+ * is the head of the frame's complement — not a tuning knob. A ZERO gap does
+ * not work: it loses "what did you add or infer yourself?", which is PR1's own
+ * second question.
+ */
+const INFERENCE_VERB =
+  "infer(?:red|ring|s)?|(?:re)?interpret(?:ed|ing|s|ation)?|invent(?:ed|ing|s)?" +
+  "|assum(?:e|ed|ing|ption|ptions)|made?\\s+up|guess(?:ed|ing|es)?|fill(?:ed)?\\s+in";
+
+/** Past participles only — the form that reports a completed inference. */
+const PAST_INFERENCE_VERB =
+  "inferred|(?:re)?interpreted|invented|assumed|guessed|made\\s+up|filled\\s+in";
+
 const INFERENCE_VERB_PATTERNS: readonly RegExp[] = [
-  /\binfer(?:red|ring|s)?\b/i,
-  /\b(?:re)?interpret(?:ed|ing|s|ation)?\b/i,
-  /\binvent(?:ed|ing|s)?\b/i,
-  /\bassum(?:e|ed|ing|ption)/i,
-  /\bmade?\s+up\b/i,
-  /\bguess(?:ed|ing|es)?\b/i,
-  /\bfill(?:ed)?\s+in\b/i,
-  /\bmake\s+up\b/i,
+  new RegExp(`\\bdid\\s+you\\s+(?:\\w+\\s+){0,3}(?:${INFERENCE_VERB})\\b`, "i"),
+  new RegExp(`\\bhave\\s+you\\s+(?:\\w+\\s+){0,3}(?:${INFERENCE_VERB})\\b`, "i"),
+  new RegExp(`\\bdo\\s+you\\s+(?:\\w+\\s+){0,3}(?:${INFERENCE_VERB})\\b`, "i"),
+  new RegExp(`\\byou\\s+(?:\\w+\\s+){0,2}(?:${PAST_INFERENCE_VERB})\\b`, "i"),
 ];
 
 const OMISSION_VERB_PATTERNS: readonly RegExp[] = [
