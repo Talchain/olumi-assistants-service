@@ -188,26 +188,37 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     }
   });
 
-  it('does NOT demote a genuinely user-stated raw scale (rule 1) — that would corrupt a stated magnitude', () => {
-    // raw_value is the explicit user-scale field; CEE is not its author and must not rewrite it.
-    // TRAINING stays unit-scale (ambiguous_no_evidence) so the request IS genuinely
-    // mixed — otherwise this case would pass for the wrong reason (no mixture at all).
-    const withStatedRaw = [
+  it('a CONSISTENT stated pair demotes to its own unit form; an INCONSISTENT one blocks (round-4 refinement)', () => {
+    // ROUND 4 SEMANTICS REFINEMENT (was: "never demote a stated raw_value").
+    // A consistent pair — value ∈ [0,1] with value * cap ≈ raw_value — is the
+    // SAME magnitude in two scales, by the author's own hand. Emitting the unit
+    // form is not a rewrite: PLoT was proven (live, b9f6b5a) to produce
+    // identical results for the all-unit and all-raw forms of a coherent
+    // request. What is genuinely not ours to touch is a pair whose halves
+    // DISAGREE — there the true magnitude is unknown, and the request blocks.
+    const map = buildFactorScaleMap([capabilityNodePct, ...costNodes]);
+
+    // Consistent: 0.72 * 25000 = 18000 → demotable to 0.72; request coherent.
+    const consistent = [
       { [SWITCH_COST]: { value: 0.72, raw_value: 18000 }, [TRAINING]: iv(0.6), [CAPABILITY]: iv(0.8) },
     ];
-    const map = buildFactorScaleMap([capabilityNodePct, ...costNodes]);
-    const out = projectRequestInterventionsToWireScale(withStatedRaw, map);
-    // Pin the precondition: this payload really is mixed AND really does carry a stated raw > 1.
-    const rules = projectInterventionsToRawScale(withStatedRaw[0]!, map).conversions;
-    expect(rules.find((c) => c.factor_id === SWITCH_COST)?.rule).toBe('raw_value_used');
-    expect(rules.find((c) => c.factor_id === TRAINING)?.rule).toBe('ambiguous_no_evidence');
-    expect(rules.find((c) => c.factor_id === CAPABILITY)?.rule).toBe('cap_denormalised');
-    expect(out.demoted, 'a request carrying an explicit raw_value must not be demoted').toBe(false);
-    expect(out.perOption[0]?.[SWITCH_COST], 'a user-stated raw magnitude must survive verbatim').toBe(18000);
-    expect(
-      out.mixedUnresolved,
-      'the un-demotable mixed case must be surfaced, never silently shipped',
-    ).toBe(true);
+    const okOut = projectRequestInterventionsToWireScale(consistent, map);
+    expect(okOut.demoted, 'a consistent pair must demote with its promoted siblings').toBe(true);
+    expect(okOut.perOption[0]?.[SWITCH_COST], 'the unit form of the SAME stated magnitude').toBe(0.72);
+    expect(okOut.perOption[0]?.[CAPABILITY]).toBe(0.8);
+    expect(okOut.mixedUnresolved).toBe(false);
+    expect(okOut.allWithinUnitInterval).toBe(true);
+
+    // Inconsistent: 0.5 * 25000 = 12500 ≠ 18000 → the true magnitude is
+    // unknown; nothing may be demoted and the request is surfaced unresolved.
+    const inconsistent = [
+      { [SWITCH_COST]: { value: 0.5, raw_value: 18000 }, [TRAINING]: iv(0.6), [CAPABILITY]: iv(0.8) },
+    ];
+    const badOut = projectRequestInterventionsToWireScale(inconsistent, map);
+    expect(badOut.demoted, 'an inconsistent pair must block the demote').toBe(false);
+    expect(badOut.perOption[0]?.[SWITCH_COST], 'the stated raw survives verbatim').toBe(18000);
+    expect(badOut.mixedUnresolved, 'must be surfaced, never silently shipped').toBe(true);
+    expect(badOut.unresolvedFactorIds, 'the fixable factor must be named').toContain(SWITCH_COST);
   });
 
   // -------------------------------------------------------------------------
@@ -528,5 +539,24 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
       out.mixedUnresolved,
       'a negative no_cap sibling is not stranded at unit scale — nothing to warn about',
     ).toBe(false);
+  });
+
+  it('an ENCODED code outside [0,1] is unresolvable even with no stranded sibling — it fires the gate and is rescaled by it', () => {
+    // Measured at PLoT b9f6b5a: {f_pv: 80000, f_en: 2} fires the gate and ISL
+    // receives the code as 1 — "outsource" silently became "buy". No demote can
+    // help (a code has no unit form), and no stranded sibling is needed for the
+    // corruption: the code corrupts ITSELF.
+    const map = buildFactorScaleMap([capabilityNodePct, categoryNode]);
+    const req = [{ [CAPABILITY]: iv(0.8), [CATEGORY]: { value: 2, value_type: 'categorical', encoding_map: { build: 0, buy: 1, outsource: 2 } } }];
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.demoted).toBe(false);
+    expect(out.mixedUnresolved, 'a code that cannot cross the wire faithfully must be surfaced').toBe(true);
+    expect(out.unresolvedFactorIds).toContain(CATEGORY);
+
+    // Twin: the same code WITHIN [0,1] beside the same promotion is stranded-
+    // mixed (already covered) — and codes 0/1 with no outside sibling ship fine.
+    const okReq = [{ [CATEGORY]: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1, outsource: 2 } } }];
+    const okOut = projectRequestInterventionsToWireScale(okReq, map);
+    expect(okOut.mixedUnresolved, 'a code within [0,1] with no gate-firing sibling is fine').toBe(false);
   });
 });

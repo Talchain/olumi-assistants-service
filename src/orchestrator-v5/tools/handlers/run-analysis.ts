@@ -93,6 +93,12 @@ import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { AnalysisNotReadyError } from './analysis-ready-core.js';
 import { scaffoldUnconfiguredOptions } from './scaffold-unconfigured-options.js';
+import {
+  buildFactorScaleMap,
+  projectRequestInterventionsToWireScale,
+  summariseConversions,
+  summaryIsNoteworthy,
+} from '../plot-intervention-scale.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import {
   buildScaffoldDisclosureForPartition,
@@ -406,16 +412,142 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       scenarioId: args.scenario_id,
     }).graph;
 
-    // --- 3. Build PLoT payload (allowlisted fields) -----------------------
+    // --- 3. ONE request-level scale projection, on the FINAL option set -----
+    // ROUND 4: the projection runs HERE — after the scaffold, immediately
+    // before the payload is built — because it is the LAST transformation of
+    // the options. Round 3 projected and attested inside the snapshot loader,
+    // and the scaffold then mutated the options AFTER the guard (TOCTOU): the
+    // loader attested `allWithinUnitInterval: true` while the wire shipped a
+    // raw-scale neutral beside demoted unit values, corrupting the configured
+    // cost factor 100,000× (round-3 review, executed against real PLoT
+    // b9f6b5a). Options up to this point carry the ORIGINAL merged
+    // intervention OBJECTS (loader) plus the scaffold's neutral candidate
+    // OBJECTS; the wire numbers exist only from here on.
+    const graphNodesForScale = (graphForAnalysis as { nodes?: unknown })?.nodes;
+    const factorScaleById = buildFactorScaleMap(graphNodesForScale);
+    const scaffoldedOptions = scaffoldOutcome.options as ReadonlyArray<Record<string, unknown>>;
+    const rawObjectsPerOption = scaffoldedOptions.map((opt) =>
+      opt.interventions !== null && typeof opt.interventions === 'object'
+        ? (opt.interventions as Record<string, unknown>)
+        : {},
+    );
+    const requestProjection = projectRequestInterventionsToWireScale(
+      rawObjectsPerOption,
+      factorScaleById,
+    );
+    const conversionSummary = summariseConversions(requestProjection.conversions);
+    if (summaryIsNoteworthy(conversionSummary) || requestProjection.demoted) {
+      log.info(
+        {
+          event: 'run_analysis.intervention_scale_egress',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          by_rule: conversionSummary.by_rule,
+          cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
+          inconsistent_scale_factors: conversionSummary.inconsistent_scale_factors,
+          ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
+          by_rule_outside_unit_interval: requestProjection.outsideUnitIntervalByRule,
+          scale_demoted: requestProjection.demoted,
+          demoted_factors: requestProjection.demotedFactors,
+          wire_all_within_unit_interval: requestProjection.allWithinUnitInterval,
+        },
+        'run_analysis egress intervention value-scale projection (redacted; no magnitudes)',
+      );
+    }
+
+    // --- 3.1. Unresolvable-mixed requests DO NOT COMPUTE --------------------
+    // Orchestrator ruling (round 4): a request the system itself classified as
+    // unresolvable-mixed must not reach PLoT — its gate would re-scale every
+    // stranded value (unit-scale costs annihilated; encoded categories like
+    // "buy"=1 renormalised to 0.5). Routed to the EXISTING recoverable
+    // `analysis_not_ready` shape (200 + honest next step + review chip); the
+    // copy names the factors and asks for their units. This replaces the
+    // round-3 log-only warn, which let the run ship `robustness: high` with no
+    // hedge on numbers computed from a corrupted payload.
+    if (requestProjection.mixedUnresolved) {
+      const labelById = new Map<string, string>();
+      if (Array.isArray(graphNodesForScale)) {
+        for (const n of graphNodesForScale) {
+          const node = n as { id?: unknown; label?: unknown };
+          if (typeof node.id === 'string' && typeof node.label === 'string') {
+            labelById.set(node.id, node.label);
+          }
+        }
+      }
+      const factorNames = requestProjection.unresolvedFactorIds
+        .map((id) => labelById.get(id))
+        .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
+      const named = factorNames.length > 0 ? factorNames.join(', ') : 'some of the factors';
+      log.warn(
+        {
+          event: 'run_analysis.intervention_scale_mixed_unresolved',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          unresolved_factor_ids: requestProjection.unresolvedFactorIds,
+          by_rule_outside_unit_interval: requestProjection.outsideUnitIntervalByRule,
+        },
+        'run_analysis outbound payload is unresolvably mixed-scale — analysis BLOCKED with a typed ask (never computed)',
+      );
+      throw new HandlerInvocationFailedError(
+        'Outbound analysis payload mixes value scales in a way CEE cannot safely resolve',
+        {
+          cause_kind: 'analysis_not_ready',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+            reason_code: 'mixed_scale_unresolved',
+            next_step: `I can't run this analysis safely yet: the scale of ${named} is unclear — some values look like raw amounts and others like 0–1 proportions, and mixing them would distort the results. Tell me the unit for ${named} (for example “percent, 0–100” or “£”), and I'll re-run the analysis.`,
+          },
+        },
+      );
+    }
+
+    // --- 3.2. HARD postcondition on the FINAL wire values -------------------
+    // Belt and braces at the true seam: the projection above IS the last
+    // transformation, and this assertion re-checks its output right where the
+    // payload is assembled. `postconditionViolated` means the decision
+    // predicates and the postcondition disagree — fail CLOSED, never compute.
+    if (requestProjection.postconditionViolated) {
+      log.error(
+        {
+          event: 'run_analysis.intervention_scale_postcondition_violated',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          demoted_factors: requestProjection.demotedFactors,
+        },
+        'run_analysis INVARIANT VIOLATION: demotion was chosen but the final payload is still not within [0,1] — refusing to compute on a corrupted payload',
+      );
+      throw new HandlerInvocationFailedError(
+        'Analysis payload failed its scale-coherence postcondition',
+        {
+          cause_kind: 'analysis_not_ready',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+            reason_code: 'scale_postcondition_violated',
+            next_step: 'This scenario needs a quick fix before it can be analysed.',
+          },
+        },
+      );
+    }
+
+    // --- 3.3. Build PLoT payload (allowlisted fields) -----------------------
     // validateRunPayload inside PLoTClient.run enforces the strict allowlist
-    // shape. We only forward fields PLoT accepts. No interpretation, no
-    // transformation beyond the 0.13c-1 intercept guard above.
+    // shape. We only forward fields PLoT accepts. The options carry the
+    // request-projected wire numbers; NOTHING may transform them between here
+    // and `plotClient.run` (that gap was the round-3 defect).
+    const finalWireOptions = scaffoldedOptions.map((opt, index) => ({
+      ...opt,
+      interventions: requestProjection.perOption[index] ?? {},
+    }));
     const plotPayload: Record<string, unknown> = {
       graph: graphForAnalysis,
       // D-ask-1 (2.11 P0-1): scaffolded projection — identical to
       // snapshot.options unless the scaffold filled placeholder
       // interventions for an unconfigured option (disclosed below).
-      options: scaffoldOutcome.options,
+      options: finalWireOptions,
       goal_node_id: snapshot.goal_node_id,
       request_id: invocation.requestId,
     };

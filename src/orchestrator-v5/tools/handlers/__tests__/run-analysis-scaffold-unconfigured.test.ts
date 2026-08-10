@@ -92,7 +92,12 @@ function makeGraph(extraNodes: Array<Record<string, unknown>> = [], extraEdges: 
 }
 
 const CONFIGURED_A = { id: 'opt_a', option_id: 'opt_a', label: 'Option A', interventions: { fac_price: 120 } };
-const CONFIGURED_B = { id: 'opt_b', option_id: 'opt_b', label: 'Option B', interventions: { fac_price: 90, fac_volume: 0.5 } };
+// Round 4 (final-payload coherence): volume is configured RAW (2500), matching the
+// RAW_CONFIGURED_* fixtures below. The old `fac_volume: 0.5` beside raw 120/90 was
+// itself the corruption class round 4 blocks — an unproven [0,1] value that PLoT's
+// fired gate divides by cap (0.5 / 5000). These specs pin scaffold mechanics, not
+// scale semantics; the fixture is made coherent with intent preserved.
+const CONFIGURED_B = { id: 'opt_b', option_id: 'opt_b', label: 'Option B', interventions: { fac_price: 90, fac_volume: 2500 } };
 
 function makeSnapshot(overrides?: Partial<RunAnalysisScenarioSnapshot>): RunAnalysisScenarioSnapshot {
   const graph = overrides?.graph ?? makeGraph();
@@ -552,7 +557,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     expect(sentOptions.find((o) => o.option_id === 'opt_a')!.interventions).toEqual({ fac_price: 120 });
     expect(sentOptions.find((o) => o.option_id === 'opt_b')!.interventions).toEqual({
       fac_price: 90,
-      fac_volume: 0.5,
+      fac_volume: 2500,
     });
   });
 

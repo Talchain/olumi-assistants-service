@@ -39,13 +39,6 @@ import {
   computeStructuralReadiness,
   mergeInterventionSourceObjects,
 } from '../orchestrator/tools/analysis-ready-helper.js';
-import {
-  buildFactorScaleMap,
-  projectRequestInterventionsToWireScale,
-  summariseConversions,
-  summaryIsNoteworthy,
-  type InterventionConversion,
-} from './tools/plot-intervention-scale.js';
 import { assessAnalysisReadiness, AnalysisNotReadyError, type ReadinessResult } from './tools/handlers/analysis-ready-core.js';
 import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
@@ -315,7 +308,14 @@ export interface RunAnalysisScenarioSnapshot {
     readonly id: string;
     readonly option_id: string;
     readonly label: string;
-    readonly interventions: Record<string, number>;
+    /**
+     * ROUND 4: the ORIGINAL merged intervention OBJECTS (raw_value/value/unit
+     * preserved), NOT projected wire numbers. The single request-level scale
+     * projection runs in `run_analysis` AFTER the scaffold — projecting here
+     * was the round-3 TOCTOU (the scaffold mutated the options after the
+     * loader's coherence attestation).
+     */
+    readonly interventions: Record<string, unknown>;
   }>;
   readonly goal_node_id: string;
   /**
@@ -1730,20 +1730,13 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
 
-  // CEE → PLoT value-scale egress net (Tier 0, Phase 1) — UNCONDITIONAL since
-  // 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted,
-  // live-true on staging).
-  //
-  // PLoT consumes intervention input `value` as RAW user-scale and normalises
-  // internally using the target factor node's `observed_state.cap` (re-verified
-  // clean on PLoT staging `78aea76`, 2026-06-18). CEE historically projected the
-  // normalised `[0,1]` convention, which double-normalises capped interventions
-  // (e.g. sends 0.25 where PLoT expects 25000). We therefore canonicalise the
-  // OUTBOUND interventions here — the single egress projection point — via the
-  // evidence-gated rule in `plot-intervention-scale.ts` (no silent corruption,
-  // double-conversion-safe). Read-only: the persisted graph is never mutated;
-  // only the outbound PLoT projection changes.
-  const options = projectOptionsToRawScale(parsedGraph.data.nodes, readiness.options, requestId, scenarioId);
+  // ROUND 4: the loader performs NO scale projection — it merges and preserves
+  // the ORIGINAL intervention objects. The single, final, request-level
+  // projection (and its egress diagnostic) lives in `run_analysis`, AFTER
+  // `scaffoldUnconfiguredOptions`, immediately before the payload is built —
+  // because a projection attested here was mutated downstream by the scaffold
+  // (the round-3 TOCTOU). Read-only: the persisted graph is never mutated.
+  const options = mergeOptionInterventionObjects(parsedGraph.data.nodes, readiness.options);
 
   return {
     graph: parsedGraph.data,
@@ -1768,109 +1761,36 @@ export async function loadScenarioSnapshotForRunAnalysis(
 }
 
 /**
- * Egress value-scale projection (flag-ON path). Re-reads the ORIGINAL
- * intervention objects from the persisted option nodes (object-preserving merge
- * — same precedence + membership as readiness) plus the target factors'
- * `observed_state` (cap + normalised-convention evidence), and canonicalises
- * each outbound intervention to raw user-scale via the evidence-gated rule. Emits
- * a SINGLE redacted diagnostic per load (rule counts + factor ids only — never
- * magnitudes or caps) when anything was denormalised / inconsistent / ambiguous.
- * Pure with respect to the persisted graph: it reads nodes but never mutates them.
+ * ROUND 4 (final-payload enforcement): the loader no longer projects
+ * intervention values to the wire scale. It returns the ORIGINAL merged
+ * intervention OBJECTS per option (same precedence + membership as readiness,
+ * via `mergeInterventionSourceObjects`), and the ONE request-level projection
+ * happens in `run_analysis` AFTER `scaffoldUnconfiguredOptions` — because a
+ * projection attested here was mutated downstream by the scaffold (the round-3
+ * TOCTOU: the loader attested `allWithinUnitInterval:true` and the scaffold
+ * then pushed a raw-scale neutral into the wire, corrupting the configured
+ * siblings 100,000×). The egress diagnostic moved with the projection.
  */
-function projectOptionsToRawScale(
+function mergeOptionInterventionObjects(
   nodes: GraphV3T['nodes'],
   options: ReadonlyArray<{ option_id: string; label: string; interventions: Record<string, unknown> }>,
-  requestId: string,
-  scenarioId: string,
-): Array<{ id: string; option_id: string; label: string; interventions: Record<string, number> }> {
-  const factorScaleById = buildFactorScaleMap(nodes);
+): Array<{ id: string; option_id: string; label: string; interventions: Record<string, unknown> }> {
   const optionNodesById = new Map<string, Record<string, unknown>>();
   for (const node of nodes) {
     if (node.kind === 'option' && typeof node.id === 'string') {
       optionNodesById.set(node.id, node as unknown as Record<string, unknown>);
     }
   }
-
-  // The scale decision is REQUEST-level, not per-option: PLoT's normalisation gate
-  // keys on whether ANY value in the request exceeds 1, so a promotion inside one
-  // option changes how EVERY other option's factors are interpreted. Collect the
-  // whole request first, then project it to a single wire scale.
-  const rawObjectsPerOption = options.map((option) => {
+  return options.map((option) => {
     const optionNode = optionNodesById.get(option.option_id);
-    return optionNode ? mergeInterventionSourceObjects(optionNode) : {};
+    const rawObjects = optionNode ? mergeInterventionSourceObjects(optionNode) : {};
+    return {
+      id: option.option_id,
+      option_id: option.option_id,
+      label: option.label,
+      interventions: rawObjects,
+    };
   });
-  const requestProjection = projectRequestInterventionsToWireScale(
-    rawObjectsPerOption,
-    factorScaleById,
-  );
-  const egressConversions: InterventionConversion[] = requestProjection.conversions;
-  const projected = options.map((option, index) => ({
-    id: option.option_id,
-    option_id: option.option_id,
-    label: option.label,
-    interventions: requestProjection.perOption[index] ?? {},
-  }));
-
-  const conversionSummary = summariseConversions(egressConversions);
-  if (summaryIsNoteworthy(conversionSummary) || requestProjection.demoted) {
-    log.info(
-      {
-        event: 'run_analysis.intervention_scale_egress',
-        request_id: requestId,
-        scenario_id: scenarioId,
-        by_rule: conversionSummary.by_rule,
-        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
-        inconsistent_scale_factors: conversionSummary.inconsistent_scale_factors,
-        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
-        // Request-level homogeneity (2026-08-10): ids + booleans only, no magnitudes.
-        // Magnitude-free count of emitted values OUTSIDE [0,1], per rule — sign-symmetric
-        // to match PLoT's gate. Any value outside [0,1] AND a non-empty
-        // ambiguous_no_evidence_factors means unit-scale siblings were annihilated.
-        // Without it an encoded-category OR negative-magnitude corruption reads CLEAN.
-        by_rule_outside_unit_interval: requestProjection.outsideUnitIntervalByRule,
-        scale_demoted: requestProjection.demoted,
-        demoted_factors: requestProjection.demotedFactors,
-        wire_all_within_unit_interval: requestProjection.allWithinUnitInterval,
-      },
-      'run_analysis egress intervention value-scale projection (redacted; no magnitudes)',
-    );
-  }
-  if (requestProjection.postconditionViolated) {
-    // INVARIANT VIOLATION — loud by construction. Demotion was chosen and did not make
-    // the request homogeneous, which means the decision predicates and the postcondition
-    // disagree. This is the assertion that catches a mixed-scale class nobody enumerated.
-    log.error(
-      {
-        event: 'run_analysis.intervention_scale_postcondition_violated',
-        request_id: requestId,
-        scenario_id: scenarioId,
-        demoted_factors: requestProjection.demotedFactors,
-        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
-        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
-      },
-      'run_analysis INVARIANT VIOLATION: demotion was chosen but the outbound payload is still not within [0,1] — the request is STILL mixed-scale and the analysis is computing on corrupted input',
-    );
-  }
-  if (requestProjection.mixedUnresolved) {
-    // Mixed scale CEE must NOT auto-resolve: the value above 1 is a magnitude CEE does
-    // not own — an explicit raw_value, an already-raw passthrough, or an ENCODED
-    // category (where `2` means "outsource", not "two"). Surfaced rather than silently
-    // shipped. NOTE: this currently has no consumer beyond this log — such a run still
-    // ships `robustness: high` with no hedge. Whether it should is a product ruling
-    // (rowed), not something this projection may decide.
-    log.warn(
-      {
-        event: 'run_analysis.intervention_scale_mixed_unresolved',
-        request_id: requestId,
-        scenario_id: scenarioId,
-        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
-        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
-      },
-      'run_analysis outbound payload is mixed-scale and carries a value above 1 that CEE does not own (stated raw_value / already-raw / encoded category) — NOT demoted; PLoT will renormalise the whole request and every unit-scale sibling will be divided by its cap',
-    );
-  }
-
-  return projected;
 }
 
 // normaliseNumericInterventions deleted 2026-07-20 (O-7 wave 2): it was the

@@ -183,8 +183,16 @@ function nodesOf(graph: unknown): Dict[] {
 function buildNeutralFactorValues(
   graph: unknown,
   scaleNetEnabled: boolean,
-): Map<string, number> {
-  const neutral = new Map<string, number>();
+): Map<string, unknown> {
+  // ROUND 4 (final-payload enforcement): the map now carries the CANDIDATE
+  // OBJECT, not a projected wire number. Projection to the wire happens
+  // exactly once, downstream, over the WHOLE request (configured siblings +
+  // scaffolded neutrals together) — the per-value projection here is used for
+  // SELECTION only (reject unprojectable / ambiguous candidates), preserving
+  // the original selection semantics byte-for-byte. Emitting a projected
+  // number from here was the TOCTOU: it re-mixed the request AFTER the
+  // request-level guard had attested coherence.
+  const neutral = new Map<string, unknown>();
   const nodes = nodesOf(graph);
   // The SAME evidence map the loader's net-ON sibling projection builds
   // (buildFactorScaleMap over the graph nodes) — only needed when the net
@@ -221,7 +229,9 @@ function buildNeutralFactorValues(
     for (const candidate of candidates) {
       const wire = projectNeutralCandidate(candidate, scaleById?.get(node.id), scaleNetEnabled);
       if (wire !== undefined) {
-        neutral.set(node.id, wire);
+        // Selection passed — keep the OBJECT; the single request-level
+        // projection downstream derives the wire value in request context.
+        neutral.set(node.id, candidate);
         break;
       }
     }
@@ -350,7 +360,7 @@ export function scaffoldUnconfiguredOptions(
       // it stays on the honest configure path.
       const targets = connected.length > 0 ? connected : ownEdges.length === 0 ? comparisonBasis : [];
       if (targets.length === 0) return opt; // nothing safe → honest 422 recovery
-      const interventions: Record<string, number> = {};
+      const interventions: Record<string, unknown> = {};
       for (const factorId of targets) {
         interventions[factorId] = neutral.get(factorId)!;
       }
