@@ -36,7 +36,7 @@ import { selectFragileEdge } from '../../coaching/select-fragile-edge.js';
 import { selectUncertaintyPriority } from '../../coaching/uncertainty-priority.js';
 import { rankInterventions, selectLens, type LensId } from '../lens-selector.js';
 import { buildLensSurface, type BlockBuildCtx } from '../phase3-blocks.js';
-import { setTestSink } from '../../../utils/telemetry.js';
+import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
 
 type Enrichment = Record<string, unknown>;
 
@@ -442,7 +442,44 @@ describe('§6 recommending nothing is still a first-class outcome', () => {
     expect(ranking.candidates).toStrictEqual([]);
   });
 
-  it('a turn that recommends nothing returns no surface (silently, for now)', () => {
+  it('EMITS the race outcome when nothing is recommended (the silent-turn alarm)', () => {
+    sink = [];
+    expect(buildLensSurface(makeFact({}), CTX, null)).toBeNull();
+    const outcome = sink.find((e) => e.event === TelemetryEvents.V5LensRaceOutcome);
+    expect(outcome).toBeDefined();
+    expect(outcome!.data.outcome).toBe('no_recommendation');
+    expect(outcome!.data.eligible_count).toBe(0);
+    expect(outcome!.data.graph_hash_at_generation).toBe(CTX.graph_hash_at_generation);
+  });
+
+  it('carries the CLOSED reasons that answer "why did nothing surface?"', () => {
+    sink = [];
+    // A real capture with every trigger present, but the run stripped of the
+    // signals each lens needs — so the reasons are the producer's, not invented.
+    buildLensSurface(makeFact({ factor_sensitivity: [] }), CTX, null);
+    const outcome = sink.find((e) => e.event === TelemetryEvents.V5LensRaceOutcome);
+    const reasons = outcome!.data.ineligible_reasons as string[];
+    expect(reasons.length).toBeGreaterThan(0);
+    for (const r of reasons) {
+      expect([
+        'trigger_not_fired',
+        'executor_unavailable',
+        'contraindicated_after_previous',
+        'offer_not_composable',
+      ]).toContain(r);
+    }
+    // Content-free: reason TAGS and counts only, never user text or a label.
+    expect(JSON.stringify(outcome!.data)).not.toMatch(/[A-Z][a-z]+ [A-Z][a-z]+/);
+  });
+
+  it('does NOT fire on a turn that DID recommend something (a race with a winner is not a silent turn)', () => {
+    sink = [];
+    const surface = buildLensSurface(makeFact(clone(SESSION_A)), CTX, null);
+    expect(surface).not.toBeNull();
+    expect(sink.find((e) => e.event === TelemetryEvents.V5LensRaceOutcome)).toBeUndefined();
+  });
+
+  it('a turn that recommends nothing returns no surface', () => {
     // ⚠ THE OBSERVABILITY HALF OF THIS IS NOT CLOSED, AND IS NOT CLAIMED CLOSED.
     // `buildLensSurface` returning null fires NO lens telemetry, so
     // "this run had nothing honest to recommend" is still unobservable. Closing

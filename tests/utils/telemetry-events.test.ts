@@ -444,6 +444,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
         // displaced the head lens. Log-only (see debugOnlyEvents).
         V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
+        // Capability layer (ROADMAP 2.692/2.1024) — the intervention race
+        // produced NO recommendation. Log-only (see debugOnlyEvents).
+        V5LensRaceOutcome: "v5.capability.lens_race_outcome",
         // Wave-1 Lane A (PR2, ROADMAP 2.989/3.17) — fragile-edge selection
         // decision + wire-reaching offer. Log-only (see debugOnlyEvents).
         V5FragileEdgeSelection: "v5.capability.fragile_edge_selection",
@@ -1250,6 +1253,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer (ROADMAP 2.211): content-free displaced/chosen lens
         // pair — log-only, no Datadog mapping.
         TelemetryEvents.V5LensNoRepeatDisplaced,
+        // Capability layer (ROADMAP 2.692/2.1024): content-free silent-turn
+        // alarm — outcome + counts + closed reason tags, log-only, no Datadog
+        // mapping.
+        TelemetryEvents.V5LensRaceOutcome,
         // Wave-3 σ (ROADMAP 1.203): field-level claim-safety cage decision —
         // content-free (field name + decision + reason tag), log-only.
         TelemetryEvents.V5ClaimCageFieldEvaluated,
@@ -2229,6 +2236,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
         // displaced the head lens; carries the (displaced, chosen) pair.
         "v5.capability.lens_no_repeat_displaced",
+        // Capability layer (ROADMAP 2.692/2.1024) — the intervention race
+        // produced no recommendation; the silent-turn alarm.
+        "v5.capability.lens_race_outcome",
         // Wave-3 σ (ROADMAP 1.203) — field-level claim-safety cage decision.
         "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.

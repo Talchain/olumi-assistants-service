@@ -98,7 +98,7 @@ import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
 import {
   LENS_DSK_PROVENANCE,
-  selectLens,
+  rankInterventions,
   whatIfSuggestionExecutorAvailable,
   type LensId,
   type LensSelection,
@@ -1560,14 +1560,40 @@ export function buildLensSurface(
     refusal_reason: fragileEdgeDecision.refusalReason,
   });
 
-  const selection = selectLens(fact, {
+  // ROADMAP 2.692 — the WHOLE race, not just its winner. `selectLens` is this
+  // ranking's head (one derivation, threaded — never a second call, which is how
+  // two derivations of one fact drift), and the losing half is what makes the
+  // silent turn answerable below.
+  const ranking = rankInterventions(fact, {
     ...liveLensExecutorAvailability(),
     // ROADMAP 2.211 — the no-immediate-repeat tie-break's ONE input. Omitted /
     // null ⇒ byte-identical to the pre-amendment selection.
     previousAnalysisLens: previousAnalysisLens ?? null,
     fragileEdge: fragileEdgeDecision,
   });
-  if (selection === null) return null;
+  const selection = ranking.chosen;
+  if (selection === null) {
+    // ⭐ ROADMAP 2.1024 — THE SILENT-TURN ALARM. Recommending nothing is a
+    // first-class outcome of this loop, and until this event it was the only
+    // outcome that emitted nothing at all: the function returned here, before
+    // `lens_suggestion_emitted` could fire, so "this run had nothing honest to
+    // say" and "this code never ran" were indistinguishable downstream. A
+    // may-recommend-nothing default whose rate cannot be measured is a
+    // may-recommend-nothing default nobody can audit.
+    //
+    // Content-free by construction: counts and CLOSED reason tags, sorted and
+    // deduped for a stable payload. No labels, no lens copy, no user text — the
+    // reasons come from `InterventionIneligibleReason`, which is a union of
+    // literals, so there is no route by which producer data reaches this line.
+    emit(TelemetryEvents.V5LensRaceOutcome, {
+      outcome: 'no_recommendation',
+      eligible_count: ranking.candidates.length,
+      ineligible_count: ranking.ineligible.length,
+      ineligible_reasons: [...new Set(ranking.ineligible.map((c) => c.reason))].sort(),
+      graph_hash_at_generation: ctx.graph_hash_at_generation,
+    });
+    return null;
+  }
 
   // ROADMAP 2.989 — the offer, present on exactly one lens. `offer` is `null`
   // for every other lens, so the spreads below are byte-inert on them.
