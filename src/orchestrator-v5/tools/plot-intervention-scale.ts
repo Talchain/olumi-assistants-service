@@ -419,17 +419,18 @@ export interface RequestScaleProjection {
    */
   readonly allWithinUnitInterval: boolean;
   /**
-   * Count of emitted values ABOVE 1, per rule. MAGNITUDE-FREE by construction: it
+   * Count of emitted values OUTSIDE [0,1], per rule — sign-symmetric, matching the
+   * producer's gate. MAGNITUDE-FREE by construction: it
    * carries how MANY values crossed the gate threshold, never what they were, so it
    * preserves the no-magnitudes property the egress diagnostic was designed around.
    *
    * WHY: the diagnostic previously recorded rule COUNTS and factor ids only, which
-   * cannot tell whether an `encoded_verbatim` or `no_cap` value exceeded 1 — so a
-   * request corrupted by an encoded category classified as CLEAN. With this field a
-   * corrupted run is derivable exactly: any value above 1 AND a stranded unit-scale
-   * sibling (`ambiguous_no_evidence_factors` non-empty).
+   * cannot tell whether an `encoded_verbatim` or `no_cap` value left [0,1] — so a
+   * request corrupted by an encoded category, or by a NEGATIVE magnitude, classified
+   * as CLEAN. With this field a corrupted run is derivable: any value outside [0,1]
+   * AND a stranded unit-scale sibling (`ambiguous_no_evidence_factors` non-empty).
    */
-  readonly aboveOneByRule: Record<string, number>;
+  readonly outsideUnitIntervalByRule: Record<string, number>;
   /**
    * INVARIANT VIOLATION: demotion was chosen and still did not bring the request
    * inside [0,1]. Should be unreachable — it means the decision predicates and the
@@ -494,8 +495,17 @@ export function projectRequestInterventionsToWireScale(
   // as a denormalised magnitude does. What matters to PLoT is the NUMBER on the wire,
   // so every predicate below is numeric.
 
-  // Anything above 1 flips PLoT's request-level gate for the WHOLE request.
-  const aboveOne = present.filter((r) => r.result.value !== null && r.result.value > 1);
+  // Anything OUTSIDE [0,1] flips PLoT's request-level gate for the WHOLE request.
+  // SIGN-SYMMETRIC, deliberately: the producer's gate is
+  // `if (value < 0 || value > 1) return true;` (PLoT `src/lib/intervention-normaliser.ts`),
+  // so a NEGATIVE magnitude trips it exactly as a value above 1 does. An earlier
+  // revision tested only `> 1` and was blind to the whole negative class — which is
+  // reachable: `src/cee/extraction/numeric-parser.ts` stores negative relativeValue /
+  // delta for decrease/reduce/cut/lower phrasing, the contract is a bare `z.number()`,
+  // and this module's own suite already pins `{value: -0.4} -> passthrough`.
+  const outsideUnitInterval = present.filter(
+    (r) => r.result.value !== null && (r.result.value < 0 || r.result.value > 1),
+  );
   // A sibling is STRANDED only if its emitted value really is <= 1: once the gate
   // fires, PLoT divides it by its cap and it is annihilated. A `no_cap` value ABOVE 1
   // is not stranded — and note these are two different claims that must not be
@@ -506,14 +516,18 @@ export function projectRequestInterventionsToWireScale(
     (r) =>
       (r.result.rule === 'ambiguous_no_evidence' || r.result.rule === 'no_cap') &&
       r.result.value !== null &&
+      r.result.value >= 0 &&
       r.result.value <= 1,
   );
-  const mixed = aboveOne.length > 0 && strandedUnitScale;
+  const mixed = outsideUnitInterval.length > 0 && strandedUnitScale;
   // ONLY rule 2 is ours to undo — CEE derived that number itself. Every other value
   // above 1 is a magnitude we do not own: an explicit `raw_value`, an already-raw
   // passthrough, or an encoded category (where `2` means "outsource", not "two").
-  const undemotableAboveOne = aboveOne.some((r) => r.result.rule !== 'cap_denormalised');
-  const demote = mixed && !undemotableAboveOne;
+  // A NEGATIVE is undemotable for the same reason a stated raw_value is: it is a
+  // magnitude CEE does not own, and dividing it back by a cap would not bring it
+  // inside [0,1] anyway.
+  const undemotableOutside = outsideUnitInterval.some((r) => r.result.rule !== 'cap_denormalised');
+  const demote = mixed && !undemotableOutside;
 
   const perOption: Array<Record<string, number>> = [];
   const conversions: InterventionConversion[] = [];
@@ -543,17 +557,22 @@ export function projectRequestInterventionsToWireScale(
   // "demoted" would be a lie. This assertion is what catches the whole defect class
   // WITHOUT anyone having to enumerate the rules in advance; it would have caught the
   // encoded-category case before anybody thought of `encoded_verbatim`.
-  const allWithinUnitInterval = perOption.every((o) => Object.values(o).every((v) => v <= 1));
+  // Written against the SPEC ([0,1]), not against the failure mode being fixed. An
+  // earlier revision wrote `v <= 1` and therefore inherited the exact blind spot the
+  // assertion exists to catch.
+  const allWithinUnitInterval = perOption.every((o) =>
+    Object.values(o).every((v) => v >= 0 && v <= 1),
+  );
   const postconditionViolated = isDemotionPostconditionViolated(demote, allWithinUnitInterval);
   // Counted from the EMITTED values (post-demotion), i.e. what actually reaches PLoT
   // and therefore what actually decides its gate. Counts only — never magnitudes.
-  const aboveOneByRule: Record<string, number> = {};
+  const outsideUnitIntervalByRule: Record<string, number> = {};
   for (const entries of resolved) {
     for (const { factorId, result } of entries) {
       if (result.value === null) continue;
       const emitted = perOption[resolved.indexOf(entries)]?.[factorId];
-      if (emitted !== undefined && emitted > 1) {
-        aboveOneByRule[result.rule] = (aboveOneByRule[result.rule] ?? 0) + 1;
+      if (emitted !== undefined && (emitted < 0 || emitted > 1)) {
+        outsideUnitIntervalByRule[result.rule] = (outsideUnitIntervalByRule[result.rule] ?? 0) + 1;
       }
     }
   }
@@ -563,12 +582,12 @@ export function projectRequestInterventionsToWireScale(
     demoted: demote && !postconditionViolated && demotedFactors.length > 0,
     demotedFactors,
     allWithinUnitInterval,
-    aboveOneByRule,
+    outsideUnitIntervalByRule,
     postconditionViolated,
     // A mixed request we must NOT auto-resolve, OR one where demotion failed to make
     // the request homogeneous. Either way it is unresolved and must not be shipped as
     // if it were fine.
-    mixedUnresolved: (mixed && undemotableAboveOne) || postconditionViolated,
+    mixedUnresolved: (mixed && undemotableOutside) || postconditionViolated,
   };
 }
 

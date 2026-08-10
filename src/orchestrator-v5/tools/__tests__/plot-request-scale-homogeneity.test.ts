@@ -279,6 +279,10 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
       encoded: { node: { id: 'f_d', kind: 'factor', observed_state: { value: 1 } }, ivs: [encodedIv(2), encodedIv(0), encodedIv(1)] },
       statedRaw: { node: { id: 'f_e', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, ivs: [{ value: 0.72, raw_value: 18000 }, { value: 0.2, raw_value: 5000 }] },
       alreadyRaw: { node: { id: 'f_f', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, ivs: [iv(9000), iv(0.4)] },
+      // NEGATIVE magnitudes — reachable via decrease/reduce/cut/lower phrasing, and
+      // already pinned by this module's own suite as `{value: -0.4} -> passthrough`.
+      // PLoT's gate is `value < 0 || value > 1`, so these trip it exactly as >1 does.
+      negative: { node: { id: 'f_g', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, ivs: [iv(-0.4), iv(-2), iv(0.4)] },
     };
     const names = Object.keys(factorShapes);
     const nodes = names.map((n) => factorShapes[n]!.node);
@@ -308,7 +312,8 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
                 if (out.demoted) {
                   demotedCount++;
                   const flat = out.perOption.flatMap((o) => Object.values(o));
-                  if (!flat.every((v) => v <= 1)) demotedStillMixed++;
+                  // SPEC, not failure mode: [0,1], both bounds.
+                  if (!flat.every((v) => v >= 0 && v <= 1)) demotedStillMixed++;
                 }
               }
             }
@@ -325,22 +330,52 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     expect(violations, 'postcondition must never be violated').toBe(0);
   });
 
-  it('⭐ DIFFERENTIAL: the fix never makes a factor worse than doing nothing', () => {
-    // The failure this replaces was correct-to-100x-suppressed. So the guarantee we
-    // assert is comparative, against the PRE-FIX projection, not absolute.
-    const encoded = (v: number) => encodedIv(v);
-    const cases: Array<[string, Record<string, unknown>[], Record<string, unknown>[]]> = [
-      ['encoded+promotion+cost', [{ f_d: encoded(2), f_a: iv(0.8), f_b: iv(0.72) }], [{ id: 'f_d', kind: 'factor', observed_state: { value: 1 } }, { id: 'f_a', kind: 'factor', observed_state: { value: 0.35, raw_value: 35, cap: 100 } }, { id: 'f_b', kind: 'factor', observed_state: { value: 0, raw_value: 0, cap: 25000 } }]],
-      ['nocap+promotion+cost', [{ f_c: iv(5000), f_a: iv(0.8), f_b: iv(0.72) }], [{ id: 'f_c', kind: 'factor', observed_state: { value: 12 } }, { id: 'f_a', kind: 'factor', observed_state: { value: 0.35, raw_value: 35, cap: 100 } }, { id: 'f_b', kind: 'factor', observed_state: { value: 0, raw_value: 0, cap: 25000 } }]],
+  it('⭐ DIFFERENTIAL: BOTH branches of the guarantee, over the whole corpus including negatives', () => {
+    // The previous version of this test asserted `after === before` over two
+    // UN-DEMOTABLE cases. That can only hold where no demotion fires, so it was
+    // structurally incapable of observing a harmful demote — a guard agreeing with
+    // itself. The guarantee has two branches and both must be exercised:
+    //   demoted   -> the request ends fully within [0,1] (it achieved its purpose)
+    //   otherwise -> output is byte-identical to the pre-fix projection (no harm)
+    const shapes: Array<{ node: Record<string, unknown>; ivs: unknown[] }> = [
+      { node: { id: 'g_a', kind: 'factor', observed_state: { value: 0.35, raw_value: 35, cap: 100 } }, ivs: [iv(0.8), iv(0.2)] },
+      { node: { id: 'g_b', kind: 'factor', observed_state: { value: 0, raw_value: 0, cap: 25000 } }, ivs: [iv(0.72), iv(0)] },
+      { node: { id: 'g_c', kind: 'factor', observed_state: { value: 12 } }, ivs: [iv(5000), iv(0.5)] },
+      { node: { id: 'g_d', kind: 'factor', observed_state: { value: 1 } }, ivs: [encodedIv(2), encodedIv(1)] },
+      { node: { id: 'g_e', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, ivs: [iv(-0.4), iv(-2), iv(0.4)] },
     ];
-    for (const [label, req, nodes] of cases) {
-      const map = buildFactorScaleMap(nodes);
-      const before = req.map((r) => projectInterventionsToRawScale(r, map).interventions);
-      const after = projectRequestInterventionsToWireScale(req as Record<string, unknown>[], map).perOption;
-      expect(Object.keys(before[0]!).length, `${label}: empty corpus would be vacuous`).toBeGreaterThan(0);
-      expect(after, `${label}: an un-demotable request must be left exactly as the pre-fix projection had it`).toEqual(before);
+    const map = buildFactorScaleMap(shapes.map((x) => x.node));
+    let demotedBranch = 0;
+    let identicalBranch = 0;
+    let negativeSeen = 0;
+    for (let i = 0; i < shapes.length; i++) {
+      for (let j = 0; j < shapes.length; j++) {
+        for (const a of shapes[i]!.ivs) {
+          for (const b of shapes[j]!.ivs) {
+            const req = [{ [shapes[i]!.node.id as string]: a, [shapes[j]!.node.id as string]: b }];
+            const before = req.map((r) => projectInterventionsToRawScale(r, map).interventions);
+            const out = projectRequestInterventionsToWireScale(req, map);
+            const flat = out.perOption.flatMap((o) => Object.values(o));
+            if (flat.some((v) => v < 0)) negativeSeen++;
+            if (out.demoted) {
+              demotedBranch++;
+              expect(flat.every((v) => v >= 0 && v <= 1), `demoted but outside [0,1]: ${JSON.stringify(out.perOption)}`).toBe(true);
+            } else {
+              identicalBranch++;
+              expect(out.perOption, 'not demoted, so it must equal the pre-fix projection').toEqual(before);
+            }
+          }
+        }
+      }
     }
+    // Both branches must actually be exercised, and negatives must be present —
+    // otherwise this test is blind in exactly the way its predecessor was.
+    expect(demotedBranch, 'the demoted branch must be exercised').toBeGreaterThan(0);
+    expect(identicalBranch, 'the identical branch must be exercised').toBeGreaterThan(0);
+    expect(negativeSeen, 'the corpus MUST contain negative magnitudes').toBeGreaterThan(0);
   });
+
+  // -------------------------------------------------------------------------
 
   it('M8 DISCRIMINATOR: a no_cap value ABOVE 1 with no <=1 sibling strands nothing, so it must NOT warn', () => {
     // Without the `<= 1` numeric guard on stranded siblings this request would be
@@ -378,21 +413,21 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     const map = buildFactorScaleMap([categoryNode, ...costNodes]);
     const out = projectRequestInterventionsToWireScale(req, map);
 
-    expect(out.aboveOneByRule, 'the encoded category above 1 must be counted, by rule').toEqual({
+    expect(out.outsideUnitIntervalByRule, 'the encoded category outside [0,1] must be counted, by rule').toEqual({
       encoded_verbatim: 1,
     });
     // The classifier a log consumer can now write, with no magnitudes involved:
-    const anyAboveOne = Object.values(out.aboveOneByRule).reduce((a, b) => a + b, 0) > 0;
+    const anyOutside = Object.values(out.outsideUnitIntervalByRule).reduce((a, b) => a + b, 0) > 0;
     const strandedSibling = out.conversions.some((c) => c.rule === 'ambiguous_no_evidence');
-    expect(anyAboveOne && strandedSibling, 'A1 must now classify as CORRUPTED').toBe(true);
+    expect(anyOutside && strandedSibling, 'A1 must now classify as CORRUPTED').toBe(true);
   });
 
   it('by_rule_above_one carries counts only, and is empty for a genuinely clean request', () => {
     const map = buildFactorScaleMap([capabilityNodeUnit, ...costNodes]);
     const out = projectRequestInterventionsToWireScale(perOptionRawObjects, map);
-    expect(out.aboveOneByRule, 'an all-unit-scale request has nothing above 1').toEqual({});
+    expect(out.outsideUnitIntervalByRule, 'an all-unit-scale request has nothing outside [0,1]').toEqual({});
     // Magnitude-free: every value in the record is a count, never a magnitude.
-    for (const v of Object.values(out.aboveOneByRule)) expect(Number.isInteger(v)).toBe(true);
+    for (const v of Object.values(out.outsideUnitIntervalByRule)) expect(Number.isInteger(v)).toBe(true);
   });
 
   it('counts the EMITTED values, so a successful demotion leaves nothing above 1', () => {
@@ -403,8 +438,49 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     );
     expect(out.demoted).toBe(true);
     expect(
-      out.aboveOneByRule,
-      'after a successful demote nothing reaches PLoT above 1, so the count must be empty',
+      out.outsideUnitIntervalByRule,
+      'after a successful demote nothing reaches PLoT outside [0,1], so the count must be empty',
     ).toEqual({});
+  });
+
+  it('⭐ NEGATIVE CLASS: a negative magnitude is undemotable and must NOT be reported as clean', () => {
+    // PLoT's gate is sign-symmetric (`value < 0 || value > 1`), so -0.4 flips it exactly
+    // as 80 does. An earlier revision tested only `> 1`, demoted anyway, and drove a
+    // £72,000 cost from a CORRECT 0.72 to 0.0000072 — 100,000x suppressed — while
+    // self-reporting demoted:true, mixedUnresolved:false, allWithinUnitInterval:true.
+    const NEG = 'fac_headcount_change';
+    const COSTBIG = 'fac_migration_cost';
+    const nodes = [
+      { id: NEG, kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } },
+      { id: COSTBIG, kind: 'factor', observed_state: { value: 0.35, raw_value: 35000, cap: 100000 } },
+      ...costNodes,
+    ];
+    const map = buildFactorScaleMap(nodes);
+    const req = [{ [NEG]: iv(-0.4), [COSTBIG]: iv(0.72), [SWITCH_COST]: iv(0.3) }];
+    // Pin the precondition: the negative really does resolve to a passthrough below 0.
+    const rules = projectInterventionsToRawScale(req[0]!, map).conversions;
+    expect(rules.find((c) => c.factor_id === NEG)?.rule).toBe('passthrough');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.demoted, 'a negative is a magnitude CEE does not own — must NOT demote').toBe(false);
+    expect(out.perOption[0]?.[NEG], 'the negative must survive verbatim').toBe(-0.4);
+    expect(out.perOption[0]?.[COSTBIG], 'the correct promotion must survive').toBe(72000);
+    expect(
+      out.allWithinUnitInterval,
+      'a request carrying -0.4 is NOT within [0,1] — reporting true here is the whole defect',
+    ).toBe(false);
+    expect(out.outsideUnitIntervalByRule, 'the negative must be counted').toEqual({
+      passthrough: 1,
+      cap_denormalised: 1,
+    });
+    expect(out.mixedUnresolved, 'must be surfaced, not silently shipped as clean').toBe(true);
+  });
+
+  it('the postcondition is written against the SPEC [0,1], so it sees a negative', () => {
+    expect(isDemotionPostconditionViolated(true, false)).toBe(true);
+    // Guard the exact asymmetry that shipped: a wire holding -0.4 must not read "within".
+    const map = buildFactorScaleMap([{ id: 'n1', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, capabilityNodePct, ...costNodes]);
+    const out = projectRequestInterventionsToWireScale([{ n1: iv(-0.4), [CAPABILITY]: iv(0.8), [SWITCH_COST]: iv(0.3) }], map);
+    expect(out.allWithinUnitInterval).toBe(false);
   });
 });

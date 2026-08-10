@@ -34,11 +34,18 @@ const captures: unknown = JSON.parse(
 
 interface Capture {
   capture: string;
+  provenance: string;
   divergentOnStaging: boolean;
+  note?: string;
+  expect?: { demoted: boolean; allWithinUnitInterval: boolean; mixedUnresolved: boolean };
   factorNodes: Array<Record<string, unknown>>;
   optionInterventions: Array<{ option_id: string; interventions: Record<string, unknown> }>;
 }
-const CAPTURES = captures as unknown as Capture[];
+const ALL = captures as unknown as Capture[];
+/** The 13 REAL staging captures. They contain zero negative magnitudes. */
+const CAPTURES = ALL.filter((c) => c.provenance === 'staging-capture-2026-08-10');
+/** SYNTHETIC negative-class cases — labelled, never presented as observed captures. */
+const SYNTHETIC = ALL.filter((c) => c.provenance === 'synthetic-negative-class');
 
 /** The faithful all-unit-scale replay payload — proven on deployed PLoT to give the honest answer. */
 const faithfulReplay = (c: Capture) =>
@@ -52,9 +59,20 @@ const faithfulReplay = (c: Capture) =>
   );
 
 describe('staging draft captures — payload acceptance (re-executable)', () => {
-  it('the fixture is the corpus it claims to be', () => {
+  it('the fixture is the corpus it claims to be, and its provenance is not blurred', () => {
     // Assert inputs before believing any agreement (trap 13).
     expect(CAPTURES).toHaveLength(13);
+    expect(SYNTHETIC.length, 'the negative class must be represented').toBeGreaterThan(0);
+    // The real captures contain NO negatives — which is exactly why the synthetic
+    // cases exist, and why this must be asserted rather than assumed.
+    const realValues = CAPTURES.flatMap((c) =>
+      c.optionInterventions.flatMap((o) =>
+        Object.values(o.interventions).map((v) =>
+          typeof v === 'object' && v !== null ? (v as { value: number }).value : (v as number),
+        ),
+      ),
+    );
+    expect(realValues.some((v) => v < 0), 'real captures carry no negatives').toBe(false);
     expect(CAPTURES.filter((c) => c.divergentOnStaging)).toHaveLength(4);
     for (const c of CAPTURES) {
       expect(c.optionInterventions.length, `${c.capture}: no options`).toBeGreaterThan(0);
@@ -103,5 +121,22 @@ describe('staging draft captures — payload acceptance (re-executable)', () => 
       }
     }
     expect(demoted, 'exactly the 4 divergent captures must demote').toBe(4);
+  });
+
+  it('the synthetic negative-class cases behave as the spec requires', () => {
+    expect(SYNTHETIC.length).toBeGreaterThan(0);
+    for (const c of SYNTHETIC) {
+      const map = buildFactorScaleMap(c.factorNodes);
+      const raws = c.optionInterventions.map((o) => o.interventions);
+      const out = projectRequestInterventionsToWireScale(raws, map);
+      const flat = out.perOption.flatMap((o) => Object.values(o));
+      expect(flat.some((v) => v < 0), `${c.capture}: must actually carry a negative`).toBe(true);
+      expect(out.demoted, `${c.capture}: demoted`).toBe(c.expect!.demoted);
+      expect(out.allWithinUnitInterval, `${c.capture}: allWithinUnitInterval`).toBe(c.expect!.allWithinUnitInterval);
+      expect(out.mixedUnresolved, `${c.capture}: mixedUnresolved`).toBe(c.expect!.mixedUnresolved);
+      // The whole point: an un-demotable request is left exactly as the pre-fix projection.
+      const before = raws.map((r) => projectInterventionsToRawScale(r, map).interventions);
+      expect(out.perOption, `${c.capture}: must equal the pre-fix projection`).toEqual(before);
+    }
   });
 });

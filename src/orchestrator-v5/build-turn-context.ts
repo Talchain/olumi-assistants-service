@@ -1823,11 +1823,11 @@ function projectOptionsToRawScale(
         inconsistent_scale_factors: conversionSummary.inconsistent_scale_factors,
         ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
         // Request-level homogeneity (2026-08-10): ids + booleans only, no magnitudes.
-        // Magnitude-free count of emitted values above 1, per rule. This is what makes
-        // a corrupted run DERIVABLE from the log: any value above 1 AND a non-empty
+        // Magnitude-free count of emitted values OUTSIDE [0,1], per rule — sign-symmetric
+        // to match PLoT's gate. Any value outside [0,1] AND a non-empty
         // ambiguous_no_evidence_factors means unit-scale siblings were annihilated.
-        // Without it an encoded-category corruption classified as CLEAN.
-        by_rule_above_one: requestProjection.aboveOneByRule,
+        // Without it an encoded-category OR negative-magnitude corruption reads CLEAN.
+        by_rule_outside_unit_interval: requestProjection.outsideUnitIntervalByRule,
         scale_demoted: requestProjection.demoted,
         demoted_factors: requestProjection.demotedFactors,
         wire_all_within_unit_interval: requestProjection.allWithinUnitInterval,

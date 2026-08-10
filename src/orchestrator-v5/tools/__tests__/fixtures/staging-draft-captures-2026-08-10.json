@@ -98,7 +98,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "pre-deploy/s3",
@@ -201,7 +202,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "post-deploy/s1",
@@ -304,7 +306,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "post-deploy/s2",
@@ -407,7 +410,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "post-deploy/s3",
@@ -510,7 +514,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "post-deploy/s4",
@@ -613,7 +618,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "post-deploy/s5",
@@ -716,7 +722,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "fee-route/s1",
@@ -819,7 +826,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "fee-route/s2",
@@ -922,7 +930,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "fee-route/s3",
@@ -1025,7 +1034,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "reanalyse/s1",
@@ -1126,7 +1136,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "reanalyse/s2",
@@ -1229,7 +1240,8 @@
      }
     }
    }
-  ]
+  ],
+  "provenance": "staging-capture-2026-08-10"
  },
  {
   "capture": "reanalyse/s3",
@@ -1329,6 +1341,133 @@
      },
      "fac_platform_capability": {
       "value": 0.8
+     }
+    }
+   }
+  ],
+  "provenance": "staging-capture-2026-08-10"
+ },
+ {
+  "capture": "synthetic/negative-passthrough-with-promotion",
+  "provenance": "synthetic-negative-class",
+  "divergentOnStaging": false,
+  "note": "PLoT's gate is `value < 0 || value > 1`. A negative trips it exactly as >1 does. Demoting here drove a 72000 cost to 0.0000072 (100,000x) in an earlier revision.",
+  "expect": {
+   "demoted": false,
+   "allWithinUnitInterval": false,
+   "mixedUnresolved": true
+  },
+  "factorNodes": [
+   {
+    "id": "fac_headcount_change",
+    "kind": "factor",
+    "observed_state": {
+     "value": 0.2,
+     "raw_value": 5000,
+     "cap": 25000
+    }
+   },
+   {
+    "id": "fac_migration_cost",
+    "kind": "factor",
+    "observed_state": {
+     "value": 0.35,
+     "raw_value": 35000,
+     "cap": 100000
+    }
+   },
+   {
+    "id": "fac_switch_cost",
+    "kind": "factor",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 25000
+    }
+   }
+  ],
+  "optionInterventions": [
+   {
+    "option_id": "opt_reduce",
+    "interventions": {
+     "fac_headcount_change": {
+      "value": -0.4
+     },
+     "fac_migration_cost": {
+      "value": 0.72
+     },
+     "fac_switch_cost": {
+      "value": 0.3
+     }
+    }
+   },
+   {
+    "option_id": "opt_hold",
+    "interventions": {
+     "fac_headcount_change": {
+      "value": 0
+     },
+     "fac_migration_cost": {
+      "value": 0.35
+     },
+     "fac_switch_cost": {
+      "value": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "capture": "synthetic/negative-below-minus-one",
+  "provenance": "synthetic-negative-class",
+  "divergentOnStaging": false,
+  "note": "A negative beyond -1, to prove the bound is [0,1] and not |v| <= 1.",
+  "expect": {
+   "demoted": false,
+   "allWithinUnitInterval": false,
+   "mixedUnresolved": true
+  },
+  "factorNodes": [
+   {
+    "id": "fac_headcount_change",
+    "kind": "factor",
+    "observed_state": {
+     "value": 0.2,
+     "raw_value": 5000,
+     "cap": 25000
+    }
+   },
+   {
+    "id": "fac_capability",
+    "kind": "factor",
+    "observed_state": {
+     "value": 0.35,
+     "raw_value": 35,
+     "cap": 100
+    }
+   },
+   {
+    "id": "fac_switch_cost",
+    "kind": "factor",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 25000
+    }
+   }
+  ],
+  "optionInterventions": [
+   {
+    "option_id": "opt_cut",
+    "interventions": {
+     "fac_headcount_change": {
+      "value": -2
+     },
+     "fac_capability": {
+      "value": 0.8
+     },
+     "fac_switch_cost": {
+      "value": 0.3
      }
     }
    }
