@@ -8,13 +8,19 @@
  * is merely TALKING ABOUT. Row 7 closes that: when this turn's composed cards
  * name a graph entity and no side-effect row fired, bring THAT entity into view.
  *
- * ENTITY RESOLUTION ROUTE (the design decision): the directive reuses the
- * entity reference the composed card ALREADY carries (`target_refs[0]`) —
+ * ENTITY RESOLUTION ROUTE (the design decision): the directive reuses an entity
+ * reference the composed cards ALREADY carry — the first DISPATCHABLE ref in
+ * block order, NOT `target_refs[0]` as this header claimed until 10 Aug 2026 —
  * a `TargetRef` CEE resolved against the graph node lookup and which has
  * already passed the block's own strict parse. NO prose is parsed here, NO
  * second resolution is performed, and the target therefore CANNOT disagree with
  * the card the user is reading (one derivation, two read points — the same rule
  * ROADMAP 2.211 applies to `selectLens`).
+ *
+ * WHICH of the card's refs it lands on is therefore decided by the order the
+ * producing builder emitted them in. For the two prose-matched builders that
+ * order is now FIRST MENTION IN THE PROSE (ROADMAP 2.1023); it used to be graph
+ * lookup order, which could point the viewport at an incidental aside.
  *
  * Row 7 is a strict TAIL: it is reached only when the N=1 latch is still unset,
  * so it can never displace a side-effect gesture.
@@ -184,6 +190,40 @@ function blocksWithRefs(env: ReturnType<typeof composeToolCallResponse>) {
   );
 }
 
+/**
+ * A `decision_review.key_assumptions` entry composes an `assumption_check`
+ * coaching card whose `target_refs` come from `resolveProseEntityRefs` — the
+ * PROSE-matched path, as opposed to the structurally-resolved evidence card.
+ * `evidenceFactorId: null` keeps the evidence card out of the turn so the
+ * coaching card is the leading block carrying a dispatchable ref, which is what
+ * makes row 7 land on it.
+ */
+const LEADS_WITH_MARGIN =
+  'Gross margin floor is doing most of the work here, though Team ramp time matters a little too.';
+const LEADS_WITH_TEAM =
+  'Team ramp time is doing most of the work here, though Gross margin floor matters a little too.';
+
+function assumptionFact(
+  assumption: string,
+  overrides: { leadingOptionId?: string | null; mayNameLeadingOption?: boolean } = {},
+): HandlerFact {
+  const fact = analysisFact({ ...overrides, evidenceFactorId: null }) as unknown as {
+    result: { enrichment: Record<string, unknown> };
+  };
+  fact.result.enrichment.decision_review = { key_assumptions: [assumption] };
+  return fact as unknown as HandlerFact;
+}
+
+/** The prose-matched coaching card's refs, read back for the precondition pin. */
+function proseCardRefs(env: ReturnType<typeof composeToolCallResponse>) {
+  const card = env.blocks.find(
+    (b) => (b as { coaching_kind?: string }).coaching_kind === 'assumption_check',
+  );
+  expect(card).toBeDefined();
+  return (card as unknown as { target_refs: Array<{ id: string; label: string; kind: string }> })
+    .target_refs;
+}
+
 describe('row 7 — the workspace follows the conversation', () => {
   it('PRECONDITION PIN: the six side-effect rows all decline this turn, so row 7 is the only possible author', () => {
     // Pins the precondition IN-TEST rather than assuming it (trap 13b's third
@@ -247,21 +287,103 @@ describe('row 7 — the workspace follows the conversation', () => {
     expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(0);
   });
 
-  it('the withheld-claim gate still bites — row 7 never points at an option the turn may not name', () => {
+  it('the withheld-claim gate still bites — row 7 SUPPRESSES rather than pointing at an option the turn may not name', () => {
     // Withheld verdict AND the only discussable entity is an OPTION.
+    //
+    // ⚠ TITLE HONESTY (review fold, 10 Aug 2026), and the repair was BIGGER
+    // than the report. This test used to assert ONLY
+    // `for (const d of ds) …expect(t.kind).not.toBe('option')`, and `ds` is
+    // empty here — so the loop body never ran and the test asserted NOTHING
+    // while its title claimed the gate bit.
+    //
+    // Adding `expect(ds).toHaveLength(0)` would have made it non-vacuous and
+    // STILL not true to its title: the ORIGINAL fixture carried no
+    // decision_review at all, so no card carried ANY dispatchable ref and row 7
+    // suppressed with `no_discussed_entity` — it never reached the withheld
+    // branch. Measured, not assumed: asserting the withheld reason against the
+    // old fixture fails with `expected 'no_discussed_entity'`.
+    //
+    // So the fixture is repaired rather than the title: a prose-matched card
+    // naming ONLY options, which is the sole shape that reaches the gate. (The
+    // property was never uncovered — the unit tests below pin it directly; this
+    // makes the INTEGRATION path prove it too.)
     const env = compose(
-      analysisFact({
+      assumptionFact('Hire locally looks stronger than Outsource delivery here.', {
         leadingOptionId: 'opt_x',
         mayNameLeadingOption: false,
-        evidenceFactorId: null,
       }),
     );
+    // Precondition pinned in-test: the card really does carry option refs, and
+    // NO factor/edge ref — otherwise the suppression would prove nothing.
+    const refKinds = proseCardRefs(env).map((r) => r.kind);
+    expect(refKinds.length).toBeGreaterThan(0);
+    expect(new Set(refKinds)).toEqual(new Set(['option']));
     const ds = directives(env);
+    expect(ds).toHaveLength(0);
+    expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(0);
+    // Bind to the REASON, not just to the absence — an absence is also
+    // consistent with the ladder never reaching row 7 at all.
+    const dropped = suppressions().filter((e) => e.data.fact_type === DISCUSSED_ENTITY_TAG);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.data.reason).toBe('leading_option_claim_withheld');
+    // Kept as a total guard: were a future change to make row 7 emit here, an
+    // option target must still be impossible.
     for (const d of ds) {
       for (const t of d.targets) {
         expect(t.kind).not.toBe('option');
       }
     }
+  });
+
+  // ── ROADMAP 2.1023: row 7 follows the SENTENCE, not the node array ────────
+  //
+  // The two coaching builders in phase3-blocks.ts populate `target_refs` via
+  // `resolveProseEntityRefs`. Row 7 takes the first DISPATCHABLE ref, so on a
+  // turn whose leading eligible card is one of those, the viewport lands on
+  // whichever entity that resolver put first. It used to put them in GRAPH
+  // LOOKUP order, so the workspace could jump to an incidental aside while the
+  // user reads about the main subject — worse than not moving at all, because
+  // it teaches the user to distrust the gesture.
+  //
+  // ⚠ WHICH OF THE PAIR IS THE DISCRIMINATOR — measured, not assumed. `GRAPH`
+  // lists `fac_margin` BEFORE `fac_team`, so on the first case below lookup
+  // order and prose order AGREE: it is the CONTROL, and it survives a mutant
+  // that deletes the ordering entirely. The second case (prose leading with
+  // `fac_team`) is where the two orders DISAGREE, and it is the one that bites.
+  // Stated because an earlier draft of this comment had the node order
+  // backwards and would have sold the control as the proof.
+  it('row 7 focuses the entity the sentence LEADS with, not the one the graph happens to list first', () => {
+    const env = compose(assumptionFact(LEADS_WITH_MARGIN));
+
+    // Precondition pinned IN-TEST (trap 13b): the card really does resolve BOTH
+    // factors, so a pass cannot come from the aside having failed to resolve.
+    const refs = proseCardRefs(env);
+    expect(refs.map((r) => r.id)).toEqual(['fac_margin', 'fac_team']);
+
+    const ds = directives(env);
+    expect(ds).toHaveLength(1);
+    expect(ds[0]).toMatchObject({
+      verb: 'focus',
+      targets: [{ id: 'fac_margin', label: 'Gross margin floor', kind: 'factor' }],
+    });
+    // Attribution: row 2 emits byte-identical `focus @ <factor>`, so only the
+    // telemetry tag can prove row 7 authored this.
+    expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(1);
+    expect(emittedBy('run_analysis')).toHaveLength(0);
+  });
+
+  it('DISCRIMINATOR: reversing the mentions in the SAME graph moves the viewport to the other factor', () => {
+    // Without this, the test above is also satisfied by any rule that happens
+    // to prefer fac_margin (its id, its label, a hardcoded reversal of lookup
+    // order). Only a pair that flips with the PROSE proves the binding.
+    const env = compose(assumptionFact(LEADS_WITH_TEAM));
+    expect(proseCardRefs(env).map((r) => r.id)).toEqual(['fac_team', 'fac_margin']);
+    const ds = directives(env);
+    expect(ds).toHaveLength(1);
+    expect(ds[0]).toMatchObject({
+      targets: [{ id: 'fac_team', label: 'Team ramp time', kind: 'factor' }],
+    });
+    expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(1);
   });
 
   it('suppresses rather than pointing at nothing when no card names an entity — with a closed reason tag', () => {

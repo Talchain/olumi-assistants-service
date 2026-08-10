@@ -176,3 +176,125 @@ describe('δ1 forward path is unchanged (id → ref still resolves)', () => {
     });
   });
 });
+
+// ============================================================================
+// PROSE ORDER (ROADMAP 2.1023). `resolveProseEntityRefs` used to return refs in
+// GRAPH LOOKUP order — the order the producer happened to emit its nodes in,
+// which is invisible to the reader. Two consumers read `[0]` as "the entity
+// this card is about": the card's own pills, and ui_directive row 7, which
+// MOVES THE VIEWPORT. Measured on the 14 committed captures at
+// olumi-docs/PHASE0-EVIDENCE-2026-07-28/mutation-witness-2026-08-10:
+// 12 of 21 multi-ref coaching cards listed their entities in an order that
+// CONTRADICTS their own sentence — the dominant shape being
+// "The link from <factor> to <goal> assumes…" rendered as [goal, factor].
+//
+// The fix is a pure REORDERING: same set, ordered by FIRST MENTION in the prose,
+// ties broken by longer label first. It cannot add or drop a ref.
+// ============================================================================
+describe('1.135 prose entity refs — ORDER BY FIRST MENTION', () => {
+  // `fac_team` is deliberately listed BEFORE `fac_margin` so lookup order and
+  // prose order DISAGREE. Under the old behaviour this fixture returns
+  // [Team ramp time, Gross margin floor] — the incidental mention first.
+  const ORDER_NODES = [
+    { id: 'goal_g', label: 'Launch success', kind: 'goal' },
+    { id: 'fac_team', label: 'Team ramp time', kind: 'factor' },
+    { id: 'fac_margin', label: 'Gross margin floor', kind: 'factor' },
+  ];
+  const orderLookup = lookupOf(ORDER_NODES);
+  const orderIndex = buildLabelIndex(orderLookup);
+  const idsFor = (prose: string) =>
+    resolveProseEntityRefs(orderLookup, orderIndex, prose).map((r) => r.id);
+
+  // ── The discriminating pair (trap 19). Neither case alone proves the order
+  // tracks the PROSE: a mutant that simply reverses lookup order passes the
+  // first and FAILS the second. Both must hold, on the SAME graph, and they
+  // must fail on DIFFERENT assertions.
+  it('leads with the entity the sentence leads with (subject before the aside)', () => {
+    expect(
+      idsFor(
+        'Your Gross margin floor is doing most of the work here, though Team ramp time matters a little too.',
+      ),
+    ).toEqual(['fac_margin', 'fac_team']);
+  });
+
+  it('DISCRIMINATOR: the SAME graph with the mentions reversed yields the reversed order', () => {
+    // Precondition pinned in-test: this is the same lookup as above, so a
+    // difference in the result can only come from the prose.
+    expect(orderLookup.get('fac_team')).toEqual({
+      id: 'fac_team',
+      label: 'Team ramp time',
+      kind: 'factor',
+    });
+    expect(
+      idsFor(
+        'Your Team ramp time is doing most of the work here, though Gross margin floor matters a little too.',
+      ),
+    ).toEqual(['fac_team', 'fac_margin']);
+  });
+
+  it('is a pure reordering — the SET of resolved refs is unchanged', () => {
+    // Guards against the reorder silently becoming a suppression.
+    const a = idsFor(
+      'Your Gross margin floor is doing most of the work here, though Team ramp time matters a little too.',
+    );
+    const b = idsFor(
+      'Your Team ramp time is doing most of the work here, though Gross margin floor matters a little too.',
+    );
+    expect([...a].sort()).toEqual(['fac_margin', 'fac_team']);
+    expect([...a].sort()).toEqual([...b].sort());
+  });
+
+  it('the measured live shape: "The link from <factor> to <goal>" leads with the factor', () => {
+    // Taken from reanalyse/s3 in the committed capture set, which shipped
+    // [goal, factor] — the reader sees the factor named first.
+    const nodes = [
+      { id: 'goal_prod', label: 'Achieve Higher Sales Productivity Within Budget', kind: 'goal' },
+      { id: 'fac_sales', label: 'Sales Team Productivity', kind: 'factor' },
+    ];
+    const lk = lookupOf(nodes);
+    const refs = resolveProseEntityRefs(
+      lk,
+      buildLabelIndex(lk),
+      'The link from Sales Team Productivity to Achieve Higher Sales Productivity Within Budget assumes productivity gains will hold.',
+    );
+    expect(refs.map((r) => r.id)).toEqual(['fac_sales', 'goal_prod']);
+  });
+
+  // ── Tie-break: longer label first. This is what makes the CTO case correct
+  // WITHOUT a separate longest-match rule — a shorter label contained in a
+  // longer one either starts later (offset decides) or starts at the same
+  // offset (this tie-break decides).
+  it('prefers the LONGER label when a bare token also matches inside it (CTO)', () => {
+    const nodes = [
+      { id: 'fac_cto', label: 'CTO', kind: 'factor' },
+      { id: 'opt_cto_equity', label: 'Equity Offered to CTO', kind: 'option' },
+    ];
+    const lk = lookupOf(nodes);
+    const refs = resolveProseEntityRefs(
+      lk,
+      buildLabelIndex(lk),
+      'Revisit the Equity Offered to CTO before deciding.',
+    );
+    expect(refs[0]).toEqual({
+      id: 'opt_cto_equity',
+      label: 'Equity Offered to CTO',
+      kind: 'option',
+    });
+  });
+
+  it('prefers the LONGER label on a same-offset tie (prefix containment)', () => {
+    // "Onboarding" and "Onboarding friction" both start at offset 0 of the
+    // match, so only the tie-break can decide.
+    const nodes = [
+      { id: 'fac_onb', label: 'Onboarding', kind: 'factor' },
+      { id: 'fac_onb_fric', label: 'Onboarding friction', kind: 'factor' },
+    ];
+    const lk = lookupOf(nodes);
+    const refs = resolveProseEntityRefs(
+      lk,
+      buildLabelIndex(lk),
+      'Onboarding friction is the thing to watch.',
+    );
+    expect(refs[0]!.id).toBe('fac_onb_fric');
+  });
+});
