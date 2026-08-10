@@ -529,8 +529,8 @@ function suppressionWindow(
   //    later, unrelated ceiling drops a real limit for free. Start the window
   //    after the last floor span that closes before this match begins.
   let from = 0;
-  for (const [s, e] of consumed) {
-    if (e <= index) from = Math.max(from, e);
+  for (const [, end] of consumed) {
+    if (end <= index) from = Math.max(from, end);
   }
   let head = brief.slice(from, index);
 
