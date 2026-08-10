@@ -412,6 +412,36 @@ describe('§4 the card points at what it names (open_inspector, not focus)', () 
     expect(directive?.verb).not.toBe('open_inspector');
   });
 
+  it('the HOST must be the lens block — a non-lens card carrying an edge ref is not one', () => {
+    // ⚠ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED THE ONE ABOVE. Falling back
+    // to `freshBlocks[0]` is invisible to an EMPTY block list — the absence
+    // proved nothing about which block the row reads (trap 13). Here the list is
+    // non-empty and carries a perfectly good edge ref on a block that is NOT the
+    // σ-gated lens card, so a row that took "the first block with an edge" would
+    // point at it. The gesture's whole safety story is that it inherits the lens
+    // card's prose/schema gate; a directive sourced from anything else is a
+    // "look here" with no card behind it.
+    const impostor = {
+      type: 'coaching',
+      source: 'llm',
+      coaching_kind: 'reframe',
+      title: 'Not the lens card',
+      body: 'A different card that happens to name an edge.',
+      target_refs: [
+        { id: `${RIVAL.from}→${RIVAL.to}`, label: 'Unit Cost Base → Gross Margin', kind: 'edge' },
+      ],
+    };
+    const directive = buildFocusInspectorDirective(
+      makeFact(SPARSE),
+      EMPTY_LOOKUP as never,
+      [impostor] as unknown as OlumiResponse['blocks'],
+      null,
+      undefined,
+      signals(T2_FACTS),
+    );
+    expect(directive?.verb).not.toBe('open_inspector');
+  });
+
   it('an EDGE target asserts no leader, so a withheld turn still gets its pointer', () => {
     // Today this turn suppresses entirely (`leading_option_claim_withheld`) and
     // the user reading a judgement card gets no pointer at all. An edge names no

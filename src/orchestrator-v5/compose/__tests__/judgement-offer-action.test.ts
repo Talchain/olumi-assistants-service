@@ -169,6 +169,37 @@ describe('§1 the action copy', () => {
     }
   });
 
+  it('T2 names the edge in the RIGHT DIRECTION (a literal, not a derivation)', () => {
+    // ⚠ THIS ASSERTION EXISTS BECAUSE THE ONE ABOVE CANNOT SEE A REVERSAL, AND A
+    // MUTANT PROVED IT. Reversing `composeFragileEdgeActionPrompt`'s arguments
+    // left the equality above GREEN on all 30 corpus members — both sides move
+    // together, so it is a guard agreeing with itself (trap 13b). The delegation
+    // check answers "are these the same sentence?"; only a literal answers "is
+    // the sentence right?". Distinguishable endpoint labels, so a swap REDs.
+    expect(composeDisagreementActionPrompt('Sales Effort', 'Revenue')).toBe(
+      'Adjust the strength of the link from Sales Effort to Revenue in my model.',
+    );
+  });
+
+  it('the T1 copy itself trips the meta-question veto — why one conjunct is currently inert', () => {
+    // DISCLOSURE, MADE FAIL-LOUD. `isOverrideActionComposable` also asserts
+    // `isAnalyticalQuestion`, and a mutant proved that conjunct is currently
+    // NON-DISCRIMINATING: the shipped copy contains "show me", "what would" and
+    // "flip", all in `EDIT_GRAPH_NEGATIVE_REGEX`, so `isEditGraphDispatchable`
+    // is already false for every label and the analytical conjunct can never be
+    // the deciding one. It stays because it binds to the conjunct of
+    // `route-v2`'s `editVerbCandidate` that actually suppresses edit dispatch
+    // for a question — but a redundancy nobody can see is how a guard quietly
+    // stops meaning anything, so the PRECONDITION for its redundancy is pinned
+    // here instead: reword the copy past the veto set and this REDs, pointing
+    // the next reader at the conjunct that has just become load-bearing.
+    for (const [from, to] of CORPUS) {
+      const prompt = composeOverrideActionPrompt(from, to);
+      expect(/\b(?:flip|show me|what would)\b/i.test(prompt)).toBe(true);
+      expect(isEditGraphDispatchable(prompt)).toBe(false);
+    }
+  });
+
   it('no causal connective in either prompt (temporal-not-causal is binding)', () => {
     const causal = /\b(because|caused|is why|as a result of|due to)\b/i;
     for (const [from, to] of CORPUS) {
