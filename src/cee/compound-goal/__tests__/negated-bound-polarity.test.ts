@@ -293,10 +293,16 @@ describe("D — what actually reaches the wire, against the real B1 node set", (
   const nodeLabels = new Map<string, string>(
     graph.nodes.map((n: any) => [n.id, n.label]),
   );
-  const B1 = readFileSync(
-    "/Users/paulslee/Documents/GitHub/olumi-docs/PHASE0-EVIDENCE-2026-07-28/context-integrity-trace-2026-08-08/briefs/B1.txt",
-    "utf8",
-  );
+  /**
+   * ⚠ THE BRIEF COMES FROM THE CAPTURE, NOT FROM A PATH OUTSIDE THE REPO.
+   *
+   * The first version of this suite read `B1.txt` from an absolute home-dir
+   * path outside the repo. It passed locally and FAILED AT COLLECT in CI — the
+   * whole FILE, so every test in it silently stopped existing on the runner.
+   * The capture carries the real deployed `brief_text` verbatim, so the
+   * external read bought nothing and cost the suite.
+   */
+  const B1: string = capture.brief_text;
 
   it("the real graph genuinely has no gross-margin node (the reason A08 cannot land)", () => {
     const marginish = nodeIds.filter((id) => /margin/i.test(id));
