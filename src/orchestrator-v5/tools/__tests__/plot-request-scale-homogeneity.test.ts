@@ -559,4 +559,36 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     const okOut = projectRequestInterventionsToWireScale(okReq, map);
     expect(okOut.mixedUnresolved, 'a code within [0,1] with no gate-firing sibling is fine').toBe(false);
   });
+
+  it('M20 DISCRIMINATOR: the same-factor exemption applies to NO-CAP factors only — a CAPPED ambiguous factor is stranded even when it fires the gate itself', () => {
+    // Why the asymmetry is real, derived from PLoT deriveRange (b9f6b5a):
+    //   - a NO-CAP factor normalises by a range derived from its OWN values
+    //     (spread/baseline tiers) — values on both sides of 1 are treated
+    //     coherently within their own scale;
+    //   - a CAPPED factor ALWAYS divides by its cap (tier 0, authoritative).
+    //     An unproven 0.72 on a 25000-cap factor is annihilated to 0.0000288
+    //     no matter WHICH factor fired the gate — including its own.
+    // Widening the exemption to capped factors ships exactly that corruption.
+    const map = buildFactorScaleMap(costNodes); // f: cap 25000, £0 baseline (no evidence)
+    const req = [
+      { [SWITCH_COST]: iv(1.2) },  // raw-looking on the SAME factor — fires the gate
+      { [SWITCH_COST]: iv(0.72) }, // unproven [0,1] on the SAME factor
+    ];
+    const rules = req.map((r) => projectInterventionsToRawScale(r, map).conversions[0]?.rule);
+    expect(rules[0]).toBe('passthrough');
+    expect(rules[1]).toBe('ambiguous_no_evidence');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.demoted).toBe(false);
+    expect(
+      out.mixedUnresolved,
+      'a capped ambiguous value is cap-divided regardless of which factor fired the gate — must be surfaced',
+    ).toBe(true);
+
+    // The exemption's positive half stays pinned: the same shape on a NO-CAP
+    // factor ships raw (its range derives from its own values).
+    const noCapMap = buildFactorScaleMap([{ id: SWITCH_COST, kind: 'factor', observed_state: { value: 12 } }]);
+    const noCapOut = projectRequestInterventionsToWireScale(req, noCapMap);
+    expect(noCapOut.mixedUnresolved, 'a no-cap factor with values astride 1 declares its own raw-ness').toBe(false);
+  });
 });
