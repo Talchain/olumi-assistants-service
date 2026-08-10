@@ -30,6 +30,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 
 import { composeToolCallResponse } from '../../compose.js';
+import { buildDiscussedEntityUiDirective } from '../ui-directive.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
 /**
@@ -271,5 +272,140 @@ describe('row 7 — the workspace follows the conversation', () => {
     const dropped = suppressions().filter((e) => e.data.fact_type === DISCUSSED_ENTITY_TAG);
     expect(dropped).toHaveLength(1);
     expect(dropped[0].data.reason).toBe('no_discussed_entity');
+  });
+});
+
+// ===========================================================================
+// UNIT COVERAGE for the selection rule + the two gates.
+//
+// ⚠ WHY THESE EXIST, stated plainly because it is the honest reason: the
+// integration fixture above CANNOT REACH these branches. It composes exactly
+// one dispatchable ref, and that ref is always a FACTOR — so the withheld-claim
+// gate, the dispatchable-kind filter and the composition-order rule were all
+// GREEN THROUGH THEIR OWN MUTANTS (measured: defanging the withheld gate,
+// removing the kind filter, and reversing the scan order each left the suite
+// fully green). That is trap 16-inverse — the producer in that fixture cannot
+// emit the shapes those branches exist for, so a passing suite said nothing
+// about them. These unit tests drive the builder directly with the shapes a
+// real turn can carry.
+// ===========================================================================
+
+/** A minimal block carrying `target_refs`. `readTargetRefs` reads the field
+ *  defensively, so this stands in for any card that names entities. */
+function cardWithRefs(refs: ReadonlyArray<{ id: string; label: string; kind: string }>) {
+  return { type: 'coaching', target_refs: refs } as unknown as Parameters<
+    typeof buildDiscussedEntityUiDirective
+  >[0][number];
+}
+
+const FACTOR_REF = { id: 'fac_margin', label: 'Gross margin floor', kind: 'factor' };
+const OTHER_FACTOR_REF = { id: 'fac_team', label: 'Team ramp time', kind: 'factor' };
+const OPTION_REF = { id: 'opt_x', label: 'Hire locally', kind: 'option' };
+const GOAL_REF = { id: 'goal_g', label: 'Launch success', kind: 'goal' };
+const CONSTRAINT_REF = { id: 'con_budget', label: 'Budget ceiling', kind: 'constraint' };
+
+describe('row 7 — the withheld-claim gate', () => {
+  it('POSITIVE CONTROL: an option IS pointed at when the turn may name a leader', () => {
+    // Without this, the suppression below could be caused by anything at all.
+    const d = buildDiscussedEntityUiDirective([cardWithRefs([OPTION_REF])], true);
+    expect(d).toMatchObject({
+      verb: 'focus',
+      targets: [{ id: 'opt_x', label: 'Hire locally', kind: 'option' }],
+    });
+  });
+
+  it('skips an option target when the turn may NOT name a leader, and says so', () => {
+    const d = buildDiscussedEntityUiDirective([cardWithRefs([OPTION_REF])], false);
+    expect(d).toBeNull();
+    const dropped = suppressions().filter((e) => e.data.fact_type === DISCUSSED_ENTITY_TAG);
+    expect(dropped).toHaveLength(1);
+    // Distinct from `no_discussed_entity` on purpose: there WAS something to
+    // point at and we declined, which is a different operational fact.
+    expect(dropped[0].data.reason).toBe('leading_option_claim_withheld');
+  });
+
+  it('a withheld turn still points at a FACTOR — the gate is scoped to options, not a blanket mute', () => {
+    // Over-suppression is the other half of the acceptance criteria: a factor
+    // target asserts no leader, so the user keeps their pointer on exactly the
+    // turn they most need one.
+    const d = buildDiscussedEntityUiDirective(
+      [cardWithRefs([OPTION_REF, FACTOR_REF])],
+      false,
+    );
+    expect(d).toMatchObject({
+      verb: 'focus',
+      targets: [{ id: 'fac_margin', label: 'Gross margin floor', kind: 'factor' }],
+    });
+  });
+});
+
+describe('row 7 — the dispatchable-kind filter', () => {
+  it('POSITIVE CONTROL: a factor in the same position IS pointed at', () => {
+    const d = buildDiscussedEntityUiDirective([cardWithRefs([FACTOR_REF])], true);
+    expect(d).toMatchObject({ targets: [{ id: 'fac_margin', kind: 'factor' }] });
+  });
+
+  it('skips kinds with no shipped renderer even when they come FIRST', () => {
+    // `constraint` is a known dead end (schema comment: ROADMAP 2.457(b)); goal
+    // has no shipped precedent. Pointing at either is a gesture that silently
+    // does nothing. The factor behind them must win instead.
+    const d = buildDiscussedEntityUiDirective(
+      [cardWithRefs([GOAL_REF, CONSTRAINT_REF, FACTOR_REF])],
+      true,
+    );
+    expect(d).toMatchObject({
+      targets: [{ id: 'fac_margin', label: 'Gross margin floor', kind: 'factor' }],
+    });
+  });
+
+  it('suppresses when EVERY candidate is a non-dispatchable kind', () => {
+    const d = buildDiscussedEntityUiDirective(
+      [cardWithRefs([GOAL_REF, CONSTRAINT_REF])],
+      true,
+    );
+    expect(d).toBeNull();
+    const dropped = suppressions().filter((e) => e.data.fact_type === DISCUSSED_ENTITY_TAG);
+    expect(dropped[0].data.reason).toBe('no_discussed_entity');
+  });
+});
+
+describe('row 7 — selection order binds to the named entity', () => {
+  it('the FIRST dispatchable ref in composition order wins', () => {
+    // DISCRIMINATING: fac_team is also a perfectly valid factor, so an
+    // assertion that merely checked "kind === factor" would pass on either.
+    // This binds by IDENTITY to the one composition order selects.
+    const d = buildDiscussedEntityUiDirective(
+      [cardWithRefs([FACTOR_REF]), cardWithRefs([OTHER_FACTOR_REF])],
+      true,
+    );
+    expect(d).toMatchObject({
+      targets: [{ id: 'fac_margin', label: 'Gross margin floor', kind: 'factor' }],
+    });
+  });
+
+  it('and the sibling is chosen when IT is the one composition order puts first', () => {
+    // The other arm of the pair: proves the assertion above tracks ORDER, not
+    // a hardcoded affinity for fac_margin.
+    const d = buildDiscussedEntityUiDirective(
+      [cardWithRefs([OTHER_FACTOR_REF]), cardWithRefs([FACTOR_REF])],
+      true,
+    );
+    expect(d).toMatchObject({
+      targets: [{ id: 'fac_team', label: 'Team ramp time', kind: 'factor' }],
+    });
+  });
+
+  it('malformed refs are skipped without throwing, and a good ref behind them still wins', () => {
+    const d = buildDiscussedEntityUiDirective(
+      [
+        cardWithRefs([
+          { id: '', label: 'blank id', kind: 'factor' },
+          { id: 'fac_x', label: '', kind: 'factor' },
+          FACTOR_REF,
+        ]),
+      ],
+      true,
+    );
+    expect(d).toMatchObject({ targets: [{ id: 'fac_margin', kind: 'factor' }] });
   });
 });
