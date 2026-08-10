@@ -70,6 +70,7 @@ import {
   COACHING_BLOCK_BODY_MAX,
   composeFragileEdgeActionPrompt,
   isEditGraphDispatchable,
+  isFragileEdgeOfferComposable,
 } from '../../coaching/fragile-edge-offer-text.js';
 import {
   DISAGREEMENT_ACTION_LABEL,
@@ -84,10 +85,16 @@ import {
   isOverrideOfferComposable,
 } from '../../coaching/judgement-offer-text.js';
 import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
+import { shouldSuppressEditDispatchForValueUpdate } from '../../../orchestrator/routing/value-update-gate.js';
+import {
   classifyAnalyticalIntent,
   hasIndependentMutationSignal,
 } from '../../routing/analytical-intent.js';
 import { isAnalyticalQuestion } from '../../routing/analytical-question-guard.js';
+import { isStateQueryQuestionShape } from '../../routing/state-query-guard.js';
 import {
   tryPostAnalysisAdviceGate,
   type AdviceGateAnalysis,
@@ -229,6 +236,13 @@ describe('§2 the two prompts have OPPOSITE routing polarity', () => {
     // The same corpus, the opposite expectation. C-B is excluded from the
     // must-dispatch half BY CONSTRUCTION: those labels exist to trip the veto,
     // and §4 asserts they drop the action rather than shipping it inert.
+    //
+    // ⚠ NOTE WHAT THIS DOES AND DOES NOT PROVE. `isEditGraphDispatchable` is the
+    // body of `isDisagreementActionComposable`, so on its own this is a guard
+    // agreeing with itself: it covers 2 of `route-v2`'s 5 conjuncts and is blind
+    // to the other three. §6 rebuilds the route's whole predicate and pins the
+    // residue. This assertion stays as the DIRECTIONAL twin of T1's — it is the
+    // polarity claim, not the routing claim.
     for (const [from, to] of C_A) {
       expect(isEditGraphDispatchable(composeDisagreementActionPrompt(from, to))).toBe(true);
     }
@@ -384,6 +398,100 @@ describe('§4 an unphrasable action costs the action, never the card', () => {
 // ============================================================================
 // §5 — the length gate: a prompt is never TRUNCATED into a different route
 // ============================================================================
+
+// ============================================================================
+// §6 — the ROUTE'S OWN predicate, rebuilt from its own imports
+// ============================================================================
+
+/**
+ * `route-v2.ts:4128`'s `editVerbCandidate`, reconstructed from THE SAME five
+ * pure predicates the route imports — never a re-stated regex. All five are
+ * `(message: string) => boolean` with no I/O, so the whole conjunction is
+ * derivable in a unit test.
+ *
+ * ⚠ SCOPE: this is `editVerbCandidate`, not the full `editIntentDetected` at
+ * `:4432`, which additionally admits `configureOptionIntent` /
+ * `structuralRestructureIntent` and subtracts `proposalConfirmSuppressed` and the
+ * edge-chip door. Those need turn state a unit test does not have. Stated so the
+ * next reader inherits the boundary rather than the number.
+ */
+function editVerbCandidate(message: string): boolean {
+  return (
+    EDIT_GRAPH_POSITIVE_REGEX.test(message) &&
+    !EDIT_GRAPH_NEGATIVE_REGEX.test(message) &&
+    !shouldSuppressEditDispatchForValueUpdate(message) &&
+    !isAnalyticalQuestion(message) &&
+    !isStateQueryQuestionShape(message)
+  );
+}
+
+describe('§6 measured against the route’s own five-conjunct predicate', () => {
+  it('T1 is never an edit under ALL FIVE conjuncts, not merely under two', () => {
+    // §2 asserts T1 against `isEditGraphDispatchable`, which is 2 of 5. This is
+    // the whole predicate, and it is the assertion that actually says "a probe
+    // cannot mutate the graph".
+    for (const [from, to] of CORPUS) {
+      expect(editVerbCandidate(composeOverrideActionPrompt(from, to))).toBe(false);
+    }
+  });
+
+  it('KNOWN-DIVERGENT SET: T2 clears our gate but not the route on EXACTLY these pairs', () => {
+    // ⚠ THIS EXISTS BECAUSE §2'S T2 ASSERTION WAS A GUARD AGREEING WITH ITSELF.
+    // It asserted `isEditGraphDispatchable(prompt) === true` — the predicate's
+    // own body — so it could never observe the three conjuncts the predicate
+    // does not implement. Rebuilding the route's predicate found real residue.
+    //
+    // Pinned as an EXACT SET, so it REDs if it GROWS *or* SHRINKS: a gap
+    // recorded in the suite is honest, a gap invisible to it is how a wrong
+    // guarantee survives. Bound by label identity, never by a count.
+    const divergent = CORPUS.filter(
+      ([from, to]) =>
+        isDisagreementActionComposable(from, to) &&
+        !editVerbCandidate(composeDisagreementActionPrompt(from, to)),
+    );
+    expect(divergent).toStrictEqual([
+      ['Operating Profit Uplift', 'Raise Group Operating Profit by 8% Within 18 Months'],
+      ['Flour Cost Margin Squeeze', 'Raise Group Operating Profit by 8% Within 18 Months'],
+    ]);
+    // The MECHANISM, derived rather than described: it is the value-update
+    // conjunct, and the phrasing comes from the PRODUCER LABEL ("Raise … by 8%"),
+    // not from our copy.
+    for (const [from, to] of divergent) {
+      const prompt = composeDisagreementActionPrompt(from, to);
+      expect(shouldSuppressEditDispatchForValueUpdate(prompt)).toBe(true);
+      expect(isAnalyticalQuestion(prompt)).toBe(false);
+      expect(isStateQueryQuestionShape(prompt)).toBe(false);
+    }
+  });
+
+  it('the divergence is INHERITED from the fragile-edge lens, not introduced here', () => {
+    // The already-shipped lens composes the IDENTICAL string from the same
+    // labels and mis-routes identically. This PR does not create the residue; it
+    // makes it visible. Rowed separately.
+    for (const [from, to] of CORPUS) {
+      const t2 = composeDisagreementActionPrompt(from, to);
+      const fragile = composeFragileEdgeActionPrompt(from, to);
+      expect(t2).toBe(fragile);
+      if (isDisagreementActionComposable(from, to) && !editVerbCandidate(t2)) {
+        expect(isFragileEdgeOfferComposable(from, to)).toBe(true);
+        expect(editVerbCandidate(fragile)).toBe(false);
+      }
+    }
+  });
+
+  it('POSITIVE CONTROL: the rebuilt predicate DOES say yes to ordinary edit turns', () => {
+    // Without this the two assertions above could both pass on a predicate that
+    // returns false for everything (trap 13 — an absence probe needs to prove it
+    // can see a presence).
+    expect(editVerbCandidate('Adjust the strength of the link from Sales Effort to Revenue in my model.')).toBe(true);
+    const admitted = CORPUS.filter(
+      ([from, to]) =>
+        isDisagreementActionComposable(from, to) &&
+        editVerbCandidate(composeDisagreementActionPrompt(from, to)),
+    );
+    expect(admitted.length).toBeGreaterThanOrEqual(20);
+  });
+});
 
 describe('§5 the action prompt survives the contract cap untruncated', () => {
   it('a pair the naming sentence admits can still overflow the prompt cap — and is refused', () => {

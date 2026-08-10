@@ -196,6 +196,20 @@ export function composeDisagreementActionPrompt(fromLabel: string, toLabel: stri
  * and the action is refused rather than shipped inert (2.770: no inert chips).
  * The CARD still ships — see the module header for why that is a different
  * question with a different answer.
+ *
+ * ⚠ SCOPE, STATED HONESTLY BECAUSE THE OPPOSITE WAS ONCE WRITTEN HERE'S SIBLING:
+ * this covers **2 of `route-v2`'s 5 `editVerbCandidate` conjuncts**. Measured by
+ * rebuilding that predicate from the route's own imports over the committed live
+ * captures: **2 of 22 capture label pairs** clear this gate and are still refused
+ * by the route, via `valueUpdatePhrasingHit` (the label *"Raise Group Operating
+ * Profit by 8% Within 18 Months"* is itself value-update phrasing). Those turns
+ * fall to the generic LLM router — non-deterministic, not a dead button and not a
+ * wrong mutation — and the divergence is **INHERITED, not introduced**: the
+ * already-shipped fragile-edge lens composes the identical prompt from the same
+ * labels and diverges on exactly the same two pairs. Pinned as an exact set in
+ * `compose/__tests__/judgement-offer-action.test.ts` §6. Closing the three
+ * uncovered conjuncts, and the fragile-edge lens's own mis-route, are rowed
+ * separately and are NOT this lane's.
  */
 export function isDisagreementActionComposable(fromLabel: string, toLabel: string): boolean {
   const prompt = composeDisagreementActionPrompt(fromLabel, toLabel);

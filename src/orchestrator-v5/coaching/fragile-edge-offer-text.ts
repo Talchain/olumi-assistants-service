@@ -141,15 +141,28 @@ export function isFragileEdgeOfferComposable(fromLabel: string, toLabel: string)
  * judgement-lens offer (`judgement-offer-text.ts`) asks the SAME question of the
  * SAME string rather than re-stating the pair. One definition, three callers.
  *
- * ⚠ THIS IS ONE CONJUNCT OF FIVE, NOT THE WHOLE ROUTE. `route-v2.ts`'s
+ * ⚠ THIS IS TWO CONJUNCTS OF FIVE, NOT THE WHOLE ROUTE. `route-v2.ts:4128`'s
  * `editVerbCandidate` is `positiveEditRegexHit && !negativeEditRegexHit &&
  * !valueUpdatePhrasingHit && !analyticalQuestionDetected && !stateQuerySuppressed`.
- * So a `true` here is NECESSARY-not-sufficient for dispatch (the fragile-edge
- * prompt clears the other three by shape), and a `false` here is SUFFICIENT for
- * "cannot dispatch". That asymmetry is why the probe-side gate in
- * `judgement-offer-text.ts` asserts `isAnalyticalQuestion` as well: a prompt can
- * carry a producer-authored edit verb and still be un-dispatchable, and the
- * measured corpus contains exactly that class.
+ * A `false` here is SUFFICIENT for "cannot dispatch"; a `true` here is
+ * NECESSARY-NOT-SUFFICIENT.
+ *
+ * ⚠⚠ AND THE RESIDUE IS REAL, NOT THEORETICAL — this comment previously read
+ * *"(the fragile-edge prompt clears the other three by shape)"* and that was
+ * FALSE, refuted by rebuilding `editVerbCandidate` from the route's own imports
+ * and running it over the committed live captures: on **2 of the 22 capture
+ * label pairs** this predicate says yes and the route says no, via
+ * `valueUpdatePhrasingHit` — the producer label *"Raise Group Operating Profit
+ * by 8% Within 18 Months"* is itself value-update phrasing. Those turns are not
+ * dead buttons and not wrong mutations: they are refused at the edge-phrasing
+ * gate and fall to the generic LLM router, so the guarantee on them is
+ * NON-DETERMINISTIC rather than absent. The exact divergent set is pinned in
+ * `compose/__tests__/judgement-offer-action.test.ts` §6 and REDs if it grows OR
+ * shrinks. Closing the three uncovered conjuncts is rowed separately.
+ *
+ * The asymmetry is also why the probe-side gate in `judgement-offer-text.ts`
+ * asserts `isAnalyticalQuestion`: a prompt can carry a producer-authored edit
+ * verb and still be un-dispatchable, and the measured corpus contains that class.
  */
 export function isEditGraphDispatchable(message: string): boolean {
   if (!EDIT_GRAPH_POSITIVE_REGEX.test(message)) return false;
