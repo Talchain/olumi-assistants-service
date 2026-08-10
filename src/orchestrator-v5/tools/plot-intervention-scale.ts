@@ -379,6 +379,27 @@ export function projectInterventionsToRawScale(
 }
 
 /**
+ * The demotion postcondition, as a directly-testable predicate.
+ *
+ * Demotion exists to put the WHOLE request inside [0,1] so PLoT's request-level gate
+ * skips. Choosing to demote and not achieving that means the payload is still mixed
+ * and the analysis is still computing on corrupted input.
+ *
+ * ⚠ HONEST SCOPE: given correct decision predicates this is UNREACHABLE end-to-end —
+ * a mutant that neuters the call inside `projectRequestInterventionsToWireScale`
+ * survives, because no reachable request violates it. It is defence in depth against
+ * a FUTURE predicate change, which is exactly when it earns its place. Its logic is
+ * pinned here rather than only through the caller so the check itself cannot rot into
+ * a no-op unnoticed.
+ */
+export function isDemotionPostconditionViolated(
+  demoteChosen: boolean,
+  allWithinUnitInterval: boolean,
+): boolean {
+  return demoteChosen && !allWithinUnitInterval;
+}
+
+/**
  * The outcome of projecting an ENTIRE request's interventions to one wire scale.
  * `perOption` mirrors the input order exactly.
  */
@@ -511,7 +532,7 @@ export function projectRequestInterventionsToWireScale(
   // WITHOUT anyone having to enumerate the rules in advance; it would have caught the
   // encoded-category case before anybody thought of `encoded_verbatim`.
   const allWithinUnitInterval = perOption.every((o) => Object.values(o).every((v) => v <= 1));
-  const postconditionViolated = demote && !allWithinUnitInterval;
+  const postconditionViolated = isDemotionPostconditionViolated(demote, allWithinUnitInterval);
   return {
     perOption,
     conversions,

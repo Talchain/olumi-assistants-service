@@ -44,6 +44,7 @@ import {
   buildFactorScaleMap,
   projectRequestInterventionsToWireScale,
   projectInterventionsToRawScale,
+  isDemotionPostconditionViolated,
 } from '../plot-intervention-scale.js';
 
 // ---------------------------------------------------------------------------
@@ -340,5 +341,32 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
       expect(Object.keys(before[0]!).length, `${label}: empty corpus would be vacuous`).toBeGreaterThan(0);
       expect(after, `${label}: an un-demotable request must be left exactly as the pre-fix projection had it`).toEqual(before);
     }
+  });
+
+  it('M8 DISCRIMINATOR: a no_cap value ABOVE 1 with no <=1 sibling strands nothing, so it must NOT warn', () => {
+    // Without the `<= 1` numeric guard on stranded siblings this request would be
+    // classified mixed and warn. Nothing here can be annihilated: the only sibling
+    // has no cap for PLoT to divide by, and the promoted factor round-trips.
+    const NOCAP = 'fac_headcount';
+    const req = [{ [NOCAP]: iv(5000), [CAPABILITY]: iv(0.8) }];
+    const map = buildFactorScaleMap([{ id: NOCAP, kind: 'factor', observed_state: { value: 12 } }, capabilityNodePct]);
+    const rules = projectInterventionsToRawScale(req[0]!, map).conversions;
+    expect(rules.find((c) => c.factor_id === NOCAP)?.rule).toBe('no_cap');
+    expect(rules.find((c) => c.factor_id === CAPABILITY)?.rule).toBe('cap_denormalised');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.demoted).toBe(false);
+    expect(out.perOption[0]?.[CAPABILITY], 'the correct promotion survives').toBe(80);
+    expect(
+      out.mixedUnresolved,
+      'no sibling is stranded at unit scale, so there is nothing to warn about',
+    ).toBe(false);
+  });
+
+  it('the demotion postcondition predicate is pinned directly (it is unreachable through the caller)', () => {
+    expect(isDemotionPostconditionViolated(true, false), 'demote chosen + still mixed = violation').toBe(true);
+    expect(isDemotionPostconditionViolated(true, true)).toBe(false);
+    expect(isDemotionPostconditionViolated(false, false), 'no demote chosen = no claim made = no violation').toBe(false);
+    expect(isDemotionPostconditionViolated(false, true)).toBe(false);
   });
 });
