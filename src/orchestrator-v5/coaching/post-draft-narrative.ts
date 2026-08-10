@@ -67,8 +67,11 @@ import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/type
 
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
+import { isDirectionClarificationId } from '../../cee/compound-goal/direction-gate.js';
+
 import {
   gateAssumptionFragment,
+  gateCoachingCardBody,
   gateFullResponse,
   type GateRejectReason,
 } from './copy-quality-gate.js';
@@ -99,6 +102,26 @@ const MAX_LISTED_WHEN_OVER = 3;
  * overwhelming the reader.
  */
 const MAX_ADDITIONAL_CHECKS = 1;
+
+/**
+ * How many direction clarifications may occupy their own slot.
+ *
+ * ⚠⚠ WHY A DEDICATED SLOT AND NOT A PRIORITY TWEAK. A direction clarification
+ * is the only coaching item that represents a LIMIT THE USER STATED AND THE
+ * PRODUCT DECLINED TO ENFORCE. Measured at 32f06dd with the live brief: the
+ * gate built the card correctly, `package.ts` appended it correctly — and then
+ * the served turn contained no trace of it, because the clarification is
+ * appended LAST, `pickAssumption` reads `strengthenItems[0]` only, and the
+ * single "worth a look" slot went to the second LLM item. Competing for a
+ * general-purpose budget means position decides whether a board-level limit is
+ * mentioned at all.
+ *
+ * Making it the ASSUMPTION bullet instead would have been the other wrong
+ * answer: it is not an assumption, and taking that slot would silence real
+ * coaching to surface the question (the opposite-direction defect — trap 22b).
+ * Its own slot costs one line and settles both.
+ */
+const MAX_DIRECTION_BULLETS = 2;
 
 /**
  * Calm advisory phrases mapped from the widening_log `brief_completeness`
@@ -275,6 +298,17 @@ export interface PostDraftNarrativeTelemetry {
   /** Count of EXTRA "check" bullets surfaced in the rendered text beyond the
    *  single primary assumption bullet (0 or 1 under the current cap). */
   readonly additional_checks_surfaced: number;
+  /**
+   * How many direction clarifications reached the served narrative.
+   *
+   * Ops needs this separately from `additional_checks_surfaced` for one
+   * reason: a clarification that is BUILT and then not SURFACED is invisible in
+   * every other signal — the gate logs it as withheld-and-asked, the package
+   * stage logs it as appended, and the served text simply does not mention it.
+   * That is exactly how the defect this slot fixes survived a full adversarial
+   * review. A zero here beside a non-zero withheld count is the alarm.
+   */
+  readonly direction_clarifications_surfaced: number;
   /** Source category of the extra check bullet, or null when none surfaced. */
   readonly additional_check_source: 'strengthen_item' | 'coaching_bias_signal' | null;
 }
@@ -360,6 +394,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         brief_completeness_surfaced: false,
         additional_checks_surfaced: 0,
         additional_check_source: null,
+        direction_clarifications_surfaced: 0,
       },
     };
   }
@@ -385,6 +420,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         brief_completeness_surfaced: false,
         additional_checks_surfaced: 0,
         additional_check_source: null,
+        direction_clarifications_surfaced: 0,
       },
     };
   }
@@ -400,10 +436,21 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   const tradeOffBullet = buildTradeOffBullet(factors, risks);
 
+  // A direction clarification gets its OWN slot and is therefore removed from
+  // the general-purpose pickers below. Leaving it in both would surface the
+  // same question twice, and leaving it ONLY in the generic pool is the defect
+  // being fixed — see `pickDirectionClarifications`.
+  const directionBullets = pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
+    (t) => toDirectionBullet(t),
+  );
+  const generalStrengthenItems = Array.isArray(strengthenItems)
+    ? strengthenItems.filter((i) => !isDirectionClarificationItem(i))
+    : strengthenItems;
+
   const assumption = pickAssumption({
     nodes,
     analysisReady,
-    strengthenItems,
+    strengthenItems: generalStrengthenItems,
     coachingBiasSignals,
   });
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
@@ -414,14 +461,18 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const usedTexts = new Set<string>();
   if (assumptionBullet) usedTexts.add(normaliseForDedup(stripBulletLabel(assumptionBullet)));
   const additionalChecks = pickAdditionalChecks({
-    strengthenItems,
+    strengthenItems: generalStrengthenItems,
     coachingBiasSignals,
     alreadyUsed: usedTexts,
     limit: MAX_ADDITIONAL_CHECKS,
   });
   const additionalBullets = additionalChecks.map((c) => toCheckBullet(c.text));
 
+  // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
+  // stated and the product declined to enforce outranks a coaching suggestion,
+  // and the core block is the one the word-budget ladder sheds LAST.
   const coreBullets = [
+    ...directionBullets,
     ...(tradeOffBullet ? [tradeOffBullet] : []),
     ...(assumptionBullet ? [assumptionBullet] : []),
   ];
@@ -430,6 +481,10 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     ...coreBullets,
     ...additionalBullets,
   ]);
+  const weighingBlockDirectionOnly =
+    directionBullets.length > 0
+      ? renderBulletSection('What the model is weighing', directionBullets)
+      : null;
 
   // Brief-completeness advisory (own droppable block). Only the enum is read;
   // it is mapped to a calm advisory phrase and never emitted verbatim.
@@ -443,6 +498,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     optionsBlock,
     weighingBlock,
     weighingBlockCore,
+    weighingBlockDirectionOnly,
     completenessBlock,
     nextStep,
   });
@@ -464,6 +520,11 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       brief_completeness_surfaced: sectioned.includedCompleteness,
       additional_checks_surfaced: sectioned.includedWeighingExtra ? additionalBullets.length : 0,
       additional_check_source: additionalChecks[0]?.source ?? null,
+      // Reported from what the ASSEMBLER kept, never from what was built: the
+      // word-budget ladder can shed the whole weighing block, and a count of
+      // bullets that were composed but not served is the optimism this
+      // telemetry exists to catch.
+      direction_clarifications_surfaced: sectioned.includedWeighing ? directionBullets.length : 0,
     },
   };
 }
@@ -781,6 +842,63 @@ function pickCoachingBiasSignalAssumption(
   return null;
 }
 
+// ----- direction-clarification picker (its own weighing slot) ---------------
+
+/**
+ * Collect the direction clarifications from `strengthen_items`, rendered from
+ * their OWN copy rather than through the assumption-fragment pipeline.
+ *
+ * ⚠⚠ THE GATE CHOICE IS THE FIX, NOT A DETAIL. {@link gateAssumptionFragment}
+ * is shaped for the tail of "One assumption worth checking: …": it caps at 150
+ * chars and rejects trailing punctuation, so it rejects EVERY clarification the
+ * gate emits — and the caller's fallback then takes the detail's FIRST
+ * SENTENCE, which is exactly where the question is not. Measured: the user read
+ * "Assumption to check: You mentioned 85% for CSAT" and was never asked which
+ * direction the limit ran.
+ *
+ * {@link gateCoachingCardBody} is the right instrument and already exists for
+ * precisely this situation (its own header sets out the argument, for
+ * `bias_signals[].detail`): it keeps every SHARED CONTENT rule — internal-id
+ * leaks, schema terms, graph-shape language, premature recommendation — and
+ * drops only the fragment-splicing presentation rules that do not apply to a
+ * complete sentence standing on its own.
+ *
+ * FAILS CLOSED. `metric_text` comes from the USER'S OWN WORDS, so this copy is
+ * not trusted the way the fixed fallbacks are: a card that trips the content
+ * gate is DROPPED, never rewritten and never partially rendered.
+ *
+ * Items are identified by ID PREFIX, imported from the producer — never by a
+ * text predicate another item could satisfy (trap 19), and never by a second
+ * copy of the string (trap 12).
+ */
+function pickDirectionClarifications(
+  items: ReadonlyArray<unknown> | null | undefined,
+  limit: number,
+): string[] {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const out: string[] = [];
+  for (const item of items) {
+    if (out.length >= limit) break;
+    if (typeof item !== 'object' || item === null) continue;
+    if (!isDirectionClarificationId((item as { id?: unknown }).id)) continue;
+    const detail = (item as { detail?: unknown }).detail;
+    if (typeof detail !== 'string' || detail.trim().length === 0) continue;
+    const gated = gateCoachingCardBody(detail);
+    if (!gated.accept) continue;
+    out.push(gated.text ?? detail.trim());
+  }
+  return out;
+}
+
+/** Is this item a direction clarification? Used to keep it out of the generic pickers. */
+function isDirectionClarificationItem(item: unknown): boolean {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    isDirectionClarificationId((item as { id?: unknown }).id)
+  );
+}
+
 // ----- additional-check picker (second weighing point) ----------------------
 
 interface AdditionalCheckPick {
@@ -885,6 +1003,19 @@ function extractBiasSignalText(signal: unknown): string | null {
  */
 function toCheckBullet(text: string): string {
   return `Worth a look: ${text}`;
+}
+
+/**
+ * Render a direction clarification as a bullet.
+ *
+ * The label names what the user must DO, and is deliberately distinct from
+ * `Assumption to check:` — this is not an assumption the model made, it is a
+ * limit the user stated that is not being enforced until they say which way it
+ * runs. The body is rendered WHOLE: it already carries the question, and
+ * clipping it is the defect this slot exists to end.
+ */
+function toDirectionBullet(text: string): string {
+  return `Limit to confirm: ${text}`;
 }
 
 /**
@@ -1033,6 +1164,11 @@ interface SectionedNarrativeInput {
   readonly weighingBlock: string;
   /** Weighing block with only the trade-off + primary assumption bullets. */
   readonly weighingBlockCore: string;
+  /**
+   * Weighing block reduced to the direction clarifications alone, or `null`
+   * when there are none. The last rung before the block is shed entirely.
+   */
+  readonly weighingBlockDirectionOnly: string | null;
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
   readonly nextStep: string;
@@ -1044,6 +1180,11 @@ interface SectionedNarrativeResult {
   readonly includedWeighingExtra: boolean;
   /** Whether the brief-completeness advisory block survived. */
   readonly includedCompleteness: boolean;
+  /**
+   * Whether ANY weighing block survived — the direction bullets live in it, so
+   * telemetry must report what was SERVED rather than what was composed.
+   */
+  readonly includedWeighing: boolean;
 }
 
 /**
@@ -1089,27 +1230,41 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
   // Rung 1 — everything.
   let text = tryAssemble(input.weighingBlock, true, true);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness };
+    return { text, includedWeighingExtra: hasExtra, includedCompleteness: hasCompleteness, includedWeighing: true };
   }
   // Rung 2 — drop the extra check bullet.
   text = tryAssemble(input.weighingBlockCore, true, true);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: hasCompleteness };
+    return { text, includedWeighingExtra: false, includedCompleteness: hasCompleteness, includedWeighing: true };
   }
   // Rung 3 — drop the completeness advisory.
   text = tryAssemble(input.weighingBlockCore, true, false);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: false };
+    return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+  }
+  // Rung 3b — reduce the weighing block to the direction clarifications alone.
+  //
+  // ⭐ A LIMIT THE USER STATED OUTRANKS EVERY COACHING SUGGESTION IN THE BLOCK.
+  // Without this rung a long options list could shed the whole section, and the
+  // one thing in it the user is REQUIRED to answer would vanish with it — the
+  // same silent loss, arriving through the word budget instead of through
+  // position.
+  if (input.weighingBlockDirectionOnly !== null) {
+    text = tryAssemble(input.weighingBlockDirectionOnly, true, false);
+    if (countWords(text) <= MAX_WORDS) {
+      return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+    }
   }
   // Rung 4 — drop the whole weighing block.
   text = tryAssemble(null, true, false);
   if (countWords(text) <= MAX_WORDS) {
-    return { text, includedWeighingExtra: false, includedCompleteness: false };
+    return { text, includedWeighingExtra: false, includedCompleteness: false, includedWeighing: false };
   }
   // Rung 5 — drop options too.
   return {
     text: tryAssemble(null, false, false),
     includedWeighingExtra: false,
     includedCompleteness: false,
+    includedWeighing: false,
   };
 }

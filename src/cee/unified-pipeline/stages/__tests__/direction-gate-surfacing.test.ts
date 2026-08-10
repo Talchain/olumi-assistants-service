@@ -57,7 +57,17 @@ describe('ROADMAP 2.1051 — direction clarifications reach a user', () => {
     expect(card!.detail).toContain('at or below');
     // And it must say the limit is NOT being enforced, which is the fact the
     // user most needs: silence here is what made the original defect invisible.
-    expect(card!.detail).toContain("isn't being enforced");
+    // (Contraction dropped 2026-08-11 with the copy change below — the
+    // assertion is about the FACT being stated, and pinning the apostrophe
+    // rather than the fact is what made this a spelling test.)
+    expect(card!.detail).toContain('is not being enforced');
+    // ⭐ AND IT MUST ASK. Added 2026-08-11: the card was previously two
+    // observation sentences, and the served V5 narrative's first-sentence
+    // slice reduced it to "You mentioned 78% for gross margin" — a statement
+    // where the question belongs. Measured on staging at 32f06dd. A card that
+    // never asks cannot obtain the answer this gate exists to obtain.
+    expect(card!.detail).toContain('?');
+    expect(card!.detail).toMatch(/Should gross margin stay at or above 78%, or at or below it\?/);
   });
 
   it('dedupes by (metric, amount) — one limit is ONE question however many rows carried it', () => {
