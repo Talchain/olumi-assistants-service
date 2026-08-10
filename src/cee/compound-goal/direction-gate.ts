@@ -65,22 +65,33 @@
  * successive corpora have each spelled negation the same way and each missed a
  * class the next one found (trap 22).
  *
- * ⚠ AND THE SHARED ALPHABETS ARE IMPORTED, NEVER COPIED. `AMT`, `NEGATION_LEAD`,
- * `NEGATION_OR_PREVENTION_LEAD`, `FALL_VERB` and `parseValue` come from
- * `extractor.ts`, and `POSSIBILITY_MARKER_SRC` from `risk-polarity.ts`. A copied
- * alphabet is the hand-maintained mirror this estate keeps paying for: the gate
- * would drift from the producer it screens and the drift would read as green.
+ * ⚠ THE SHARED GRAMMARS ARE IMPORTED, NEVER COPIED: `AMT`, `FALL_VERB` and
+ * `parseValue` from `extractor.ts`, `POSSIBILITY_MARKER_SRC` from
+ * `risk-polarity.ts`. A copied amount grammar is the hand-maintained mirror this
+ * estate keeps paying for — the gate would drift from the producer it screens
+ * and the drift would read as green.
+ *
+ * ⚠⚠ THE NEGATION ALPHABET IS THE ONE EXCEPTION, DELIBERATELY, AND IT CARRIES
+ * ITS OWN GUARD. It is spelled out below rather than derived from the
+ * extractor's two lead lists, because it must differ from them in three ways
+ * that are the entire point of this module: it ADDS the contraction forms both
+ * lists omit (`don't/doesn't/didn't` — the audit's whole a1 class), it
+ * SEPARATES prevention verbs from negations (they screen differently), and it
+ * narrows `no` to `no(?=\s)` so compounds like `no-show` stop being read as
+ * negations. A derivation could not express any of those.
+ *
+ * So the completeness risk is real, and the guard for it is a UNION ASSERTION
+ * in `__tests__/direction-gate-corpus.test.ts`: every alternative in the
+ * extractor's `NEGATION_LEAD` and `NEGATION_OR_PREVENTION_LEAD` must be matched
+ * by this module's `NEG_PLUS_RE`. That is derivable and therefore cannot go
+ * stale — if someone teaches the extractor a new negation, the gate's test goes
+ * red until the gate learns it too (trap 12d: derivation proves agreement, a
+ * union assertion is what notices the list is short).
  *
  * Pure, no I/O, every function exported for direct test.
  */
 
-import {
-  AMT,
-  FALL_VERB,
-  NEGATION_LEAD,
-  NEGATION_OR_PREVENTION_LEAD,
-  parseValue,
-} from './extractor.js';
+import { AMT, FALL_VERB, parseValue } from './extractor.js';
 import { POSSIBILITY_MARKER_SRC } from './risk-polarity.js';
 
 /* ===========================================================================
@@ -329,6 +340,9 @@ const PREVENTION_SRC =
 
 /** Any token that makes a sentence's direction unsafe to read off a comparator. */
 const NEG_PLUS_RE = new RegExp(`\\b(?:${inner(NEG_CORE_SRC)}|${inner(PREVENTION_SRC)})`, 'i');
+
+/** Exported so the union assertion in the corpus spec can screen against it. */
+export const NEGATION_SCREEN_RE = NEG_PLUS_RE;
 
 /** FALL verbs — the extractor's own list, plus the `go/going` forms it omits. */
 const FALL_PLUS_SRC = `(?:${inner(FALL_VERB)}|go(?:es|ing)?|went|sink(?:s|ing)?|sank|declin(?:e|es|ing)|decreas(?:e|es|ing)|slid(?:e|es|ing)?)`;
@@ -653,7 +667,8 @@ export function rangeGovernsAmount(sentence: string, value: number): boolean {
 }
 
 /**
- * Classify a `value_frame: 'delta'` row as a stated ESTIMATE rather than a
+ * Classify a delta-framed row (one whose `value_frame` reads `delta`) as a
+ * stated ESTIMATE rather than a
  * limit, or `null` if it stands as a limit and proceeds through S1–S4.
  *
  * Why `risk-polarity` did not already catch this: its movement lists carry

@@ -374,6 +374,14 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // ROADMAP 2.1051 — INCIDENTAL. The direction gate holds no magnitude list
+    // of its own: it IMPORTS `AMT` and `parseValue` from the extractor
+    // precisely so it cannot drift from them. Its only magnitude words sit in
+    // a comment explaining why the sentence terminator must require trailing
+    // whitespace — `£1.5 million` and `1,500,000` must never be split
+    // (ROADMAP 2.714).
+    'cee/compound-goal/direction-gate.ts':
+      'incidental — comment only; the file imports AMT/parseValue and spells no alphabet',
     "utils/magnitude-alphabet.ts": "the canonical alphabet itself",
     "cee/extraction/numeric-parser.ts": "sibling value lookup — compared in Part A",
     "cee/decision-review/shape-check.ts": "sibling value lookup — compared in Part A",

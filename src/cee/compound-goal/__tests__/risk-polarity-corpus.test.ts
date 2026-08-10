@@ -257,17 +257,62 @@ describe('2.653 — the LLM producer is screened by the same rule, at the same p
     expect(emitted.map((c) => c.constraint_id)).toEqual(['gc_costs']);
   });
 
-  it('an LLM row with NO source_quote is inconclusive and stands — the screen never guesses', () => {
-    const emitted = emitFor('Grow MRR to 250000. Nothing else stated.', [
+  it('an LLM row with NO source_quote is inconclusive to THIS screen — it is not what withholds it', () => {
+    // ⚠⚠ THIS TEST'S WIRE-LEVEL EXPECTATION CHANGED WITH ROADMAP 2.1051, AND
+    // THE REASON IS TRAP 21: TWO AUTHORITIES ANSWERING DIFFERENT QUESTIONS
+    // UNDER SIMILAR NAMES. Both answers below are correct for their own
+    // question, and reconciling them by aligning the defaults would be the
+    // mistake.
+    //
+    //   2.653 (this module) asks: "does this row's operator CONTRADICT the risk
+    //     framing of its own source phrase?" With no phrase there is no
+    //     contradiction, so this screen declines — it never guesses. UNCHANGED,
+    //     and asserted directly below.
+    //
+    //   2.1051 (the direction gate) asks: "is this row's direction PROVEN?"
+    //     With no evidence it is not, so the gate withholds it and ASKS the
+    //     user. That is the stronger question, and it is the one that decides
+    //     the wire.
+    //
+    // The gate is deliberately fail-closed here: the audit's e3 probe showed an
+    // LLM row surviving ALONE on the wire and inverting a user's floor, and a
+    // row that omits its quote is exactly that row with its evidence removed.
+    // Letting it stand would reopen the hole for any model turn that skips the
+    // (prompt-mandated) `source_quote`.
+    const brief = 'Grow MRR to 250000. Nothing else stated.';
+    const row = {
+      constraint_id: 'gc_bare',
+      node_id: 'fac_churn',
+      operator: '>=' as const,
+      value: 0.03,
+      label: 'Some limit',
+    };
+
+    // THIS module still declines to judge it — the 2.653 rule is untouched.
+    expect(contradictedRiskPolarity(null, '>=', brief)).toBeNull();
+    expect(deriveRiskPolarity('Some limit', brief)).toBeNull();
+
+    // …and the row nonetheless does not reach the wire, because a DIFFERENT
+    // gate proved nothing about its direction.
+    expect(emitFor(brief, [row]).map((c) => c.constraint_id)).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL: the same row WITH a locatable quote does reach the wire', () => {
+    // Without this pair the assertion above is satisfied by a merge that emits
+    // nothing at all, which would make it vacuous (trap 13). The only
+    // difference between the two rows is the evidence.
+    const brief = 'Grow MRR to 250000. Keep churn under 3%.';
+    const emitted = emitFor(brief, [
       {
-        constraint_id: 'gc_bare',
+        constraint_id: 'gc_quoted',
         node_id: 'fac_churn',
-        operator: '>=',
+        operator: '<=',
         value: 0.03,
         label: 'Some limit',
+        source_quote: 'Keep churn under 3%.',
       },
     ]);
-    expect(emitted.map((c) => c.constraint_id)).toEqual(['gc_bare']);
+    expect(emitted.map((c) => c.constraint_id)).toEqual(['gc_quoted']);
   });
 });
 

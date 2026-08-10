@@ -155,6 +155,7 @@ describe('2.932 — a deterministic frame survives an unframed model duplicate',
         value: -0.15,
         unit: 'fraction',
         label: 'Marketing cost reduction (model wording)',
+        source_quote: 'Reduce marketing cost by 15%.',
       },
     ]);
 
@@ -178,6 +179,7 @@ describe('2.932 — preservation FAILS CLOSED when the two rows are different qu
         value: 0.85,
         unit: 'fraction',
         label: 'Marketing cost ceiling (model wording)',
+        source_quote: 'Reduce marketing cost by 15%.',
       },
     ]);
 
@@ -217,6 +219,7 @@ describe('2.932 — preservation FAILS CLOSED when the two rows are different qu
         value: 30,
         unit: '£',
         label: 'Headcount ceiling (model wording)',
+        source_quote: 'Keep headcount under 30.',
       },
     ]);
 
@@ -234,7 +237,7 @@ describe('2.932 — preservation FAILS CLOSED when the two rows are different qu
     // deterministic counterpart exists, so the absence here is the input's
     // doing rather than a merge that stopped carrying the field at all.
     const framed = merge(CHURN_BRIEF, [
-      { constraint_id: 'gc-a', node_id: 'out_churn', operator: '<=', value: 0.05, unit: 'fraction' },
+      { constraint_id: 'gc-a', node_id: 'out_churn', operator: '<=', value: 0.05, unit: 'fraction', source_quote: 'Keep churn under 5%.' },
     ]);
     expect(
       pick(framed, 'out_churn', '<=').value_frame,
@@ -242,7 +245,7 @@ describe('2.932 — preservation FAILS CLOSED when the two rows are different qu
     ).toBe('level');
 
     const rows = merge('We want to grow.', [
-      { constraint_id: 'gc-lonely', node_id: 'goal_arr', operator: '>=', value: 1_000_000, unit: '£' },
+      { constraint_id: 'gc-lonely', node_id: 'goal_arr', operator: '>=', value: 1_000_000, unit: '£', source_quote: 'We want to grow.' },
     ]);
     expect(pick(rows, 'goal_arr', '>=').value_frame).toBeUndefined();
   });
@@ -260,6 +263,7 @@ describe('2.932 — preservation FAILS CLOSED when the two rows are different qu
         unit: 'fraction',
         value_frame: 'level',
         label: 'Marketing cost (model wording)',
+        source_quote: 'Reduce marketing cost by 15%.',
       },
     ]);
 

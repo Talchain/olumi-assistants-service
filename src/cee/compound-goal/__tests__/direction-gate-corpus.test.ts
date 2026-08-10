@@ -43,6 +43,8 @@ import {
   extractCompoundGoals,
   normaliseConstraintUnits,
   toGoalConstraints,
+  NEGATION_LEAD,
+  NEGATION_OR_PREVENTION_LEAD,
 } from '../extractor.js';
 import {
   findT1Matches,
@@ -52,6 +54,7 @@ import {
   partitionUnprovenDirection,
   detectUncoveredNegatedBounds,
   detectorItem,
+  NEGATION_SCREEN_RE,
   type DirectionUnresolvedItem,
 } from '../direction-gate.js';
 
@@ -297,6 +300,53 @@ describe('ROADMAP 2.1051 — constraint-direction corpus', () => {
     expect(CLASS_G_DELTA.length).toBe(8);
     expect(ALL_CASES.length).toBe(103);
     expect(new Set(ALL_CASES.map((c) => c.id)).size).toBe(ALL_CASES.length);
+  });
+
+  /* ---------------------------------------------------------------------
+   * THE UNION ASSERTION — what notices the gate's list has gone short.
+   *
+   * Trap 12d, second face: deriving a guard from a list MOVES the risk, it does
+   * not remove it — nothing derived from a list can notice a token missing FROM
+   * it. The gate's negation alphabet is deliberately NOT derived from the
+   * extractor's (it must add contractions, split prevention verbs, and narrow
+   * `no`), so this is the instrument that keeps the two from diverging: every
+   * token the EXTRACTOR treats as a negation must also be one the GATE screens.
+   *
+   * Direction matters. This asserts gate ⊇ extractor, not equality — the gate
+   * is deliberately WIDER, and that is safe (it can only add questions). A
+   * narrower gate would silently pass rows the extractor already distrusts.
+   * ------------------------------------------------------------------- */
+  it('UNION: every extractor negation token is screened by the gate', () => {
+    const alternatives = (src: string): string[] =>
+      src
+        .replace(/^\\b/, '')
+        .replace(/^\(\?:/, '')
+        .replace(/\)\\b$/, '')
+        .replace(/\)$/, '')
+        .split('|')
+        .map((t) => t.replace(/\\s\+/g, ' ').trim())
+        .filter((t) => t.length > 0);
+
+    const tokens = [
+      ...alternatives(NEGATION_LEAD),
+      ...alternatives(NEGATION_OR_PREVENTION_LEAD.source),
+    ];
+    // Positive control: the extraction itself must yield a real, plural list —
+    // an empty token list would make this assertion vacuously true (trap 13).
+    expect(tokens.length).toBeGreaterThan(20);
+    expect(tokens).toContain('without');
+    expect(tokens).toContain('never');
+
+    const unscreened = tokens.filter((t) => !NEGATION_SCREEN_RE.test(`we ${t} do it`));
+    expect(unscreened, 'the gate must screen every token the extractor calls a negation').toEqual([]);
+  });
+
+  it('UNION control: the gate does NOT screen ordinary words', () => {
+    // The discriminating half. Without it, `NEGATION_SCREEN_RE = /./` would
+    // satisfy the union assertion perfectly while destroying every ceiling.
+    for (const word of ['keep', 'maintain', 'ensure', 'target', 'reduce', 'grow', 'spend']) {
+      expect(NEGATION_SCREEN_RE.test(`we ${word} it`), `${word} must not screen as a negation`).toBe(false);
+    }
   });
 
   /* ---------------------------------------------------------------------

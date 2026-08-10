@@ -62,7 +62,7 @@ function setupMocksForConstraints(opts: {
   remappedConstraints?: Array<{ targetName: string; targetNodeId: string; operator?: string; value?: number }>;
   remapResult?: { remapped: number; rejected_junk: number; rejected_no_match: number };
 }) {
-  const extractedConstraints = [{ targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05 }];
+  const extractedConstraints = [{ targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }];
   const validConstraints = opts.remappedConstraints ?? extractedConstraints;
 
   (extractCompoundGoals as any).mockReturnValue({
@@ -78,6 +78,12 @@ function setupMocksForConstraints(opts: {
     validConstraints.map((c: any) => ({
       constraint_id: `constraint_${c.targetNodeId}_max`,
       node_id: c.targetNodeId,
+      // ROADMAP 2.1051 — the direction gate is fail-closed on evidence it
+      // cannot verify against the brief, so these mocked producer rows carry
+      // the `source_quote` the draft prompt already mandates. Without one the
+      // gate withholds them and these tests would measure the gate instead of
+      // their own subject (remap plumbing / graph non-mutation).
+      source_quote: "keeping churn under 5%",
       operator: c.operator ?? "<=",
       value: c.value ?? 0.05,
     })),
@@ -93,7 +99,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("emits goal_constraints when remapConstraintTargets returns valid constraints", () => {
     setupMocksForConstraints({
-      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
       remapResult: { remapped: 1, rejected_junk: 0, rejected_no_match: 0 },
     });
 
@@ -107,7 +113,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("does NOT add constraint nodes to the graph", () => {
     setupMocksForConstraints({
-      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
       remapResult: { remapped: 1, rejected_junk: 0, rejected_no_match: 0 },
     });
 
@@ -125,7 +131,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("drops all constraints when remapConstraintTargets returns empty", () => {
     (extractCompoundGoals as any).mockReturnValue({
-      constraints: [{ targetName: "unknown", targetNodeId: "fac_totally_unknown", operator: "<=", value: 0.05 }],
+      constraints: [{ targetName: "unknown", targetNodeId: "fac_totally_unknown", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
       isCompound: true,
       warnings: [],
     });
@@ -179,8 +185,13 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
       rejected_no_match: 1,
     });
     (toGoalConstraints as any).mockReturnValue([
-      { constraint_id: "c1", node_id: "fac_retention_rate", operator: ">=" },
-      { constraint_id: "c2", node_id: "fac_retention_rate", operator: "<=" },
+      // ROADMAP 2.1051 — VALUES ADDED DELIBERATELY. Two opposite operators on
+      // ONE node with no values at all cannot be shown to be a coherent band,
+      // so the direction gate's cross-row screen withholds both as a producer
+      // disagreement. A floor strictly below its ceiling is the realistic
+      // shape, and it keeps this test measuring remap plumbing.
+      { constraint_id: "c1", node_id: "fac_retention_rate", operator: ">=", value: 0.8, source_quote: "keeping churn under 5%" },
+      { constraint_id: "c2", node_id: "fac_retention_rate", operator: "<=", value: 0.9, source_quote: "keeping churn under 5%" },
     ]);
 
     const ctx = makeCtx();
@@ -198,7 +209,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("passes graph node IDs and labels to remapConstraintTargets", () => {
     const extractedConstraints = [
-      { targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05 },
+      { targetName: "churn", targetNodeId: "fac_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" },
     ];
     (extractCompoundGoals as any).mockReturnValue({
       constraints: extractedConstraints,
@@ -262,7 +273,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("removing constraint nodes does not change goal_node_id", () => {
     setupMocksForConstraints({
-      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
     });
 
     const ctx = makeCtx();
@@ -276,7 +287,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("removing constraint nodes does not change option interventions", () => {
     setupMocksForConstraints({
-      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
     });
 
     const ctx = makeCtx();
@@ -289,7 +300,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("removing constraint nodes does not alter factor/edge IDs", () => {
     setupMocksForConstraints({
-      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
     });
 
     const ctx = makeCtx();
@@ -306,7 +317,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
   it("no node ID starts with constraint_ after compound goal processing", () => {
     setupMocksForConstraints({
       remappedConstraints: [
-        { targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 },
+        { targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" },
         { targetName: "revenue", targetNodeId: "out_revenue", operator: ">=", value: 1000000 },
       ],
     });
@@ -321,7 +332,7 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
 
   it("goal_constraints still contains all constraint data with valid node_id references", () => {
     setupMocksForConstraints({
-      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05 }],
+      remappedConstraints: [{ targetName: "churn", targetNodeId: "fac_monthly_churn", operator: "<=", value: 0.05, sourceQuote: "keeping churn under 5%" }],
     });
 
     const ctx = makeCtx();

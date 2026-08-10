@@ -103,6 +103,11 @@ describe('2.349 R3 — the walk brief no longer mints a hard deadline constraint
           operator: '<=',
           value: 0.05,
           label: 'Churn ceiling',
+          // ROADMAP 2.1051: the direction gate is fail-closed on unverifiable
+          // evidence, so the ordinary sibling carries a quote from the brief.
+          // Without one it is withheld for lack of evidence and this positive
+          // control would silently stop controlling for anything.
+          source_quote: 'churn has been creeping up',
         },
       ],
     });
@@ -140,6 +145,11 @@ describe('2.349 R3 — the walk brief no longer mints a hard deadline constraint
           operator: '<=',
           value: 0.05,
           label: 'Churn ceiling',
+          // ROADMAP 2.1051: the direction gate is fail-closed on unverifiable
+          // evidence, so the ordinary sibling carries a quote from the brief.
+          // Without one it is withheld for lack of evidence and this positive
+          // control would silently stop controlling for anything.
+          source_quote: 'churn has been creeping up',
         },
       ],
     });
