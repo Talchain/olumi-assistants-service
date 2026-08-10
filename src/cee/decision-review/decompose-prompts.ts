@@ -33,11 +33,20 @@
  * monolith stays the revert anchor + fallback.
  */
 
-/** Per-sub-prompt versions. Bump the individual constant on any content change. */
-export const DECOMPOSE_R1_HEADLINE_VERSION = 'b1-r1-v1';
-export const DECOMPOSE_R2_DRIVER_VERSION = 'b1-r2-v1';
-export const DECOMPOSE_R3_FRAGILITY_VERSION = 'b1-r3-v1';
-export const DECOMPOSE_R4_CALIBRATION_VERSION = 'b1-r4-v1';
+/**
+ * Per-sub-prompt versions. Bump the individual constant on any content change.
+ *
+ * ALL FOUR moved to `-v2` for F3 (2026-08-10). R1's own body changed (the
+ * narrative sentence-1 instruction now requires the leading option's OWN win
+ * probability instead of the distance to the runner-up), and the other three
+ * changed because {@link SHARED_VOICE_AND_GROUNDING} — injected into every
+ * sub-prompt — gained the ban on stating that distance. Leaving R2-R4 at `-v1`
+ * would have three version labels naming two different prompts each.
+ */
+export const DECOMPOSE_R1_HEADLINE_VERSION = 'b1-r1-v2';
+export const DECOMPOSE_R2_DRIVER_VERSION = 'b1-r2-v2';
+export const DECOMPOSE_R3_FRAGILITY_VERSION = 'b1-r3-v2';
+export const DECOMPOSE_R4_CALIBRATION_VERSION = 'b1-r4-v2';
 
 /** Composite version string stamped on the composed review for provenance. */
 export const DECOMPOSE_COMPOSITE_VERSION = [
