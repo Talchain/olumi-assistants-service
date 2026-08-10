@@ -29,6 +29,13 @@
  * recorded in the suite is honest; a gap invisible to it is how four rounds of
  * this defect happened. Adding two words and declaring the class closed is
  * precisely what this file exists to prevent.
+ *
+ * ⚠⚠ THE PINNED SETS CONTAIN LIES, NOT DEGRADATIONS. Their names say so. A
+ * member ships an INVERTED bound to a user — the opposite of what they wrote —
+ * which is a strictly worse class than the `MUST_SURVIVE` pin's correct-row-
+ * becomes-a-question. THE LIE CLASS THEREFORE DIES BY ENUMERATION, NOT BY
+ * CONSTRUCTION: S3 blesses any sentence with no LISTED token, so the guarantee
+ * is exactly as wide as these lists and no wider.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -88,34 +95,60 @@ const PREVENTION_VERBS = [
  * ======================================================================= */
 
 /**
- * Movement verbs the gate does not read as a fall.
+ * ⚠⚠ VERBS THAT SHIP AN INVERTED BOUND — i.e. A USER-VISIBLE FALSEHOOD.
  *
- * EMPTY, and measured — the sweep drove this to zero in round 1. It stays as a
- * pinned set rather than an inline `[]` so that a future verb slipping out of
- * the lexicon REDs here with its own name, instead of quietly rejoining a gap.
- * The sentinel control below is what proves an empty result means "all covered"
- * rather than "the probe stopped looking".
+ * EMPTY, and measured — the round-1 sweep drove this to zero. It stays as a
+ * pinned set rather than an inline `[]` so a verb slipping out of the lexicon
+ * REDs here with its own name instead of quietly rejoining a gap. The sentinel
+ * control below is what proves an empty result means "all covered" rather than
+ * "the probe stopped looking".
+ *
+ * ⭐ THIS PIN IS A DIFFERENT AND STRICTLY WORSE SEVERITY CLASS THAN THE
+ * `MUST_SURVIVE` PIN in `direction-gate-corpus.test.ts`, and the two must never
+ * be read as the same kind of debt:
+ *
+ *   MUST_SURVIVE  = DEGRADATIONS. A correct row becomes a QUESTION. The user
+ *                   loses convenience; the model stays honest.
+ *   THIS SET      = LIES. A floor ships as a ceiling. The product states, at
+ *                   0.85 confidence, the exact opposite of the user's limit,
+ *                   and then penalises the options that honour it.
+ *
+ * A member here is a defect being tolerated, not a trade being made.
  */
-const KNOWN_UNSCREENED_FALL: readonly string[] = [];
+const KNOWN_INVERTING_FALL_VERBS: readonly string[] = [];
 
 /**
- * Prevention verbs the gate does not screen — MEASURED, then parked with reasons.
+ * ⚠⚠ PREVENTION VERBS THAT SHIP AN INVERTED BOUND — TEN USER-VISIBLE FALSEHOODS.
  *
- * ⚠ SIX OF THESE ARE PARKED ON PURPOSE AND MUST STAY PARKED. `Cap`, `Check`,
- * `Contain`, `Limit`, `Minimise` and `Restrict` are ALSO the vocabulary of a
- * legitimate ceiling — "Cap spend at £5m", "Limit churn to 4%" — so screening
- * them as prevention would withhold the very constraints they state. That is
- * the 13-of-14 over-suppression the #888 review measured, and it is a worse
- * product than this gap.
+ * ⭐ READ THE SEVERITY BEFORE THE REASONS. Every member of this set means a
+ * sentence like "Limit any move that takes NRR below 90%" reaches the wire as
+ * `nrr <= 0.9` — a hard CEILING demanding the very collapse the user is trying
+ * to prevent. This is NOT the `MUST_SURVIVE` class (a correct row becoming a
+ * question); it is the lie class itself, enumerated and tolerated. Anyone
+ * widening this set is admitting new falsehoods, not accepting new friction.
  *
- * The other four (`Combat`, `Counter`, `Fight`, `Oppose`) are rare in briefs and
- * ambiguous as verbs; they are parked as a judgement, not an oversight.
+ * They are tolerated for one reason only: at the merge-base every one of them
+ * inverts too, so this PR is MONOTONE — it removes inversions and adds none —
+ * and blocking a monotone improvement to finish enumerating is the treadmill
+ * trap 22f exists to stop.
  *
- * Everything else the sweep found — avert, thwart, foil, deter, discourage,
- * suppress, hinder, impede, obstruct — was ADDED to the lexicon, because none
- * of them collides with a ceiling idiom.
+ * WHY EACH IS STILL HERE:
+ *   - `Cap`, `Check`, `Contain`, `Limit`, `Minimise`, `Restrict` are ALSO the
+ *     vocabulary of a legitimate ceiling — "Cap spend at £5m", "Limit churn to
+ *     4%". Screening them as prevention would withhold the very constraints they
+ *     state: the 13-of-14 over-suppression the #888 review measured. Trading a
+ *     rare lie for a common gap is not obviously right, so it waits for the
+ *     structural fix rather than a lexicon judgement.
+ *   - `Combat`, `Counter`, `Fight`, `Oppose` are rare in briefs and ambiguous as
+ *     verbs. Parked as a judgement, not an oversight.
+ *
+ * ⭐ THE REAL FIX IS STRUCTURAL AND IS SEQUENCED SEPARATELY: making the
+ * `keep X from <VERB> below|above N` frame VERB-AGNOSTIC closes the fall side
+ * wholesale, because the PREPOSITION already carries the direction. That is what
+ * "by construction" would actually look like here — removing the lexicon from
+ * the decision rather than lengthening it.
  */
-const KNOWN_UNSCREENED_PREVENTION: readonly string[] = [
+const KNOWN_INVERTING_PREVENTION_VERBS: readonly string[] = [
   'Cap', 'Check', 'Combat', 'Contain', 'Counter', 'Fight', 'Limit', 'Minimise',
   'Oppose', 'Restrict',
 ];
@@ -148,11 +181,11 @@ describe('ROADMAP 2.1051 — lexicon completeness (external vocabulary sweep)', 
     expect(
       [...leaked].sort(),
       'unscreened fall verbs must match the pinned set EXACTLY — grow or shrink both RED',
-    ).toEqual([...KNOWN_UNSCREENED_FALL].sort());
+    ).toEqual([...KNOWN_INVERTING_FALL_VERBS].sort());
   });
 
   it('FALL SWEEP POSITIVE CONTROL: an unknown verb DOES leak, so the empty result means something', () => {
-    // Without this, `KNOWN_UNSCREENED_FALL = []` is satisfied equally well by a
+    // Without this, `KNOWN_INVERTING_FALL_VERBS = []` is satisfied equally well by a
     // gate that covers every verb and by a probe that observes nothing.
     const wire = wireFor(`We must keep cash runway from ${SENTINEL_UNKNOWN_FALL_VERB} below 250000.`);
     expect(
@@ -187,7 +220,7 @@ describe('ROADMAP 2.1051 — lexicon completeness (external vocabulary sweep)', 
       if (wire.some((r) => r.node_id === 'fac_marketing_spend' && r.operator === '>=')) leaked.push(v);
     }
     expect(leaked.length, 'the probe must observe the parked leaks').toBeGreaterThan(0);
-    expect([...leaked].sort()).toEqual([...KNOWN_UNSCREENED_PREVENTION].sort());
+    expect([...leaked].sort()).toEqual([...KNOWN_INVERTING_PREVENTION_VERBS].sort());
   });
 
   it('PREVENTION SWEEP (floor side): the SAME verbs, the opposite direction', () => {
@@ -202,7 +235,7 @@ describe('ROADMAP 2.1051 — lexicon completeness (external vocabulary sweep)', 
     expect(
       [...leaked].sort(),
       'the screen must be sign-symmetric — a different set here means S3 has acquired a direction',
-    ).toEqual([...KNOWN_UNSCREENED_PREVENTION].sort());
+    ).toEqual([...KNOWN_INVERTING_PREVENTION_VERBS].sort());
   });
 
   /* ---------------------------------------------------------------------

@@ -361,6 +361,15 @@ describe('ROADMAP 2.1051 — constraint-direction corpus', () => {
    * asymmetry as the code it tests is a guard agreeing with itself). The
    * re-derivation below is INDEPENDENT of the gate's own bookkeeping — it
    * reads the sentence and the operator and decides for itself.
+   *
+   * ⚠⚠ AND ITS REACH IS BOUNDED BY THE SAME LEXICON THE GATE USES, which is
+   * why this invariant cannot certify the lie class closed. `hasUnspentNegation`
+   * is the test's own oracle AND the gate's screen, so a sentence carrying an
+   * UNLISTED prevention verb reads "clean" to both — they agree, and both are
+   * wrong together. That is the union-assertion blind spot one level up, and it
+   * is exactly why the load-bearing evidence for this predicate is an OUTSIDE
+   * corpus (trap 22c) rather than this file. THE LIE CLASS DIES BY ENUMERATION,
+   * NOT BY CONSTRUCTION.
    * ------------------------------------------------------------------- */
   it('I1: no wire row carries a direction the spec cannot independently prove', () => {
     const violations: string[] = [];
@@ -506,7 +515,20 @@ describe('ROADMAP 2.1051 — constraint-direction corpus', () => {
    * rule: a gap recorded in the suite is honest; a gap invisible to it is
    * how four rounds happened).
    * ------------------------------------------------------------------- */
-  it('PRICED: the negation-bearing ceilings that become questions are exactly the pinned set', () => {
+  /**
+   * ⭐ SEVERITY: THIS PIN HOLDS DEGRADATIONS, NOT LIES.
+   *
+   * A correct row becomes a QUESTION here — the user loses convenience and the
+   * model stays honest. That is the deliberate trade of the whole design.
+   *
+   * It must NOT be read as the same class as
+   * `direction-gate-lexicon-completeness.test.ts`'s
+   * `KNOWN_INVERTING_PREVENTION_VERBS`, whose members ship an INVERTED bound:
+   * a floor reaching the wire as a ceiling, at 0.85 confidence, penalising
+   * exactly the options that honour it. One pin records friction; the other
+   * records falsehoods still in the product.
+   */
+  it('PRICED (degradations, not lies): the negation-bearing ceilings that become questions are exactly the pinned set', () => {
     const pinned = ALL_CASES.filter((c) => c.klass === 'MUST_SURVIVE-negation-bearing-ceiling');
     expect(pinned.map((c) => c.id).sort()).toEqual(['b-v-D3', 'b-v-D4', 'b-v-D5', 'b-v-D6', 'b-v-D7']);
     for (const c of pinned) {

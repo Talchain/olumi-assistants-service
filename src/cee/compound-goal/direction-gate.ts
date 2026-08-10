@@ -24,11 +24,38 @@
  * question ("which clause does this negation govern?"). It asks only the
  * question it can answer: "is this row's direction PROVEN?"
  *
+ * ⚠⚠ AND THE LIMIT OF THAT CLAIM, STATED HERE BECAUSE AN OVERCLAIMED GUARANTEE
+ * IN A COMMENT TEACHES THE NEXT LANE TO STOP LOOKING.
+ *
+ * **THE LIE CLASS DIES BY ENUMERATION, NOT BY CONSTRUCTION.** An earlier version
+ * of this header said "by construction", and that was false. S3 blesses any
+ * sentence that contains no LISTED token, so the guarantee is exactly as wide as
+ * {@link NEG_CORE_SRC} and {@link PREVENTION_SRC} — no wider. A prevention verb
+ * nobody wrote down ("Stem any decline that takes NRR below 90%") screens CLEAN,
+ * and the inverted bound ships.
+ *
+ * Round-2 review measured the residue with 30 verbs of its own: 11 of 14 fall
+ * verbs and 14 of 16 prevention verbs still invert. Those same verbs invert at
+ * the MERGE-BASE too — this module introduces no new inversions and removes
+ * several — but "monotone improvement" and "dead by construction" are different
+ * claims and only the first one is true.
+ *
+ * The genuinely by-construction fix for the largest frame is known and is NOT in
+ * this module: make `keep X from <VERB> below|above N` VERB-AGNOSTIC, because the
+ * PREPOSITION already carries the direction. That removes the lexicon from the
+ * decision instead of lengthening it, and it is sequenced as its own gate round.
+ * Until it lands, read every guarantee below as bounded by the lists.
+ *
  * ── THE TRICHOTOMY — EXACTLY THREE OUTCOMES AND NO FOURTH ──────────────────
  *
- * The gate TERMINATES this problem rather than suppressing it. Every bound that
- * enters lands in exactly one bucket, and the three buckets PARTITION the input
- * exactly (asserted, not asserted-about — see {@link partitionUnprovenDirection}):
+ * ⚠ THE TRICHOTOMY IS OVER ROWS THE GATE SEES, NOT OVER BOUNDS THE USER WROTE.
+ * Every row that ENTERS lands in exactly one bucket, and the three buckets
+ * PARTITION the input exactly (asserted, not asserted-about — see
+ * {@link partitionUnprovenDirection}). A bound whose sentence carries no listed
+ * token never becomes an unresolved row in the first place: it is PROVEN by a
+ * screen that found nothing to object to, and no partition assertion can notice
+ * that. The enumeration limit sits UPSTREAM of the trichotomy, which is why the
+ * partition being exact is not the same as the lie class being closed.
  *
  *   1. PROVEN      — direction demonstrated -> modelled, reaches the wire.
  *   2. UNRESOLVED  — direction ambiguous or contested -> withheld from the wire
@@ -47,8 +74,15 @@
  *     that produced no row.
  *   - NEVER FLIPS an operator. A contradicted row is WITHHELD and ASKED ABOUT,
  *     never silently corrected. The gate has no minting authority, so a gate
- *     defect can create a spare question — it cannot create a lie.
+ *     defect can create a spare question — it cannot AUTHOR a lie.
  *   - NEVER CHANGES a value, unit, node binding or frame.
+ *
+ * ⚠ "CANNOT AUTHOR A LIE" IS NOT "NO LIE REACHES THE WIRE", and the two were
+ * conflated in an earlier draft of this header. This module can only REMOVE
+ * rows, so nothing it does can invent a wrong direction — that much is genuinely
+ * by construction. But a bound it never RECOGNISES as needing screening passes
+ * through untouched, still carrying whatever direction the producer gave it. The
+ * producers' inversions are upstream and this gate catches the enumerated ones.
  *
  * The worst case this module can produce is the pre-constraint product plus a
  * visible question. That is provably bounded, and it is the trade the trap-22f
