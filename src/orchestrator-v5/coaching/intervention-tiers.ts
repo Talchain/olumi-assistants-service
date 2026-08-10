@@ -46,8 +46,11 @@
  *     must never be described as one; see `coaching/uncertainty-priority.ts`
  *     for the producer bytes and the premise they refute.)
  *   - Placed anywhere BELOW `orient`, `resolve_uncertainty` is selected on
- *     **0 of 16** cells. That is the placement shipped here, so **this lane is
- *     shipping a lens that the in-repo evidence base says is DARK.**
+ *     **0 of 16** cells on these captures. ⚠ Say ELIGIBLE-AND-OUTRANKED, not
+ *     "dark": on session-b2 the trigger FIRES and the candidate ranks third, so
+ *     it is in the race and losing it — a different thing from a rule that
+ *     cannot fire, and it means any run whose higher tiers are silent puts this
+ *     lens on a user's screen.
  *   - Placed ABOVE `orient` it is reachable — and this lane MEASURED what that
  *     costs, by shipping it that way first and running the existing suites:
  *     **it takes the head on every session-b2 cell, the no-repeat rule then
@@ -65,17 +68,32 @@
  *    order is **byte-identical to the locked ladder**: nothing is reordered,
  *    nothing is starved, and every 2.490 / 2.211 / 2.211-① pin holds.
  *
- * ⚠ AND THE OPEN QUESTION IS NOW ANSWERED WITH DATA, WHICH IS WHAT THE DESIGN
- *   ASKED FOR. 2.692 §5 OQ-1 asks whether a resolve-class tier may outrank the
- *   locked core three. The measured answer is that **both options are bad, and
- *   the reason is structural, not a matter of taste**: at the ratified band the
- *   new class is dark; above `orient` it starves three live ones. A single slot
- *   filled by a total priority order cannot absorb another intervention class —
- *   which is precisely why the ranked list is now a first-class value
- *   (`rankInterventions`) and this order is ONE constant. Permuting it is a
- *   one-line reviewed change, and `next-best-intervention.test.ts` prints the
- *   consequence of either choice. **Escalated with a corrected premise rather
- *   than shipped silently, per 2.490 doctrine.**
+ * ⚠ AND THE OPEN QUESTION IS ANSWERED — WITH ITS SCOPE STATED, BECAUSE THE
+ *   FIRST VERSION OF THIS PARAGRAPH OVERSTATED IT. 2.692 §5 OQ-1 asks whether a
+ *   resolve-class tier may outrank the locked core three. The measured answer:
+ *
+ *     **On the two committed captures, no ordering surfaces the new class
+ *     without starving an existing one; the class is reachable only when the
+ *     orient / pre-mortem / estimate tiers are all silent.**
+ *
+ *   State it in exactly that form. An earlier revision of this comment
+ *   generalised the same measurement into *"a single slot filled by a total
+ *   priority order cannot absorb another intervention class"* — a claim about
+ *   the ARCHITECTURE, drawn from two captures. **It is refuted by construction**:
+ *   an adversarial review built a legitimate enrichment (spread influence,
+ *   negligible flip risk, decisive leader, high confidence, one resolved row) on
+ *   which the higher tiers are all silent and this class takes the slot at the
+ *   order shipped here. The class IS absorbed — just not on any shape these two
+ *   captures contain. This is CLAUDE.md trap 20 happening inside the record: the
+ *   measurement was correctly scoped and the GENERALISATION was the defect.
+ *
+ *   What follows from the narrow claim, and no more: the ranked list is a
+ *   first-class value (`rankInterventions`) and this order is ONE constant, so
+ *   permuting it is a one-line reviewed change and
+ *   `next-best-intervention.test.ts` re-measures the consequence. **Widening the
+ *   slot is ONE candidate remedy, NOT an established necessity** — nothing here
+ *   establishes that it is the only one. **Escalated with a corrected premise
+ *   rather than shipped silently, per 2.490 doctrine.**
  *
  * ── SCOPE HONESTY ────────────────────────────────────────────────────────────
  * `resolve_disagreement` has NO members in this slice. It is declared because it

@@ -1184,7 +1184,7 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   consider_opposite: 'Strengthen your model: argue the other side',
   devils_advocacy: 'Strengthen your model: challenge the main assumption',
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
-  uncertainty_reduction_priority: 'Strengthen your model: test the assumption this result is most sensitive to',
+  uncertainty_reduction_priority: 'Strengthen your model: pin down the assumption this run is most sensitive to',
 };
 
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
@@ -1253,6 +1253,23 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   //       `p_win_recommended` OR `p_joint_goal` depending on whether the run
   //       carried goal constraints, so "the chance your front-runner wins"
   //       would be FALSE on a joint-goal run. The copy stays metric-neutral.
+  //   (d) NOT "of everything uncertain here". FALSE SCOPE, and it is a fact
+  //       about the sweep's INPUT, not loose wording: the sweep ranks only
+  //       `request.parameter_uncertainties`. Edge and structural uncertainty
+  //       run in BOTH arms and are never ranked, so they cannot appear in this
+  //       ordering at all. The copy names the scope it actually ranks.
+  //   (e) NOT "its own measurement noise". The floor is `1.96*sqrt(0.5/n)` —
+  //       a function of the SAMPLE COUNT alone, identical for every factor in
+  //       the run. It is the RUN's floor, not the factor's.
+  //
+  // ⚠⚠ ALL FIVE WERE DERIVED CORRECTLY AND THE FIRST SHIPPED COPY STILL
+  // VIOLATED (a) IN SUBSTANCE, avoiding every banned WORD: "the picture
+  // steadies more than it would from anything else you could look into" is a
+  // comparative value-of-information claim wearing plain English. Caught by
+  // adversarial review, not by this comment — which is why the prohibitions are
+  // now MECHANICAL, in `__tests__/uncertainty-copy-claim-shapes.test.ts`. A
+  // comment is not a guard (trap 13c, one level up: a correct oracle and an
+  // expectation that slipped past it).
   // The hedge in the last sentence is ISL's own: its science validation says
   // "treat `resolved` as 'distinguishable from noise at 95%', not 'real'"
   // (`docs/science-validation/REPORT.md:362-364`) — roughly one in twenty
@@ -1260,7 +1277,7 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   // evidence beside the recommendation is the differentiator, not a caveat to
   // be tidied away.
   RESOLVED_PWIN_SENSITIVITY:
-    'Of everything still uncertain here, this result moves most with one factor: settle what you believe about it and the picture steadies more than it would from anything else you could look into. This run separated it from its own measurement noise, which is a strong hint rather than a settled fact.',
+    "Of the parameter uncertainties this run measured, the headline number moves most with one: pinning down what you believe about it would steady that number most. This ranks how far the number moves, not what you should do. It cleared the run's noise floor — a strong hint, not a settled fact.",
 
   // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
   // What is TRUE on these turns and what is NOT, because the copy turns on it:
