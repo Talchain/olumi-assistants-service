@@ -658,10 +658,10 @@ function detectConstraintIntent(
  */
 function buildConstraintNotAppliedText(factorLabel: string): string {
   return (
-    `I couldn't apply that limit on **${factorLabel}** — this lane can't register a ` +
-    'constraint, so nothing was saved and the analysis will not score against it. ' +
-    'Ask for it as a constraint in one message, including the limit and which ' +
-    `direction it runs — for example: "add a constraint on ${factorLabel}".`
+    `I couldn't apply that limit on **${factorLabel}** — it wasn't saved, and the ` +
+    'analysis will not score against it. ' +
+    `Ask for it as a constraint — for example: "add a constraint on ${factorLabel}" — ` +
+    "and say what the limit is and whether it's a floor or a ceiling."
   );
 }
 
