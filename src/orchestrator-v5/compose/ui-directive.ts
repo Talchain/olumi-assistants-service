@@ -186,6 +186,11 @@ function emitDirective(factType: string, block: UiDirectiveBlock): UiDirectiveBl
     // Graph verbs carry their target in targets[]; panel verbs (0.32.0) in
     // ui_target. One of the two is always present on an emitted block.
     target_kind: block.targets[0]?.kind ?? block.ui_target?.kind ?? null,
+    // 0.39.0 gesture provenance, on the TELEMETRY as well as the wire — a
+    // capture that can distinguish a deterministic gesture from an LLM-proposed
+    // one is the precondition for ever trusting a composer slot, and telemetry
+    // is where that distinction gets counted. Closed enum; no user text.
+    source: block.source ?? null,
   });
   return block;
 }
