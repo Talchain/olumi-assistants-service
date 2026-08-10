@@ -440,15 +440,43 @@ const NEGATION_OR_PREVENTION_LEAD =
  * `[.!?]` also cuts the DECIMAL POINT — "£1.5 million" becomes "1" — which is
  * literally how ROADMAP 2.714 died: a magnitude guard its own header called
  * "the most important line here" could not fire, because the window handed to
- * it had been truncated before the magnitude word (CLAUDE.md trap 22). The
- * semicolon is included because a stressed executive writes "we want growth;
- * without dropping margin below 78%".
+ * it had been truncated before the magnitude word (CLAUDE.md trap 22).
+ *
+ * ⚠⚠ THE SET INCLUDES COMMA, COLON AND DASH, AND THAT WIDTH IS A FIX, NOT A
+ * FLOURISH. With only `[.!?;]` the window ran back across clause boundaries, so
+ * a negation ANYWHERE earlier in a long sentence suppressed a perfectly
+ * legitimate ceiling downstream. Measured — five false positives, every one a
+ * real limit silently dropped:
+ *
+ *   "There is no scope for overruns, so keep churn under 4%."
+ *   "We cannot afford delays, so keep spend under £1m."
+ *   "We have not agreed the plan, yet spend must stay under £2m."
+ *   "I do not want surprises: keep marketing under £1.5m."
+ *   "No exceptions — keep churn under 4%."
+ *
+ * A negation only REVERSES a bound it actually governs. Once a clause boundary
+ * separates them it governs nothing, and suppressing there trades one silent
+ * failure for another — which is the whole objection to a predicate that is too
+ * wide.
+ *
+ * ⚠ AND THE `\s` NOW PROTECTS TWO THINGS, NOT ONE: the decimal point
+ * ("£1.5m" — no space after the dot) AND the THOUSANDS SEPARATOR
+ * ("1,500,000" — no space after the comma). Adding `,` to this set without the
+ * whitespace requirement would have reintroduced the 2.714 truncation through a
+ * second door.
  */
 function clauseBefore(brief: string, index: number): string {
   const head = brief.slice(0, index);
   let cut = 0;
-  for (const m of head.matchAll(/[.!?;]\s/g)) {
-    cut = (m.index ?? 0) + m[0].length;
+  // Sentence and clause terminators, each requiring following whitespace.
+  for (const m of head.matchAll(/[.!?;:,]\s/g)) {
+    cut = Math.max(cut, (m.index ?? 0) + m[0].length);
+  }
+  // Dashes used as clause separators. Em/en dashes are frequently written
+  // WITHOUT surrounding spaces, so they are matched on the character itself —
+  // safe, because no number format uses them as an internal separator.
+  for (const m of head.matchAll(/—|–|\s--?\s/g)) {
+    cut = Math.max(cut, (m.index ?? 0) + m[0].length);
   }
   return head.slice(cut);
 }

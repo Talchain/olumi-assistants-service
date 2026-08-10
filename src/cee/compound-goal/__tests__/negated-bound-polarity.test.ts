@@ -180,6 +180,49 @@ describe("D — no negated bound reaches the wire inverted (adversarial corpus)"
   });
 
   /**
+   * ⚠⚠ THE SUPPRESSION PREDICATE WAS TOO WIDE, AND THESE ARE THE CASES THAT
+   * PROVED IT.
+   *
+   * A predicate that drops legitimate ceilings has traded one silent failure
+   * for another. With the clause window cutting only on `[.!?;]`, a negation
+   * ANYWHERE earlier in a long sentence suppressed a perfectly real limit
+   * downstream — five measured false positives, every one a hard constraint
+   * silently lost:
+   *
+   * The negation in each of these governs NOTHING: a clause boundary separates
+   * it from the bound. Comma, colon and dash are now clause boundaries too.
+   */
+  it.each([
+    ["There is no scope for overruns, so keep churn under 4%.", 0.04],
+    ["We cannot afford delays, so keep spend under £1m.", 1_000_000],
+    ["We have not agreed the plan, yet spend must stay under £2m.", 2_000_000],
+    ["I do not want surprises: keep marketing under £1.5m.", 1_500_000],
+    ["No exceptions — keep churn under 4%.", 0.04],
+    ["Nothing else matters, but keep churn under 4%.", 0.04],
+  ])("an incidental negation across a clause boundary does not suppress: %s", (brief, value) => {
+    const rows = withValue(constraintsOf(brief as string), value as number);
+    expect(
+      rows.length,
+      "a legitimate ceiling was suppressed by a negation that does not govern it",
+    ).toBeGreaterThan(0);
+    for (const c of rows) expect(c.operator).toBe("<=");
+  });
+
+  /**
+   * ⚠ THE THOUSANDS SEPARATOR, guarding the second door into the 2.714
+   * truncation. Adding `,` to the clause terminators WITHOUT the trailing-\s
+   * requirement would cut "£1,500,000" at its first comma and hand the guard
+   * "500,000" — or worse, "1". This sentence is a FLOOR, so it must emit `>=`
+   * at the FULL magnitude; a truncated parse cannot produce 1_500_000.
+   */
+  it("a thousands-separated magnitude survives the comma clause rule", () => {
+    const rows = constraintsOf("We must not let headcount cost drop below £1,500,000.");
+    const full = rows.filter((c) => c.value === 1_500_000);
+    expect(full.length, "the magnitude was truncated at a thousands separator").toBeGreaterThan(0);
+    for (const c of full) expect(c.operator).toBe(">=");
+  });
+
+  /**
    * DISCRIMINATING HALF. Suppression must not eat a legitimate ceiling. These
    * carry no negation in the clause and must survive byte-identically.
    */
@@ -377,5 +420,38 @@ describe("D — retraction class (DISCLOSED DEFECT, pinned as a tripwire)", () =
     // And at least the polarity is no longer inverted, which is the only part
     // this PR improved.
     for (const c of rows) expect(c.operator).toBe(">=");
+  });
+});
+
+/**
+ * ── ⚠ DISCLOSED, NOT FIXED: THE MIRROR-IMAGE DEFECT ON THE `above` SIDE ────
+ *
+ * "Marketing must not go above £1.5m" means `<= 1_500_000`. It is extracted as
+ * `>=` — the same confidently-inverted class this PR exists to kill, on the
+ * LOWER-bound path instead of the upper one.
+ *
+ * It is PRE-EXISTING: this PR neither introduced it nor made it worse. It is
+ * disclosed rather than fixed because the fix is a second, symmetric change on
+ * a different code path — the one the 35-test risk-polarity corpus governs —
+ * and bolting it on mid-review is exactly the "while we're here" expansion the
+ * scope rule prohibits. The smallest enabling change is to extend the same
+ * clause-scoped suppression to `above|over` matches; it is rowed for a
+ * follow-up with its own RED-first evidence and its own corpus.
+ *
+ * ⚠ THIS TEST PINS THE DEFECT, NOT THE DESIRED BEHAVIOUR. It is a tripwire: when
+ * someone fixes the `above` side, this REDs and they delete it. It must never be
+ * read as a specification.
+ */
+describe("D — `above` side inversion (DISCLOSED PRE-EXISTING DEFECT, tripwire)", () => {
+  it("still inverts a negated `above` bound", () => {
+    const rows = constraintsOf("Marketing must not go above £1.5m.").filter(
+      (c) => c.value === 1_500_000,
+    );
+    expect(
+      rows.length,
+      "the `above` side appears to be FIXED — delete this tripwire and its docblock",
+    ).toBeGreaterThan(0);
+    // Today: `>=`, which is the inverse of what the sentence means.
+    expect(rows.some((c) => c.operator === ">=")).toBe(true);
   });
 });
