@@ -86,7 +86,7 @@ function verdictOf(
  * would never exercise the shape the user actually receives.
  */
 const LEADER_HEADLINE =
-  'Hire Two Sales Reps currently leads by 27 percentage points because Sales capacity is the strongest driver.';
+  'Hire Two Sales Reps came out ahead in 27% of runs of this model because Sales capacity is the strongest driver.';
 
 describe('2.349 — the out-of-scope voice says the true thing and none of the false ones', () => {
   const suffix = buildConstraintDisclosure(verdictOf('not_applicable', [], [DEADLINE]));

@@ -129,7 +129,15 @@ describe('claim-safety — the `?? 0` audit sites do not fabricate a surfaced cl
     expect(headline === null || typeof headline === 'string').toBe(true);
     if (typeof headline === 'string') {
       // No fabricated zero-probability claim leaked into user-facing prose.
-      expect(headline).not.toContain('0%');
+      //
+      // ⚠ BOUND BY IDENTITY, NOT BY SUBSTRING. This assertion read
+      // `not.toContain('0%')` until the headline began stating the leader's own
+      // win probability — at which point a perfectly honest "70%" failed it,
+      // because "0%" is a substring of "70%". The assertion had always been a
+      // value predicate another string could satisfy (CLAUDE.md trap 19); it
+      // simply had no counter-example until now. Anchored on the word boundary
+      // so it catches the fabricated zero it was written for and nothing else.
+      expect(headline).not.toMatch(/(?<!\d)0%/);
       expect(headline).not.toMatch(/\b0(\.0+)?\s*%/);
     }
   });

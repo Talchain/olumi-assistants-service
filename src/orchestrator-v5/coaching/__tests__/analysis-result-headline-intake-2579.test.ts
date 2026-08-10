@@ -4,7 +4,7 @@
  * Codex expert session, 5 Aug 2026, deployed staging, CEE `e82738b`
  * (`PHASE0-EVIDENCE-2026-07-28/expert-session-2026-08-05-raw/run3/`): a brief
  * that enumerated FIVE options produced a FOUR-option graph, and the analysis
- * shipped "Energy-Efficiency Retrofit currently leads by 9 percentage points"
+ * shipped "Energy-Efficiency Retrofit came out ahead in 9% of runs of this model"
  * over a candidate set it was missing a candidate from. `a new retail
  * concession` never got a chance to win.
  *
@@ -108,7 +108,7 @@ describe('2.579 — the ranking is withheld when the intake lost an option', () 
     // (trap 19): the control has to name THE RETROFIT. `expect(text).not
     // .toBeNull()` would be satisfied by a headline naming any of the four.
     expect(text).toContain('Energy-Efficiency Retrofit');
-    expect(text).toContain('currently leads');
+    expect(text).toContain('came out ahead in');
   });
 
   it('POSITIVE CONTROL — the SAME result names the leader when the brief never enumerated', () => {

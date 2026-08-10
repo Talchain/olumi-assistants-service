@@ -164,7 +164,7 @@ describe('shared status-aware winner — site 3: decision-review enricher', () =
 // ---------------------------------------------------------------------------
 
 // All three options FAILED to compute. A status-blind selector crowns the
-// top (B, 0.90) and prints "Option B currently leads by 50 percentage points"
+// top (B, 0.90) and prints "Option B came out ahead in 50% of runs of this model"
 // over a 100%-failed run.
 function allFailedHeadlineEnrichment(): Record<string, unknown> {
   return {
@@ -237,7 +237,7 @@ describe('shared status-aware winner — site 4: run_analysis headline (resolveW
     });
     expect(out).not.toBeNull();
     expect(out!).toContain('Option A');
-    expect(out!).toContain('currently leads');
+    expect(out!).toContain('came out ahead in');
     // Never the failed rival.
     expect(out!).not.toContain('Option B');
   });
@@ -257,7 +257,7 @@ describe('shared status-aware winner — site 4: run_analysis headline (resolveW
     });
     expect(out).not.toBeNull();
     expect(out!).toContain('Option B');
-    expect(out!).toContain('50 percentage points'); // B 0.90 - A 0.40
+    expect(out!).toContain('90% of runs of this model'); // B 0.90 - A 0.40
   });
 });
 

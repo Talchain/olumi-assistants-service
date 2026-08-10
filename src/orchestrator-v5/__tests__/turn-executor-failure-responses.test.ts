@@ -405,7 +405,7 @@ describe('TurnExecutor — success path is unchanged', () => {
     expect(result.response.blocks).toHaveLength(1);
     expect(result.response.blocks[0]).toMatchObject({ type: 'analysis_result' });
     expect(result.response.assistant_text).toContain('Running the analysis.');
-    expect(result.response.assistant_text).toMatch(/Ran analysis|currently leads/);
+    expect(result.response.assistant_text).toMatch(/Ran analysis|came out ahead in/);
 
     expect(failureResponseEvent()).toBeUndefined();
     expectBI01();

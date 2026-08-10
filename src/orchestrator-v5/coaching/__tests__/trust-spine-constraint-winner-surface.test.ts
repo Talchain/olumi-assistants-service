@@ -152,6 +152,6 @@ describe('run_analysis headline — suppresses the confident lead when infeasibl
   it('discriminates: without the flag the SAME envelope produces a lead headline', () => {
     const text = buildAnalysisResultHeadline({ ...baseInput, constraint_infeasible: false });
     expect(text).not.toBeNull();
-    expect(text).toContain('leads');
+    expect(text).toContain('came out ahead in');
   });
 });

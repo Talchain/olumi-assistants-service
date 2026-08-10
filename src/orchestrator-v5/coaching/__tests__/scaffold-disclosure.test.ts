@@ -125,7 +125,7 @@ describe('egress allowlist × scaffold disclosure', () => {
   });
 
   it('deterministic headline (+ existing tails) + disclosure suffix is ACCEPTED', () => {
-    const headline = 'Option A currently leads by 24 percentage points because Price is the strongest driver.';
+    const headline = 'Option A came out ahead in 24% of runs of this model because Price is the strongest driver.';
     expect(isAllowedRunAnalysisAssistantText(`${headline}${LABELLED}`)).toBe(true);
     expect(
       isAllowedRunAnalysisAssistantText(`${headline}${REDUCED_SAMPLES_SUFFIX}${LABELLED}`),
@@ -170,7 +170,7 @@ describe('P1-3 — composed suffix validated against the real egress defences', 
   const PROBE_LABELS = ['Plan E_2', 'Option N_1 pilot', 'Fast-track E_visa'];
   const TEMPLATE = 'Ran analysis on your current scenario.';
   const HEADLINE =
-    'Option A currently leads by 24 percentage points because Price is the strongest driver.';
+    'Option A came out ahead in 24% of runs of this model because Price is the strongest driver.';
 
   it('every probe label yields a SURVIVING disclosure (specific or generic) on both the template and headline egress shapes', () => {
     for (const label of PROBE_LABELS) {
@@ -271,7 +271,7 @@ describe('buildScaffoldOmittedSuffix — copy contract + egress', () => {
 
   it('every shape is ACCEPTED on every locked template and on a deterministic headline', () => {
     const headline =
-      'Option A currently leads by 24 percentage points because Price is the strongest driver.';
+      'Option A came out ahead in 24% of runs of this model because Price is the strongest driver.';
     for (const suffix of [LABELLED_OUT, GENERIC_OUT, PLURAL_OUT]) {
       for (const template of RUN_ANALYSIS_LOCKED_TEMPLATES) {
         expect(isAllowedRunAnalysisAssistantText(`${template}${suffix}`)).toBe(true);
@@ -489,7 +489,7 @@ describe('⭐ 2.120(c) — dedup removal disclosed with the engine\'s actual rea
 
   it('every new shape SURVIVES the egress allowlist on every locked template and on a real headline', () => {
     const headline =
-      'Option A currently leads by 24 percentage points because Price is the strongest driver.';
+      'Option A came out ahead in 24% of runs of this model because Price is the strongest driver.';
     const shapes = [
       buildScaffoldOmittedSuffix([record('opt_1', 'New Option')], keptLabelFor({ opt_1: 'Status Quo' })),
       buildScaffoldOmittedSuffix([record('opt_1', LIVE_REMOVED)], keptLabelFor({ opt_1: LIVE_KEPT })),
