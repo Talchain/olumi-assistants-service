@@ -150,7 +150,13 @@ const GAP_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
   // margin is a P&L movement, never the distance between two options.
   /\bmargins?\s+(?:expansion|contraction|improvement|erosion|compression|uplift|decline|growth|pressure)\b/gi,
   /\bahead\s+of\s+(?:the\s+)?(?:schedule|time|plan|deadline|launch|target\s+date|forecast)\b/gi,
-  /\b(?:leads?|leading|led|wins?|won|beats?|outperforms?|outranks?|ahead\s+of)\s+(?:the\s+|our\s+|its\s+|their\s+)?(?:competitors?|rivals?|peers?|market|industry|field|sector|benchmark)\b/gi,
+  // ⚠ THIS LIST MUST TRACK `GAP_BINDER_SRC`. It carves a legitimate use OUT of
+  // the binder vocabulary, so a verb added there and forgotten here becomes an
+  // immediate over-reach: adding `winning|beating|outperforming` in round 2
+  // would have started redacting "your firm is beating competitors by 10 points
+  // on NPS" — a user-brief market echo — with nothing red. Both lists moved in
+  // the same edit; the twins below pin it.
+  /\b(?:leads?|leading|led|wins?|winning|won|beats?|beating|outperforms?|outperforming|outranks?|ahead\s+of)\s+(?:the\s+|our\s+|its\s+|their\s+)?(?:competitors?|rivals?|peers?|market|industry|field|sector|benchmark)\b/gi,
 ];
 
 const GAP_NEUTRALISED_SPAN = '#';
@@ -179,8 +185,21 @@ function neutralise(text: string): string {
  * percentage points under the upside" is a legitimate sensitivity statement, and
  * a bare `win` would read the second as the first. The inflected forms are the
  * verb; the bare form is the noun this estate uses for `win_probability`.
+ *
+ * ⚠ THE GERUND ARM MUST STAY COMPLETE (round-2 review). `leading`, `trailing`
+ * and `lagging` were here from the start; `winning`, `beating` and
+ * `outperforming` were not, so "Option A is **winning** by 12 points" leaked
+ * while "Option A is **leading** by 12 points" was caught. That is not a new
+ * class — it is one class half-declared, which is the worst shape a vocabulary
+ * list can take, because the cases it does catch make it look complete. Every
+ * base form in this list now carries its progressive.
+ *
+ * The reviewer could construct no legitimate sentence for any of the three
+ * gerunds, and neither could I; the twins that pin them are the market-position
+ * ones below, which are legitimate and had to be kept in step (see
+ * {@link GAP_FALSE_POSITIVE_SPANS}).
  */
-const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|outperforms?|outranks?|beats?)`;
+const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|outperforms?|outperforming|outranks?|beats?|beating)`;
 
 /**
  * Bounded and ordered: the FIRST match is what rides the log's primary `reason`
@@ -338,6 +357,18 @@ const GAP_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: Re
  *    ROSTER, which this pure reader does not have. Pinned rather than guessed at
  *    — CLAUDE.md trap 22f: stop adding rounds to an unwinnable predicate and
  *    make the gap explicit instead.
+ *  - `label_collides_with_carve_out_noun` — "Option A leads Market Expansion by
+ *    10 points." (round-2 review, verbatim.) The market-position carve-out just
+ *    above neutralises `leads … market`, so an OPTION LABEL that opens with one
+ *    of the carve-out's nouns takes the binder down with it. The control that
+ *    makes this a carve-out limit rather than a missing binder: "Option A leads
+ *    **Partner Channel** by 10 points." IS caught, same shape, different label.
+ *    ⚠ THE FIX IS NOT AVAILABLE AT THIS SEAM. Discriminating "the market" (a
+ *    thing the user's firm competes in) from "Market Expansion" (a thing the
+ *    user named as an option) needs the OPTION ROSTER, and this reader is pure
+ *    over the review object. Narrowing the carve-out instead would re-open the
+ *    round-1 over-reach it was added to close — the same two-harms-one-parameter
+ *    trade M5 already measured. Pinned rather than chased (trap 22f).
  *  - `basis_point_dialect` — "leads by 500 basis points". A real third dialect
  *    (1 pp = 100 bp) that {@link QTY_SRC} does not admit, because the unit must
  *    follow the digits immediately and "basis" intervenes. Left OUT rather than
@@ -356,6 +387,7 @@ export const KNOWN_UNDETECTED_GAP_FORMS = [
   'spelled_out_number',
   'clause_separated',
   'long_label_transitive',
+  'label_collides_with_carve_out_noun',
   'basis_point_dialect',
 ] as const;
 

@@ -866,6 +866,36 @@ export default async function route(app: FastifyInstance) {
       // body, AFTER the shape check (which is structural and must read what the
       // model actually produced) and BEFORE anything reads `reviewOutput`, so
       // there is no un-redacted path to the wire.
+      //
+      // ── TWO NAMED GAPS IN WHAT WE KNOW ABOUT THIS CARRIER ──────────────────
+      // Recorded HERE, at the code a future lane will touch, rather than only in
+      // a PR comment: a limitation that lives in review prose is invisible to
+      // every later tree grep and register sweep, which is how this estate loses
+      // things (CLAUDE.md trap 12f).
+      //
+      // (a) THE LIVE POSTURE IS WITNESSED, NOT CURRENT. PLoT's
+      //     `DECISION_REVIEW_ENABLE` defaults to FALSE when unset (PLoT
+      //     `src/config/flags.ts`, strict equality against '1'/'true', with no
+      //     staging fallback unlike its neighbours), so it must be witnessed
+      //     rather than assumed. It WAS witnessed ON — capture
+      //     `olumi-docs/PHASE0-EVIDENCE-2026-07-28/probe2676-2026-08-07/
+      //     probe-response.json`, deployed PLoT build 49549d5, 2026-08-06,
+      //     `meta.feature_flags.DECISION_REVIEW_ENABLE: "1"`, carrying a real
+      //     gap sentence. Its value at PLoT's CURRENT build is UNVERIFIED: the
+      //     only surface reporting it is `meta.feature_flags` inside the
+      //     bearer-gated `/v2/run` body. Whether PLoT's `CEE_BASE_URL` /
+      //     `CEE_API_KEY` (its second gate) are set on deployed staging has no
+      //     public surface at all. So this redaction is installed
+      //     UNCONDITIONALLY — correctness here must not depend on a posture we
+      //     cannot re-derive on demand.
+      //
+      // (b) THE PROMETHEUS SERIES CANNOT ANSWER (a). The M2 decision-review path
+      //     emits NO counter: the four `plot_engine_cee_*` series belong to
+      //     PLoT's v1 path only (verified by call-site grep). A reading of ZERO
+      //     on them is SILENCE, not "the path is off" — do not read it as
+      //     evidence either way. Wiring an M2 counter is the cheap way to make
+      //     this answerable; it is not done here.
+      // ───────────────────────────────────────────────────────────────────────
       const rawReviewOutput = extractionResult.json as Record<string, unknown>;
       const gapRedaction = redactRunnerUpGapStatistic(rawReviewOutput);
       if (gapRedaction.fields > 0) {

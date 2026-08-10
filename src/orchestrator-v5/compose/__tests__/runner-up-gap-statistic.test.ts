@@ -118,6 +118,23 @@ const MUST_TRIP: ReadonlyArray<readonly [string, string]> = [
     'REVIEW R16 — same class, `difference`',
     'The difference between the two options is 33 percentage points.',
   ],
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ROUND-2 ADVERSARIAL REVIEW — THE GERUND ARM. `wins|won` closed the round-1
+  // leak, but the PROGRESSIVE forms were left out while `leading`, `trailing`
+  // and `lagging` had been in the set from the start. One class, half declared
+  // — and the half it caught made it look complete. Verbatim from the round-2
+  // review, with its two CONTROLS kept alongside so the pairing is visible in
+  // the suite rather than only in a PR comment.
+  // ══════════════════════════════════════════════════════════════════════════
+  ['REVIEW r2 — gerund `winning`', 'Option A is winning by 12 points.'],
+  ['REVIEW r2 — gerund `beating`', 'Option A is beating Salesforce by 12 percentage points.'],
+  [
+    'REVIEW r2 — gerund `outperforming`',
+    'Option A is outperforming Salesforce by 12 percentage points.',
+  ],
+  ['REVIEW r2 CONTROL — `leading` was always caught', 'Option A is leading by 12 points.'],
+  ['REVIEW r2 CONTROL — `trailing` was always caught', 'Option B is trailing by 12 points.'],
 ];
 
 // ============================================================================
@@ -242,6 +259,27 @@ const MUST_NOT_TRIP: ReadonlyArray<readonly [string, string]> = [
     'the basis-point dialect is NOT a quantity here (pinned, see KNOWN_UNDETECTED_GAP_FORMS)',
     'Base case: interest rates rise by 50 basis points.',
   ],
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ROUND-2 TWINS FOR THE GERUND ARM. The reviewer could construct no
+  // legitimate sentence for `winning`/`beating`/`outperforming` themselves, and
+  // neither could I — but the MARKET-POSITION carve-out is legitimate, already
+  // ratified in round 1, and had to move in the same edit. Without that, adding
+  // the three verbs would have started redacting a user's own brief echo with
+  // nothing red anywhere. These three are what pin the two lists together.
+  // ══════════════════════════════════════════════════════════════════════════
+  [
+    'gerund twin — market position, `winning`',
+    'You noted your firm is winning market share by 10 points on NPS.',
+  ],
+  [
+    'gerund twin — market position, `beating`',
+    'You noted your firm is beating competitors by 10 points on NPS.',
+  ],
+  [
+    'gerund twin — market position, `outperforming`',
+    'You noted your firm is outperforming the industry by 10 points on NPS.',
+  ],
 ];
 
 describe('findRunnerUpGapCodes — the measured corpus', () => {
@@ -256,8 +294,8 @@ describe('findRunnerUpGapCodes — the measured corpus', () => {
   it('the corpus is non-trivial in both directions', () => {
     // Trap 13: an absence assertion needs a positive control. If either arm
     // were empty, every `it.each` above would vacuously pass.
-    expect(MUST_TRIP.length).toBeGreaterThanOrEqual(24);
-    expect(MUST_NOT_TRIP.length).toBeGreaterThanOrEqual(28);
+    expect(MUST_TRIP.length).toBeGreaterThanOrEqual(29);
+    expect(MUST_NOT_TRIP.length).toBeGreaterThanOrEqual(31);
   });
 });
 
@@ -276,12 +314,13 @@ describe('KNOWN_UNDETECTED_GAP_FORMS — the honest gap, pinned', () => {
    * classes are now CAUGHT; the two that remain are declared here, each with a
    * reason at the constant, and each exercised below.
    */
-  it('the declared set is exactly five forms', () => {
+  it('the declared set is exactly six forms', () => {
     expect([...KNOWN_UNDETECTED_GAP_FORMS]).toEqual([
       'percent_dialect',
       'spelled_out_number',
       'clause_separated',
       'long_label_transitive',
+      'label_collides_with_carve_out_noun',
       'basis_point_dialect',
     ]);
   });
@@ -314,6 +353,19 @@ describe('KNOWN_UNDETECTED_GAP_FORMS — the honest gap, pinned', () => {
     // that returns the same answer for every input is reporting on itself).
     expect(
       findRunnerUpGapCodes('Migrate to HubSpot outperforms Consolidate by 21 percentage points.').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('label_collides_with_carve_out_noun: the reviewer’s exact sentence, with its control', () => {
+    // Verbatim from the round-2 corpus. The market-position carve-out
+    // neutralises `leads … Market`, taking the binder down with an option label
+    // that happens to open with one of its nouns.
+    expect(findRunnerUpGapCodes('Option A leads Market Expansion by 10 points.')).toEqual([]);
+    // THE CONTROL is what makes this a CARVE-OUT limit and not a missing binder
+    // (trap 20: a probe returning the same answer for every input is reporting
+    // on itself). Same shape, same verb, same quantity — different label.
+    expect(
+      findRunnerUpGapCodes('Option A leads Partner Channel by 10 points.').length,
     ).toBeGreaterThan(0);
   });
 
