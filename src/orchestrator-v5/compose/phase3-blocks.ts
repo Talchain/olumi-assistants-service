@@ -86,6 +86,7 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 // SELECTOR can also import (it cannot import this module: config/telemetry side
 // effects, and a cycle). One definition, two consumers.
 import {
+  COACHING_ACTION_PROMPT_MAX,
   COACHING_BLOCK_BODY_MAX,
   FRAGILE_EDGE_ACTION_LABEL,
   composeFragileEdgeActionPrompt,
@@ -93,11 +94,18 @@ import {
   isFragileEdgeOfferComposable,
 } from '../coaching/fragile-edge-offer-text.js';
 // ROADMAP 2.692 slice 2 — the judgement offers' text + composability, in the
-// same pure-leaf shape for the same two-consumer reason.
+// same pure-leaf shape for the same two-consumer reason. PR2 COMPLETE LOOP (L1)
+// adds the ACTION half: its own copy and its own (separately named) predicates.
 import {
+  DISAGREEMENT_ACTION_LABEL,
+  OVERRIDE_STRESS_TEST_ACTION_LABEL,
+  composeDisagreementActionPrompt,
   composeDisagreementBody,
+  composeOverrideActionPrompt,
   composeOverrideBody,
+  isDisagreementActionComposable,
   isDisagreementOfferComposable,
+  isOverrideActionComposable,
   isOverrideOfferComposable,
 } from '../coaching/judgement-offer-text.js';
 import type { JudgementSignals } from './judgement-signals.js';
@@ -193,8 +201,14 @@ const ACTION_LABEL_MAX = 40;
  * 0.31.0). Equal to `BODY_MAX` by derivation, not by definition — the contract
  * declares them as separate named constants, so they are kept separate here
  * too rather than aliased.
+ *
+ * PR2 COMPLETE LOOP (L1) — SINGLE-SOURCED with the judgement offer's length
+ * gate, for the same reason `BODY_MAX` is: the number that decides whether an
+ * action is composable and the number this module TRUNCATES to must be one, or a
+ * truncation can re-cut a word into (or out of) a routing token and silently
+ * change which handler the shipped prompt reaches.
  */
-const ACTION_PROMPT_MAX = 300;
+const ACTION_PROMPT_MAX = COACHING_ACTION_PROMPT_MAX;
 const TECHNIQUE_MAX = 300;
 
 // Round-4 review: defence-in-depth prose guard. Each Phase 3 block carries
@@ -1570,13 +1584,28 @@ function buildFragileEdgeOffer(selection: LensSelection): FragileEdgeOffer | nul
   };
 }
 
-/** ROADMAP 2.692 slice 2 — a judgement lens's minted offer: the named body and
- *  the identity-bound edge ref. No action fields in v1 (the follow-through is
- *  conversational for T1 and the Model tab's contested cards for T2 — no chip,
- *  so no inert chip). */
+/**
+ * ROADMAP 2.692 slice 2 — a judgement lens's minted offer: the named body and
+ * the identity-bound edge ref.
+ *
+ * ⭐ PR2 COMPLETE LOOP (L1) — THE ACTION FIELDS ARE NEW, AND THEY SUPERSEDE A
+ * STATED v1 DECISION. This comment previously read *"No action fields in v1 (the
+ * follow-through is conversational for T1 and the Model tab's contested cards
+ * for T2 — no chip, so no inert chip)"*. That was the right call while nothing
+ * could prove either prompt would DISPATCH; the seam was left open on purpose
+ * (see the composite-id comment in {@link buildJudgementLensOffer}), and this is
+ * the slice that closes it with the routing measured rather than assumed.
+ *
+ * The pair is OPTIONAL and travels TOGETHER. Absent ⇒ the card ships exactly the
+ * surface #907 shipped: a finding with no chip. `action_label` alone would be an
+ * inert `<span>` pill at the UI, and `action_prompt` alone a button with no
+ * caption — so the mint below emits both or neither.
+ */
 interface JudgementLensOffer {
   readonly body: string;
   readonly targetRefs: readonly TargetRef[];
+  readonly actionLabel?: string;
+  readonly actionPrompt?: string;
 }
 
 /**
@@ -1604,8 +1633,35 @@ function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer |
     selection.lens === 'override_stress_test'
       ? composeOverrideBody(selection.body, edge.fromLabel, edge.toLabel)
       : composeDisagreementBody(selection.body, edge.fromLabel, edge.toLabel);
+  // ⭐ PR2 COMPLETE LOOP (L1) — THE ACTION. Gated on a SECOND predicate, asked of
+  // the ACTUAL composed prompt on every run: "can this run's producer labels be
+  // phrased into a turn that reaches the handler that fulfils it?" A `false`
+  // costs the ACTION and nothing else — the card ships with the finding, exactly
+  // as it does today. That is deliberately NOT the fragile-edge rule, where the
+  // body has no meaning without the offer and the whole surface drops; the two
+  // predicates are named apart in `coaching/judgement-offer-text.ts` because
+  // they answer different questions (CLAUDE.md trap 21).
+  //
+  // ⚠ NO `action_intent`, for the reason recorded at the block mint below: the
+  // closed 15-value enum has no edge-mutation member, and the UI never
+  // dispatches the field.
+  const isOverride = selection.lens === 'override_stress_test';
+  const actionComposable = isOverride
+    ? isOverrideActionComposable(edge.fromLabel, edge.toLabel)
+    : isDisagreementActionComposable(edge.fromLabel, edge.toLabel);
+  const action = actionComposable
+    ? {
+        actionLabel: isOverride
+          ? OVERRIDE_STRESS_TEST_ACTION_LABEL
+          : DISAGREEMENT_ACTION_LABEL,
+        actionPrompt: isOverride
+          ? composeOverrideActionPrompt(edge.fromLabel, edge.toLabel)
+          : composeDisagreementActionPrompt(edge.fromLabel, edge.toLabel),
+      }
+    : {};
   return {
     body,
+    ...action,
     // The same `from→to` composite identity the fragile-edge offer uses — one
     // spelling of edge identity across every lens that points at one (and the
     // spelling `adjust-edge-strength`'s parseEdgeId accepts, should a later
@@ -1760,6 +1816,13 @@ export function buildLensSurface(
     return null;
   }
 
+  // The turn's ONE action pair, whichever lens produced it. `judgementOffer`
+  // first for the same reason `body`/`target_refs` read it first below: the two
+  // offer kinds are mutually exclusive by lens, so the order is a tie-break that
+  // can never fire, not a precedence rule.
+  const actionLabel = judgementOffer?.actionLabel ?? offer?.actionLabel;
+  const actionPrompt = judgementOffer?.actionPrompt ?? offer?.actionPrompt;
+
   const candidate = {
     ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
     type: 'coaching' as const,
@@ -1791,10 +1854,18 @@ export function buildLensSurface(
     // deployed UI tip: the chip is live on `action_label` + `action_prompt` and
     // `action_intent` is never dispatched (it rides as a data-* attribute).
     // Omitting it costs nothing and promises nothing false.
-    ...(offer !== null
+    //
+    // ⭐ PR2 COMPLETE LOOP (L1): the judgement lenses now reach this spread too.
+    // ONE pair of locals feeds both the wire fields and the prose guard below,
+    // so a field can never be scanned-but-not-emitted or emitted-but-not-scanned
+    // (the two lists were the drift risk here). BOTH-OR-NEITHER is structural:
+    // a label without a prompt renders as an inert `<span>` pill at the UI, and
+    // a prompt without a label as an uncaptioned button, so the spread is keyed
+    // on the pair rather than on either half.
+    ...(actionLabel !== undefined && actionPrompt !== undefined
       ? {
-          action_label: truncate(offer.actionLabel, ACTION_LABEL_MAX),
-          action_prompt: truncate(offer.actionPrompt, ACTION_PROMPT_MAX),
+          action_label: truncate(actionLabel, ACTION_LABEL_MAX),
+          action_prompt: truncate(actionPrompt, ACTION_PROMPT_MAX),
         }
       : {}),
   };
@@ -1808,8 +1879,8 @@ export function buildLensSurface(
       // caption and the turn text the user sends in their own name — so they go
       // through the SAME guard as the body. Absent on every other lens, and
       // `scanProse` skips non-strings, so this is inert for them.
-      { name: 'action_label', value: offer?.actionLabel },
-      { name: 'action_prompt', value: offer?.actionPrompt },
+      { name: 'action_label', value: actionLabel },
+      { name: 'action_prompt', value: actionPrompt },
     ],
   });
   if (block === null) return null;

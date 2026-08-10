@@ -518,8 +518,18 @@ describe('§5 target_refs bind to the fired edge BY IDENTITY', () => {
     expect(block.body.startsWith('The two drafting passes disagreed')).toBe(true);
     expect(block.body).toContain('Factor A');
     expect(block.body).toContain('Factor B');
-    // v1 ships no action chip on this lens — the honest minimal surface.
-    expect(block.action_label).toBeUndefined();
+    // ⭐ SUPERSEDED, DELIBERATELY (PR2 COMPLETE LOOP, L1). This assertion read
+    // `expect(block.action_label).toBeUndefined()` with the note *"v1 ships no
+    // action chip on this lens — the honest minimal surface"*. That was a pin on
+    // a v1 DESIGN DECISION, not on recorded evidence, and the decision has been
+    // taken again with the routing measured rather than assumed — the composite
+    // edge id here was minted "should a later slice add an action chip", and
+    // this is that slice. The action's OWN behaviour (copy, routing polarity,
+    // the labels that refuse it) is `judgement-offer-action.test.ts` and
+    // `judgement-lens-action-block.test.ts`; this file keeps only the identity
+    // binding it was written for, so the two do not become two authorities on
+    // one fact.
+    expect(block.action_label).toBe('Adjust this relationship');
   });
 
   it('T1’s block carries its own signal_code and the overridden edge’s identity', () => {
