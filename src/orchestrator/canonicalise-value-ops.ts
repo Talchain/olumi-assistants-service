@@ -365,10 +365,18 @@ export function stampUserEditProvenance(
 // `observed_state` is a whole-object REPLACE (`plotClient` is null at both V5
 // dispatch call sites — PLoT's deepMerge is not in play here).
 //
-// Scope: ONLY `update_node` ops whose observed_state payload carries a
-// `value` member. Unit-only edits, label edits, structural ops and the
+// Scope: ONLY `update_node` ops that MOVE `observed_state.value` — i.e. whose
+// payload carries a `value` member DIFFERING from the node's current one.
+// That second clause is load-bearing and is enforced against the node, not
+// against the payload's shape: the canonicaliser merges the node's existing
+// observed_state under every translatable-leaf write, so a unit-only,
+// std-only or baseline-only edit reaches here carrying an UNCHANGED `value`
+// and the live `raw_value`. Reconciling those would DELETE a correct pair on
+// an edit that never touched the number, and with it the
+// `normalisedConvention` evidence the egress scale net needs — sending PLoT a
+// value off by a factor of `cap`. Label edits, structural ops and the
 // intervention subtree (whose own `raw_value` IS authoritative — see
-// plot-intervention-scale.ts) are returned BY REFERENCE, untouched.
+// plot-intervention-scale.ts) are likewise returned BY REFERENCE, untouched.
 //
 // Composed, not folded into `canonicaliseValueOps`, for the same reason
 // `stampUserEditProvenance` is: that module's pinned contract is
@@ -403,6 +411,27 @@ export function reconcileObservedValuePair(
     const newValue = observed.value;
     if (typeof newValue !== 'number' || !Number.isFinite(newValue)) return op;
 
+    // Scale context, and the authority on whether the value MOVED. Read before
+    // any other guard, because that question decides the whole lane.
+    const nodeObserved = asRecord(findNode(currentGraph, op.path)?.observed_state) ?? {};
+
+    // ⚠ THE SCOPE THE CHAIN ACTUALLY HANDS US. This function's contract is
+    // "act on ops that MOVE observed_state.value", but it never receives a
+    // bare payload: `canonicaliseUpdateNodeValue` merges the node's existing
+    // observed_state under EVERY translatable-leaf write (value · unit ·
+    // baseline · std), so a unit-only / std-only / baseline-only edit arrives
+    // carrying an UNCHANGED `value` AND the live `raw_value` — and would
+    // resolve `ambiguous` and DELETE the pair on an edit that never touched
+    // the number. Nothing can be stale if the value did not move.
+    //
+    // Deleting it is not cosmetic: `buildFactorScaleMap` grants
+    // `normalisedConvention` only when `raw_value` is present, and that flag
+    // is the sole evidence gate for the egress scale net's `cap_denormalised`
+    // rule. Dropping it changes what PLoT/ISL computes on by a factor of
+    // `cap` (£20,000 → 0.2). Pinned by the "COMPOSED chain" describe in
+    // observed-value-pair-authority.test.ts.
+    if (nodeObserved.value === newValue) return op;
+
     // ⚠ NARROW BY DESIGN: act ONLY on a payload that already carries a
     // `raw_value`. That key is the stale-carry-forward signature — it is
     // there because `canonicaliseUpdateNodeValue` merged the node's existing
@@ -422,8 +451,7 @@ export function reconcileObservedValuePair(
 
     // Scale context: the payload's own unit/cap (the canonicaliser already
     // merged the node's in), falling back to the node for a payload that set
-    // one without the other.
-    const nodeObserved = asRecord(findNode(currentGraph, op.path)?.observed_state) ?? {};
+    // one without the other. `nodeObserved` is read above.
     const unit =
       typeof observed.unit === 'string'
         ? observed.unit

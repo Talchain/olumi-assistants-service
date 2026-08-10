@@ -48,7 +48,15 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { handleEditGraph } from '../edit-graph.js';
-import { reconcileObservedValuePair } from '../../canonicalise-value-ops.js';
+import {
+  reconcileObservedValuePair,
+  canonicaliseValueOps,
+  stampUserEditProvenance,
+} from '../../canonicalise-value-ops.js';
+import {
+  buildFactorScaleMap,
+  projectInterventionsToRawScale,
+} from '../../../orchestrator-v5/tools/plot-intervention-scale.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import type { PatchOperation } from '../../types.js';
 import type { ConversationContext } from '../../types.js';
@@ -135,6 +143,24 @@ function valueOp(nodeId: string, value: unknown, oldValue: unknown = 0.2) {
     old_value: oldValue,
     impact: 'moderate',
     rationale: 'User set the value.',
+  };
+}
+
+/**
+ * A NON-value tunable-leaf edit in the SAME prompt spelling. `unit` (like
+ * `std` and `baseline`) is a member of `TRANSLATABLE_LEAVES`, so the
+ * canonicaliser merges the node's existing `observed_state` under it — which
+ * is exactly how an unchanged `value` and a live `raw_value` arrive at the
+ * reconciler on an edit that never touched the number.
+ */
+function leafOp(nodeId: string, leaf: string, value: unknown, oldValue: unknown) {
+  return {
+    op: 'update_node',
+    path: `/nodes/${nodeId}/data/${leaf}`,
+    value,
+    old_value: oldValue,
+    impact: 'moderate',
+    rationale: `User changed the ${leaf}.`,
   };
 }
 
@@ -303,7 +329,11 @@ describe('2.1033 — reconcileObservedValuePair: scope and by-reference contract
     expect(out[0]).toBe(ops[0]);
   });
 
-  it('IGNORES an op that writes no value (unit-only edit is returned by reference)', () => {
+  it('IGNORES an op that writes no value — a bare unit payload is returned by reference', () => {
+    // ⚠ SCOPE OF THIS TEST, and why it is not enough on its own: it calls the
+    // reconciler DIRECTLY, so the payload is exactly what is written here.
+    // The composed chain never hands it a payload this bare — see the
+    // "COMPOSED chain" describe below, which is the binding that matters.
     const ops = [
       { op: 'update_node', path: 'fac_spend', value: { observed_state: { unit: '$' } } },
     ] as unknown as PatchOperation[];
@@ -338,5 +368,196 @@ describe('2.1033 — reconcileObservedValuePair: scope and by-reference contract
     // stopped preferring raw_value, every assertion above would pass for the
     // wrong reason. This asserts the defect mechanism is still real.
     expect(synthesiseDisplayValue({ value: 0.4, raw_value: 20000, unit: '£', cap: 100000 })).toBe('£20k');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// THE COMPOSED CHAIN — the binding everything above this line is blind to.
+//
+// Every test above either drives the full handler on a VALUE edit, or calls
+// `reconcileObservedValuePair` DIRECTLY. Neither can see the defect below,
+// and CI was green on all of it: of 1,621 tracked `*.test.ts`, 59 call
+// `handleEditGraph` and ZERO exercised a unit- or std-only op.
+//
+// ── The defect, reproduced by execution at pristine 77229a88 ───────────────
+// The reconciler documents that it acts only on ops that MOVE
+// `observed_state.value`, and the direct-call test above agrees with it. The
+// CHAIN does not honour that scope. `canonicaliseValueOps` merges the node's
+// existing `observed_state` under EVERY translatable-leaf write
+// (`TRANSLATABLE_LEAVES` = value · unit · baseline · std), so a unit-only,
+// std-only or baseline-only edit arrives carrying an UNCHANGED `value` AND
+// the live `raw_value`. It then resolves `ambiguous` and DELETES `raw_value`
+// on an edit that never moved the number. Measured, driving `handleEditGraph`
+// with a unit-only op on the £20,000 fixture factor:
+//
+//   observed_state after edit = { value: 0.2, unit: '%', cap: 100000 }
+//                                          ↑ raw_value: 20000 is GONE
+//
+// ── Why that is a REGRESSION, not a cosmetic gap ───────────────────────────
+// `buildFactorScaleMap` grants `normalisedConvention` ONLY when `raw_value`
+// is present and proves `value ≈ raw_value / cap`, and that flag is the SOLE
+// evidence gate for rule 2 of the egress scale net
+// (`plot-intervention-scale.ts`). Deleting `raw_value` therefore changes what
+// PLoT/ISL computes on, by a factor of `cap`:
+//
+//                          normalisedConvention | rule                  | to PLoT
+//   before the edit        true                 | cap_denormalised      | 20000
+//   after it, at pristine  ABSENT               | ambiguous_no_evidence | 0.2
+//
+// The consumer is egress-bound and unconditional: `build-turn-context.ts`
+// `projectOptionsToRawScale` → `buildFactorScaleMap` +
+// `projectInterventionsToRawScale`. So this is the same scientific-truth harm
+// row 2.1033 exists to close, arriving by DELETION instead of by staleness.
+//
+// Nothing can be stale if the value did not move — so an op that leaves
+// `value` where it found it is returned untouched.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('2.1033 — the COMPOSED chain: an edit that never moved the value keeps its pair', () => {
+  /** EXACTLY the composition both apply seams run (edit-graph.ts, gm-held-execute.ts). */
+  function chain(ops: PatchOperation[], graph: unknown): PatchOperation[] {
+    return reconcileObservedValuePair(
+      stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations),
+      graph,
+    );
+  }
+
+  /** The post-`normalisePath` op spelling the handler feeds the canonicaliser. */
+  function leafPatch(nodeId: string, leaf: string, to: unknown): PatchOperation {
+    return {
+      op: 'update_node',
+      path: nodeId,
+      value: { [`data/${leaf}`]: to },
+    } as unknown as PatchOperation;
+  }
+
+  function observedOfOp(op: PatchOperation): Record<string, unknown> {
+    return (op.value as Record<string, Record<string, unknown>>).observed_state ?? {};
+  }
+
+  it('a unit-only edit keeps value 0.2 AND raw_value 20000 (the pair the chain merged in)', () => {
+    const graph = buildGraph();
+    const ops = [leafPatch('fac_spend', 'unit', '%')];
+
+    // ── PIN THE PRECONDITION IN-TEST (trap 13b) ──────────────────────────
+    // The assertion below is only about the reconciler if the canonicaliser
+    // really did merge an unchanged `value` and a live `raw_value` under this
+    // unit write. Prove that here, so a fixture that silently stopped
+    // reproducing the setup fails LOUD instead of passing vacuously.
+    const merged = observedOfOp(canonicaliseValueOps(ops, graph).operations[0]!);
+    expect(merged.value).toBe(0.2); // unchanged — the user edited the UNIT
+    expect(merged.raw_value).toBe(20000); // live, and about to be deleted
+    expect(merged.unit).toBe('%'); // the edit the user DID make
+
+    const observed = observedOfOp(chain(ops, graph)[0]!);
+
+    expect(observed.value).toBe(0.2); // still where the user left it
+    expect(observed.raw_value).toBe(20000); // pristine DELETES this
+    expect(observed.unit).toBe('%');
+    expect(observed.cap).toBe(100000);
+  });
+
+  it('END TO END: a unit-only edit through handleEditGraph commits the pair intact', async () => {
+    const result = await runEdit(
+      buildGraph(),
+      [leafOp('fac_spend', 'unit', '%', '£')],
+      'Show marketing spend as a percentage',
+    );
+
+    expect(result.wasRejected).toBe(false);
+
+    // The value the user never touched is still theirs, and its derived
+    // sibling is still standing behind it. Bound by ID, never by value.
+    const observed = observedOf(result.appliedGraph, 'fac_spend');
+    expect(observed.value).toBe(0.2);
+    expect(observed.raw_value).toBe(20000); // pristine DELETES this
+    expect(observed.unit).toBe('%');
+    expect(observed.cap).toBe(100000);
+  });
+
+  it('THE HARM ITSELF: after that edit fac_spend proves normalisedConvention and PLoT receives 20000, not 0.2', async () => {
+    // Deliberately a SEPARATE test from the one above, asserting ONLY the
+    // egress outcome. A raw_value assertion sitting in front of these would
+    // fail first and mask them, leaving the metric that actually matters —
+    // the number PLoT/ISL computes on — unmeasured at RED (trap 23: never
+    // let the symptom's metric stand in for the outcome's).
+    const result = await runEdit(
+      buildGraph(),
+      [leafOp('fac_spend', 'unit', '%', '£')],
+      'Show marketing spend as a percentage',
+    );
+    const nodes = (result.appliedGraph as { nodes: unknown[] }).nodes;
+
+    const scale = buildFactorScaleMap(nodes).get('fac_spend');
+    expect(scale?.cap).toBe(100000);
+    expect(scale?.normalisedConvention).toBe(true); // pristine: undefined
+
+    // The intervention deliberately carries NO `raw_value` — with one, rule 1
+    // (`raw_value_used`) short-circuits and `normalisedConvention` is never
+    // consulted, so these would hold for the wrong reason.
+    const projected = projectInterventionsToRawScale(
+      { fac_spend: { value: 0.2 } },
+      buildFactorScaleMap(nodes),
+    );
+    expect(projected.conversions[0]?.rule).toBe('cap_denormalised'); // pristine: ambiguous_no_evidence
+    expect(projected.interventions.fac_spend).toBe(20000); // pristine: 0.2 — off by a factor of cap
+  });
+
+  it('the same class, not unit-specific: a std-only edit on a legacy % factor keeps raw_value 20', () => {
+    // `{ value: 20, raw_value: 20, unit: '%' }` — the shape the acceptance
+    // case above already pins. A std write merges the pair in, the value is
+    // outside [0,1] on a `%` factor, so `resolveExistingRawValue` answers
+    // `ambiguous` and pristine drops the 20.
+    const graph = buildGraph();
+    (graph.nodes[2] as Record<string, unknown>).observed_state = {
+      value: 20,
+      raw_value: 20,
+      unit: '%',
+    };
+
+    const observed = observedOfOp(chain([leafPatch('fac_spend', 'std', 0.05)], graph)[0]!);
+
+    expect(observed.value).toBe(20);
+    expect(observed.raw_value).toBe(20); // pristine DELETES this
+    expect(observed.std).toBe(0.05); // the edit the user DID make
+  });
+
+  it('the UNTOUCHED sibling keeps its own pair and its own PLoT value (identity binding)', async () => {
+    const result = await runEdit(
+      buildGraph(),
+      [leafOp('fac_spend', 'unit', '%', '£')],
+      'Show marketing spend as a percentage',
+    );
+
+    const other = observedOf(result.appliedGraph, 'fac_other');
+    expect(other.value).toBe(0.2);
+    expect(other.raw_value).toBe(20000);
+    expect(other.unit).toBe('£');
+
+    const nodes = (result.appliedGraph as { nodes: unknown[] }).nodes;
+    const projected = projectInterventionsToRawScale(
+      { fac_other: { value: 0.2 } },
+      buildFactorScaleMap(nodes),
+    );
+    expect(projected.interventions.fac_other).toBe(20000);
+    expect(projected.conversions[0]?.rule).toBe('cap_denormalised');
+  });
+
+  it('a VALUE edit is still reconciled — this lane narrows nothing (control)', () => {
+    // The early return must key on "the value did not move", never on "a
+    // non-value leaf was written". A value edit that ALSO carries a unit
+    // must still re-derive the sibling.
+    const graph = buildGraph();
+    const ops = [
+      {
+        op: 'update_node',
+        path: 'fac_spend',
+        value: { 'data/value': 0.4, 'data/unit': '£' },
+      },
+    ] as unknown as PatchOperation[];
+
+    const observed = observedOfOp(chain(ops, graph)[0]!);
+    expect(observed.value).toBe(0.4);
+    expect(observed.raw_value).toBe(40000); // re-derived, not carried forward
   });
 });
