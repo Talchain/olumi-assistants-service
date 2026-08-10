@@ -318,29 +318,54 @@ function collectLeverLabels(
 }
 
 /**
- * Whole-phrase containment with letter/number word boundaries on BOTH ends.
+ * Offset of the FIRST whole-phrase occurrence of `needle` in `haystack`, with
+ * letter/number word boundaries on BOTH ends — or `-1` when there is none.
  * Both arguments are expected to be pre-normalised via `normaliseForPhraseMatch`
  * (so only Unicode letters/numbers and single spaces remain). Scans every
- * occurrence so a first boundary-failing hit cannot mask a later valid one. A
- * bare shared token must NOT match — on live staging the lever "Equity Offered
- * to CTO" and a non-lever assumption both contain "CTO", so a token match would
- * over-suppress. Boundaries use the Unicode letter/number classes so accented
- * words ("café") are bounded correctly.
+ * occurrence so a first boundary-failing hit cannot mask a later valid one.
+ * Boundaries use the Unicode letter/number classes so accented words ("café")
+ * are bounded correctly.
+ *
+ * The offset is into the NORMALISED haystack, not the original prose. That is
+ * sufficient for ORDERING and nothing else reads it: `normaliseForPhraseMatch`
+ * is monotone (NFKC, lower-case, collapse non-alphanumeric runs, trim all map a
+ * prefix to a prefix), so relative order is preserved exactly even though
+ * absolute positions shift.
  */
-function containsWholePhrase(haystack: string, needle: string): boolean {
-  if (needle.length === 0) return false;
+function firstBoundedPhraseAt(haystack: string, needle: string): number {
+  if (needle.length === 0) return -1;
   let from = 0;
   for (;;) {
     const at = haystack.indexOf(needle, from);
-    if (at < 0) return false;
+    if (at < 0) return -1;
     const before = at === 0 ? '' : haystack[at - 1]!;
     const afterIdx = at + needle.length;
     const after = afterIdx >= haystack.length ? '' : haystack[afterIdx]!;
     const boundedBefore = before === '' || !/[\p{L}\p{N}]/u.test(before);
     const boundedAfter = after === '' || !/[\p{L}\p{N}]/u.test(after);
-    if (boundedBefore && boundedAfter) return true;
+    if (boundedBefore && boundedAfter) return at;
     from = at + 1;
   }
+}
+
+/**
+ * Whole-phrase containment — the boolean face of {@link firstBoundedPhraseAt},
+ * which is the single owner of the scan (one derivation, two read points, so a
+ * boundary-rule change can never apply to one caller and not the other).
+ *
+ * A bare shared token must NOT match a DIFFERENT phrase — on live staging the
+ * lever "Equity Offered to CTO" and a non-lever assumption both contain "CTO",
+ * so a token match would over-suppress.
+ *
+ * ⚠ NOTE WHAT THIS DOES NOT DO, because a docstring here previously claimed it
+ * did: bounded matching stops "CTO" matching inside "director", it does NOT
+ * stop a node genuinely LABELLED "CTO" from matching prose that names "Equity
+ * Offered to CTO" — there, "CTO" is a bounded whole word and both labels match.
+ * Choosing between them is an ORDERING question, settled in
+ * {@link resolveProseEntityRefs} by the longer-label tie-break.
+ */
+function containsWholePhrase(haystack: string, needle: string): boolean {
+  return firstBoundedPhraseAt(haystack, needle) >= 0;
 }
 
 /**
@@ -609,12 +634,45 @@ export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | 
 
 /**
  * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
- * one deduped `TargetRef` per unambiguously-resolved node, in lookup order.
- * Whole-phrase, both-ends-bounded matching (reusing `containsWholePhrase`, which
- * already encodes the "Equity Offered to CTO" vs bare "CTO" over-match lesson);
- * too-short / bare-generic single-word labels are skipped; a label shared by two
- * nodes (`AMBIGUOUS_LABEL`) links to NEITHER. Pure; no producer value is read —
- * only the node's own display label. Byte-inert until a builder calls it.
+ * one deduped `TargetRef` per unambiguously-resolved node, **ordered by first
+ * mention in the prose**.
+ *
+ * Whole-phrase, both-ends-bounded matching; too-short / bare-generic
+ * single-word labels are skipped; a label shared by two nodes
+ * (`AMBIGUOUS_LABEL`) links to NEITHER. Pure; no producer value is read — only
+ * the node's own display label.
+ *
+ * ⭐ WHY THE ORDER IS PROSE ORDER AND NOT LOOKUP ORDER (ROADMAP 2.1023).
+ * This function used to return refs in `lookup.values()` order — i.e. the order
+ * the PRODUCER happened to emit its nodes in, which the reader cannot see and
+ * which has nothing to do with the sentence. Two consumers read `[0]` as "the
+ * entity this card is about": the card's own `target_refs` pills, and
+ * `ui_directive` row 7, which MOVES THE USER'S VIEWPORT. Measured across the 14
+ * committed captures (`olumi-docs/PHASE0-EVIDENCE-2026-07-28/
+ * mutation-witness-2026-08-10`): **12 of 21 multi-ref coaching cards listed
+ * their entities in an order that contradicted their own sentence**, the
+ * dominant shape being `"The link from <factor> to <goal> assumes…"` rendered
+ * as `[goal, factor]`.
+ *
+ * ⚠ THIS IS A PURE REORDERING. The set of resolved refs is byte-identical —
+ * every rail above still decides membership, and this function still cannot
+ * add, drop, or invent a ref. Only the sequence changes. That is deliberate:
+ * salience is NOT inferred from graph structure (influence, degree, rank).
+ * The card named these entities in prose; the prose is the only evidence, and a
+ * structural salience score would be a fabricated number wearing computed
+ * clothes.
+ *
+ * TIE-BREAK — LONGER LABEL FIRST, and it is load-bearing. When a node labelled
+ * `"CTO"` and one labelled `"Equity Offered to CTO"` both exist, prose naming
+ * the longer phrase matches BOTH (see {@link containsWholePhrase} — bounded
+ * matching does not prevent this). Ordering by offset alone already prefers the
+ * longer one whenever the shorter sits INSIDE it and starts later; the
+ * tie-break covers the remaining case, prefix containment
+ * (`"Onboarding"` vs `"Onboarding friction"`), where both start at the same
+ * offset. Together they make a separate longest-match rule unnecessary.
+ *
+ * Final tie-break is the original lookup order, so the result stays TOTAL and
+ * DETERMINISTIC (never dependent on `Array.prototype.sort` stability).
  */
 export function resolveProseEntityRefs(
   lookup: GraphNodeLookup,
@@ -623,25 +681,41 @@ export function resolveProseEntityRefs(
 ): readonly TargetRef[] {
   const hay = normaliseForPhraseMatch(prose);
   if (hay.length === 0) return [];
-  const refs: TargetRef[] = [];
+  const matched: Array<{
+    ref: TargetRef;
+    at: number;
+    len: number;
+    ordinal: number;
+  }> = [];
   const seen = new Set<string>();
+  let ordinal = 0;
   for (const ref of lookup.values()) {
+    ordinal++;
     const needle = normaliseForPhraseMatch(ref.label);
     if (needle.length < LEVER_LABEL_MIN_LEN) continue;
     // A bare generic single word ("cost") over-matches ordinary decision prose —
     // require a distinctive single word or a multi-word phrase (same rule as the
     // lever-naming guard's Finding-5 tempering).
     if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
-    if (!containsWholePhrase(hay, needle)) continue;
+    const at = firstBoundedPhraseAt(hay, needle);
+    if (at < 0) continue;
     // Fail-closed on ambiguity: a duplicate normalised label resolves to
     // AMBIGUOUS_LABEL → link to neither node.
     const resolved = index.get(needle);
     if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
     if (seen.has(resolved)) continue;
     seen.add(resolved);
-    refs.push({ id: ref.id, label: ref.label, kind: ref.kind });
+    matched.push({
+      ref: { id: ref.id, label: ref.label, kind: ref.kind },
+      at,
+      len: needle.length,
+      ordinal,
+    });
   }
-  return refs;
+  matched.sort(
+    (a, b) => a.at - b.at || b.len - a.len || a.ordinal - b.ordinal,
+  );
+  return matched.map((m) => m.ref);
 }
 
 /**

@@ -428,10 +428,20 @@ function buildFlipFocusDirective(
 // what "beside the canvas, not on it" feels like.
 //
 // ⭐ THE ENTITY-RESOLUTION ROUTE, and why it is not prose-matching. This row
-// resolves NOTHING itself. It reuses the entity reference the composed card
-// ALREADY carries — `target_refs[0]` — a `TargetRef` that CEE resolved against
-// the graph node lookup and that has already passed the block's own strict
-// parse. Consequences:
+// resolves NOTHING itself. It reuses an entity reference the composed cards
+// ALREADY carry — the FIRST DISPATCHABLE ref, scanning blocks in order — a
+// `TargetRef` that CEE resolved against the graph node lookup and that has
+// already passed the block's own strict parse.
+//
+// ⚠ NOT `target_refs[0]`, which is what this comment said until 10 Aug 2026.
+// The code has always skipped refs whose kind is outside
+// ROW7_DISPATCHABLE_KINDS (and options on a withheld turn), so a card carrying
+// `[goal, factor]` yields the FACTOR, not the goal. The code is the safer
+// behaviour; the comment overstated how simple the rule is, which matters
+// because "it is literally element zero" is the sentence a reader would use to
+// conclude that ref ORDER cannot affect this row. It can, and it does.
+//
+// Consequences:
 //   · it CANNOT point at an entity that does not exist (the ref came from the
 //     graph lookup, which is closed over real nodes/edges);
 //   · it CANNOT disagree with the card the user is reading, because it is the
@@ -450,6 +460,16 @@ function buildFlipFocusDirective(
 // both-ends-bounded matching, a minimum label length, generic-token rejection,
 // and a duplicate label resolving to NEITHER node — and it can only ever return
 // ids that exist in the graph.
+//
+// ⭐ RESOLVED IN PART, 10 Aug 2026 (ROADMAP 2.1023). `resolveProseEntityRefs`
+// used to return its refs in GRAPH LOOKUP order — the producer's node-array
+// order, invisible to the reader — so this row could focus the incidental
+// mention while the user read about the main subject ("your gross margin floor
+// is doing most of the work, though team ramp time matters a little too" →
+// focus @ Team ramp time, reproduced at the bytes). It now orders by FIRST
+// MENTION IN THE PROSE, so the gesture follows the sentence. That is a pure
+// reordering of the same set: this row's safety invariant is untouched — it
+// still cannot point at anything the card does not already point at.
 //
 // Row 7 deliberately does NOT try to distinguish the two provenances. A
 // hand-maintained list of "structural" builders would read correct on the day
