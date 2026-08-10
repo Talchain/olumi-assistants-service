@@ -294,6 +294,95 @@ describe('ROADMAP 2.1051 — direction gate at the real merge boundary', () => {
   });
 
   /* ---------------------------------------------------------------------
+   * EVIDENCE IS PROTECTED PAYLOAD ACROSS THE MERGE (round-1 finding 4).
+   *
+   * ⚠ THESE TESTS EXIST BECAUSE MUTANT M18 SURVIVED WITHOUT THEM. The fix was
+   * verified in a throwaway probe and never pinned in the suite — which is the
+   * same defect class as the round-1 M4 survivor one level down: a behaviour
+   * that works today and is guarded by nothing.
+   *
+   * The merge is `node_id::operator` with "LLM overwrites on same key", so a
+   * model row carrying only a LABEL replaces a correct, QUOTE-BEARING
+   * deterministic row. Harmless before the gate; not harmless now, because the
+   * gate is fail-closed on evidence it cannot verify — the overwrite deletes
+   * the very quote that would have proven the row.
+   * ------------------------------------------------------------------- */
+
+  it('a label-only model row INHERITS the deterministic twin\'s quote, so the limit survives', () => {
+    const brief = 'Keep marketing spend under £1500000.';
+    const detOnly = runMerge(brief);
+    expect(
+      detOnly.wire.some((w) => w.node_id === 'fac_marketing_spend' && w.operator === '<='),
+      'premise: the deterministic producer reads this correctly',
+    ).toBe(true);
+
+    const both = runMerge(brief, [{
+      constraint_id: 'gc-label-only',
+      node_id: 'fac_marketing_spend',
+      operator: '<=',
+      value: 1500000,
+      unit: '£',
+      label: 'Marketing spend ceiling (model wording)',
+      // NO source_quote — the shape that destroyed B1's only real constraint.
+    }]);
+    expect(
+      both.wire.some((w) => w.node_id === 'fac_marketing_spend' && w.operator === '<='),
+      'the overwrite must not delete a limit the deterministic producer proved',
+    ).toBe(true);
+    expect(both.asks, 'and it must not manufacture a question about a settled bound').toEqual([]);
+  });
+
+  it('DISCRIMINATING TWIN: a DIFFERENT number does NOT inherit the quote', () => {
+    // The half that makes the inheritance safe rather than convenient. A quote
+    // describing a different quantity is not evidence about this one; carrying
+    // it would let the gate "prove" a direction from a sentence about another
+    // number. Same gate as the frame: same value, same unit, or nothing.
+    const brief = 'Keep marketing spend under £1500000.';
+    const both = runMerge(brief, [{
+      constraint_id: 'gc-other-number',
+      node_id: 'fac_marketing_spend',
+      operator: '<=',
+      value: 999,
+      unit: '£',
+      label: 'Different number (model wording)',
+    }]);
+    expect(
+      both.wire.some((w) => w.node_id === 'fac_marketing_spend' && Math.abs(w.value - 999) < 1e-9),
+      'an unevidenced row about a different number must NOT ship',
+    ).toBe(false);
+    expect(both.asks.length, 'it must become a question instead').toBeGreaterThan(0);
+  });
+
+  it('DISCRIMINATING TWIN: a DIFFERENT unit does NOT inherit the quote', () => {
+    const brief = 'Keep marketing spend under £1500000.';
+    const both = runMerge(brief, [{
+      constraint_id: 'gc-other-unit',
+      node_id: 'fac_marketing_spend',
+      operator: '<=',
+      value: 1500000,
+      unit: '%',
+      label: 'Same number, different unit (model wording)',
+    }]);
+    expect(both.wire.some((w) => w.node_id === 'fac_marketing_spend' && w.operator === '<=')).toBe(false);
+    expect(both.asks.length).toBeGreaterThan(0);
+  });
+
+  it('a model row that HAS its own quote keeps it — inheritance only fills a hole', () => {
+    const brief = 'Keep marketing spend under £1500000.';
+    const both = runMerge(brief, [{
+      constraint_id: 'gc-own-quote',
+      node_id: 'fac_marketing_spend',
+      operator: '<=',
+      value: 1500000,
+      unit: '£',
+      label: 'Marketing spend ceiling',
+      source_quote: 'Keep marketing spend under £1500000.',
+    }]);
+    expect(both.wire.some((w) => w.node_id === 'fac_marketing_spend' && w.operator === '<=')).toBe(true);
+    expect(both.asks).toEqual([]);
+  });
+
+  /* ---------------------------------------------------------------------
    * THE EARLY-RETURN MOVE — claim (g).
    * ------------------------------------------------------------------- */
 
