@@ -81,11 +81,27 @@ export function buildRecommendedOptionUiDirective(
     type: 'ui_directive',
     verb: 'highlight',
     targets: [{ id: ref.id, label: ref.label, kind: 'option' }],
+    source: LADDER_SOURCE,
   };
 
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
 }
+
+/**
+ * 0.39.0 `source` provenance. EVERY row in this file is deterministic,
+ * fact-derived and CEE-authored, so every directive this module mints is
+ * `ladder` — never `gate`, never `composer`. Stamped so a capture, the UI and
+ * telemetry can distinguish a deterministic gesture from an LLM-proposed one;
+ * before this, CEE stamped nothing and no capture could tell them apart, which
+ * is the precondition for ever trusting a composer slot.
+ *
+ * ⚠ This is an ADDITIVE wire change: the emitted block gains a key. The exact
+ * key-set pin in `__tests__/ui-directive-emit.test.ts` is updated in the same
+ * commit — that pin exists to catch ACCIDENTAL field additions, and this one is
+ * deliberate.
+ */
+const LADDER_SOURCE = 'ladder' as const;
 
 // ============================================================================
 // Wave-4 δ2 — the focus / open_inspector emit policy (ROADMAP 1.202), extended
@@ -150,7 +166,13 @@ type UiDirectiveSuppressReason =
    * we are declining to point at it, which is a different operational fact
    * from "the analysis produced none".
    */
-  | 'leading_option_claim_withheld';
+  | 'leading_option_claim_withheld'
+  /**
+   * §2.1 row 7: the turn composed no card carrying a DISPATCHABLE entity
+   * reference, so there is nothing the assistant is demonstrably discussing to
+   * point at. Fail-closed — never point at nothing.
+   */
+  | 'no_discussed_entity';
 
 function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
   emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
@@ -174,6 +196,7 @@ function directiveFromRef(verb: UiDirectiveVerbLiteral, ref: GraphNodeRef): UiDi
     type: 'ui_directive',
     verb,
     targets: [{ id: ref.id, label: ref.label, kind: ref.kind }],
+    source: LADDER_SOURCE,
   };
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
@@ -194,6 +217,7 @@ function directiveFromUiTarget(
     verb,
     targets: [],
     ui_target: uiTarget,
+    source: LADDER_SOURCE,
   };
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
@@ -385,6 +409,140 @@ function buildFlipFocusDirective(
   const block = directiveFromRef('focus', ref);
   if (block === null) return suppressDirective('what_would_flip', 'target_unresolved');
   return emitDirective('what_would_flip', block);
+}
+
+// ============================================================================
+// §2.1 ROW 7 — THE DISCUSSED-ENTITY TAIL. "The workspace follows the
+// conversation." (P3 UI agency, component 3.)
+//
+// THE GAP THIS CLOSES: rows 1–6 are each keyed to a handler SIDE EFFECT — an
+// applied mutation, a completed analysis, a flip query, an answered explain. So
+// the assistant can point at what it just CHANGED or COMPUTED, and never at
+// what it is merely TALKING ABOUT. When a card says "your gross margin floor is
+// doing most of the work here", nothing on the canvas moves. That is precisely
+// what "beside the canvas, not on it" feels like.
+//
+// ⭐ THE ENTITY-RESOLUTION ROUTE, and why it is not prose-matching. This row
+// resolves NOTHING itself. It reuses the entity reference the composed card
+// ALREADY carries — `target_refs[0]` — a `TargetRef` that CEE resolved against
+// the graph node lookup and that has already passed the block's own strict
+// parse. Consequences:
+//   · it CANNOT point at an entity that does not exist (the ref came from the
+//     graph lookup, which is closed over real nodes/edges);
+//   · it CANNOT disagree with the card the user is reading, because it is the
+//     same ref object — one derivation, two read points, the rule ROADMAP 2.211
+//     already applies to `selectLens`;
+//   · verb and target stay DETERMINISTIC and CEE-authored. Zero LLM authorship
+//     of either, unchanged from rows 1–6.
+//
+// ⚠ DISCLOSURE ON REF PROVENANCE (the reviewer should weigh this). Most
+// `target_refs` are derived structurally (a factor id → lookup: the evidence
+// card, the lens subject, the flip-threshold row). But TWO coaching builders in
+// phase3-blocks.ts (`resolveProseEntityRefs` call sites) derive their refs by
+// scanning the card's own prose for graph node LABELS. So for cards built by
+// those two, the provenance chain does bottom out in prose matching. It is a
+// shipped, reviewed matcher with hard over-match rails — whole-phrase
+// both-ends-bounded matching, a minimum label length, generic-token rejection,
+// and a duplicate label resolving to NEITHER node — and it can only ever return
+// ids that exist in the graph. Row 7 deliberately does NOT try to distinguish
+// the two provenances: `target_refs` carries no provenance stamp, so any such
+// split would need a hand-maintained list of "structural" builders, which is
+// the hand-maintained-mirror defect class. The mitigation that matters is the
+// one above: even in the worst case the gesture points at an entity the visible
+// card names, so the workspace and the card agree.
+//
+// VERB: `focus` — bring into view. It asserts nothing about leadership (unlike
+// `highlight`), which is what makes it safe as a discussion gesture.
+//
+// N=1: this is a strict TAIL. The caller reaches it only when the
+// `uiDirectiveEmitted` latch is still unset, so a side-effect gesture ALWAYS
+// wins and row 7 can never displace one. Rows 1–6 are byte-unchanged apart from
+// the additive `source` stamp.
+// ============================================================================
+
+/**
+ * The `TargetRefKind`s row 7 will point at. DELIBERATELY NARROWER than the
+ * boundary union, which also carries `goal`, `risk`, `constraint` and
+ * `outcome`.
+ *
+ * Derived from what the shipped ladder DEMONSTRABLY dispatches, not from what
+ * the schema permits: rows 2/4 point at `factor`, row 3 at `option`, and row 1
+ * at whichever the graph lookup returns for a mutated target — which indexes
+ * edges as `kind: 'edge'` (phase3-blocks.ts::populateGraphNodeLookup pass 2), so
+ * `adjust_edge_strength` already ships edge targets. The four excluded kinds
+ * have NO shipped precedent, and `constraint` is explicitly a known dead end
+ * (the schema's own comment: "a schema-legal target with no renderer is a dead
+ * end — the `constraint` TargetRefKind defect class, ROADMAP 2.457(b)").
+ * Pointing at a target nothing renders is a gesture that silently does nothing.
+ */
+const ROW7_DISPATCHABLE_KINDS: ReadonlySet<string> = new Set(['factor', 'option', 'edge']);
+
+/** Telemetry `fact_type` tag for row 7. Row 7 is not keyed to a handler fact —
+ *  it is keyed to what the turn's cards discuss — so it needs its own tag, and
+ *  the tag is the ONLY way to tell a row-7 gesture from a row-2 one: both emit
+ *  `focus @ <factor>` and the block bytes are identical. */
+const DISCUSSED_ENTITY_TAG = 'discussed_entity';
+
+/** A block's `target_refs`, read defensively. Blocks that do not carry the
+ *  field (graph_patch, text, analysis_result, the directive itself) yield []. */
+function readTargetRefs(block: OlumiResponse['blocks'][number]): readonly GraphNodeRef[] {
+  const refs = (block as { target_refs?: unknown }).target_refs;
+  if (!Array.isArray(refs)) return [];
+  const out: GraphNodeRef[] = [];
+  for (const raw of refs) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const { id, label, kind } = raw as { id?: unknown; label?: unknown; kind?: unknown };
+    if (typeof id !== 'string' || id.length === 0) continue;
+    if (typeof label !== 'string' || label.length === 0) continue;
+    if (typeof kind !== 'string') continue;
+    out.push({ id, label, kind } as GraphNodeRef);
+  }
+  return out;
+}
+
+/**
+ * §2.1 row 7 — point at the entity this turn's cards DISCUSS.
+ *
+ * `blocks` is the turn's composed block list (the caller passes what it has
+ * accumulated). `mayNameLeadingOption` is the turn's claim-safety verdict: when
+ * FALSE, an `option` target is skipped — the withheld-claim gate must bite here
+ * exactly as it does on row 3, because a directive that points at a leader the
+ * product is not entitled to name is a trust defect wearing a UI gesture. A
+ * FACTOR or EDGE target asserts no leader and stays permitted on those turns
+ * (the same scoping row 3's comment sets out for row 2's `focus`).
+ *
+ * Fail-closed and telemetered on every path: no card carries a dispatchable ref
+ * → `no_discussed_entity`; the only candidates were options on a withheld turn
+ * → `leading_option_claim_withheld`; schema parse failure →
+ * `target_unresolved`.
+ */
+export function buildDiscussedEntityUiDirective(
+  blocks: readonly OlumiResponse['blocks'][number][],
+  mayNameLeadingOption: boolean,
+): UiDirectiveBlock | null {
+  let withheldOptionSeen = false;
+
+  for (const block of blocks) {
+    for (const ref of readTargetRefs(block)) {
+      if (!ROW7_DISPATCHABLE_KINDS.has(ref.kind)) continue;
+      if (ref.kind === 'option' && !mayNameLeadingOption) {
+        // Do not point at an option this turn may not name. Keep scanning: a
+        // factor or edge later in the turn is still a legitimate target.
+        withheldOptionSeen = true;
+        continue;
+      }
+      const directive = directiveFromRef('focus', ref);
+      if (directive === null) {
+        return suppressDirective(DISCUSSED_ENTITY_TAG, 'target_unresolved');
+      }
+      return emitDirective(DISCUSSED_ENTITY_TAG, directive);
+    }
+  }
+
+  return suppressDirective(
+    DISCUSSED_ENTITY_TAG,
+    withheldOptionSeen ? 'leading_option_claim_withheld' : 'no_discussed_entity',
+  );
 }
 
 /**

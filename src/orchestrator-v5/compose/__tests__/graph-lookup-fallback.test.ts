@@ -338,6 +338,16 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
     });
   });
 
+  // ⚠ ASSERTION NARROWED (§2.1 row 7, the discussed-entity tail). These two
+  // tests protect the ROW-3 invariant: an unresolvable recommended option must
+  // never produce a highlight, and never an id-as-label target. They asserted
+  // that by counting ui_directive blocks on the whole response, which was an
+  // exact proxy only while row 3 was the sole possible author. Row 7 can now
+  // point at a DIFFERENT, properly-resolved entity that this turn's cards
+  // discuss, so the count is no longer the right instrument — but the invariant
+  // is unchanged and is now asserted DIRECTLY: no highlight, and no directive
+  // carrying the unresolvable id. (The subject was always row 3; the old
+  // assertion was over-broad, not wrong.)
   it('fallback resolving the recommended id to a NON-option kind still fails closed', () => {
     const env = composeToolCallResponse({
       answerKind: 'functional',
@@ -346,7 +356,21 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    const ds = byType(env.blocks, 'ui_directive') as unknown as ReadonlyArray<{
+      verb: string;
+      targets: ReadonlyArray<{ id: string; kind: string }>;
+    }>;
+    // The corruption under test is a FACTOR id arriving as `leading_option_id`.
+    // The invariant is that nothing presents it as the winning OPTION — not
+    // that the factor becomes untouchable. Row 7 may legitimately focus it AS A
+    // FACTOR, because a card genuinely discusses it; what must never happen is
+    // a `highlight`, or a target claiming `kind: 'option'` for it.
+    expect(ds.some((d) => d.verb === 'highlight')).toBe(false);
+    expect(
+      ds
+        .flatMap((d) => d.targets)
+        .some((t) => t.id === 'fac_delivery_risk' && t.kind === 'option'),
+    ).toBe(false);
   });
 
   it('recommended id absent from BOTH sources still fails closed (no id-as-label fallback)', () => {
@@ -357,10 +381,31 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    const ds = byType(env.blocks, 'ui_directive') as unknown as ReadonlyArray<{
+      verb: string;
+      targets: ReadonlyArray<{ id: string }>;
+    }>;
+    expect(ds.some((d) => d.verb === 'highlight')).toBe(false);
+    // The id-as-label defect would surface as a target carrying the unresolved
+    // id — assert that exact absence, which is what §0.1 forbids.
+    expect(ds.flatMap((d) => d.targets).some((t) => t.id === 'opt_unknown')).toBe(false);
   });
 
-  it('prior-fact FRESH lifecycle rebuild with persistedGraph still emits ZERO directives (current-turn only)', () => {
+  // ⚠⚠ DELIBERATE INVARIANT CHANGE — flagged for review, not absorbed quietly.
+  // This test previously pinned "ZERO directives (current-turn only)": the
+  // SIDE-EFFECT rows are keyed to a current-turn handler fact, so a lifecycle
+  // rebuild (which re-presents an analysis the user has already been shown)
+  // emitted no gesture at all. §2.1 row 7 deliberately changes that, and this
+  // turn class is the clearest case for it: the assistant is purely DISCUSSING
+  // — re-presenting cards, computing nothing — which is exactly the gap row 7
+  // exists to close, and the FRESH verdict means the graph hash matches so
+  // every ref still resolves.
+  //
+  // What the original invariant protected is UNCHANGED and still asserted
+  // below: no side-effect row fires here, and the gesture makes no claim (it is
+  // a `focus`, never a `highlight`). If the reviewer wants lifecycle turns to
+  // stay gesture-less, this is the single place to say so.
+  it('prior-fact FRESH lifecycle rebuild emits NO side-effect directive; row 7 may focus a discussed entity', () => {
     const env = composeToolCallResponse({
       answerKind: 'functional',
       ...BASE_INPUT,
@@ -381,7 +426,14 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       },
     });
     expect(byType(env.blocks, 'analysis_result')).toHaveLength(1);
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    const ds = byType(env.blocks, 'ui_directive') as unknown as ReadonlyArray<{
+      verb: string;
+      source?: string;
+    }>;
+    // N=1 still holds, and nothing here asserts a leader.
+    expect(ds.length).toBeLessThanOrEqual(1);
+    expect(ds.some((d) => d.verb === 'highlight')).toBe(false);
+    for (const d of ds) expect(d.source).toBe('ladder');
   });
 });
 

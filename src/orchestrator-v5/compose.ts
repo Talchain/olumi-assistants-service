@@ -43,7 +43,10 @@ import type { LensId } from './compose/lens-selector.js';
 // re-derive (CLAUDE.md trap #12). `mayNameLeadingOptionForFact` is the one
 // per-fact accessor, so the block funnel and the transport projection cannot
 // read it two different ways.
-import { buildFocusInspectorDirective } from './compose/ui-directive.js';
+import {
+  buildDiscussedEntityUiDirective,
+  buildFocusInspectorDirective,
+} from './compose/ui-directive.js';
 import {
   mayNameLeadingOptionForFact,
   projectAnalysisSummaryForWithheldClaim,
@@ -549,6 +552,36 @@ function buildBlocksFromFacts(
   // verdict to select the canonical source fact and decide emission.
   if (!currentTurnRunAnalysisHandled && lifecycle !== undefined) {
     blocks.push(...buildLifecycleBlocksFromPrior(lifecycle, persistedGraph));
+  }
+
+  // §2.1 ROW 7 — the DISCUSSED-ENTITY tail. "The workspace follows the
+  // conversation." Rows 1–6 are each keyed to a handler SIDE EFFECT, so the
+  // assistant could point at what it just changed or computed and never at what
+  // it is merely TALKING ABOUT. This tail points at the entity the turn's cards
+  // name, reusing the `target_refs` those cards already carry (no new
+  // resolution, no prose parsing — see the builder's header).
+  //
+  // Placed AFTER the fact loop AND after the lifecycle branch, and gated on the
+  // same `uiDirectiveEmitted` latch, so:
+  //   · a side-effect gesture ALWAYS wins (N=1 preserved; row 7 never displaces
+  //     one, it only fills a turn that would otherwise gesture at nothing);
+  //   · it also covers the lifecycle prior-fact branch, which re-presents an
+  //     analysis the user has already been shown and has never emitted a
+  //     directive at all — the purest "discussing, not acting" turn class.
+  if (!uiDirectiveEmitted) {
+    // The turn's claim-safety verdict. Derived from the SAME run_analysis fact
+    // the ladder gates row 3 on, so the two gates can never disagree. No
+    // run_analysis fact on this turn ⇒ no leader is being claimed ⇒ permitted.
+    const runAnalysisFact = facts.find((f) => f.fact_type === 'run_analysis');
+    const mayNameLeadingOption =
+      runAnalysisFact === undefined
+        ? true
+        : mayNameLeadingOptionForFact(runAnalysisFact as RunAnalysisHandlerFact);
+    const directive = buildDiscussedEntityUiDirective(blocks, mayNameLeadingOption);
+    if (directive !== null) {
+      blocks.push(directive);
+      uiDirectiveEmitted = true;
+    }
   }
 
   return blocks;
