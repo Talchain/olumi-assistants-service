@@ -119,8 +119,8 @@ export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
   deterministic: T | undefined,
   model: T,
 ): T {
-  const frame = deterministic?.value_frame;
-  if (deterministic === undefined || frame === undefined) return model;
+  if (deterministic === undefined) return model;
+  const frame = deterministic.value_frame;
 
   const detValue = deterministic.value;
   const modelValue = model.value;
@@ -138,7 +138,37 @@ export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
 
   if (!sameNumber || !sameUnit) return model;
 
-  return { ...model, value_frame: frame };
+  let out: T = frame === undefined ? model : ({ ...model, value_frame: frame } as T);
+
+  // ⚠⚠ EVIDENCE IS PROTECTED PAYLOAD TOO — ROADMAP 2.1051, round-1 review.
+  //
+  // The merge is `node_id::operator` with "LLM overwrites on same key", so a
+  // model row carrying only a LABEL replaces a correct, QUOTE-BEARING
+  // deterministic row. Before the direction gate that was harmless: the
+  // survivor still had the right operator and value. It is no longer harmless,
+  // because the gate is fail-closed on evidence it cannot verify — so the
+  // overwrite DELETES the very quote that would have proven the row, and the
+  // user loses a limit the deterministic producer had read correctly. Measured
+  // on B1: the brief's only real constraint disappeared and the card read
+  // "Confirm the direction of this limit" about a bound nothing was unsure of.
+  //
+  // The evidence already exists on the row being overwritten, so carry it. This
+  // is the SAME argument as the frame above and it is gated on the SAME
+  // conjunction — same number, same unit — for the same reason: a quote that
+  // describes a DIFFERENT quantity is not evidence about this one, and
+  // attaching it would let the gate "prove" a direction from a sentence about
+  // another number. Fails closed on any mismatch.
+  //
+  // Model-supplied quotes still win when present: they are richer metadata, and
+  // this only fills a hole.
+  const detQuote = deterministic.source_quote;
+  const modelQuote = out.source_quote;
+  const modelHasQuote = typeof modelQuote === "string" && modelQuote.trim().length > 0;
+  if (typeof detQuote === "string" && detQuote.trim().length > 0 && !modelHasQuote) {
+    out = { ...out, source_quote: detQuote } as T;
+  }
+
+  return out;
 }
 
 export function runCompoundGoals(ctx: StageContext): void {

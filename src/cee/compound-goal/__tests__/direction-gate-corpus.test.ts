@@ -581,6 +581,63 @@ describe('ROADMAP 2.1051 — constraint-direction corpus', () => {
     expect(t).toContain('1,500,000');
   });
 
+  /* ---------------------------------------------------------------------
+   * ROUND-1 REVIEW REGRESSIONS — every one with its opposite-direction twin.
+   * ------------------------------------------------------------------- */
+
+  it('R1: the detector is SIGN-SYMMETRIC on interrupted negated bounds', () => {
+    // The fourth outcome the trichotomy forbids: an interrupted negated CEILING
+    // reached neither the wire nor an ask, while its FLOOR twin asked. Cause was
+    // a mandatory `(SUBJ)\s+` anchor — on the fall side the movement verb fills
+    // it, on the rise side `exceed` IS the comparator and nothing does.
+    const pairs: Array<[string, string]> = [
+      ['Net revenue retention must not (under any circumstances) exceed 95%.',
+       'Net revenue retention must not (under any circumstances) drop below 78%.'],
+      ['Net revenue retention must not, whatever happens, exceed 95%.',
+       'Net revenue retention must not, whatever happens, drop below 78%.'],
+      ['Marketing spend must not — and the board is firm — exceed 2000000.',
+       'Marketing spend must not — and the board is firm — drop below 2000000.'],
+    ];
+    for (const [ceiling, floor] of pairs) {
+      const c = run(ceiling);
+      const f = run(floor);
+      expect(c.wireOps, `${ceiling} must not ship`).toEqual([]);
+      expect(f.wireOps, `${floor} must not ship`).toEqual([]);
+      expect(c.askCount, `CEILING side must ask: ${ceiling}`).toBeGreaterThan(0);
+      expect(f.askCount, `FLOOR side must ask: ${floor}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('R1: the ask quotes the number the user actually wrote', () => {
+    // `SUBJ` began `\w`, which includes digits, so it ate the leading 7 of "78%"
+    // and the card offered "8%" — value 0.08 — a quantity the user never wrote,
+    // carried into the reusable record too. A gate that must not state an
+    // unproven DIRECTION must not state an unread QUANTITY.
+    const found = detectUncoveredNegatedBounds(
+      "We haven't decided whether 78% is a floor or a ceiling for gross margin.",
+      [], new Set<number>(),
+    );
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0]!.amount_text).toBe('78%');
+    expect(found[0]!.metric_text).toBe('gross margin');
+
+    // Discriminating control: a word before the number was ALWAYS correct, so
+    // only the digit-initial case proves the guard bites.
+    const ctrl = detectUncoveredNegatedBounds(
+      "We haven't decided whether the target of 78% is a floor or a ceiling.",
+      [], new Set<number>(),
+    );
+    expect(ctrl[0]!.amount_text).toBe('78%');
+  });
+
+  it('R1: a metric named AFTER the amount is recovered, not left as boilerplate', () => {
+    const found = detectUncoveredNegatedBounds(
+      "We haven't decided whether 4% is a floor or a ceiling for churn.",
+      [], new Set<number>(),
+    );
+    expect(found[0]!.metric_text).toBe('churn');
+  });
+
   it('curly and straight apostrophes are the same sentence to the gate', () => {
     const straight = run("Don't let gross margin drop below 78%.");
     const curly = run('Don’t let gross margin drop below 78%.');

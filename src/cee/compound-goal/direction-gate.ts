@@ -331,11 +331,38 @@ const NEG_CORE_SRC =
  * 13-of-14 over-suppression the #888 review measured. `keep` appears in this
  * module ONLY inside the T1-3 `keep X from falling below Y` construction, where
  * the word `from` is what carries the prevention sense.
+ *
+ * ⚠⚠ THIS LIST WAS SHORT, AND A UNION ASSERTION COULD NOT SEE IT (round-1
+ * review). `resist` was in NEITHER this list NOR the extractor's
+ * `NEGATION_OR_PREVENTION_LEAD`, so "Resist any move that takes marketing spend
+ * above 2000000" screened CLEAN and shipped `>= 2000000` — a hard floor
+ * demanding the overspend the user was resisting. Its mirror inverted too.
+ *
+ * The instrument that found it was a corpus from outside this lane's head, and
+ * the instrument that keeps it honest is the EXTERNAL VOCABULARY SWEEP in
+ * `__tests__/direction-gate-lexicon-completeness.test.ts` — a minimal-variation
+ * probe over verbs drawn from general English rather than from this list, with
+ * every unscreened survivor pinned in an explicit KNOWN set. A union assertion
+ * proves the gate agrees with the extractor; only a corpus notices they are
+ * both short in the same place (trap 12d, second face).
  */
 const PREVENTION_SRC =
   '(?:' +
   'avoid(?:s|ing)?|prevent(?:s|ing)?|stop(?:s|ping)?|refus(?:e|es|ing)|' +
-  'protect(?:s|ing)?|guard(?:s|ing)?|sacrific(?:e|es|ing)' +
+  'protect(?:s|ing)?|guard(?:s|ing)?|sacrific(?:e|es|ing)|' +
+  // ── added round 1, from the reviewer's corpus and the external sweep ──
+  'resist(?:s|ing)?|block(?:s|ing)?|forbid(?:s|ding)?|forbade|forbidden|' +
+  'prohibit(?:s|ing)?|preclud(?:e|es|ing)|disallow(?:s|ing)?|veto(?:es|ing)?|' +
+  'curb(?:s|ing)?|restrain(?:s|ing)?|den(?:y|ies|ying)|reject(?:s|ing)?|' +
+  'barring|barred|rul(?:e|es|ing)\\s+out|safeguard(?:s|ing)?|shield(?:s|ing)?|' +
+  'defend(?:s|ing)?|insulat(?:e|es|ing)|head(?:s|ing)?\\s+off|steer(?:s|ing)?\\s+clear|' +
+  // ── added round 1, from the EXTERNAL VOCABULARY SWEEP ──
+  // Unambiguous prevention verbs with no ceiling-idiom conflict. The
+  // conflicted ones (cap/limit/restrict/contain/check/minimise) are
+  // deliberately EXCLUDED and pinned in the sweep's KNOWN set — screening
+  // them would withhold the very ceilings they state.
+  'avert(?:s|ing)?|thwart(?:s|ing)?|foil(?:s|ing)?|deter(?:s|ring)?|' +
+  'discourag(?:e|es|ing)|suppress(?:es|ing)?|hinder(?:s|ing)?|imped(?:e|es|ing)|obstruct(?:s|ing)?' +
   ')';
 
 /** Any token that makes a sentence's direction unsafe to read off a comparator. */
@@ -344,14 +371,47 @@ const NEG_PLUS_RE = new RegExp(`\\b(?:${inner(NEG_CORE_SRC)}|${inner(PREVENTION_
 /** Exported so the union assertion in the corpus spec can screen against it. */
 export const NEGATION_SCREEN_RE = NEG_PLUS_RE;
 
-/** FALL verbs — the extractor's own list, plus the `go/going` forms it omits. */
-const FALL_PLUS_SRC = `(?:${inner(FALL_VERB)}|go(?:es|ing)?|went|sink(?:s|ing)?|sank|declin(?:e|es|ing)|decreas(?:e|es|ing)|slid(?:e|es|ing)?)`;
+/**
+ * FALL verbs — the extractor's own list, plus the forms it omits.
+ *
+ * ⚠ `shrink` WAS MISSING AND IT COST AN INVERSION (round-1 review). "We must
+ * keep cash runway from shrinking below 250000" failed T1-3, `keep` is
+ * correctly not a negation, so the sentence screened CLEAN and `<= 250000`
+ * shipped against a user who meant a floor. Its `falling` twin withheld
+ * correctly — a discriminating pair, which is what made it a defect rather
+ * than noise. Completeness is guarded by the external vocabulary sweep, not by
+ * re-reading this line.
+ */
+const FALL_PLUS_SRC = `(?:${inner(FALL_VERB)}|go(?:es|ing)?|went|sink(?:s|ing)?|sank|declin(?:e|es|ing)|decreas(?:e|es|ing)|slid(?:e|es|ing)?|` +
+  'shrink(?:s|ing)?|shrank|shrunk|contract(?:s|ing)?|dwindl(?:e|es|ing)|' +
+  'erod(?:e|es|ing)|deteriorat(?:e|es|ing)|worsen(?:s|ing)?|weaken(?:s|ing)?|' +
+  'diminish(?:es|ing)?|lessen(?:s|ing)?|sag(?:s|ging)?|soften(?:s|ing)?|' +
+  'taper(?:s|ing)?|reduc(?:e|es|ing)|fall(?:s|ing)?\\s+short|' +
+  // ── added round 1, from the EXTERNAL VOCABULARY SWEEP ──
+  'plummet(?:s|ing)?|plung(?:e|es|ing)|tumbl(?:e|es|ing)|collaps(?:e|es|ing)|' +
+  'crash(?:es|ing)?|crater(?:s|ing)?|reced(?:e|es|ing)|retreat(?:s|ing)?|' +
+  'subsid(?:e|es|ing)|wan(?:e|es|ing)|ebb(?:s|ing)?|backslid(?:e|es|ing)|' +
+  'degrad(?:e|es|ing)|regress(?:es|ing)?)';
 
 /** RISE verbs / upper-crossing forms, for the ceiling constructions. */
-const RISE_PLUS_SRC = '(?:exceed(?:s|ing)?|surpass(?:es|ing)?|overshoot(?:s|ing)?|go(?:es|ing)?\\s+(?:above|over|beyond|past)|ris(?:e|es|ing)\\s+above)';
+const RISE_PLUS_SRC = '(?:exceed(?:s|ing)?|surpass(?:es|ing)?|overshoot(?:s|ing)?|' +
+  'go(?:es|ing)?\\s+(?:above|over|beyond|past)|ris(?:e|es|ing)\\s+above|' +
+  'climb(?:s|ing)?|grow(?:s|ing)?|escalat(?:e|es|ing)|balloon(?:s|ing)?|' +
+  'spiral(?:s|ling|ing)?|surg(?:e|es|ing)|spik(?:e|es|ing)|creep(?:s|ing)?\\s+(?:up|above)|' +
+  'inflat(?:e|es|ing)|swell(?:s|ing)?|top(?:s|ping)?)';
 
-/** A bounded subject capture — the extractor's own shape, so no new window. */
-const SUBJ = '\\w+(?:[\\s-]+\\w+){0,3}';
+/**
+ * A bounded subject capture — the extractor's own shape, so no new window.
+ *
+ * ⚠ IT MUST NOT START MID-NUMBER. `\w` includes digits, so the original
+ * `\w+(?:[\s-]+\w+){0,3}` matched "decided whether 7" out of "…whether 78% is a
+ * floor…", leaving the amount as "8%" and putting `value: 0.08` — a number the
+ * user never wrote — into the ask AND into the reusable record a future
+ * elicitation surface consumes. A gate whose charter is "never state a
+ * direction it did not prove" must not state a QUANTITY it did not read.
+ * Anchoring the subject to a letter is the whole fix.
+ */
+const SUBJ = '[A-Za-z_][\\w]*(?:[\\s-]+\\w+){0,3}';
 
 /** Optional permissive verb between a negation and the metric. */
 const LET = '(?:let(?:ting|s)?|allow(?:ing|s)?)';
@@ -703,7 +763,7 @@ export function classifyNonLimitDelta(
  * user-facing copy even though the row's node id still carries it.
  */
 const SUBJECT_NOISE_RE =
-  /^(?:the|a|an|to|of|and|or|we|it|is|are|was|were|be|been|that|this|our|their|its|unspecified|so|while|even|ever|during|under|any|all|circumstances|let|letting|lets|allow|allowing|allows|keep|keeping|keeps|maintain|maintaining|ensure|ensuring|ensures|guarantee|guaranteeing|approve|approves|approving|treat|treating|sacrificing|protect|protecting|stop|stopping|prevent|preventing|must|should|shall|will|would|could|not|no|never|without|t|s|re|ve|ll|d|m)\b/i;
+  /^(?:the|a|an|to|of|and|or|we|i|you|they|he|she|it|is|are|was|were|be|been|being|am|do|does|did|have|has|had|that|this|these|those|our|their|its|my|your|unspecified|so|while|when|even|ever|still|during|under|over|any|all|circumstances|whatever|happens|let|letting|lets|allow|allowing|allows|keep|keeping|keeps|maintain|maintaining|ensure|ensuring|ensures|guarantee|guaranteeing|approve|approves|approving|treat|treating|treats|sacrificing|protect|protecting|stop|stopping|prevent|preventing|resist|resisting|decide|decides|decided|deciding|debate|debated|debating|agree|agreed|agreeing|sure|unsure|undecided|whether|if|hire|hiring|spend|spending|move|moves|takes|take|taking|want|wants|wanting|need|needs|afford|scope|room|exceptions|must|should|shall|will|would|could|can|cannot|not|no|never|without|t|s|re|ve|ll|d|m)\b/i;
 
 /** A label that states a DIRECTION rather than naming a metric. */
 const DIRECTIONAL_LABEL_RE = /^(?:at\s+or\s+(?:above|below)|no\s+more\s+than|no\s+less\s+than|at\s+least|at\s+most|minimum|maximum)\b/i;
@@ -770,6 +830,22 @@ export function deriveMetricText(
   return FALLBACK_METRIC;
 }
 
+/**
+ * A trailing `for <metric>` / `on <metric>` phrase.
+ *
+ * Ambiguity sentences routinely put the metric AFTER the quantity — "we haven't
+ * decided whether 78% is a floor or a ceiling FOR GROSS MARGIN" — so a
+ * left-looking subject capture finds only the decision verb. Reading the
+ * trailing phrase is what turns "decided whether" into "gross margin".
+ */
+const TRAILING_METRIC_RE = /\b(?:for|on|against)\s+([A-Za-z][\w'-]*(?:\s+[A-Za-z][\w'-]*){0,3})\s*$/i;
+
+/** Recover a metric named after the amount, when the subject capture is noise. */
+export function trailingMetric(sentence: string): string | null {
+  const m = TRAILING_METRIC_RE.exec(normaliseEvidenceText(sentence).replace(/[.!?]+$/, ''));
+  return m?.[1] ? m[1].trim() : null;
+}
+
 /** Used when no user-derived word survives cleaning. */
 export const FALLBACK_METRIC = 'this measure';
 
@@ -825,7 +901,11 @@ export function buildUnresolvedItem(
 ): DirectionUnresolvedItem {
   const value = typeof row.value === 'number' && Number.isFinite(row.value) ? row.value : null;
   const unit = typeof row.unit === 'string' && row.unit.length > 0 ? row.unit : null;
-  const metric_text = deriveMetricText(subject, row.label, row.source_quote);
+  let metric_text = deriveMetricText(subject, row.label, row.source_quote);
+  if (metric_text === FALLBACK_METRIC) {
+    const trailing = trailingMetric(sentence);
+    if (trailing) metric_text = deriveMetricText(trailing, null, null);
+  }
   const amount_text = deriveAmountText(sentence, value, unit);
   return {
     metric_text,
@@ -1046,9 +1126,25 @@ function amountsMatch(m: T1Match, value: number, unit: unknown): boolean {
  * It fires ONLY on negation-bearing sentences, by design. Widening it to all
  * bounds would make it a second extractor — prohibited, and it would inherit
  * every blind spot the first one has.
+ *
+ * ⚠⚠ THE SUBJECT IS OPTIONAL, AND MAKING IT MANDATORY WAS A SIGN-ASYMMETRIC
+ * BUG (round-1 review). The first cut required `(SUBJ)\s+` before the
+ * comparator. On the FALL side the movement verb supplies that word — "…must
+ * not (under any circumstances) DROP below 78%" — so interrupted negated FLOORS
+ * were caught. On the RISE side **`exceed` IS the comparator**, so it cannot
+ * also be its own anchor, and after a `)` or a `,` no word fills the slot:
+ *
+ *     "…must not (under any circumstances) exceed 95%."   -> wire [] , asks []
+ *     "…must not (under any circumstances) drop below 78%." -> wire [] , asks [1]
+ *
+ * A silent ceiling is the FOURTH OUTCOME the trichotomy forbids, and it existed
+ * only on one side — trap 13d inside the detector written to prevent silence:
+ * the guard carried the same asymmetry as the failure it was written from
+ * (claim g was a floor). The subject is now optional and the metric falls back
+ * to the sentence topic, which is what the interrupted forms need anyway.
  */
 const NEGATED_BOUND_NEIGHBOURHOOD = new RegExp(
-  `(${SUBJ})\\s+(?:${inner(FALL_PLUS_SRC)}|${inner(RISE_PLUS_SRC)})?\\s*(?:below|under|above|over|exceed(?:s|ing)?|more\\s+than|less\\s+than|short\\s+of)\\s+(${AMT})`,
+  `(?:(${SUBJ})\\s+)?(?:${inner(FALL_PLUS_SRC)}|${inner(RISE_PLUS_SRC)})?\\s*(?:below|under|above|over|exceed(?:s|ing)?|more\\s+than|less\\s+than|short\\s+of)\\s+(${AMT})`,
   'gi',
 );
 
@@ -1072,7 +1168,7 @@ const NEGATED_BOUND_NEIGHBOURHOOD = new RegExp(
 const PREVENTION_CONSTRUCTION_RE =
   /\b(?:keep(?:s|ing)?|stop(?:s|ping)?|prevent(?:s|ing)?|protect(?:s|ing)?|guard(?:s|ing)?)\s+[\w\s'-]{0,40}?\bfrom\b/i;
 
-const BARE_AMOUNT_RE = new RegExp(`(${SUBJ})?\\s*(${AMT})`, 'gi');
+const BARE_AMOUNT_RE = new RegExp(`(?:(${SUBJ})\\s+)?(?<![\\d.,])(${AMT})`, 'gi');
 
 export function detectUncoveredNegatedBounds(
   brief: string | null | undefined,
@@ -1116,6 +1212,12 @@ export function detectUncoveredNegatedBounds(
       // the first negation — which for those constructions is the metric
       // itself ("Retention must not — … — fall below 92%").
       let metric = deriveMetricText(m[1] ?? null, null, null);
+      // A metric named AFTER the amount beats a left-capture that cleaned to
+      // noise ("decided whether" -> "gross margin").
+      if (metric === FALLBACK_METRIC) {
+        const trailing = trailingMetric(s.text);
+        if (trailing) metric = deriveMetricText(trailing, null, null);
+      }
       if (metric === FALLBACK_METRIC) {
         const negAt = s.text.search(NEG_PLUS_RE);
         const topic = negAt > 0 ? s.text.slice(0, negAt) : '';
@@ -1202,7 +1304,14 @@ export function renderDirectionClarifications(
   const shown = unique.slice(0, MAX_DIRECTION_CLARIFICATIONS);
   const out: DirectionStrengthenItem[] = shown.map((it, n) => ({
     id: `direction_unresolved_${n + 1}`,
-    label: `Confirm the direction of the ${it.metric_text} limit`,
+    // ⚠ GRAMMAR, NOT DECORATION. When no user word survives, `metric_text` is
+    // the generic fallback and "Confirm the direction of the this measure
+    // limit" is what the user reads — a card that looks broken is a card that
+    // gets dismissed, which costs the answer the gate exists to obtain.
+    label:
+      it.metric_text === FALLBACK_METRIC
+        ? `Confirm the direction of this limit`
+        : `Confirm the direction of the ${it.metric_text} limit`,
     detail:
       `You mentioned ${it.amount_text} for ${it.metric_text}. I couldn't tell from the ` +
       `wording whether that's a floor (keep it at or above ${it.amount_text}) or a ceiling ` +
