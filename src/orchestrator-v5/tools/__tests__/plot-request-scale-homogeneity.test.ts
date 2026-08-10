@@ -483,4 +483,50 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     const out = projectRequestInterventionsToWireScale([{ n1: iv(-0.4), [CAPABILITY]: iv(0.8), [SWITCH_COST]: iv(0.3) }], map);
     expect(out.allWithinUnitInterval).toBe(false);
   });
+
+  it('M12 DISCRIMINATOR: a request whose ONLY out-of-range value is NEGATIVE must not read "within [0,1]"', () => {
+    // The previous negative test also carried 72000, so `v <= 1` was already false and
+    // the LOWER bound was never exercised — the test could not tell the two predicates
+    // apart. Here nothing exceeds 1, so only a sign-symmetric bound can be correct.
+    // This is exactly the shape where CEE self-reported wire_all_within_unit_interval: true.
+    const NEG = 'fac_headcount_change';
+    const map = buildFactorScaleMap([
+      { id: NEG, kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } },
+      ...costNodes,
+    ]);
+    const req = [{ [NEG]: iv(-0.4), [SWITCH_COST]: iv(0.3) }];
+    const out = projectRequestInterventionsToWireScale(req, map);
+    const flat = out.perOption.flatMap((o) => Object.values(o));
+    // Pin the precondition: nothing here is above 1, so `v <= 1` alone would pass.
+    expect(flat.some((v) => v > 1), 'no value may exceed 1 or this stops discriminating').toBe(false);
+    expect(flat.some((v) => v < 0), 'a negative must be present').toBe(true);
+    expect(
+      out.allWithinUnitInterval,
+      'the wire holds -0.4; reporting it as within [0,1] is the exact defect that shipped',
+    ).toBe(false);
+    expect(out.outsideUnitIntervalByRule, 'the negative must be counted').toEqual({ passthrough: 1 });
+  });
+
+  it('M14 DISCRIMINATOR: a NEGATIVE no_cap sibling strands nothing, so it must not warn', () => {
+    // Without the `>= 0` lower bound on stranded siblings this would classify as mixed
+    // and warn. Nothing is annihilated: the sibling has no cap to be divided by, and
+    // the promoted factor round-trips.
+    const NOCAP = 'fac_headcount_change';
+    const map = buildFactorScaleMap([
+      { id: NOCAP, kind: 'factor', observed_state: { value: 12 } },
+      capabilityNodePct,
+    ]);
+    const req = [{ [NOCAP]: iv(-0.4), [CAPABILITY]: iv(0.8) }];
+    const rules = projectInterventionsToRawScale(req[0]!, map).conversions;
+    expect(rules.find((c) => c.factor_id === NOCAP)?.rule).toBe('no_cap');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.perOption[0]?.[CAPABILITY], 'the correct promotion survives').toBe(80);
+    expect(out.perOption[0]?.[NOCAP]).toBe(-0.4);
+    expect(out.demoted).toBe(false);
+    expect(
+      out.mixedUnresolved,
+      'a negative no_cap sibling is not stranded at unit scale — nothing to warn about',
+    ).toBe(false);
+  });
 });
