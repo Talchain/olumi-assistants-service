@@ -88,7 +88,14 @@ import { replaceAssertingUnits } from './redactable-units.js';
 
 /**
  * A percentage-point quantity, in every dialect this estate has emitted:
- * "33 percentage points", "78 points", "7pp", "7.5 percentage points".
+ * "33 percentage points", "78 points", "7pp", "7.5 percentage points" — and,
+ * since the round-1 review, the HYPHENATED attributive forms "a 20-point lead"
+ * and "a 33-percentage-point lead". The separator is `[\s-]*`, not `\s*`: the
+ * reviewer's corpus leaked both hyphenated sentences because a digit-hyphen-unit
+ * quantity was not a quantity at all to this reader.
+ *
+ * `50 basis points` still does not match — the unit must follow the digits
+ * immediately, and "basis" intervenes. Pinned as a twin.
  *
  * ⚠ BARE `%` IS DELIBERATELY EXCLUDED. "leads by 24%" is the same category
  * error in a third dialect, and it is NOT matched here — see
@@ -96,7 +103,7 @@ import { replaceAssertingUnits } from './redactable-units.js';
  * Admitting `%` would put this reader one loose window away from redacting
  * "leads with a 42% win probability", which is the RATIFIED-CORRECT sentence.
  */
-const QTY_SRC = String.raw`\d+(?:[.,]\d+)?\s*(?:percentage[\s-]?points?|pp|points?)\b`;
+const QTY_SRC = String.raw`\d+(?:[.,]\d+)?[\s-]*(?:percentage[\s-]?points?|pp|points?)\b`;
 
 /** Approximators and articles that sit between a connector and the quantity. */
 const FILLER_SRC = String.raw`[^,.!?;:]{0,22}?`;
@@ -120,6 +127,14 @@ const FILLER_SRC = String.raw`[^,.!?;:]{0,22}?`;
  *    ordinary accounting sense of the word this module's own vocabulary claims.
  *  - TEMPORAL `ahead of`. "5 percentage points ahead of schedule" is a
  *    date, not a ranking.
+ *  - MARGIN OF ERROR / SAFETY (round-1 review). "The margin of error is 3
+ *    percentage points" is legitimate statistics prose, entirely plausible in
+ *    `robustness_explanation.summary`, and this reader was DELETING it.
+ *  - MARKET POSITION (round-1 review). "your firm leads competitors by 10
+ *    points on NPS" is a user-brief echo about the market, not about two
+ *    options in this model. There is no option roster at this seam, so the
+ *    discrimination has to come from the OBJECT of the ranking word — which is
+ *    what this span names.
  *
  * The replacement token inherits the three properties documented on
  * `ENFORCEMENT_NEUTRALISED_SPAN`: non-word, non-whitespace, not NUL — so
@@ -128,7 +143,14 @@ const FILLER_SRC = String.raw`[^,.!?;:]{0,22}?`;
 const GAP_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
   /\b(?:driven|caused|explained|supported|underpinned|helped|hurt|shaped|informed|affected|influenced|accompanied|offset|dominated|amplified|dampened)\s+by\b/gi,
   /\b(?:gross|net|operating|profit|contribution|ebitda|ebit|retention|churn)\s+margins?\b/gi,
+  /\bmargins?\s+of\s+(?:error|safety)\b/gi,
+  // The accounting sense again, this time WITHOUT a qualifier in front —
+  // reachable only since `qty_attributive` landed ("a 3 percentage point margin
+  // expansion"). Named by its head noun instead: an expanding or contracting
+  // margin is a P&L movement, never the distance between two options.
+  /\bmargins?\s+(?:expansion|contraction|improvement|erosion|compression|uplift|decline|growth|pressure)\b/gi,
   /\bahead\s+of\s+(?:the\s+)?(?:schedule|time|plan|deadline|launch|target\s+date|forecast)\b/gi,
+  /\b(?:leads?|leading|led|wins?|won|beats?|outperforms?|outranks?|ahead\s+of)\s+(?:the\s+|our\s+|its\s+|their\s+)?(?:competitors?|rivals?|peers?|market|industry|field|sector|benchmark)\b/gi,
 ];
 
 const GAP_NEUTRALISED_SPAN = '#';
@@ -151,8 +173,14 @@ function neutralise(text: string): string {
  * list answers *"does this text name a leading option?"*, this one answers
  * *"is this quantity the SIZE OF A LEAD?"*. Two questions, two lists — the
  * lesson of CLAUDE.md trap #21, applied before rather than after the fact.
+ *
+ * ⚠ `wins|won` BUT NEVER BARE `win` (round-1 review, leak class 1). "Option A
+ * wins by 12 points" is a gap claim; "Option A's **win probability** rises by 12
+ * percentage points under the upside" is a legitimate sensitivity statement, and
+ * a bare `win` would read the second as the first. The inflected forms are the
+ * verb; the bare form is the noun this estate uses for `win_probability`.
  */
-const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|outperforms?|outranks?|beats?)`;
+const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|outperforms?|outranks?|beats?)`;
 
 /**
  * Bounded and ordered: the FIRST match is what rides the log's primary `reason`
@@ -190,10 +218,68 @@ const GAP_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: Re
       'i',
     ),
   },
+  /**
+   * "The margin between the two options is 6 percentage points." · "The
+   * difference between the two options is 33 percentage points."
+   * (round-1 review, leak classes 5 and 6.)
+   *
+   * ⚠ THE INTERPOSITION IS NOT AN OPEN WINDOW — it must OPEN WITH AN EXPLICIT
+   * COMPARISON PREPOSITION. `gap_is` requires the verb adjacent to the gap-noun,
+   * so any `between …` phrase defeats it; the tempting fix is to widen `gap_is`
+   * to `{0,40}`, which would also swallow "The margin **on this deal** is 6
+   * percentage points" — a business margin, and the same one-parameter-two-harms
+   * mistake M5 already proved for `gap_by`. Requiring `between|over|versus|
+   * against` makes the interposition itself the discriminator: it names a
+   * comparison, which is exactly the claim being policed.
+   */
+  {
+    code: 'gap_between_is',
+    re: new RegExp(
+      String.raw`\b(?:lead|margin|gap|difference)\s+(?:between|over|versus|vs\.?|against)\b[^,.!?;:]{0,40}?\b(?:is|was|stands\s+at|sits\s+at|comes\s+to|amounts\s+to)\b${FILLER_SRC}${QTY_SRC}`,
+      'i',
+    ),
+  },
   // "51 percentage points ahead of the runner-up" · "12 points behind"
   {
     code: 'qty_ahead_of',
     re: new RegExp(String.raw`${QTY_SRC}\s+(?:ahead|behind|clear|adrift|in\s+front)\b`, 'i'),
+  },
+  /**
+   * "It holds a 20-point lead over Salesforce." · "A 33-percentage-point lead
+   * separates HubSpot from Salesforce." (round-1 review, leak classes 2 and 3.)
+   *
+   * The ATTRIBUTIVE form: the quantity modifies the gap-noun directly, with no
+   * verb and no connector, so every existing pattern misses it by construction.
+   * Hyphen tolerance in {@link QTY_SRC} is half the fix; this pattern is the
+   * other half.
+   *
+   * Bounded to LEAD-NOUNS only. "a 5-point NPS improvement", "a 10-point plan"
+   * and "a 3 percentage point gross margin" all carry a quantity in the same
+   * position and must survive — the first two because their head noun is not a
+   * gap-noun, the third because the business-margin span is neutralised first.
+   * All three are pinned as twins.
+   */
+  {
+    code: 'qty_attributive',
+    re: new RegExp(String.raw`${QTY_SRC}\s+(?:lead|margin|gap|advantage)\b`, 'i'),
+  },
+  /**
+   * "HubSpot is 33 percentage points better than Salesforce." (round-1 review,
+   * leak class 4 — and note it is the PR's OWN motivating word: the margin
+   * "invites '33% better'", which is precisely what this reader could not see.)
+   *
+   * ⚠ RESIDUAL, STATED RATHER THAN LEFT TO BE FOUND: a comparison against a
+   * TIME PERIOD or a TARGET in the identical shape ("5 percentage points better
+   * than last quarter") is over-removed. Discriminating it needs an option
+   * roster, which this pure reader does not have. The direction is
+   * over-removal — the same documented-safe direction as the `pp.`
+   * sentence-merge below — and the comparator set is deliberately restricted to
+   * superiority words: `higher`, `lower`, `faster` and the rest survive, which
+   * is what the twins pin.
+   */
+  {
+    code: 'qty_better_than',
+    re: new RegExp(String.raw`${QTY_SRC}\s+(?:better|stronger)\s+than\b`, 'i'),
   },
   /**
    * "It sits ahead of Standardise on Dell XPS by 44 percentage points."
@@ -239,11 +325,38 @@ const GAP_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: Re
  *    clear on the current model." A clause boundary between binder and
  *    connector is excluded by the window above, because admitting it admits
  *    attributive `by`. Trap 22b: one predicate cannot police both directions.
+ *  - `long_label_transitive` — "Migrate to HubSpot outperforms Consolidate on
+ *    the Salesforce Enterprise Agreement by 21 percentage points."
+ *    ⚠ THE ROUND-1 REVIEWER FOUND THIS AND EXPLICITLY FORBADE THE OBVIOUS FIX.
+ *    A transitive binder takes a USER-SUPPLIED option label as its object, so
+ *    the binder→`by` distance is unbounded — and widening `gap_by`'s window to
+ *    reach it is measured to reopen the factor-sensitivity false positive (this
+ *    module's own M5 mutant, 25→120). `gap_ahead_of_by` solves the same shape
+ *    for `ahead of X by` only because `of` is an explicit comparison marker that
+ *    attributive `by` never carries; a bare transitive verb has no such marker,
+ *    so there is nothing to discriminate on. Catching it needs the OPTION
+ *    ROSTER, which this pure reader does not have. Pinned rather than guessed at
+ *    — CLAUDE.md trap 22f: stop adding rounds to an unwinnable predicate and
+ *    make the gap explicit instead.
+ *  - `basis_point_dialect` — "leads by 500 basis points". A real third dialect
+ *    (1 pp = 100 bp) that {@link QTY_SRC} does not admit, because the unit must
+ *    follow the digits immediately and "basis" intervenes. Left OUT rather than
+ *    added: unlike every MUST-TRIP case in the suite, no capture in this estate
+ *    shows the product emitting it, and `LEADER_CLAIM_PATTERNS` states the rule
+ *    this follows — *"do not add speculative siblings here, add them when the
+ *    control asks"*. Written down so it is a known gap, not a surprise.
+ *
+ * ⚠ WHAT THIS LIST IS NOT: it is not a list of over-reaches. Two are documented
+ * at their patterns instead ({@link GAP_CLAIM_PATTERNS} `qty_better_than`'s
+ * temporal comparator, and the `pp.` sentence-merge below), because they remove
+ * MORE than intended rather than less, which is the safe direction.
  */
 export const KNOWN_UNDETECTED_GAP_FORMS = [
   'percent_dialect',
   'spelled_out_number',
   'clause_separated',
+  'long_label_transitive',
+  'basis_point_dialect',
 ] as const;
 
 // ============================================================================
@@ -286,6 +399,16 @@ export function unitStatesRunnerUpGap(value: string): boolean {
  * tie and single-option logic on a different rail — trap #12 in exchange for a
  * nicer sentence. The correct statistic already reaches the user on the same
  * turn, from the one module that owns it.
+ *
+ * ⚠ ONE KNOWN OVER-REMOVAL, AND ITS DIRECTION (round-1 review). A sentence
+ * ending in the `pp` dialect — "…by 9 pp." — is abbreviation-shaped to
+ * `redactable-units.ts`'s splitter (a ≤2-letter final token), so it MERGES with
+ * the sentence after it and both are replaced. The direction is
+ * OVER-REMOVAL, never under: a larger unit removes more, and can never leave
+ * half a claim standing. Left as-is deliberately — the splitter's abbreviation
+ * rule is shared with two other gates and is structural, not a lexicon, so
+ * special-casing `pp` here would fork a shared primitive to widen the blast
+ * radius of nothing.
  */
 export const RUNNER_UP_GAP_REPLACEMENT =
   'The size of the lead is not reported as a gap between options — the difference between two ' +

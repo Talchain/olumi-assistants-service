@@ -91,6 +91,33 @@ const MUST_TRIP: ReadonlyArray<readonly [string, string]> = [
   ],
   ['constraint-gap disclosure copy', 'MacBook Pro leads by 18 percentage points and is the best pick.'],
   ['budget copy', 'Increase Engineering Budget currently leads by 39 percentage points.'],
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ROUND-1 ADVERSARIAL REVIEW — the six leak classes an INDEPENDENT corpus
+  // found that this author's did not (CLAUDE.md trap 22c: the reviewer's corpus
+  // is the load-bearing evidence, the author's is a development aid). Verbatim
+  // from the reviewer's `corpus.ts`, ids preserved so the two can be diffed.
+  // Every one of them SURVIVED at `7d0385b8` and is the RED baseline for this
+  // round.
+  // ══════════════════════════════════════════════════════════════════════════
+  ['REVIEW R9 — the `wins` vocabulary', 'Option A wins by 12 points.'],
+  ['REVIEW R11 — hyphenated attributive quantity', 'It holds a 20-point lead over Salesforce.'],
+  [
+    'REVIEW R12 — fully hyphenated unit',
+    'A 33-percentage-point lead separates HubSpot from Salesforce.',
+  ],
+  [
+    'REVIEW R25 — "better than", the PR’s own motivating word',
+    'HubSpot is 33 percentage points better than Salesforce.',
+  ],
+  [
+    'REVIEW R4 — interposed `between` phrase defeats gap_is',
+    'The margin between the two options is 6 percentage points.',
+  ],
+  [
+    'REVIEW R16 — same class, `difference`',
+    'The difference between the two options is 33 percentage points.',
+  ],
 ];
 
 // ============================================================================
@@ -171,6 +198,50 @@ const MUST_NOT_TRIP: ReadonlyArray<readonly [string, string]> = [
     'window pin B: the same shape on a different factor',
     'Plan A leads on the current evidence and a single retention assumption shifts the outcome by 9 percentage points.',
   ],
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ROUND-2 TWINS — one per pattern added this round (trap 22b: every corpus
+  // case gets its OPPOSITE-DIRECTION twin, or a fix in one direction reopens
+  // the other). Each pairs with a REVIEW case above; the mutant table proves
+  // the pairing (pattern removed → its MUST-TRIP REDs; twin stays GREEN).
+  // ══════════════════════════════════════════════════════════════════════════
+  [
+    'twin of R9 — the NOUN `win`, which the binder deliberately excludes',
+    "Option A's win probability rises by 12 percentage points under the upside.",
+  ],
+  [
+    'twin of R9 — `wins` is still bounded by the window',
+    'Option A wins on cost while the retention assumption alone moves the result by 8 percentage points.',
+  ],
+  [
+    'twin of R11/R12 — a hyphenated quantity whose head noun is not a gap-noun',
+    "The user's brief targets a 5-point NPS improvement.",
+  ],
+  ['twin of R11/R12 — same shape, ordinary English', 'The proposal is a 10-point plan.'],
+  [
+    'twin of R11/R12 — the accounting margin, unqualified',
+    'The plan assumes a 3 percentage point margin expansion.',
+  ],
+  [
+    'twin of R25 — a NON-superiority comparator survives',
+    'Retention is 4 percentage points higher than the base case.',
+  ],
+  [
+    'twin of R4/R16 — `difference` without the comparison preposition',
+    'The difference in churn across the two quarters is 3 percentage points.',
+  ],
+  [
+    'twin of R4/R16 — the margin-of-error carve-out (round-1 over-reach 1)',
+    'The margin of error is 3 percentage points.',
+  ],
+  [
+    'round-1 over-reach 2 — a user-brief market-position echo',
+    'You noted your firm leads competitors by 10 points on NPS.',
+  ],
+  [
+    'the basis-point dialect is NOT a quantity here (pinned, see KNOWN_UNDETECTED_GAP_FORMS)',
+    'Base case: interest rates rise by 50 basis points.',
+  ],
 ];
 
 describe('findRunnerUpGapCodes — the measured corpus', () => {
@@ -185,8 +256,8 @@ describe('findRunnerUpGapCodes — the measured corpus', () => {
   it('the corpus is non-trivial in both directions', () => {
     // Trap 13: an absence assertion needs a positive control. If either arm
     // were empty, every `it.each` above would vacuously pass.
-    expect(MUST_TRIP.length).toBeGreaterThanOrEqual(18);
-    expect(MUST_NOT_TRIP.length).toBeGreaterThanOrEqual(18);
+    expect(MUST_TRIP.length).toBeGreaterThanOrEqual(24);
+    expect(MUST_NOT_TRIP.length).toBeGreaterThanOrEqual(28);
   });
 });
 
@@ -197,11 +268,21 @@ describe('KNOWN_UNDETECTED_GAP_FORMS — the honest gap, pinned', () => {
    * set, so it REDs if the set grows OR shrinks — and each member is exercised
    * below so "declared" cannot drift from "true".
    */
-  it('the declared set is exactly three forms', () => {
+  /**
+   * ⚠ IT WAS THREE, AND THE ROUND-1 REVIEWER SHOWED THE HONEST NUMBER WAS
+   * LARGER: *"the honest-gap mechanism claims the reader deliberately fails to
+   * see exactly three forms; the truth is at least eight. A pinned-gap set that
+   * under-declares is the defect class it exists to prevent."* Six of those
+   * classes are now CAUGHT; the two that remain are declared here, each with a
+   * reason at the constant, and each exercised below.
+   */
+  it('the declared set is exactly five forms', () => {
     expect([...KNOWN_UNDETECTED_GAP_FORMS]).toEqual([
       'percent_dialect',
       'spelled_out_number',
       'clause_separated',
+      'long_label_transitive',
+      'basis_point_dialect',
     ]);
   });
 
@@ -217,6 +298,30 @@ describe('KNOWN_UNDETECTED_GAP_FORMS — the honest gap, pinned', () => {
     expect(
       findRunnerUpGapCodes('Option A leads, and it is clear by 12 percentage points.'),
     ).toEqual([]);
+  });
+
+  it('long_label_transitive: the reviewer’s exact sentence, pinned rather than chased', () => {
+    // Verbatim from the round-1 corpus (R8). The reviewer explicitly forbade the
+    // obvious fix — widening gap_by's window — because this module's own M5
+    // mutant measures that reopening the factor-sensitivity false positive.
+    expect(
+      findRunnerUpGapCodes(
+        'Migrate to HubSpot outperforms Consolidate on the Salesforce Enterprise Agreement by 21 percentage points.',
+      ),
+    ).toEqual([]);
+    // …and the SHORT-label form of the same sentence IS caught, which is what
+    // makes this a window limit rather than a missing binder (trap 20: a probe
+    // that returns the same answer for every input is reporting on itself).
+    expect(
+      findRunnerUpGapCodes('Migrate to HubSpot outperforms Consolidate by 21 percentage points.').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('basis_point_dialect: "leads by 500 basis points" is NOT detected, deliberately', () => {
+    expect(findRunnerUpGapCodes('Option A leads by 500 basis points.')).toEqual([]);
+    // Positive control on the same sentence shape: the percentage-point dialect
+    // of the identical claim IS caught, so this pins the UNIT, not the sentence.
+    expect(findRunnerUpGapCodes('Option A leads by 5 percentage points.').length).toBeGreaterThan(0);
   });
 });
 

@@ -25,6 +25,10 @@ import { config } from "../config/index.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
 import { extractJsonFromResponse } from "../utils/json-extractor.js";
 import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
+// F3 carrier 2 — the SAME runner-up gap policy the V5 enricher seam installs.
+// Imported, never re-implemented: two copies of a policy is how one of them
+// gets the next fix (CLAUDE.md trap #12).
+import { redactRunnerUpGapStatistic } from "../orchestrator-v5/compose/runner-up-gap-statistic.js";
 import type { CallOpts } from "../adapters/llm/types.js";
 import { UpstreamHTTPError } from "../adapters/llm/errors.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
@@ -843,7 +847,46 @@ export default async function route(app: FastifyInstance) {
       }
 
       // Build response
-      const reviewOutput = extractionResult.json as Record<string, unknown>;
+      //
+      // F3 CARRIER 2 — the runner-up GAP statistic, removed at THIS route's
+      // egress with the SAME policy the V5 enricher seam applies. Not a second
+      // rule: the same reader, the same replacement, the same per-field,
+      // per-sentence action (`compose/runner-up-gap-statistic.ts`).
+      //
+      // WHY THE ROUTE NEEDS ITS OWN INSTALL. The V5 seam covers the auto-fire
+      // path only. PLoT's `decision-review-orchestrator.ts` calls THIS route
+      // and merges the parsed review into its `/v2/run` response as
+      // `m1_review` — a second wire carrier for `narrative_summary` and
+      // `key_assumptions` that never passes through the enricher, and that the
+      // UI has live readers for. One producer, two exits; both must be seamed
+      // or the policy is a guard pointed at one door (CLAUDE.md trap 3b at the
+      // carrier grain).
+      //
+      // Placed at the SINGLE point where the parsed review becomes the response
+      // body, AFTER the shape check (which is structural and must read what the
+      // model actually produced) and BEFORE anything reads `reviewOutput`, so
+      // there is no un-redacted path to the wire.
+      const rawReviewOutput = extractionResult.json as Record<string, unknown>;
+      const gapRedaction = redactRunnerUpGapStatistic(rawReviewOutput);
+      if (gapRedaction.fields > 0) {
+        log.warn(
+          {
+            event: 'cee.decision_review.runner_up_gap_redacted',
+            request_id: requestId,
+            brief_hash: input.brief_hash,
+            // Field PATHS and pattern CODES only — never the matched prose,
+            // which is the user's own decision content (R-004).
+            hit_paths: gapRedaction.paths,
+            hit_codes: gapRedaction.codes,
+            hit_fields: gapRedaction.fields,
+          },
+          'cee.decision_review.runner_up_gap_redacted: the review stated the size of the lead as a ' +
+            'gap between options. The gap between two win frequencies is not a difference in outcome ' +
+            'and inflates when any other option collapses. FIX THE SERVED PROMPT — the repo default ' +
+            'is correct; the PMS `decision_review_default` row is what this alarm is measuring.',
+        );
+      }
+      const reviewOutput = gapRedaction.value;
       const latencyMs = Date.now() - start;
 
       const response: Record<string, unknown> = {

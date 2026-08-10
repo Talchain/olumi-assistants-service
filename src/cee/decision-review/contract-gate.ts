@@ -30,10 +30,20 @@
  *
  * ── Rule derivation (derive-don't-mirror; every rule cites its source) ──
  *
- *  The contract source of truth is the staged decision_review prompt text
+ *  ⚠ CORRECTED 2026-08-10 (F3 lane) — THIS PARAGRAPH NAMED THE WRONG VERSION
+ *  AND THE WRONG LOCATION, AND IT IS REPLACED RATHER THAN QUIETLY DELETED
+ *  (CLAUDE.md trap #14). It read: *"the staged decision_review prompt text
  *  `parallel-briefs/decision-review-v15-candidate.txt` (= PMS
- *  `decision_review_default` v13, LIVE on staging) and its clause enumeration
- *  `parallel-briefs/CLAUSE-CHECKLIST-decision-review-2026-07-16.md`.
+ *  `decision_review_default` v13, LIVE on staging)"*.
+ *
+ *  The contract source of truth is **`Prompts/canonical/decision_review.txt`,
+ *  IN THIS REPO** — `Prompts/canonical/README.md` states the direction plainly:
+ *  *"PMS is populated FROM here."* The served pointer is **v15**, not v13:
+ *  `Prompts/canonical/manifest.json` records `served_version: 15`,
+ *  `served_hash_verified: true`, `sha256` beginning `ba4879dd`, regenerated
+ *  2026-07-31 at the moment of promotion and read back from the LIVE
+ *  `/admin/prompts/status` rather than inferred from the file. Its clause
+ *  enumeration is `parallel-briefs/CLAUSE-CHECKLIST-decision-review-2026-07-16.md`.
  *
  *  - Coverage floor ("≥ 1 review_card") is derived from the COMPOSER'S OWN
  *    emission condition: `buildNarrativeCard` in
@@ -62,21 +72,27 @@ import { collectStrings } from './shape-check.js';
 // ============================================================================
 // Contract count caps — the TIGHT prompt bound  (TELEMETRY-ONLY; see D-11 below)
 //
-// ⚠ EXTERNAL SOURCE OF TRUTH — NOT DERIVABLE IN THIS REPO (trap #12: a
-//   hand-maintained mirror drifts silently). These four maxima MIRROR the
-//   served decision_review prompt's own per-field schema, which lives OUTSIDE
-//   olumi-assistants-service:
-//     • parallel-briefs/decision-review-v15-candidate.txt  (the v15 candidate)
-//     • the served PMS prompt `decision_review_default` (v13 == v15 candidate,
-//       LIVE on staging) — the authoritative wire contract.
-//   Neither is checked into this repo, so these constants CANNOT be derived
-//   in-repo; they are a HAND-MAINTAINED MIRROR that will drift silently if the
-//   served prompt's caps change. Reconciliation owner: the decision_review
-//   prompt-estate owner (see PROMPT-ESTATE-REGISTER.md). Durable fix = derive
-//   these from the served prompt at build/test time (ROADMAP follow-up row —
-//   see PR #645 report). Until then, RE-CHECK on every decision_review prompt
-//   bump. Do NOT add an in-repo copy of the prompt to "fix" this — that is just
-//   a second mirror.
+// ⚠ A HAND-MAINTAINED MIRROR (trap #12: it drifts silently). These four maxima
+//   MIRROR the served decision_review prompt's own per-field schema.
+//
+//   ⚠⚠ CORRECTED 2026-08-10 (F3 lane), AND THE CORRECTION MATTERS BECAUSE THE
+//   OLD TEXT TOLD EVERY READER NOT TO LOOK. It said the served prompt "lives
+//   OUTSIDE olumi-assistants-service", that it was PMS v13, and that these
+//   constants "CANNOT be derived in-repo". All three are false:
+//     • the served bytes ARE in this repo, at
+//       `Prompts/canonical/decision_review.txt` (README: "PMS is populated FROM
+//       here. Here is the source of truth");
+//     • the served pointer is **v15** (`Prompts/canonical/manifest.json`,
+//       `served_hash_verified: true`, sha256 `ba4879dd…`);
+//     • so a derivation IS available — parse the caps out of the canonical file,
+//       exactly as `tools/orchestrator-eval/src/decision-review/served-contract.ts`
+//       already parses the BANNED-terms block out of the same file.
+//   Until that derivation lands these constants stay a mirror, so RE-CHECK on
+//   every decision_review prompt bump. The old instruction *"do NOT add an
+//   in-repo copy of the prompt"* still stands and is now trivially satisfied:
+//   there is exactly one in-repo copy and it is the source of truth, not a copy.
+//   Reconciliation owner: the decision_review prompt-estate owner (see
+//   PROMPT-ESTATE-REGISTER.md); durable fix rowed from the PR #645 report.
 //
 // ⚠ BLAST RADIUS IS LOW BY CONSTRUCTION: since A1 ruling D-11 these caps are
 //   TELEMETRY-ONLY (see COUNT_CAP_RULES / isEnforcedRule below). A breach is
