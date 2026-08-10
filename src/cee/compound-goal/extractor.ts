@@ -132,7 +132,7 @@ export interface CompoundGoalExtractionResult {
  * ========================================================================= */
 
 /** A currency-or-bare amount with an optional magnitude suffix and optional `%`. */
-const AMT = String.raw`[£$€]?\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}%?`;
+export const AMT = String.raw`[£$€]?\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}%?`;
 
 /** The same token where a trailing `%` is not admissible ("within £4bn budget"). */
 const AMT_NO_PCT = String.raw`[£$€]?\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}`;
@@ -201,8 +201,8 @@ const UPPER_BOUND_PATTERNS = [
  * `X below Y` upper-bound pattern, so a claimed span is the only way to stop
  * the ceiling being re-derived from the floor's own words.
  */
-const NEGATION_LEAD = String.raw`(?:without|must\s+not|cannot|can't|shouldn't|should\s+not|won't|will\s+not|never)`;
-const FALL_VERB = String.raw`(?:drop(?:ping|s)?|fall(?:ing|s)?|slip(?:ping|s)?|dip(?:ping|s)?)`;
+export const NEGATION_LEAD = String.raw`(?:without|must\s+not|cannot|can't|shouldn't|should\s+not|won't|will\s+not|never)`;
+export const FALL_VERB = String.raw`(?:drop(?:ping|s)?|fall(?:ing|s)?|slip(?:ping|s)?|dip(?:ping|s)?)`;
 const NEGATED_FLOOR_PATTERNS = [
   // "without dropping gross margin below 78%"
   new RegExp(
@@ -286,7 +286,7 @@ const REDUCTION_PATTERNS = [
  * Handles currency symbols, percentages, suffixes (k, m, b),
  * composite units ("2 hours", "£50k/month"), and period suffixes.
  */
-function parseValue(valueStr: string): { value: number; unit: string } {
+export function parseValue(valueStr: string): { value: number; unit: string } {
   let cleaned = valueStr.trim();
   let unit = "";
 
@@ -430,7 +430,7 @@ function extractPrimaryGoal(brief: string): CompoundGoalExtractionResult["primar
  * 0.85 confidence, negation stripped from the quote, labelled "Keep gross
  * margin at or below 78%".
  */
-const NEGATION_OR_PREVENTION_LEAD =
+export const NEGATION_OR_PREVENTION_LEAD =
   /\b(?:without|not|never|no|cannot|can't|won't|shan't|shouldn't|mustn't|wouldn't|couldn't|avoid|avoids|avoiding|prevent|prevents|preventing|stop|stops|stopping|refuse|refuses|refusing|protect|protects|protecting|guard|guards|guarding)\b/i;
 
 /**

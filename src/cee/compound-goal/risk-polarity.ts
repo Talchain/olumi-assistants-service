@@ -106,7 +106,7 @@ export function polaritySafeOperator(polarity: RiskPolarity): '<=' | '>=' {
  * and a requirement is possibility versus obligation, and that is the single
  * hinge this whole module turns on.
  */
-const POSSIBILITY_MARKER_SRC =
+export const POSSIBILITY_MARKER_SRC =
   '(?:' +
   'could|might|may|maybe|possibly|potentially' +
   // ⚠ EACH NOUN STANDS ALONE. An earlier revision spelled these with the

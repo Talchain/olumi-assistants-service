@@ -224,6 +224,16 @@ export interface StageContext {
   goalConstraints: any;
   /** Late STRP result (Stage 4 substep 6 — Rules 3,5 with goalConstraints context) */
   constraintStrpResult: any;
+  /**
+   * ROADMAP 2.1051 — bounds whose DIRECTION the semantic gate could not prove,
+   * plus stated bounds that matched no row at all.
+   *
+   * INTERNAL, NEVER A WIRE FIELD. The package stage renders these as coaching
+   * `strengthen_items[]` with `action_type: 'add_constraint'`; the records
+   * themselves are surface-agnostic so a later "Olumi needs your input"
+   * elicitation surface can consume the same objects without re-deriving them.
+   */
+  directionUnresolved?: import("../compound-goal/direction-gate.js").DirectionUnresolvedItem[];
   structuralMeta: any;
   validationSummary: any;
   orchestratorRepairUsed?: boolean;
