@@ -46,6 +46,7 @@ import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.
 import { enforceCoachingContract } from "../../../adapters/llm/coaching-contract-conformance.js";
 import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
+import { renderDirectionClarifications } from "../../compound-goal/direction-gate.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
 import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
@@ -308,6 +309,66 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
           action_type: "add_option",
           bias_category: "narrow_framing",
         });
+        ctx.coaching = coaching;
+      }
+    }
+  }
+
+  // ── Step 2b-2: ROADMAP 2.1051 direction-clarification injection ───────────
+  // The user-facing half of the constraint-direction semantic gate. The gate
+  // (Stage 4, `compound-goals.ts`) withholds every bound whose direction it
+  // could not prove and stashes a reusable record per bound; this is where
+  // those records become something a user can answer.
+  //
+  // ⚠ THE APPEND SITE IS LOAD-BEARING AND IS *HERE*, NOT AT THE GATE. The
+  // Stage 4.5 coaching pass REGENERATES `ctx.coaching` wholesale, so an append
+  // at Stage 4 is overwritten before it can reach anyone. Package is the first
+  // stage after that regeneration. A test pins this ordering, because the
+  // failure mode is silent: the gate would look correct, the records would be
+  // built correctly, and the user would simply never see the question.
+  //
+  // Items append whether or not LLM coaching succeeded — the canonical-empty
+  // coaching block accepts them, and `hasMeaningfulCoaching` then rightly
+  // reports meaningful coaching, so a draft whose only coaching is these
+  // questions still surfaces them.
+  {
+    const unresolved = ctx.directionUnresolved ?? [];
+    if (unresolved.length > 0) {
+      const clarifications = renderDirectionClarifications(unresolved);
+      if (clarifications.length > 0) {
+        let inserted = false;
+        const coaching = (ctx.coaching ?? (() => {
+          inserted = true;
+          return {
+            summary: "",
+            strengthen_items: [],
+            widening_log: {
+              elements_added: [],
+              elements_considered_but_excluded: [],
+              brief_completeness: "thin",
+            },
+            bias_signals: [],
+          };
+        })()) as {
+          summary: string;
+          strengthen_items: Array<Record<string, unknown>>;
+          widening_log?: Record<string, unknown>;
+          bias_signals?: unknown[];
+        };
+        if (inserted) {
+          emit(TelemetryEvents.DraftGraphContractDefaultApplied, {
+            field: "coaching",
+            request_id: ctx.requestId,
+            prompt_version: (ctx as { promptVersion?: string }).promptVersion,
+          });
+        }
+        if (!Array.isArray(coaching.strengthen_items)) {
+          coaching.strengthen_items = [];
+        }
+        for (const item of clarifications) {
+          const alreadyPresent = coaching.strengthen_items.some((existing) => existing.id === item.id);
+          if (!alreadyPresent) coaching.strengthen_items.push({ ...item });
+        }
         ctx.coaching = coaching;
       }
     }

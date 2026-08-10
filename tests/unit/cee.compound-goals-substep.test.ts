@@ -78,6 +78,12 @@ function setupMocksForConstraints(opts: {
     validConstraints.map((c: any) => ({
       constraint_id: `constraint_${c.targetNodeId}_max`,
       node_id: c.targetNodeId,
+      // ROADMAP 2.1051 — the direction gate is fail-closed on evidence it
+      // cannot verify against the brief, so these mocked producer rows carry
+      // the `source_quote` the draft prompt already mandates. Without one the
+      // gate withholds them and these tests would measure the gate instead of
+      // their own subject (remap plumbing / graph non-mutation).
+      source_quote: "keeping churn under 5%",
       operator: c.operator ?? "<=",
       value: c.value ?? 0.05,
     })),
@@ -179,8 +185,13 @@ describe("runCompoundGoals — constraint extraction (no graph mutation)", () =>
       rejected_no_match: 1,
     });
     (toGoalConstraints as any).mockReturnValue([
-      { constraint_id: "c1", node_id: "fac_retention_rate", operator: ">=" },
-      { constraint_id: "c2", node_id: "fac_retention_rate", operator: "<=" },
+      // ROADMAP 2.1051 — VALUES ADDED DELIBERATELY. Two opposite operators on
+      // ONE node with no values at all cannot be shown to be a coherent band,
+      // so the direction gate's cross-row screen withholds both as a producer
+      // disagreement. A floor strictly below its ceiling is the realistic
+      // shape, and it keeps this test measuring remap plumbing.
+      { constraint_id: "c1", node_id: "fac_retention_rate", operator: ">=", value: 0.8, source_quote: "keeping churn under 5%" },
+      { constraint_id: "c2", node_id: "fac_retention_rate", operator: "<=", value: 0.9, source_quote: "keeping churn under 5%" },
     ]);
 
     const ctx = makeCtx();

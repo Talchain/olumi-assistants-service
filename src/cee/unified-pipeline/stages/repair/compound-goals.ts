@@ -18,6 +18,11 @@ import {
   remapConstraintTargets,
 } from "../../../compound-goal/index.js";
 import { partitionRiskFramedInversions } from "../../../compound-goal/risk-polarity.js";
+import {
+  partitionUnprovenDirection,
+  detectUncoveredNegatedBounds,
+  detectorItem,
+} from "../../../compound-goal/direction-gate.js";
 import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
 import { log } from "../../../../utils/telemetry.js";
 
@@ -114,8 +119,8 @@ export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
   deterministic: T | undefined,
   model: T,
 ): T {
-  const frame = deterministic?.value_frame;
-  if (deterministic === undefined || frame === undefined) return model;
+  if (deterministic === undefined) return model;
+  const frame = deterministic.value_frame;
 
   const detValue = deterministic.value;
   const modelValue = model.value;
@@ -133,7 +138,37 @@ export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
 
   if (!sameNumber || !sameUnit) return model;
 
-  return { ...model, value_frame: frame };
+  let out: T = frame === undefined ? model : ({ ...model, value_frame: frame } as T);
+
+  // ⚠⚠ EVIDENCE IS PROTECTED PAYLOAD TOO — ROADMAP 2.1051, round-1 review.
+  //
+  // The merge is `node_id::operator` with "LLM overwrites on same key", so a
+  // model row carrying only a LABEL replaces a correct, QUOTE-BEARING
+  // deterministic row. Before the direction gate that was harmless: the
+  // survivor still had the right operator and value. It is no longer harmless,
+  // because the gate is fail-closed on evidence it cannot verify — so the
+  // overwrite DELETES the very quote that would have proven the row, and the
+  // user loses a limit the deterministic producer had read correctly. Measured
+  // on B1: the brief's only real constraint disappeared and the card read
+  // "Confirm the direction of this limit" about a bound nothing was unsure of.
+  //
+  // The evidence already exists on the row being overwritten, so carry it. This
+  // is the SAME argument as the frame above and it is gated on the SAME
+  // conjunction — same number, same unit — for the same reason: a quote that
+  // describes a DIFFERENT quantity is not evidence about this one, and
+  // attaching it would let the gate "prove" a direction from a sentence about
+  // another number. Fails closed on any mismatch.
+  //
+  // Model-supplied quotes still win when present: they are richer metadata, and
+  // this only fills a hole.
+  const detQuote = deterministic.source_quote;
+  const modelQuote = out.source_quote;
+  const modelHasQuote = typeof modelQuote === "string" && modelQuote.trim().length > 0;
+  if (typeof detQuote === "string" && detQuote.trim().length > 0 && !modelHasQuote) {
+    out = { ...out, source_quote: detQuote } as T;
+  }
+
+  return out;
 }
 
 export function runCompoundGoals(ctx: StageContext): void {
@@ -229,7 +264,19 @@ export function runCompoundGoals(ctx: StageContext): void {
   // The semantic identity of a constraint is its target node + operator.
   // constraint_id is an implementation label, not a dedup key — regex and
   // LLM will assign different IDs to the same semantic constraint.
-  if (llmConstraints.length === 0 && regexConstraints.length === 0) return;
+  // ⚠ NO EARLY RETURN HERE ANY MORE — ROADMAP 2.1051.
+  //
+  // This used to be `if (llm === 0 && regex === 0) return;`. It cannot be, now
+  // that the direction gate's unmatched-negation detector runs in this
+  // function: a DROPPED FLOOR means BOTH producers emitted nothing, which is
+  // exactly the state the old early return treated as "nothing to do". The
+  // audit's claim (g) — "Retention must not — even during migration — fall
+  // below 92%" — produces NO ROWS from either producer, and returning here
+  // meant the user's floor vanished in silence with nothing left to notice it.
+  //
+  // The empty case is now handled at the two sites that need it (the merge and
+  // the emission log), and the detector runs unconditionally below.
+  const bothProducersEmpty = llmConstraints.length === 0 && regexConstraints.length === 0;
 
   const merged = new Map<string, any>();
   const dedupeKey = (c: any) => `${c.node_id}::${c.operator ?? ""}`;
@@ -261,7 +308,41 @@ export function runCompoundGoals(ctx: StageContext): void {
   // comparator-only rule. One gate, both producers, stated once in
   // `risk-polarity.ts` — which is also where the argument for SUPPRESSING
   // rather than flipping is written out.
-  const { binding, inverted } = partitionRiskFramedInversions(notTemporal, ctx.effectiveBrief);
+  const { binding: notRiskFramed, inverted } = partitionRiskFramedInversions(notTemporal, ctx.effectiveBrief);
+
+  // ROADMAP 2.1051 — THE THIRD source-agnostic gate, on the same merged set and
+  // for the same reason the two above it exist: both producers are taught to
+  // map the comparator word to the operator and to ignore the negation that
+  // reverses it, so a user's floor reaches the wire as a ceiling. Fixing either
+  // producer alone leaves the other minting the identical lie.
+  //
+  // It runs AFTER the two gates above so temporal and risk-framed rows are
+  // already gone (no double-withholding), and BEFORE `mintStatedTargetBaselines`
+  // so baselines are minted only for rows that will actually ship.
+  //
+  // ⭐ THE PARTITION IS EXACT AND SAYS SO: every row lands in `proven`,
+  // `unresolved` or `nonLimit`, and the gate throws if the three do not sum to
+  // its input. There is no silent-drop path left in this stage.
+  // `nodeLabels` is the map already built at the top of this function for the
+  // remap's label-matching fallback — reused, not rebuilt, so the labels the
+  // clarification copy shows are the same ones the binding used.
+  const {
+    proven: binding,
+    unresolved: directionUnresolved,
+    nonLimit: directionNonLimit,
+  } = partitionUnprovenDirection(notRiskFramed as any[], ctx.effectiveBrief, nodeLabels);
+
+  // The unmatched-negation detector — the DROPPED-bound half of the same defect.
+  // Runs even when both producers emitted nothing (see the note at the merge).
+  // A bound is COVERED when a surviving row carries its quantity, or when a row
+  // from the same sentence was already withheld and therefore already carries
+  // its own question — otherwise the user would be asked twice about one limit.
+  const coveredValues = [
+    ...binding.map((c: any) => (typeof c?.value === 'number' ? c.value : NaN)),
+    ...directionUnresolved.map((u) => (typeof (u.constraint as any)?.value === 'number' ? (u.constraint as any).value : NaN)),
+    ...directionNonLimit.map((n) => (typeof (n.constraint as any)?.value === 'number' ? (n.constraint as any).value : NaN)),
+  ].filter((v) => Number.isFinite(v));
+  const detectorFindings = detectUncoveredNegatedBounds(ctx.effectiveBrief, coveredValues, new Set<number>());
 
   if (temporal.length > 0) {
     // FAIL LOUD, not silent (CLAUDE.md trap 12): a drop that leaves no trace
@@ -295,6 +376,44 @@ export function runCompoundGoals(ctx: StageContext): void {
     }, `${inverted.length} constraint(s) withheld from goal_constraints[] — the operator contradicts the risk framing of the phrase it was minted from`);
   }
 
+  // ROADMAP 2.1051 — FAIL LOUD, same contract as the two gates above: ids,
+  // counts, operators and RULE NAMES only. No labels, no thresholds, no user
+  // text. A silent withholding here would be indistinguishable from an
+  // extractor that simply stopped matching, which is the one thing a reader of
+  // these logs must be able to tell apart.
+  if (directionUnresolved.length > 0 || detectorFindings.length > 0 || directionNonLimit.length > 0) {
+    log.info({
+      event: "cee.compound_goal.direction_unresolved",
+      request_id: ctx.requestId,
+      withheld_count: directionUnresolved.length,
+      detector_count: detectorFindings.length,
+      non_limit_count: directionNonLimit.length,
+      constraint_ids: directionUnresolved.map((u) => (u.constraint as any)?.constraint_id ?? null),
+      node_ids: directionUnresolved.map((u) => (u.constraint as any)?.node_id ?? null),
+      operators: directionUnresolved.map((u) => (u.constraint as any)?.operator ?? null),
+      reasons: directionUnresolved.map((u) => u.reason),
+      non_limit_reasons: directionNonLimit.map((n) => n.reason),
+    }, `${directionUnresolved.length} constraint(s) withheld from goal_constraints[] — direction not proven; ${detectorFindings.length} stated bound(s) matched no row; ${directionNonLimit.length} row(s) declined as non-limits`);
+  }
+
+  // Stash the reusable unresolved records for the package stage to surface.
+  //
+  // ⚠ THE APPEND CANNOT HAPPEN HERE. `ctx.coaching` is REGENERATED wholesale by
+  // the Stage 4.5 coaching pass, so anything appended at Stage 4 is overwritten
+  // before it can reach a user. The package stage is the first point after that
+  // regeneration — see the append site there, and the spec that pins it.
+  //
+  // Internal only: this never becomes a wire field. If a future consumer needs
+  // the unresolved set on the wire, that is an additive `direction_unresolved[]`
+  // block beside `goal_constraints` on the draft_graph body — a schemas-train
+  // row, deliberately not assumed here.
+  ctx.directionUnresolved = [
+    ...directionUnresolved.map((u) => u.item),
+    ...detectorFindings.map((f) => detectorItem(f)),
+  ];
+
+  if (bothProducersEmpty) return;
+
   ctx.goalConstraints = binding;
 
   // ROADMAP 2.877 (link 2) — the DRAFT-path twin of the add_constraint
@@ -318,6 +437,9 @@ export function runCompoundGoals(ctx: StageContext): void {
     from_llm: llmConstraints.length,
     temporal_withheld: temporal.length,
     risk_inversion_withheld: inverted.length,
+    direction_unresolved_withheld: directionUnresolved.length,
+    direction_non_limit: directionNonLimit.length,
+    direction_detector_asks: detectorFindings.length,
   }, "Compound goal constraints emitted to goal_constraints[]");
 }
 

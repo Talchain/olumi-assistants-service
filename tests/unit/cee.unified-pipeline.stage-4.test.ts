@@ -718,13 +718,16 @@ describe("Substep 5: Compound goals", () => {
       rejected_junk: 0,
       rejected_no_match: 0,
     });
-    (toGoalConstraints as any).mockReturnValue([{ node_id: "c1" }]);
+    // ROADMAP 2.1051 — the direction gate is fail-closed on unverifiable
+    // evidence; this row carries a quote from the fixture brief so the test
+    // keeps measuring graph non-mutation rather than the gate.
+    (toGoalConstraints as any).mockReturnValue([{ node_id: "c1", source_quote: "Test brief for compound goals" }]);
 
     const ctx = makeCtx();
     runCompoundGoals(ctx);
 
     // goal_constraints should be populated
-    expect(ctx.goalConstraints).toEqual([{ node_id: "c1" }]);
+    expect(ctx.goalConstraints).toEqual([{ node_id: "c1", source_quote: "Test brief for compound goals" }]);
     // Graph must NOT be mutated — constraints are metadata, not graph nodes
     expect((ctx.graph as any).nodes.length).toBe(validGraph.nodes.length);
     expect((ctx.graph as any).edges.length).toBe(validGraph.edges.length);
