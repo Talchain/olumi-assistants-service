@@ -391,21 +391,21 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
     expect(ds.flatMap((d) => d.targets).some((t) => t.id === 'opt_unknown')).toBe(false);
   });
 
-  // ⚠⚠ DELIBERATE INVARIANT CHANGE — flagged for review, not absorbed quietly.
-  // This test previously pinned "ZERO directives (current-turn only)": the
-  // SIDE-EFFECT rows are keyed to a current-turn handler fact, so a lifecycle
-  // rebuild (which re-presents an analysis the user has already been shown)
-  // emitted no gesture at all. §2.1 row 7 deliberately changes that, and this
-  // turn class is the clearest case for it: the assistant is purely DISCUSSING
-  // — re-presenting cards, computing nothing — which is exactly the gap row 7
-  // exists to close, and the FRESH verdict means the graph hash matches so
-  // every ref still resolves.
+  // ⚠⚠ THIS INVARIANT SURVIVED A CHALLENGE — READ BEFORE WEAKENING IT AGAIN.
+  // §2.1 row 7 (the discussed-entity tail) was first built to fire here, on the
+  // argument that a rebuild is the purest "discussing, not acting" turn class.
+  // That was OVERTURNED (Paul, 10 Aug 2026):
   //
-  // What the original invariant protected is UNCHANGED and still asserted
-  // below: no side-effect row fires here, and the gesture makes no claim (it is
-  // a `focus`, never a `highlight`). If the reviewer wants lifecycle turns to
-  // stay gesture-less, this is the single place to say so.
-  it('prior-fact FRESH lifecycle rebuild emits NO side-effect directive; row 7 may focus a discussed entity', () => {
+  //   A DIRECTIVE IS A RESPONSE TO SOMETHING THE USER JUST DID. On a rebuild
+  //   the user did nothing — they reloaded, or the session rehydrated. Moving
+  //   their viewport on a turn they did not initiate is the workspace acting on
+  //   its OWN INITIATIVE rather than following the conversation.
+  //
+  // Row 7 is now STRUCTURALLY unable to reach this branch: it runs before the
+  // lifecycle rebuild in `buildBlocksFromFacts` and is gated on
+  // `facts.length > 0`. This test is the pin on that ordering — if someone
+  // moves row 7 below the lifecycle branch, this REDs.
+  it('prior-fact FRESH lifecycle rebuild with persistedGraph still emits ZERO directives (current-turn only)', () => {
     const env = composeToolCallResponse({
       answerKind: 'functional',
       ...BASE_INPUT,
@@ -426,14 +426,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       },
     });
     expect(byType(env.blocks, 'analysis_result')).toHaveLength(1);
-    const ds = byType(env.blocks, 'ui_directive') as unknown as ReadonlyArray<{
-      verb: string;
-      source?: string;
-    }>;
-    // N=1 still holds, and nothing here asserts a leader.
-    expect(ds.length).toBeLessThanOrEqual(1);
-    expect(ds.some((d) => d.verb === 'highlight')).toBe(false);
-    for (const d of ds) expect(d.source).toBe('ladder');
+    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
   });
 });
 

@@ -275,6 +275,58 @@ describe('row 7 — the workspace follows the conversation', () => {
   });
 });
 
+describe('row 7 — never fires on a turn the user did not initiate', () => {
+  // TWO independent mechanisms enforce this, and each needs its OWN pin:
+  //   (a) `facts.length > 0` — pinned by graph-lookup-fallback.test.ts's
+  //       "prior-fact FRESH lifecycle rebuild ... emits ZERO directives", whose
+  //       turn carries no handler facts at all;
+  //   (b) ORDERING — row 7 runs BEFORE the lifecycle rebuild pushes its blocks.
+  // Mechanism (b) is invisible to that test (its `facts` is empty, so gate (a)
+  // already stops it). This test is the pin on (b): a turn that HAS a
+  // current-turn fact AND triggers a lifecycle rebuild. If row 7 is moved below
+  // the rebuild, it will find the re-presented cards' refs and emit — and this
+  // REDs. Without this, moving row 7 would silently reintroduce the behaviour
+  // the ruling removed.
+  it('a current-turn fact + a FRESH lifecycle rebuild: row 7 never points at a REBUILT card', () => {
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      // Row 1 suppresses: this target does not exist in the graph, so the
+      // current-turn facts contribute NO card carrying a dispatchable ref.
+      handlerFacts: [
+        {
+          fact_type: 'set_factor_value',
+          fact_version: 1,
+          noop: false,
+          result: { target_id: 'fac_does_not_exist', status: 'applied', before: {}, after: {} },
+        } as unknown as HandlerFact,
+      ],
+      persistedGraph: GRAPH,
+      lifecycle: {
+        priorFacts: [analysisFact({ leadingOptionId: 'opt_x' })],
+        freshness: {
+          freshness: 'fresh',
+          selected_fact_index: 0,
+          graph_hash_at_run: GRAPH_HASH,
+          current_graph_hash: GRAPH_HASH,
+          reason: 'graph_hash_match',
+          computed_at: '2026-08-10T09:00:00.000Z',
+        },
+        requestId: 'req-row7-ordering',
+        scenarioId: 'scen-discussed',
+      } as unknown as Parameters<typeof composeToolCallResponse>[0]['lifecycle'],
+    });
+
+    // POSITIVE CONTROL: the rebuild really did happen and really did compose
+    // cards naming entities — otherwise this test would pass by testing nothing.
+    const rebuilt = blocksWithRefs(env);
+    expect(rebuilt.length).toBeGreaterThan(0);
+
+    // …and yet NO directive was emitted from them.
+    expect(directives(env)).toHaveLength(0);
+    expect(emittedBy(DISCUSSED_ENTITY_TAG)).toHaveLength(0);
+  });
+});
+
 // ===========================================================================
 // UNIT COVERAGE for the selection rule + the two gates.
 //

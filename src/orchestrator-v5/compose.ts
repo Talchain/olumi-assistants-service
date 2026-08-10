@@ -547,13 +547,6 @@ function buildBlocksFromFacts(
     }
   }
 
-  // PR 3 lifecycle branch 2 — no current-turn run_analysis fact AND
-  // lifecycle context supplied. Walk prior_facts using the freshness
-  // verdict to select the canonical source fact and decide emission.
-  if (!currentTurnRunAnalysisHandled && lifecycle !== undefined) {
-    blocks.push(...buildLifecycleBlocksFromPrior(lifecycle, persistedGraph));
-  }
-
   // §2.1 ROW 7 — the DISCUSSED-ENTITY tail. "The workspace follows the
   // conversation." Rows 1–6 are each keyed to a handler SIDE EFFECT, so the
   // assistant could point at what it just changed or computed and never at what
@@ -561,14 +554,30 @@ function buildBlocksFromFacts(
   // name, reusing the `target_refs` those cards already carry (no new
   // resolution, no prose parsing — see the builder's header).
   //
-  // Placed AFTER the fact loop AND after the lifecycle branch, and gated on the
-  // same `uiDirectiveEmitted` latch, so:
-  //   · a side-effect gesture ALWAYS wins (N=1 preserved; row 7 never displaces
-  //     one, it only fills a turn that would otherwise gesture at nothing);
-  //   · it also covers the lifecycle prior-fact branch, which re-presents an
-  //     analysis the user has already been shown and has never emitted a
-  //     directive at all — the purest "discussing, not acting" turn class.
-  if (!uiDirectiveEmitted) {
+  // ⚠⚠ POSITION IS THE INVARIANT — DO NOT MOVE THIS BELOW THE LIFECYCLE BRANCH.
+  // Row 7 runs AFTER the fact loop but BEFORE the prior-fact lifecycle rebuild,
+  // and `facts.length > 0` gates it, so it is STRUCTURALLY INCAPABLE of seeing a
+  // rebuilt block. That is deliberate, and it is a ruling (Paul, 10 Aug 2026)
+  // that overturned this lane's own first design:
+  //
+  //   A DIRECTIVE IS A RESPONSE TO SOMETHING THE USER JUST DID. On a lifecycle
+  //   rebuild the user did nothing — they reloaded, or the session rehydrated.
+  //   Moving their viewport on a turn they did not initiate is the workspace
+  //   acting on its OWN INITIATIVE rather than following the conversation,
+  //   which is the same charter violation as the assistant closing a panel.
+  //   UI #645 spent a lane making that structurally impossible in one
+  //   direction; this does not reopen it in another.
+  //
+  // The rebuild's zero-directive invariant was DELIBERATELY pinned by an
+  // earlier author, and reversing a deliberate pin on a lane's judgement —
+  // without a user-facing witness that the new behaviour is better — is how
+  // surprising behaviour ships. Re-enabling later is small and can carry a
+  // witness. Pinned in `graph-lookup-fallback.test.ts`.
+  //
+  // The `uiDirectiveEmitted` latch still gates it, so a side-effect gesture
+  // ALWAYS wins (N=1 preserved): row 7 never displaces one, it only fills a
+  // turn that would otherwise gesture at nothing.
+  if (!uiDirectiveEmitted && facts.length > 0) {
     // The turn's claim-safety verdict. Derived from the SAME run_analysis fact
     // the ladder gates row 3 on, so the two gates can never disagree. No
     // run_analysis fact on this turn ⇒ no leader is being claimed ⇒ permitted.
@@ -582,6 +591,14 @@ function buildBlocksFromFacts(
       blocks.push(directive);
       uiDirectiveEmitted = true;
     }
+  }
+
+  // PR 3 lifecycle branch 2 — no current-turn run_analysis fact AND
+  // lifecycle context supplied. Walk prior_facts using the freshness
+  // verdict to select the canonical source fact and decide emission.
+  // Runs AFTER row 7 by design — see the block above.
+  if (!currentTurnRunAnalysisHandled && lifecycle !== undefined) {
+    blocks.push(...buildLifecycleBlocksFromPrior(lifecycle, persistedGraph));
   }
 
   return blocks;

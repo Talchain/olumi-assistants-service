@@ -440,21 +440,23 @@ function buildFlipFocusDirective(
 //   · verb and target stay DETERMINISTIC and CEE-authored. Zero LLM authorship
 //     of either, unchanged from rows 1–6.
 //
-// ⚠ DISCLOSURE ON REF PROVENANCE (the reviewer should weigh this). Most
-// `target_refs` are derived structurally (a factor id → lookup: the evidence
-// card, the lens subject, the flip-threshold row). But TWO coaching builders in
-// phase3-blocks.ts (`resolveProseEntityRefs` call sites) derive their refs by
-// scanning the card's own prose for graph node LABELS. So for cards built by
-// those two, the provenance chain does bottom out in prose matching. It is a
-// shipped, reviewed matcher with hard over-match rails — whole-phrase
+// ⚠ DISCLOSURE ON REF PROVENANCE — NAMED, NOT CLOSED (ruling, 10 Aug 2026).
+// `target_refs` CARRIES NO PROVENANCE STAMP. Most are derived structurally (a
+// factor id → lookup: the evidence card, the lens subject, the flip-threshold
+// row), but TWO coaching builders in phase3-blocks.ts populate theirs via
+// `resolveProseEntityRefs`, which scans the card's own prose for graph node
+// LABELS. A row-7 directive therefore INHERITS whatever confidence that matcher
+// has. It is shipped and reviewed, with hard over-match rails — whole-phrase
 // both-ends-bounded matching, a minimum label length, generic-token rejection,
 // and a duplicate label resolving to NEITHER node — and it can only ever return
-// ids that exist in the graph. Row 7 deliberately does NOT try to distinguish
-// the two provenances: `target_refs` carries no provenance stamp, so any such
-// split would need a hand-maintained list of "structural" builders, which is
-// the hand-maintained-mirror defect class. The mitigation that matters is the
-// one above: even in the worst case the gesture points at an entity the visible
-// card names, so the workspace and the card agree.
+// ids that exist in the graph.
+//
+// Row 7 deliberately does NOT try to distinguish the two provenances. A
+// hand-maintained list of "structural" builders would read correct on the day
+// it was written and drift silently the first time someone adds a builder —
+// the hand-maintained-mirror defect class. Stamping provenance ON `target_refs`
+// is a contract change and is sequenced separately; it is NOT this lane's to
+// invent. The gap is named here so the next reader inherits it.
 //
 // VERB: `focus` — bring into view. It asserts nothing about leadership (unlike
 // `highlight`), which is what makes it safe as a discussion gesture.
@@ -463,6 +465,13 @@ function buildFlipFocusDirective(
 // `uiDirectiveEmitted` latch is still unset, so a side-effect gesture ALWAYS
 // wins and row 7 can never displace one. Rows 1–6 are byte-unchanged apart from
 // the additive `source` stamp.
+//
+// ⚠ SCOPE — CURRENT-TURN FACTS ONLY. The caller invokes this BEFORE the
+// prior-fact lifecycle rebuild and gates it on `facts.length > 0`, so row 7
+// cannot fire on a turn the user did not initiate (a reload / session
+// rehydration). A directive is a response to something the user JUST DID;
+// moving their viewport otherwise is the workspace acting on its own
+// initiative. See the call site in compose.ts for the full ruling.
 // ============================================================================
 
 /**
