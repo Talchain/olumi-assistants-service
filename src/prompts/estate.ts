@@ -547,7 +547,7 @@ export const DEFAULT_PROMPT_VERSIONS = {
   orchestrator: 'cf-v28',
   edit_graph: 'v6',
   draft_graph: 'v187',
-  decision_review: 'v11',
+  decision_review: 'v11.1',
   repair_graph: 'v6',
 } as const satisfies Partial<Record<CeeTaskId, string>>;
 

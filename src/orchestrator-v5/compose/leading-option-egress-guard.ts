@@ -308,6 +308,32 @@ const ENFORCEMENT_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
 const ENFORCEMENT_NEUTRALISED_SPAN = '#';
 
 /**
+ * Blank the documented non-ranking uses of the leader vocabulary, so an
+ * ENFORCING reader can run its own patterns over what is left.
+ *
+ * EXPORTED (F3, 2026-08-10) rather than copied. A third enforcing reader —
+ * `compose/runner-up-gap-statistic.ts`, which removes the runner-up GAP
+ * statistic from decision-review prose — needs exactly the same carve-outs:
+ * "higher capacity **leads to** faster delivery" and "the **team leads** …" are
+ * not ranking claims there either. Re-declaring the two spans in that module
+ * would be CLAUDE.md trap #12 in its purest form (two lists, one of which gets
+ * the next fix), so the spans stay declared once, here, beside the alarm
+ * vocabulary they carve out of.
+ *
+ * The replacement token's three properties are load-bearing — see
+ * {@link ENFORCEMENT_NEUTRALISED_SPAN}. Because it is non-word and non-space
+ * and every span is `\b`-anchored, neutralisation can only ever REMOVE matches,
+ * never manufacture one, for ANY caller's patterns.
+ */
+export function neutraliseEnforcementFalsePositiveSpans(value: string): string {
+  let neutralised = value;
+  for (const re of ENFORCEMENT_FALSE_POSITIVE_SPANS) {
+    neutralised = neutralised.replace(re, ENFORCEMENT_NEUTRALISED_SPAN);
+  }
+  return neutralised;
+}
+
+/**
  * Does one string ASSERT a leading option, for the purposes of ENFORCEMENT?
  *
  * Same vocabulary as {@link textNamesLeadingOption}, minus the documented
@@ -320,11 +346,7 @@ const ENFORCEMENT_NEUTRALISED_SPAN = '#';
  */
 export function textAssertsLeadingOption(value: string): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  let neutralised = value;
-  for (const re of ENFORCEMENT_FALSE_POSITIVE_SPANS) {
-    neutralised = neutralised.replace(re, ENFORCEMENT_NEUTRALISED_SPAN);
-  }
-  return textNamesLeadingOption(neutralised);
+  return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
 }
 
 /**

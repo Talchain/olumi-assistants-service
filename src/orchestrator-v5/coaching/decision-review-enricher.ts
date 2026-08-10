@@ -43,6 +43,9 @@ import {
 } from '../../orchestrator/context/constraint-feasibility.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
+// F3 — the runner-up gap-statistic policy. Installed at the enricher's single
+// decision_review egress seam (below), beside the DSK grounding policy.
+import { redactRunnerUpGapStatistic } from '../compose/runner-up-gap-statistic.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
@@ -519,6 +522,47 @@ export async function enrichRunAnalysisWithDecisionReview(
         }
       }
     }
+    // F3 — the runner-up GAP statistic, removed at the SAME single egress seam
+    // as the DSK grounding policy above, so both invoke paths (decomposed and
+    // monolithic) are covered by one rule rather than two drifting copies.
+    //
+    // PR #906 retired "leads by N percentage points" from the deterministic
+    // headline; the external audit of 10 Aug 2026 then measured the SAME turn
+    // response on deployed build 5d69ce0 carrying the correct statistic in
+    // `assistant_text` and the retired one in `decision_review
+    // .narrative_summary`. The prompts are fixed in this PR too — this is the
+    // second line of defence, because the served decision_review prompt is a
+    // PMS row whose bytes this repo does not control.
+    //
+    // ⚠ PER-FIELD, PER-SENTENCE — NOT A DROP. The action mirrors the rule that
+    // guards `assistant_text` (routing/validation-registry.ts): replace the
+    // offending text with safe copy, keep the surface alive. Routing this
+    // through the contract gate's `mustDrop` path instead would take out the
+    // WHOLE decision review — bias findings, evidence enhancements, flip
+    // thresholds and all — on every analysed turn for as long as the served
+    // prompt still asks for the margin. See the ruling at the end of
+    // `compose/leading-option-egress-guard.ts`.
+    const gapRedaction = redactRunnerUpGapStatistic(output as Record<string, unknown>);
+    if (gapRedaction.fields > 0) {
+      log.warn(
+        {
+          event: 'v5.decision_review.runner_up_gap_redacted',
+          request_id: input.requestId,
+          scenario_id: input.scenarioId,
+          // Field PATHS and pattern CODES only — never the matched prose, which
+          // is the user's own decision content (R-004).
+          hit_paths: gapRedaction.paths,
+          hit_codes: gapRedaction.codes,
+          hit_fields: gapRedaction.fields,
+        },
+        'v5.decision_review.runner_up_gap_redacted: the review stated the size of the lead as a ' +
+          'gap between options. The gap between two win frequencies is not a difference in outcome ' +
+          'and inflates when any other option collapses. FIX THE SERVED PROMPT — the repo default ' +
+          'is correct; the PMS `decision_review_default` row is what this alarm is measuring.',
+      );
+    }
+    const reviewOutput = gapRedaction.value as DecisionReviewOutput;
+
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
     // Run the parent-level enrichment through the sanitiser BEFORE
     // attaching decision_review. The sanitiser:
@@ -535,7 +579,7 @@ export async function enrichRunAnalysisWithDecisionReview(
     // verbatim contract.
     const merged: Record<string, unknown> = {
       ...(enrichment as Record<string, unknown>),
-      decision_review: output,
+      decision_review: reviewOutput,
     };
     const sanitised = sanitiseEnrichment(merged);
     let finalEnrichment: Record<string, unknown> = sanitised.enrichment;

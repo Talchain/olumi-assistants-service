@@ -1205,7 +1205,20 @@ Respond ONLY with valid JSON.`;
  * Version identifier for the decision review fallback prompt.
  * Used for telemetry when prompt admin is unavailable.
  */
-export const DECISION_REVIEW_PROMPT_VERSION = 'v11';
+/**
+ * ⚠ BUMPED TO A DOTTED SUFFIX, NOT TO 'v12', AND THAT IS DELIBERATE (F3,
+ * 2026-08-10). The bytes below changed — the margin instruction now forbids
+ * stating the distance between two options — so the label must change too, or
+ * `default:decision_review@v11` names two different prompts in telemetry
+ * (CLAUDE.md trap #12). But 'v12' is a poisoned label in the ADJACENT PMS
+ * lineage for `decision_review_default` (a mis-uploaded draft_graph prompt; see
+ * `Prompts/canonical/README.md` standing hazards), and an operator reading
+ * `default:decision_review@v12` on a dashboard should not have to work out
+ * which numbering space they are looking at. The dotted suffix cannot collide
+ * with the PMS integer lineage and reads unambiguously; `orchestrator`'s
+ * 'cf-v28' already establishes that this space is not integers-only.
+ */
+export const DECISION_REVIEW_PROMPT_VERSION = 'v11.1';
 
 const DECISION_REVIEW_PROMPT = `<ROLE>
 You transform deterministic analysis signals into plain-English explanations,
@@ -1224,8 +1237,15 @@ WINNER / RUNNER-UP (pre-computed — trust these, do not recalculate):
   runner_up.id, runner_up.label, runner_up.win_probability, runner_up.outcome_mean
   If runner_up is null: use absolute framing ("this option scores X"), not comparative.
 
-MARGIN (pre-computed — do not recalculate):
-  margin: number  — winner.win_probability minus runner_up.win_probability. Quote directly.
+MARGIN (pre-computed — SELECTION INPUT ONLY, NEVER QUOTED):
+  margin: number  — winner.win_probability minus runner_up.win_probability.
+  ⚠ NEVER STATE THIS NUMBER, in any unit or wording. It is the difference between two
+  win FREQUENCIES, not a difference in outcome, cost or benefit, and it INFLATES BY
+  CONSTRUCTION: it widens whenever any other option collapses, with no improvement in
+  the winner at all. "leads by 33 percentage points" invites "33% better", which it is not.
+  Use it ONLY to judge how confidently to write (a small margin means write cautiously).
+  To say how well the winner did, state the winner's OWN win_probability:
+    "{winner.label} came out ahead in {N}% of runs of this model".
   If runner_up is null, ignore margin and do not mention it.
 
 FLIP THRESHOLDS (from flip_threshold_data[], optional):
@@ -1297,8 +1317,11 @@ NUMBERS:
 - Do NOT invent statistics, benchmarks, or industry averages.
 - Do NOT compute derived numbers (differences, ratios, averages, counts). The only
   permitted transformation is converting an input probability-like value (win_probability,
-  overall_confidence, recommendation_stability, margin) between decimal and percentage form
-  (e.g., 0.07 → "7 percentage points", 0.77 → "77%"). All other arithmetic is forbidden.
+  overall_confidence, recommendation_stability) between decimal and percentage form
+  (e.g., 0.77 → "77%"). All other arithmetic is forbidden.
+- NEVER express the distance between two options as a number, in any unit — not
+  "percentage points", not "points", not "pp", not a bare percentage, and not as a
+  "margin", "gap" or "lead of". The margin field is deliberately excluded from the list above.
 - Selection logic may compare magnitudes (e.g., choose largest absolute elasticity,
   highest voi, highest marginal_switch_probability). Do not output any computed values
   derived from these comparisons.
@@ -1350,10 +1373,15 @@ Each output field: name, constraints, max count.
 
 narrative_summary (string, 2-4 sentences):
   Sentence 1: winner.label + key driver.
-    If runner_up present: always include margin as percentage points (e.g., 0.07 → "7 percentage points").
-      If headline_type is close_call, frame as a narrow lead but still include the number
-      (e.g., "a narrow lead of about 7 percentage points").
-    If runner_up null: use winner.win_probability instead (no margin).
+    Always state the winner's OWN win_probability as a percentage — never the distance to
+    the runner-up: "{winner.label} came out ahead in {N}% of runs of this model"
+    (e.g., 0.61 → "came out ahead in 61% of runs of this model").
+      If headline_type is close_call, frame it as a narrow lead in WORDS and still give the
+      same number (e.g., "came out ahead in 38% of runs of this model, only just clear of
+      the alternatives").
+    This holds whether or not runner_up is present — the statistic does not change.
+    ⚠ NEVER write "leads by N percentage points", "by a margin of N points", "a lead of
+    N percentage points", or any other numeric distance between two options.
     Driver hierarchy (use first available):
     1. isl_results.factor_sensitivity — pick entry with largest absolute elasticity, use its factor_label
     2. else deterministic_coaching.evidence_gaps — pick entry with highest voi, use its factor_label
