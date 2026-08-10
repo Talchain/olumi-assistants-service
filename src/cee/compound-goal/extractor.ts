@@ -162,10 +162,68 @@ const UPPER_BOUND_PATTERNS = [
   new RegExp(String.raw`at\s+most\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi"),
   // "within Y budget" - note: targetName defaults to "budget"
   new RegExp(String.raw`within\s+(${AMT_NO_PCT})\s*(budget|limit|cap)`, "gi"),
+  // ── BREADTH (PR1, frozen-corpus atoms B1-A19 / B1-A20) ──────────────────
+  // Measured 2026-08-10: both of B1's board-imposed limits produced NO
+  // constraint row. Their numbers survived only as `data.cap` on a factor — a
+  // NORMALISATION DENOMINATOR, which PLoT does not score — while the right
+  // panel read "Constraints: No limits on record".
+  new RegExp(
+    String.raw`(\w+(?:\s+\w+){0,3}?)\s+(?:(?:is|are|was|were)\s+)?(?:capped|limited|fixed)\s+(?:at|to)\s+(${AMT})`,
+    "gi",
+  ),
+  new RegExp(
+    String.raw`(?:cannot|can't|must\s+not|may\s+not|won't)\s+(?:\w+\s+){0,2}?more\s+than\s+(${AMT})\s+(\w+(?:\s+\w+){0,2}?)\b`,
+    "gi",
+  ),
   // "X under Y" (simple form)
   new RegExp(String.raw`(\w+(?:\s+\w+){0,2})\s+(?:under|below)\s+(${AMT})`, "gi"),
   // Subject-optional: "under/below Y [unit]" (bare phrase — subject defaults to "unspecified")
   new RegExp(`(?:^|\\s)(?:under|below)\\s+(${_VAL})`, "gi"),
+];
+
+/**
+ * NEGATED FLOORS — "without dropping X below Y" means X >= Y.
+ *
+ * ⚠ THESE MUST BE MATCHED BEFORE THE SIMPLE BOUND PATTERNS, AND THEY CLAIM
+ * THEIR SPAN. Measured on brief B1 of the frozen corpus (2026-08-10): the
+ * sentence "without dropping gross margin below 78%" was extracted as
+ * `operator: "<="` — the EXACT INVERSE of the user's floor — stamped
+ * `provenance: "explicit"` at `confidence: 0.85`, with a source quote from
+ * which the negation had been stripped. It was one of only two constraints B1
+ * produced, and the other was its subject-less duplicate.
+ *
+ * An inverted floor is worse than a missing one: enforced, it penalises exactly
+ * the options that honour the limit. That is the mechanism behind the frontier
+ * comparison's most commercially dangerous finding — the pragmatic middle
+ * option ranking near-zero in 2 of 3 briefs.
+ *
+ * The inner phrase ("gross margin below 78%") still matches the simple
+ * `X below Y` upper-bound pattern, so a claimed span is the only way to stop
+ * the ceiling being re-derived from the floor's own words.
+ */
+const NEGATION_LEAD = String.raw`(?:without|must\s+not|cannot|can't|shouldn't|should\s+not|won't|will\s+not|never)`;
+const FALL_VERB = String.raw`(?:drop(?:ping|s)?|fall(?:ing|s)?|slip(?:ping|s)?|dip(?:ping|s)?)`;
+const NEGATED_FLOOR_PATTERNS = [
+  // "without dropping gross margin below 78%"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+(?:let(?:ting)?\s+)?${FALL_VERB}\s+(\w+(?:\s+\w+){0,3})\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
+  // "must not let gross margin fall below 78%"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+let(?:ting)?\s+(\w+(?:\s+\w+){0,3})\s+${FALL_VERB}\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
+  // "gross margin cannot drop below 78%"
+  new RegExp(
+    String.raw`(\w+(?:\s+\w+){0,3})\s+${NEGATION_LEAD}\s+${FALL_VERB}\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
+  // subject-less: "without falling below 78%"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+${FALL_VERB}\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
 ];
 
 /** Lower bound constraint patterns (operator: >=) */
@@ -353,13 +411,264 @@ function extractPrimaryGoal(brief: string): CompoundGoalExtractionResult["primar
 /**
  * Extract upper bound constraints (operator: <=).
  */
-function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] {
+/**
+ * A NEGATION OR PREVENTION lead — the words that reverse the meaning of a
+ * `below|under` bound sitting after them in the same clause.
+ *
+ * ⚠ DELIBERATELY WIDER THAN `NEGATION_LEAD`, AND FOR A DIFFERENT JOB.
+ * `NEGATION_LEAD` gates a pattern that MINTS a correct floor, so it must be
+ * tight — a false positive there invents a constraint. This one gates a
+ * SUPPRESSION, so it must be broad: a false positive drops a row (a gap), a
+ * false negative ships an inverted one (a confidently wrong limit that
+ * penalises exactly the options honouring it). The two failure modes are not
+ * remotely symmetric, so the two predicates are not the same predicate.
+ *
+ * Found by an adversarial corpus written outside this lane: "do not let gross
+ * margin drop below 78%", "without letting gross margin GO below 78%", "will
+ * not ALLOW it to drop below 78%" all reached the wire as
+ * `fac_gross_margin <= 0.78` — right node, inverted operator, `explicit` at
+ * 0.85 confidence, negation stripped from the quote, labelled "Keep gross
+ * margin at or below 78%".
+ */
+const NEGATION_OR_PREVENTION_LEAD =
+  /\b(?:without|not|never|no|cannot|can't|won't|shan't|shouldn't|mustn't|wouldn't|couldn't|avoid|avoids|avoiding|prevent|prevents|preventing|stop|stops|stopping|refuse|refuses|refusing|protect|protects|protecting|guard|guards|guarding)\b/i;
+
+/**
+ * THE SUPPRESSION WINDOW — deliberately NOT the same window minting uses.
+ *
+ * ⚠⚠ TWO DIRECTIONS, TWO QUESTIONS, TWO WINDOWS. This lane already learned the
+ * lesson once and then collapsed it: `NEGATION_OR_PREVENTION_LEAD` is wider
+ * than `NEGATION_LEAD` because one gates MINTING a floor (a false positive
+ * INVENTS a constraint — a lie) and the other gates SUPPRESSION (a false
+ * positive DROPS one — a gap). The same asymmetry applies to the WINDOW, and
+ * folding both into one parameter is what produced the regression below.
+ *
+ *   MINTING's window is the regex adjacency in `NEGATED_FLOOR_PATTERNS`
+ *   itself — the negation must sit next to the verb it negates. It is narrow
+ *   BY CONSTRUCTION and must stay that way; nothing here widens it.
+ *
+ *   SUPPRESSION's window is this function, and it must span PARENTHETICALS
+ *   and INTERRUPTIONS, because a negation still governs a bound it is
+ *   interrupted from.
+ *
+ * ── THE TWO FAILURES THIS FUNCTION SITS BETWEEN, BOTH MEASURED ─────────────
+ *
+ * TOO WIDE A WINDOW (cutting only on `[.!?;]`) suppressed 13/14 legitimate
+ * ceilings, because a negation in a PRECEDING INDEPENDENT CLAUSE reached
+ * forward to a bound it does not govern:
+ *     "There is no scope for overruns, so keep churn under 4%."
+ *
+ * TOO NARROW A WINDOW (also cutting on every bare comma, colon and dash) let
+ * 7/10 genuine floors leak back out as inverted `<=`, because a PARENTHETICAL
+ * severed a negation from the bound it does govern:
+ *     "Do not, under any circumstances, let gross margin drop below 78%."
+ *     "Never, ever let gross margin go below 78%."
+ *     "We must not — and the board is firm on this — let gross margin go below 78%."
+ *
+ * The premise that produced the second failure was written into this file as
+ * fact — "once a clause boundary separates them it governs nothing" — and it is
+ * FALSE for interrupted constructions. A comma is not a clause boundary; it is
+ * a comma.
+ *
+ * ── WHAT ACTUALLY DISCRIMINATES THEM ──────────────────────────────────────
+ * Not punctuation. A NEW FINITE CLAUSE. So:
+ *   1. balanced parentheticals are REMOVED, not cut at — the construction
+ *      resumes on the far side of them;
+ *   2. the window is cut at a colon, an UNPAIRED dash, or a comma FOLLOWED BY A
+ *      CLAUSE-INTRODUCING CONJUNCTION ("so", "yet", "but", …) — each of which
+ *      starts a genuinely new clause;
+ *   3. a BARE comma never cuts, because that is exactly the parenthetical case.
+ *
+ * ⚠ EVERY TERMINATOR REQUIRING `\s` STILL GUARDS TWO NUMBER FORMATS: the
+ * decimal point ("£1.5m") and the thousands separator ("1,500,000"). Dropping
+ * the whitespace requirement re-opens the ROADMAP 2.714 truncation, which is
+ * how that row died.
+ */
+/**
+ * Tokens that, after a comma, genuinely START A NEW CLAUSE — so a negation on
+ * the near side does not govern a bound on the far side.
+ *
+ * ⚠⚠ HAND-MAINTAINED, WITH NOTHING DERIVING OR CHECKING ITS COMPLETENESS.
+ * CLAUDE.md trap 12d: this is a list a human must remember to extend, and its
+ * omissions FAIL SILENTLY AND IN THE GAP DIRECTION — a missing token means the
+ * window is not cut, the negation reaches across, and a real limit is dropped
+ * with no error anywhere. It reads authoritative and is not.
+ *
+ * It has already been short once. The first cut omitted every COORDINATING
+ * conjunction, so `", and"` — the commonest clause join in English — silently
+ * dropped the limit in sentences like
+ * "We will not let quality slip, and we must keep spend under £250,000."
+ * Found by an independent 72-sentence corpus, not by this file's own tests.
+ *
+ * ⚠ WHAT WOULD CATCH THE NEXT OMISSION — and it is NOT another reading of this
+ * list. A minimal-variation probe: hold one sentence frame fixed
+ * ("<negation clause>, <TOKEN> keep churn under 4%") and sweep TOKEN across a
+ * candidate vocabulary drawn from OUTSIDE this file — a conjunction list, or a
+ * real brief corpus. Every token that suppresses the ceiling is a missing
+ * entry. That probe is what found the five coordinators below; re-run it when
+ * this list is next touched, because no amount of staring at it will reveal
+ * what is not written down.
+ *
+ * ⚠ AND EVERY ADDITION IS BIDIRECTIONAL. Widening this list moves the ceiling
+ * gap DOWN and risks moving the floor inversion UP — a token added here stops
+ * suppressing, which is correct for a new clause and WRONG for an interruption
+ * ("Do not, and this is firm, let margin drop below 78%"). Measure both
+ * directions before and after, every time; the interruption cases are pinned in
+ * `negated-bound-polarity.test.ts`.
+ */
+const CLAUSE_INTRODUCER = String.raw`(?:so|yet|but|however|therefore|thus|then|although|whereas|while|and|or|nor|plus|also|meanwhile|additionally|besides|otherwise)`;
+
+function suppressionWindow(
+  brief: string,
+  index: number,
+  consumed: readonly Span[] = [],
+): string {
+  // 0. A negation that ALREADY MINTED a floor is SPENT. In
+  //    "Without letting gross margin drop below 78%, keep churn under 4%."
+  //    the negation produced its own `>=` row; letting it also suppress the
+  //    later, unrelated ceiling drops a real limit for free. Start the window
+  //    after the last floor span that closes before this match begins.
+  let from = 0;
+  for (const [, end] of consumed) {
+    if (end <= index) from = Math.max(from, end);
+  }
+  let head = brief.slice(from, index);
+
+  // 1. Remove BALANCED parentheticals — the construction resumes after them,
+  //    so the negation on the near side still governs the bound on the far
+  //    side. Replaced with a space so word boundaries survive.
+  head = head.replace(/\(([^()]{0,120})\)/g, " ");
+  //    ⚠ THE CLOSING DASH IS A CLASS, NOT A BACKREFERENCE. `\1` required the
+  //    aside to close with the SAME dash character it opened with, so a MIXED
+  //    pair never matched, the aside was never removed, and the negation was
+  //    severed from its bound:
+  //      "We must not – and the board is firm on this — let gross margin drop
+  //       below 35%."  ->  <= 0.35, a confident inversion.
+  //    Word, Google Docs and cross-source pastes produce mixed en/em dashes
+  //    routinely. Widening to `[—–]` cannot widen the ceiling gap either, since
+  //    a same-dash pair still matches exactly as before.
+  head = head.replace(/[—–][^—–]{0,120}[—–]/g, " ");
+  //    COMMA-DELIMITED parentheticals too: a short segment CLOSED by a second
+  //    comma is an interruption, not a new clause. This is what separates
+  //    "Do not, and this is firm, let margin drop below 78%" (closed — the
+  //    negation still governs) from "We will not let quality slip, and we must
+  //    keep spend under £250,000" (never closed — a genuinely new clause).
+  //    Without this, adding the coordinating conjunctions below fixes the
+  //    ceiling gap and re-opens the floor inversion — measured, both ways.
+  head = head.replace(/,\s*[^,]{1,60},/g, " ");
+
+  // 2. Cut at boundaries that genuinely start a new clause.
+  let cut = 0;
+  const boundary = new RegExp(
+    // sentence terminators and the semicolon
+    String.raw`[.!?;]\s` +
+      // a colon introducing a new clause
+      String.raw`|:\s` +
+      // an UNPAIRED dash (any survivor of step 1) introducing a new clause
+      String.raw`|[—–]\s*|\s--?\s` +
+      // a comma ONLY when a clause-introducing conjunction follows it
+      String.raw`|,\s*${CLAUSE_INTRODUCER}\s`,
+    "gi",
+  );
+  for (const m of head.matchAll(boundary)) {
+    cut = Math.max(cut, (m.index ?? 0) + m[0].length);
+  }
+  return head.slice(cut);
+}
+
+/** A half-open character span of the brief already claimed by a stronger reading. */
+type Span = readonly [number, number];
+
+function overlapsClaimed(index: number, length: number, claimed: readonly Span[]): boolean {
+  const end = index + length;
+  return claimed.some(([s, e]) => index < e && s < end);
+}
+
+/**
+ * Extract negated FLOORS, and report the spans they claim.
+ *
+ * The claim is the load-bearing half: "without dropping gross margin below 78%"
+ * contains "gross margin below 78%", which the simple upper-bound pattern reads
+ * as a CEILING. Without the claim the fix would emit the correct floor and the
+ * inverted ceiling side by side, and the model would carry both.
+ */
+function extractNegatedFloorConstraints(brief: string): {
+  constraints: ExtractedGoalConstraint[];
+  claimed: Span[];
+} {
+  const constraints: ExtractedGoalConstraint[] = [];
+  const claimed: Span[] = [];
+
+  for (const pattern of NEGATED_FLOOR_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(brief)) !== null) {
+      const index = match.index ?? 0;
+      // A later, looser pattern must not re-emit a span an earlier one owns.
+      if (overlapsClaimed(index, match[0].length, claimed)) continue;
+
+      // Subject-less form: single capture group (the amount).
+      const hasSubject = match[2] !== undefined;
+      const targetName = hasSubject ? match[1] : "unspecified";
+      const valueStr = hasSubject ? match[2] : match[1];
+      if (!valueStr) continue;
+
+      const { value, unit } = parseValue(valueStr);
+      constraints.push({
+        targetName: targetName.trim(),
+        targetNodeId: generateNodeId(targetName.trim()),
+        operator: ">=",
+        value,
+        unit,
+        label: buildBoundDisplayName(targetName, ">=", valueStr),
+        // ⚠ THE QUOTE KEEPS THE NEGATION. It is shown back to the user as the
+        // evidence for this constraint; a quote with the word that reverses its
+        // meaning removed cannot support the row it is attached to.
+        sourceQuote: match[0].slice(0, 200),
+        confidence: hasSubject ? 0.85 : 0.6,
+        provenance: "explicit",
+        valueFrame: "level",
+      });
+      claimed.push([index, index + match[0].length]);
+    }
+  }
+
+  return { constraints, claimed };
+}
+
+function extractUpperBoundConstraints(
+  brief: string,
+  claimed: readonly Span[] = [],
+): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
   for (const pattern of UPPER_BOUND_PATTERNS) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
+      if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      // ── SUPPRESS RATHER THAN INVERT ────────────────────────────────────
+      // A `below|under` reading whose clause is negated is a FLOOR wearing a
+      // ceiling's words. `NEGATED_FLOOR_PATTERNS` mints the correct row for the
+      // phrasings it recognises; for every phrasing it does not, the honest
+      // output is NOTHING.
+      //
+      // A missing constraint is a gap. An inverted one is scored by ISL
+      // (operator and value survive all 19 hops to the engine) and penalises
+      // precisely the options that honour the limit. We do not attempt to
+      // invert-correctly here — guessing the right operator from arbitrary
+      // English is the 2.714 failure mode, and this estate has the scar.
+      //
+      // Precedent: ROADMAP 2.653 drops rows whose operator is the inverse of
+      // the sentence rather than repairing them.
+      if (
+        /\b(?:below|under)\b/i.test(match[0]) &&
+        NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
+      ) {
+        continue;
+      }
       // Pattern groups vary, normalize them
       let targetName: string;
       let valueStr: string;
@@ -408,13 +717,18 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
 /**
  * Extract lower bound constraints (operator: >=).
  */
-function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] {
+function extractLowerBoundConstraints(
+  brief: string,
+  claimed: readonly Span[] = [],
+): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
   for (const pattern of LOWER_BOUND_PATTERNS) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
+      if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
       let targetName: string;
       let valueStr: string;
 
@@ -1076,15 +1390,47 @@ export function extractCompoundGoals(
   // Extract primary goal
   const primaryGoal = extractPrimaryGoal(brief);
 
-  // Extract all constraint types
-  const upperBound = extractUpperBoundConstraints(brief);
-  const lowerBound = extractLowerBoundConstraints(brief);
+  // Extract all constraint types.
+  //
+  // ⚠ ORDER IS LOAD-BEARING. Negated floors run FIRST and claim their spans, so
+  // the simple `X below Y` reading cannot re-derive an inverted ceiling from the
+  // floor's own words. See NEGATED_FLOOR_PATTERNS.
+  // ⚠⚠ THE SPAN CLAIM IS NO LONGER INDEPENDENTLY OBSERVABLE — SAY SO, DO NOT
+  // LET THE NEXT READER ASSUME IT BITES. Since the clause-level suppression
+  // landed in `extractUpperBoundConstraints`, THREE mutants that disable this
+  // mechanism all SURVIVE the full 133-test suite: removing the claim from the
+  // upper path, from both paths, and removing the intra-floor overlap guard.
+  // The suppression subsumes it, because every phrasing that matches a floor
+  // pattern necessarily carries a `NEGATION_LEAD`, and that set is a subset of
+  // `NEGATION_OR_PREVENTION_LEAD`.
+  //
+  // It is KEPT rather than deleted, and the distinction from the
+  // `dropSubjectlessDuplicates` pass deleted earlier in this PR is deliberate:
+  // that was a no-op pass over results, whereas this is a guard of a DIFFERENT
+  // KIND — positional/structural, where the suppression is lexical. They fail
+  // differently: the suppression fails on a negation word absent from its list
+  // (M13 proves that list is load-bearing), this fails on a phrasing the floor
+  // patterns do not match. CLAUDE.md trap 12d: two guards of different kinds
+  // are not redundant, and neither supersedes the other — ship both.
+  //
+  // ⚠ THE SPAN CLAIM IS ALSO WHAT KILLS THE SUBJECT-LESS DUPLICATE. A first cut
+  // of this fix also carried a `dropSubjectlessDuplicates` pass, on the theory
+  // that B1's `fac_unspecified` row needed its own screen. A mutant that
+  // removed that pass SURVIVED, and probing showed why: with the span claimed,
+  // the subject-optional pattern never matches the floor's words at all, so the
+  // pass had nothing left to drop. It was deleted rather than shipped as
+  // unreachable code with a test that passed vacuously. The property is guarded
+  // by the mutant that removes the claim itself (M7), which REDs.
+  const { constraints: negatedFloors, claimed } = extractNegatedFloorConstraints(brief);
+  const upperBound = extractUpperBoundConstraints(brief, claimed);
+  const lowerBound = extractLowerBoundConstraints(brief, claimed);
   const reduction = extractReductionConstraints(brief);
   const between = extractBetweenConstraints(brief);
   const temporal = extractTemporalConstraints(brief);
 
   // Combine and deduplicate
   let constraints = deduplicateConstraints([
+    ...negatedFloors,
     ...upperBound,
     ...lowerBound,
     ...reduction,

@@ -1384,7 +1384,27 @@ describe("handleUnreachableFactors — prior synthesis from baseline", () => {
     });
   });
 
-  it("falls back to full uncertainty for out-of-range high data.value", () => {
+  /**
+   * ⚠ EXPECTATION CORRECTED (PR1, frontier comparison 2026-08-10). This pin
+   * previously asserted `[0, 1]` for a value above 1, under the label "falls
+   * back to full uncertainty".
+   *
+   * ITS INTENT WAS SOUND AND IS PRESERVED: the old code's clamp produced
+   * `range_min = max(0, 110-55) = 55`, `range_max = min(1, 165) = 1` — an
+   * INVERTED range — and `[0,1]` was the workaround. The fix removes the upper
+   * clamp on ratio scale instead, so the range is `[55, 165]`: not inverted,
+   * and it CONTAINS the baseline it was synthesised from. Non-inversion is now
+   * asserted directly, as an invariant over every branch, in
+   * `stages/repair/__tests__/stated-quantity-survival.test.ts`.
+   *
+   * WHY THE OLD EXPECTATION HAD TO GO: `[0,1]` discards the baseline entirely.
+   * Measured on the deployed B1 capture, that is what turned a stated "NRR
+   * 112%" into a maximum-width prior, which then topped ISL's influence
+   * ranking — the product reporting the user's own figure as the thing it knows
+   * least about. A value above 1 is not a fault to be neutralised; the live
+   * draft prompt mandates it for any ratio that can exceed 100%.
+   */
+  it("synthesises a containing, non-inverted prior for a high data.value", () => {
     const graph = makeGraph({
       nodes: [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -1405,12 +1425,19 @@ describe("handleUnreachableFactors — prior synthesis from baseline", () => {
 
     expect(result.reclassified).toContain("fac_high");
     const highNode = graph.nodes.find((n: any) => n.id === "fac_high");
-    // Out-of-domain (>1) → full uncertainty (guards against inverted ranges)
+    // margin = max(0.1, 110 * 0.5) = 55 → [55, 165]. Same margin doctrine as
+    // every other branch; only the upper clamp (the source of the inversion)
+    // is gone.
     expect(highNode.prior).toEqual({
       distribution: "uniform",
-      range_min: 0.0,
-      range_max: 1.0,
+      range_min: 55,
+      range_max: 165,
     });
+    // The property the original pin actually existed to protect.
+    expect(highNode.prior.range_min).toBeLessThanOrEqual(highNode.prior.range_max);
+    // The property its expectation silently gave up.
+    expect(highNode.prior.range_min).toBeLessThanOrEqual(110);
+    expect(highNode.prior.range_max).toBeGreaterThanOrEqual(110);
   });
 
   it("emits cee.repair.prior_synthesised_from_baseline log event", () => {

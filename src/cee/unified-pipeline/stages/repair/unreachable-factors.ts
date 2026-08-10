@@ -116,21 +116,111 @@ function _findMostCommonOutcomeRiskTarget(
  *
  * Special cases:
  *   - Binary values (exactly 0 or 1): full uncertainty [0.0, 1.0]
- *   - Out-of-domain values (negative or > 1): full uncertainty [0.0, 1.0]
- *     (upstream normalisation should ensure [0,1], but we guard defensively
- *     to avoid inverted range_min > range_max from clamping arithmetic)
- *   - All ranges clamped to [0, 1] since priors are on a normalised scale.
+ *   - Values above 1 are RATIO SCALE, not out-of-domain — see below.
+ *   - Unit-interval ranges clamped to [0, 1].
+ *
+ * ⚠⚠ THE INVARIANT THIS FUNCTION MUST NOT BREAK (PR1 / frontier comparison
+ * 2026-08-10): A SYNTHESISED PRIOR MUST CONTAIN THE VALUE IT WAS SYNTHESISED
+ * FROM. `range_min <= value <= range_max`, always. A distribution whose support
+ * EXCLUDES its own baseline is incoherent by construction, whatever the margin
+ * doctrine says.
+ *
+ * It was broken here, and the cost was measured. This function previously
+ * short-circuited EVERY `value >= 1` to `[0, 1]`, calling it "out-of-domain"
+ * and guarding "defensively" against upstream normalisation failure. But a
+ * value above 1 is not a normalisation failure — the LIVE DRAFT PROMPT
+ * MANDATES it. `prompts/defaults-v187.ts:299` declares, in its MODEL UNIT
+ * TYPES table, "Ratio that can exceed 100% | raw ratio | NRR 110% → 1.10", and
+ * repeats it as a contrastive example (:551-553) with the WRONG encoding
+ * spelled out as `0.11`. So the drafter emits `1.12` for "our NRR is 112%",
+ * exactly as instructed, and this stage then classified that compliant value as
+ * out-of-domain and discarded it.
+ *
+ * The measured consequence on the deployed B1 graph (`fac_nrr`, captured at
+ * `cee/context-integrity/__tests__/fixtures/b1-growth.cold-read.json`): the
+ * user's stated figure became a MAXIMUM-WIDTH `[0,1]` prior; the widest prior
+ * tops ISL's influence ranking; the product then reported NRR as the strongest
+ * driver and served an evidence card asking the user to go and collect the
+ * number they had already given it. **The loss inverts the analysis: what you
+ * told it becomes what it says you don't know.**
+ *
+ * Two scales, and the difference is the whole fix:
+ *   - UNIT-INTERVAL (0 < value < 1): unchanged. Same margin, same [0,1] clamp.
+ *     Every computed number on this path is byte-identical to before.
+ *   - RATIO (value > 1): the same ±50% margin with NO upper clamp, because
+ *     there is no ceiling to clamp to — `DECLARED_SCALE_BOUNDS.ratio` is
+ *     `{min: 0, max: null}` in the vendored contract.
+ *   - value <= 0: `[0, 1]` is retained. It already SATISFIES containment at
+ *     exactly 0, and a negative baseline is a genuine upstream fault this
+ *     function must not paper over by inventing a negative support.
  */
 function synthesisePriorFromBaseline(value: number): { range_min: number; range_max: number } {
-  // Binary or out-of-domain: full uncertainty
-  if (value <= 0 || value >= 1) {
+  // Non-positive: [0,1] already contains 0, and a negative baseline is an
+  // upstream fault, not something to model.
+  if (value <= 0) {
     return { range_min: 0.0, range_max: 1.0 };
   }
   const margin = Math.max(0.1, value * 0.5);
+  // RATIO SCALE. No upper clamp — clamping to 1 is what excluded the baseline.
+  if (value > 1) {
+    return { range_min: Math.max(0, value - margin), range_max: value + margin };
+  }
+  // UNIT INTERVAL. Unchanged doctrine; `value === 1` keeps its [0,1] band,
+  // which contains 1 and therefore already satisfies the invariant.
+  if (value === 1) {
+    return { range_min: 0.0, range_max: 1.0 };
+  }
   return {
     range_min: Math.max(0, value - margin),
     range_max: Math.min(1, value + margin),
   };
+}
+
+/**
+ * The DECLARED scale of a factor's value — stamped by the producer that knows
+ * it, never inferred by a consumer that does not.
+ *
+ * That ruling is the vendored contract's own (`@talchain/schemas` 0.31.0
+ * additive, ROADMAP 2.193, the fix path for 2.159): the #766 review proved no
+ * derivation from the CURRENT VALUE can be sound in either direction, because
+ * a `0` or a `1` is a legal raw count AND a legal proportion. So a classifier
+ * cannot be built from the value alone — but a PRODUCER that also holds the
+ * unit and the normalisation cap can declare it, and this stage holds both.
+ *
+ * ⚠ FAIL OPEN, AND ONLY HERE. Absence means UNDECLARED, which is every graph
+ * drafted before the field existed. Where this producer does not know the
+ * scale it stamps NOTHING — a defaulted declaration is a manufactured
+ * attestation, and the contract is explicit that a consumer must not read
+ * absence as `unit_interval`.
+ *
+ * Returns a `DeclaredScale` literal or undefined. Deliberately NOT typed
+ * against a local string union: the vocabulary belongs to the contract.
+ */
+function declaredScaleOf(
+  value: number,
+  unit: string | undefined,
+  cap: number | undefined,
+  rawValue: number | undefined,
+): "unit_interval" | "ratio" | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  // A percentage-style metric carrying a value above 1 is the ratio case the
+  // draft prompt mandates ("can this metric meaningfully exceed 100%?").
+  if (unit === "%" && value > 1) return "ratio";
+  const inUnitInterval = value >= 0 && value <= 1;
+  if (!inUnitInterval) return undefined;
+  // NORMALISATION EVIDENCE, not a guess about the value. The enricher mints
+  // `value = raw_value / cap` and stores all three together
+  // (`factor-extraction/enricher.ts`), so EITHER a cap, OR a raw magnitude that
+  // differs from the value, is a producer-side fact that this value is a
+  // proportion. The contract's warning (2.193) is that the VALUE ALONE cannot
+  // be classified — a bare `0` or `1` is a legal count and a legal proportion.
+  // The relationship between value and raw_value is different evidence, and it
+  // is the evidence this producer actually holds.
+  if (cap !== undefined) return "unit_interval";
+  if (rawValue !== undefined && rawValue !== value) return "unit_interval";
+  // A percentage within the unit interval is a proportion.
+  if (unit === "%") return "unit_interval";
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +315,94 @@ export function handleUnreachableFactors(
       }
       if (data.encoding_map !== undefined) {
         (node as any).encoding_map = data.encoding_map;
+      }
+
+      // ── THE STATED QUANTITY SURVIVES (PR1 / frontier comparison 2026-08-10) ──
+      //
+      // `data` is deleted a few lines below, and the user's own figure went
+      // with it. Measured on the deployed captures: EVERY reclassified factor
+      // in all three trace briefs reached the wire with `unit=undefined
+      // raw_value=undefined`, which is why the canvas rendered "Current ARR —
+      // Range: 0.28 to 0.84" for a stated £11.2m and "Available Cash — Range
+      // 0.31 to 0.93" for a stated £3.1m. A user cannot recognise their own
+      // business in a normalised 0–1 factor.
+      //
+      // These promote to NODE level for the same reason `factor_type` and
+      // `uncertainty_drivers` already do: the V1→V3 transform rebuilds the node
+      // FIELD BY FIELD (`transforms/schema-v3.ts:197`), so anything left on a
+      // deleted `data` is dropped with no error anywhere. `raw_value`, `cap`
+      // and `unit` are all declared on the shared node schema, so they survive
+      // the strict re-parse.
+      //
+      // ⚠ NONE OF THIS READS THE BRIEF. Every value here was already extracted
+      // by the pipeline and is merely being carried instead of deleted. Reading
+      // a number out of free-brief prose and presenting it back as the user's
+      // own statement is the ROADMAP 2.714 defect class, reverted 8 Aug 2026
+      // and guarded by `transforms/__tests__/no-brief-derived-user-override.writers.test.ts`.
+      if (data.raw_value !== undefined) {
+        (node as any).raw_value = data.raw_value;
+      }
+      if (data.cap !== undefined) {
+        (node as any).cap = data.cap;
+      }
+
+      const scale = declaredScaleOf(originalValue ?? NaN, data.unit, data.cap, data.raw_value);
+      if (scale !== undefined) {
+        (node as any).declared_scale = scale;
+      }
+
+      // ⚠ THE UNIT IS WITHHELD ON RATIO SCALE, DELIBERATELY, AND IT IS RECORDED.
+      //
+      // `schema-v3.ts:411` reads node-level `unit` to synthesise an external
+      // factor's display string, and `factor-extraction/display-value.ts`
+      // resolves a '%' bound by MAGNITUDE SNIFF: `n >= 0 && n <= 1 ? n * 100 : n`.
+      // On a ratio-scale prior of [0.56, 1.68] that renders "56% to 1.68%" —
+      // replacing a silent omission with a confidently wrong number, which is
+      // the worse of the two defects. The '%' unit has meant two different
+      // things in this estate (fraction vs percentage points) and has already
+      // cost real defects; the ruling is producer-side disambiguation, and the
+      // producer-side answer is `declared_scale` above.
+      //
+      // So: stamp the scale and withhold the rendering. The formatter fix
+      // belongs in `display-value.ts`, which is frozen for this lane.
+      //
+      // ⚠⚠ THE WITHHOLDING IS TELEMETRY-ONLY TODAY — IT IS NOT USER-VISIBLE,
+      // AND AN EARLIER VERSION OF THIS COMMENT CLAIMED OTHERWISE.
+      //
+      // `boundary.ts:104` filters deterministic repairs through
+      // `REPAIR_CODE_TO_ADJUSTMENT`, a hand-maintained allowlist carrying
+      // exactly one entry (`UNREACHABLE_FACTOR_RECLASSIFIED`). This code is not
+      // on it, so it never becomes a `model_adjustments` row and the user never
+      // sees it. The channel itself is live (the allowlisted code appears 33x in
+      // a real deployed capture); this code simply is not on it.
+      //
+      // It DOES ride three carriers, and naming only one understates them:
+      //   - `ctx.deterministicRepairs` (the in-process array)
+      //   - `trace.repair_summary.deterministic_repairs`
+      //   - `pipelineOutcome.repair_provenance`
+      // All three are TELEMETRY — diagnostic surfaces engineers read — so the
+      // class claim ("not user-visible") holds exactly as stated.
+      //
+      // Putting it on the channel is NOT a local edit: `ModelAdjustmentCode` is
+      // a CLOSED 5-value enum in the shared contract, so a new code is a
+      // four-repo train. Rowed separately rather than smuggled into this PR.
+      //
+      // Until then the honest description of this branch is: the value is
+      // preserved, the scale is declared, the rendering is suppressed, and the
+      // suppression is recorded where engineers can see it and users cannot.
+      const withholdUnit = scale === "ratio";
+      if (data.unit !== undefined && !withholdUnit) {
+        (node as any).unit = data.unit;
+      } else if (data.unit !== undefined && withholdUnit) {
+        repairs.push({
+          code: "STATED_UNIT_WITHHELD_RATIO_SCALE",
+          path: `nodes[${node.id}].unit`,
+          action:
+            `Stated unit "${data.unit}" withheld from display on ratio-scale factor ` +
+            `"${node.label ?? node.id}" (value ${originalValue}): the '%' formatter ` +
+            `resolves bounds by magnitude and would render this range as a fraction. ` +
+            `declared_scale="ratio" is stamped; the value is preserved, not dropped.`,
+        });
       }
       // If remaining data has no semantically valid union key, remove the property
       // so DraftGraphOutput.parse() doesn't fail on a partial object.
