@@ -535,17 +535,30 @@ export function classifyEditIntent(editDescription: string): EditIntentCategory 
 // Constraint Detection
 // ============================================================================
 
+/**
+ * ROADMAP 2.1041 — detection only. This result deliberately carries NO
+ * constraint object.
+ *
+ * It used to carry `{ node_id, type: 'threshold', threshold, direction, label }`,
+ * which the branch below wrote onto the goal node. That object could never have
+ * become a constraint: `GoalConstraintSchema` requires `constraint_id`,
+ * `operator` and `value`, and none of the three were produced — while `type`,
+ * `threshold` and `direction` are not contract fields at all. It was written to
+ * a NODE, whereas PLoT is fed from the TOP-LEVEL `graph.goal_constraints`
+ * (build-turn-context.ts), and nothing in the repo reads `.threshold` or
+ * `.direction` off a constraint. The user was nonetheless told the constraint
+ * "would be added".
+ *
+ * `PatchOperation` has no top-level graph op (types.ts — node and edge ops
+ * only), so this lane structurally cannot write `graph.goal_constraints`.
+ * Constraints are served by the D1 `add_constraint` handler, reached when
+ * value-update-gate clause D suppresses edit dispatch. Detection is kept so the
+ * turn does not fall through to the composition LLM (which would invent a node
+ * instead); everything downstream of it is now a truthful refusal.
+ */
 interface ConstraintDetectionResult {
-  goalId: string;
+  /** Label of the factor/risk/outcome the user named, for the refusal copy. */
   factorLabel: string;
-  existingConstraints: unknown[];
-  newConstraint: {
-    node_id: string;
-    type: 'threshold';
-    threshold?: number;
-    direction?: 'below' | 'above';
-    label?: string;
-  };
 }
 
 /**
@@ -577,19 +590,22 @@ function detectConstraintIntent(
   const thresholdMatch = msg.match(/(\d+(?:\.\d+)?)\s*%/);
   if (!thresholdMatch) return null;
 
-  const threshold = parseFloat(thresholdMatch[1]) / 100;
   const thresholdPosition = thresholdMatch.index!;
 
-  // Find goal node
+  // Find goal node. Retained from the original detection breadth so this change
+  // alters ONLY what happens after detection, never which utterances land here.
   const nodes = graph.nodes ?? [];
   const goalNode = nodes.find((n) => (n as Record<string, unknown>).kind === 'goal');
   if (!goalNode) return null;
-  const goalId = (goalNode as Record<string, unknown>).id as string;
 
-  // Determine direction
-  const belowPattern = /\b(under|below|less than|at most)\b/;
-  const abovePattern = /\b(above|over|more than|at least)\b/;
-  const direction = belowPattern.test(msg) ? 'below' as const : abovePattern.test(msg) ? 'above' as const : 'below' as const;
+  // NOTE — direction inference deliberately REMOVED (ROADMAP 2.1041).
+  // It read the first bare direction word in the message, so a FLOOR phrased
+  // with "below" ("keep gross margin from dropping below 78%", verbatim shape
+  // from frozen brief B1) was stamped as a CEILING. An inverted floor, if ever
+  // enforced, penalises exactly the options that honour it. The ruling is
+  // suppress rather than invert: where direction cannot be determined
+  // confidently, emit nothing and say so. This lane emits nothing either way,
+  // so it must not carry a direction it has no way to validate.
 
   // Match a factor/risk/outcome from the graph.
   // Score candidates by number of matching label words to pick the best match.
@@ -617,25 +633,36 @@ function detectConstraintIntent(
   candidates.sort((a, b) => b.score - a.score);
   const matchedFactor = candidates[0];
 
-  // Build constraint label
-  const constraintLabel = `${matchedFactor.label} ${direction === 'below' ? '<' : '>'} ${(threshold * 100).toFixed(0)}%`;
+  return { factorLabel: matchedFactor.label };
+}
 
-  // Read existing goal_constraints
-  const rawConstraints = (goalNode as Record<string, unknown>).goal_constraints;
-  const existingConstraints = Array.isArray(rawConstraints) ? rawConstraints : [];
-
-  return {
-    goalId,
-    factorLabel: matchedFactor.label,
-    existingConstraints,
-    newConstraint: {
-      node_id: matchedFactor.id,
-      type: 'threshold',
-      threshold,
-      direction,
-      label: constraintLabel,
-    },
-  };
+/**
+ * The truthful receipt shipped instead of the false "would be added" claim.
+ *
+ * Three things it must do, each learned from a live defect:
+ *  1. say the limit was NOT applied (the user otherwise believes a hard limit
+ *     is protecting them);
+ *  2. state the ANALYSIS consequence (a bare apology still leaves them thinking
+ *     the number is guarded);
+ *  3. offer a phrasing that the REAL router sends to the sanctioned
+ *     `add_constraint` handler — a call-to-action that terminates in refusal is
+ *     the defect one layer over.
+ *
+ * The quoted example is direction-free and value-free on purpose: restating the
+ * limit in a message this lane does not serve is what lets the D1 handler
+ * extract `operator` and `value` under the contract, rather than this lane
+ * guessing a direction it has already been shown to get backwards.
+ *
+ * Wording is swept in this module's spec against `findSuccessClaimHit`, so it
+ * cannot drift into commit-claim language.
+ */
+function buildConstraintNotAppliedText(factorLabel: string): string {
+  return (
+    `I couldn't apply that limit on **${factorLabel}** — this lane can't register a ` +
+    'constraint, so nothing was saved and the analysis will not score against it. ' +
+    'Ask for it as a constraint in one message, including the limit and which ' +
+    `direction it runs — for example: "add a constraint on ${factorLabel}".`
+  );
 }
 
 function buildIntentInstruction(intentCategory: EditIntentCategory): string | null {
@@ -1965,45 +1992,34 @@ export async function handleEditGraph(
   });
 
   // ── Constraint shortcut ────────────────────────────────────────────────
-  // Constraints (keep X under/below Y, hard requirement) can't be expressed
-  // as standard patch operations. Detect and construct goal_constraints update
-  // deterministically instead of falling through to the edit_graph LLM.
-  // Same reasoning as `resolutionMode` above: the constraint shortcut composes
-  // operations from the SENTENCE, so it must not pre-empt a batch that has
-  // already been composed and grounded.
+  // Constraints ("keep X under Y", hard requirement) cannot be expressed as
+  // patch operations — `PatchOperation` has node and edge ops only, and PLoT is
+  // fed from the TOP-LEVEL `graph.goal_constraints`, which no patch op can
+  // reach. This branch therefore does NOT apply a constraint and no longer
+  // pretends to (ROADMAP 2.1041).
+  //
+  // It still INTERCEPTS, for one reason: falling through would hand the
+  // utterance to the composition LLM, which expresses "keep churn under 5%" as
+  // the only thing it can — an invented node or a mangled value edit. A
+  // truthful refusal beats a confident wrong edit.
+  //
+  // Same reasoning as `resolutionMode` above: this branch reads the SENTENCE,
+  // so it must not pre-empt a batch that has already been composed and grounded.
   const constraintMatch = preComposedOperations !== null
     ? null
     : detectConstraintIntent(editDescription, context.graph);
   if (constraintMatch) {
-    branchTaken = 'apply';
-    branchReason = 'constraint_shortcut';
-    const ops: PatchOperation[] = [{
-      op: 'update_node',
-      path: constraintMatch.goalId,
-      value: {
-        goal_constraints: [...constraintMatch.existingConstraints, constraintMatch.newConstraint],
-      },
-    }];
-    setOpsTelemetry(ops);
-    validationOutcome = 'constraint_shortcut';
+    branchTaken = 'clarify';
+    branchReason = 'constraint_not_supported_on_edit_lane';
+    // No operations: nothing is written, so nothing may be claimed. This also
+    // arms the V5 H5 invariant (zero ops + no applied graph ⇒ any success-claim
+    // language is rewritten) as a second net under the copy below.
+    setOpsTelemetry([]);
+    validationOutcome = 'constraint_not_supported';
 
-    // Skip PLoT validation for constraint-only updates (no structural change)
-    const constraintLabel = constraintMatch.newConstraint.label ?? constraintMatch.factorLabel;
     return {
-      blocks: [createGraphPatchBlock(
-        {
-          patch_type: 'edit',
-          operations: ops,
-          status: 'proposed',
-          auto_apply: false,
-          applied_graph_hash: baseGraphHash,
-        },
-        turnId,
-        undefined,
-        undefined,
-        'tool:edit_graph',
-      )],
-      assistantText: `Constraint **${constraintLabel}**${constraintMatch.newConstraint.threshold != null ? ` (threshold: ${constraintMatch.newConstraint.threshold})` : ''} would be added.`,
+      blocks: [],
+      assistantText: buildConstraintNotAppliedText(constraintMatch.factorLabel),
       latencyMs: Date.now() - startTime,
       appliedGraph: null,
       wasRejected: false,
