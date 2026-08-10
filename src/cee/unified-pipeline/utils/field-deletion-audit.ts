@@ -23,7 +23,49 @@ export const MAX_FIELD_DELETIONS_PER_STAGE = 50;
 // Types
 // =============================================================================
 
-export interface FieldDeletionEvent {
+/**
+ * What a deletion REMOVED — the field this audit was missing.
+ *
+ * ⚠ AN AUDIT THAT RECORDS THAT A DELETION HAPPENED BUT NOT WHAT WAS DELETED
+ * CANNOT SUPPORT ANY HONEST STATEMENT TO THE USER, AND CANNOT BE TESTED FOR
+ * CORRECTNESS. It is trap 13's shape at the instrument level: an absence is
+ * recorded with no way to prove what the absence is of. Measured consequence
+ * (CEE build `32f06dd`, deployed capture 2026-08-10): `fac_support_cost` lost a
+ * £1.8m baseline to `UNREACHABLE_FACTOR_RECLASSIFIED` and the user's receipt
+ * said only that the category had changed.
+ *
+ * ⚠ EVERY FIELD HERE IS COPIED OUT OF THE PAYLOAD BEING MUTATED. Nothing in
+ * this module reads the brief, and nothing may. ROADMAP 2.714 shipped a limb
+ * that read a number out of free-brief prose and stamped it with the user's own
+ * provenance (PR #853); it was measured committing values 10^6x wrong, values
+ * the user had NEGATED, and values bound to the WRONG NODE, and was reverted 54
+ * minutes later (#856). Reporting what the pipeline itself held is a different
+ * act from re-reading what the user wrote, and only the first is safe.
+ */
+export interface PreviousFieldState {
+  /** The value as the pipeline held it — usually cap-normalised, not a magnitude. */
+  previous_value?: unknown;
+  /** The un-normalised magnitude, when the node carried one (e.g. 1800000). */
+  previous_raw_value?: number;
+  /** The unit that gave the magnitude its meaning (e.g. '£', '%'). */
+  previous_unit?: string;
+  /** The cap the value was normalised against, when present. */
+  previous_cap?: number;
+  /**
+   * The provenance the node carried BEFORE the mutation relabelled it.
+   * ⚠ Read as a record of what the pipeline claimed, never as proof the user
+   * said it: `brief_extraction` is a DEFAULT stamp applied to anything the
+   * drafter did not self-declare as inferred, so it OVER-CLAIMS (ROADMAP 2.743).
+   */
+  previous_provenance?: string;
+  /**
+   * The Stated Ledger item this value came from — S3, unbuilt. NULL, always,
+   * until a ledger exists. A minted id with no referent is worse than none.
+   */
+  stated_item_id?: string | null;
+}
+
+export interface FieldDeletionEvent extends PreviousFieldState {
   /** Pipeline stage that performed the deletion */
   stage: string;
   /** Node ID on which the field was deleted */
@@ -69,14 +111,30 @@ export const FIELD_DELETION_REASON_DESCRIPTIONS: Record<FieldDeletionReason, str
 
 /**
  * Create a FieldDeletionEvent. Convenience to avoid typos in inline construction.
+ *
+ * `previous` is OPTIONAL and OMITTED KEYS ARE NOT EMITTED, so every call site
+ * that does not pass it produces the byte-identical event it produced before —
+ * `trace.field_deletions` consumers see no change until a stage opts in.
  */
 export function fieldDeletion(
   stage: string,
   nodeId: string,
   field: string,
   reason: FieldDeletionReason,
+  previous?: PreviousFieldState,
 ): FieldDeletionEvent {
-  return { stage, node_id: nodeId, field, reason };
+  const event: FieldDeletionEvent = { stage, node_id: nodeId, field, reason };
+  if (previous === undefined) return event;
+  // Assign only what is actually known. A key present with `undefined` reads as
+  // "we looked and there was nothing"; an absent key reads as "we did not
+  // look". Those are different claims and must not collapse.
+  if ("previous_value" in previous) event.previous_value = previous.previous_value;
+  if (previous.previous_raw_value !== undefined) event.previous_raw_value = previous.previous_raw_value;
+  if (previous.previous_unit !== undefined) event.previous_unit = previous.previous_unit;
+  if (previous.previous_cap !== undefined) event.previous_cap = previous.previous_cap;
+  if (previous.previous_provenance !== undefined) event.previous_provenance = previous.previous_provenance;
+  if ("stated_item_id" in previous) event.stated_item_id = previous.stated_item_id ?? null;
+  return event;
 }
 
 /**

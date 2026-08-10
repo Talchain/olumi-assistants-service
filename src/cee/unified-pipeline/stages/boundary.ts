@@ -16,6 +16,9 @@ import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
 import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
+// The CONTRACT's own type, not a local restatement. `before` is declared here
+// and has never been populated on the deterministic-sweep path (S2).
+import type { ModelAdjustmentT } from "../../../schemas/analysis-ready.js";
 import { computeDiagnosticChecks } from "../../observability/diagnostic-checks.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 
@@ -105,18 +108,49 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
         UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
       };
 
+      // ── THE PRESERVATION CONTRACT REACHES THE RECEIPT HERE (S2) ────────
+      // `ModelAdjustment.before` is DECLARED in the shared contract
+      // (`schemas/analysis-ready.ts:200`) and has never been populated on this
+      // path. A field declared in a strict block with no projection line is
+      // this estate's named P0 shape — the value crosses no seam and the user
+      // learns nothing. These four lines are that projection.
+      //
+      // ⚠ ID VALIDATION, mirroring what `graph-validator.ts:1407-1420` already
+      // does for `widening_log.elements_added`: an adjustment naming a node
+      // that is not in `nodes[]` points the user at nothing. `widening_log`
+      // guards against the model INVENTING elements; this guards the same
+      // shape in the loss direction. Same check, opposite harm.
+      const liveNodeIds = new Set<string>(
+        (Array.isArray((v3Body as any)?.nodes) ? (v3Body as any).nodes : [])
+          .map((n: any) => n?.id)
+          .filter((id: unknown): id is string => typeof id === "string"),
+      );
+
       const repairAdjustments = (ctx.deterministicRepairs ?? [])
         .filter((r) => r.code in REPAIR_CODE_TO_ADJUSTMENT)
         .map((r) => {
           // Extract node_id from path format "nodes[fac_x].category"
           const nodeIdMatch = r.path.match(/^nodes\[([^\]]+)\]/);
-          return {
-            code: REPAIR_CODE_TO_ADJUSTMENT[r.code],
-            node_id: nodeIdMatch?.[1],
+          const nodeId = nodeIdMatch?.[1];
+          const resolved = nodeId !== undefined && liveNodeIds.has(nodeId);
+          const adjustment: ModelAdjustmentT = {
+            code: REPAIR_CODE_TO_ADJUSTMENT[r.code]!,
+            // An id that resolves to nothing is worse than no id: it invites a
+            // consumer to highlight a node that is not there.
+            node_id: resolved ? nodeId : undefined,
             field: r.path,
             reason: r.action,
             source: "deterministic_sweep" as const,
           };
+          // The magnitude first — it is what a reader recognises. The
+          // normalised value is the fallback, and only when there is no
+          // magnitude to prefer.
+          if (r.deleted_raw_value !== undefined) {
+            adjustment.before = r.deleted_raw_value;
+          } else if (r.deleted_value !== undefined) {
+            adjustment.before = r.deleted_value;
+          }
+          return adjustment;
         });
 
       if (!v3Body.analysis_ready.model_adjustments) {

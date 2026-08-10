@@ -32,6 +32,21 @@ export interface UnreachableFactorRepair {
   prior_synthesised?: boolean;
   /** The synthesised prior range (only present when prior_synthesised is true) */
   synthesised_range?: { range_min: number; range_max: number };
+
+  // ── THE PRESERVATION CONTRACT (S2) ───────────────────────────────────────
+  // A stage may TRANSFORM a value; it may not DELETE one without declaring
+  // what it removed, in a form that reaches the user's receipt.
+  //
+  // These three fields exist so `boundary.ts` can fill `ModelAdjustment.before`
+  // — a field DECLARED in the shared contract (`schemas/analysis-ready.ts:200`)
+  // that this path has never populated. A declared field with no projection
+  // line is the estate's named P0 shape, and this is the line.
+  /** `data.value` as held at deletion — cap-normalised, NOT a magnitude. */
+  deleted_value?: number;
+  /** The magnitude the normalised value stood for (e.g. 1800000). */
+  deleted_raw_value?: number;
+  /** The unit that made the magnitude meaningful (e.g. '£'). */
+  deleted_unit?: string;
 }
 
 export interface UnreachableFactorResult {
@@ -154,6 +169,39 @@ function _findMostCommonOutcomeRiskTarget(
  *     exactly 0, and a negative baseline is a genuine upstream fault this
  *     function must not paper over by inventing a negative support.
  */
+/**
+ * Render a magnitude the way the user would recognise it, or NULL.
+ *
+ * NULL is a first-class answer: with no magnitude, or no unit to give one
+ * meaning, there is nothing honest to show and the receipt stays quiet.
+ *
+ * ⚠ NO `toLocaleString`. Its grouping depends on the host's ICU data and
+ * default locale, so the same input can render `1,800,000` on one box and
+ * `1 800 000` on another — a user-visible string that differs by deployment
+ * environment is untestable by construction. Grouping is done explicitly.
+ */
+export function formatStatedMagnitude(
+  rawValue: number | undefined,
+  unit: string | undefined,
+): string | null {
+  if (rawValue === undefined || !Number.isFinite(rawValue)) return null;
+  if (unit === undefined || unit.length === 0) return null;
+
+  const negative = rawValue < 0;
+  const abs = Math.abs(rawValue);
+  // Keep at most two decimals, then drop a trailing ".00"/".x0".
+  const fixed = Number.isInteger(abs) ? String(abs) : abs.toFixed(2).replace(/\.?0+$/, "");
+  const [whole, fraction] = fixed.split(".");
+  const grouped = (whole ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const digits = `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+
+  // '%' is a suffix; a currency SYMBOL is a prefix; an alphabetic unit
+  // ('users', 'months') reads as a suffixed word.
+  if (unit === "%") return `${digits}%`;
+  if (/^[^\p{L}\p{N}\s]{1,3}$/u.test(unit)) return `${unit}${digits}`;
+  return `${digits} ${unit}`;
+}
+
 function synthesisePriorFromBaseline(value: number): { range_min: number; range_max: number } {
   // Non-positive: [0,1] already contains 0, and a negative baseline is an
   // upstream fault, not something to model.
@@ -301,8 +349,32 @@ export function handleUnreachableFactors(
     // violation. factor_type, uncertainty_drivers, and extractionType are metadata
     // fields that remain useful for downstream enrichment. Promote them to node level
     // (NodeV3 passthrough preserves them) before potentially removing data.
+    // Everything the deletion is about to destroy, captured BEFORE the delete.
+    // Read off the payload only — no brief, no prose, no re-extraction.
+    const priorState = {
+      previous_value: data?.value as unknown,
+      previous_raw_value: typeof data?.raw_value === "number" ? data.raw_value : undefined,
+      previous_unit: typeof data?.unit === "string" ? data.unit : undefined,
+      previous_cap: typeof data?.cap === "number" ? data.cap : undefined,
+      previous_provenance:
+        typeof (node as any).provenance === "string" ? (node as any).provenance : undefined,
+      // S3 is unbuilt. NULL is the only honest value; a minted id with no
+      // referent is a fabrication wearing an identifier.
+      stated_item_id: null,
+    };
+
     if (data) {
-      if (data.value !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.value', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
+      if (data.value !== undefined) {
+        deletions.push(
+          fieldDeletion(
+            'unreachable-factors',
+            node.id,
+            'data.value',
+            'UNREACHABLE_FACTOR_RECLASSIFIED',
+            priorState,
+          ),
+        );
+      }
       delete data.value;
       if (data.factor_type !== undefined) {
         (node as any).factor_type = data.factor_type;
@@ -413,7 +485,15 @@ export function handleUnreachableFactors(
       const hasOperator = typeof data.operator === 'string';
       const hasValue = typeof data.value === 'number';
       if (!hasInterventions && !hasOperator && !hasValue) {
-        deletions.push(fieldDeletion('unreachable-factors', node.id, 'data', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
+        deletions.push(
+          fieldDeletion(
+            'unreachable-factors',
+            node.id,
+            'data',
+            'UNREACHABLE_FACTOR_RECLASSIFIED',
+            priorState,
+          ),
+        );
         delete (node as any).data;
       }
     }
@@ -446,6 +526,47 @@ export function handleUnreachableFactors(
         range_min,
         range_max,
       }, `Synthesised prior for reclassified factor "${node.id}" from baseline ${originalValue}`);
+    }
+
+    // ── THE DECLARATION (S2) ─────────────────────────────────────────────
+    // What this repair destroyed, carried on the record that already reaches
+    // the user (`boundary.ts:100-105` → `analysis_ready.model_adjustments`).
+    // Until now that surface said only that the category had moved, while a
+    // figure the user recognises was removed from the maths in silence.
+    if (originalValue !== undefined) repair.deleted_value = originalValue;
+    if (priorState.previous_raw_value !== undefined) {
+      repair.deleted_raw_value = priorState.previous_raw_value;
+    }
+    if (priorState.previous_unit !== undefined) {
+      repair.deleted_unit = priorState.previous_unit;
+    }
+
+    // The SENTENCE is emitted only when there is a magnitude a reader can
+    // recognise. A bare normalised `0.72` told back to a user is noise, and
+    // over-declaration that makes the receipt unreadable is a real cost
+    // (design §8.2 risk 4) — so the AUDIT records everything and the RECEIPT
+    // speaks only when it has something meaningful to say.
+    const shownFigure = formatStatedMagnitude(
+      priorState.previous_raw_value,
+      priorState.previous_unit,
+    );
+    if (shownFigure !== null) {
+      // ⚠ PHRASING IS LOAD-BEARING TWICE OVER.
+      //
+      // (1) It must not attribute the figure to the user. The pipeline
+      //     extracted it; `provenance: "brief_extraction"` is a DEFAULT stamp
+      //     that over-claims (ROADMAP 2.743), and the whole 2.714 revert was
+      //     about a surface telling users the system's reading was their own.
+      //
+      // (2) It must survive the DEPLOYED UI's `sanitiseDetail()`
+      //     (`ModelAdjustments.tsx` at UI `7b5992fc`), which strips
+      //     parenthesised bare numbers, quoted lowercase tokens and the prior
+      //     clause before rendering. A figure written as "(1800000)" would be
+      //     DELETED there and the user would read a sentence with a hole in
+      //     it — worse than saying nothing. Pinned control in the spec.
+      repair.action +=
+        `. The extracted value ${shownFigure} is not used in the maths` +
+        ` — the range shown is a placeholder`;
     }
 
     repairs.push(repair);
