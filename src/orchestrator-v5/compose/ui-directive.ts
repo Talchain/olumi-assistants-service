@@ -48,6 +48,7 @@ import {
   type GraphNodeRef,
 } from './phase3-blocks.js';
 import { selectLens, type LensId } from './lens-selector.js';
+import type { JudgementSignals } from './judgement-signals.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
@@ -272,6 +273,7 @@ function buildRunAnalysisDirective(
   lookup: GraphNodeLookup,
   freshBlocks: OlumiResponse['blocks'],
   previousAnalysisLens?: LensId | null,
+  judgementSignals?: JudgementSignals,
 ): UiDirectiveBlock | null {
   if (fact.noop) return suppressDirective('run_analysis', 'noop');
 
@@ -288,6 +290,9 @@ function buildRunAnalysisDirective(
     const selection = selectLens(fact, {
       ...liveLensExecutorAvailability(),
       previousAnalysisLens: previousAnalysisLens ?? null,
+      // ROADMAP 2.692 slice 2 — spread-if-present so the options object stays
+      // byte-identical for unthreaded callers.
+      ...(judgementSignals !== undefined ? { judgementSignals } : {}),
     });
     const subjectRef = selection?.subjectRef;
     if (subjectRef !== undefined) {
@@ -598,10 +603,15 @@ export function buildFocusInspectorDirective(
   freshBlocks: OlumiResponse['blocks'],
   previousAnalysisLens?: LensId | null,
   rawPersistedGraph?: unknown,
+  // ROADMAP 2.692 slice 2 — the SAME judgement feed compose handed the lens
+  // surface, so this module's second `selectLens` derivation of the turn
+  // cannot disagree with the card about which lens won (the trap-12/16 rule
+  // this file already states for `previousAnalysisLens`).
+  judgementSignals?: JudgementSignals,
 ): UiDirectiveBlock | null {
   switch (fact.fact_type) {
     case 'run_analysis':
-      return buildRunAnalysisDirective(fact, lookup, freshBlocks, previousAnalysisLens);
+      return buildRunAnalysisDirective(fact, lookup, freshBlocks, previousAnalysisLens, judgementSignals);
     case 'set_factor_value':
     case 'adjust_edge_strength':
       return buildMutationInspectorDirective(fact, lookup);

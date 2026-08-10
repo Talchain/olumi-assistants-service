@@ -116,6 +116,21 @@ export const GUIDANCE_SIGNAL_CODES = {
   /** coaching `strengthen` — an LLM-identified area to reinforce. Legacy twin:
    *  reuses the guidance-item.ts STRENGTHEN_ITEM value. (No live V5 emitter today.) */
   STRENGTHEN_ITEM: 'STRENGTHEN_ITEM',
+  /** coaching `strengthen` (override_stress_test lens, ROADMAP 2.692 slice 2 /
+   *  2.690 CH-1) — detector class: a USER-SET judgement receipt. The item is
+   *  generated from an `edge_adjudication` fact with `verdict: 'overridden'`
+   *  that no analysis has yet absorbed (I-B5 fact ordering). Its provenance is
+   *  the user's own override, not any producer computation — a distinct signal
+   *  class, per this module's rule that `signal_code` names the DETECTOR, never
+   *  the block kind. */
+  OVERRIDE_UNANSWERED: 'OVERRIDE_UNANSWERED',
+  /** coaching `strengthen` (disagreement_resolution lens, ROADMAP 2.692 slice 2)
+   *  — detector class: the two-pass validation pipeline's CONTESTED verdict
+   *  (`edges[].validation.status === 'contested'`) joined with the absence of
+   *  any `edge_adjudication` fact for the same edge. The same producer signal
+   *  class the UI's calibration tray / contested cards key on, so a consumer
+   *  can group the turn nudge with the Model-tab surface. */
+  UNRESOLVED_DISAGREEMENT: 'UNRESOLVED_DISAGREEMENT',
 } as const;
 
 export type GuidanceSignalCode = (typeof GUIDANCE_SIGNAL_CODES)[keyof typeof GUIDANCE_SIGNAL_CODES];
@@ -349,5 +364,28 @@ export function fragileEdgeOfferSignals(): GuidanceSignalsWithProvenance {
       guidanceSignalsForCoachingKind('strengthen').category,
     ),
     ...provenanceOf(GUIDANCE_SIGNAL_CODES.FRAGILE_RESULT),
+  };
+}
+
+/**
+ * ROADMAP 2.692 slice 2 — signals for the two JUDGEMENT lenses. Same shape and
+ * same reasoning as {@link fragileEdgeOfferSignals}: the offers ride the
+ * existing `strengthen` coaching kind (zero schema change, withheld-safe by
+ * construction), the CATEGORY/PRIORITY derive from that kind through the single
+ * source above, and the `signal_code` names the DETECTOR class — the judgement
+ * receipt (T1) or the validation pipeline's contested verdict (T2) — never the
+ * block kind, which is the invented-code defect this module exists to kill.
+ */
+export function overrideStressTestSignals(): GuidanceSignalsWithProvenance {
+  return {
+    ...signalsOf(guidanceSignalsForCoachingKind('strengthen').category),
+    ...provenanceOf(GUIDANCE_SIGNAL_CODES.OVERRIDE_UNANSWERED),
+  };
+}
+
+export function disagreementResolutionSignals(): GuidanceSignalsWithProvenance {
+  return {
+    ...signalsOf(guidanceSignalsForCoachingKind('strengthen').category),
+    ...provenanceOf(GUIDANCE_SIGNAL_CODES.UNRESOLVED_DISAGREEMENT),
   };
 }

@@ -146,6 +146,24 @@ export function derivePreviousAnalysisLens(
   );
   if (newestFirst.length === 0) return null;
 
+  // ⚠ ROADMAP 2.692 slice 2 — STRIP `judgementSignals` (2.690 §B.5's
+  // prescription for feed-class options). TODAY's judgement bag describes
+  // TODAY's persisted graph and fact window; replaying it into an EARLIER
+  // turn's selection would hand yesterday's slot to a lens computed from
+  // future information, forking the derived history from what was actually
+  // emitted. The contested set as-of-then is unreconstructible (the persisted
+  // graph is current-state only), so the honest replay is the no-feed one.
+  // Cost, ONE-DIRECTIONAL and bounded like honest-scope limit 1 above: a
+  // judgement-lens win is invisible to the next turn's no-repeat history — at
+  // most an extra turn of monotony/diversity, never a suppressed or invented
+  // lens. I-B5's fact-ordering makes the T1 half nearly free (a spent trigger
+  // cannot re-fire regardless); the T2 half repeats only while the
+  // disagreement genuinely stands, which is the design's fire-once-by-join
+  // semantics. Pinned: history derivation is byte-identical with and without
+  // signals on `baseOptions` (`next-best-judgement-tier.test.ts` §7).
+  const { judgementSignals: _strippedJudgementSignals, ...replayBase } = baseOptions ?? {};
+  void _strippedJudgementSignals;
+
   // Replay oldest → newest so each step sees the selection the step before it
   // would have made. `previousAnalysisLens` is threaded, never accumulated: a
   // turn that recommended NOTHING resets the history to `null`, because "no lens
@@ -155,7 +173,7 @@ export function derivePreviousAnalysisLens(
     const fact = newestFirst[i]!.fact;
     if (fact.fact_type !== 'run_analysis') continue;
     const selection = selectLens(fact as RunAnalysisHandlerFact, {
-      ...baseOptions,
+      ...replayBase,
       previousAnalysisLens: previous,
     });
     previous = selection?.lens ?? null;

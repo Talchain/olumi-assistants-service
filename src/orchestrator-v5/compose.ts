@@ -36,6 +36,15 @@ import {
 // why a persisted "last lens" would be a hand-maintained mirror of a pure
 // derivation).
 import { derivePreviousAnalysisLens } from './compose/lens-history.js';
+// ROADMAP 2.692 slice 2 — the judgement feed (2.690 §B.5's ratified FEED
+// architecture): derived ONCE per current-turn run_analysis fact from
+// `prior_facts` + the hash-gated persisted snapshot, threaded to BOTH same-turn
+// `selectLens` sites (the lens surface and the `focus` ui_directive), and
+// STRIPPED in the lens-history replay.
+import {
+  deriveJudgementSignals,
+  type JudgementSignals,
+} from './compose/judgement-signals.js';
 import type { LensId } from './compose/lens-selector.js';
 // T1 claim safety — the SINGLE owner of "may a leading option be named" is
 // `deriveConstraintVerdict`, called ONCE in the run_analysis handler and
@@ -401,6 +410,12 @@ function buildBlocksFromFacts(
     fact: HandlerFact,
     lookup: GraphNodeLookup,
     fresh: OlumiResponse['blocks'],
+    // ROADMAP 2.692 slice 2 — the SAME judgement feed the lens surface got, so
+    // the directive's second `selectLens` derivation of this turn cannot
+    // disagree with the card about which lens won (trap 12/16). Passed only by
+    // the current-turn run_analysis branch; the mutation/flip branches carry no
+    // lens surface and pass nothing.
+    judgementSignals?: JudgementSignals,
   ): void => {
     if (uiDirectiveEmitted) return;
     // `persistedGraph` (closure) feeds ONLY §2.1 row 6's contested-edge
@@ -411,6 +426,7 @@ function buildBlocksFromFacts(
       fresh,
       previousAnalysisLens,
       persistedGraph,
+      judgementSignals,
     );
     if (directive !== null) {
       blocks.push(directive);
@@ -439,6 +455,18 @@ function buildBlocksFromFacts(
         // Review F2 — build the lookup ONCE per fact and share it between
         // the Phase 3 rebuild and the ui_directive builder.
         const lookup = buildGraphNodeLookup(fact, fallbackForFact);
+        // ROADMAP 2.692 slice 2 — the judgement feed, derived ONCE per fact
+        // and shared by BOTH `selectLens` sites below (the lens surface and
+        // the `focus` directive). Reads the SAME hash-gated snapshot the
+        // lookup trusts: when the gate failed (concurrent writer) the feed is
+        // empty and the selection is byte-identical to pre-change — identity
+        // over availability, the F1 stance. Current-turn fresh branch only,
+        // same scoping as `previousAnalysisLens` (the prior-fact lifecycle
+        // branch re-presents an already-seen analysis and passes nothing).
+        const judgementSignals =
+          priorTurnFactsForLensHistory === undefined
+            ? undefined
+            : deriveJudgementSignals(priorTurnFactsForLensHistory, fallbackForFact);
         // D-U F2: reuse the SAME hash-gated raw-snapshot the lookup trusts as
         // the lever-union authority — when the snapshot hash diverges from the
         // fact's, we fail closed (undefined ⇒ empty set ⇒ no suppression),
@@ -450,6 +478,7 @@ function buildBlocksFromFacts(
           'fresh',
           fallbackForFact,
           previousAnalysisLens,
+          judgementSignals,
         );
         blocks.push(...freshBlocks);
 
@@ -463,7 +492,7 @@ function buildBlocksFromFacts(
         // wave-3 wired. The shared `lookup` carries the hash-gated persisted
         // snapshot fallback — in production the only source that resolves labels.
         // At most ONE directive per turn (`uiDirectiveEmitted` latch, N=1).
-        tryEmitUiDirective(fact, lookup, freshBlocks);
+        tryEmitUiDirective(fact, lookup, freshBlocks, judgementSignals);
         if (lifecycle !== undefined) {
           emitLifecycle(lifecycle, {
             lifecycle_state: 'emitted_fresh',
@@ -1112,6 +1141,16 @@ function rebuildPhase3BlocksFresh(
    * derivation comment in `buildBlocksFromFacts`).
    */
   previousAnalysisLens?: LensId | null,
+  /**
+   * ROADMAP 2.692 slice 2 — the turn's judgement feed
+   * (`deriveJudgementSignals`), passed by the current-turn branch only, with
+   * the SAME scoping rationale as `previousAnalysisLens`: the prior-fact
+   * lifecycle branch RE-PRESENTS an analysis the user has already seen, and
+   * feeding it TODAY's judgement state could make one analysis show two
+   * different lenses on two turns. Omitted ⇒ byte-identical to the pre-change
+   * build.
+   */
+  judgementSignals?: JudgementSignals,
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
     created_at: new Date().toISOString(),
@@ -1139,7 +1178,7 @@ function rebuildPhase3BlocksFresh(
   // analysis (only ever fires on a fresh verdict — the stale branch returns
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
-  const lensSurface = buildLensSurface(fact, ctx, previousAnalysisLens);
+  const lensSurface = buildLensSurface(fact, ctx, previousAnalysisLens, judgementSignals);
   const reviewCards = buildReviewCardBlocks(
     fact,
     lookup,

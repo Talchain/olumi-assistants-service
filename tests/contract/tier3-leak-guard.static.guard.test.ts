@@ -81,6 +81,16 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // no caller can surface one. Its offer copy is number-free by ruling — see
   // `lens-selector.ts::BODY_BY_RATIONALE.FRAGILE_EDGE_RESOLVABLE`.
   ['coaching/select-fragile-edge.ts', 'structured'],
+  // ROADMAP 2.692 slice 2 — `readAnalysisSignals` reads `edge_e_values` row
+  // IDENTITIES (+ the e_value) for ONE purpose: the disagreement_resolution
+  // in-tier ordering's first leg (lowest e-value among contested-unadjudicated
+  // edges = the most load-bearing disagreement). Same classification and same
+  // reason as `select-fragile-edge.ts` directly above: the quantity is a
+  // structured ORDERING gate only — it is not carried on `EvaluatorHit`,
+  // `LensSelection`, or any exported type (the selection carries ids + labels
+  // only), so no caller can surface it; the lens copy is number-free by design
+  // (2.692 §4: magnitudes banned; `BODY_BY_RATIONALE.CONTESTED_UNADJUDICATED`).
+  ['compose/lens-selector.ts', 'structured'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
   // Root-level seams (non-recursive root scan):
   ['compose.ts', 'transport'],
