@@ -473,6 +473,15 @@ describe("D — the corpus covers BOTH directions, and says so in numbers", () =
    * other by more than 2 entries. The tolerance was 4 until a mutant removing
    * three ceilings SURVIVED it — a balance check loose enough not to bite is
    * the same defect one level up.
+   *
+   * ⚠⚠ AND THE SCOPE OF ANY "ZERO DEFECTS" CLAIM MADE FROM THIS FILE IS
+   * THIS FILE. Green here means "no defect IN THIS CORPUS", never "no defect".
+   * Every round of this predicate has been settled by exactly that distinction:
+   * the suite was fully green on the round-3 inversion, on the round-4
+   * conjunction gap, and on the regressions pinned in KNOWN_DROPPED below —
+   * each found by a corpus written OUTSIDE this file. An independent
+   * 50-floor/42-ceiling measurement is the load-bearing evidence for this
+   * work; this suite is the regression net that keeps it, not the proof.
    */
   it("the two halves stay BALANCED — a one-sided addition fails here", () => {
     expect(FLOORS.length, "floor half too small").toBeGreaterThanOrEqual(6);
@@ -552,5 +561,94 @@ describe("D — `above` side inversion (DISCLOSED PRE-EXISTING DEFECT, tripwire)
     ).toBeGreaterThan(0);
     // Today: `>=`, which is the inverse of what the sentence means.
     expect(rows.some((c) => c.operator === ">=")).toBe(true);
+  });
+});
+
+/**
+ * ── ⚠ KNOWN-DROPPED CEILINGS — RECORDED, PINNED, AND NOT SILENT ───────────
+ *
+ * These are ceilings the extractor SUPPRESSES that it should keep. They are
+ * real gaps. They are pinned here rather than left to be rediscovered, because
+ * a gap recorded in the suite is honest and a gap invisible to it is how this
+ * predicate reached round four.
+ *
+ * ⚠ THE ASSERTION IS EXACT-SET EQUALITY, DELIBERATELY. It REDs when the set
+ * GROWS (a new regression) and equally when it SHRINKS (someone fixed one and
+ * must say so here). A `>=`-style pin would have let the set rot in one
+ * direction, which is the ratchet-versus-balance mistake this suite already
+ * made once.
+ *
+ * ── THE SHARED MECHANISM, and it is structural rather than a tuning miss ──
+ * ASIDE REMOVAL CONSUMES THE PUNCTUATION THE CLAUSE-INTRODUCER CUT DEPENDS ON.
+ *
+ *   "We will not cut corners, given the direction, so keep spend under £6m."
+ *      -> aside ", given the direction," removed
+ *      -> "We will not cut corners so keep spend under £6m."
+ *      -> the comma before "so" left WITH the aside, `,\s*so` never fires,
+ *         the negation reaches the bound, the real limit is suppressed.
+ *
+ * ⚠ AND ONE OF THESE IS THE PRICE OF A FIX WE CHOSE. Widening the dash aside
+ * from a backreference to `[—–]` kills the mixed-dash floor INVERSION
+ * ("We must not – … — let gross margin drop below 35%" → `<= 0.35`) and opens
+ * the mixed-dash ceiling GAP below. By this programme's ranking — a lie
+ * outranks a gap, because an inverted limit penalises the very options that
+ * honour it — that trade is correct. It is not free, and this pin is where it
+ * is admitted.
+ *
+ * ⚠ DO NOT FIX THESE WITH ANOTHER PUNCTUATION RULE. Ruled 2026-08-10 after an
+ * independent reviewer ran the next round in advance and showed it oscillates:
+ * the obvious next tweak fixes these and re-opens the round-4 floor inversion.
+ * `", and"` is genuinely ambiguous between interruption and new clause, and the
+ * discriminators are already two arbitrary length constants with hard cliffs.
+ * The settled direction is to STOP GUESSING AND ASK — "you've set a limit on
+ * gross margin; is 78% a floor or a ceiling?" — which is a successor lane, not
+ * a fifth round here.
+ */
+describe("D — known-dropped ceilings are pinned as an EXACT set", () => {
+  /** Ceilings this extractor is currently known to drop. Derived by
+   *  differential measurement against pristine `origin/staging`, not asserted. */
+  const KNOWN_DROPPED: ReadonlyArray<[string, number]> = [
+    // aside removal eats the comma that `, so` needs
+    ["We will not cut corners, given the direction, so keep spend under £6m.", 6_000_000],
+    // mixed-dash aside removal leaves no comma for `, and` — the price of fix 2
+    [
+      "We will not compromise – and the board is firm on this — and we must keep spend under £5m.",
+      5_000_000,
+    ],
+  ];
+
+  /** Ceilings that MUST keep working — the discriminating half. */
+  const MUST_SURVIVE: ReadonlyArray<[string, number]> = [
+    ["We will not cut corners, given the board's very clear direction on capital discipline this year, so keep spend under £3m.", 3_000_000],
+    ["We will not compromise — and this reflects the board's settled view after a long and genuinely difficult discussion about our priorities for the coming year — and we must keep spend under £4m.", 4_000_000],
+    ["There is no scope for overruns, so keep churn under 4%.", 0.04],
+    ["Keep churn under 4% next year.", 0.04],
+  ];
+
+  it("EXACTLY the known-dropped set is dropped — REDs if it grows or shrinks", () => {
+    const all = [...KNOWN_DROPPED, ...MUST_SURVIVE];
+    const dropped = all
+      .filter(([b, v]) => withValue(constraintsOf(b), v).length === 0)
+      .map(([b]) => b)
+      .sort();
+    expect(
+      dropped,
+      "the known-dropped set changed. If it GREW a new regression landed; if it " +
+        "SHRANK someone fixed one and must remove it from KNOWN_DROPPED here.",
+    ).toEqual(KNOWN_DROPPED.map(([b]) => b).sort());
+  });
+
+  /**
+   * FLOOR TWINS for the two known-dropped ceilings, so the balance assertion
+   * above is satisfied GENUINELY rather than by counting one direction twice.
+   * Both are the inversion-direction case of the same punctuation shape.
+   */
+  it.each([
+    "We will not, given the direction, let gross margin drop below 78%.",
+    "We must not – and the board is firm on this — let gross margin drop below 78%.",
+  ])("floor twin emits no inverted row: %s", (brief) => {
+    expect(
+      constraintsOf(brief).filter((c) => c.value === 0.78 && c.operator === "<="),
+    ).toEqual([]);
   });
 });

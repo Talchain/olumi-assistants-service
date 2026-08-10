@@ -538,7 +538,16 @@ function suppressionWindow(
   //    so the negation on the near side still governs the bound on the far
   //    side. Replaced with a space so word boundaries survive.
   head = head.replace(/\(([^()]{0,120})\)/g, " ");
-  head = head.replace(/([—–])[^—–]{0,120}\1/g, " ");
+  //    ⚠ THE CLOSING DASH IS A CLASS, NOT A BACKREFERENCE. `\1` required the
+  //    aside to close with the SAME dash character it opened with, so a MIXED
+  //    pair never matched, the aside was never removed, and the negation was
+  //    severed from its bound:
+  //      "We must not – and the board is firm on this — let gross margin drop
+  //       below 35%."  ->  <= 0.35, a confident inversion.
+  //    Word, Google Docs and cross-source pastes produce mixed en/em dashes
+  //    routinely. Widening to `[—–]` cannot widen the ceiling gap either, since
+  //    a same-dash pair still matches exactly as before.
+  head = head.replace(/[—–][^—–]{0,120}[—–]/g, " ");
   //    COMMA-DELIMITED parentheticals too: a short segment CLOSED by a second
   //    comma is an interruption, not a new clause. This is what separates
   //    "Do not, and this is firm, let margin drop below 78%" (closed — the
