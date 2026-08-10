@@ -33,11 +33,20 @@
  * monolith stays the revert anchor + fallback.
  */
 
-/** Per-sub-prompt versions. Bump the individual constant on any content change. */
-export const DECOMPOSE_R1_HEADLINE_VERSION = 'b1-r1-v1';
-export const DECOMPOSE_R2_DRIVER_VERSION = 'b1-r2-v1';
-export const DECOMPOSE_R3_FRAGILITY_VERSION = 'b1-r3-v1';
-export const DECOMPOSE_R4_CALIBRATION_VERSION = 'b1-r4-v1';
+/**
+ * Per-sub-prompt versions. Bump the individual constant on any content change.
+ *
+ * ALL FOUR moved to `-v2` for F3 (2026-08-10). R1's own body changed (the
+ * narrative sentence-1 instruction now requires the leading option's OWN win
+ * probability instead of the distance to the runner-up), and the other three
+ * changed because {@link SHARED_VOICE_AND_GROUNDING} — injected into every
+ * sub-prompt — gained the ban on stating that distance. Leaving R2-R4 at `-v1`
+ * would have three version labels naming two different prompts each.
+ */
+export const DECOMPOSE_R1_HEADLINE_VERSION = 'b1-r1-v2';
+export const DECOMPOSE_R2_DRIVER_VERSION = 'b1-r2-v2';
+export const DECOMPOSE_R3_FRAGILITY_VERSION = 'b1-r3-v2';
+export const DECOMPOSE_R4_CALIBRATION_VERSION = 'b1-r4-v2';
 
 /** Composite version string stamped on the composed review for provenance. */
 export const DECOMPOSE_COMPOSITE_VERSION = [
@@ -65,7 +74,8 @@ LANGUAGE:
 
 NUMBERS (grounding — a downstream validator re-checks this and will reject the whole review on a violation):
 - Every number you write in descriptive prose MUST appear in the inputs within ±10%. Do not invent statistics, benchmarks, or industry averages.
-- Do NOT compute derived numbers (differences, ratios, averages, counts). The ONLY permitted transformation is converting a probability-like value between decimal and percentage form (0.77 → "77%"; 0.07 → "7 percentage points").
+- Do NOT compute derived numbers (differences, ratios, averages, counts). The ONLY permitted transformation is converting a probability-like value between decimal and percentage form (0.77 → "77%").
+- NEVER express the distance between two options as a number, in any unit — not "percentage points", not "points", not "pp", not a bare percentage, and not as a "margin", "gap" or "lead of". That number is the difference between two win FREQUENCIES, not a difference in outcome, and it widens whenever any other option collapses. To say how well an option did, state its OWN win_probability.
 - Percentages and decimals are equivalent (0.77 = 77%). Do not round aggressively (76.8% → "about 77%" is fine; "roughly 80%" is a violation).
 - Quote values that carry a unit with the unit exactly as given ("16000 GBP"); do not add currency symbols, commas, or "k"/"m" abbreviations the unit does not already contain.
 - Do not state counts in prose ("three factors", "two edges") unless that exact count is itself an input value.
@@ -88,7 +98,7 @@ ${SHARED_VOICE_AND_GROUNDING}
 
 <INPUTS>
 - BRIEF: the user's decision description.
-- DECISION_CONTEXT: winner {id,label,win_probability}, runner_up {id,label,win_probability} or null, margin (winner minus runner_up win_probability; null for single-option).
+- DECISION_CONTEXT: winner {id,label,win_probability}, runner_up {id,label,win_probability} or null, margin (winner minus runner_up win_probability; null for single-option). ⚠ The margin field is a SELECTION INPUT ONLY — use it to judge how cautiously to write, NEVER state it.
 - OPTION_COMPARISON: every option {option_id, option_label, win_probability, outcome:{mean,p10,p90}}.
 - READINESS: {readiness, headline_type} — sets the tone (see TONE).
 - DRIVER_HINT: the single strongest factor {factor_label, elasticity, confidence} — the key driver to name in sentence 1 (may be null).
@@ -107,7 +117,7 @@ If readiness and headline_type disagree, take the MORE cautious tone.
 <OUTPUT_CONTRACT>
 {
   "narrative_summary": "string — 2 to 4 sentences.
-     Sentence 1: name winner.label and the key driver (DRIVER_HINT.factor_label if present; else winner's leading position). If runner_up present, include the margin as percentage points (0.07 → 'about 7 percentage points'); for a close_call frame it as a narrow lead but still state the number. If runner_up is null, use winner.win_probability and omit all comparative framing.
+     Sentence 1: name winner.label and the key driver (DRIVER_HINT.factor_label if present; else winner's leading position). Always state winner.win_probability as a percentage — '{winner.label} came out ahead in {N}% of runs of this model' (0.61 → 'came out ahead in 61% of runs of this model') — and NEVER the distance to the runner-up. For a close_call, frame it as a narrow lead in WORDS and give the same number. If runner_up is null, omit all comparative framing. ⚠ Never write 'leads by N percentage points', 'by a margin of N points', or 'a lead of N percentage points'.
      Sentence 2: the primary stability or fragility, from STABILITY_HINT (reference the fragile edge as from_label → to_label if present).
      Sentence 3-4: the readiness caveat, if readiness is not 'ready'. Omit if ready.",
   "story_headlines": {

@@ -29,7 +29,12 @@ was cross-checked against what the live service reports it is sending.
 | `edit_graph.txt` | `edit_graph` | v11 | free-text graph-edit turn |
 | `repair_edit_graph.txt` | `repair_edit_graph` | v2 | edit retry (attempt ≥ 2) after invalid ops |
 | `repair_graph.txt` | `repair_graph` | v6 | draft turn where PLoT validation fails |
-| `decision_review.txt` | `decision_review` | v14 | `run_analysis` outcome + the PLoT→CEE decision-review callback |
+| `decision_review.txt` | `decision_review` | **v15** | `run_analysis` outcome + the PLoT→CEE decision-review callback |
+
+> ⚠ **This table is a mirror and it drifted.** `decision_review` read `v14` here
+> until 2026-08-10 while `manifest.json` — which this README itself calls the
+> authority — had recorded `served_version: 15`, `served_hash_verified: true`
+> since the 31 Jul regeneration. **Read `manifest.json`, not this table.**
 
 ## What is deliberately NOT in here
 
@@ -90,9 +95,17 @@ To revert: `PATCH {"stagingVersion": <previous>}` + reload, then confirm the has
   against v14's 27,256). Promoting it destroys the review panel. Its `change_note` in PMS
   has been marked `⛔ POISONED — DO NOT PROMOTE`; a full byte backup is at
   `docs-designs/pms-v12-backup-2026-07-27.json` in the programme docs.
-  Valid lineage: v11 (prod pointer) → v13 (revert anchor `ac07859bec2dfc77`) → v14 (staging
-  pointer). **Never create a v15** — the naming trap is documented at
-  `tools/conversation-harness/prompt-estate/revert-anchors/decision-review-revert-anchor.txt`.
+  Valid lineage: v11 (prod pointer) → v13 (revert anchor `ac07859bec2dfc77`) → v14 → **v15
+  (current staging pointer, sha256 `ba4879dd…`)**.
+  ⚠ **CORRECTED 2026-08-10: this bullet used to end "Never create a v15".** It was written
+  before the fix-decision-review-v15 lane created and promoted exactly that on 2026-07-31
+  (`manifest.json` `_meta.decision_review_regen_note`, hash read back from the live
+  `/admin/prompts/status`). Leaving the instruction standing meant the estate's own
+  version-bump doctrine forbade the version it was already serving — and the next author
+  would have skipped a number for a reason that no longer existed. **The next version is
+  v16.** The original naming trap is still documented at
+  `tools/conversation-harness/prompt-estate/revert-anchors/decision-review-revert-anchor.txt`;
+  what it warns about is confusing the POISONED v12 with a good version, not the number 15.
   Note the marker is **advisory only**: the admin `requires_approval` guard
   (`src/routes/admin.prompts.ts:502`) only fires on a `status`→`production` transition, and
   this row is already `production`, so **nothing in code blocks a `stagingVersion: 12`
