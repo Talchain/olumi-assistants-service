@@ -249,6 +249,51 @@ describe('ROADMAP 2.1051 — direction gate at the real merge boundary', () => {
   });
 
   /* ---------------------------------------------------------------------
+   * S4 — THE CROSS-ROW CONTESTED SCREEN.
+   *
+   * ⚠ THIS TEST EXISTS BECAUSE MUTANT M10 SURVIVED WITHOUT IT, and the reason
+   * it survived is worth recording: every OTHER contested-looking fixture in
+   * this file is settled EARLIER — by S2 (evidence contradiction) or by the
+   * unlocatable-quote fail-closed — so S4 was never reached and could have been
+   * deleted wholesale under a green suite.
+   *
+   * To reach S4 both rows must pass S1–S3 cleanly and still disagree. Two
+   * negation-free sentences on ONE node do exactly that: each is individually
+   * provable, and together they are a contradiction the user never wrote.
+   * ------------------------------------------------------------------- */
+
+  it('S4: two individually-clean bounds that CONTRADICT each other are both withheld', () => {
+    const brief = 'Keep marketing spend above £500,000. Keep marketing spend under £300,000.';
+    const r = runMerge(brief);
+    const onNode = r.wire.filter((w) => w.node_id === 'fac_marketing_spend');
+    const ops = new Set(onNode.map((w) => w.operator));
+    expect(
+      ops.has('>=') && ops.has('<='),
+      'a floor ABOVE its own ceiling is a contradiction and must not ship',
+    ).toBe(false);
+    expect(onNode, 'neither side of an incoherent pair may ship').toEqual([]);
+    expect(
+      r.asks.some((a) => a.reason === 'producer_disagreement'),
+      'the contradiction must be surfaced as a producer_disagreement question',
+    ).toBe(true);
+  });
+
+  it('S4: a COHERENT pair on one node is a band and survives — the discriminating twin', () => {
+    // The other half of the discriminating pair. Without this, S4 could be
+    // "withhold every node carrying both operators", which would delete every
+    // legitimate band — a fix that closes a lie by opening a gap (trap 22b).
+    const brief = 'Keep marketing spend above £300,000. Keep marketing spend under £500,000.';
+    const r = runMerge(brief);
+    const onNode = r.wire.filter((w) => w.node_id === 'fac_marketing_spend');
+    expect(onNode.some((w) => w.operator === '>=' && Math.abs(w.value - 300000) < 1e-9), 'band floor must ship').toBe(true);
+    expect(onNode.some((w) => w.operator === '<=' && Math.abs(w.value - 500000) < 1e-9), 'band ceiling must ship').toBe(true);
+    expect(
+      r.asks.some((a) => a.reason === 'producer_disagreement'),
+      'a coherent band is not a disagreement',
+    ).toBe(false);
+  });
+
+  /* ---------------------------------------------------------------------
    * THE EARLY-RETURN MOVE — claim (g).
    * ------------------------------------------------------------------- */
 
