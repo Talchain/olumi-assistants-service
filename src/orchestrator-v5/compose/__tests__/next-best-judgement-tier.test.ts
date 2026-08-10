@@ -600,15 +600,40 @@ describe('§6 an unphraseable judgement offer never wins the slot', () => {
 // ============================================================================
 
 describe('§7 history derivation cannot fork on judgement signals', () => {
+  /** A prior analysis whose enrichment fires NO fact-derived lens — so on this
+   *  window the stripped replay derives `null`, while an UN-stripped replay
+   *  would hand every replayed turn to the disagreement lens. The two answers
+   *  differ by construction, which is what makes the equality below a real
+   *  strip assertion rather than two empty extractions agreeing. */
+  function priorSparseAnalysisFact(computedAt: string): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: 'scen-2692-s2',
+        summary: 'Prior analysis.',
+        graph_hash_at_run: 'gh_2692000000000001',
+        computed_at: computedAt,
+        enrichment: { confidence_tier: 'strong' },
+      },
+    } as unknown as HandlerFact;
+  }
+
   it('derivePreviousAnalysisLens is byte-identical with and without signals on baseOptions', () => {
     // Two prior analyses so the replay genuinely walks. The signals injected
     // here would (if un-stripped) hand the first replayed turn to a judgement
     // lens and flip the derived history.
     const priorFacts: HandlerFact[] = [
-      priorAnalysisFact('2026-08-09T12:00:00.000Z'),
-      priorAnalysisFact('2026-08-09T00:00:00.000Z'),
+      priorSparseAnalysisFact('2026-08-09T12:00:00.000Z'),
+      priorSparseAnalysisFact('2026-08-09T00:00:00.000Z'),
     ];
     const without = derivePreviousAnalysisLens(priorFacts, {});
+    // Pin the discriminating shape itself: the stripped answer on this window
+    // is `null` (nothing fires on the sparse enrichment), and an un-stripped
+    // replay would return 'disagreement_resolution' — asserted via the live
+    // presence control below.
+    expect(without).toBeNull();
     const withSignals = derivePreviousAnalysisLens(priorFacts, {
       judgementSignals: signalsFor([], GRAPH_ONE_CONTESTED),
     } as never);
