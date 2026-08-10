@@ -214,6 +214,35 @@ describe('headline states the leader’s own win probability, not the gap', () =
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
+  it('the percentage rounds DOWN below the half (0.614 → 61%, never 62%)', () => {
+    // ⚠ THE OTHER HALF OF THE PAIR, AND IT WAS FOUND BY TAKING THE REVIEW'S
+    // POINT SERIOUSLY RATHER THAN NARROWLY. Adding 0.615 killed the
+    // `Math.floor` mutant, so the finding as reported was closed — but
+    // `Math.round` has TWO neighbours, and `Math.ceil` still survived the
+    // whole battery afterwards. Every fixture above happens to sit on or below
+    // its integer (`0.62 * 100` is exactly 62; `0.615 * 100` is 61.5, which
+    // ceil and round agree on), so nothing in the suite could tell round from
+    // ceil.
+    //
+    // 0.614 is the discriminator in the opposite direction: `0.614 * 100` is
+    // 61.4, so round → 61 while ceil → 62. With 0.615 above, the operator is
+    // now pinned from BOTH sides — one case alone only ever proves the
+    // rounding is not one particular wrong thing.
+    const out = buildAnalysisResultHeadline({
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.614 },
+          { option_id: 'opt_b', option_label: 'Stay on Salesforce', win_probability: 0.386 },
+        ],
+        robustness: { level: 'moderate' },
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBe('Switch to HubSpot came out ahead in 61% of runs of this model.');
+    expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
+  });
+
   it('a probability just under certainty rounds to 100%, and stays an integer', () => {
     // The upper-boundary partner: 0.999 → 100 under round, 99 under floor. Also
     // guards the grammar's `\d{1,3}` slot at three digits and re-asserts the
