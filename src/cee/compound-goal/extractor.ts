@@ -434,48 +434,81 @@ const NEGATION_OR_PREVENTION_LEAD =
   /\b(?:without|not|never|no|cannot|can't|won't|shan't|shouldn't|mustn't|wouldn't|couldn't|avoid|avoids|avoiding|prevent|prevents|preventing|stop|stops|stopping|refuse|refuses|refusing|protect|protects|protecting|guard|guards|guarding)\b/i;
 
 /**
- * The clause containing `index`, looking backwards.
+ * THE SUPPRESSION WINDOW — deliberately NOT the same window minting uses.
  *
- * ⚠ THE TERMINATOR MUST BE FOLLOWED BY WHITESPACE. Cutting on a bare
- * `[.!?]` also cuts the DECIMAL POINT — "£1.5 million" becomes "1" — which is
- * literally how ROADMAP 2.714 died: a magnitude guard its own header called
- * "the most important line here" could not fire, because the window handed to
- * it had been truncated before the magnitude word (CLAUDE.md trap 22).
+ * ⚠⚠ TWO DIRECTIONS, TWO QUESTIONS, TWO WINDOWS. This lane already learned the
+ * lesson once and then collapsed it: `NEGATION_OR_PREVENTION_LEAD` is wider
+ * than `NEGATION_LEAD` because one gates MINTING a floor (a false positive
+ * INVENTS a constraint — a lie) and the other gates SUPPRESSION (a false
+ * positive DROPS one — a gap). The same asymmetry applies to the WINDOW, and
+ * folding both into one parameter is what produced the regression below.
  *
- * ⚠⚠ THE SET INCLUDES COMMA, COLON AND DASH, AND THAT WIDTH IS A FIX, NOT A
- * FLOURISH. With only `[.!?;]` the window ran back across clause boundaries, so
- * a negation ANYWHERE earlier in a long sentence suppressed a perfectly
- * legitimate ceiling downstream. Measured — five false positives, every one a
- * real limit silently dropped:
+ *   MINTING's window is the regex adjacency in `NEGATED_FLOOR_PATTERNS`
+ *   itself — the negation must sit next to the verb it negates. It is narrow
+ *   BY CONSTRUCTION and must stay that way; nothing here widens it.
  *
- *   "There is no scope for overruns, so keep churn under 4%."
- *   "We cannot afford delays, so keep spend under £1m."
- *   "We have not agreed the plan, yet spend must stay under £2m."
- *   "I do not want surprises: keep marketing under £1.5m."
- *   "No exceptions — keep churn under 4%."
+ *   SUPPRESSION's window is this function, and it must span PARENTHETICALS
+ *   and INTERRUPTIONS, because a negation still governs a bound it is
+ *   interrupted from.
  *
- * A negation only REVERSES a bound it actually governs. Once a clause boundary
- * separates them it governs nothing, and suppressing there trades one silent
- * failure for another — which is the whole objection to a predicate that is too
- * wide.
+ * ── THE TWO FAILURES THIS FUNCTION SITS BETWEEN, BOTH MEASURED ─────────────
  *
- * ⚠ AND THE `\s` NOW PROTECTS TWO THINGS, NOT ONE: the decimal point
- * ("£1.5m" — no space after the dot) AND the THOUSANDS SEPARATOR
- * ("1,500,000" — no space after the comma). Adding `,` to this set without the
- * whitespace requirement would have reintroduced the 2.714 truncation through a
- * second door.
+ * TOO WIDE A WINDOW (cutting only on `[.!?;]`) suppressed 13/14 legitimate
+ * ceilings, because a negation in a PRECEDING INDEPENDENT CLAUSE reached
+ * forward to a bound it does not govern:
+ *     "There is no scope for overruns, so keep churn under 4%."
+ *
+ * TOO NARROW A WINDOW (also cutting on every bare comma, colon and dash) let
+ * 7/10 genuine floors leak back out as inverted `<=`, because a PARENTHETICAL
+ * severed a negation from the bound it does govern:
+ *     "Do not, under any circumstances, let gross margin drop below 78%."
+ *     "Never, ever let gross margin go below 78%."
+ *     "We must not — and the board is firm on this — let gross margin go below 78%."
+ *
+ * The premise that produced the second failure was written into this file as
+ * fact — "once a clause boundary separates them it governs nothing" — and it is
+ * FALSE for interrupted constructions. A comma is not a clause boundary; it is
+ * a comma.
+ *
+ * ── WHAT ACTUALLY DISCRIMINATES THEM ──────────────────────────────────────
+ * Not punctuation. A NEW FINITE CLAUSE. So:
+ *   1. balanced parentheticals are REMOVED, not cut at — the construction
+ *      resumes on the far side of them;
+ *   2. the window is cut at a colon, an UNPAIRED dash, or a comma FOLLOWED BY A
+ *      CLAUSE-INTRODUCING CONJUNCTION ("so", "yet", "but", …) — each of which
+ *      starts a genuinely new clause;
+ *   3. a BARE comma never cuts, because that is exactly the parenthetical case.
+ *
+ * ⚠ EVERY TERMINATOR REQUIRING `\s` STILL GUARDS TWO NUMBER FORMATS: the
+ * decimal point ("£1.5m") and the thousands separator ("1,500,000"). Dropping
+ * the whitespace requirement re-opens the ROADMAP 2.714 truncation, which is
+ * how that row died.
  */
-function clauseBefore(brief: string, index: number): string {
-  const head = brief.slice(0, index);
+const CLAUSE_INTRODUCER = String.raw`(?:so|yet|but|however|therefore|thus|then|although|whereas|while)`;
+
+function suppressionWindow(brief: string, index: number): string {
+  let head = brief.slice(0, index);
+
+  // 1. Remove BALANCED parentheticals — the construction resumes after them,
+  //    so the negation on the near side still governs the bound on the far
+  //    side. Replaced with a space so word boundaries survive.
+  head = head.replace(/\(([^()]{0,120})\)/g, " ");
+  head = head.replace(/([—–])[^—–]{0,120}\1/g, " ");
+
+  // 2. Cut at boundaries that genuinely start a new clause.
   let cut = 0;
-  // Sentence and clause terminators, each requiring following whitespace.
-  for (const m of head.matchAll(/[.!?;:,]\s/g)) {
-    cut = Math.max(cut, (m.index ?? 0) + m[0].length);
-  }
-  // Dashes used as clause separators. Em/en dashes are frequently written
-  // WITHOUT surrounding spaces, so they are matched on the character itself —
-  // safe, because no number format uses them as an internal separator.
-  for (const m of head.matchAll(/—|–|\s--?\s/g)) {
+  const boundary = new RegExp(
+    // sentence terminators and the semicolon
+    String.raw`[.!?;]\s` +
+      // a colon introducing a new clause
+      String.raw`|:\s` +
+      // an UNPAIRED dash (any survivor of step 1) introducing a new clause
+      String.raw`|[—–]\s*|\s--?\s` +
+      // a comma ONLY when a clause-introducing conjunction follows it
+      String.raw`|,\s*${CLAUSE_INTRODUCER}\s`,
+    "gi",
+  );
+  for (const m of head.matchAll(boundary)) {
     cut = Math.max(cut, (m.index ?? 0) + m[0].length);
   }
   return head.slice(cut);
@@ -570,7 +603,7 @@ function extractUpperBoundConstraints(
       // the sentence rather than repairing them.
       if (
         /\b(?:below|under)\b/i.test(match[0]) &&
-        NEGATION_OR_PREVENTION_LEAD.test(clauseBefore(brief, match.index ?? 0) + " " + match[0])
+        NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0) + " " + match[0])
       ) {
         continue;
       }

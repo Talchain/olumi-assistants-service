@@ -372,10 +372,16 @@ export function handleUnreachableFactors(
       // `boundary.ts:104` filters deterministic repairs through
       // `REPAIR_CODE_TO_ADJUSTMENT`, a hand-maintained allowlist carrying
       // exactly one entry (`UNREACHABLE_FACTOR_RECLASSIFIED`). This code is not
-      // on it, so the repair reaches `ctx.deterministicRepairs` and the logs and
-      // stops there — it never becomes a `model_adjustments` row and the user
-      // never sees it. The channel itself is live (the allowlisted code appears
-      // 33x in a real deployed capture); this code simply is not on it.
+      // on it, so it never becomes a `model_adjustments` row and the user never
+      // sees it. The channel itself is live (the allowlisted code appears 33x in
+      // a real deployed capture); this code simply is not on it.
+      //
+      // It DOES ride three carriers, and naming only one understates them:
+      //   - `ctx.deterministicRepairs` (the in-process array)
+      //   - `trace.repair_summary.deterministic_repairs`
+      //   - `pipelineOutcome.repair_provenance`
+      // All three are TELEMETRY — diagnostic surfaces engineers read — so the
+      // class claim ("not user-visible") holds exactly as stated.
       //
       // Putting it on the channel is NOT a local edit: `ModelAdjustmentCode` is
       // a CLOSED 5-value enum in the shared contract, so a new code is a

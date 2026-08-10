@@ -168,6 +168,26 @@ describe("D — no negated bound reaches the wire inverted (adversarial corpus)"
     // truncated at a decimal point before the magnitude word.
     "Do not let the £1.5m marketing spend push gross margin below 78%.",
     "We will not let the £2.5m programme drag gross margin below 78%.",
+    // ⚠⚠ INTERRUPTED CONSTRUCTIONS — the regression set. A first attempt at the
+    // over-width fix cut the window at every bare comma, colon and dash, on the
+    // stated premise that "once a clause boundary separates them it governs
+    // nothing". THAT PREMISE IS FALSE: a parenthetical INTERRUPTS a governing
+    // construction, it does not end it. 7 of 10 floors leaked back out as
+    // inverted `<=` — the canonical B1 `drop` verb in ordinary board English —
+    // and the suite stayed GREEN because every case added that round pointed at
+    // the gap direction and none at the inversion direction.
+    "Do not, under any circumstances, let gross margin drop below 78%.",
+    "Never, ever let gross margin go below 78%.",
+    "We must not — and the board is firm on this — let gross margin go below 78%.",
+    "Do not (and this is non-negotiable) let gross margin drop below 78%.",
+    // A parenthetical that CONTAINS a boundary character. Without the
+    // paren-removal step the `;`/`:` inside the brackets cuts the window and
+    // the governing "Do not" is lost — both leak an inverted `<=`. These are
+    // what make mutant M18 bite; the plain-parenthetical case above does not,
+    // because brackets are not themselves boundaries.
+    "Do not (this is firm; truly non-negotiable) let gross margin drop below 78%.",
+    "Do not (note: the board agreed) let gross margin drop below 78%.",
+    "We will not, whatever the pressure, let gross margin fall below 78%.",
   ])("emits no inverted ceiling for: %s", (brief) => {
     for (const c of withValue(constraintsOf(brief), 0.78)) {
       expect(
@@ -384,6 +404,56 @@ describe("D — what actually reaches the wire, against the real B1 node set", (
     // never inherited as a wire-scoped one. Closing this needs the DRAFTER to
     // mint a margin node — a separate lane.
     expect(survivors.map((c: any) => c.targetNodeId)).not.toContain("fac_gross_margin");
+  });
+});
+
+/**
+ * ── ⚠⚠ THE BIDIRECTIONAL OBLIGATION, MADE STRUCTURAL ──────────────────────
+ *
+ * This suite guards a predicate that can fail in TWO opposite directions:
+ *   - too wide  -> a legitimate CEILING is suppressed (a silent gap)
+ *   - too narrow -> a genuine FLOOR leaks out INVERTED (a confident lie)
+ *
+ * Both failures have now happened here, one per review round, and BOTH TIMES
+ * `pnpm test:required` was fully green — because the cases added that round all
+ * pointed at one door while the other stood open. A corpus that only tests one
+ * direction is a guard watching one door.
+ *
+ * ⚠ RULE FOR EVERY FUTURE CASE ADDED TO THIS FILE: it must arrive WITH ITS
+ * OPPOSITE-DIRECTION TWIN, and the twin must be shown to fail before the fix
+ * and pass after. The counts below are asserted so a one-sided addition cannot
+ * pass unnoticed.
+ */
+describe("D — the corpus covers BOTH directions, and says so in numbers", () => {
+  const FLOORS = [
+    "Do not, under any circumstances, let gross margin drop below 78%.",
+    "Never, ever let gross margin go below 78%.",
+    "We must not — and the board is firm on this — let gross margin go below 78%.",
+    "Do not (and this is non-negotiable) let gross margin drop below 78%.",
+    "We will not, whatever the pressure, let gross margin fall below 78%.",
+    "The goal is to get to £20m ARR by end of FY28 without dropping gross margin below 78%.",
+  ];
+  const CEILINGS: Array<[string, number]> = [
+    ["There is no scope for overruns, so keep churn under 4%.", 0.04],
+    ["We cannot afford delays, so keep spend under £1m.", 1_000_000],
+    ["We have not agreed the plan, yet spend must stay under £2m.", 2_000_000],
+    ["I do not want surprises: keep marketing under £1.5m.", 1_500_000],
+    ["No exceptions — keep churn under 4%.", 0.04],
+    ["Keep churn under 4% next year.", 0.04],
+  ];
+
+  it("NO genuine floor leaks out inverted", () => {
+    const leaks = FLOORS.filter((b) =>
+      constraintsOf(b).some((c) => c.value === 0.78 && c.operator === "<="),
+    );
+    expect(leaks, "these floors reached the output as confident ceilings").toEqual([]);
+    expect(FLOORS.length, "the floor half of the corpus shrank").toBeGreaterThanOrEqual(6);
+  });
+
+  it("NO legitimate ceiling is suppressed", () => {
+    const dropped = CEILINGS.filter(([b, v]) => withValue(constraintsOf(b), v).length === 0);
+    expect(dropped.map(([b]) => b), "these real limits were silently dropped").toEqual([]);
+    expect(CEILINGS.length, "the ceiling half of the corpus shrank").toBeGreaterThanOrEqual(6);
   });
 });
 
