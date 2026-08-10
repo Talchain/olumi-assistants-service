@@ -426,6 +426,9 @@ describe("D — what actually reaches the wire, against the real B1 node set", (
  */
 describe("D — the corpus covers BOTH directions, and says so in numbers", () => {
   const FLOORS = [
+    "Do not, and this is firm, let gross margin drop below 78%.",
+    "We must not, and the board agrees, let gross margin drop below 78%.",
+    "Never, and I mean never, let gross margin drop below 78%.",
     "Do not, under any circumstances, let gross margin drop below 78%.",
     "Never, ever let gross margin go below 78%.",
     "We must not — and the board is firm on this — let gross margin go below 78%.",
@@ -434,6 +437,9 @@ describe("D — the corpus covers BOTH directions, and says so in numbers", () =
     "The goal is to get to £20m ARR by end of FY28 without dropping gross margin below 78%.",
   ];
   const CEILINGS: Array<[string, number]> = [
+    ["We will not let quality slip, and we must keep spend under £250,000.", 250_000],
+    ["Protect the brand at all costs, and keep churn under 4%.", 0.04],
+    ["Without letting gross margin drop below 78%, keep churn under 4%.", 0.04],
     ["There is no scope for overruns, so keep churn under 4%.", 0.04],
     ["We cannot afford delays, so keep spend under £1m.", 1_000_000],
     ["We have not agreed the plan, yet spend must stay under £2m.", 2_000_000],
@@ -447,13 +453,36 @@ describe("D — the corpus covers BOTH directions, and says so in numbers", () =
       constraintsOf(b).some((c) => c.value === 0.78 && c.operator === "<="),
     );
     expect(leaks, "these floors reached the output as confident ceilings").toEqual([]);
-    expect(FLOORS.length, "the floor half of the corpus shrank").toBeGreaterThanOrEqual(6);
   });
 
   it("NO legitimate ceiling is suppressed", () => {
     const dropped = CEILINGS.filter(([b, v]) => withValue(constraintsOf(b), v).length === 0);
     expect(dropped.map(([b]) => b), "these real limits were silently dropped").toEqual([]);
-    expect(CEILINGS.length, "the ceiling half of the corpus shrank").toBeGreaterThanOrEqual(6);
+  });
+
+  /**
+   * ⚠ THIS ASSERTS BALANCE, NOT MERELY NON-SHRINKAGE — and the distinction is
+   * the whole point. An earlier version asserted only `length >= 6` on each
+   * half while its comment claimed "a one-sided addition cannot pass
+   * unnoticed". It could: adding 20 floors and 0 ceilings passed cleanly. That
+   * is a shrinkage ratchet wearing a balance check's description — the same
+   * label-drift class as the false premise this suite already retracted.
+   *
+   * A one-sided corpus is exactly what produced the round-3 regression, so the
+   * balance is now enforced rather than described: neither half may exceed the
+   * other by more than 2 entries. The tolerance was 4 until a mutant removing
+   * three ceilings SURVIVED it — a balance check loose enough not to bite is
+   * the same defect one level up.
+   */
+  it("the two halves stay BALANCED — a one-sided addition fails here", () => {
+    expect(FLOORS.length, "floor half too small").toBeGreaterThanOrEqual(6);
+    expect(CEILINGS.length, "ceiling half too small").toBeGreaterThanOrEqual(6);
+    expect(
+      Math.abs(FLOORS.length - CEILINGS.length),
+      `corpus is lopsided: ${FLOORS.length} floors vs ${CEILINGS.length} ceilings. ` +
+        `Every case added here arrives with its opposite-direction twin — a corpus ` +
+        `that grows one way is a guard watching one door.`,
+    ).toBeLessThanOrEqual(2);
   });
 });
 

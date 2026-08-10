@@ -484,16 +484,69 @@ const NEGATION_OR_PREVENTION_LEAD =
  * the whitespace requirement re-opens the ROADMAP 2.714 truncation, which is
  * how that row died.
  */
-const CLAUSE_INTRODUCER = String.raw`(?:so|yet|but|however|therefore|thus|then|although|whereas|while)`;
+/**
+ * Tokens that, after a comma, genuinely START A NEW CLAUSE — so a negation on
+ * the near side does not govern a bound on the far side.
+ *
+ * ⚠⚠ HAND-MAINTAINED, WITH NOTHING DERIVING OR CHECKING ITS COMPLETENESS.
+ * CLAUDE.md trap 12d: this is a list a human must remember to extend, and its
+ * omissions FAIL SILENTLY AND IN THE GAP DIRECTION — a missing token means the
+ * window is not cut, the negation reaches across, and a real limit is dropped
+ * with no error anywhere. It reads authoritative and is not.
+ *
+ * It has already been short once. The first cut omitted every COORDINATING
+ * conjunction, so `", and"` — the commonest clause join in English — silently
+ * dropped the limit in sentences like
+ * "We will not let quality slip, and we must keep spend under £250,000."
+ * Found by an independent 72-sentence corpus, not by this file's own tests.
+ *
+ * ⚠ WHAT WOULD CATCH THE NEXT OMISSION — and it is NOT another reading of this
+ * list. A minimal-variation probe: hold one sentence frame fixed
+ * ("<negation clause>, <TOKEN> keep churn under 4%") and sweep TOKEN across a
+ * candidate vocabulary drawn from OUTSIDE this file — a conjunction list, or a
+ * real brief corpus. Every token that suppresses the ceiling is a missing
+ * entry. That probe is what found the five coordinators below; re-run it when
+ * this list is next touched, because no amount of staring at it will reveal
+ * what is not written down.
+ *
+ * ⚠ AND EVERY ADDITION IS BIDIRECTIONAL. Widening this list moves the ceiling
+ * gap DOWN and risks moving the floor inversion UP — a token added here stops
+ * suppressing, which is correct for a new clause and WRONG for an interruption
+ * ("Do not, and this is firm, let margin drop below 78%"). Measure both
+ * directions before and after, every time; the interruption cases are pinned in
+ * `negated-bound-polarity.test.ts`.
+ */
+const CLAUSE_INTRODUCER = String.raw`(?:so|yet|but|however|therefore|thus|then|although|whereas|while|and|or|nor|plus|also|meanwhile|additionally|besides|otherwise)`;
 
-function suppressionWindow(brief: string, index: number): string {
-  let head = brief.slice(0, index);
+function suppressionWindow(
+  brief: string,
+  index: number,
+  consumed: readonly Span[] = [],
+): string {
+  // 0. A negation that ALREADY MINTED a floor is SPENT. In
+  //    "Without letting gross margin drop below 78%, keep churn under 4%."
+  //    the negation produced its own `>=` row; letting it also suppress the
+  //    later, unrelated ceiling drops a real limit for free. Start the window
+  //    after the last floor span that closes before this match begins.
+  let from = 0;
+  for (const [s, e] of consumed) {
+    if (e <= index) from = Math.max(from, e);
+  }
+  let head = brief.slice(from, index);
 
   // 1. Remove BALANCED parentheticals — the construction resumes after them,
   //    so the negation on the near side still governs the bound on the far
   //    side. Replaced with a space so word boundaries survive.
   head = head.replace(/\(([^()]{0,120})\)/g, " ");
   head = head.replace(/([—–])[^—–]{0,120}\1/g, " ");
+  //    COMMA-DELIMITED parentheticals too: a short segment CLOSED by a second
+  //    comma is an interruption, not a new clause. This is what separates
+  //    "Do not, and this is firm, let margin drop below 78%" (closed — the
+  //    negation still governs) from "We will not let quality slip, and we must
+  //    keep spend under £250,000" (never closed — a genuinely new clause).
+  //    Without this, adding the coordinating conjunctions below fixes the
+  //    ceiling gap and re-opens the floor inversion — measured, both ways.
+  head = head.replace(/,\s*[^,]{1,60},/g, " ");
 
   // 2. Cut at boundaries that genuinely start a new clause.
   let cut = 0;
@@ -603,7 +656,7 @@ function extractUpperBoundConstraints(
       // the sentence rather than repairing them.
       if (
         /\b(?:below|under)\b/i.test(match[0]) &&
-        NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0) + " " + match[0])
+        NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
       ) {
         continue;
       }
