@@ -75,6 +75,11 @@
 import { NodeV3 } from '../schemas/cee-v3.js';
 import { ALLOWED_OBSERVED_SUBKEYS } from '../orchestrator-v5/graph-management/field-safety.js';
 import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapters/edit-graph-producer.js';
+// The ONE de-normalisation the validator, the executor precheck and the
+// `set_factor_value` handler already share (the AC.1 parity invariant). Reused
+// rather than reimplemented — a second copy of a scale convention is the
+// hand-maintained-twin defect this module's header exists to warn about.
+import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { PatchOperation } from './types.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -304,6 +309,180 @@ export function stampUserEditProvenance(
         provenance: USER_EDIT_PROVENANCE,
       },
     };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Observed value-pair authority (ROADMAP 2.1033 — the SERVER half of
+// "screen = commit", 2026-08-09).
+//
+// ── The defect, reproduced by execution at 1ff2469d ────────────────────────
+// `canonicaliseUpdateNodeValue` merges the node's EXISTING observed_state
+// under the translated leaves so a value write never wipes `unit`/`cap`. That
+// merge also carries `raw_value` forward — and `raw_value` is the field the
+// canonical formatter reads FIRST. So editing a 20% factor to 40% produced:
+//
+//   applied observed_state = { value: 0.4, raw_value: 20, unit: '%' }
+//   synthesiseDisplayValue(...)             → "20%"     ← the OLD number
+//   reconcileDisplayAnchors(...) repaired[] → []        ← agreed with it
+//
+// #884's display-anchor reconciliation cannot see this: it recomputes the
+// anchor from the same stale `raw_value`, gets "20%" back, and concludes
+// nothing needs repair. The 2.1003 fix is not wrong — it is fed a lie.
+//
+// ── The authority ruling ───────────────────────────────────────────────────
+// On the edit path `observed_state.value` is AUTHORITATIVE and `raw_value` is
+// a derived denormalisation artefact. Three independent derivations, none of
+// them a matter of taste:
+//   1. `ALLOWED_OBSERVED_SUBKEYS` (field-safety.ts) = baseline · interventions
+//      · std · unit · value. `raw_value` is NOT AI-editable, so an edit op
+//      structurally CANNOT author a correct one. A field the writer may not
+//      write cannot be the field that wins.
+//   2. `graph-hash.ts` whitelists `observed_state.{value,baseline,cap}` as
+//      analysis-affecting and EXCLUDES `raw_value` as "cosmetic / provenance
+//      / display" — the repo's own declaration.
+//   3. `analysis-ready.ts` ships `observed_state.value` as the intervention
+//      number; `raw_value` reaches only display-oriented detail.
+//
+// So the pair is repaired at the WRITER, once, rather than every reader
+// defending against it (trap 21: two same-named-concept sources of one
+// symptom must not earn a third patch).
+//
+// ── Why re-derive rather than invent ───────────────────────────────────────
+// The inverse is NOT a second copy: `resolveExistingRawValue` is the shared
+// de-normalisation the validator, the executor precheck and the
+// `set_factor_value` handler already agree on (the AC.1 parity invariant).
+// Calling it with `raw_value` OMITTED asks it exactly the right question —
+// "what user-unit magnitude does this NEW value denote?" — and it answers
+// `ambiguous` when the scale genuinely cannot be recovered.
+//
+// On `ambiguous`/`missing` the stale `raw_value` is DROPPED, never kept. That
+// is the same law `set-factor-value.ts` and `reconcileDisplayAnchors` already
+// apply to `display_value`: clear the derived artefact rather than let it
+// lie. The formatter's own `value` fallback then renders the honest number.
+// Dropping is safe because the live edit path applies ops through
+// `applyUpdateNode`, whose `NODE_REQUIRED_NESTED_FIELDS` set is empty, so
+// `observed_state` is a whole-object REPLACE (`plotClient` is null at both V5
+// dispatch call sites — PLoT's deepMerge is not in play here).
+//
+// Scope: ONLY `update_node` ops that MOVE `observed_state.value` — i.e. whose
+// payload carries a `value` member DIFFERING from the node's current one.
+// That second clause is load-bearing and is enforced against the node, not
+// against the payload's shape: the canonicaliser merges the node's existing
+// observed_state under every translatable-leaf write, so a unit-only,
+// std-only or baseline-only edit reaches here carrying an UNCHANGED `value`
+// and the live `raw_value`. Reconciling those would DELETE a correct pair on
+// an edit that never touched the number, and with it the
+// `normalisedConvention` evidence the egress scale net needs — sending PLoT a
+// value off by a factor of `cap`. Label edits, structural ops and the
+// intervention subtree (whose own `raw_value` IS authoritative — see
+// plot-intervention-scale.ts) are likewise returned BY REFERENCE, untouched.
+//
+// Composed, not folded into `canonicaliseValueOps`, for the same reason
+// `stampUserEditProvenance` is: that module's pinned contract is
+// spelling-only.
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-derive (or clear) `observed_state.raw_value` on every op that moves
+ * `observed_state.value`, so the denormalised sibling can never outlive the
+ * value it described.
+ *
+ * Pure and total — never throws, never mutates its inputs; an op that needs
+ * no reconciliation is returned BY REFERENCE, so a batch that already agrees
+ * is byte-identical to today.
+ *
+ * @param currentGraph - the graph these ops are about to be applied to; it
+ *                       supplies the `unit`/`cap` scale context and the
+ *                       existing `raw_value` that may need clearing.
+ */
+export function reconcileObservedValuePair(
+  operations: readonly PatchOperation[],
+  currentGraph: unknown,
+): PatchOperation[] {
+  return operations.map((op) => {
+    if (op.op !== 'update_node') return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    const observed = asRecord(value[OBSERVED_ROOT]);
+    if (observed === null) return op;
+    if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
+
+    const newValue = observed.value;
+    if (typeof newValue !== 'number' || !Number.isFinite(newValue)) return op;
+
+    // Scale context, and the authority on whether the value MOVED. Read before
+    // any other guard, because that question decides the whole lane.
+    const nodeObserved = asRecord(findNode(currentGraph, op.path)?.observed_state) ?? {};
+
+    // ⚠ THE SCOPE THE CHAIN ACTUALLY HANDS US. This function's contract is
+    // "act on ops that MOVE observed_state.value", but it never receives a
+    // bare payload: `canonicaliseUpdateNodeValue` merges the node's existing
+    // observed_state under EVERY translatable-leaf write (value · unit ·
+    // baseline · std), so a unit-only / std-only / baseline-only edit arrives
+    // carrying an UNCHANGED `value` AND the live `raw_value` — and would
+    // resolve `ambiguous` and DELETE the pair on an edit that never touched
+    // the number. Nothing can be stale if the value did not move.
+    //
+    // Deleting it is not cosmetic: `buildFactorScaleMap` grants
+    // `normalisedConvention` only when `raw_value` is present, and that flag
+    // is the sole evidence gate for the egress scale net's `cap_denormalised`
+    // rule. Dropping it changes what PLoT/ISL computes on by a factor of
+    // `cap` (£20,000 → 0.2). Pinned by the "COMPOSED chain" describe in
+    // observed-value-pair-authority.test.ts.
+    if (nodeObserved.value === newValue) return op;
+
+    // ⚠ NARROW BY DESIGN: act ONLY on a payload that already carries a
+    // `raw_value`. That key is the stale-carry-forward signature — it is
+    // there because `canonicaliseUpdateNodeValue` merged the node's existing
+    // observed_state under the write. A payload WITHOUT it cannot strand a
+    // stale claim, so this lane leaves it exactly as it found it.
+    //
+    // This is the boundary, and it is deliberate. A literal nested
+    // `{ observed_state: { value } }` op takes the declared-field branch, is
+    // never merged, and the applier's whole-object replace then drops
+    // `unit`/`cap`/`raw_value` outright — pinned today by
+    // `gm-held-value-canonicalisation.test.ts` ("the canonicaliser is the
+    // identity"). That sibling WIPE is a real and separate defect; it is NOT
+    // this defect (nothing stale survives a wipe), and repairing it here
+    // would be the "while we're here" scope creep this programme keeps
+    // paying for. Recorded, not absorbed.
+    if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value')) return op;
+
+    // Scale context: the payload's own unit/cap (the canonicaliser already
+    // merged the node's in), falling back to the node for a payload that set
+    // one without the other. `nodeObserved` is read above.
+    const unit =
+      typeof observed.unit === 'string'
+        ? observed.unit
+        : typeof nodeObserved.unit === 'string'
+          ? nodeObserved.unit
+          : undefined;
+    const cap =
+      typeof observed.cap === 'number'
+        ? observed.cap
+        : typeof nodeObserved.cap === 'number'
+          ? nodeObserved.cap
+          : undefined;
+
+    // `raw_value` deliberately OMITTED: we are asking what the NEW value
+    // denotes, not echoing the old answer back (which is the defect).
+    const derived = resolveExistingRawValue({
+      value: newValue,
+      ...(unit !== undefined ? { unit } : {}),
+      ...(cap !== undefined ? { cap } : {}),
+    });
+
+    const nextObserved: Record<string, unknown> = { ...observed };
+    if (derived.kind === 'resolved') {
+      if (observed.raw_value === derived.raw) return op; // agrees — by reference
+      nextObserved.raw_value = derived.raw;
+    } else {
+      // Scale unrecoverable. Never leave the stale claim standing.
+      delete nextObserved.raw_value;
+    }
+
+    return { ...op, value: { ...value, [OBSERVED_ROOT]: nextObserved } };
   });
 }
 

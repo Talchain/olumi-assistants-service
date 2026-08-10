@@ -44,6 +44,7 @@ import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
+  reconcileObservedValuePair,
   batchFullyLanded,
 } from '../../orchestrator/canonicalise-value-ops.js';
 import {
@@ -377,8 +378,14 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // consent signal in the product — its value writes earn the USER stamp
   // (observed_state.source + node provenance) exactly like the normal seam.
   // Same single stamp function; see canonicalise-value-ops.ts.
-  const opsToApply: PatchOperation[] = stampUserEditProvenance(
-    canonicaliseValueOps(operations, input.currentGraph).operations,
+  // 2.1033: same value-pair authority as the normal seam. A confirmed batch
+  // must not commit a `value` while leaving the denormalised `raw_value` the
+  // formatter reads first describing the number the user just replaced. ONE
+  // function, both seams — the no-second-copy rule this module already keeps
+  // for canonicalisation and the provenance stamp.
+  const opsToApply: PatchOperation[] = reconcileObservedValuePair(
+    stampUserEditProvenance(canonicaliseValueOps(operations, input.currentGraph).operations),
+    input.currentGraph,
   );
 
   // ── 3. Apply through the existing apply path ──────────────────────────

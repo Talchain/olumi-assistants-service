@@ -39,6 +39,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
+  reconcileObservedValuePair,
 } from '../canonicalise-value-ops.js';
 import { handleEditGraph } from '../tools/edit-graph.js';
 import { GraphV3, ObservedStateV3 } from '../../schemas/cee-v3.js';
@@ -123,9 +124,21 @@ function valueOp(overrides: Partial<PatchOperation> = {}): PatchOperation {
   } as PatchOperation;
 }
 
-/** Canonicalise then stamp — the exact composition both seams run. */
+/**
+ * Canonicalise, stamp, then reconcile the value pair — the exact composition
+ * both seams run.
+ *
+ * ⚠ 2.1033: this helper is a MIRROR of the seams' chain, and it silently
+ * stopped being one. It ran only canonicalise+stamp while both seams gained a
+ * third step, so it asserted a `raw_value` the product no longer persists.
+ * Kept in sync deliberately — if you add a step to either seam, add it here,
+ * or this file's comment becomes the most convincing stale claim in the repo.
+ */
 function canonicaliseAndStamp(ops: PatchOperation[]): PatchOperation[] {
-  return stampUserEditProvenance(canonicaliseValueOps(ops, CURRENT_GRAPH).operations);
+  return reconcileObservedValuePair(
+    stampUserEditProvenance(canonicaliseValueOps(ops, CURRENT_GRAPH).operations),
+    CURRENT_GRAPH,
+  );
 }
 
 describe('stampUserEditProvenance — the op-level stamp', () => {
@@ -140,7 +153,12 @@ describe('stampUserEditProvenance — the op-level stamp', () => {
     // The merge siblings the canonicaliser threaded are untouched.
     expect(observed.value).toBe(0.5);
     expect(observed.unit).toBe('£');
-    expect(observed.raw_value).toBe(20000);
+    // 2.1033 — was `20000`, which pinned the defect: the op moved `value` to
+    // 0.5 of a 100000 cap (= £50k) while the denormalised sibling the
+    // formatter reads FIRST still said £20k, so the canvas kept rendering the
+    // number the user had just replaced. The sibling is now re-derived from
+    // the authoritative `value` (0.5 x 100000).
+    expect(observed.raw_value).toBe(50000);
     expect(observed.cap).toBe(100000);
   });
 
