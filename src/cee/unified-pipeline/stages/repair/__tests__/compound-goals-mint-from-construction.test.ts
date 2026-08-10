@@ -41,6 +41,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import { runCompoundGoals } from '../compound-goals.js';
+import {
+  hasExplicitAmbiguity,
+  findT1Matches,
+  findProvenUncoveredBounds,
+} from '../../../../compound-goal/direction-gate.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -192,6 +197,31 @@ describe('ROADMAP 2.1051 limb 2 — mint the bound the construction table alread
     expect(r.asks.length, 'and the user must be asked').toBeGreaterThan(0);
   });
 
+  it('ANTI-LIE: ambiguity outranks a PROVEN construction in the same sentence', () => {
+    // ⚠⚠ ADDED AFTER A SURVIVING MUTANT. The case above cannot see this rule at
+    // all: its sentence carries NO T1 construction, so the mint declines for a
+    // reason that has nothing to do with S1, and a mutant bypassing the
+    // ambiguity screen entirely survived it (trap 13b — a guard whose
+    // discrimination depends on a fixture that never exercises the path).
+    //
+    // This sentence carries BOTH, which is what makes it discriminating.
+    const brief = 'We are still deciding the target, so do not let CSAT drop below 85% for now.';
+
+    // PRECONDITION PINNED IN-TEST: the outcome below is only the ambiguity
+    // screen's doing if the construction really is proven here. Without this,
+    // a change that broke T1 on this sentence would leave the test passing for
+    // entirely the wrong reason.
+    expect(hasExplicitAmbiguity(brief), 'fixture must declare its own ambiguity').toBe(true);
+    expect(
+      findT1Matches(brief).map((m) => `${m.id}:${m.direction}`),
+      'fixture must ALSO carry a proven construction, or this proves nothing',
+    ).toContain('T1-2:floor');
+
+    const r = run(brief, CAPTURED.runs.live_r1!.nodes);
+    expect(r.wire.filter((w) => w.node_id === 'out_csat'), 'a declared unknown is asked, never minted').toEqual([]);
+    expect(r.asks.length).toBeGreaterThan(0);
+  });
+
   it('ANTI-LIE: a bare comparator with NO construction verdict mints nothing new', () => {
     // "…could rise above 3%" is a RISK, not a requirement. The mint fires only
     // on a PROVEN construction; a sentence the T1 table does not recognise must
@@ -221,6 +251,39 @@ describe('ROADMAP 2.1051 limb 2 — mint the bound the construction table alread
     expect(csat[0]!.quote, 'the producer row survives, not a minted duplicate').toBe(
       'Do not let CSAT drop below 85%',
     );
+  });
+
+  it('ANTI-LIE: the mint never REPLACES a producer limit that shares its node and operator', () => {
+    // ⚠⚠ ADDED AFTER A SURVIVING MUTANT, AND THE SURVIVOR WAS A CORPUS HOLE,
+    // NOT AN EQUIVALENT MUTANT (trap 13c: a survivor is a claim either way, and
+    // this one had to be settled by a discriminating fixture rather than by
+    // argument).
+    //
+    // The `merged.has(key)` guard looks redundant beside the coverage check —
+    // and it is NOT, because the two are keyed on different things. Coverage is
+    // by VALUE; the merge key is NODE + OPERATOR. So a producer holding
+    // `out_csat >= 0.90` does not cover a brief that states 0.85: the mint
+    // fires, produces `out_csat >= 0.85`, and lands on the producer's own key.
+    // Without the guard it OVERWRITES a stricter limit with a looser one, and
+    // the user silently loses the tighter constraint they were given.
+    //
+    // PRECONDITION PINNED IN-TEST: the mint must genuinely still be firing at
+    // 0.85 given 0.90 is taken, or this asserts nothing.
+    // The producer's quote must be VERIFIABLE in the brief, or the gate
+    // withholds its row for want of evidence and the collision never happens —
+    // a fixture that cannot reach the code path proves nothing about it.
+    const brief = 'CSAT must stay at or above 90%. Do not let CSAT drop below 85%.';
+    expect(
+      findProvenUncoveredBounds(brief, [0.9]).map((b) => b.value),
+      'the 0.85 bound must still be uncovered when a producer holds 0.90',
+    ).toEqual([0.85]);
+
+    const r = run(brief, CAPTURED.runs.live_r1!.nodes, [
+      llmRow('out_csat', '>=', 0.9, 'CSAT must stay at or above 90%', '%'),
+    ]);
+    const floors = r.wire.filter((w) => w.node_id === 'out_csat' && w.operator === '>=');
+    expect(floors, 'one row on this key, not two').toHaveLength(1);
+    expect(floors[0]!.value, 'the PRODUCER\'s limit survives — the mint must not replace it').toBeCloseTo(0.9, 10);
   });
 
   it('ANTI-LIE: an LLM INVERSE on the same bound is still withheld, and the mint does not rescue it', () => {

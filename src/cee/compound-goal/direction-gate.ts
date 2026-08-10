@@ -1380,8 +1380,19 @@ export function findProvenUncoveredBounds(
       // than let match order decide a user's limit.
       if (group.some((m) => m.length === best.length && m.direction !== best.direction)) continue;
       if (isCoveredValue(value, coveredValues)) continue;
+      // ⚠ THIS LINE IS DEFENCE IN DEPTH AND IS *NOT* LOAD-BEARING — recorded so
+      // the next reader does not mistake it for a guard under test. A mutant
+      // that deletes it SURVIVES, and the survival was DEMONSTRATED rather than
+      // argued (trap 13c): `deriveMetricText(null, null, null)` returns
+      // FALLBACK_METRIC by construction, and every subject-less T1 entry
+      // (T1-1, T1-5, T1-6, T1-7) was executed to confirm it mints nothing with
+      // or without this line. It stays because "no subject means no identity to
+      // bind to" is the RULE, and stating it where it applies is worth one
+      // redundant comparison.
       if (best.subject === null) continue;
 
+      // THE load-bearing half: a subject that cleans to no user word cannot be
+      // bound to a node BY IDENTITY, and proximity is not identity (trap 19).
       const subject = deriveMetricText(best.subject, null, null);
       if (subject === FALLBACK_METRIC) continue;
 
