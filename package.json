@@ -84,7 +84,7 @@
     "@typescript-eslint/parser": "^8.48.0",
     "ajv-formats": "^3.0.1",
     "artillery": "^2.0.27",
-    "eslint": "^9.39.1",
+    "eslint": "^10.8.0",
     "openapi-typescript": "^7.10.1",
     "playwright": "^1.56.1",
     "prettier": "^3.3.3",
