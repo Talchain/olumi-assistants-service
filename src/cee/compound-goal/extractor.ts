@@ -1190,38 +1190,6 @@ export function remapConstraintTargets(
  * @param options - Extraction options
  * @returns Extraction result with primary goal and constraints
  */
-/**
- * Drop a subject-less constraint when a NAMED constraint already carries the
- * same quantity.
- *
- * The subject-optional fallback patterns exist so a bare "under £2m" is not
- * lost entirely. But when the specific pattern has already bound the same
- * number to a named target, the fallback's row is a pure liability: it targets
- * `fac_unspecified`, a node that does not exist, and it double-counts the limit.
- *
- * Measured on brief B1 (2026-08-10): the two constraints extracted were the
- * margin bound and its own subject-less twin — HALF of everything B1 produced.
- *
- * ⚠ Matched on (value, unit), NOT on operator. A subject-less row that
- * disagrees about DIRECTION with the named row for the same quantity is the
- * strongest evidence that it is a mis-parse of the same words, so it is exactly
- * the one to drop.
- */
-function dropSubjectlessDuplicates(
-  constraints: readonly ExtractedGoalConstraint[],
-): ExtractedGoalConstraint[] {
-  const namedQuantities = new Set(
-    constraints
-      .filter((c) => c.targetName !== "unspecified")
-      .map((c) => `${c.value} ${c.unit ?? ""}`),
-  );
-  return constraints.filter(
-    (c) =>
-      c.targetName !== "unspecified" ||
-      !namedQuantities.has(`${c.value} ${c.unit ?? ""}`),
-  );
-}
-
 export function extractCompoundGoals(
   brief: string,
   options: {
@@ -1241,6 +1209,14 @@ export function extractCompoundGoals(
   // ⚠ ORDER IS LOAD-BEARING. Negated floors run FIRST and claim their spans, so
   // the simple `X below Y` reading cannot re-derive an inverted ceiling from the
   // floor's own words. See NEGATED_FLOOR_PATTERNS.
+  // ⚠ THE SPAN CLAIM IS ALSO WHAT KILLS THE SUBJECT-LESS DUPLICATE. A first cut
+  // of this fix also carried a `dropSubjectlessDuplicates` pass, on the theory
+  // that B1's `fac_unspecified` row needed its own screen. A mutant that
+  // removed that pass SURVIVED, and probing showed why: with the span claimed,
+  // the subject-optional pattern never matches the floor's words at all, so the
+  // pass had nothing left to drop. It was deleted rather than shipped as
+  // unreachable code with a test that passed vacuously. The property is guarded
+  // by the mutant that removes the claim itself (M7), which REDs.
   const { constraints: negatedFloors, claimed } = extractNegatedFloorConstraints(brief);
   const upperBound = extractUpperBoundConstraints(brief, claimed);
   const lowerBound = extractLowerBoundConstraints(brief, claimed);
@@ -1249,14 +1225,14 @@ export function extractCompoundGoals(
   const temporal = extractTemporalConstraints(brief);
 
   // Combine and deduplicate
-  let constraints = dropSubjectlessDuplicates(deduplicateConstraints([
+  let constraints = deduplicateConstraints([
     ...negatedFloors,
     ...upperBound,
     ...lowerBound,
     ...reduction,
     ...between,
     ...temporal,
-  ]));
+  ]);
 
   // Add qualitative proxies if enabled
   if (options.includeProxies) {
