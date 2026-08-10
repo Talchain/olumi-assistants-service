@@ -316,7 +316,6 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
         }
       }
     }
-    // eslint-disable-next-line no-console
     console.log(`[differential] requests=${requests} demoted=${demotedCount} demotedStillMixed=${demotedStillMixed} postconditionViolations=${violations}`);
     // Assert the corpus is real before believing any agreement (trap 13).
     expect(requests, 'corpus must be non-trivial').toBeGreaterThan(200);
