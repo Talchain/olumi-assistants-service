@@ -195,15 +195,24 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, recommended option 
     expect((block as unknown as { targets: unknown[] }).targets).toHaveLength(1);
   });
 
-  it('carries NO free-text note and NO duration_ms (schema-required fields + target only)', () => {
+  it('carries NO free-text note and NO duration_ms (schema-required fields + target + source only)', () => {
     const env = composeToolCallResponse({
     answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     const [block] = uiDirectives(env);
+    // ⚠ `source` ADDED DELIBERATELY (0.39.0 gesture provenance). This pin exists
+    // to catch ACCIDENTAL field growth — especially a free-text `note`, which
+    // would open a hallucination surface for the egress scrubber. It is doing
+    // its job here: the addition is intentional, additive-optional on the wire,
+    // and a CLOSED ENUM, so it carries no user text. `note` and `duration_ms`
+    // remain absent, which is what this test is really guarding.
     expect(Object.keys(block as Record<string, unknown>).sort()).toEqual([
+      'source',
       'targets',
       'type',
       'verb',
     ]);
+    expect(block).not.toHaveProperty('note');
+    expect(block).not.toHaveProperty('duration_ms');
   });
 
   it('the composed response passes the strict egress OlumiResponseSchema with the directive on blocks[]', () => {

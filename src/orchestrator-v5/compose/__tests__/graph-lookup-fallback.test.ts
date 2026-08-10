@@ -338,6 +338,16 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
     });
   });
 
+  // ⚠ ASSERTION NARROWED (§2.1 row 7, the discussed-entity tail). These two
+  // tests protect the ROW-3 invariant: an unresolvable recommended option must
+  // never produce a highlight, and never an id-as-label target. They asserted
+  // that by counting ui_directive blocks on the whole response, which was an
+  // exact proxy only while row 3 was the sole possible author. Row 7 can now
+  // point at a DIFFERENT, properly-resolved entity that this turn's cards
+  // discuss, so the count is no longer the right instrument — but the invariant
+  // is unchanged and is now asserted DIRECTLY: no highlight, and no directive
+  // carrying the unresolvable id. (The subject was always row 3; the old
+  // assertion was over-broad, not wrong.)
   it('fallback resolving the recommended id to a NON-option kind still fails closed', () => {
     const env = composeToolCallResponse({
       answerKind: 'functional',
@@ -346,7 +356,21 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    const ds = byType(env.blocks, 'ui_directive') as unknown as ReadonlyArray<{
+      verb: string;
+      targets: ReadonlyArray<{ id: string; kind: string }>;
+    }>;
+    // The corruption under test is a FACTOR id arriving as `leading_option_id`.
+    // The invariant is that nothing presents it as the winning OPTION — not
+    // that the factor becomes untouchable. Row 7 may legitimately focus it AS A
+    // FACTOR, because a card genuinely discusses it; what must never happen is
+    // a `highlight`, or a target claiming `kind: 'option'` for it.
+    expect(ds.some((d) => d.verb === 'highlight')).toBe(false);
+    expect(
+      ds
+        .flatMap((d) => d.targets)
+        .some((t) => t.id === 'fac_delivery_risk' && t.kind === 'option'),
+    ).toBe(false);
   });
 
   it('recommended id absent from BOTH sources still fails closed (no id-as-label fallback)', () => {
@@ -357,9 +381,30 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
+    const ds = byType(env.blocks, 'ui_directive') as unknown as ReadonlyArray<{
+      verb: string;
+      targets: ReadonlyArray<{ id: string }>;
+    }>;
+    expect(ds.some((d) => d.verb === 'highlight')).toBe(false);
+    // The id-as-label defect would surface as a target carrying the unresolved
+    // id — assert that exact absence, which is what §0.1 forbids.
+    expect(ds.flatMap((d) => d.targets).some((t) => t.id === 'opt_unknown')).toBe(false);
   });
 
+  // ⚠⚠ THIS INVARIANT SURVIVED A CHALLENGE — READ BEFORE WEAKENING IT AGAIN.
+  // §2.1 row 7 (the discussed-entity tail) was first built to fire here, on the
+  // argument that a rebuild is the purest "discussing, not acting" turn class.
+  // That was OVERTURNED (Paul, 10 Aug 2026):
+  //
+  //   A DIRECTIVE IS A RESPONSE TO SOMETHING THE USER JUST DID. On a rebuild
+  //   the user did nothing — they reloaded, or the session rehydrated. Moving
+  //   their viewport on a turn they did not initiate is the workspace acting on
+  //   its OWN INITIATIVE rather than following the conversation.
+  //
+  // Row 7 is now STRUCTURALLY unable to reach this branch: it runs before the
+  // lifecycle rebuild in `buildBlocksFromFacts` and is gated on
+  // `facts.length > 0`. This test is the pin on that ordering — if someone
+  // moves row 7 below the lifecycle branch, this REDs.
   it('prior-fact FRESH lifecycle rebuild with persistedGraph still emits ZERO directives (current-turn only)', () => {
     const env = composeToolCallResponse({
       answerKind: 'functional',
