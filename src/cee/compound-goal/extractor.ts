@@ -162,10 +162,68 @@ const UPPER_BOUND_PATTERNS = [
   new RegExp(String.raw`at\s+most\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi"),
   // "within Y budget" - note: targetName defaults to "budget"
   new RegExp(String.raw`within\s+(${AMT_NO_PCT})\s*(budget|limit|cap)`, "gi"),
+  // ── BREADTH (PR1, frozen-corpus atoms B1-A19 / B1-A20) ──────────────────
+  // Measured 2026-08-10: both of B1's board-imposed limits produced NO
+  // constraint row. Their numbers survived only as `data.cap` on a factor — a
+  // NORMALISATION DENOMINATOR, which PLoT does not score — while the right
+  // panel read "Constraints: No limits on record".
+  new RegExp(
+    String.raw`(\w+(?:\s+\w+){0,3}?)\s+(?:(?:is|are|was|were)\s+)?(?:capped|limited|fixed)\s+(?:at|to)\s+(${AMT})`,
+    "gi",
+  ),
+  new RegExp(
+    String.raw`(?:cannot|can't|must\s+not|may\s+not|won't)\s+(?:\w+\s+){0,2}?more\s+than\s+(${AMT})\s+(\w+(?:\s+\w+){0,2}?)\b`,
+    "gi",
+  ),
   // "X under Y" (simple form)
   new RegExp(String.raw`(\w+(?:\s+\w+){0,2})\s+(?:under|below)\s+(${AMT})`, "gi"),
   // Subject-optional: "under/below Y [unit]" (bare phrase — subject defaults to "unspecified")
   new RegExp(`(?:^|\\s)(?:under|below)\\s+(${_VAL})`, "gi"),
+];
+
+/**
+ * NEGATED FLOORS — "without dropping X below Y" means X >= Y.
+ *
+ * ⚠ THESE MUST BE MATCHED BEFORE THE SIMPLE BOUND PATTERNS, AND THEY CLAIM
+ * THEIR SPAN. Measured on brief B1 of the frozen corpus (2026-08-10): the
+ * sentence "without dropping gross margin below 78%" was extracted as
+ * `operator: "<="` — the EXACT INVERSE of the user's floor — stamped
+ * `provenance: "explicit"` at `confidence: 0.85`, with a source quote from
+ * which the negation had been stripped. It was one of only two constraints B1
+ * produced, and the other was its subject-less duplicate.
+ *
+ * An inverted floor is worse than a missing one: enforced, it penalises exactly
+ * the options that honour the limit. That is the mechanism behind the frontier
+ * comparison's most commercially dangerous finding — the pragmatic middle
+ * option ranking near-zero in 2 of 3 briefs.
+ *
+ * The inner phrase ("gross margin below 78%") still matches the simple
+ * `X below Y` upper-bound pattern, so a claimed span is the only way to stop
+ * the ceiling being re-derived from the floor's own words.
+ */
+const NEGATION_LEAD = String.raw`(?:without|must\s+not|cannot|can't|shouldn't|should\s+not|won't|will\s+not|never)`;
+const FALL_VERB = String.raw`(?:drop(?:ping|s)?|fall(?:ing|s)?|slip(?:ping|s)?|dip(?:ping|s)?)`;
+const NEGATED_FLOOR_PATTERNS = [
+  // "without dropping gross margin below 78%"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+(?:let(?:ting)?\s+)?${FALL_VERB}\s+(\w+(?:\s+\w+){0,3})\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
+  // "must not let gross margin fall below 78%"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+let(?:ting)?\s+(\w+(?:\s+\w+){0,3})\s+${FALL_VERB}\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
+  // "gross margin cannot drop below 78%"
+  new RegExp(
+    String.raw`(\w+(?:\s+\w+){0,3})\s+${NEGATION_LEAD}\s+${FALL_VERB}\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
+  // subject-less: "without falling below 78%"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+${FALL_VERB}\s+(?:below|under)\s+(${AMT})`,
+    "gi",
+  ),
 ];
 
 /** Lower bound constraint patterns (operator: >=) */
@@ -353,13 +411,78 @@ function extractPrimaryGoal(brief: string): CompoundGoalExtractionResult["primar
 /**
  * Extract upper bound constraints (operator: <=).
  */
-function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] {
+/** A half-open character span of the brief already claimed by a stronger reading. */
+type Span = readonly [number, number];
+
+function overlapsClaimed(index: number, length: number, claimed: readonly Span[]): boolean {
+  const end = index + length;
+  return claimed.some(([s, e]) => index < e && s < end);
+}
+
+/**
+ * Extract negated FLOORS, and report the spans they claim.
+ *
+ * The claim is the load-bearing half: "without dropping gross margin below 78%"
+ * contains "gross margin below 78%", which the simple upper-bound pattern reads
+ * as a CEILING. Without the claim the fix would emit the correct floor and the
+ * inverted ceiling side by side, and the model would carry both.
+ */
+function extractNegatedFloorConstraints(brief: string): {
+  constraints: ExtractedGoalConstraint[];
+  claimed: Span[];
+} {
+  const constraints: ExtractedGoalConstraint[] = [];
+  const claimed: Span[] = [];
+
+  for (const pattern of NEGATED_FLOOR_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(brief)) !== null) {
+      const index = match.index ?? 0;
+      // A later, looser pattern must not re-emit a span an earlier one owns.
+      if (overlapsClaimed(index, match[0].length, claimed)) continue;
+
+      // Subject-less form: single capture group (the amount).
+      const hasSubject = match[2] !== undefined;
+      const targetName = hasSubject ? match[1] : "unspecified";
+      const valueStr = hasSubject ? match[2] : match[1];
+      if (!valueStr) continue;
+
+      const { value, unit } = parseValue(valueStr);
+      constraints.push({
+        targetName: targetName.trim(),
+        targetNodeId: generateNodeId(targetName.trim()),
+        operator: ">=",
+        value,
+        unit,
+        label: buildBoundDisplayName(targetName, ">=", valueStr),
+        // ⚠ THE QUOTE KEEPS THE NEGATION. It is shown back to the user as the
+        // evidence for this constraint; a quote with the word that reverses its
+        // meaning removed cannot support the row it is attached to.
+        sourceQuote: match[0].slice(0, 200),
+        confidence: hasSubject ? 0.85 : 0.6,
+        provenance: "explicit",
+        valueFrame: "level",
+      });
+      claimed.push([index, index + match[0].length]);
+    }
+  }
+
+  return { constraints, claimed };
+}
+
+function extractUpperBoundConstraints(
+  brief: string,
+  claimed: readonly Span[] = [],
+): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
   for (const pattern of UPPER_BOUND_PATTERNS) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
+      if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
       // Pattern groups vary, normalize them
       let targetName: string;
       let valueStr: string;
@@ -408,13 +531,18 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
 /**
  * Extract lower bound constraints (operator: >=).
  */
-function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] {
+function extractLowerBoundConstraints(
+  brief: string,
+  claimed: readonly Span[] = [],
+): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
   for (const pattern of LOWER_BOUND_PATTERNS) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
+      if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
       let targetName: string;
       let valueStr: string;
 
@@ -1062,6 +1190,38 @@ export function remapConstraintTargets(
  * @param options - Extraction options
  * @returns Extraction result with primary goal and constraints
  */
+/**
+ * Drop a subject-less constraint when a NAMED constraint already carries the
+ * same quantity.
+ *
+ * The subject-optional fallback patterns exist so a bare "under £2m" is not
+ * lost entirely. But when the specific pattern has already bound the same
+ * number to a named target, the fallback's row is a pure liability: it targets
+ * `fac_unspecified`, a node that does not exist, and it double-counts the limit.
+ *
+ * Measured on brief B1 (2026-08-10): the two constraints extracted were the
+ * margin bound and its own subject-less twin — HALF of everything B1 produced.
+ *
+ * ⚠ Matched on (value, unit), NOT on operator. A subject-less row that
+ * disagrees about DIRECTION with the named row for the same quantity is the
+ * strongest evidence that it is a mis-parse of the same words, so it is exactly
+ * the one to drop.
+ */
+function dropSubjectlessDuplicates(
+  constraints: readonly ExtractedGoalConstraint[],
+): ExtractedGoalConstraint[] {
+  const namedQuantities = new Set(
+    constraints
+      .filter((c) => c.targetName !== "unspecified")
+      .map((c) => `${c.value} ${c.unit ?? ""}`),
+  );
+  return constraints.filter(
+    (c) =>
+      c.targetName !== "unspecified" ||
+      !namedQuantities.has(`${c.value} ${c.unit ?? ""}`),
+  );
+}
+
 export function extractCompoundGoals(
   brief: string,
   options: {
@@ -1076,21 +1236,27 @@ export function extractCompoundGoals(
   // Extract primary goal
   const primaryGoal = extractPrimaryGoal(brief);
 
-  // Extract all constraint types
-  const upperBound = extractUpperBoundConstraints(brief);
-  const lowerBound = extractLowerBoundConstraints(brief);
+  // Extract all constraint types.
+  //
+  // ⚠ ORDER IS LOAD-BEARING. Negated floors run FIRST and claim their spans, so
+  // the simple `X below Y` reading cannot re-derive an inverted ceiling from the
+  // floor's own words. See NEGATED_FLOOR_PATTERNS.
+  const { constraints: negatedFloors, claimed } = extractNegatedFloorConstraints(brief);
+  const upperBound = extractUpperBoundConstraints(brief, claimed);
+  const lowerBound = extractLowerBoundConstraints(brief, claimed);
   const reduction = extractReductionConstraints(brief);
   const between = extractBetweenConstraints(brief);
   const temporal = extractTemporalConstraints(brief);
 
   // Combine and deduplicate
-  let constraints = deduplicateConstraints([
+  let constraints = dropSubjectlessDuplicates(deduplicateConstraints([
+    ...negatedFloors,
     ...upperBound,
     ...lowerBound,
     ...reduction,
     ...between,
     ...temporal,
-  ]);
+  ]));
 
   // Add qualitative proxies if enabled
   if (options.includeProxies) {
