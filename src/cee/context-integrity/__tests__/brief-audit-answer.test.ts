@@ -327,6 +327,132 @@ describe("composeBriefAuditAnswer", () => {
     }
   });
 
+  /**
+   * ROUND 2 / F3 — COPY TRUTH.
+   *
+   * The derivation does NOT support "not in the model at all". `absent` means
+   * "this check could not locate the figure in the surfaces it searched", and
+   * `scope.excluded_from_search` names what it never looked at. The locator's
+   * own header enumerates a false-negative set it calls explicitly incomplete:
+   * ranges where a currency does not distribute, word-form numerals, word-form
+   * percentages, locale decimal separators, postfix currency.
+   *
+   * An independent oracle over all three fixtures found NO genuine false
+   * absent, so this is a WORDING defect, not a correctness one. It is still
+   * worth fixing: this is a trust surface, and the capability's entire promise
+   * is telling the user the truth about our own work.
+   */
+  describe("F3: the copy claims only what the derivation supports", () => {
+    for (const [name, capture] of [
+      ["B1", B1],
+      ["B2", B2],
+      ["B3", B3],
+    ] as const) {
+      it(`${name}: does not assert absence as a fact about the model`, () => {
+        const answer = tryBriefAuditAnswer(capture.brief_text, capture.graph) ?? "";
+        expect(answer).not.toMatch(/not in the model at all/i);
+      });
+
+      it(`${name}: frames the finding as what this check could locate`, () => {
+        const answer = tryBriefAuditAnswer(capture.brief_text, capture.graph) ?? "";
+        expect(answer).toMatch(/could not find|could not locate/i);
+      });
+
+      it(`${name}: says the search itself is bounded`, () => {
+        // `scope.excluded_from_search` exists precisely so the consumer can say
+        // this. Naming it is what makes "could not find" honest rather than coy.
+        const answer = tryBriefAuditAnswer(capture.brief_text, capture.graph) ?? "";
+        expect(answer).toMatch(/bare numbers carrying no unit, currency or percent sign/i);
+      });
+    }
+  });
+
+  /**
+   * ROUND 2 / F4 — TRUNCATION WAS SILENT.
+   *
+   * `deriveNotModelledManifest` tallies EVERY quantity but caps `items` at
+   * MAX_ITEMS (200), setting `quantities.truncated`. The round-1 composer read
+   * `items` and ignored the flag, so on a long brief the headline counted
+   * figures the list then failed to name, and the difference vanished without a
+   * word. A capability whose promise is "here is what happened to everything
+   * you said" must not silently drop any of them.
+   */
+  describe("F4: a truncated derivation says so", () => {
+    /** Real corpus bytes, repeated to cross MAX_ITEMS. Only LENGTH is contrived. */
+    function longBrief(): string {
+      return Array.from({ length: 10 }, () => B3.brief_text).join("\n\n");
+    }
+
+    it("the fixture actually crosses the truncation boundary", () => {
+      // A truncation test that does not truncate is a guard agreeing with
+      // itself (trap 13b) — assert the precondition in-test.
+      const manifest = deriveNotModelledManifest(longBrief(), B3.graph);
+      expect(manifest.quantities!.truncated).toBe(true);
+      expect(manifest.quantities!.total).toBeGreaterThan(manifest.quantities!.items.length);
+    });
+
+    it("discloses that only part of the brief was examined", () => {
+      const manifest = deriveNotModelledManifest(longBrief(), B3.graph);
+      const answer = composeBriefAuditAnswer(manifest) ?? "";
+      expect(answer).toMatch(/first \d+ figures/i);
+    });
+
+    it("names how many figures it did not account for", () => {
+      const manifest = deriveNotModelledManifest(longBrief(), B3.graph);
+      const q = manifest.quantities!;
+      const unaccounted = q.total - q.items.length;
+      expect(unaccounted).toBeGreaterThan(0);
+      const answer = composeBriefAuditAnswer(manifest) ?? "";
+      expect(answer).toContain(String(unaccounted));
+    });
+
+    it("an untruncated brief carries no truncation notice", () => {
+      // The opposite-direction twin: the notice must not appear when it is false.
+      const answer = tryBriefAuditAnswer(B1.brief_text, B1.graph) ?? "";
+      expect(answer).not.toMatch(/first \d+ figures/i);
+    });
+  });
+
+  /**
+   * ROUND 2 / F5 — TWO ACCOUNTS OF ONE QUESTION (trap 21 at the presentation
+   * layer).
+   *
+   * The UI panel and this answer both read the SAME manifest and reported
+   * DIFFERENT numbers for B2: the panel's "Not modelled yet" is
+   * `absent + prose_only` (23), while round-1's headline was `absent` alone
+   * (17). Neither was wrong; they answer different questions, and nothing said
+   * so. Two surfaces disagreeing about one derivation undermines the whole
+   * premise of a fidelity report.
+   *
+   * Resolution: the chat states the SAME headline concept the panel does, and
+   * then names its two parts, so the numbers reconcile and each is labelled.
+   */
+  describe("F5: the chat reconciles with the panel's arithmetic", () => {
+    for (const [name, capture] of [
+      ["B1", B1],
+      ["B2", B2],
+      ["B3", B3],
+    ] as const) {
+      it(`${name}: states the panel's not-yet-modelled total (absent + prose_only)`, () => {
+        const manifest = deriveNotModelledManifest(capture.brief_text, capture.graph);
+        const q = manifest.quantities!;
+        // Derived from the producer, exactly as V7WhatIWasGivenSection derives
+        // its `notYetCount`. Not a number this module invents.
+        const notYet = q.absent + q.prose_only;
+        const answer = composeBriefAuditAnswer(manifest) ?? "";
+        expect(answer).toContain(String(notYet));
+      });
+
+      it(`${name}: still names the two parts separately`, () => {
+        const manifest = deriveNotModelledManifest(capture.brief_text, capture.graph);
+        const q = manifest.quantities!;
+        const answer = composeBriefAuditAnswer(manifest) ?? "";
+        expect(answer).toContain(String(q.absent));
+        expect(answer).toContain(String(q.prose_only));
+      });
+    }
+  });
+
   describe("beyond the cap, the overflow AND the ordering are disclosed", () => {
     /**
      * A LENGTH PROBE, not a fidelity claim: two real briefs concatenated to

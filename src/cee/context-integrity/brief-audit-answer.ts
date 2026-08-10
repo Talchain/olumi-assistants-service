@@ -86,16 +86,31 @@ const MAX_QUOTED_FACTORS = 8;
  * Does this message ask what the system did WITH THE USER'S BRIEF, as opposed
  * to what it changed in this session?
  *
+ * ⚠⚠ THE DIRECTION OF FAILURE IS NOT UNIFORM, AND ROUND 1 GOT THIS WRONG.
+ * Round 1 reasoned that a narrow predicate "fails toward the GAP". That is true
+ * only for utterances `STATE_QUERY_PATTERNS` does NOT match, which fall through
+ * to the grounded LLM. For utterances it DOES match, the session-edit arm
+ * claims the turn and the canned deflection fires, so narrowness fails toward
+ * the LIE. The safe default is a property of the UTTERANCE, not of the
+ * predicate — and two of PR1's four questions sit in the second class:
+ *
+ *   "what did you add or infer yourself?"  matches `what did you add`
+ *   "what did you change or reinterpret?"  matches `what did you change`
+ *
+ * Both shipped the canned deflection at the round-1 head. This is why
+ * {@link INFERENCE_VERB_PATTERNS} exists: those two questions are identified by
+ * a verb that has no session-edit reading, so they can be claimed without
+ * widening anything that a genuine "what did you add?" would satisfy.
+ *
  * ⚠ TWO CONJUNCTS, AND THAT IS THE DESIGN (CLAUDE.md trap 22b). This predicate
- * guards against two OPPOSITE harms, which cannot share one window:
+ * still guards two OPPOSITE harms, which cannot share one window:
  *
- *   - too narrow → the audit question keeps being deflected. A GAP: the user is
- *     no worse off than today.
+ *   - too narrow → deflection (a LIE) for utterances the session-edit arm
+ *     claims; a GAP for the rest. See the correction above.
  *   - too wide   → a genuine session-edit question ("what did you just
- *     change?") is answered with a report about the brief. A LIE, and strictly
- *     worse than the gap.
+ *     change?") is answered with a report about the brief. A LIE either way.
  *
- * So both conjuncts must hold, and the predicate fails toward the GAP:
+ * So both conjuncts must hold:
  *
  *   1. an AUDIT FRAME — the question is about what YOU (the system) did; and
  *   2. a BRIEF REFERENT ("my brief", "what I told you") OR an OMISSION VERB
@@ -111,6 +126,7 @@ export function isBriefAuditQuestion(message: string): boolean {
   if (!AUDIT_FRAME_PATTERNS.some((p) => p.test(message))) return false;
   if (BRIEF_REFERENT_PATTERNS.some((p) => p.test(message))) return true;
   if (OMISSION_VERB_PATTERNS.some((p) => p.test(message))) return true;
+  if (INFERENCE_VERB_PATTERNS.some((p) => p.test(message))) return true;
   // ⚠ THE WEAK REFERENT NEEDS A SECOND KEY, AND THIS IS WHERE THE TWO HARMS
   // SEPARATE. "my numbers" does NOT identify the question on its own:
   //
@@ -157,8 +173,11 @@ const AUDIT_FRAME_PATTERNS: readonly RegExp[] = [
 const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
   /\b(?:my|the|that|this)\s+brief\b/i,
   /\bmy\s+(?:input|notes|write-?up|description|summary|context)\b/i,
-  // "what I told you", "what I gave you", "what I wrote", "what I said"
-  /\bwhat\s+i\s+(?:told|gave|wrote|said|sent|described|shared)\b/i,
+  // "what I told you", "what I gave you", "anything I wrote", "the parts I
+  // described". The determiner is generalised because "anything I wrote" refers
+  // to the submitted text exactly as "what I wrote" does, and pinning only the
+  // interrogative form left "have you replaced anything I wrote?" unclaimed.
+  /\b(?:what|anything|everything|all|the\s+(?:things|parts|bits|stuff))\s+i\s+(?:told|gave|wrote|said|sent|described|shared)\b/i,
   // "the text I gave you", "the information I provided"
   /\bthe\s+(?:text|information|detail|numbers|figures)\s+i\s+(?:gave|wrote|sent|provided|shared)\b/i,
 ];
@@ -202,6 +221,32 @@ const RETENTION_VERB_PATTERNS: readonly RegExp[] = [
   /\blos(?:e|t)\b/i,
 ];
 
+/**
+ * Conjunct 2d — verbs of INFERENCE and REINTERPRETATION, which are what PR1's
+ * second and fourth questions are actually made of.
+ *
+ * These name something only the SYSTEM can have done to the USER'S material,
+ * and none of them is an edit the product performs: you cannot ask Olumi to
+ * "infer" or "reinterpret" a node. That is what lets these fire on
+ * *"what did you add or infer yourself?"* while leaving the bare
+ * *"what did you add?"* to the session-edit guard — the two differ by exactly
+ * the word that carries the audit sense.
+ *
+ * ⚠ `add` and `change` are NOT here, and must never be: they are the verbs the
+ * session-edit arm owns, and putting them here would answer "what did you just
+ * change?" with a report about the brief.
+ */
+const INFERENCE_VERB_PATTERNS: readonly RegExp[] = [
+  /\binfer(?:red|ring|s)?\b/i,
+  /\b(?:re)?interpret(?:ed|ing|s|ation)?\b/i,
+  /\binvent(?:ed|ing|s)?\b/i,
+  /\bassum(?:e|ed|ing|ption)/i,
+  /\bmade?\s+up\b/i,
+  /\bguess(?:ed|ing|es)?\b/i,
+  /\bfill(?:ed)?\s+in\b/i,
+  /\bmake\s+up\b/i,
+];
+
 const OMISSION_VERB_PATTERNS: readonly RegExp[] = [
   /\ble(?:ave|aving|ft)\s+out\b/i,
   /\bomit(?:ted|ting|s)?\b/i,
@@ -225,15 +270,40 @@ export function composeBriefAuditAnswer(manifest: NotModelledManifest): string |
 
   const paragraphs: string[] = [];
 
+  /**
+   * ⚠ F5 — ONE QUESTION, ONE NUMBER, ACROSS BOTH SURFACES (CLAUDE.md trap 21 at
+   * the presentation layer).
+   *
+   * The UI panel's "Not modelled yet" count is `absent + prose_only`
+   * (`V7WhatIWasGivenSection`), while round 1's headline here was `absent`
+   * alone. On B2 that was 23 against 17: two surfaces reading the SAME
+   * derivation and reporting different totals for what a user reads as the same
+   * question, with nothing saying they differed. Neither number was wrong; the
+   * defect was that the concepts were never named apart.
+   *
+   * The headline is now the panel's concept, so the two reconcile, and the two
+   * parts are named underneath so the stronger claim ("I could not find it at
+   * all") is still distinguishable from the weaker one ("it is only in the
+   * prose").
+   */
+  const notYetModelled = q.absent + q.prose_only;
   paragraphs.push(
     `Here is what happened to the figures in your brief. I found ${count(q.total, "stated figure")}. ` +
-      `${q.in_model} of them are carried in the model, ${q.prose_only} appear only in the commentary, ` +
-      `and ${q.absent} are not in the model at all.`,
+      `${q.in_model} of them are carried in the model. The other ${notYetModelled} are not yet ` +
+      `driving anything: ${q.absent} I could not find in the model, and ${q.prose_only} appear ` +
+      `only in the commentary.`,
   );
 
   const absent = q.items.filter((i) => i.verdict === "absent");
   if (absent.length > 0) {
-    paragraphs.push(`Not in the model: ${quoteLiterals(absent)}.`);
+    // ⚠ F3 — "could not find", never "not in the model at all". The derivation
+    // supports a statement about THIS SEARCH, not about the model. The locator
+    // declines word-form numerals, requires currency identity, and does not
+    // read ranges where a currency fails to distribute; its own header calls
+    // that false-negative set incomplete. Every one of those failures points
+    // the same way, toward reporting a figure as missing when it is present, so
+    // the copy must not upgrade a search result into a fact about the model.
+    paragraphs.push(`Figures I could not find in the model: ${quoteLiterals(absent)}.`);
   }
 
   const proseOnly = q.items.filter((i) => i.verdict === "prose_only");
@@ -257,12 +327,37 @@ export function composeBriefAuditAnswer(manifest: NotModelledManifest): string |
     );
   }
 
+  /**
+   * ⚠ F4 — A TRUNCATED DERIVATION SAYS SO.
+   *
+   * `deriveNotModelledManifest` tallies EVERY quantity it finds but caps
+   * `items` at `MAX_ITEMS`, setting `truncated`. Round 1 read `items` and
+   * ignored the flag, so on a long brief the headline counted figures the lists
+   * then failed to name, and the difference vanished without a word. On a
+   * 260-figure brief that is 60 of the user's own figures silently unaccounted
+   * for, inside a capability whose entire promise is "here is what happened to
+   * everything you said".
+   */
+  if (q.truncated) {
+    const unaccounted = q.total - q.items.length;
+    paragraphs.push(
+      `One limit worth knowing: your brief is long, so I checked the first ${q.items.length} ` +
+        `figures in it. ${unaccounted} further ${unaccounted === 1 ? "figure is" : "figures are"} ` +
+        `not accounted for above. Ask me about a specific one and I will check it directly.`,
+    );
+  }
+
   // The anti-reassurance clause. Never optional: a finite `absent` list that
   // reads as exhaustive is the one failure the manifest's own header calls
   // "more damaging than silence".
+  //
+  // F3's second half: the SEARCH's own bounds are stated too, from
+  // `scope.excluded_from_search`. Saying "I could not find it" is only honest
+  // alongside what was never looked at.
   paragraphs.push(
     `This is not a complete account of what was left out. It only covers figures I can ` +
-      `locate in your text, so it cannot see ${humaniseClasses(manifest.not_tracked)}. ` +
+      `locate in your text: it does not look at ${humaniseList(searchExclusions(manifest))}, ` +
+      `and it cannot see ${humaniseClasses(manifest.not_tracked)}. ` +
       `If something matters and is missing, tell me and I will add it.`,
   );
 
@@ -330,6 +425,31 @@ function joinWithOverflow(values: readonly string[], cap: number): string {
 function humaniseClasses(classes: readonly string[]): string {
   const phrases = classes.map((c) => c.replace(/_/g, " "));
   if (phrases.length === 0) return "everything it does not track";
-  if (phrases.length === 1) return phrases[0]!;
-  return `${phrases.slice(0, -1).join(", ")}, or ${phrases[phrases.length - 1]!}`;
+  return humaniseList(phrases);
+}
+
+/** Join a list in English, with "or" before the last item. */
+function humaniseList(values: readonly string[]): string {
+  if (values.length === 0) return "nothing";
+  if (values.length === 1) return values[0]!;
+  return `${values.slice(0, -1).join(", ")}, or ${values[values.length - 1]!}`;
+}
+
+/**
+ * What the SEARCH never looked at, read from the manifest's own `scope`.
+ *
+ * ⚠ DERIVED, NOT RE-SPELLED (trap 12). One entry is a cross-reference rather
+ * than user copy — `"everything in not_tracked"` — and the sentence that
+ * follows already names those classes in full, so repeating the pointer would
+ * be noise. It is dropped by matching the CROSS-REFERENCE, and if that entry's
+ * wording ever changes the string simply renders literally: visibly odd, but
+ * never a false narrowing of what we admit to skipping. Failing loud beats
+ * failing quiet.
+ */
+const NOT_TRACKED_CROSS_REFERENCE = "everything in not_tracked";
+
+function searchExclusions(manifest: NotModelledManifest): readonly string[] {
+  return manifest.scope.excluded_from_search.filter(
+    (entry) => entry !== NOT_TRACKED_CROSS_REFERENCE,
+  );
 }

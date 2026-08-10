@@ -43,6 +43,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
+import { isEditRequestShape } from '../mutation-warrant.js';
 import {
   isStateQueryQuestionShape,
   tryStateQueryGuard,
@@ -225,6 +226,154 @@ describe('ROADMAP 2.975 — brief-audit questions are not answered from edit his
       });
       const text = outcome.matched ? outcome.assistant_text : '';
       expect(text).not.toContain(CANNED_DEFLECTION);
+    });
+  });
+
+  /**
+   * ROUND 2 / F1 — THE CANNED LIE SURVIVED FOR TWO OF THE FOUR QUESTIONS.
+   *
+   * ⚠ AND THE RATIONALE IN ROUND 1 WAS INVERTED FOR THIS CLASS. Round 1 argued
+   * that a narrow audit predicate "fails toward the GAP". That holds ONLY for
+   * utterances `STATE_QUERY_PATTERNS` does not match, which fall through to the
+   * LLM. For utterances it DOES match, narrowness fails toward the LIE, because
+   * the session-edit arm claims the turn and the canned deflection fires.
+   *
+   * Two of PR1's four questions are in that second class:
+   *   "what did you add or infer yourself?"  -> matches `what did you add`
+   *   "what did you change or reinterpret?"  -> matches `what did you change`
+   * Measured at the round-1 head: both returned the canned deflection.
+   *
+   * Round 1's corpus could not see this: it carried "infer" and "reinterpret"
+   * ONLY inside the compound T4_FOURQ capture, where the co-occurring "my
+   * brief" fired the predicate for a reason that vanishes when the question is
+   * asked on its own (trap 22 — the corpus shared the code's blind spot).
+   */
+  describe('F1: each of PR1\'s four questions, asked SINGLY', () => {
+    // Derived by splitting the verbatim T4_FOURQ capture at its own numbering.
+    const fourQuestionsSingly: readonly (readonly [string, string])[] = [
+      ['Q1 retained', 'what from my brief did you keep in the model?'],
+      ['Q2 inferred', 'what did you add or infer yourself?'],
+      ['Q3 excluded', 'what did you leave out?'],
+      ['Q4 changed', 'what did you change or reinterpret?'],
+    ];
+
+    for (const [label, message] of fourQuestionsSingly) {
+      it(`${label}: never returns the canned edit-history deflection`, () => {
+        const outcome = tryStateQueryGuard({
+          message,
+          contextPack: ctxWith([]),
+          briefAudit,
+        });
+        const text = outcome.matched ? outcome.assistant_text : '';
+        expect(text).not.toContain(CANNED_DEFLECTION);
+      });
+
+      it(`${label}: is answered from the derived manifest`, () => {
+        const outcome = tryStateQueryGuard({
+          message,
+          contextPack: ctxWith([]),
+          briefAudit,
+        });
+        expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+      });
+    }
+
+    /**
+     * Real paraphrases, taken from the trace's OWN captures rather than from
+     * this author's head — the exact failure mode that produced F1.
+     */
+    const capturedParaphrases: readonly (readonly [string, string])[] = [
+      ['T4C_EXCLUDED (Q3+Q4 compound)', CAPTURED_EXCLUDED_QUESTION],
+      ['T4_FOURQ (all four compound)', CAPTURED_FOUR_QUESTION_AUDIT],
+      [
+        'T4C first clause alone',
+        'Which parts of my brief did you leave out of the model?',
+      ],
+      [
+        'T4C second clause alone',
+        'which numbers did you change or reinterpret?',
+      ],
+    ];
+
+    for (const [label, message] of capturedParaphrases) {
+      it(`${label}: answered from the manifest, never deflected`, () => {
+        const outcome = tryStateQueryGuard({
+          message,
+          contextPack: ctxWith([]),
+          briefAudit,
+        });
+        expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+      });
+    }
+
+    /**
+     * REAL NEGATIVES, also from the captures. These are questions about the
+     * MODEL or the ANALYSIS, not about fidelity to the brief, and the trace
+     * showed the grounded LLM path answers them well. The predicate must leave
+     * them alone.
+     */
+    const capturedNonAudits: readonly (readonly [string, string])[] = [
+      ['T4B_REVIEW', 'Walk me through the model so I can review it before running the analysis.'],
+      ['T4D_ASSUM', 'Which assumptions in this model matter most to check before I act on this result?'],
+      ['T4E_BUDGET (pointed single-fact)', 'I gave you two budget numbers, which one is the model using?'],
+    ];
+
+    for (const [label, message] of capturedNonAudits) {
+      it(`${label}: is NOT claimed as a brief audit`, () => {
+        const outcome = tryStateQueryGuard({
+          message,
+          contextPack: ctxWith([]),
+          briefAudit,
+        });
+        const dispatch = outcome.matched ? outcome.dispatch : 'unmatched';
+        expect(dispatch).not.toBe('brief_audit');
+      });
+    }
+  });
+
+  /**
+   * ROUND 2 / F2 — THE SUPPRESSOR WAS CLOSED ONLY FOR THE `change` CLASS.
+   *
+   * `EDIT_VERB_PATTERN` was tested FIRST and returned early, so an audit
+   * question carrying remove / adjust / replace / lower never reached the
+   * brief-audit check. Measured at the round-1 head: "did you remove anything
+   * from my brief?" classified as a brief audit BY THIS MODULE'S OWN PREDICATE
+   * and was still granted a mutation warrant.
+   *
+   * A question must never be able to change the thing it asks about, for ANY
+   * verb — so the audit classification is authoritative over warrant-granting.
+   */
+  describe('F2: an audit question is never granted a mutation warrant', () => {
+    const auditQuestionsCarryingEditVerbs: readonly string[] = [
+      'did you remove anything from my brief?',
+      "did you adjust my brief's figures?",
+      'did you lower any figure from my brief?',
+      'what did you remove from my brief?',
+      'have you replaced anything I wrote?',
+    ];
+
+    for (const message of auditQuestionsCarryingEditVerbs) {
+      it(`${JSON.stringify(message)}: is question-shaped despite the edit verb`, () => {
+        expect(isStateQueryQuestionShape(message)).toBe(true);
+      });
+
+      it(`${JSON.stringify(message)}: is refused a mutation warrant`, () => {
+        // Asserted against the product's OWN warrant door, not a copy of it.
+        expect(isEditRequestShape(message)).toBe(false);
+      });
+    }
+
+    it('a genuine imperative edit still gets its warrant', () => {
+      // The suppressor must not swallow real edits, or nothing could be edited.
+      expect(isEditRequestShape('Remove the NRR factor.')).toBe(true);
+    });
+
+    it('a compound audit-plus-edit turn still reaches normal routing', () => {
+      expect(
+        isStateQueryQuestionShape(
+          'What did you leave out of my brief? Add a constraint below 50000.',
+        ),
+      ).toBe(false);
     });
   });
 

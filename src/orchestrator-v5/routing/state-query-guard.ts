@@ -273,19 +273,29 @@ const EDIT_VERB_PATTERN =
  * so they are never hijacked by edit routing and need no route suppression.
  */
 export function isStateQueryQuestionShape(message: string): boolean {
-  if (EDIT_VERB_PATTERN.test(message)) return false;
-  // ROADMAP 2.975 — a BRIEF-AUDIT question is a question, so it must be
-  // suppressed from `edit_graph` routing for exactly the same reason a
-  // session-edit question is: *"which numbers did you change or reinterpret?"*
-  // carries the edit verb `change` and would otherwise be hijacked into an
-  // attempt to MUTATE the model the user is asking about. Widening suppression
-  // fails safe; narrowing it would let the route claim a question as an edit.
-  if (
-    !STATE_QUERY_PATTERNS.some((pat) => pat.test(message)) &&
-    !isBriefAuditQuestion(message)
-  ) {
-    return false;
+  // ROADMAP 2.975 — A QUESTION MUST NEVER BE ABLE TO CHANGE THE THING IT ASKS
+  // ABOUT, FOR ANY VERB.
+  //
+  // ⚠ ROUND 1 CLOSED THIS ONLY FOR THE `change` CLASS, AND THE HOLE WAS THE
+  // ORDERING. `EDIT_VERB_PATTERN` was tested FIRST and returned early, so
+  // *"did you remove anything from my brief?"* never reached the brief-audit
+  // check: it was classified as an audit by this module's own predicate and was
+  // still granted a mutation warrant by `mutation-warrant.ts:221`, which reads
+  // this function. `change` happened to be absent from `EDIT_VERB_PATTERN`
+  // (deliberately, so session-edit questions could fire), which is the only
+  // reason the `change` case ever worked. remove / adjust / replace / lower are
+  // all in it.
+  //
+  // So the audit classification is now AUTHORITATIVE over the edit-verb gate.
+  // For every non-audit message this function is byte-identical to before: the
+  // same gate, the same allowlist, the same bail-out, in the same order.
+  const briefAudit = isBriefAuditQuestion(message);
+  if (!briefAudit) {
+    if (EDIT_VERB_PATTERN.test(message)) return false;
+    if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
   }
+  // The compound bail-out still applies to BOTH classes: "what did you leave
+  // out? add a constraint" carries a real edit and belongs in normal routing.
   if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(message))) return false;
   return true;
 }
@@ -318,12 +328,6 @@ export interface TryStateQueryGuardInput {
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
-  // Negative gate first — cheapest. A message with an imperative edit
-  // verb is almost always a fresh edit request, not a state-query.
-  if (EDIT_VERB_PATTERN.test(input.message)) {
-    return { matched: false };
-  }
-
   // ROADMAP 2.975 — SEPARATE THE TWO QUESTIONS BEFORE EITHER ARM CLAIMS ONE.
   //
   // This runs BEFORE the session-edit arms, and returns unconditionally, so a
@@ -347,6 +351,16 @@ export function tryStateQueryGuard(
     // the grounded conversational path rather than asserting a zero.
     if (answer === null) return { matched: false };
     return { matched: true, dispatch: 'brief_audit', assistant_text: answer };
+  }
+
+  // Negative gate — cheapest of the session-edit arms. A message with an
+  // imperative edit verb is almost always a fresh edit request, not a
+  // state-query. It runs AFTER the brief-audit check for the reason given in
+  // `isStateQueryQuestionShape`: an audit question carrying `remove` is still a
+  // question, and returning early here would hand it to the LLM having already
+  // let the route treat it as an edit.
+  if (EDIT_VERB_PATTERN.test(input.message)) {
+    return { matched: false };
   }
 
   const recent = input.contextPack.recent_changes;
