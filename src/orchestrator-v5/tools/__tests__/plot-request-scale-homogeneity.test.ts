@@ -204,8 +204,141 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     expect(out.demoted, 'a request carrying an explicit raw_value must not be demoted').toBe(false);
     expect(out.perOption[0]?.[SWITCH_COST], 'a user-stated raw magnitude must survive verbatim').toBe(18000);
     expect(
-      out.blockedByStatedRawScale,
+      out.mixedUnresolved,
       'the un-demotable mixed case must be surfaced, never silently shipped',
     ).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // The rules an earlier version of this decision could not see. Both are LIVE:
+  // `DEFAULT_ENCODING_MAPS` writes categorical encodings onto option nodes at the
+  // draft ingest boundary, and this module's own suite already pins
+  // `{ value: 2, rule: 'encoded_verbatim' }`.
+  // -------------------------------------------------------------------------
+  const encodedIv = (value: number) => ({ value, value_type: 'categorical', encoding_map: { build: 0, buy: 1, outsource: 2 } });
+  const CATEGORY = 'fac_build_vs_buy';
+  const categoryNode = { id: CATEGORY, kind: 'factor', observed_state: { value: 1 } };
+
+  it('A1: an ENCODED category above 1 flips the gate with no promotion — must be surfaced, never silently shipped', () => {
+    const req = [{ [CATEGORY]: encodedIv(2), [SWITCH_COST]: iv(0.72) }];
+    const map = buildFactorScaleMap([categoryNode, ...costNodes]);
+    // Pin the precondition: the encoded value really does resolve verbatim, above 1.
+    const rules = projectInterventionsToRawScale(req[0]!, map).conversions;
+    expect(rules.find((c) => c.factor_id === CATEGORY)?.rule).toBe('encoded_verbatim');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.perOption[0]?.[CATEGORY], 'an encoded category must never be rewritten').toBe(2);
+    expect(out.demoted, 'an encoded category is not ours to demote').toBe(false);
+    expect(
+      out.mixedUnresolved,
+      'a request whose gate is flipped by an encoded category, stranding a unit-scale cost, MUST warn',
+    ).toBe(true);
+  });
+
+  it('A2 (THE REGRESSION): encoded category + rule-2 promotion — must NOT demote, and must not undo a correct promotion', () => {
+    // An earlier version demoted here, taking capability from a CORRECT 80 (→0.8 at
+    // PLoT) to 0.8 (→0.008): correct-to-100x-suppressed, worse than doing nothing.
+    const req = [{ [CATEGORY]: encodedIv(2), [CAPABILITY]: iv(0.8), [SWITCH_COST]: iv(0.72) }];
+    const map = buildFactorScaleMap([categoryNode, capabilityNodePct, ...costNodes]);
+    const rules = projectInterventionsToRawScale(req[0]!, map).conversions;
+    expect(rules.find((c) => c.factor_id === CATEGORY)?.rule).toBe('encoded_verbatim');
+    expect(rules.find((c) => c.factor_id === CAPABILITY)?.rule).toBe('cap_denormalised');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.demoted, 'must NOT demote when an un-ownable value above 1 is present').toBe(false);
+    expect(
+      out.perOption[0]?.[CAPABILITY],
+      'capability must keep its correct raw value 80 — demoting it here is worse than the defect',
+    ).toBe(80);
+    expect(out.perOption[0]?.[CATEGORY]).toBe(2);
+    expect(out.mixedUnresolved, 'still mixed and unresolved — must warn').toBe(true);
+  });
+
+  it('A3: a no_cap value ABOVE 1 is not a stranded unit-scale sibling — no un-achievable demote', () => {
+    const NOCAP = 'fac_headcount';
+    const req = [{ [NOCAP]: iv(5000), [CAPABILITY]: iv(0.8), [SWITCH_COST]: iv(0.72) }];
+    const map = buildFactorScaleMap([{ id: NOCAP, kind: 'factor', observed_state: { value: 12 } }, capabilityNodePct, ...costNodes]);
+    const rules = projectInterventionsToRawScale(req[0]!, map).conversions;
+    expect(rules.find((c) => c.factor_id === NOCAP)?.rule).toBe('no_cap');
+
+    const out = projectRequestInterventionsToWireScale(req, map);
+    expect(out.demoted, 'demotion could never make this request homogeneous').toBe(false);
+    expect(out.perOption[0]?.[CAPABILITY], 'the correct promotion must survive').toBe(80);
+    expect(out.mixedUnresolved).toBe(true);
+  });
+
+  it('⭐ POSTCONDITION IS AN INVARIANT, not a log line: exhaustive differential over the whole rule space', () => {
+    // Independently generated corpus — NOT the 13 captures, and not the reviewer's
+    // numbers, which are deliberately not inherited. Every combination of the six
+    // emitting rules across 2 options x 3 factors.
+    const factorShapes: Record<string, { node: Record<string, unknown>; ivs: unknown[] }> = {
+      provesConvention: { node: { id: 'f_a', kind: 'factor', observed_state: { value: 0.35, raw_value: 35, cap: 100 } }, ivs: [iv(0.8), iv(0.35), iv(0)] },
+      zeroBaselineCap: { node: { id: 'f_b', kind: 'factor', observed_state: { value: 0, raw_value: 0, cap: 25000 } }, ivs: [iv(0.72), iv(0.5), iv(0)] },
+      noCap: { node: { id: 'f_c', kind: 'factor', observed_state: { value: 12 } }, ivs: [iv(5000), iv(0.5)] },
+      encoded: { node: { id: 'f_d', kind: 'factor', observed_state: { value: 1 } }, ivs: [encodedIv(2), encodedIv(0), encodedIv(1)] },
+      statedRaw: { node: { id: 'f_e', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, ivs: [{ value: 0.72, raw_value: 18000 }, { value: 0.2, raw_value: 5000 }] },
+      alreadyRaw: { node: { id: 'f_f', kind: 'factor', observed_state: { value: 0.2, raw_value: 5000, cap: 25000 } }, ivs: [iv(9000), iv(0.4)] },
+    };
+    const names = Object.keys(factorShapes);
+    const nodes = names.map((n) => factorShapes[n]!.node);
+    const map = buildFactorScaleMap(nodes);
+
+    let requests = 0;
+    let demotedCount = 0;
+    let demotedStillMixed = 0;
+    let violations = 0;
+    // every unordered TRIPLE of factor shapes x every intervention magnitude of each
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i; j < names.length; j++) {
+        for (let k = j; k < names.length; k++) {
+          const A = factorShapes[names[i]!]!;
+          const B = factorShapes[names[j]!]!;
+          const C = factorShapes[names[k]!]!;
+          for (const ivA of A.ivs) {
+            for (const ivB of B.ivs) {
+              for (const ivC of C.ivs) {
+                const idA = A.node.id as string;
+                const idB = B.node.id as string;
+                const idC = C.node.id as string;
+                const req = [{ [idA]: ivA, [idB]: ivB, [idC]: ivC }, { [idA]: ivA, [idC]: ivC }];
+                const out = projectRequestInterventionsToWireScale(req, map);
+                requests++;
+                if (out.postconditionViolated) violations++;
+                if (out.demoted) {
+                  demotedCount++;
+                  const flat = out.perOption.flatMap((o) => Object.values(o));
+                  if (!flat.every((v) => v <= 1)) demotedStillMixed++;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[differential] requests=${requests} demoted=${demotedCount} demotedStillMixed=${demotedStillMixed} postconditionViolations=${violations}`);
+    // Assert the corpus is real before believing any agreement (trap 13).
+    expect(requests, 'corpus must be non-trivial').toBeGreaterThan(200);
+    expect(demotedCount, 'the corpus must actually exercise the demote path').toBeGreaterThan(0);
+    // THE INVARIANT.
+    expect(demotedStillMixed, 'every demoted request MUST end up within [0,1]').toBe(0);
+    expect(violations, 'postcondition must never be violated').toBe(0);
+  });
+
+  it('⭐ DIFFERENTIAL: the fix never makes a factor worse than doing nothing', () => {
+    // The failure this replaces was correct-to-100x-suppressed. So the guarantee we
+    // assert is comparative, against the PRE-FIX projection, not absolute.
+    const encoded = (v: number) => encodedIv(v);
+    const cases: Array<[string, Record<string, unknown>[], Record<string, unknown>[]]> = [
+      ['encoded+promotion+cost', [{ f_d: encoded(2), f_a: iv(0.8), f_b: iv(0.72) }], [{ id: 'f_d', kind: 'factor', observed_state: { value: 1 } }, { id: 'f_a', kind: 'factor', observed_state: { value: 0.35, raw_value: 35, cap: 100 } }, { id: 'f_b', kind: 'factor', observed_state: { value: 0, raw_value: 0, cap: 25000 } }]],
+      ['nocap+promotion+cost', [{ f_c: iv(5000), f_a: iv(0.8), f_b: iv(0.72) }], [{ id: 'f_c', kind: 'factor', observed_state: { value: 12 } }, { id: 'f_a', kind: 'factor', observed_state: { value: 0.35, raw_value: 35, cap: 100 } }, { id: 'f_b', kind: 'factor', observed_state: { value: 0, raw_value: 0, cap: 25000 } }]],
+    ];
+    for (const [label, req, nodes] of cases) {
+      const map = buildFactorScaleMap(nodes);
+      const before = req.map((r) => projectInterventionsToRawScale(r, map).interventions);
+      const after = projectRequestInterventionsToWireScale(req as Record<string, unknown>[], map).perOption;
+      expect(Object.keys(before[0]!).length, `${label}: empty corpus would be vacuous`).toBeGreaterThan(0);
+      expect(after, `${label}: an un-demotable request must be left exactly as the pre-fix projection had it`).toEqual(before);
+    }
   });
 });

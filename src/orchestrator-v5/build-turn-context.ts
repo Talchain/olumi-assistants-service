@@ -1830,10 +1830,29 @@ function projectOptionsToRawScale(
       'run_analysis egress intervention value-scale projection (redacted; no magnitudes)',
     );
   }
-  if (requestProjection.blockedByStatedRawScale) {
-    // Mixed scale we must NOT auto-resolve: an explicit user-stated raw_value above 1
-    // is not ours to rewrite. Surfaced rather than silently shipped — this is the
-    // residual case the root-cause fix (graph-level convention evidence) must close.
+  if (requestProjection.postconditionViolated) {
+    // INVARIANT VIOLATION — loud by construction. Demotion was chosen and did not make
+    // the request homogeneous, which means the decision predicates and the postcondition
+    // disagree. This is the assertion that catches a mixed-scale class nobody enumerated.
+    log.error(
+      {
+        event: 'run_analysis.intervention_scale_postcondition_violated',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        demoted_factors: requestProjection.demotedFactors,
+        cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
+        ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
+      },
+      'run_analysis INVARIANT VIOLATION: demotion was chosen but the outbound payload is still not within [0,1] — the request is STILL mixed-scale and the analysis is computing on corrupted input',
+    );
+  }
+  if (requestProjection.mixedUnresolved) {
+    // Mixed scale CEE must NOT auto-resolve: the value above 1 is a magnitude CEE does
+    // not own — an explicit raw_value, an already-raw passthrough, or an ENCODED
+    // category (where `2` means "outsource", not "two"). Surfaced rather than silently
+    // shipped. NOTE: this currently has no consumer beyond this log — such a run still
+    // ships `robustness: high` with no hedge. Whether it should is a product ruling
+    // (rowed), not something this projection may decide.
     log.warn(
       {
         event: 'run_analysis.intervention_scale_mixed_unresolved',
@@ -1842,7 +1861,7 @@ function projectOptionsToRawScale(
         cap_denormalised_factors: conversionSummary.cap_denormalised_factors,
         ambiguous_no_evidence_factors: conversionSummary.ambiguous_no_evidence_factors,
       },
-      'run_analysis outbound payload is mixed-scale and carries an explicit raw_value above 1 — NOT demoted (a stated magnitude must not be rewritten); PLoT will renormalise the whole request',
+      'run_analysis outbound payload is mixed-scale and carries a value above 1 that CEE does not own (stated raw_value / already-raw / encoded category) — NOT demoted; PLoT will renormalise the whole request and every unit-scale sibling will be divided by its cap',
     );
   }
 

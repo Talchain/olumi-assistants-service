@@ -398,11 +398,18 @@ export interface RequestScaleProjection {
    */
   readonly allWithinUnitInterval: boolean;
   /**
-   * True when the request is mixed but could NOT be demoted, because an explicit
-   * user-stated `raw_value` (rule 1) is itself above 1. Demoting that would
-   * rewrite a magnitude CEE does not own, so we ship as-is and surface loudly.
+   * INVARIANT VIOLATION: demotion was chosen and still did not bring the request
+   * inside [0,1]. Should be unreachable — it means the decision predicates and the
+   * postcondition disagree, and the request is still computing on corrupted input.
    */
-  readonly blockedByStatedRawScale: boolean;
+  readonly postconditionViolated: boolean;
+  /**
+   * True when the request is mixed and CEE must NOT auto-resolve it — because the
+   * value above 1 is a magnitude CEE does not own (an explicit `raw_value`, an
+   * already-raw passthrough, or an ENCODED category) — or when demotion was chosen
+   * and failed its postcondition. Surfaced loudly; never silently shipped.
+   */
+  readonly mixedUnresolved: boolean;
 }
 
 /**
@@ -445,22 +452,35 @@ export function projectRequestInterventionsToWireScale(
   );
   const present = resolved.flat().filter((r) => r.result.value !== null);
 
-  // Request-level homogeneity decision.
-  const promotedByCap = present.filter((r) => r.result.rule === 'cap_denormalised');
-  const unitScaleSiblings = present.some(
-    (r) => r.result.rule === 'ambiguous_no_evidence' || r.result.rule === 'no_cap',
-  );
-  // A value above 1 that CEE did NOT derive — an explicit user-stated raw_value, or
-  // an already-raw passthrough. Demoting these would corrupt a magnitude we do not own.
-  const statedRawAboveOne = present.some(
-    (r) =>
-      (r.result.rule === 'raw_value_used' || r.result.rule === 'passthrough') &&
-      r.result.value !== null &&
-      r.result.value > 1,
-  );
+  // ---- Request-level decision, classified by the EMITTED VALUE, not by rule name ----
+  // SIX rules can emit a value. An earlier version of this decision keyed on rule
+  // NAMES and enumerated four of them, so `encoded_verbatim` was invisible and
+  // `no_cap` was miscounted as unit-scale. Both are live: `DEFAULT_ENCODING_MAPS`
+  // writes categorical encodings like `{build: 0, buy: 1, outsource: 2}` onto option
+  // nodes at the draft ingest boundary, and an encoded `2` flips PLoT's gate exactly
+  // as a denormalised magnitude does. What matters to PLoT is the NUMBER on the wire,
+  // so every predicate below is numeric.
 
-  const mixed = promotedByCap.length > 0 && unitScaleSiblings;
-  const demote = mixed && !statedRawAboveOne;
+  // Anything above 1 flips PLoT's request-level gate for the WHOLE request.
+  const aboveOne = present.filter((r) => r.result.value !== null && r.result.value > 1);
+  // A sibling is STRANDED only if its emitted value really is <= 1: once the gate
+  // fires, PLoT divides it by its cap and it is annihilated. A `no_cap` value ABOVE 1
+  // is not stranded — and note these are two different claims that must not be
+  // collapsed: `no_cap` is genuinely NOT corrupted (there is no cap to divide by), but
+  // it is also NOT unit-scale. Counting it as unit-scale regardless of magnitude is
+  // what made an earlier version demote a request it could never make homogeneous.
+  const strandedUnitScale = present.some(
+    (r) =>
+      (r.result.rule === 'ambiguous_no_evidence' || r.result.rule === 'no_cap') &&
+      r.result.value !== null &&
+      r.result.value <= 1,
+  );
+  const mixed = aboveOne.length > 0 && strandedUnitScale;
+  // ONLY rule 2 is ours to undo — CEE derived that number itself. Every other value
+  // above 1 is a magnitude we do not own: an explicit `raw_value`, an already-raw
+  // passthrough, or an encoded category (where `2` means "outsource", not "two").
+  const undemotableAboveOne = aboveOne.some((r) => r.result.rule !== 'cap_denormalised');
+  const demote = mixed && !undemotableAboveOne;
 
   const perOption: Array<Record<string, number>> = [];
   const conversions: InterventionConversion[] = [];
@@ -483,14 +503,26 @@ export function projectRequestInterventionsToWireScale(
     perOption.push(interventions);
   }
 
+  // ---- POSTCONDITION, ASSERTED RATHER THAN LOGGED ----
+  // Demotion exists for exactly one purpose: to put the whole request inside [0,1] so
+  // PLoT's gate SKIPS. If we chose to demote and did not achieve that, the payload is
+  // still mixed and the analysis is still computing on corrupted input — so the claim
+  // "demoted" would be a lie. This assertion is what catches the whole defect class
+  // WITHOUT anyone having to enumerate the rules in advance; it would have caught the
+  // encoded-category case before anybody thought of `encoded_verbatim`.
   const allWithinUnitInterval = perOption.every((o) => Object.values(o).every((v) => v <= 1));
+  const postconditionViolated = demote && !allWithinUnitInterval;
   return {
     perOption,
     conversions,
-    demoted: demote && demotedFactors.length > 0,
+    demoted: demote && !postconditionViolated && demotedFactors.length > 0,
     demotedFactors,
     allWithinUnitInterval,
-    blockedByStatedRawScale: mixed && statedRawAboveOne,
+    postconditionViolated,
+    // A mixed request we must NOT auto-resolve, OR one where demotion failed to make
+    // the request homogeneous. Either way it is unresolved and must not be shipped as
+    // if it were fine.
+    mixedUnresolved: (mixed && undemotableAboveOne) || postconditionViolated,
   };
 }
 
