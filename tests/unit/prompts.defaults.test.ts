@@ -22,6 +22,7 @@ import {
 } from '../../src/prompts/loader.js';
 import { getSystemPrompt } from '../../src/adapters/llm/prompt-loader.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../../src/config/graphCaps.js';
+import { DEFAULT_PROMPT_VERSIONS } from '../../src/prompts/estate.js';
 
 // Reset loader state between tests
 beforeEach(() => {
@@ -262,13 +263,18 @@ describe('Integration with Loader', () => {
   });
 });
 
-describe('Decision Review Fallback Prompt (v11)', () => {
+describe('Decision Review Fallback Prompt (v11.1)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
 
-  it('exports DECISION_REVIEW_PROMPT_VERSION as v11', () => {
-    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11');
+  // F3 (2026-08-10): v11 -> v11.1. The registered default's bytes changed (the
+  // margin instruction now forbids stating the distance between two options),
+  // so the label had to move or it would name two different prompts. NOT 'v12'
+  // — that label is poisoned in the adjacent PMS lineage; see the note at the
+  // constant's declaration in src/prompts/defaults.ts.
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v11.1', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11.1');
   });
 
   it('decision_review prompt is registered', () => {
@@ -468,8 +474,17 @@ describe('Prompt version alignment invariants', () => {
     expect(registered).toBe(template);
   });
 
-  it('DECISION_REVIEW_PROMPT_VERSION matches v11', () => {
-    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11');
+  // ⚠ DERIVED, NOT A THIRD COPY OF THE LITERAL (CLAUDE.md trap #12). This
+  // assertion used to re-type 'v11', so the same fact lived in THREE places:
+  // the constant, `estate.ts`'s DEFAULT_PROMPT_VERSIONS map, and here. The F3
+  // bump reddened two of them and would have left the third free to drift on
+  // the next one. The alignment invariant this describe-block is named for is
+  // that the constant and the estate map AGREE — assert exactly that.
+  it('DECISION_REVIEW_PROMPT_VERSION agrees with the estate map', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe(DEFAULT_PROMPT_VERSIONS.decision_review);
+    // Positive control (trap 13): an agreement assertion between two undefineds
+    // would pass while measuring nothing.
+    expect(DECISION_REVIEW_PROMPT_VERSION).toMatch(/^v\d/);
   });
 
   it('REPAIR_GRAPH_PROMPT_VERSION matches v6', () => {
