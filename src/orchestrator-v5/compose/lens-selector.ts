@@ -126,6 +126,12 @@ import {
   type FragileEdgeSelection,
 } from '../coaching/select-fragile-edge.js';
 import { isRawFragile } from '../coaching/robustness-honesty.js';
+import { isFragileEdgeOfferComposable } from '../coaching/fragile-edge-offer-text.js';
+import {
+  tierForCandidate,
+  tierRank,
+  type InterventionTier,
+} from '../coaching/intervention-tiers.js';
 import {
   bandConfidence,
   isLensLowConfidence,
@@ -152,6 +158,14 @@ export type LensId =
   | 'consider_opposite'
   | 'devils_advocacy'
   | 'what_if_counterfactual';
+// ⛔ ROADMAP 2.692 — `uncertainty_reduction_priority` WAS a member here and was
+// REMOVED before merge on a science ruling, not dropped for want of a use. The
+// derivation survives, unwired, at `coaching/uncertainty-priority.ts`, whose
+// header carries the gate (ISL's live user-facing-language ban, unmet gating
+// condition `provisional_doctrine_v0`) and the exact re-add checklist. Its
+// reviewed copy is parked there too. Do NOT re-add it here without clearing
+// that gate — the compile-exhaustive tables below will walk you through the
+// rest, which is the harness working as intended.
 
 /**
  * The specific signal that TRIGGERED the lens. Distinct from `LensId` so
@@ -1168,7 +1182,6 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:
     'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
-
   // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
   // What is TRUE on these turns and what is NOT, because the copy turns on it:
   // the robustness Monte Carlo reports the result is not stable (`is_robust:
@@ -1330,8 +1343,128 @@ export function selectLens(
   fact: RunAnalysisHandlerFact,
   options?: LensSelectorOptions,
 ): LensSelection | null {
+  return rankInterventions(fact, options).chosen;
+}
+
+// ============================================================================
+// ROADMAP 2.692 — THE RANKED CANDIDATE LIST, EXPOSED
+// ============================================================================
+
+/**
+ * Why a candidate never entered the race. Closed enum — a skip is an OUTCOME,
+ * not a non-event, and an unobservable skip is how three capabilities in this
+ * module shipped dark before anyone measured them.
+ */
+export type InterventionIneligibleReason =
+  /** The lens's own trigger did not fire on this run's enrichment. */
+  | 'trigger_not_fired'
+  /** The platform cannot honestly RUN the method this lens points at. */
+  | 'executor_unavailable'
+  /** A DSK protocol contraindicated by what ran on the previous analysis turn. */
+  | 'contraindicated_after_previous'
+  /**
+   * ROADMAP 2.1024 — the trigger fired but the OFFER could not be composed into
+   * a dispatchable turn from this run's producer-authored labels. Previously
+   * this was discovered AFTER the lens had won the slot, and it dropped the
+   * whole coaching card; now it never enters the race and the slot passes on.
+   */
+  | 'offer_not_composable';
+
+/** Why an ELIGIBLE candidate did not take the slot. `null` on the chosen one. */
+export type InterventionNotSelectedReason =
+  /** A higher tier (or a higher rung of the same tier) took the slot. */
+  | 'outranked'
+  /** It WAS the slot head and the no-immediate-repeat tie-break moved it. */
+  | 'displaced_head'
+  /** It was the eligible head and stepped aside under the 2.211-① yield. */
+  | 'yielded';
+
+export interface RankedIntervention {
+  readonly lens: LensId;
+  readonly tier: InterventionTier;
+  readonly rationaleCode: LensRationaleCode;
+  readonly notSelectedReason: InterventionNotSelectedReason | null;
+}
+
+export interface IneligibleIntervention {
+  readonly lens: LensId;
+  readonly reason: InterventionIneligibleReason;
+}
+
+/**
+ * The whole race, not just its winner.
+ *
+ * ⚠ WHY THIS TYPE EXISTS. The selector always BUILT a ranked list and then threw
+ * all but one element away at the return. Everything downstream — telemetry,
+ * reviews, every "is this capability reachable?" question — had to be answered
+ * by hand-written replay scripts, three times, after three capabilities had
+ * already shipped dark (2.490, 2.989, and this lane's own finding about
+ * `p_win_sensitivity`). The ranking is now a first-class, testable value, so the
+ * next placement question is a census against real captures rather than a guess.
+ */
+export interface InterventionRanking {
+  /**
+   * Every ELIGIBLE candidate in TIER order (`intervention-tiers.ts`), with the
+   * locked method ladder as the within-tier order. This is the RANKING; the
+   * tie-breaks below decide which of them takes the single slot.
+   */
+  readonly candidates: readonly RankedIntervention[];
+  /** Every candidate that never entered the race, with its closed reason. */
+  readonly ineligible: readonly IneligibleIntervention[];
+  /** The one selection, or `null` — may-recommend-nothing is still first-class. */
+  readonly chosen: LensSelection | null;
+}
+
+/**
+ * Can this candidate's user-facing offer actually be composed and dispatched
+ * from THIS run's producer data? (ROADMAP 2.1024.)
+ *
+ * A per-candidate ELIGIBILITY predicate, deliberately a new named concept rather
+ * than a conjunct bolted onto `isLensExecutorAvailable`: "the platform can run
+ * this method" and "this run's data can be phrased into a dispatchable offer"
+ * are different questions with different failure modes, and CLAUDE.md trap 21 is
+ * the record of what happens when two such questions share one predicate.
+ *
+ * Total over `LensId`: every lens whose offer has no composition step is
+ * trivially composable, and the ONE lens that composes an offer answers with the
+ * same pure leaf the block mint uses (`coaching/fragile-edge-offer-text.ts`) —
+ * one function, two callers, so the eligibility test and the composition cannot
+ * disagree about what is composable.
+ */
+function isInterventionComposable(lens: LensId, hit: EvaluatorHit): boolean {
+  if (lens !== 'fragile_edge_resolution') return true;
+  const edge = hit.fragileEdge;
+  if (edge === undefined) return false;
+  return isFragileEdgeOfferComposable(edge.fromLabel, edge.toLabel);
+}
+
+/**
+ * Rank every candidate intervention for this analysis and choose at most one.
+ *
+ * The ladder below is UNCHANGED and is still the only method ordering in this
+ * file. What is added above it is the lexicographic TIER order
+ * (`coaching/intervention-tiers.ts`), which asks a different question — what
+ * KIND of issue is most worth resolving — and uses the ladder as the within-tier
+ * tie-break. Both tie-breaks (2.211-① correlated yield, 2.211 no-immediate-repeat
+ * with its 2.490 sequence exception) run afterwards over the tier-ordered list,
+ * exactly as they ran over the ladder before.
+ *
+ * ⚠ ONE DISCLOSED CONSEQUENCE OF A TOP TIER, stated rather than discovered: on a
+ * run where `resolve_uncertainty` fires, it takes the slot from whatever would
+ * otherwise have won it — including, on the shape measured in session-b2, the
+ * `devils_advocacy` cell that ROADMAP 2.490's sequence rule exists to protect.
+ * 2.490's guarantee is preserved on every run where the tier is EMPTY, which is
+ * 1 of the 2 committed captures and — per the l47 depth finding the design
+ * records — the common case. That is the honest shape of the trade: a
+ * statistically-gated recommendation outranks an ungated exercise on the runs
+ * where the statistics licensed it, and nowhere else.
+ */
+export function rankInterventions(
+  fact: RunAnalysisHandlerFact,
+  options?: LensSelectorOptions,
+): InterventionRanking {
   const signals = readAnalysisSignals(fact, options?.fragileEdge);
-  if (signals === null) return null;
+  if (signals === null) return { candidates: [], ineligible: [], chosen: null };
 
   // THE PRIORITY LADDER, unchanged and still the only ordering in this file.
   // Materialised as a list rather than four sequential early-returns purely so
@@ -1508,21 +1641,70 @@ export function selectLens(
     ['fragile_edge_resolution', evaluateFragileEdgeResolution(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
   ];
-  const eligible: { lens: LensId; hit: EvaluatorHit }[] = [];
+  const eligible: { lens: LensId; hit: EvaluatorHit; tier: InterventionTier }[] = [];
+  const ineligible: IneligibleIntervention[] = [];
   for (const [lens, hit] of ladder) {
-    if (hit === null || !isLensExecutorAvailable(lens, options)) continue;
+    if (hit === null) {
+      ineligible.push({ lens, reason: 'trigger_not_fired' });
+      continue;
+    }
+    if (!isLensExecutorAvailable(lens, options)) {
+      ineligible.push({ lens, reason: 'executor_unavailable' });
+      continue;
+    }
     // DSK "do not run immediately after" — applied at ELIGIBILITY, before both
     // tie-breaks, so neither the correlated yield nor the no-repeat promotion
     // can hand the slot to a contraindicated protocol. See
     // CONTRAINDICATED_IMMEDIATELY_AFTER for why the diversity rule alone
     // produced the forbidden sequence.
-    if (isContraindicatedAfter(lens, options?.previousAnalysisLens)) continue;
-    eligible.push({ lens, hit });
+    if (isContraindicatedAfter(lens, options?.previousAnalysisLens)) {
+      ineligible.push({ lens, reason: 'contraindicated_after_previous' });
+      continue;
+    }
+    // ROADMAP 2.1024 — the SAME stage, for the same reason: an intervention the
+    // platform cannot phrase into a dispatchable offer must not win the slot and
+    // then take the whole card down with it.
+    if (!isInterventionComposable(lens, hit)) {
+      ineligible.push({ lens, reason: 'offer_not_composable' });
+      continue;
+    }
+    eligible.push({ lens, hit, tier: tierForCandidate(lens) });
   }
 
-  // Load-bearing negative: no lens whose evidence fired has an available executor.
-  const eligibleHead = eligible[0];
-  if (eligibleHead === undefined) return null;
+  // THE TIER ORDER. A STABLE sort by tier rank, so the locked method ladder
+  // survives verbatim as the within-tier order — `Array.prototype.sort` is
+  // required to be stable (ECMA-262 §23.1.3.30), and the comparator returns 0
+  // for same-tier pairs, so their ladder order is preserved by the spec rather
+  // than by luck.
+  const tierOrdered = [...eligible].sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
+
+  const candidatesInTierOrder: RankedIntervention[] = tierOrdered.map((e) => ({
+    lens: e.lens,
+    tier: e.tier,
+    rationaleCode: e.hit.code,
+    notSelectedReason: 'outranked' as InterventionNotSelectedReason | null,
+  }));
+
+  function finish(
+    chosen: LensSelection | null,
+    marks: ReadonlyMap<LensId, InterventionNotSelectedReason>,
+  ): InterventionRanking {
+    return {
+      candidates: candidatesInTierOrder.map((c) => ({
+        ...c,
+        notSelectedReason:
+          c.lens === chosen?.lens ? null : (marks.get(c.lens) ?? 'outranked'),
+      })),
+      ineligible,
+      chosen,
+    };
+  }
+
+  // Load-bearing negative: no lens whose evidence fired has an available executor
+  // (or every one that did could not be composed). Recommending NOTHING is a
+  // first-class outcome and must never be manufactured away.
+  const eligibleHead = tierOrdered[0];
+  if (eligibleHead === undefined) return finish(null, new Map());
 
   // ROADMAP 2.211-① — THE CORRELATED-ONLY YIELD (founder-ratified; module
   // header). Two conditions, both required:
@@ -1539,15 +1721,18 @@ export function selectLens(
   // An ISOLATED or DOMINANT_DRIVER hit never yields. The order of the OTHER
   // lenses is untouched — this narrows rule 1's trigger; it does not re-rank
   // the locked ladder.
-  let slotOrder: readonly { lens: LensId; hit: EvaluatorHit }[] = eligible;
+  const marks = new Map<LensId, InterventionNotSelectedReason>();
+  let slotOrder: readonly { lens: LensId; hit: EvaluatorHit; tier: InterventionTier }[] =
+    tierOrdered;
   let yieldedLens: LensId | undefined;
   if (
     eligibleHead.lens === 'sensitivity_flip_risk' &&
     CORRELATED_YIELD_CODES.has(eligibleHead.hit.code) &&
-    eligible.length > 1
+    tierOrdered.length > 1
   ) {
-    slotOrder = [...eligible.slice(1), eligibleHead];
+    slotOrder = [...tierOrdered.slice(1), eligibleHead];
     yieldedLens = eligibleHead.lens;
+    marks.set(eligibleHead.lens, 'yielded');
   }
 
   const head = slotOrder[0]!;
@@ -1621,13 +1806,20 @@ export function selectLens(
     options.previousAnalysisLens === head.lens &&
     runnerUp !== undefined
   ) {
-    return buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat');
+    marks.set(head.lens, 'displaced_head');
+    return finish(
+      buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat'),
+      marks,
+    );
   }
 
-  return buildSelection(
-    head.lens,
-    head.hit,
-    yieldedLens,
-    yieldedLens !== undefined ? 'correlated_yield' : undefined,
+  return finish(
+    buildSelection(
+      head.lens,
+      head.hit,
+      yieldedLens,
+      yieldedLens !== undefined ? 'correlated_yield' : undefined,
+    ),
+    marks,
   );
 }

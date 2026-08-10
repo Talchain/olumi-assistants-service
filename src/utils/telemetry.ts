@@ -727,6 +727,26 @@ export const TelemetryEvents = {
   // has a single trigger, or the history input is not reaching the selector) —
   // which is the broken-alarm question this event exists to make answerable.
   V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
+  // Capability layer, ROADMAP 2.692/2.1024 — THE SILENT-TURN ALARM. Fires when
+  // the intervention race produced NO recommendation, i.e. `selectLens` returned
+  // null and the turn ships no coaching card. Recommending nothing is a
+  // first-class outcome of this loop ("the run had nothing honest to say"), and
+  // until this event it was completely unobservable: `buildLensSurface` returned
+  // before `lens_suggestion_emitted` could fire, so a silent turn and a turn
+  // that never ran looked identical from the outside. Payload: outcome (closed),
+  // eligible_count, ineligible_count, ineligible_reasons (a sorted, deduped
+  // array of the CLOSED `InterventionIneligibleReason` tags) +
+  // graph_hash_at_generation — NO user text, NO node/edge labels, NO lens copy.
+  // Content-free; log-only (no Datadog mapping).
+  //
+  // ⚠ SCOPE, so a zero rate is not over-read: this reports the RACE's outcome,
+  // not every route by which a turn can end up card-less. A race that HAD a
+  // winner whose block was then dropped by the prose/schema gate
+  // (`validateProseAndSchemaOrDrop`) is a different question and is still
+  // silent — deliberately not folded in here, because bolting a second meaning
+  // onto one field is how two questions come to share one predicate (CLAUDE.md
+  // trap 21). That residual is rowed, not claimed closed.
+  V5LensRaceOutcome: "v5.capability.lens_race_outcome",
   // Wave-1 Lane A (PR2 scientific loop, ROADMAP 2.989/3.17) — the fragile-edge
   // selector's decision. ONE event covers both SELECTED and REFUSED arms (kin:
   // the may-recommend-nothing default of lens_suggestion_emitted above).
