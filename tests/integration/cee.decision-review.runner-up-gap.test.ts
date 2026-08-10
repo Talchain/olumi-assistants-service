@@ -59,6 +59,25 @@ import plotEgressBodyRaw from '../fixtures/plot/decision-review-egress-e18e17c2.
 
 const plotEgressBody: Record<string, unknown> = plotEgressBodyRaw;
 
+/**
+ * ⚠ THE LIVE WITNESS — this carrier has ALREADY EMITTED THE DEFECT.
+ *
+ * Verbatim `m1_review.narrative_summary` from
+ * `olumi-docs/PHASE0-EVIDENCE-2026-07-28/probe2676-2026-08-07/probe-response.json`,
+ * captured against DEPLOYED PLoT staging build `49549d5` at
+ * `2026-08-06T09:07:17Z`, `review_status: "complete"`, with the capture's own
+ * `meta.feature_flags.DECISION_REVIEW_ENABLE: "1"`.
+ *
+ * So this is not a hypothetical carrier and the flag is not a hypothetical
+ * posture: the gap statistic reached the `/v2/run` wire through this path four
+ * days before this PR. APPEND-ONLY EVIDENCE — read here, never edited (CLAUDE.md
+ * trap 14b).
+ */
+const LIVE_M1_REVIEW_NARRATIVE_49549D5 =
+  'New sales channel leads by 22 percentage points, but the link from Marketing intensity ' +
+  'to Maximise annual profit is fragile and could alter the outcome. There is notable ' +
+  'uncertainty here, so alternative options or more grounding may be needed.';
+
 /** Verbatim from the round-1 reviewer's corpus. Ids preserved. */
 const REVIEW_R1 =
   'Switch to HubSpot comes out ahead of Salesforce by a margin of 33 percentage points.';
@@ -184,6 +203,29 @@ describe('POST /assist/v1/decision-review applies the runner-up gap policy (F3, 
     );
     // …and the correct statistic survives verbatim.
     expect(review.narrative_summary).toBe(CORRECT);
+  });
+
+  it('THE LIVE WITNESS: the sentence this carrier actually shipped on 2026-08-06 is removed', async () => {
+    // Precondition pinned in-test: the capture genuinely carries the statistic.
+    expect(LIVE_M1_REVIEW_NARRATIVE_49549D5).toContain('22 percentage points');
+
+    const review = await postReview(reviewWith(LIVE_M1_REVIEW_NARRATIVE_49549D5));
+    const narrative = review.narrative_summary as string;
+
+    expect(narrative).not.toContain('22 percentage points');
+    expect(narrative).not.toContain('leads by');
+    expect(narrative).toContain(RUNNER_UP_GAP_REPLACEMENT);
+    // The third sentence — the honest uncertainty caveat — survives verbatim.
+    expect(narrative).toContain(
+      'There is notable uncertainty here, so alternative options or more grounding may be needed.',
+    );
+    // ⚠ Sentence 2 goes WITH sentence 1: they share one unit only if the
+    // splitter merges them, and here they do not — sentence 1 ends at the full
+    // stop after "outcome." So assert what actually happens rather than what
+    // would be convenient: the fragility clause rides in the SAME sentence as
+    // the gap claim (one sentence, one comma), so it is removed with it. That
+    // is the documented over-removal direction, never under.
+    expect(narrative).not.toContain('Marketing intensity');
   });
 
   it('CONTROL: a review stating the leader’s own win probability passes through untouched', async () => {
