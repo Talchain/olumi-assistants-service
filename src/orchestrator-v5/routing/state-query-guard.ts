@@ -34,6 +34,10 @@
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import {
+  isBriefAuditQuestion,
+  tryBriefAuditAnswer,
+} from '../../cee/context-integrity/brief-audit-answer.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { RecentMutation } from '../context/recent-changes.js';
 import type { SuggestedAction } from '../compose/types.js';
@@ -52,6 +56,17 @@ export type StateQueryGuardOutcome =
   | {
       readonly matched: true;
       readonly dispatch: 'no_recent_changes';
+      readonly assistant_text: string;
+    }
+  /**
+   * ROADMAP 2.975 — the user asked what became of THEIR BRIEF, not what
+   * changed in this session. Answered from the derived not-modelled manifest;
+   * see `cee/context-integrity/brief-audit-answer.ts` for why the two questions
+   * must not share an answer.
+   */
+  | {
+      readonly matched: true;
+      readonly dispatch: 'brief_audit';
       readonly assistant_text: string;
     };
 
@@ -258,8 +273,29 @@ const EDIT_VERB_PATTERN =
  * so they are never hijacked by edit routing and need no route suppression.
  */
 export function isStateQueryQuestionShape(message: string): boolean {
-  if (EDIT_VERB_PATTERN.test(message)) return false;
-  if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
+  // ROADMAP 2.975 — A QUESTION MUST NEVER BE ABLE TO CHANGE THE THING IT ASKS
+  // ABOUT, FOR ANY VERB.
+  //
+  // ⚠ ROUND 1 CLOSED THIS ONLY FOR THE `change` CLASS, AND THE HOLE WAS THE
+  // ORDERING. `EDIT_VERB_PATTERN` was tested FIRST and returned early, so
+  // *"did you remove anything from my brief?"* never reached the brief-audit
+  // check: it was classified as an audit by this module's own predicate and was
+  // still granted a mutation warrant by `mutation-warrant.ts:221`, which reads
+  // this function. `change` happened to be absent from `EDIT_VERB_PATTERN`
+  // (deliberately, so session-edit questions could fire), which is the only
+  // reason the `change` case ever worked. remove / adjust / replace / lower are
+  // all in it.
+  //
+  // So the audit classification is now AUTHORITATIVE over the edit-verb gate.
+  // For every non-audit message this function is byte-identical to before: the
+  // same gate, the same allowlist, the same bail-out, in the same order.
+  const briefAudit = isBriefAuditQuestion(message);
+  if (!briefAudit) {
+    if (EDIT_VERB_PATTERN.test(message)) return false;
+    if (!STATE_QUERY_PATTERNS.some((pat) => pat.test(message))) return false;
+  }
+  // The compound bail-out still applies to BOTH classes: "what did you leave
+  // out? add a constraint" carries a real edit and belongs in normal routing.
   if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(message))) return false;
   return true;
 }
@@ -267,16 +303,66 @@ export function isStateQueryQuestionShape(message: string): boolean {
 export interface TryStateQueryGuardInput {
   readonly message: string;
   readonly contextPack: Pick<ContextPack, 'recent_changes'>;
+  /**
+   * ROADMAP 2.975 — the persisted brief and graph, for answering a BRIEF-AUDIT
+   * question ("what did you keep from my brief?") rather than a session-edit
+   * one.
+   *
+   * ⚠ MUST BE THE FULL PERSISTED BRIEF (`TurnContext.scenarioBriefText`), NOT
+   * `ContextPack.brief`. The pack's copy is hard-sliced at
+   * `CONTEXT_PACK_BRIEF_CHAR_CAP` (2,000 chars) — B2 of the trace corpus
+   * persists at 2,078 — and a truncated brief would silently shorten the list
+   * of figures we claim to have looked for, turning "I could not see it" into
+   * "you did not say it". Both fields are loaded in ONE round trip by
+   * `loadGraphAndBriefText`, so the untruncated pair is already in hand.
+   *
+   * Omitted by callers that have no scenario state; the guard then declines the
+   * turn rather than answering, and never deflects.
+   */
+  readonly briefAudit?: {
+    readonly briefText: string | null;
+    readonly graph: unknown;
+  };
 }
 
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
-  // Negative gate first — cheapest. A message with an imperative edit
-  // verb is almost always a fresh edit request, not a state-query.
+  // ROADMAP 2.975 — SEPARATE THE TWO QUESTIONS BEFORE EITHER ARM CLAIMS ONE.
+  //
+  // This runs BEFORE the session-edit arms, and returns unconditionally, so a
+  // brief-audit question can never reach `no_recent_changes`. That ordering is
+  // the fix: the measured defect was not bad copy, it was the edit-history arm
+  // answering a question about the brief. Whichever way this branch resolves,
+  // the user does not get told about edit history.
+  //
+  // The compound bail-out is checked first so "what did you leave out? add a
+  // constraint" still reaches the LLM, which can handle both halves.
+  if (isBriefAuditQuestion(input.message)) {
+    if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
+      return { matched: false };
+    }
+    if (input.briefAudit === undefined) return { matched: false };
+    const answer = tryBriefAuditAnswer(
+      input.briefAudit.briefText,
+      input.briefAudit.graph,
+    );
+    // `null` = the manifest could not look. Falling through hands the turn to
+    // the grounded conversational path rather than asserting a zero.
+    if (answer === null) return { matched: false };
+    return { matched: true, dispatch: 'brief_audit', assistant_text: answer };
+  }
+
+  // Negative gate — cheapest of the session-edit arms. A message with an
+  // imperative edit verb is almost always a fresh edit request, not a
+  // state-query. It runs AFTER the brief-audit check for the reason given in
+  // `isStateQueryQuestionShape`: an audit question carrying `remove` is still a
+  // question, and returning early here would hand it to the LLM having already
+  // let the route treat it as an edit.
   if (EDIT_VERB_PATTERN.test(input.message)) {
     return { matched: false };
   }
+
   const recent = input.contextPack.recent_changes;
   // Two phrase classes:
   //   - STATE_QUERY_PATTERNS: legacy named follow-ups ("what changed",
