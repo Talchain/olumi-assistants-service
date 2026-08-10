@@ -409,7 +409,15 @@ const RISE_PLUS_SRC = '(?:exceed(?:s|ing)?|surpass(?:es|ing)?|overshoot(?:s|ing)
  * user never wrote — into the ask AND into the reusable record a future
  * elicitation surface consumes. A gate whose charter is "never state a
  * direction it did not prove" must not state a QUANTITY it did not read.
- * Anchoring the subject to a letter is the whole fix.
+ *
+ * ⚠ THIS ANCHOR IS DEFENCE IN DEPTH, NOT THE FIX, AND THE DISTINCTION IS
+ * MEASURED. The load-bearing guard is the `(?<![\d.,])` lookbehind on
+ * {@link BARE_AMOUNT_RE}: reverting THAT reproduces `8%` immediately, while
+ * reverting this anchor alone leaves all 187 gate tests green. So no mutant
+ * bites this line, and a reader must not infer from the suite that it is
+ * guarded — it is kept because a subject starting mid-number is wrong on its
+ * own terms and the direction of the change is safe, not because anything
+ * currently depends on it.
  */
 const SUBJ = '[A-Za-z_][\\w]*(?:[\\s-]+\\w+){0,3}';
 
