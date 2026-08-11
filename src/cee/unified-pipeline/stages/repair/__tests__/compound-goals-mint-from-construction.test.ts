@@ -395,21 +395,61 @@ describe('ROADMAP 2.1051 limb 2 — mint the bound the construction table alread
     },
   );
 
-  it('NEGATIVE QUANTIFIER does not suppress metrics whose NAME merely starts with those letters', () => {
-    // The opposite-direction twin (trap 22b), and the reason this limb is
-    // word-bounded while the shared predicate's `not` is not. `nonetheless`,
-    // `non-renewal` and `no-show` must all read as ORDINARY WORDS.
-    for (const s of ['nonetheless', 'non-renewal rate', 'no-show rate', 'a note on scope']) {
-      expect(/\b(?:nobody|no\s+one|none|neither|nothing|no\s+such)\b/i.test(s), `${s} must not read as a quantifier`).toBe(false);
-    }
+  it('NEGATIVE QUANTIFIER is WORD-BOUNDED: a metric containing "none" as a substring still mints', () => {
+    // ⚠⚠ THIS TEST HAD TO BE REWRITTEN AFTER ITS MUTANT SURVIVED, AND BOTH
+    // reasons are worth recording because each is a trap this estate has a
+    // scar from.
+    //
+    //   (1) It asserted against a HAND-COPIED COPY of the pattern
+    //       (`expect(/\b(?:nobody|...)\b/i.test(s))`). Mutating the module's
+    //       regex therefore could not fail it — a mirror of the very thing
+    //       under test (trap 12). Behaviour is now asserted through
+    //       `findProvenUncoveredBounds`, which cannot drift from the source.
+    //
+    //   (2) Its fixture did not discriminate. `non-renewal` and `no-show`
+    //       contain no quantifier substring at all, so removing the word
+    //       boundaries changed nothing about them. `nonessential` DOES contain
+    //       `none`, which is what makes it the case that bites.
+    //
+    // Measured: `nonessential spend` -> bounded=false (safe), unbounded=true
+    // (would be suppressed). It is also an ordinary business metric.
+    const brief = 'Keep nonessential spend from rising above £50k.';
+
+    // PRECONDITION PINNED IN-TEST: the construction must be proven here, or an
+    // empty result below would prove the boundary rather than the fixture.
+    expect(findT1Matches(brief).length, 'the fixture must carry a proven construction').toBeGreaterThan(0);
+    expect(
+      findProvenUncoveredBounds(brief, []).map((b) => b.direction),
+      'a metric whose NAME contains "none" must still mint its ceiling',
+    ).toEqual(['ceiling']);
+
     const nodes = [
-      { id: 'goal_x', kind: 'goal', label: 'Retain customers' },
-      { id: 'fac_non_renewal_rate', kind: 'factor', label: 'Non-renewal rate' },
+      { id: 'goal_x', kind: 'goal', label: 'Control cost' },
+      { id: 'fac_nonessential_spend', kind: 'factor', label: 'Nonessential spend' },
     ];
-    const r = run('Keep non-renewal rate from rising above 3%.', nodes);
-    const rows = r.wire.filter((w) => w.node_id === 'fac_non_renewal_rate');
-    expect(rows, 'a legitimate ceiling on a non-prefixed metric must still ship').toHaveLength(1);
+    const r = run(brief, nodes);
+    const rows = r.wire.filter((w) => w.node_id === 'fac_nonessential_spend');
+    expect(rows, 'and it must reach the wire bound to its own node').toHaveLength(1);
     expect(rows[0]!.operator).toBe('<=');
+  });
+
+  it('NEGATIVE QUANTIFIER leaves the hyphenated compounds alone (the shared predicate\'s discrimination)', () => {
+    // The other half of the twin: `no-show` and `non-renewal` are compounds,
+    // not quantifiers, and both must still mint. This is the discrimination the
+    // shared predicate's `no(?=\s)` protects and that a hand-rolled `\bno\b`
+    // would have destroyed — which is exactly why the new limb was added
+    // BESIDE it rather than merged INTO it.
+    for (const [metric, id, brief] of [
+      ['No-show rate', 'fac_no_show_rate', 'Keep no-show rate from rising above 3%.'],
+      ['Non-renewal rate', 'fac_non_renewal_rate', 'Keep non-renewal rate from rising above 3%.'],
+    ] as const) {
+      const nodes = [
+        { id: 'goal_x', kind: 'goal', label: 'Retain customers' },
+        { id, kind: 'factor', label: metric },
+      ];
+      const r = run(brief, nodes);
+      expect(r.wire.filter((w) => w.node_id === id), `${metric} must still ship its ceiling`).toHaveLength(1);
+    }
   });
 
   it('OUTER NEGATION does not suppress a legitimate metric whose NAME contains a negation token', () => {
