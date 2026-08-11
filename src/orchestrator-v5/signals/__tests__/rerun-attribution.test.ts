@@ -427,29 +427,51 @@ describe('PR2 L2 — the sentence is TEMPORAL, never CAUSAL', () => {
     /\bdue to\b/i, /\bled to\b/i, /\bresulted in\b/i, /\btherefore\b/i,
   ];
 
+  const PRIOR_SETS: Array<readonly HandlerFact[]> = [
+    [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)],
+    [factorEditFact('Customer churn'), priorRunFact(OFFSHORE_LEADS)],
+    [editGraphFact('CRM adoption'), priorRunFact(OFFSHORE_LEADS)],
+    [factorEditFact('Customer churn'), edgeEditFact(), priorRunFact(OFFSHORE_LEADS)],
+  ];
+  const ENVS = [
+    OFFSHORE_LEADS, ONSHORE_LEADS, OFFSHORE_LEADS_WIDER, OFFSHORE_LEADS_NARROWER,
+  ];
+
+  /** The same delta with NOTHING intervening — i.e. the pre-attribution copy. */
+  function unattributed(currentEnv: Record<string, unknown>): string {
+    return rerunText({ priorFacts: [priorRunFact(OFFSHORE_LEADS)], currentEnv });
+  }
+
+  // ⚠ THESE TWO TESTS ANSWER DIFFERENT QUESTIONS AND ARE DELIBERATELY SEPARATE
+  // (CLAUDE.md trap 21). The first asks "does the product assert causation?";
+  // the second asks "is the opener the temporal word we chose?". Folded into
+  // one test they were indistinguishable: a mutant swapping "Since"→"After"
+  // REDded the causal test via its positive control, so the causal assertion
+  // appeared to bite when it had not. Split, the discriminating pair is legible
+  // — "Since"→"Because" REDs BOTH, "Since"→"After" REDs only the second.
   it('no branch of the attributed copy contains a causal connective', () => {
-    const priorSets: Array<readonly HandlerFact[]> = [
-      [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)],
-      [factorEditFact('Customer churn'), priorRunFact(OFFSHORE_LEADS)],
-      [editGraphFact('CRM adoption'), priorRunFact(OFFSHORE_LEADS)],
-      [factorEditFact('Customer churn'), edgeEditFact(), priorRunFact(OFFSHORE_LEADS)],
-    ];
-    const envs = [
-      OFFSHORE_LEADS, ONSHORE_LEADS, OFFSHORE_LEADS_WIDER, OFFSHORE_LEADS_NARROWER,
-    ];
     let composed = 0;
-    for (const priorFacts of priorSets) {
-      for (const currentEnv of envs) {
+    for (const priorFacts of PRIOR_SETS) {
+      for (const currentEnv of ENVS) {
         const text = rerunText({ priorFacts, currentEnv });
         for (const pattern of CAUSAL) expect(text).not.toMatch(pattern);
-        // Positive control: these ARE the attributed branches, so the temporal
-        // connective must be present. Without this the loop above could pass
-        // by composing nothing attributable at all.
-        expect(text).toContain('Since');
+        // Non-vacuity, bound to the PROPERTY rather than to a word: attribution
+        // demonstrably changed this sentence, so the loop cannot pass by
+        // composing nothing attributable. Robust to a wording change, which the
+        // literal-token control was not.
+        expect(text).not.toBe(unattributed(currentEnv));
         composed += 1;
       }
     }
     expect(composed).toBe(16);
+  });
+
+  it('the attributed opener is the TEMPORAL connective "Since"', () => {
+    for (const priorFacts of PRIOR_SETS) {
+      for (const currentEnv of ENVS) {
+        expect(rerunText({ priorFacts, currentEnv }).startsWith('Since ')).toBe(true);
+      }
+    }
   });
 
   it('a USER-AUTHORED label carrying a causal word is echoed verbatim and is not the product asserting causation', () => {
