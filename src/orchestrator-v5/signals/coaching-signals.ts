@@ -224,6 +224,11 @@ function composeRerunText(
   // attribute, which reproduces the pre-attribution copy byte-identically.
   const since = attributionPrefix(interveningChange);
   const attributed = since.length > 0;
+  // The anaphor must AGREE WITH ITS OWN OPENER. `several` deliberately names no
+  // antecedent, so a singular "that change" after it is a dangling referent AND
+  // makes a claim about one unidentified change when several occurred — the
+  // mirror of the sole-cause-by-omission that `deriveInterveningChange` refuses.
+  const theChange = interveningChange?.kind === 'several' ? 'those changes' : 'that change';
 
   if (delta.leading_option_changed) {
     return attributed
@@ -248,26 +253,52 @@ function composeRerunText(
       + `has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
     );
   }
+  // ⭐⭐ THE MARGIN COULD NOT BE COMPUTED — ITS OWN ARM, BECAUSE IT IS NOT A
+  // NULL RESULT. `deriveMargin` returns 'unavailable' when either run's
+  // `margin_pp` is null (fewer than two recommendable options), and until round
+  // 2 this fell THROUGH to the unchanged arm below — so the product reported a
+  // no-movement finding about a pair whose margin was never compared. The
+  // leader IDENTITY is comparable here (that comparison does not use margins),
+  // so the honest form states exactly that and names the limit, in the shape
+  // the abstention arm already uses: say what was observed, then say what was
+  // not. `since` is empty when nothing is attributable, so the unattributed
+  // form is the same sentence without the clause.
+  if (delta.margin_direction === 'unavailable') {
+    return (
+      `${since}${delta.current_leading_label} still leads after this re-run. `
+      + 'I could not compare the size of its lead between the two runs.'
+    );
+  }
+
   // ⭐ THE UNCHANGED ARM IS THE SCIENTIFIC ONE AND MUST READ AS A FINDING, NOT
-  // AN APOLOGY. An intervention that moves nothing is evidence the conclusion
-  // is ROBUST to it, and a product that can only report a result when the
-  // answer changes cannot report a null result at all. So the attributed form
-  // states the finding explicitly rather than reusing the bare "unchanged"
-  // sentence, which read as a non-event when the user had just acted.
+  // AN APOLOGY: a product that can only report a result when the answer changes
+  // cannot report a null result at all.
   //
-  // ⚠ "the conclusion", NOT "the recommendation". The design this implements
-  // specified "the recommendation does not hinge on that value", and that copy
-  // is DEFECTIVE at the egress bytes: `recommendation` is in
+  // ⚠⚠ BUT THE FINDING IS AN OBSERVATION, NOT A ROBUSTNESS CLAIM. Round 1 said
+  // "the conclusion does not hinge on that change", which asserts causal
+  // INDEPENDENCE — and the temporal-not-causal ruling is SYMMETRIC. Asserting
+  // the ABSENCE of a causal link needs the same evidence class as asserting its
+  // presence, and C2_unpaired licenses neither: with the seed unpinned, "no
+  // observed movement" cannot be separated from "a real effect cancelled by
+  // sampling noise". A change with a true -18pp effect masked to -0.4pp by an
+  // unlucky pair of draws lands HERE (`MARGIN_EPSILON_PP = 0.5`,
+  // compare-runs.ts:266) and would have been reported as non-dependence. The
+  // design's own §2.2 conceded the point in passing — "evidence the conclusion
+  // is robust to it" — and the shipped copy asserted the conclusion of that
+  // inference, unhedged. "Held both before and after" states only what was
+  // observed at the two time points, which is exactly what the pair licenses.
+  //
+  // ⚠ "the conclusion", NOT "the recommendation" — `recommendation` is in
   // FORBIDDEN_USER_FACING_PHRASES (the founder ruling that the product does not
-  // recommend), so `applyTerminologyRewrite` silently rewrote it to "the
-  // leading option" — shipping bytes the copy deck never said AND
-  // MANUFACTURING the banned leader vocabulary inside our own safety pass, on
-  // every unchanged-arm re-run. Measured with both controls live. The whole
-  // composed sentence set is now pinned against the real guard by test.
+  // recommend), so `applyTerminologyRewrite` silently rewrote the design's
+  // wording to "the leading option", MANUFACTURING the banned leader vocabulary
+  // inside our own safety pass. All composed arms are pinned against the real
+  // guard by test.
   return attributed
     ? (
-      `${since}the picture is the same: ${delta.current_leading_label} still leads. `
-      + 'That is a result in itself: the conclusion does not hinge on that change.'
+      `${since}the picture has stayed the same: ${delta.current_leading_label} `
+      + `still leads. That is a result in itself: the conclusion held both before `
+      + `and after ${theChange}.`
     )
     : `The result is unchanged: ${delta.current_leading_label} still leads.`;
 }

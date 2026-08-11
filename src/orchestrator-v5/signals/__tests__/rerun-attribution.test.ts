@@ -271,10 +271,13 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
   it('UNCHANGED reads as a FINDING, not an apology (the null arm is the scientific one)', () => {
     const facts = [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS });
+    // ⭐ OBSERVATIONAL, NOT A ROBUSTNESS CLAIM. "does not hinge on that change"
+    // asserted causal INDEPENDENCE, which C2_unpaired cannot license. "held both
+    // before and after" states only what was observed at the two time points.
     expect(text).toBe(
-      'Since you adjusted a link in the decision model, the picture is the same: '
-      + 'Offshore still leads. That is a result in itself: the conclusion does '
-      + 'not hinge on that change.',
+      'Since you adjusted a link in the decision model, the picture has stayed the '
+      + 'same: Offshore still leads. That is a result in itself: the conclusion held '
+      + 'both before and after that change.',
     );
   });
 
@@ -305,12 +308,42 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
     );
   });
 
-  it('SEVERAL changes produce the unnamed opener', () => {
+  it('SEVERAL × unchanged agrees with its own plural opener, BYTE-EXACTLY', () => {
+    // ⚠ ROUND 1 ASSERTED ONLY THE OPENER PREFIX AND TWO not.toContains, SO THE
+    // SECOND SENTENCE WAS NEVER READ — and it shipped "…does not hinge on THAT
+    // CHANGE" under a plural opener that deliberately names no antecedent: a
+    // dangling referent, and non-dependence asserted about an unidentified
+    // single change when several occurred (the mirror of this module's own
+    // several ⇒ name-none rule). Binding the WHOLE sentence is the fix.
     const facts = [factorEditFact('Customer churn'), edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS });
-    expect(text.startsWith('Since your recent changes, ')).toBe(true);
+    expect(text).toBe(
+      'Since your recent changes, the picture has stayed the same: Offshore still '
+      + 'leads. That is a result in itself: the conclusion held both before and '
+      + 'after those changes.',
+    );
     expect(text).not.toContain('a link in the decision model');
     expect(text).not.toContain('Customer churn');
+  });
+
+  it('UNAVAILABLE margins get their own arm and never the null-arm sentence', () => {
+    // A single recommendable option ⇒ `margin` is null (analysis-compact.ts:836
+    // needs >= 2) ⇒ `deriveMargin` returns 'unavailable' (compare-runs.ts:272).
+    // ⚠ ROUND 1 HAD NO 'unavailable' BRANCH, so this FELL THROUGH to the
+    // unchanged arm and asserted a robustness finding about a pair whose margin
+    // could not even be computed. The leader identity IS comparable here, so the
+    // honest form states that and names the limit — the abstention arm's shape.
+    const solo = runEnvelope([{ id: 'a', label: 'Offshore', win: 0.62 }]);
+    const text = rerunText({
+      priorFacts: [edgeEditFact(), priorRunFact(solo)],
+      currentEnv: solo,
+    });
+    expect(text).toBe(
+      'Since you adjusted a link in the decision model, Offshore still leads after '
+      + 'this re-run. I could not compare the size of its lead between the two runs.',
+    );
+    expect(text).not.toContain('the picture has stayed the same');
+    expect(text).not.toContain('held both before and after');
   });
 
   it('every action has a verb that is true of the fact it covers', () => {
@@ -398,9 +431,25 @@ describe('PR2 L2 — the sentence is TEMPORAL, never CAUSAL', () => {
   // Vocabulary taken from the CONTRACT's attribution model, not invented here:
   // `C1_attributable` is the only case that would license causation, and it
   // requires `pair_provenance.seed_equal`, which the live path does not pin.
+  // ⭐⭐ BOTH DIRECTIONS. Round 1 policed only POSITIVE connectives — the same
+  // asymmetry as the defect it was guarding against (CLAUDE.md trap 13d: an
+  // invariant written with the code's asymmetry is a guard agreeing with
+  // itself). Asserting the ABSENCE of a causal link needs the same evidence
+  // class as asserting its presence, and `C2_unpaired` licenses NEITHER: with
+  // the seed unpinned, "no observed movement" cannot be separated from "a real
+  // effect cancelled by sampling noise" — a true −18pp effect masked to −0.4pp
+  // by an unlucky pair lands in the unchanged arm (`MARGIN_EPSILON_PP = 0.5`,
+  // compare-runs.ts:266). The invariant is written against the SPEC — no causal
+  // claim in EITHER direction under C2 — not against the failure mode in hand.
   const CAUSAL = [
+    // positive
     /\bbecause\b/i, /\bcaused?\b/i, /\bis why\b/i, /\bas a result of\b/i,
     /\bdue to\b/i, /\bled to\b/i, /\bresulted in\b/i, /\btherefore\b/i,
+    // negative — causal INDEPENDENCE / robustness claims
+    /\bhinges? on\b/i, /\bdepends? on\b/i, /\brel(?:y|ies|ied) on\b/i,
+    /\bdriven by\b/i, /\bunaffected by\b/i, /\brobust to\b/i,
+    /\bno effect\b/i, /\b(?:in)?sensitive to\b/i, /\bindependent of\b/i,
+    /\bmakes? no difference\b/i, /\bnothing to do with\b/i,
   ];
 
   const PRIOR_SETS: Array<readonly HandlerFact[]> = [

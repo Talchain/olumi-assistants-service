@@ -148,6 +148,16 @@ export function deriveInterveningChange(
   // attribution rather than a wrong one.
   if (between.some((fact) => fact.fact_type === 'run_analysis')) return null;
 
+  // ⚠ FORWARD RISK, PINNED RATHER THAN REMEMBERED: the projector's
+  // `MUTATION_DISPATCH_SKIP` deliberately hides the three judgement receipts
+  // (`feedback`, `edge_adjudication`, `prior_range_edit`) because they persist a
+  // human judgement WITHOUT touching the graph. That is correct today — they
+  // cannot move an analysis, so they are not an intervening change. The day any
+  // of them feeds the compute, this join goes blind to it and `several ⇒ name
+  // none` would name a single change while a judgement also intervened. Whoever
+  // wires that must revisit this call site; the conformance test in
+  // `recent-changes.ts` will flag the fact_type, not this consequence.
+  //
   // Capped at RECENT_CHANGES_CAP (3) by the projector. Only `> 1` is read
   // below, so the cap cannot change the verdict for any true count.
   const projected = projectRecentChanges(between);
