@@ -969,13 +969,40 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
   const newNodes: NodeT[] = [];
   let splitCount = 0;
 
+  // Mediating-outcome id resolved ONCE PER FACTOR, not per edge. Two reasons, and
+  // the second only bites once collision handling exists:
+  //  - several factor→goal edges from one factor must share one outcome node
+  //    (pinned by "deduplicates outcome node when same factor targets multiple
+  //    goals"), and
+  //  - re-running the suffix search per edge would step _2, _3, _4… because each
+  //    mint makes the previous id taken — turning one shared outcome into N.
+  const resolvedOutcomeId = new Map<string, string>();
+
   for (const edge of edges) {
     const fromKind = nodeKindMap.get(edge.from);
     const toKind = nodeKindMap.get(edge.to);
 
     if (fromKind === "factor" && toKind === "goal") {
-      const outcomeId = `out_${edge.from}_impact`;
       const factorLabel = nodeLabelMap.get(edge.from) ?? edge.from;
+
+      let outcomeId = resolvedOutcomeId.get(edge.from);
+      if (outcomeId === undefined) {
+        outcomeId = `out_${edge.from}_impact`;
+
+        // `out_<factorId>_impact` is MINTED, not reserved — the id may already be
+        // held by an unrelated node. Reusing it blindly wires factor→<non-outcome>,
+        // and where the squatter is a GOAL it re-emits the very factor→goal edge
+        // this repair exists to remove, after the sweep that owns that pattern has
+        // run. Verify kind-compatibility, else generate a collision-safe id.
+        // (Same policy, same file: `fixOptionGoalShortcut` below.)
+        if (nodeKindMap.has(outcomeId) && nodeKindMap.get(outcomeId) !== "outcome") {
+          let suffix = 2;
+          while (nodeKindMap.has(`out_${edge.from}_impact_${suffix}`)) suffix++;
+          outcomeId = `out_${edge.from}_impact_${suffix}`;
+        }
+
+        resolvedOutcomeId.set(edge.from, outcomeId);
+      }
 
       // Only create the outcome node once (multiple factor→goal edges from same factor)
       if (!nodeKindMap.has(outcomeId)) {

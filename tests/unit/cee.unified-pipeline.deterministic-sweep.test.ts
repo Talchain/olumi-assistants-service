@@ -1665,6 +1665,184 @@ describe("fixFactorGoalEdges", () => {
     // Actually: fac→out (edge 1), out→goal_1 (edge 2), fac→out (edge 3, same from/to), out→goal_2 (edge 4)
     expect(graph.edges).toHaveLength(4);
   });
+
+  // ===========================================================================
+  // Id-collision safety — the minted id may already be TAKEN, by a non-outcome
+  // ===========================================================================
+  //
+  // `out_<factorId>_impact` is minted, not reserved. Before this block the
+  // splitter asked only `nodeKindMap.has(outcomeId)` — PRESENCE, never KIND — so
+  // a pre-existing non-outcome node sitting on that id was silently adopted as
+  // the mediating outcome. Two harms follow, and the second is the serious one:
+  //
+  //   1. factor→<non-outcome> is wired, which is not the topology this repair
+  //      exists to build; and
+  //   2. when the squatter is itself a GOAL, the splitter emits a BRAND-NEW
+  //      factor→goal edge — the exact edge it was called to remove — *after* the
+  //      sweep that owns that pattern has already run. It reaches the
+  //      post-enforcement gate with no repair authority left to claim it.
+  //
+  // The collision-safe form of this same id-minting policy already existed in
+  // this file, in `fixOptionGoalShortcut` (kind-check, then suffix-search for a
+  // free `out_<x>_impact_<n>`). Two implementations of one policy in one file,
+  // disagreeing, is this estate's differently-named-twins defect class; these
+  // tests pin the reconciled behaviour.
+  describe("id collision with a pre-existing non-outcome node", () => {
+    it("does NOT wire through a non-outcome node squatting the minted id", () => {
+      const graph: any = {
+        nodes: [
+          { id: "fac_support_cost", kind: "factor", label: "Support Cost" },
+          // The squatter: exactly the id the splitter would mint, held by a FACTOR.
+          { id: "out_fac_support_cost_impact", kind: "factor", label: "Pre-existing, not an outcome" },
+          { id: "goal_reduce_costs", kind: "goal", label: "Reduce Costs" },
+        ],
+        edges: [
+          { from: "fac_support_cost", to: "goal_reduce_costs", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.85 },
+        ],
+      };
+
+      const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(result.splitCount).toBe(1);
+
+      // The squatter is untouched — neither rewritten to `outcome` nor wired into.
+      const squatter = graph.nodes.find((n: any) => n.id === "out_fac_support_cost_impact");
+      expect(squatter.kind, "the pre-existing node's kind must not be rewritten").toBe("factor");
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_support_cost" && e.to === "out_fac_support_cost_impact"),
+        "the splitter must not wire factor→<non-outcome squatter>",
+      ).toBe(false);
+      expect(
+        graph.edges.some((e: any) => e.from === "out_fac_support_cost_impact" && e.to === "goal_reduce_costs"),
+        "the splitter must not wire <non-outcome squatter>→goal",
+      ).toBe(false);
+
+      // A collision-safe synthetic outcome is minted instead, and the chain runs
+      // through THAT node — bound by id, not by "some outcome exists".
+      const minted = graph.nodes.find((n: any) => n.id === "out_fac_support_cost_impact_2");
+      expect(minted, "a collision-safe outcome node must be minted").toBeDefined();
+      expect(minted.kind).toBe("outcome");
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_support_cost" && e.to === "out_fac_support_cost_impact_2"),
+        "factor→<collision-safe outcome> must be wired",
+      ).toBe(true);
+      expect(
+        graph.edges.some((e: any) => e.from === "out_fac_support_cost_impact_2" && e.to === "goal_reduce_costs"),
+        "<collision-safe outcome>→goal must be wired",
+      ).toBe(true);
+
+      // And the pattern this repair exists to remove must not survive in any form.
+      const factorGoal = graph.edges.filter((e: any) => {
+        const from = graph.nodes.find((n: any) => n.id === e.from);
+        const to = graph.nodes.find((n: any) => n.id === e.to);
+        return from?.kind === "factor" && to?.kind === "goal";
+      });
+      expect(factorGoal, "no factor→goal edge may remain after the split").toHaveLength(0);
+    });
+
+    it("emits no fresh factor→goal edge when the squatter is itself the GOAL", () => {
+      // The serious harm, isolated: adopting a GOAL as the mediating "outcome"
+      // makes the splitter re-emit the very pattern it was called to remove.
+      const graph: any = {
+        nodes: [
+          { id: "fac_sales", kind: "factor", label: "Sales" },
+          { id: "out_fac_sales_impact", kind: "goal", label: "A goal squatting the minted id" },
+          { id: "goal_growth", kind: "goal", label: "Growth" },
+        ],
+        edges: [
+          { from: "fac_sales", to: "goal_growth", strength_mean: 0.6, strength_std: 0.1, belief_exists: 0.9 },
+        ],
+      };
+
+      fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_sales" && e.to === "out_fac_sales_impact"),
+        "wiring factor→<goal squatter> IS a fresh factor→goal edge, emitted after the sweep that owns it",
+      ).toBe(false);
+      const squatter = graph.nodes.find((n: any) => n.id === "out_fac_sales_impact");
+      expect(squatter.kind, "the squatting goal must not be rewritten to outcome").toBe("goal");
+    });
+
+    it("still reuses ONE synthetic outcome across several goals when the id collides", () => {
+      // The dedup invariant pinned by "deduplicates outcome node when same factor
+      // targets multiple goals" must survive collision handling: resolving the id
+      // per EDGE rather than per FACTOR would mint `_2` then `_3` here.
+      const graph: any = {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "out_fac_cost_impact", kind: "factor", label: "Squatter" },
+          { id: "goal_1", kind: "goal", label: "Goal 1" },
+          { id: "goal_2", kind: "goal", label: "Goal 2" },
+        ],
+        edges: [
+          { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+          { from: "fac_cost", to: "goal_2", strength_mean: 0.3, strength_std: 0.1, belief_exists: 0.8 },
+        ],
+      };
+
+      const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(result.splitCount).toBe(2);
+      const synthetic = graph.nodes.filter((n: any) => n.kind === "outcome");
+      expect(synthetic, "exactly one synthetic outcome, shared by both goals").toHaveLength(1);
+      expect(synthetic[0].id).toBe("out_fac_cost_impact_2");
+      expect(
+        graph.nodes.some((n: any) => n.id === "out_fac_cost_impact_3"),
+        "a second collision-safe id would mean the id was resolved per-edge, not per-factor",
+      ).toBe(false);
+    });
+
+    it("walks the suffix past collision-safe ids that are already taken", () => {
+      const graph: any = {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "out_fac_cost_impact", kind: "factor", label: "Squatter" },
+          { id: "out_fac_cost_impact_2", kind: "risk", label: "Also taken" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        ],
+      };
+
+      fixFactorGoalEdges(graph, "V1_FLAT");
+
+      const minted = graph.nodes.find((n: any) => n.id === "out_fac_cost_impact_3");
+      expect(minted, "the suffix search must skip every taken id").toBeDefined();
+      expect(minted.kind).toBe("outcome");
+      expect(
+        graph.nodes.find((n: any) => n.id === "out_fac_cost_impact_2").kind,
+        "the taken `_2` node must be left exactly as it was",
+      ).toBe("risk");
+    });
+
+    it("reuses a pre-existing node on the minted id when it IS already an outcome", () => {
+      // The negative half: a kind-COMPATIBLE node must still be reused, or the
+      // guard has simply been widened into always minting a fresh id.
+      const graph: any = {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "out_fac_cost_impact", kind: "outcome", label: "Already the right kind" },
+          { id: "goal_1", kind: "goal", label: "Goal" },
+        ],
+        edges: [
+          { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        ],
+      };
+
+      fixFactorGoalEdges(graph, "V1_FLAT");
+
+      expect(
+        graph.nodes.some((n: any) => n.id === "out_fac_cost_impact_2"),
+        "a kind-compatible existing outcome must be reused, not duplicated",
+      ).toBe(false);
+      expect(
+        graph.edges.some((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact"),
+        "the existing outcome must carry the chain",
+      ).toBe(true);
+    });
+  });
 });
 
 // =============================================================================
