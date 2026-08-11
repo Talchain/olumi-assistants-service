@@ -110,13 +110,40 @@ describe("the currency vocabulary is the repo's, not this module's", () => {
     // The four unit strings the real captures actually contain must read
     // exactly as the old private parser read them, or Part C's equality claim
     // is measuring nothing.
-    expect(readUnit("£m")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1_000_000 });
-    expect(readUnit("£")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1 });
+    // ⚠ WS-A round 2, B3 added `currencyDisplay` — the currency token WITHOUT
+    // its magnitude letter — so a consumer that has already applied
+    // `multiplier` can name the amount without spending the letter twice
+    // (`£m1,000,000`). It is asserted here rather than loosened to
+    // `toMatchObject`, because this file's whole job is that `readUnit` reads
+    // these four strings EXACTLY as the parser it replaced did: a partial match
+    // would stop noticing a field that changed.
+    expect(readUnit("£m")).toEqual({
+      kind: "currency",
+      currencyCode: "GBP",
+      currencyDisplay: "£",
+      multiplier: 1_000_000,
+    });
+    expect(readUnit("£")).toEqual({
+      kind: "currency",
+      currencyCode: "GBP",
+      currencyDisplay: "£",
+      multiplier: 1,
+    });
     expect(readUnit("scale")).toEqual({ kind: "plain", multiplier: 1 });
     expect(readUnit("Trustpilot score")).toEqual({ kind: "plain", multiplier: 1 });
     // …and it reads the two spellings the old parser could not.
-    expect(readUnit("GBP")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1 });
-    expect(readUnit("A$m")).toEqual({ kind: "currency", currencyCode: "AUD", multiplier: 1_000_000 });
+    expect(readUnit("GBP")).toEqual({
+      kind: "currency",
+      currencyCode: "GBP",
+      currencyDisplay: "GBP",
+      multiplier: 1,
+    });
+    expect(readUnit("A$m")).toEqual({
+      kind: "currency",
+      currencyCode: "AUD",
+      currencyDisplay: "A$",
+      multiplier: 1_000_000,
+    });
   });
 });
 

@@ -45,6 +45,7 @@ import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
+import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 
 // ============================================================================
 // V3 Types
@@ -1032,6 +1033,29 @@ export function transformResponseToV3(
     v3Graph,
     v3Options,
     goalNodeId
+  );
+
+  // ── WS-A item 1(b): THE COMMIT-TIME MONEY INVARIANT ──────────────────────
+  //
+  // THIS IS THE COMMIT POINT. `v3Options` carries the interventions that were
+  // just extracted and `v3Graph.nodes` the factors they are levers on, so this
+  // is the first and only place where both halves of the encoding pair
+  // (`cap` and `level`) exist together — which is exactly why nothing has ever
+  // asserted their product (L2B-VARIANCE.md §3.1: the two halves are emitted
+  // independently by one LLM call, and the user's £6,000 committed as £1,440
+  // with `warnings: []` throughout).
+  //
+  // DISCLOSURE, NOT REPAIR. The detector is pure and the graph is untouched:
+  // it appends to the same `validation_warnings` channel that already carries
+  // `CONSTRAINT_DIRECTION_HEURISTIC` and `STRENGTH_DEFAULT_APPLIED`, both
+  // witnessed on the persisted wire. Never a rewrite — that is #853's defect
+  // class, and a magnitude silently corrected can be 10^6x wrong.
+  validationWarnings.push(
+    ...detectUnreconciledStatedMagnitudes({
+      nodes: v3Graph.nodes as NodeV3T[],
+      options: v3Options,
+      briefText: context.brief,
+    }),
   );
 
   // P0: Build analysis-ready payload for direct PLoT consumption

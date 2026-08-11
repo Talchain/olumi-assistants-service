@@ -82,6 +82,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { resolveExistingRawValue } from "../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js";
 
 /** What KIND of quantity a written amount (or a unit string) denotes. */
 export type AmountKind = "currency" | "percent" | "plain";
@@ -196,6 +197,27 @@ export function findStatedAmounts(text: string | null | undefined): readonly Sta
 export interface UnitReading {
   readonly kind: AmountKind;
   readonly currencyCode?: string;
+  /**
+   * The unit's currency token WITH ITS MAGNITUDE SUFFIX REMOVED, exactly as the
+   * unit string spelled it: `"£m" ⇒ "£"`, `"GBPm" ⇒ "GBP"`, `"£" ⇒ "£"`.
+   * Present iff `kind === "currency"`.
+   *
+   * ⚠ WHY IT IS HERE RATHER THAN LEFT TO EACH CALLER (WS-A round 2, B3). A
+   * consumer that has applied {@link multiplier} to a level has ALREADY spent
+   * the unit's magnitude letter; prefixing the raw unit string afterwards
+   * spends it twice, and the copy misstates the user's own money by 10^6 —
+   * `£1m` rendered as `£m1,000,000`, and the brief's own `£0.9m` as
+   * `£m900,000` (measured on `money-invariant.ts` at `3038820c`). The two
+   * pieces of information — HOW MUCH to scale by, and WHAT TO CALL IT — are
+   * different questions with one source, so `readUnit` answers both rather
+   * than leaving the second to be re-derived from a string it has already
+   * parsed (CLAUDE.md trap 21).
+   *
+   * DERIVED, NEVER MIRRORED: it is the very capture group this function
+   * already matched, so a new currency added to `CURRENCY_SYMBOL_TO_CODE`
+   * cannot make the display form and the code form disagree.
+   */
+  readonly currencyDisplay?: string;
   /** Multiplier from the unit's own magnitude letter: "£m" ⇒ 1e6. */
   readonly multiplier: number;
 }
@@ -226,9 +248,11 @@ export function readUnit(unit: string | null | undefined): UnitReading {
   if (/^percent(age)?$/i.test(trimmed)) return { kind: "percent", multiplier: 1 };
   const iso = ISO_UNIT_PATTERN.exec(trimmed);
   if (iso) {
+    const code = (iso.groups?.code ?? trimmed).toUpperCase();
     return {
       kind: "currency",
-      currencyCode: (iso.groups?.code ?? trimmed).toUpperCase(),
+      currencyCode: code,
+      currencyDisplay: code,
       multiplier: resolveMagnitude(iso.groups?.mag),
     };
   }
@@ -240,7 +264,10 @@ export function readUnit(unit: string | null | undefined): UnitReading {
   if (symbol) {
     const code =
       CURRENCY_SYMBOL_TO_CODE[symbol] ?? CURRENCY_SYMBOL_TO_CODE[symbol.toUpperCase()] ?? symbol;
-    return { kind: "currency", currencyCode: code, multiplier };
+    // The SYMBOL as written, not the code: "£", never "GBP". The magnitude
+    // letter is deliberately excluded — it lives in `multiplier` and spending
+    // it twice is B3.
+    return { kind: "currency", currencyCode: code, currencyDisplay: symbol, multiplier };
   }
   if (typeof groups.pct === "string") return { kind: "percent", multiplier };
   return { kind: "plain", multiplier };
@@ -257,6 +284,49 @@ function magnitudesMatch(a: number, b: number): boolean {
   if (a === b) return true;
   const scale = Math.max(Math.abs(a), Math.abs(b), 1);
   return Math.abs(a - b) <= RELATIVE_EPSILON * scale;
+}
+
+/**
+ * WS-A ITEM 1 — THE MAGNITUDE A NORMALISED LEVEL DENOTES, given the producer's
+ * own declared denominator.
+ *
+ * WHY THIS EXISTS. The pipeline reasons in NORMALISED lever space
+ * (`observed_state.value ∈ [0,1]`) and records the denominator beside it
+ * (`observed_state.cap`). Everything that compares a lever against the user's
+ * words — this module's predicate, and the commit-time money invariant in
+ * `money-invariant.ts` — needs the same inverse, so it is resolved ONCE here
+ * rather than multiplied out at each call site (CLAUDE.md trap 21: two
+ * derivations of one meaning end up disagreeing inside a single response).
+ *
+ * THE INVERSE IS NOT RE-DERIVED. `resolveExistingRawValue` is the shared
+ * de-normalisation the validator, the executor precheck and the
+ * `set_factor_value` handler already agree on (the AC.1 parity invariant), and
+ * it is the exact inverse of `normaliseFactorValue`, which stores
+ * `value = raw / cap` for every capped factor and `value = raw` when uncapped.
+ * `raw_value` is deliberately NOT passed: the question is what THIS level
+ * denotes, not what some earlier level denoted (the stale-sibling defect
+ * `reconcileObservedValuePair` exists to repair).
+ *
+ * FAILS TOWARD THE WEAKER CLAIM, like everything else in this module:
+ *   - no usable cap (absent, non-finite, ≤ 0 — all off-contract, since
+ *     `evaluateFactorValueProposal` guarantees a positive cap on the write
+ *     path) ⇒ `null`, and the caller keeps today's raw comparison;
+ *   - `ambiguous` (a raw-value-less `%` whose divisor cannot be recovered)
+ *     ⇒ `null`, so the strong claim is withheld rather than guessed.
+ */
+export function denormalisedMagnitude(
+  value: number,
+  unit: string | null | undefined,
+  cap: number | null | undefined,
+): number | null {
+  if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const resolved = resolveExistingRawValue({
+    value,
+    cap,
+    ...(typeof unit === "string" ? { unit } : {}),
+  });
+  return resolved.kind === "resolved" && Number.isFinite(resolved.raw) ? resolved.raw : null;
 }
 
 /**
@@ -282,18 +352,30 @@ function magnitudesMatch(a: number, b: number): boolean {
  *
  * Returns false for a missing brief, a non-finite value, or an empty scan —
  * every "we cannot tell" answer is a refusal.
+ *
+ * ⚠ WS-A ITEM 1(a) — `cap` IS THE FOURTH ARGUMENT, AND ITS ABSENCE IS THE
+ * DEFECT THAT SHIPPED. The one production call site passed a NORMALISED lever
+ * level (0.72) while the brief states raw magnitudes (18000), so the predicate
+ * was structurally incapable of firing: 117 of 117 interventions disowned,
+ * measured at CEE `8e3ad916` (L2B-VARIANCE.md §2.4). Nothing about the
+ * question this function answers was wrong — it was fed the wrong number.
+ * Supplying the producer's own declared denominator answers the same question
+ * about the magnitude the encoding actually denotes. OPTIONAL, so every
+ * existing three-argument caller is byte-identical to before.
  */
 export function isAmountStatedInBrief(
   value: number,
   unit: string | null | undefined,
   briefText: string | null | undefined,
+  cap?: number | null,
 ): boolean {
   if (typeof value !== "number" || !Number.isFinite(value)) return false;
   const amounts = findStatedAmounts(briefText);
   if (amounts.length === 0) return false;
 
   const reading = readUnit(unit);
-  const target = value * reading.multiplier;
+  const magnitude = denormalisedMagnitude(value, unit, cap) ?? value;
+  const target = magnitude * reading.multiplier;
   if (!Number.isFinite(target)) return false;
 
   for (const amount of amounts) {

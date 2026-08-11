@@ -532,8 +532,25 @@ function buildInterventionsFromV4Data(
     // answers a DIFFERENT question ("did the LLM name a factor that exists?"),
     // and `exact_id` genuinely is a high-confidence target match (trap 21 —
     // do not align the defaults of two different questions).
+    // ⚠ WS-A ITEM 1(a) — THE PREDICATE WAS CORRECT AND POINTED AT THE WRONG
+    // BYTES (CLAUDE.md trap 13d). `value` here is the NORMALISED lever level
+    // (0.72), and the brief states RAW magnitudes (£18,000). Without the
+    // producer's own declared denominator the comparison could only ever fire
+    // if the LLM emitted a raw magnitude — which it does not: measured over
+    // the archived corpus at CEE `8e3ad916`, 0 of 117 intervention values
+    // exceeded 1 and 117 of 117 were disowned, while the £0 status-quo
+    // baseline was stamped `brief_extraction` (L2B-VARIANCE.md §2.4/§2.6).
+    //
+    // `cap` sits one line below `unit` on the SAME `observed_state` and was
+    // already in scope. Passing it asks the predicate about the magnitude the
+    // encoding denotes (`level × cap`) rather than about the lever level, and
+    // the de-normalisation itself delegates to the estate's shared inverse —
+    // see `denormalisedMagnitude`. The direction of the change is still
+    // one-way: it can only ever restore a claim the model already made about
+    // a magnitude the user really did state.
     const unit = factor?.observed_state?.unit;
-    const statedInBrief = isAmountStatedInBrief(value, unit, briefText);
+    const cap = factor?.observed_state?.cap;
+    const statedInBrief = isAmountStatedInBrief(value, unit, briefText, cap);
 
     interventions[factorId] = {
       value,

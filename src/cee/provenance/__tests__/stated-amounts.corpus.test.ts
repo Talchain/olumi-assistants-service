@@ -182,8 +182,18 @@ describe("2.972 F1 — the currency refusal must not be FORM-DEPENDENT", () => {
   const BRIEF_GBP = "legal quoted us £900k for the process";
 
   it("[F1] reads an ISO currency code as that currency, not as a plain unit", () => {
-    expect(readUnit("GBP")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1 });
-    expect(readUnit("usd")).toEqual({ kind: "currency", currencyCode: "USD", multiplier: 1 });
+    expect(readUnit("GBP")).toEqual({
+      kind: "currency",
+      currencyCode: "GBP",
+      currencyDisplay: "GBP",
+      multiplier: 1,
+    });
+    expect(readUnit("usd")).toEqual({
+      kind: "currency",
+      currencyCode: "USD",
+      currencyDisplay: "USD",
+      multiplier: 1,
+    });
   });
 
   it("[F1] every ISO code the shared vocabulary maps to is readable as a unit", () => {
@@ -230,8 +240,22 @@ describe("2.972 F1 — the currency refusal must not be FORM-DEPENDENT", () => {
 
 describe("2.972 unit reading", () => {
   it("reads currency, magnitude and percent units, and degrades unknown units to plain x1", () => {
-    expect(readUnit("£m")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1_000_000 });
-    expect(readUnit("£")).toEqual({ kind: "currency", currencyCode: "GBP", multiplier: 1 });
+    // ⚠ WS-A round 2, B3: `currencyDisplay` is the token WITHOUT the magnitude
+    // letter, and `£m` is the case that makes the distinction load-bearing —
+    // the multiplier carries the `m`, so a consumer that has applied it must
+    // print `£`, never `£m`.
+    expect(readUnit("£m")).toEqual({
+      kind: "currency",
+      currencyCode: "GBP",
+      currencyDisplay: "£",
+      multiplier: 1_000_000,
+    });
+    expect(readUnit("£")).toEqual({
+      kind: "currency",
+      currencyCode: "GBP",
+      currencyDisplay: "£",
+      multiplier: 1,
+    });
     expect(readUnit("%")).toEqual({ kind: "percent", multiplier: 1 });
     expect(readUnit("percent")).toEqual({ kind: "percent", multiplier: 1 });
     // A unit this module does not understand must never inflate a magnitude.
