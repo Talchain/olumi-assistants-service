@@ -167,7 +167,16 @@ export interface DroppedRecordRef {
     | "ref_out_of_range"
     | "ref_target_not_a_node"
     | "self_loop"
-    | "missing_ref";
+    | "missing_ref"
+    /**
+     * The record was projected as a node and then withdrawn because nothing the
+     * model emitted connects it to the goal. Kept as a RECORD and reported here;
+     * never forced onto the graph with an invented edge, and never silently
+     * lost. `claim_index` is -1 for these — they are named by label, because the
+     * withdrawal happens after both node passes and a stated item has no claim
+     * index to point at.
+     */
+    | "unconnected_to_goal";
   readonly from_ref?: string;
   readonly to_ref?: string;
 }
@@ -516,6 +525,91 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
       provenance: prov,
     });
   });
+
+  // ── Pass 3b: DISCLOSE what the model never connected; never force it in. ───
+  //
+  // MEASURED, and this is the finding the whole slice turned on. A record set is
+  // not a graph, and a record the model states but never links is not a graph
+  // node: the consumer's `NO_PATH_TO_GOAL` (`graph-validator.ts:620`) requires
+  // EVERY node except the decision to reach the goal. On a live draft, 8 of 17
+  // projected nodes reached nothing — mostly stated figures the model correctly
+  // kept in `stated_items` (the instruction tells it never to drop what the user
+  // said) and correctly declined to connect, because they did not bear on the
+  // goal. Projecting them anyway manufactured the rejection.
+  //
+  // There are exactly three things the projector can do with such a record, and
+  // two of them are defects:
+  //   FORCE IT IN   — place the node and let a repair invent an edge to the
+  //                   goal. That is a machine-authored causal claim presented to
+  //                   the user as part of their model. The worst option, and it
+  //                   is the one that happens by default if we do nothing.
+  //   DROP IT       — silently lose something the user said. The second worst.
+  //   DISCLOSE IT   — keep the RECORD, leave it off the graph, and say so.
+  // Only the third is honest, so it is the only one implemented.
+  //
+  // ⭐ WHAT IS DELIBERATELY *NOT* PRUNED, because the reasoning differs per kind:
+  //   `goal`     — the graph has no meaning without it.
+  //   `option`   — an option the user named must appear even if the model failed
+  //                to connect it; dropping options also trips
+  //                `INSUFFICIENT_OPTIONS` and silently narrows the user's own
+  //                choice set, which is the one thing a decision tool may never
+  //                do. A disconnected option is the sweep's problem
+  //                (`NO_EFFECT_PATH`), and it is a VISIBLE problem.
+  //   `decision` — minted below, structural.
+  // So the rule bites only on factors and constraints: the derived material,
+  // where "we could not place this" is a truthful and useful thing to report.
+  //
+  // The predicate is the CONSUMER's, derived at its bytes rather than invented
+  // here: can this node reach the goal along emitted causal links? Reachability
+  // is computed on the reverse graph from the goal, so it is a pure function of
+  // the record set and stays deterministic.
+  const goalNodes = nodes.filter((n) => n.kind === "goal");
+  if (goalNodes.length > 0) {
+    const incoming = new Map<string, string[]>();
+    for (const e of edges) {
+      const list = incoming.get(e.to);
+      if (list) list.push(e.from);
+      else incoming.set(e.to, [e.from]);
+    }
+    const reachesGoal = new Set<string>();
+    const stack = goalNodes.map((n) => n.id);
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (reachesGoal.has(current)) continue;
+      reachesGoal.add(current);
+      for (const from of incoming.get(current) ?? []) stack.push(from);
+    }
+
+    const unmodelled = nodes.filter(
+      (n) => (n.kind === "factor" || n.kind === "constraint") && !reachesGoal.has(n.id),
+    );
+    if (unmodelled.length > 0) {
+      const unmodelledIds = new Set(unmodelled.map((n) => n.id));
+      for (const node of unmodelled) {
+        // Disclosed through the SAME channel as an unresolvable reference, so a
+        // reader has one list to consult rather than two vocabularies for "the
+        // projector did not place this" (trap 21).
+        dropped.push({
+          claim_index: -1,
+          claim_kind: node.provenance?.provenance_class === "stated" ? "stated_item" : "claim",
+          label: node.label,
+          reason: "unconnected_to_goal",
+        });
+        delete provenance[node.id];
+      }
+      // Edges among pruned nodes go with them. An edge whose endpoint is not on
+      // the graph is not a partial truth, it is a dangling reference.
+      for (const edge of edges.filter((e) => unmodelledIds.has(e.from) || unmodelledIds.has(e.to))) {
+        delete provenance[edge.id];
+      }
+      const keptEdges = edges.filter((e) => !unmodelledIds.has(e.from) && !unmodelledIds.has(e.to));
+      edges.length = 0;
+      edges.push(...keptEdges);
+      const keptNodes = nodes.filter((n) => !unmodelledIds.has(n.id));
+      nodes.length = 0;
+      nodes.push(...keptNodes);
+    }
+  }
 
   // ── Pass 4: projector-structural topology. See the header's third-class note.
   const optionNodes = nodes.filter((n) => n.kind === "option");

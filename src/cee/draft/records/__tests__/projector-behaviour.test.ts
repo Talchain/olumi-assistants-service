@@ -25,6 +25,15 @@ const RECORDS: DraftRecordSet = {
     { claim_kind: "factor", label: "implementation cost", basis: [1, 2], category: "controllable", value: 4500 },
     { claim_kind: "prior", label: "market grows 8% annually", value: 8 },
     { claim_kind: "causal_link", label: "CRM reduces churn", basis: [1], from_ref: "s1", to_ref: "s4", effect: "negative", strength: 0.4 },
+    // ⚠ THE SPINE IS PART OF THE FIXTURE. The projector withdraws any factor or
+    // constraint that reaches no goal (pass 3b), so an unconnected fixture would
+    // project to almost nothing and the assertions below would agree with
+    // themselves on an empty set. Every derived node here is connected on purpose.
+    { claim_kind: "causal_link", label: "churn bears on the goal", basis: [0], from_ref: "s4", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [0], from_ref: "c0", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "market growth bears on the goal", from_ref: "c1", to_ref: "s0", effect: "positive" },
+    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [2], from_ref: "s2", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "the margin floor bears on the goal", basis: [3], from_ref: "s3", to_ref: "s0", effect: "negative" },
   ],
 };
 
@@ -181,12 +190,18 @@ describe("unresolvable references are DISCLOSED, never silently swallowed", () =
   it("a resolvable link DOES become an edge — so the drop path is not just rejecting everything", () => {
     const { graph, dropped } = project();
     expect(dropped).toHaveLength(0);
-    const causal = graph.edges.filter((e) => e.provenance_source === "inferred");
+    // Bound by IDENTITY to the ONE link under test — the option→churn edge —
+    // never by "the only inferred edge", which was true when this fixture had a
+    // single link and would now quietly select whichever edge happened to be
+    // first. A value predicate another object can satisfy is not a binding.
+    const causal = graph.edges.filter(
+      (e) => e.provenance_source === "inferred" && e.from === optionId && e.to === churnFigureId,
+    );
     expect(causal).toHaveLength(1);
-    expect(causal[0]!.from).toBe(optionId);
-    expect(causal[0]!.to).toBe(churnFigureId);
     expect(causal[0]!.effect_direction).toBe("negative");
     expect(causal[0]!.strength_mean).toBe(0.4);
+    // The drop path is not rejecting everything, and the spine is present.
+    expect(graph.edges.filter((e) => e.provenance_source === "inferred").length).toBeGreaterThan(1);
   });
 });
 
