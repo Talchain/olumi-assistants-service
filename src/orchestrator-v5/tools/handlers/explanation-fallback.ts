@@ -27,10 +27,11 @@ import type {
   AnalysisProjectionDriver,
   StructureProjectionSummary,
 } from '../../context/projection-summaries.js';
-import {
-  formatPercentagePoints,
-  formatProbability,
-} from '../../format/format-analysis-value.js';
+// ROADMAP 2.1067: `formatPercentagePoints` is deliberately NOT imported here
+// any more. This module composed the last two deterministic sentences that
+// rendered the runner-up gap as a magnitude; with those retired, the only
+// percentage this file may speak is an option's OWN win share.
+import { formatProbability } from '../../format/format-analysis-value.js';
 import { bandFromMagnitude } from '../../format/influence-bands.js';
 import {
   formatSensitivityDirection,
@@ -191,10 +192,11 @@ export function composeRobustnessVerdict(
   const runner = projection.runner_up;
   const band = projection.robustness_band;
 
-  // Margin must be a finite number for any quantitative-leaning clause; null /
-  // NaN / Infinity fall through to the neutral "second place / contender"
-  // framing so we never anchor copy on a phantom lead (`formatPercentagePoints`
-  // renders a non-finite value as "Not available").
+  // Margin must be a finite number before this composer may call the lead
+  // CLEAR; null / NaN / Infinity fall through to the `indeterminate` arm so we
+  // never assert a standing on a phantom lead. Since ROADMAP 2.1067 the margin
+  // is a DECIDER only — no arm renders it — so this guard now protects the
+  // VERDICT rather than a rendered number.
   const finiteMargin: number | null =
     typeof projection.margin_pp === 'number' && Number.isFinite(projection.margin_pp)
       ? projection.margin_pp
@@ -226,8 +228,41 @@ export function composeRobustnessVerdict(
   const stabilityPhrase = describeRobustnessBand(band);
 
   // ---- margin_clause (mode-specific voice; needs a runner-up label) ----
+  //
+  // ⚠ ROADMAP 2.1067 — THIS CLAUSE IS THE SOLE OWNER OF THE POST-ANALYSIS
+  // RUNNER-UP STANDING SENTENCE, and it states NO gap magnitude.
+  //
+  // Until 2026-08-11 the `clear` arm read "That is ahead of {runner} by {N}
+  // percentage points" / "the lead of {N} percentage points would need to
+  // close", and `post-analysis-advice-gate.ts` carried a SECOND, copy-identical
+  // pair of its own. PR #906 had already retired that sentence family from the
+  // run_analysis headline: the number is the difference between two P(argmax)
+  // statistics, it invites "N% better" — which it is not — and it INFLATES BY
+  // CONSTRUCTION, because the gap is a function of the whole field, so a third
+  // option collapsing widens it with no improvement in the leader at all.
+  //
+  // The #906 shape is followed exactly: the margin is still the DECIDER
+  // (`marginCat`/`finiteMargin` gate this branch, unchanged) and is no longer
+  // the DISPLAY. What each arm reports instead is each option's OWN win share —
+  // the leader's is already stated by the opener one sentence earlier in both
+  // fallbacks, so the runner-up's fragment completes the pair without ever
+  // performing the subtraction.
+  //
+  // The QUALITATIVE verdict the margin earns ("meaningful rather than
+  // marginal") is deliberately KEPT. It is a claim about whether the lead is
+  // real, which is precisely what the margin is the right input to decide; only
+  // the magnitude was the wrong thing to say out loud.
+  //
+  // The probability fragment is guarded because `RobustnessVerdictInput` admits
+  // surfaces (the advice gate) whose option shape carries no probability — omit
+  // the fragment rather than render "Not available".
   let margin_clause: string | null = null;
   if (leading && runner) {
+    const runnerP = runner.probability;
+    const runnerPFragment =
+      typeof runnerP === 'number' && Number.isFinite(runnerP)
+        ? `, with a probability of ${formatProbability(runnerP)}`
+        : '';
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
@@ -236,22 +271,13 @@ export function composeRobustnessVerdict(
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `That is ahead of ${runner.label} by ${formatPercentagePoints(finiteMargin)}, so the lead is meaningful rather than marginal.`
-          : `For ${quoteLabel(runner.label)} to overtake it, the lead of ${formatPercentagePoints(finiteMargin)} would need to close.`;
+          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}, so the lead is meaningful rather than marginal.`
+          : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
     } else {
-      // indeterminate: no finite margin and not a near-tie. The probability
-      // fragment is guarded because `RobustnessVerdictInput` admits surfaces
-      // (the advice gate) whose option shape carries no probability — omit the
-      // fragment rather than render "Not available". Output is byte-identical
-      // for any caller that does supply a finite probability.
-      const runnerP = runner.probability;
-      const runnerPFragment =
-        typeof runnerP === 'number' && Number.isFinite(runnerP)
-          ? `, with a probability of ${formatProbability(runnerP)}`
-          : '';
+      // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
-          ? `${runner.label} sits in second place${runnerPFragment}.`
+          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}.`
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
     }
   }

@@ -1502,13 +1502,51 @@ function probabilityFragment(p: number | undefined): string {
 }
 
 /**
- * Margin-fragment helper. Returns a formatted percentage-points string
- * only when the value is finite; null otherwise so callers decide how
- * to phrase the surrounding sentence.
+ * Margin-fragment helper.
+ *
+ * ⚠ ROADMAP 2.1067 — THIS IS NOW A GATE, NOT A DISPLAY VALUE, AND THE RETURNED
+ * STRING MUST NOT REACH `assistant_text`. Every caller below reads it for
+ * TRUTHINESS only: "is there a finite margin, i.e. may this surface state a
+ * standing at all?". Rendering it is what shipped the retired sentence family
+ * ("It sits ahead of X by N percentage points") from four composers in this
+ * file — the difference between two P(argmax) statistics, which inflates by
+ * construction when any third option collapses and is not a difference in
+ * outcome. This mirrors `coaching/analysis-result-headline.ts` exactly, where
+ * #906 kept `marginPointsText()` as a boolean gate at all three consumer sites
+ * and dropped it from every emitted string.
+ *
+ * It still returns the formatted string rather than a boolean because the
+ * finite/non-finite decision belongs in one place, and a `string | null` that
+ * nothing interpolates cannot be misread as data by accident — a new caller
+ * that DOES interpolate it fails `post-analysis-gap-statistic-producer-control`.
  */
 function marginPpString(margin: number | null | undefined): string | null {
   if (typeof margin !== 'number' || !Number.isFinite(margin)) return null;
   return formatPercentagePoints(margin);
+}
+
+/**
+ * The runner-up STANDING sentence for the two short-register composers
+ * (`advice` and `meaning`), whose voice is one trailing clause rather than the
+ * fuller interpretive sentence `composeRobustnessVerdict` emits.
+ *
+ * ROADMAP 2.1067. Before this existed, `composeAdvice` and `composeMeaning`
+ * carried the same sentence twice, differing only in whether the label was
+ * quoted — so a reword had to be remembered in two places and neither was
+ * covered by a guard. The label arrives ALREADY RENDERED because label quoting
+ * is each composer's own voice (`advice` quotes nothing, `meaning` quotes
+ * everything) and that is the one thing these two surfaces legitimately differ
+ * on.
+ *
+ * It reports the runner-up's OWN win share. The leading option's share is
+ * stated by both composers' openers one clause earlier, so the pair gives each
+ * option's own number and never their subtraction.
+ */
+function runnerUpStandingSentence(
+  renderedRunnerLabel: string,
+  runnerProbability: number | undefined,
+): string {
+  return `${renderedRunnerLabel} sits in second place${probabilityFragment(runnerProbability)}.`;
 }
 
 /**
@@ -1609,15 +1647,18 @@ function composeAdvice(
   const runnerLabel = analysis.runner_up?.label;
   // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
   // sentence, so the margin axis is the shared composer's call here too. On a
-  // near-tie, "It sits ahead of B by 0.1 percentage points" is literally true
-  // yet frames a dead heat as a standing — and it contradicted the sibling
-  // surfaces calling the same run effectively tied. State the tie instead.
+  // near-tie, a standing sentence frames a dead heat as a lead — and it
+  // contradicted the sibling surfaces calling the same run effectively tied.
+  // State the tie instead.
+  // ROADMAP 2.1067: `margin` gates, and no longer renders. The clear arm used
+  // to read " It sits ahead of ${runnerLabel} by ${margin}."; it now names the
+  // runner-up's OWN share, which pairs with the leader's share in `opener`.
   const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
   const marginClause =
     runnerLabel && verdict.margin_category === 'near_tie'
       ? ` It is effectively tied with ${runnerLabel}.`
       : margin && runnerLabel
-        ? ` It sits ahead of ${runnerLabel} by ${margin}.`
+        ? ` ${runnerUpStandingSentence(runnerLabel, analysis.runner_up?.probability)}`
         : '';
   const lead = `${opener}${marginClause}`;
   const nextStep = topDriverLabel
@@ -1732,8 +1773,14 @@ function composeMeaning(
       );
     }
   } else {
+    // ROADMAP 2.1067: `margin` gates, and no longer renders. This read
+    // " It sits ahead of ${quoteLabel(runnerLabel)} by ${margin}."; it now
+    // states the runner-up's OWN share, pairing with the leader's share in the
+    // sentence it is appended to.
     const marginSentence =
-      margin && runnerLabel ? ` It sits ahead of ${quoteLabel(runnerLabel)} by ${margin}.` : '';
+      margin && runnerLabel
+        ? ` ${runnerUpStandingSentence(quoteLabel(runnerLabel), analysis.runner_up?.probability)}`
+        : '';
     if (topDriverLabel) {
       sentences.push(
         `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
@@ -1957,7 +2004,10 @@ function composeExplainResults(
   const driverA = interpretationDrivers[0];
   const driverB = interpretationDrivers[1];
   const runnerLabel = analysis.runner_up?.label;
-  const margin = marginPpString(analysis.margin_pp);
+  // ROADMAP 2.1067: no local `margin` binding. The standing sentence is the
+  // shared verdict's `margin_clause`, which gates on the SAME finite-margin
+  // decision internally — a second local read of the margin here is how this
+  // composer came to render it.
   const topEdge = renderableFragileEdges(analysis)[0];
   const topDriverLabel = hasNonEmptyLabel(driverA?.factor_label)
     ? driverA.factor_label
@@ -1972,14 +2022,16 @@ function composeExplainResults(
     sentences.push(
       `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probabilityFragment(analysis.leading_option?.probability)}.`,
     );
-    if (runnerLabel && margin) {
-      sentences.push(
-        `That sits ahead of ${quoteLabel(runnerLabel)} by ${margin}, so the lead is meaningful rather than marginal.`,
-      );
-    } else if (runnerLabel) {
-      sentences.push(
-        `${quoteLabel(runnerLabel)} sits in second place${probabilityFragment(analysis.runner_up?.probability)}.`,
-      );
+    // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE. These two arms were
+    // copy-identical twins of `composeRobustnessVerdict`'s `explain` clear and
+    // indeterminate arms, and the duplication is exactly why one of them still
+    // rendered the retired gap magnitude ("That sits ahead of X by N percentage
+    // points") after #906 had retired it from the headline: a reword had two
+    // homes and the guard covered neither. The near-tie arm is NOT routed here —
+    // `interpretationCloseness` above owns this surface's tie wording, and the
+    // shared verdict has already ruled that this is not a near-tie.
+    if (verdict.margin_clause !== null) {
+      sentences.push(verdict.margin_clause);
     }
   }
 
@@ -2156,7 +2208,10 @@ function composeWhatWouldFlip(
   const nearTie = verdict.margin_category === 'near_tie';
   const fragileSignal = nearTie || verdict.stability_category === 'fragile';
   const runnerLabel = analysis.runner_up?.label;
-  const margin = marginPpString(analysis.margin_pp);
+  // ROADMAP 2.1067: no local `margin` binding — see the twin note in
+  // `composeExplainResults`. `closenessLead` below still receives the raw
+  // `analysis.margin_pp` because the near-tie wording is a DIFFERENT,
+  // separately-adjudicated surface (`robustness-honesty.ts`), untouched here.
   const topEdge = renderableFragileEdges(analysis)[0];
   // DGAI #341: "the factor with the most influence on the result" may only
   // name a materially-influential driver.
@@ -2179,14 +2234,15 @@ function composeWhatWouldFlip(
     sentences.push(
       `Based on this model, ${quoteLabel(leadingLabel)} currently leads${probabilityFragment(analysis.leading_option?.probability)}.`,
     );
-    if (runnerLabel && margin) {
-      sentences.push(
-        `For ${quoteLabel(runnerLabel)} to overtake it, the lead of ${margin} would need to close.`,
-      );
-    } else if (runnerLabel) {
-      sentences.push(
-        `${quoteLabel(runnerLabel)} is the most likely contender to overtake it.`,
-      );
+    // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE, the `flip` voice of
+    // `composeRobustnessVerdict`. These two arms were copy-identical twins of
+    // that composer's clear and indeterminate arms; the clear one still read
+    // "the lead of N percentage points would need to close", quantifying a gap
+    // between two win frequencies as if closing it were a distance. The
+    // near-tie arm is NOT routed here — `closenessLead` above owns this
+    // surface's tie wording.
+    if (verdict.margin_clause !== null) {
+      sentences.push(verdict.margin_clause);
     }
   }
 

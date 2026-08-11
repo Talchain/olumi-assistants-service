@@ -314,7 +314,7 @@ describe('what_would_flip — answer-carrying contract', () => {
     expect(outcome.assistant_text).toContain('Hire Senior Engineer');
   });
 
-  it('fallback cites runner-up and margin from the projection', async () => {
+  it("fallback cites the runner-up and its OWN win share from the projection", async () => {
     const handler = createWhatWouldFlipHandler();
     const outcome = await handler(
       makeInvocation({
@@ -323,8 +323,15 @@ describe('what_would_flip — answer-carrying contract', () => {
         analysisProjection: ANALYSIS_PROJECTION,
       }),
     );
+    // ROADMAP 2.1067 — this pin was `toContain('35')`, the retired gap
+    // magnitude, and it bound by a BARE VALUE PREDICATE that any other 35 in
+    // the prose would have satisfied (CLAUDE.md trap 19). It now binds to the
+    // runner-up's own share by its full sentence.
     expect(outcome.assistant_text).toContain('Hire Two Mid-Level');
-    expect(outcome.assistant_text).toContain('35');
+    expect(outcome.assistant_text).toContain(
+      "'Hire Two Mid-Level' is the most likely contender to overtake it, with a probability of 27%",
+    );
+    expect(outcome.assistant_text).not.toMatch(/percentage points?/i);
   });
 
   it('persists a fact that round-trips through the schema on the happy path', async () => {
