@@ -54,8 +54,83 @@ import type {
 
 export type SpikeCProvenanceClass = "stated" | "ai_inferred" | "projector_structural";
 
+/**
+ * ⭐ `C-BUILD-1` — THE TWO FIELDS THE CONSUMER REQUIRES, AND WHY THESE VALUES.
+ *
+ * At `cec98ae2` every arm-C draft that emitted an edge was rejected:
+ * `edges.N.provenance.source: Required` / `.quote: Required`. The projector was
+ * correct against its OWN types and wrong against the consumer's — trap 13d.
+ * The consumer, derived at the bytes:
+ *
+ *   `LLMEdge.provenance = StructuredProvenance.optional()`  (shared-schemas.ts:118)
+ *   `StructuredProvenance = z.object({ source: z.string().min(1),
+ *                                      quote:  z.string().max(100),
+ *                                      location: z.string().optional() }).passthrough()`
+ *                                                            (schemas/graph.ts:344)
+ *
+ * NOTE `LLMEdge` takes the OBJECT only — the `z.union([StructuredProvenance,
+ * z.string()])` legacy-string branch exists on `EdgeInput` (graph.ts:409) and NOT
+ * here, so "emit a plain string" is not available at the validator that failed.
+ * `.passthrough()` is what lets `provenance_class` / `basis` / `unbased` ride
+ * alongside, so the projector's own vocabulary is not lost to satisfy the schema.
+ *
+ * ── THE ATTRIBUTION RULE (orchestrator ruling, 2026-08-11; binding) ─────────
+ * Inferred structure is HONESTLY AI-ATTRIBUTED. A user source or quote is NEVER
+ * fabricated for an edge the model inferred or the projector scaffolded. Note
+ * what that forecloses: `quote: <the stated item's source_quote>` would satisfy
+ * the schema on the CRM control brief and fail on the fidelity briefs (whose
+ * sentences exceed `max(100)`) — and where it passed it would be a LIE, telling
+ * the user their own words justified a link they never drew.
+ *
+ * ── WHY THESE PARTICULAR STRINGS (derived, not chosen) ─────────────────────
+ * `source` is free text (`z.string().min(1)`), so the value is a semantic
+ * decision and is taken from the PRODUCER's declared semantics rather than from
+ * this lane's reading of what the field ought to mean (trap 13c):
+ *   · `"hypothesis"` — named in `StructuredProvenance`'s own comment ("File name,
+ *     metric name, or 'hypothesis'"), a member of `ProvenanceSource`
+ *     (graph.ts:29), and what CEE's enricher already stamps on machine-asserted
+ *     edges (`factor-extraction/enricher.ts:452,1140`).
+ *   · `"synthetic"` — what CEE already stamps on machine-scaffolded connectivity
+ *     (`unified-pipeline/utils/edge-format.ts:138` `neutralCausalEdge`;
+ *     `repair/deterministic-sweep.ts:996,1003,1308`), with a `quote` that
+ *     describes the MACHINE ACTION ("Repair edge (structural connectivity)") —
+ *     the precedent these two quotes follow.
+ *
+ * ── THE CONSUMER-SIDE CHECK THAT MADE THIS A DERIVATION AND NOT A TASTE CALL ─
+ * `mapToV3ProvenanceSource` (`cee/transforms/schema-v3.ts:727`) is a LOWERCASED
+ * SUBSTRING matcher over `source`, and it routes to the user-facing badge:
+ * anything containing "brief", "document" or "evidence" becomes
+ * `brief_extraction` → wire `provenance_display: "from_brief"`; "user",
+ * "specified" or "manual" becomes `user_specified` → `"user_set"`. So the
+ * well-meaning `source: "inferred from the brief"` would make the product tell
+ * the user their brief stated a link the model invented — false authorship
+ * committed by a string. `"hypothesis"` routes EXPLICITLY to `cee_hypothesis`;
+ * `"synthetic"` falls to the same default every CEE structural edge takes. Both
+ * display `ai_inferred`, which is the honest badge for both classes, and the
+ * quotes are worded to contain none of that matcher's routing keywords either.
+ */
+const EDGE_ATTRIBUTION = {
+  ai_inferred: {
+    source: "hypothesis",
+    quote: "Model-inferred causal link (spike arm C projector)",
+  },
+  projector_structural: {
+    source: "synthetic",
+    quote: "Decision-to-option scaffold minted by the projector",
+  },
+} as const;
+
 export interface SpikeCProvenanceRecord {
   readonly provenance_class: SpikeCProvenanceClass;
+  /**
+   * REQUIRED by `StructuredProvenance` on any object that reaches an edge.
+   * Present on edge provenance; absent on node provenance, which no consumer
+   * validates (`LLMNode` and `Node` are `.passthrough()` with no `provenance`
+   * key — which is exactly why the live failure named edges only).
+   */
+  readonly source?: string;
+  /** REQUIRED by `StructuredProvenance` (max 100). NEVER user text — see above. */
+  readonly quote?: string;
   /** Present iff `stated`. The verbatim quote, canonicalised. */
   readonly source_quote?: string;
   /** Present iff `ai_inferred`. Minted ids of the stated items it builds on. */
@@ -377,8 +452,12 @@ export function projectRecordsToGraph(records: SpikeCRecordSet): SpikeCProjectio
     const basisIds = (claim.basis ?? [])
       .filter((i) => Number.isInteger(i) && statedIdByIndex.has(i))
       .map((i) => statedIdByIndex.get(i)!);
+    // The EDGE provenance carries the two consumer-required fields; the badge
+    // and the basis are unchanged. The basis is the honest reference to the
+    // records this link was built on — the record IDS, never their quotes.
     const prov: SpikeCProvenanceRecord = {
       provenance_class: "ai_inferred",
+      ...EDGE_ATTRIBUTION.ai_inferred,
       basis: basisIds,
       unbased: basisIds.length === 0,
     };
@@ -402,7 +481,14 @@ export function projectRecordsToGraph(records: SpikeCRecordSet): SpikeCProjectio
   // ── Pass 4: projector-structural topology. See the header's third-class note.
   const optionNodes = nodes.filter((n) => n.kind === "option");
   if (optionNodes.length > 0) {
-    const structuralProv: SpikeCProvenanceRecord = { provenance_class: "projector_structural" };
+    // ONE construction site for this class, as the header's mechanism requires —
+    // the decision node and its edges share it. The two consumer-required fields
+    // are load-bearing on the EDGES (nodes are not validated); carrying them on
+    // the node too is honest of a scaffold node and keeps the class to one site.
+    const structuralProv: SpikeCProvenanceRecord = {
+      provenance_class: "projector_structural",
+      ...EDGE_ATTRIBUTION.projector_structural,
+    };
     // Identity is derived from the option ids it joins, so the decision node is
     // stable across runs and distinct across different option sets.
     const decisionId = mintUnique(sha8("decision", ...optionNodes.map((n) => n.id)), usedIds);
