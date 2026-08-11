@@ -25,6 +25,113 @@ function isEdgeAllowed(fromKind: string, toKind: string): boolean {
   );
 }
 
+/**
+ * Edge patterns that are INVALID under the closed-world topology above, and that
+ * `simpleRepair` DELIBERATELY DOES NOT DELETE, because a downstream authority owns
+ * them and REPAIRS them into legal topology.
+ *
+ * ── WHY THIS LIST EXISTS (the two-authority adjudication) ────────────────────────
+ *
+ * `factor→goal` had TWO authorities with OPPOSITE policies, and the deleting one ran
+ * first:
+ *
+ *   simpleRepair's filter below  DELETE  (Stage 3, enrich.ts)
+ *   fixFactorGoalEdges           SPLIT into factor→outcome→goal via a synthetic
+ *                                outcome node (Stage 4 substep 1 step 4c,
+ *                                deterministic-sweep.ts, "ALWAYS run regardless of
+ *                                violations")
+ *
+ * So the splitter was UNREACHABLE for the only pattern it exists to fix. Its own
+ * header says it is there because "the LLM may short-circuit the causal chain under
+ * cost-reduction / minimisation framing" — precisely the case Stage 3 had already
+ * erased. Measured over 7 spike runs: factor→goal deleted ×15 here, while the sweep's
+ * `factor_goal_splits` counter read 0 on every single run. The deletion is not
+ * neutral: it strands the goal, roughly DOUBLING NO_PATH_TO_GOAL at the gate
+ * (counterfactual with the real functions over the real record sets —
+ * olumi-docs/PHASE0-EVIDENCE-2026-07-28/arch-decision-2026-08-11/spike/
+ * P5-REPAIR-ORDER-COUNTERFACTUAL.txt).
+ *
+ * SINGLE OWNERSHIP, restored rather than duplicated: `fixFactorGoalEdges` remains the
+ * ONE implementation of the split. This filter defers to it. Two consequences worth
+ * keeping in mind:
+ *   - the sweep's `factor_goal_splits` trace stays the honest, meaningful counter for
+ *     this pattern (it is the diagnostic that exposed the defect);
+ *   - the deferral is itself counted, at both readers, so a pattern that is deferred
+ *     but never repaired is VISIBLE rather than silent.
+ *
+ * ── WHY THE LIST IS EXACTLY ONE ENTRY ────────────────────────────────────────────
+ *
+ * The sibling reversed patterns the same model output carried are NOT the same case:
+ *   - `factor→option`   — no downstream authority. The sweep's own
+ *   - `factor→decision`   `SIMPLE_REMOVE_PATTERNS` (deterministic-sweep.ts) does not
+ *                         list them, and no shortcut handler keys on them. Deletion
+ *                         here IS their single owner, and the V4 topology decision is
+ *                         explicit upstream (cee/verification/validators/
+ *                         edge-direction-validator.ts: "options intervene on factors,
+ *                         not reverse"). Deferring them would leave an unrepairable
+ *                         invalid edge to fail at the gate. They stay deleted.
+ *   - `option→outcome`, `option→risk`, `option→goal` have conditional downstream
+ *     handlers, and `outcome→outcome` / `risk→risk` / `decision→*` are owned by the
+ *     sweep's own remover — all of which also DELETE, so there is no disagreement to
+ *     resolve. (The conditional handlers' skip-paths are a narrower, separate
+ *     question; see the PR body. Not changed here.)
+ *
+ * ADDING TO THIS LIST IS A POLICY CHANGE: an entry asserts that some downstream
+ * authority WILL repair the pattern on every path that reaches it. Derive that at the
+ * bytes before adding one.
+ */
+export const SWEEP_OWNED_EDGE_PATTERNS: ReadonlyArray<{ from: string; to: string }> = [
+  // Owned by fixFactorGoalEdges (deterministic-sweep.ts), which splits it into
+  // factor→outcome→goal.
+  { from: "factor", to: "goal" },
+];
+
+/**
+ * True when an invalid edge pattern is owned by a downstream repair authority and must
+ * therefore survive `simpleRepair` rather than be deleted by it.
+ *
+ * Single source of truth for both readers — this filter, and the post-repair assertion
+ * in Stage 3 (enrich.ts) which would otherwise raise a false "invalid edge survived"
+ * alarm about an edge that is deliberately in flight. A hand-copied second list is the
+ * defect this estate keeps paying for; there is exactly one list, above.
+ */
+export function isEdgeOwnedByDownstreamRepair(fromKind: string, toKind: string): boolean {
+  return SWEEP_OWNED_EDGE_PATTERNS.some(
+    (p) => p.from === fromKind && p.to === toKind
+  );
+}
+
+/**
+ * Count edge patterns that violate the closed-world topology, split by fate:
+ *   `invalid`  — nothing downstream owns these; if any survive `simpleRepair` a later
+ *                stage has re-added them, which is the condition Stage 3's assertion
+ *                exists to catch.
+ *   `deferred` — deliberately left for a downstream authority (see
+ *                SWEEP_OWNED_EDGE_PATTERNS). Expected, and reported so that "deferred
+ *                but never repaired" is observable instead of silent.
+ *
+ * Edges referencing unknown node ids are not counted — they are a dangling-reference
+ * problem, handled separately, and counting them here would blur two distinct faults.
+ */
+export function countEdgePatternViolations(
+  graph: Pick<GraphT, "nodes" | "edges">
+): { invalid: number; deferred: number } {
+  const kindMap = new Map<string, string>();
+  for (const node of graph.nodes) kindMap.set(node.id, node.kind);
+
+  let invalid = 0;
+  let deferred = 0;
+  for (const e of graph.edges) {
+    const fromKind = kindMap.get(e.from);
+    const toKind = kindMap.get(e.to);
+    if (!fromKind || !toKind) continue;
+    if (isEdgeAllowed(fromKind, toKind)) continue;
+    if (isEdgeOwnedByDownstreamRepair(fromKind, toKind)) deferred++;
+    else invalid++;
+  }
+  return { invalid, deferred };
+}
+
 // =============================================================================
 // Connectivity Repair Helpers
 // =============================================================================
@@ -392,11 +499,21 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   // Remove invalid edge patterns that violate the closed-world topology.
   // Previously these were preserved for connectivity, but invalid patterns like
   // outcome→outcome and outcome→risk cause downstream ISL analysis failures.
+  //
+  // EXCEPT the patterns a downstream authority OWNS AND REPAIRS
+  // (SWEEP_OWNED_EDGE_PATTERNS — see the adjudication on that constant). Deleting
+  // those here made the repair built for them unreachable and left the goal
+  // stranded; they are handed on instead.
   const invalidEdges: Array<{ from: string; to: string; fromKind: string; toKind: string }> = [];
+  const deferredEdges: Array<{ from: string; to: string; fromKind: string; toKind: string }> = [];
   validEdges = validEdges.filter((edge) => {
     const fromKind = finalNodeKindMap.get(edge.from);
     const toKind = finalNodeKindMap.get(edge.to);
     if (fromKind && toKind && !isEdgeAllowed(fromKind, toKind)) {
+      if (isEdgeOwnedByDownstreamRepair(fromKind, toKind)) {
+        deferredEdges.push({ from: edge.from, to: edge.to, fromKind, toKind });
+        return true; // Keep — the downstream authority repairs this pattern
+      }
       invalidEdges.push({ from: edge.from, to: edge.to, fromKind, toKind });
       return false; // Remove the invalid edge
     }
@@ -412,6 +529,16 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
       removed_patterns: invalidEdges.map((e) => `${e.fromKind}→${e.toKind}`),
       removed_edges: invalidEdges,
     }, `simpleRepair removed ${invalidEdges.length} invalid edge pattern(s)`);
+  }
+
+  if (deferredEdges.length > 0) {
+    log.info({
+      event: "cee.simple_repair.invalid_edges_deferred",
+      request_id: requestId,
+      deferred_count: deferredEdges.length,
+      deferred_patterns: deferredEdges.map((e) => `${e.fromKind}→${e.toKind}`),
+      deferred_edges: deferredEdges,
+    }, `simpleRepair deferred ${deferredEdges.length} edge pattern(s) to their downstream repair authority`);
   }
 
   const edges = validEdges
