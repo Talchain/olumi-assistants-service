@@ -254,10 +254,20 @@ function composeRerunText(
   // answer changes cannot report a null result at all. So the attributed form
   // states the finding explicitly rather than reusing the bare "unchanged"
   // sentence, which read as a non-event when the user had just acted.
+  //
+  // ⚠ "the conclusion", NOT "the recommendation". The design this implements
+  // specified "the recommendation does not hinge on that value", and that copy
+  // is DEFECTIVE at the egress bytes: `recommendation` is in
+  // FORBIDDEN_USER_FACING_PHRASES (the founder ruling that the product does not
+  // recommend), so `applyTerminologyRewrite` silently rewrote it to "the
+  // leading option" — shipping bytes the copy deck never said AND
+  // MANUFACTURING the banned leader vocabulary inside our own safety pass, on
+  // every unchanged-arm re-run. Measured with both controls live. The whole
+  // composed sentence set is now pinned against the real guard by test.
   return attributed
     ? (
       `${since}the picture is the same: ${delta.current_leading_label} still leads. `
-      + 'That is a result in itself: the recommendation does not hinge on that change.'
+      + 'That is a result in itself: the conclusion does not hinge on that change.'
     )
     : `The result is unchanged: ${delta.current_leading_label} still leads.`;
 }

@@ -40,6 +40,8 @@ import {
 } from '../../coaching/intervening-change.js';
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
+import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
+import { applyTerminologyRewrite } from '../../compose/terminology-rewrite.js';
 import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,18 +288,12 @@ describe('PR2 L2 — deriveInterveningChange (the fact-log join)', () => {
 });
 
 describe('PR2 L2 — the attributed consequence sentence', () => {
-  const CHANGE: InterveningChange = {
-    kind: 'single',
-    action: 'link_strength_updated',
-    target_label: 'a link in the decision model',
-  };
-
   it('UNCHANGED reads as a FINDING, not an apology (the null arm is the scientific one)', () => {
     const facts = [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)];
     const text = rerunText({ priorFacts: facts, currentEnv: OFFSHORE_LEADS });
     expect(text).toBe(
       'Since you adjusted a link in the decision model, the picture is the same: '
-      + 'Offshore still leads. That is a result in itself: the recommendation does '
+      + 'Offshore still leads. That is a result in itself: the conclusion does '
       + 'not hinge on that change.',
     );
   });
@@ -487,5 +483,70 @@ describe('PR2 L2 — the sentence is TEMPORAL, never CAUSAL', () => {
     // user's label and nothing causal remains.
     const withoutLabel = text.replace('Because-rate assumption', 'X');
     for (const pattern of CAUSAL) expect(withoutLabel).not.toMatch(pattern);
+  });
+});
+
+describe('PR2 L2 — the composed sentence clears the REAL egress guard', () => {
+  // ⭐ THIS SUITE EXISTS BECAUSE THE DESIGN'S OWN COPY FAILED IT.
+  //
+  // `composeRerunText` is a deterministic in-repo producer of leader sentences,
+  // and it had NO producer-side egress coverage: the estate's
+  // `leader-vocabulary-producer-control.test.ts` drives
+  // `composeExplainResultsFallback` / `composeWhatWouldFlipFallback` /
+  // `composeComparison` but never this composer. The gap let the design's
+  // proposed wording ("the recommendation does not hinge on that value") reach
+  // implementation, where `recommendation` is a FORBIDDEN user-facing phrase:
+  // the egress guard's terminology rewrite silently replaced it with "the
+  // leading option", so the shipped bytes differed from the copy deck AND our
+  // own safety pass manufactured the banned leader vocabulary.
+  //
+  // Asserting on the COMPOSED OUTPUT against the PRODUCTION predicate (not a
+  // paraphrase of it) is the only form that catches the next such wording.
+  const ALL_ARMS: string[] = (() => {
+    const out: string[] = [];
+    for (const priorFacts of [
+      [edgeEditFact(), priorRunFact(OFFSHORE_LEADS)],
+      [factorEditFact('Customer churn'), priorRunFact(OFFSHORE_LEADS)],
+      [editGraphFact('CRM adoption'), priorRunFact(OFFSHORE_LEADS)],
+      [factorEditFact('Customer churn'), edgeEditFact(), priorRunFact(OFFSHORE_LEADS)],
+      [priorRunFact(OFFSHORE_LEADS)], // unattributed arms too
+    ]) {
+      for (const env of [
+        OFFSHORE_LEADS, ONSHORE_LEADS, OFFSHORE_LEADS_WIDER, OFFSHORE_LEADS_NARROWER,
+      ]) {
+        out.push(rerunText({ priorFacts, currentEnv: env }));
+      }
+    }
+    return out;
+  })();
+
+  it('no composed arm trips FORBIDDEN_USER_FACING_PHRASES', () => {
+    expect(ALL_ARMS).toHaveLength(20);
+    for (const text of ALL_ARMS) {
+      expect({ text, hit: findForbiddenPhraseHit(text) }).toEqual({ text, hit: null });
+    }
+  });
+
+  it('no composed arm is silently rewritten on its way to the user', () => {
+    // A rewrite means the bytes the user reads are not the bytes this file
+    // declares. That is the defect class, independent of which phrase caused it.
+    for (const text of ALL_ARMS) {
+      expect({ text, rewritten: applyTerminologyRewrite(text).text }).toEqual({ text, rewritten: text });
+    }
+  });
+
+  it('POSITIVE CONTROL: the guard and the rewriter are live on this input class', () => {
+    // Without this, both assertions above pass if the predicates silently stop
+    // discriminating (CLAUDE.md trap 13 — an absence probe needs a presence).
+    // The control is the DESIGN'S OWN REJECTED SENTENCE, so it also pins the
+    // reason this suite exists.
+    const rejected =
+      'Since you adjusted a link in the decision model, the picture is the same: '
+      + 'Offshore still leads. That is a result in itself: the recommendation does '
+      + 'not hinge on that change.';
+    expect(findForbiddenPhraseHit(rejected)).toBe('recommendation');
+    const rw = applyTerminologyRewrite(rejected);
+    expect(rw.text).not.toBe(rejected);
+    expect(rw.text).toContain('the leading option');
   });
 });
