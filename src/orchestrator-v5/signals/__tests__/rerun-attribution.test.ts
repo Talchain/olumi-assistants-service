@@ -162,6 +162,14 @@ const OFFSHORE_LEADS = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.62 },
   { id: 'b', label: 'Onshore', win: 0.38 },
 ]);
+/**
+ * ONE recommendable option ⇒ `margin` is null (`analysis-compact.ts:836` needs
+ * >= 2) ⇒ `deriveMargin` returns `'unavailable'` (`compare-runs.ts:272`). The
+ * leader is still identified, so `leader_identity_basis` stays `'option_id'`
+ * and this reaches the `unavailable` arm rather than the abstention arm.
+ * Module-level because three suites need it, including the egress pin.
+ */
+const MARGIN_UNAVAILABLE = runEnvelope([{ id: 'a', label: 'Offshore', win: 0.62 }]);
 const OFFSHORE_LEADS_WIDER = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.72 },
   { id: 'b', label: 'Onshore', win: 0.28 },
@@ -333,10 +341,9 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
     // unchanged arm and asserted a robustness finding about a pair whose margin
     // could not even be computed. The leader identity IS comparable here, so the
     // honest form states that and names the limit — the abstention arm's shape.
-    const solo = runEnvelope([{ id: 'a', label: 'Offshore', win: 0.62 }]);
     const text = rerunText({
-      priorFacts: [edgeEditFact(), priorRunFact(solo)],
-      currentEnv: solo,
+      priorFacts: [edgeEditFact(), priorRunFact(MARGIN_UNAVAILABLE)],
+      currentEnv: MARGIN_UNAVAILABLE,
     });
     expect(text).toBe(
       'Since you adjusted a link in the decision model, Offshore still leads after '
@@ -344,6 +351,32 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
     );
     expect(text).not.toContain('the picture has stayed the same');
     expect(text).not.toContain('held both before and after');
+  });
+
+  it('UNATTRIBUTED unavailable margins get the same arm — the half of the fix nothing was pinning', () => {
+    // ⚠⚠ TRAP 11, CAUGHT BY REVIEW ON THIS PR'S OWN BONUS FIX. Round 2 claimed
+    // to correct the PRE-EXISTING over-claim on the unattributed path (staging's
+    // `composeRerunText` has no 'unavailable' handling at all, so a
+    // never-compared pair fell through to "The result is unchanged"). But every
+    // unavailable case in the suite carried an intervening change, so gating the
+    // new branch as `'unavailable' && attributed` — reverting exactly the
+    // unattributed half — left the suite 23/23 GREEN. A fix whose tests pass
+    // with the defect re-introduced is theatre, and the PR body advertised this
+    // half as a deliverable. THIS is the assertion that makes that mutant bite.
+    //
+    // No intervening change ⇒ no attribution clause, but the arm is unchanged:
+    // the margin was still never compared, so "The result is unchanged" would be
+    // just as false here as it is on the attributed path.
+    const text = rerunText({
+      priorFacts: [priorRunFact(MARGIN_UNAVAILABLE)],
+      currentEnv: MARGIN_UNAVAILABLE,
+    });
+    expect(text).toBe(
+      'Offshore still leads after this re-run. I could not compare the size of '
+      + 'its lead between the two runs.',
+    );
+    expect(text).not.toContain('The result is unchanged');
+    expect(text).not.toContain('Since');
   });
 
   it('every action has a verb that is true of the fact it covers', () => {
@@ -408,10 +441,18 @@ describe('PR2 L2 — where attribution must NOT appear', () => {
     expect(text).not.toContain('Since');
   });
 
-  it('NO-HARM: with no intervening change every branch is BYTE-IDENTICAL to the pre-attribution copy', () => {
+  it('NO-HARM: with no intervening change the four COMPARABLE branches are BYTE-IDENTICAL to the pre-attribution copy (the unavailable branch is a deliberate exception)', () => {
     // ⚠ Each case below carries a LICENSED delta that attribution COULD have
     // corrupted — a no-harm case that cannot trigger the transformation
     // asserts nothing (CLAUDE.md trap 13d).
+    //
+    // ⚠ THE TITLE NAMES ITS EXCEPTION RATHER THAN CLAIMING A UNIVERSAL. Round 2
+    // deliberately changed the UNATTRIBUTED `unavailable` sentence too (staging
+    // fell through to "The result is unchanged" on a pair whose margin was never
+    // compared), so "every branch" became false the moment that arm landed. The
+    // exception is pinned byte-exactly by "UNATTRIBUTED unavailable margins get
+    // the same arm" above — an exception a test asserts is honest; an exception
+    // a title hides is the drift this file keeps guarding against.
     const prior = [priorRunFact(OFFSHORE_LEADS)];
     expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS }))
       .toBe('The result is unchanged: Offshore still leads.');
@@ -542,6 +583,12 @@ describe('PR2 L2 — the composed sentence clears the REAL egress guard', () => 
     ]) {
       for (const env of [
         OFFSHORE_LEADS, ONSHORE_LEADS, OFFSHORE_LEADS_WIDER, OFFSHORE_LEADS_NARROWER,
+        // ⚠ ADDED ROUND 3. The `unavailable` arm shipped in round 2 and its five
+        // compositions (4 attributed + 1 unattributed) were OUTSIDE this pin —
+        // in the very suite built so that no composed arm escapes the production
+        // guard. A new arm must join the corpus in the same commit that adds it,
+        // or the suite's completeness claim quietly stops being true.
+        MARGIN_UNAVAILABLE,
       ]) {
         out.push(rerunText({ priorFacts, currentEnv: env }));
       }
@@ -550,7 +597,9 @@ describe('PR2 L2 — the composed sentence clears the REAL egress guard', () => 
   })();
 
   it('no composed arm trips FORBIDDEN_USER_FACING_PHRASES', () => {
-    expect(ALL_ARMS).toHaveLength(20);
+    // 5 prior sets × 5 envs. The count is asserted so a corpus that silently
+    // stops covering an arm REDs rather than passing over fewer strings.
+    expect(ALL_ARMS).toHaveLength(25);
     for (const text of ALL_ARMS) {
       expect({ text, hit: findForbiddenPhraseHit(text) }).toEqual({ text, hit: null });
     }
