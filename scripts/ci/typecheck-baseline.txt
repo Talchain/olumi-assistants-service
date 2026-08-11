@@ -16,7 +16,28 @@
 # broken-alarm, trap-7). Their errors are schema-INDEPENDENT (vitest mock 'never';
 # CEE-local AnalysisProjectionSummary 'staleness_reason'), unrelated to the 0.23
 # re-vendor. Count 280→282 reflects reality; no 1.192 file errors under full tsc.
-# count=282
+# UPDATED 2026-08-11 (link-R1 C1 round 2, #918): `scripts/**/*.ts` was added to
+# tsconfig.json's `include` because it was in NEITHER tsconfig — measured, not
+# assumed: at c1fabe15, `tsc -p tsconfig.build.json --listFiles` and `tsc -p
+# tsconfig.json --listFiles` both returned 0 hits for scripts/. That blindness let
+# `scripts/capture-goal-constraints-wire.ts:89` keep calling
+# `draftResultToOlumiResponse` with 4 arguments after the 5th became required —
+# TS2554, invisible to every gate, in the file whose own header calls it "the
+# cross-repo proof artefact". The offending call site is FIXED in the same PR, so
+# it is deliberately NOT baselined; bringing scripts/ under the full typecheck is
+# what makes the NEXT such strand fail loud (a non-baseline file with errors is a
+# hard ratchet failure). The 5 files added below are PRE-EXISTING drift in scripts/
+# that this PR merely made visible — none is touched by it, and each was measured
+# at this tip: set-model-configs.test.ts (2 × TS2540 read-only writeFileSync),
+# validate-with-engine.ts (3 × TS18046 unknown), pipeline-trace.ts (2 × TS2322),
+# evidence-pack-cli.ts (1 × TS2322), migrate-prompts.ts (1 × TS2345). Count
+# 282→291 = exactly those 9. Fixing them is a separate, out-of-scope change.
+# count=291
+scripts/admin/__tests__/set-model-configs.test.ts
+scripts/evidence-pack-cli.ts
+scripts/migrate-prompts.ts
+scripts/pipeline-trace.ts
+scripts/validate-with-engine.ts
 src/adapters/isl/__tests__/counterfactual-client.test.ts
 src/cee/decision-review/__tests__/invoke.test.ts
 src/cee/unified-pipeline/stages/__tests__/boundary.test.ts

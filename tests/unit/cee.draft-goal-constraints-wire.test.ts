@@ -163,7 +163,7 @@ function composeWire(brief: string = LIVE_BRIEF) {
   };
 
   // The REAL composer that builds the `/orchestrate/v2/turn` response body.
-  const response = draftResultToOlumiResponse(result, PAYLOAD, true, "req_test");
+  const response = draftResultToOlumiResponse(result, PAYLOAD, true, "req_test", PAYLOAD.message);
 
   // Serialize for real: `undefined` vanishes silently through JSON emission,
   // so an object-level assertion can pass on a value the client never sees.
@@ -337,6 +337,7 @@ describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)"
       PAYLOAD,
       true,
       "req_egress",
+      PAYLOAD.message,
     );
 
     const egress: any = validateEgress(response, "req_egress");

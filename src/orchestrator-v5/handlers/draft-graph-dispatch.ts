@@ -189,6 +189,34 @@ export function draftResultToOlumiResponse(
   payload: MessageTurnPayload,
   graphPersisted: boolean,
   requestId: string,
+  /**
+   * The brief the pipeline ACTUALLY DRAFTED FROM — `dispatchDraftGraph`'s
+   * `effectiveBrief` (`params.briefOverride ?? payload.message`), not
+   * `payload.message`.
+   *
+   * REQUIRED, deliberately. It was previously read off `payload.message`
+   * inside this function, which is the brief only on the ordinary draft turn.
+   * On the clarify-v2 intake-gate path the real brief travels as
+   * `briefOverride` and `payload.message` is the user's one-line answer — so
+   * the ROADMAP 2.972(c) refusal below was fed the answer and kept the
+   * "light on detail" advisory against a brief full of amounts (measured on
+   * deployed staging 2026-08-11, L3 §5 C1).
+   *
+   * ⚠ Making it REQUIRED is necessary and was NOT sufficient, and the first
+   * version of this comment claimed otherwise. The #918 review found a fourth
+   * call site — `scripts/capture-goal-constraints-wire.ts:89` — still passing
+   * four arguments: a genuine `TS2554` that NO gate compiled, because at
+   * `c1fabe15` `scripts/` was in neither tsconfig (measured with
+   * `tsc --listFiles`, 0 hits under both). What actually closes the class is
+   * the pair now in place: every TypeScript file under `scripts/` is inside
+   * `tsconfig.json`'s `include` (so the full typecheck and its CI ratchet see
+   * every script), and
+   * `__tests__/draft-graph-dispatch-brief-completeness-override.test.ts` sweeps
+   * EVERY TypeScript file in the repo with the TypeScript parser, deriving the
+   * required arity from THIS declaration — so adding a sixth required
+   * parameter REDs any caller that does not pass it, wherever it lives.
+   */
+  effectiveBrief: string | null,
 ): OlumiResponse {
   // Derive node/edge counts from the FINAL graph (post-repair, post-validation)
   // to ensure the assistant_text matches what the UI will render.
@@ -237,11 +265,23 @@ export function draftResultToOlumiResponse(
       wideningLog: result.coachingWideningLogObject ?? null,
       // ROADMAP 2.972 — the text the user submitted, so the builder can REFUSE the
       // "your brief was light on detail" advisory when the brief refutes it.
-      // `payload.message` IS the brief on the ordinary draft turn; on the
-      // explicit-generate path the real brief is assembled server-side
-      // (`briefOverride`) and is not visible here, so the advisory keeps its
-      // current behaviour there. Disclosed, and in the fail-safe direction.
-      briefText: typeof payload.message === 'string' ? payload.message : null,
+      //
+      // ⚠ THIS USED TO READ `payload.message`, AND THAT WAS THE DEFECT (link-track
+      // R1 item 1/C1). `payload.message` is the brief only on the ordinary draft
+      // turn. On the clarify-v2 intake-gate path — the path B2 walked on deployed
+      // staging — route-v2 dispatches with `briefOverride` and `payload.message`
+      // is the user's one-line answer ("Use sensible defaults"), which states no
+      // amounts. The guard therefore KEPT the advisory and the product told a
+      // 1,965-character, 30-figure brief that it was light on detail, on the same
+      // screen state as a receipt reporting "I found 30 stated figures"
+      // (L3-BROWSER-TRUTH §5 C1). The comment that stood here called that
+      // "the fail-safe direction"; it is the opposite — the fail-safe direction
+      // for a NEGATIVE claim about the user's own input is silence.
+      //
+      // The caller now passes `effectiveBrief`: the same string the pipeline drafts
+      // from, so the guard and the drafter can no longer disagree about what the
+      // brief is.
+      briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
     });
     // Narrow-guard scrub of the composed narrative before it becomes
     // assistant_text. Two leak paths land here:
@@ -743,7 +783,7 @@ export async function dispatchDraftGraph(
     );
     const persistenceMs = Date.now() - commitStartedAt;
 
-    let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId);
+    let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId, effectiveBrief);
     // HOLD-WIPE fix — the committed provisional response carried the lapse
     // notice (and the commit seam may have appended its own turn-TTL lapse
     // notice, F-HELD 2b). The REAL wire response is built above, so
@@ -889,7 +929,7 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch — commit failed; route returns 500 INTERNAL_ERROR',
     );
-    const response = draftResultToOlumiResponse(draftResult, payload, false, requestId);
+    const response = draftResultToOlumiResponse(draftResult, payload, false, requestId, effectiveBrief);
     return { response, commitPerformed: false, graph: draftResult.graphOutput };
   }
 }
