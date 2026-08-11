@@ -43,6 +43,7 @@ import { dirname, resolve } from 'node:path';
 import { runCompoundGoals } from '../compound-goals.js';
 import {
   hasExplicitAmbiguity,
+  hasUnspentNegation,
   findT1Matches,
   findProvenUncoveredBounds,
 } from '../../../../compound-goal/direction-gate.js';
@@ -317,11 +318,179 @@ describe('ROADMAP 2.1051 limb 2 — mint the bound the construction table alread
   });
 
   /* -------------------------------------------------------------------
+   * OUTER NEGATION — the mint must never assert a limit the user REVOKED.
+   *
+   * ⚠⚠ ROUND-1 REVIEW BLOCKER. The first cut of this change ASSERTED on all
+   * four of these while `origin/staging` correctly ASKED — a regression against
+   * the deployed build, in the mint-a-lie direction, which is the one thing
+   * this gate exists to make impossible.
+   *
+   * MECHANISM: the mint applied S1 but never S3 (`hasUnspentNegation`), and S3
+   * is unreachable for these rows BY DESIGN — a row carrying its own T1 verdict
+   * is decided by S2 and never reaches it. That is correct for a producer's row
+   * (the row is evidence in its own right) and wrong for a mint (which has no
+   * row and manufactures one from the construction alone).
+   * ----------------------------------------------------------------- */
+
+  it.each([
+    ['do not need to', 'We do not need to keep CSAT from falling below 85%.'],
+    ['there is no requirement', 'There is no requirement that CSAT must not drop below 85%.'],
+    ['never agreed', 'We never agreed to keep CSAT from falling below 85%.'],
+    ['no longer requiring', 'We are no longer requiring that CSAT does not drop below 85%.'],
+  ])('OUTER NEGATION (%s): the mint asserts NOTHING and the ask stands', (_name, brief) => {
+    // PRECONDITION PINNED IN-TEST: the construction really is proven here, so
+    // the empty wire below is the outer-negation screen's doing and not a T1
+    // miss. Without this the test would pass for entirely the wrong reason.
+    expect(
+      findT1Matches(brief).length,
+      'fixture must carry a proven construction, or this proves nothing',
+    ).toBeGreaterThan(0);
+
+    const r = run(brief, CAPTURED.runs.live_r1!.nodes);
+    expect(
+      r.wire.filter((w) => w.node_id === 'out_csat'),
+      'a revoked limit must never be asserted',
+    ).toEqual([]);
+    expect(r.asks.length, 'the user is asked, exactly as the deployed build does').toBeGreaterThan(0);
+  });
+
+  it('OUTER NEGATION does not suppress a legitimate metric whose NAME contains a negation token', () => {
+    // The opposite-direction twin (trap 22b). `no-show rate` is a compound, not
+    // a negation, and the hardened predicate knows it: `no(?=\s)` matches only
+    // before whitespace. A hand-rolled `\bno\b` would have suppressed this —
+    // which is precisely the defect that lexicon's own comment records.
+    expect(hasUnspentNegation('Keep no-show rate'), 'the compound must not read as a negation').toBe(false);
+    const nodes = [
+      { id: 'goal_x', kind: 'goal', label: 'Reduce waste' },
+      { id: 'fac_no_show_rate', kind: 'factor', label: 'No-show rate' },
+    ];
+    const r = run('Keep no-show rate from rising above 3%.', nodes);
+    const rows = r.wire.filter((w) => w.node_id === 'fac_no_show_rate');
+    expect(rows, 'a legitimate ceiling on a no-prefixed metric must still ship').toHaveLength(1);
+    expect(rows[0]!.operator).toBe('<=');
+  });
+
+  /* -------------------------------------------------------------------
+   * THE TWO BINDING GUARDS — each is the ONLY thing preventing a wrong
+   * row, and each survived the first mutant round unpinned.
+   * ----------------------------------------------------------------- */
+
+  it('M-C: a subject that resolves in TWO node families mints NOTHING', () => {
+    // The exactly-one-node rule. This graph carries BOTH `fac_csat` and
+    // `out_csat`, so the two candidate families resolve to two different nodes
+    // and the mint cannot tell which the user meant. Without the guard it takes
+    // whichever family was tried last — a hard limit bound to a node chosen by
+    // loop order. An ambiguity is a question, not a row.
+    const twoFamily = [
+      { id: 'goal_x', kind: 'goal', label: 'Ship the thing' },
+      { id: 'fac_csat', kind: 'factor', label: 'CSAT driver' },
+      { id: 'out_csat', kind: 'outcome', label: 'Customer Satisfaction Score' },
+    ];
+    // PRECONDITION: both candidates must genuinely resolve, or the guard is
+    // never exercised and this test passes by testing nothing.
+    expect(twoFamily.filter((n) => /^(fac|out)_csat$/.test(n.id)), 'both families must be present').toHaveLength(2);
+
+    const r = run('Do not let CSAT drop below 85%.', twoFamily);
+    expect(r.wire, 'two candidate nodes is an ambiguity, and an ambiguity is asked').toEqual([]);
+    expect(r.asks.length).toBeGreaterThan(0);
+  });
+
+  it('M-F: contradictory directions on ONE quantity mint NOTHING, at UNEQUAL match lengths', () => {
+    // ⚠ FOUND BY MEASUREMENT, AND IT WIDENED THE GUARD. The original rule only
+    // declined an EQUAL-LENGTH tie, and this sentence is not one:
+    //   T1-5:ceiling(19), T1-5b:ceiling(23), T1-7b:floor(24) — all on 0.85.
+    // "Longest wins" therefore handed the user a FLOOR, one side of a
+    // contradiction they wrote, chosen by four characters of regex. The rule is
+    // now ANY disagreement on one quantity.
+    const brief = 'CSAT must stay above 85% and must not exceed 85%.';
+
+    // PRECONDITION PINNED IN-TEST: the disagreement must be real AND the
+    // lengths must be UNEQUAL, or this pins the old rule rather than the new one.
+    const onValue = findT1Matches(brief).filter((m) => Math.abs(m.value - 0.85) < 1e-9);
+    expect(new Set(onValue.map((m) => m.direction)).size, 'the fixture must actually disagree').toBe(2);
+    const longest = onValue.reduce((a, b) => (b.length > a.length ? b : a));
+    expect(
+      onValue.some((m) => m.length === longest.length && m.direction !== longest.direction),
+      'the lengths must be UNEQUAL — an equal-length tie would pin the OLD rule',
+    ).toBe(false);
+
+    expect(
+      findProvenUncoveredBounds(brief, []),
+      'a contradiction is withheld, never resolved by match length',
+    ).toEqual([]);
+    const r = run(brief, CAPTURED.runs.live_r1!.nodes);
+    expect(r.wire.filter((w) => w.node_id === 'out_csat')).toEqual([]);
+  });
+
+  it('CONTROL: agreeing constructions of unequal length still mint (the guard is not a blanket refusal)', () => {
+    // The positive control for the rule above: `must not exceed` matches T1-5
+    // AND T1-5b at different lengths, both CEILING. Agreement at unequal length
+    // must still mint, or the widened guard would simply have stopped the mint
+    // working and every assertion above would be vacuous.
+    //
+    // ⚠ THE SENTENCE IS THE CAPTURED BRIEF'S OWN, and picking it was not
+    // cosmetic. The first draft of this control used the shortened "Spend must
+    // not exceed £250,000." and FAILED — not because the guard over-suppressed,
+    // but because `deriveMetricText` lists a bare `spend` as a subject NOISE
+    // word, so the metric cleaned away to nothing and the mint declined for an
+    // unrelated reason. A control that fails for the wrong reason would have
+    // sent this round chasing a phantom oscillation.
+    const brief = 'Total implementation spend must not exceed £250,000.';
+    const onValue = findT1Matches(brief).filter((m) => m.value === 250000);
+    expect(new Set(onValue.map((m) => m.length)).size, 'lengths must differ').toBeGreaterThan(1);
+    expect(new Set(onValue.map((m) => m.direction)).size, 'and directions must agree').toBe(1);
+    expect(findProvenUncoveredBounds(brief, []).map((b) => b.direction)).toEqual(['ceiling']);
+  });
+
+  /* -------------------------------------------------------------------
    * THE KNOWN GAPS — pinned as an EXACT set, so the suite is green for
    * the right reason and REDs if the set either grows OR shrinks.
    * (Trap 22f: a gap recorded in the suite is honest; a gap invisible to
    * it is how four rounds of the same defect happened.)
    * ----------------------------------------------------------------- */
+
+  it('KNOWN GAP — outer negation over the EXTRACTOR path, pinned as an EXACT set', () => {
+    // ⚠⚠ THESE ARE NOT THIS LANE'S TO FIX, AND THE SUITE SAYS SO OUT LOUD.
+    //
+    // Measured on `origin/staging` (32f06dd) with an identical probe: these four
+    // sentences ALREADY assert a limit the user revoked, via the extractor's own
+    // `must not` / `cannot` path — `NEGATION_LEAD` mints a floor and nothing
+    // screens the outer negation, exactly as the mint did before its S3 screen.
+    // This PR neither introduces nor changes them; the wire is byte-identical to
+    // baseline on all four.
+    //
+    // Fixing them means screening the EXTRACTOR's own negated-floor branch,
+    // which changes minting for every brief in the estate and is a separate,
+    // re-briefed piece of work. Recorded here so it is visible in the suite
+    // rather than invisible (trap 22f: a gap recorded is honest; a gap the suite
+    // cannot see is how four rounds of the same defect happened).
+    //
+    // Asserted as an EXACT SET so it REDs if the set GROWS (a new leak) or
+    // SHRINKS (someone fixed it and this note went stale).
+    const OUTER_NEGATION_STILL_ASSERTED_BY_THE_EXTRACTOR = [
+      'It is not true that we must not let CSAT drop below 85%.',
+      'Nobody said we must not let CSAT drop below 85%.',
+      'I would not say we must not let CSAT drop below 85%.',
+      "Don't assume we must not let CSAT drop below 85%.",
+    ] as const;
+
+    const stillAsserting = OUTER_NEGATION_STILL_ASSERTED_BY_THE_EXTRACTOR.filter((brief) => {
+      const r = run(brief, CAPTURED.runs.live_r1!.nodes);
+      return r.wire.length > 0;
+    });
+    expect(
+      [...stillAsserting].sort(),
+      'the known-leak set must not grow (a new leak) or shrink (a stale note)',
+    ).toEqual([...OUTER_NEGATION_STILL_ASSERTED_BY_THE_EXTRACTOR].sort());
+
+    // And the row they leak is the EXTRACTOR's, on the goal node — never the
+    // mint's. If one of these ever lands on `out_csat`, the mint has started
+    // contributing to the leak and that is this lane's problem again.
+    for (const brief of OUTER_NEGATION_STILL_ASSERTED_BY_THE_EXTRACTOR) {
+      const r = run(brief, CAPTURED.runs.live_r1!.nodes);
+      expect(r.wire.map((w) => w.node_id), `${brief} must not leak via the mint`).toEqual(['goal_4day_success']);
+    }
+  });
 
   it('KNOWN GAP — an INTERRUPTED construction is not proven, so it is ASKED, not minted', () => {
     // T1 is ADJACENCY-BOUND by ruling: no window constants, no clause

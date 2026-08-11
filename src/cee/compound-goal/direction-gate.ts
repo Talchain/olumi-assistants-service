@@ -623,6 +623,16 @@ export interface T1Match {
   readonly amountText: string;
   readonly subject: string | null;
   readonly length: number;
+  /**
+   * Where the construction STARTS in the normalised sentence.
+   *
+   * Carried so a caller can screen the text OUTSIDE the construction's own
+   * span. Inside the partition that is unnecessary — a row with its own T1
+   * verdict is decided by S2 and never reaches S3 — but a caller that MINTS
+   * from the verdict has no row to fall back on, and an outer negation that
+   * revokes the whole construction is invisible from inside it.
+   */
+  readonly index: number;
 }
 
 /**
@@ -645,7 +655,16 @@ export function findT1Matches(sentence: string): T1Match[] {
         if (typeof text !== 'string' || text.length === 0) return;
         const { value, unit } = parseValue(text);
         if (!Number.isFinite(value)) return;
-        out.push({ id: entry.id, direction: dir, value, unit, amountText: text, subject, length: m[0].length });
+        out.push({
+          id: entry.id,
+          direction: dir,
+          value,
+          unit,
+          amountText: text,
+          subject,
+          length: m[0].length,
+          index: m.index ?? 0,
+        });
       };
       if (entry.direction === 'band') {
         // The low amount is the floor, the high amount is the ceiling.
@@ -1385,9 +1404,78 @@ export function findProvenUncoveredBounds(
 
     for (const [value, group] of byValue) {
       const best = group.reduce((a, b) => (b.length > a.length ? b : a));
-      // A tie between opposite directions is not a verdict. Fail closed rather
-      // than let match order decide a user's limit.
-      if (group.some((m) => m.length === best.length && m.direction !== best.direction)) continue;
+      // ⭐⭐ ANY DISAGREEMENT ON ONE QUANTITY IS A CONTRADICTION, NOT A VERDICT —
+      // WIDENED FROM AN EQUAL-LENGTH TIE AFTER MEASURING A REAL SENTENCE.
+      //
+      //     "CSAT must stay above 85% and must not exceed 85%."
+      //
+      // yields T1-5:ceiling(19), T1-5b:ceiling(23) and T1-7b:floor(24) on the
+      // SAME value. The lengths are unequal, so an equal-length tie-break never
+      // fires, and "longest wins" hands the user a FLOOR — one side of a
+      // contradiction they wrote, chosen by which regex happened to match four
+      // characters more. That is an arbitrary discriminator deciding a hard
+      // limit, which is the shape trap 22f ruled against.
+      //
+      // "Longest wins" is right for the PARTITION, where the row is a producer's
+      // own evidence and the construction merely screens it. It is wrong for a
+      // MINT, which has no row and would be manufacturing one from the more
+      // verbose of two contradictory readings. The gate's own S4 already
+      // settles contradiction by withholding BOTH and asking; the mint now
+      // matches that semantic instead of inventing a second one.
+      //
+      // Strictly reduces minting, so it cannot introduce a lie — and the band
+      // (T1-8) is untouched, because its floor and ceiling carry DIFFERENT
+      // values and are grouped separately.
+      if (group.some((m) => m.direction !== best.direction)) continue;
+      // ⭐⭐ S3, SPAN-SCOPED — THE SCREEN THAT STOPS THE MINT ASSERTING A LIMIT
+      // THE USER REVOKED.
+      //
+      // A negation OUTSIDE the construction scopes OVER it and cancels it:
+      //
+      //     "We do not need to keep CSAT from falling below 85%"
+      //
+      // T1-3 matches `keep CSAT from falling below 85%` and proves a FLOOR —
+      // correctly, because that IS what the construction means. What the
+      // construction cannot see is the `do not need to` in front of it, which
+      // revokes the whole requirement. Minting there asserts a limit the user
+      // has just told us they do not have: the mint-a-lie direction, and the
+      // one thing this gate exists to make impossible.
+      //
+      // ⚠ AND IT IS UNREACHABLE FROM THE PARTITION, BY DESIGN. S3 screens rows
+      // that have NO construction verdict; a row carrying its own verdict is
+      // decided by S2 and never reaches it (see `hasUnspentNegation`'s own
+      // note). That is right for a row a producer already minted — the row is
+      // evidence in its own right. It is WRONG for a mint, which has no row and
+      // is manufacturing one from the construction alone.
+      //
+      // So the same hardened predicate is reused, scoped to the text before the
+      // construction's own negation operator. No new lexicon, no window
+      // constant, no clause discrimination — the three things trap 22f closed.
+      //
+      // ⚠ THE SUBJECT IS PART OF THAT SCOPE, AND MEASURING IS WHAT SHOWED IT.
+      // The subject capture is width-bounded and greedy, so it routinely
+      // SWALLOWS the outer negation:
+      //
+      //   "There is no requirement that CSAT must not drop below 85%"
+      //        -> T1-2b subject = "no requirement that CSAT", prefix = "There is "
+      //   "We are no longer requiring that CSAT does not drop below 85%"
+      //        -> T1-2b subject = "longer requiring that CSAT", prefix = "We are no "
+      //
+      // A prefix-only screen misses BOTH: in the first the negation is inside
+      // the capture, and in the second it sits at the prefix's trailing edge
+      // where `no(?=\s)` cannot fire once the text is trimmed. The construction's
+      // meaning begins at ITS OWN negation token, so everything before that —
+      // prefix AND swallowed subject — is outer context.
+      //
+      // ⚠ AND THE COMPOUND CASE IS WHY THE HARDENED PREDICATE IS REUSED RATHER
+      // THAN REWRITTEN: `no(?=\s)` matches only before whitespace, so
+      // "Keep no-show rate from rising above 3%" — a legitimate ceiling whose
+      // METRIC NAME contains `no` — is untouched. A hand-rolled `\bno\b` here
+      // would have suppressed it, which is the exact defect that lexicon's own
+      // comment records having been written to prevent.
+      const outerScope = `${s.text.slice(0, best.index)} ${best.subject ?? ''}`;
+      if (hasUnspentNegation(outerScope)) continue;
+
       if (isCoveredValue(value, coveredValues)) continue;
       // ⚠ THIS LINE IS DEFENCE IN DEPTH AND IS *NOT* LOAD-BEARING — recorded so
       // the next reader does not mistake it for a guard under test. A mutant
