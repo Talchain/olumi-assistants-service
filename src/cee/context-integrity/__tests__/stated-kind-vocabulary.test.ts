@@ -270,13 +270,42 @@ describe("S1 · producer rows the captured corpus never contained", () => {
 });
 
 describe("S1 · the adoption manifest — no kind ships dark", () => {
-  it("partitions all eight kinds into sourced and unsourced, with no overlap and no omission", () => {
+  /**
+   * ⚠ THE EXPECTATION IS HAND-WRITTEN AND MUST STAY HAND-WRITTEN.
+   *
+   * The first version of this test derived its expectation from `STATED_KINDS`
+   * — the very list it guards. A reviewer added a NINTH member and the spec
+   * stayed 17/17 GREEN: a derived check proves the copies AGREE and can never
+   * prove the list is RIGHT. An unsanctioned kind could have shipped, dark, past
+   * a green suite.
+   *
+   * These eight are the vocabulary the design ratified. Adding a ninth is a
+   * PRODUCT decision — it must RED here and be argued for, not arrive as a
+   * silent widening.
+   */
+  const SANCTIONED_KINDS = [
+    "assumption",
+    "constraint",
+    "correction",
+    "disagreement",
+    "evidence",
+    "figure",
+    "goal",
+    "option",
+  ] as const;
+
+  it("emits exactly the eight sanctioned kinds — a ninth must RED here", () => {
+    expect([...STATED_KINDS].sort()).toEqual([...SANCTIONED_KINDS]);
+  });
+
+  it("partitions the sanctioned kinds into sourced and unsourced, with no overlap and no omission", () => {
     const m = derive(LIVE);
     const sk = m.stated_kinds;
     expect(sk.status).toBe("derived");
 
+    // Compared against the HAND-WRITTEN set, not against `STATED_KINDS`.
     const union = [...sk.sourced, ...sk.unsourced].sort();
-    expect(union).toEqual([...STATED_KINDS].sort());
+    expect(union).toEqual([...SANCTIONED_KINDS]);
 
     const overlap = sk.sourced.filter((k) => (sk.unsourced as readonly StatedKind[]).includes(k));
     expect(overlap, "a kind cannot be both sourced and unsourced").toEqual([]);

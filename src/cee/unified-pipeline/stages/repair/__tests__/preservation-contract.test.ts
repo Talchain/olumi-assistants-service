@@ -35,7 +35,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { handleUnreachableFactors } from "../unreachable-factors.js";
+import { handleUnreachableFactors, formatStatedMagnitude } from "../unreachable-factors.js";
 import {
   fieldDeletion,
   type FieldDeletionEvent,
@@ -285,6 +285,70 @@ describe("S2 · the sentence survives the DEPLOYED UI's sanitiser with the figur
     // path — the absent projection line. This is the value that fills it.
     expect(repair.deleted_raw_value).toBe(STATED_RAW_VALUE);
     expect(repair.deleted_unit).toBe(STATED_UNIT);
+  });
+});
+
+/**
+ * ── THE SENTENCE'S BREADTH, MEASURED RATHER THAN INTENDED ──────────────────
+ *
+ * The guard once read `raw_value !== undefined && unit !== undefined` while its
+ * own comment said a bare normalised value "is noise". Those are different
+ * predicates, and the deployed data contains the gap: across seven captured
+ * runs there are 17 distinct `(value, raw_value, unit)` triples, NINE of them
+ * with `raw_value === value`, and `scale` is the drafter's marker for a
+ * dimensionless factor. The old guard produced "The extracted value 0.5 scale
+ * is not used in the maths" — literally the case the comment named.
+ *
+ * Every row below is a REAL triple lifted from those captures, each paired with
+ * its opposite-direction twin, because a guard that only ever suppresses is
+ * indistinguishable from a guard that is switched off.
+ */
+describe("S2 · the sentence fires on figures and stays silent on internal numbers", () => {
+  const FIRES: ReadonlyArray<readonly [string, number, number, string, string]> = [
+    // [node, raw_value, value, unit, expected rendering]
+    ["fac_bafin_cost (b1)", 250_000, 0.22, "£", "£250,000"],
+    ["fac_germany_opex (b1)", 900_000, 0.6, "£", "£900,000"],
+    ["fac_germany_opex EUR (b1_r2)", 900_000, 0.6, "EUR", "900,000 EUR"],
+    ["out_opex_savings (b2)", 2_500_000, 0.625, "£", "£2,500,000"],
+    ["out_csat (live)", 87, 0.87, "%", "87%"],
+    ["fac_support_cost (live)", 1_800_000, 0.72, "£", "£1,800,000"],
+  ];
+
+  const SILENT: ReadonlyArray<readonly [string, number, number, string, string]> = [
+    // [node, raw_value, value, unit, why]
+    ["fac_eng_allocation (b3)", 0.5, 0.5, "scale", "raw === value AND dimensionless — the case the comment named"],
+    ["risk_csat_drop (b2)", 50, 0.5, "scale", "dimensionless: '50 scale' means nothing to a reader"],
+    ["fac_impl_spend (live)", 0, 0, "£", "raw === value: echoing the pipeline's own zero"],
+    ["fac_legal_clearance (b3)", 0, 0, "scale", "both failures at once"],
+    ["goal_ebitda_breakeven (b2)", 0, 0, "£", "raw === value"],
+  ];
+
+  it.each(FIRES)("FIRES for %s", (_name, raw, value, unit, expected) => {
+    expect(formatStatedMagnitude(raw, value, unit)).toBe(expected);
+  });
+
+  it.each(SILENT)("SILENT for %s", (_name, raw, value, unit, _why) => {
+    expect(formatStatedMagnitude(raw, value, unit)).toBeNull();
+  });
+
+  it("suppresses on dimensionlessness alone, and on identity alone — neither condition carries the other", () => {
+    // Each condition gets its own discriminating pair against the SAME triple,
+    // so a fix that collapses the two into one predicate REDs here.
+    expect(formatStatedMagnitude(50, 0.5, "scale"), "dimensionless").toBeNull();
+    expect(formatStatedMagnitude(50, 0.5, "£"), "same numbers, real dimension").toBe("£50");
+    expect(formatStatedMagnitude(50, 50, "£"), "real dimension, raw === value").toBeNull();
+  });
+
+  it("keeps a negative magnitude — the contract admits one and suppressing it would hide a real loss", () => {
+    // Write invariants against the SPEC, not the failure mode in hand: the
+    // corpus above happens to contain no negative, so the class is asserted
+    // explicitly rather than left to an accident of the captures.
+    expect(formatStatedMagnitude(-1_800_000, 0.72, "£")).toBe("£-1,800,000");
+  });
+
+  it("stays silent with no unit at all, and does not invent a bare number", () => {
+    expect(formatStatedMagnitude(1_800_000, 0.72, undefined)).toBeNull();
+    expect(formatStatedMagnitude(1_800_000, 0.72, "")).toBeNull();
   });
 });
 
