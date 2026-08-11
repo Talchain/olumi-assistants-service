@@ -21,6 +21,8 @@ import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
+// ⚠ SPIKE ARM C — throwaway, spike branch only. Inert unless SPIKE_ARM=C.
+import { isSpikeArmC, spikeCPreRegistration } from "../../spike-c/arm.js";
 
 /**
  * Convert an ISO currency code (e.g. "GBP") to a CurrencySignal.
@@ -154,6 +156,34 @@ export async function handleDraftGraph(
   draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal; userCurrencyHint?: string | null; requestStartMs?: number },
 ): Promise<DraftGraphResult> {
   const startTime = Date.now();
+
+  // ⚠ SPIKE ARM C — THE ARM SWITCH (protocol §9; throwaway, spike branch only).
+  //
+  // Env-gated on `SPIKE_ARM=C`, set in the LOCAL instance env only — staging
+  // config is UNTOUCHED (§3). Declared HERE, at the live product draft path's
+  // entry point, because §0.1 established that this is where the product's cold
+  // draft actually arrives ("it is a V5 turn, and it arrives here"); an arm
+  // declared on the assist routes would not be the path arm A controls for.
+  //
+  // ⚠ FILE CHOICE IS A RE-ADJUDICATION, NOT THE DEFAULT. §9 permits the switch
+  // in `draft-graph.ts` OR `draft-graph-dispatch.ts`. The §9 collision re-check
+  // run at this tip found open PR #918 (link-track R1) editing
+  // `draft-graph-dispatch.ts`, which is ALSO arm B's only file. Putting the arm
+  // switch there would have put three writers on one file and made the arms
+  // share an edit surface — a measurement-validity hazard, since a difference
+  // between arms must be the named intervention and nothing else. This file has
+  // zero overlap with #918 and #919.
+  //
+  // The switch STAMPS the arm and its pre-registration hashes; it does not
+  // branch behaviour. The behavioural difference lives at the adapter's schema
+  // slot, system-block assembly, and post-LLM projection seam — one arm, one
+  // intervention, three sites that all read the same gate.
+  if (isSpikeArmC()) {
+    log.warn(
+      { event: 'spike_c.arm_active', turn_id: turnId, ...spikeCPreRegistration() },
+      '[SPIKE ARM C] active on the live V5 draft path — records grammar + projector. THROWAWAY BRANCH.',
+    );
+  }
 
   // Currency precedence: turn-context hint (full message) → brief-level detection.
   // The full-message hint is stronger because the brief may omit the symbol

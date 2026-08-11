@@ -53,6 +53,11 @@ import {
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
 import { buildDraftGraphSchema } from '../../cee/draft/anthropic-graph-schema.js';
+// ⚠ SPIKE ARM C — throwaway, spike branch only. All three imports are inert
+// unless SPIKE_ARM=C is set in the local instance env.
+import { isSpikeArmC, spikeCPreRegistration, SPIKE_C_SYSTEM_APPENDIX } from '../../spike-c/arm.js';
+import { buildSpikeCRecordsSchema, type SpikeCRecordSet } from '../../spike-c/records-schema.js';
+import { projectRecordsToGraph } from '../../spike-c/project.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
@@ -454,8 +459,18 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   // If forceDefault is true, skip store/cache and use hardcoded default directly
   const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
 
+  // ⚠ SPIKE ARM C — the system-block appendix (§2). Appended as a SECOND block,
+  // AFTER the one carrying the cache_control breakpoint, so the pinned v195
+  // prompt stays byte-identical and cached. NOT threaded through
+  // `args.systemDirective`: that channel is owned by the lean-draft retry
+  // (parse.ts:387-411) and two meanings under one name is trap 21.
+  const systemBlocks = buildSystemBlocks(systemPrompt, { operation: "draft_graph" });
+  if (isSpikeArmC()) {
+    systemBlocks.push({ type: "text", text: SPIKE_C_SYSTEM_APPENDIX });
+  }
+
   return {
-    system: buildSystemBlocks(systemPrompt, { operation: "draft_graph" }),
+    system: systemBlocks,
     userContent,
     // Native document attachment (D-59-7): the untrusted-bracketed document block
     // sequence. Present only when a document was attached; appended to the user
@@ -793,7 +808,13 @@ export async function draftGraphWithAnthropic(
   // Only meaningful on the structured path: the prompt-only fallback has no
   // grammar to omit it from, and the served prompt v195 already instructs the
   // model not to emit it there.
-  const draftGraphSchema = buildDraftGraphSchema();
+  // ⚠ SPIKE ARM C (throwaway, spike branch only, SPIKE_ARM=C, default OFF).
+  // The records grammar REPLACES the graph grammar in the structured-outputs
+  // slot. With the env var absent this is byte-identical to the status quo,
+  // which is what lets arm A run on this same lineage as a true control.
+  const draftGraphSchema = isSpikeArmC()
+    ? (buildSpikeCRecordsSchema() as ReturnType<typeof buildDraftGraphSchema>)
+    : buildDraftGraphSchema();
 
   if (draftThinkingEnabled && config.cee.anthropicStructuredOutputs) {
     log.info(
@@ -1791,6 +1812,40 @@ export async function draftGraphWithAnthropic(
     // quad that is about to be deleted. DRAFT ONLY: the repair_graph call site
     // (:2624) deliberately does NOT strip — it runs after Stage 3 has enriched,
     // where a threshold IS attested and must survive.
+    // ⚠ SPIKE ARM C — THE PROJECTION SEAM (§2).
+    //
+    // This is the post-LLM seam: `rawJson` on arm C is a RECORD SET, not a
+    // graph. The deterministic projector turns it into GraphV3 right here, so
+    // every line below — normalisation, repair, validation, persistence,
+    // analysis, UI — sees exactly what it sees today and is unchanged. Placing
+    // the projection any later would mean a graph-shaped consumer had already
+    // read a record set; any earlier and it would run before the truncation
+    // salvage that `rawJson` depends on.
+    //
+    // The provenance map and the dropped-reference list are stamped onto the
+    // payload for the §5 capture set. They ride as additive keys on a
+    // `.passthrough()` boundary and have no reader in the pipeline — on this
+    // throwaway branch that is deliberate: they exist for the classifier
+    // (metric 6.3), not for the product.
+    if (isSpikeArmC() && rawJson) {
+      const projection = projectRecordsToGraph(rawJson as unknown as SpikeCRecordSet);
+      log.info({
+        event: "spike_c.projected",
+        ...spikeCPreRegistration(),
+        stated_items: (rawJson as { stated_items?: unknown[] }).stated_items?.length ?? 0,
+        claims: (rawJson as { claims?: unknown[] }).claims?.length ?? 0,
+        nodes: projection.graph.nodes.length,
+        edges: projection.graph.edges.length,
+        dropped: projection.dropped.length,
+      }, "[SPIKE ARM C] record set projected to GraphV3 at the post-LLM seam");
+      rawJson = {
+        ...(projection.graph as unknown as Record<string, unknown>),
+        spike_c_provenance: projection.provenance,
+        spike_c_dropped: projection.dropped,
+        spike_c_records: rawJson,
+      };
+    }
+
     const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
     if (strippedGoal.nodeIds.length > 0) {
       log.info({
