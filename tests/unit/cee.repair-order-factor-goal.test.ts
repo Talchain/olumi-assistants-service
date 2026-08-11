@@ -41,7 +41,10 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { runStageEnrich } from "../../src/cee/unified-pipeline/stages/enrich.js";
+import { runPlotValidation } from "../../src/cee/unified-pipeline/stages/repair/plot-validation.js";
+import { createCorrectionCollector } from "../../src/cee/corrections.js";
 import { log } from "../../src/utils/telemetry.js";
+
 import {
   simpleRepair,
   ALLOWED_EDGE_PATTERNS,
@@ -54,6 +57,14 @@ import {
 } from "../../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
 import { validateGraph } from "../../src/validators/graph-validator.js";
 import type { GraphT } from "../../src/schemas/graph.js";
+
+// Substep 2 calls the external PLoT engine first and only reaches its deterministic
+// fallback (the simpleRepair call this file is about) when that returns not-ok. Stub it
+// not-ok so the fallback is the path under test — no network, and no other test in this
+// file imports this module.
+vi.mock("../../src/services/validateClientWithCache.js", () => ({
+  validateGraph: vi.fn(async () => ({ ok: false, violations: ["[INVALID_EDGE_TYPE] at edge factor→goal"] })),
+}));
 
 // ---------------------------------------------------------------------------
 // Fixtures — fresh objects per call (fixFactorGoalEdges MUTATES its input)
@@ -125,6 +136,9 @@ function crmRecordSetGraphWithReversedLinks(): GraphT {
   return g;
 }
 
+/** What Stage 3 (enrich.ts) passes — the ONE call site the exemption is justified at. */
+const STAGE_3_OPTS = { deferSweepOwnedPatterns: true } as const;
+
 function hasEdge(g: GraphT, from: string, to: string): boolean {
   return (g.edges as any[]).some((e) => e.from === from && e.to === to);
 }
@@ -162,7 +176,7 @@ describe("repair order — factor→goal must reach the authority that repairs i
   // -- The defect.
   describe("simpleRepair preserves factor→goal for the sweep's splitter", () => {
     it("preserves BOTH goal-terminating links, bound by identity not by count", () => {
-      const repaired = simpleRepair(crmRecordSetGraph(), "test-req");
+      const repaired = simpleRepair(crmRecordSetGraph(), "test-req", STAGE_3_OPTS);
 
       expect(
         hasEdge(repaired, LINK_LICENCE_TO_GOAL.from, LINK_LICENCE_TO_GOAL.to),
@@ -175,7 +189,7 @@ describe("repair order — factor→goal must reach the authority that repairs i
     });
 
     it("hands the pattern on intact: the splitter still finds and splits both links after simpleRepair", () => {
-      const repaired = simpleRepair(crmRecordSetGraph(), "test-req");
+      const repaired = simpleRepair(crmRecordSetGraph(), "test-req", STAGE_3_OPTS);
       const { splitCount, repairs } = fixFactorGoalEdges(repaired, "V1_FLAT");
 
       expect(splitCount, "the sweep's factor_goal_splits counter read 0 on every measured run").toBe(2);
@@ -195,7 +209,7 @@ describe("repair order — factor→goal must reach the authority that repairs i
 
     it("does not make the graph strictly worse at the gate (measured: NO_PATH_TO_GOAL 7 → 14)", () => {
       const before = countCode(crmRecordSetGraph(), "NO_PATH_TO_GOAL");
-      const after = countCode(simpleRepair(crmRecordSetGraph(), "test-req"), "NO_PATH_TO_GOAL");
+      const after = countCode(simpleRepair(crmRecordSetGraph(), "test-req", STAGE_3_OPTS), "NO_PATH_TO_GOAL");
 
       expect(
         after,
@@ -208,12 +222,12 @@ describe("repair order — factor→goal must reach the authority that repairs i
   // -- green: they are what binds the change to factor→goal and nothing else.
   describe("the other reversed patterns keep their existing single owner — deletion", () => {
     it("still deletes factor→option (no downstream authority owns it)", () => {
-      const repaired = simpleRepair(crmRecordSetGraphWithReversedLinks(), "test-req");
+      const repaired = simpleRepair(crmRecordSetGraphWithReversedLinks(), "test-req", STAGE_3_OPTS);
       expect(hasEdge(repaired, "fac_sales_productivity", "opt_hubspot")).toBe(false);
     });
 
     it("still deletes factor→decision (no downstream authority owns it, and no legal reverse exists)", () => {
-      const repaired = simpleRepair(crmRecordSetGraphWithReversedLinks(), "test-req");
+      const repaired = simpleRepair(crmRecordSetGraphWithReversedLinks(), "test-req", STAGE_3_OPTS);
       expect(hasEdge(repaired, "fac_licence_cost", "dec_crm")).toBe(false);
     });
 
@@ -233,7 +247,7 @@ describe("repair order — factor→goal must reach the authority that repairs i
         edge("out_b", GOAL_ID, 0.5, "positive"),
         edge("out_a", "out_b", 0.5, "positive"), // outcome→outcome
       );
-      const repaired = simpleRepair(g, "test-req");
+      const repaired = simpleRepair(g, "test-req", STAGE_3_OPTS);
       expect(hasEdge(repaired, "out_a", "out_b")).toBe(false);
     });
   });
@@ -249,6 +263,18 @@ describe("repair order — factor→goal must reach the authority that repairs i
       expect(hasEdge(g, LINK_PRODUCTIVITY_TO_GOAL.from, GOAL_ID)).toBe(true);
     });
 
+    it("deferral is OPT-IN: the default preserves the delete-all behaviour for every other call site", () => {
+      // The exemption is justified by what runs AFTER the caller, so it belongs to the
+      // call site, not to the function. Only Stage 3 is followed by the sweep.
+      const byDefault = simpleRepair(crmRecordSetGraph(), "test-req");
+      expect(hasEdge(byDefault, LINK_LICENCE_TO_GOAL.from, GOAL_ID)).toBe(false);
+      expect(hasEdge(byDefault, LINK_PRODUCTIVITY_TO_GOAL.from, GOAL_ID)).toBe(false);
+
+      const optedIn = simpleRepair(crmRecordSetGraph(), "test-req", { deferSweepOwnedPatterns: true });
+      expect(hasEdge(optedIn, LINK_LICENCE_TO_GOAL.from, GOAL_ID)).toBe(true);
+      expect(hasEdge(optedIn, LINK_PRODUCTIVITY_TO_GOAL.from, GOAL_ID)).toBe(true);
+    });
+
     it("the deferral list is exactly the pattern that has a downstream repairer", () => {
       // Bound by identity, not by length: a broadened list that still contained
       // factor→goal would pass a length check.
@@ -260,7 +286,7 @@ describe("repair order — factor→goal must reach the authority that repairs i
   // -- violation, and a broken alarm is worse than no alarm.
   describe("Stage 3's post-repair alarm distinguishes deferral from violation", () => {
     it("counts a deferred factor→goal as deferred and NOT as invalid", () => {
-      const counts = countEdgePatternViolations(simpleRepair(crmRecordSetGraph(), "test-req"));
+      const counts = countEdgePatternViolations(simpleRepair(crmRecordSetGraph(), "test-req", STAGE_3_OPTS));
       expect(counts).toEqual({ invalid: 0, deferred: 2 });
     });
 
@@ -334,6 +360,68 @@ describe("repair order — factor→goal must reach the authority that repairs i
         .find((a) => a?.event === "cee.enrich.post_repair_deferred_edges");
       expect(deferred, "Stage 3 must record the handoff it just performed").toBeDefined();
       expect(deferred.deferred_count).toBe(2);
+    });
+
+    it("SUBSTEP 2 must NOT defer — the id-collision collider, refuted by execution in review", async () => {
+      // ── The blocker round 1 shipped ────────────────────────────────────────────
+      // Round 1's PR body claimed "no factor→goal edge remains for substep 2 to see,
+      // so the deferral is inert there". FALSE, and the splitter itself falsifies it:
+      // fixFactorGoalEdges reuses an existing `out_<factorId>_impact` node WITHOUT
+      // checking its kind (deterministic-sweep.ts:981, `!nodeKindMap.has(outcomeId)`).
+      // Put a NON-outcome node on that id and the splitter EMITS a fresh factor→goal
+      // edge *after* the sweep has run. A function-scoped exemption then defers it at
+      // substep 2 to an authority that already ran — base DELETED it, round 1 shipped
+      // it to a 422 at the post-enforcement gate.
+      //
+      // That is trap 21 one level up from the defect this file fixes: the exemption's
+      // justification holds at ONE call site, and it was applied at FUNCTION scope.
+      // The fix is the opt-in parameter — substep-2 deferral becomes impossible BY
+      // CONSTRUCTION rather than by an argument a constructed case defeats.
+      //
+      // The splitter's missing kind guard is NOT fixed here (out of scope, rowed with
+      // the review's other latent findings). It is PINNED below, because it is exactly
+      // what makes this case non-vacuous.
+      const COLLIDER_ID = "out_fac_sales_productivity_impact";
+
+      const g = crmRecordSetGraph();
+      (g.nodes as any[]).push({
+        id: COLLIDER_ID, // the id the splitter would mint — already taken, by a FACTOR
+        kind: "factor",
+        category: "observable",
+        label: "Productivity Impact (pre-existing, not an outcome)",
+      });
+
+      // Stage 3 defers, as designed.
+      const afterStage3 = simpleRepair(g, "test-collider", { deferSweepOwnedPatterns: true });
+      expect(hasEdge(afterStage3, LINK_PRODUCTIVITY_TO_GOAL.from, GOAL_ID)).toBe(true);
+
+      // PRECONDITION — the splitter reuses the colliding node and emits a NEW
+      // factor→goal edge. If this ever stops holding, the assertion below is vacuous
+      // and must be re-derived rather than trusted.
+      fixFactorGoalEdges(afterStage3, "V1_FLAT");
+      const colliderKind = (afterStage3.nodes as any[]).find((n) => n.id === COLLIDER_ID)?.kind;
+      expect(colliderKind, "the collider must still be a factor, or nothing illegal is emitted").toBe("factor");
+      expect(
+        hasEdge(afterStage3, COLLIDER_ID, GOAL_ID),
+        "precondition: the splitter must emit the illegal factor→goal edge for this case to test anything",
+      ).toBe(true);
+
+      // ── The assertion ─────────────────────────────────────────────────────────
+      // Drive the REAL substep 2, so this binds to plot-validation.ts's actual call
+      // and REDs if anyone later passes the opt-in there.
+      const ctx: any = {
+        graph: afterStage3,
+        collector: createCorrectionCollector(),
+        requestId: "test-collider",
+        llmRepairNeeded: false,
+        remainingViolations: [],
+      };
+      await runPlotValidation(ctx);
+
+      expect(
+        hasEdge(ctx.graph as GraphT, COLLIDER_ID, GOAL_ID),
+        "substep 2 must delete this edge as it did at base — its repair authority has already run, so deferring sends it to a 422",
+      ).toBe(false);
     });
 
     it("still raises the invalid-edge alarm when an edge nothing owns survives", async () => {

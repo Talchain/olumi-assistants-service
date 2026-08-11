@@ -98,7 +98,13 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   }, "Pipeline stage: First stabiliseGraph complete");
 
   // ── Step 5: simpleRepair ────────────────────────────────────────────────
-  const repaired = simpleRepair(candidate, ctx.requestId);
+  // `deferSweepOwnedPatterns` is opt-in per call site and this is the ONLY site that
+  // may set it: Stage 4 substep 1 (the deterministic sweep) runs immediately after this
+  // stage and unconditionally, and its `fixFactorGoalEdges` repairs the deferred
+  // pattern. Substep 2's simpleRepair (`plot-validation.ts`) must NOT opt in — the
+  // sweep has already run by then, so a deferral there would hand the edge to nobody
+  // and fail closed at the post-enforcement gate.
+  const repaired = simpleRepair(candidate, ctx.requestId, { deferSweepOwnedPatterns: true });
 
   // ── Step 5b: Post-repair edge-pattern assertion ────────────────────────
   // simpleRepair is the authoritative owner of invalid-edge removal, EXCEPT for the

@@ -443,7 +443,38 @@ const PROTECTED_KINDS = new Set(["goal", "decision", "option", "outcome", "risk"
  *
  * Node/edge caps use GRAPH_MAX_NODES (50) and GRAPH_MAX_EDGES (200) from graphCaps.ts.
  */
-export function simpleRepair(g: GraphT, requestId?: string): GraphT {
+export interface SimpleRepairOptions {
+  /**
+   * Opt in to leaving SWEEP_OWNED_EDGE_PATTERNS for their downstream repair authority
+   * instead of deleting them. **Defaults to FALSE**, i.e. delete everything invalid.
+   *
+   * ⚠ THIS BELONGS TO THE CALL SITE, NOT TO THE FUNCTION, and that distinction is the
+   * whole point. The deferral is justified by what runs AFTER the caller — Stage 3
+   * (`enrich.ts`) is followed by the sweep, which repairs the pattern; substep 2
+   * (`plot-validation.ts`) is NOT, because the sweep has already run by then.
+   *
+   * Shipping this at function scope was a real defect, caught in review by execution
+   * rather than by argument: `fixFactorGoalEdges` reuses an existing
+   * `out_<factorId>_impact` node WITHOUT checking its kind
+   * (`deterministic-sweep.ts:981`), so a non-outcome node on that id makes the splitter
+   * EMIT a fresh `factor→goal` edge *after* the sweep. A function-scoped exemption then
+   * deferred it at substep 2 to an authority that had already run: previously deleted,
+   * now shipped to a 422 at the post-enforcement gate. Trap 21 one level up from the
+   * defect the deferral itself fixes.
+   *
+   * With the opt-in, substep-2 deferral is impossible BY CONSTRUCTION rather than by an
+   * argument that a constructed case defeats. **Pass `true` only where a downstream
+   * authority provably still runs, and say which one.**
+   */
+  deferSweepOwnedPatterns?: boolean;
+}
+
+export function simpleRepair(
+  g: GraphT,
+  requestId?: string,
+  opts?: SimpleRepairOptions
+): GraphT {
+  const deferSweepOwnedPatterns = opts?.deferSweepOwnedPatterns === true;
   // Separate protected and unprotected nodes
   const protectedNodes = g.nodes.filter((n) => PROTECTED_KINDS.has(n.kind));
   const unprotectedNodes = g.nodes.filter((n) => !PROTECTED_KINDS.has(n.kind));
@@ -500,17 +531,18 @@ export function simpleRepair(g: GraphT, requestId?: string): GraphT {
   // Previously these were preserved for connectivity, but invalid patterns like
   // outcome→outcome and outcome→risk cause downstream ISL analysis failures.
   //
-  // EXCEPT the patterns a downstream authority OWNS AND REPAIRS
-  // (SWEEP_OWNED_EDGE_PATTERNS — see the adjudication on that constant). Deleting
-  // those here made the repair built for them unreachable and left the goal
-  // stranded; they are handed on instead.
+  // EXCEPT, WHEN THE CALLER OPTS IN, the patterns a downstream authority OWNS AND
+  // REPAIRS (SWEEP_OWNED_EDGE_PATTERNS — see the adjudication on that constant).
+  // Deleting those made the repair built for them unreachable and left the goal
+  // stranded; they are handed on instead. The opt-in is per call site because the
+  // justification is "a repairer still runs after me", which is false at substep 2.
   const invalidEdges: Array<{ from: string; to: string; fromKind: string; toKind: string }> = [];
   const deferredEdges: Array<{ from: string; to: string; fromKind: string; toKind: string }> = [];
   validEdges = validEdges.filter((edge) => {
     const fromKind = finalNodeKindMap.get(edge.from);
     const toKind = finalNodeKindMap.get(edge.to);
     if (fromKind && toKind && !isEdgeAllowed(fromKind, toKind)) {
-      if (isEdgeOwnedByDownstreamRepair(fromKind, toKind)) {
+      if (deferSweepOwnedPatterns && isEdgeOwnedByDownstreamRepair(fromKind, toKind)) {
         deferredEdges.push({ from: edge.from, to: edge.to, fromKind, toKind });
         return true; // Keep — the downstream authority repairs this pattern
       }
