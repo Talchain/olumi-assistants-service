@@ -200,8 +200,21 @@ export function draftResultToOlumiResponse(
    * `briefOverride` and `payload.message` is the user's one-line answer — so
    * the ROADMAP 2.972(c) refusal below was fed the answer and kept the
    * "light on detail" advisory against a brief full of amounts (measured on
-   * deployed staging 2026-08-11, L3 §5 C1). Making it a required parameter
-   * means a new call site cannot silently inherit the old, wrong source.
+   * deployed staging 2026-08-11, L3 §5 C1).
+   *
+   * ⚠ Making it REQUIRED is necessary and was NOT sufficient, and the first
+   * version of this comment claimed otherwise. The #918 review found a fourth
+   * call site — `scripts/capture-goal-constraints-wire.ts:89` — still passing
+   * four arguments: a genuine `TS2554` that NO gate compiled, because at
+   * `c1fabe15` `scripts/` was in neither tsconfig (measured with
+   * `tsc --listFiles`, 0 hits under both). What actually closes the class is
+   * the pair now in place: every TypeScript file under `scripts/` is inside
+   * `tsconfig.json`'s `include` (so the full typecheck and its CI ratchet see
+   * every script), and
+   * `__tests__/draft-graph-dispatch-brief-completeness-override.test.ts` sweeps
+   * EVERY TypeScript file in the repo with the TypeScript parser, deriving the
+   * required arity from THIS declaration — so adding a sixth required
+   * parameter REDs any caller that does not pass it, wherever it lives.
    */
   effectiveBrief: string | null,
 ): OlumiResponse {

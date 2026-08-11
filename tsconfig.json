@@ -17,6 +17,7 @@
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts",
+    "scripts/**/*.ts",
     "*.config.ts",
     "sdk/typescript/src/**/*.ts",
     "sdk/typescript/*.config.ts"

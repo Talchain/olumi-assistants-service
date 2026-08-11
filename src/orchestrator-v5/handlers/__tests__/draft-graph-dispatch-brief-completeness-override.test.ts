@@ -54,9 +54,11 @@
  * brief on the same path must KEEP the advisory, so the fix cannot pass by
  * suppressing the sentence unconditionally.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { describe, it, expect, vi } from 'vitest';
 
 // emit() is telemetry-only; silence it so the composer runs side-effect-free.
@@ -195,40 +197,201 @@ describe('LINK-R1 C1 — the brief-completeness advisory on the clarify-v2 (brie
  *
  * Every case above calls `draftResultToOlumiResponse` directly and hands it
  * the brief itself, so it pins the COMPOSER. It says nothing about whether the
- * DISPATCHER passes the right string — and that wiring is exactly where the
- * defect lived. TypeScript forces a 5th argument now, but `payload.message`
- * would satisfy the type and reinstate the bug in silence.
+ * CALLERS pass the right string — and that wiring is exactly where the defect
+ * lived. TypeScript forces a 5th argument now, but `payload.message` would
+ * satisfy the type and reinstate the bug in silence.
  *
- * Reaching the real call sites needs a Fastify request, the unified draft
- * pipeline and a live commit seam. So this asserts the wiring at the SOURCE,
- * DERIVED (the file is read at your tip; nothing is mirrored here) and
- * FAIL-LOUD: it counts the call sites rather than checking a known number, so
- * a THIRD call site added later cannot pass by being unlisted.
+ * ── ROUND 2: THE FIRST VERSION OF THIS GUARD WAS WRONG IN TWO WAYS ─────────
+ * The adversarial review (#918, `c1fabe15`) measured both, and the second one
+ * let a real defect through, so both are recorded rather than quietly fixed:
+ *
+ *  (N1) Its comment said it "counts the call sites rather than checking a
+ *       known number". It executed `expect(calls.length).toBe(2)` — a
+ *       REMEMBERED number — and read exactly ONE FILE. A fourth call site in
+ *       `scripts/capture-goal-constraints-wire.ts:89` was therefore invisible
+ *       to it, still passing 4 arguments, `error TS2554` and compiled by
+ *       nothing (`tsc -p tsconfig.build.json --listFiles` and `tsc -p
+ *       tsconfig.json --listFiles` BOTH returned 0 hits for scripts/ —
+ *       measured at c1fabe15, not assumed). A claim about our own
+ *       verification is still a claim (CLAUDE.md trap 12/20).
+ *  (N2) It was LINE-SHAPED: reformatting the CORRECT `:773` call across
+ *       multiple lines — which is prettier's own output for a 124-char line
+ *       against `printWidth: 80` — turned it RED with the semantics untouched.
+ *       A guard that REDs on formatting is a broken alarm in waiting (trap 7).
+ *
+ * ── WHAT IT DOES NOW ───────────────────────────────────────────────────────
+ * It parses with the TypeScript compiler, not with `String.split('\n')`, so it
+ * is immune to formatting, to comments that mention the symbol, and to
+ * whitespace. Nothing here is mirrored:
+ *
+ *  · The REQUIRED ARITY is DERIVED FROM THE DECLARATION at your tip (its
+ *    parameters minus the optional/defaulted/rest ones). Add a sixth required
+ *    parameter and every call site in the repo must pass six — no number in
+ *    this file to update, which is the whole point: a future required-param
+ *    change cannot silently strand a caller.
+ *  · The BRIEF PARAMETER'S NAME AND INDEX are derived from the same
+ *    declaration, so the "not the wire message" assertion binds to the
+ *    parameter by identity rather than to a position someone remembered.
+ *  · The FILE SET is derived by walking the repo, so `scripts/`, `tools/`,
+ *    `tests/` and `sdk/` are all in scope. The blocker above is exactly what
+ *    a one-file sweep cannot see.
+ *
+ * Non-vacuity is proven in-test, not assumed (trap 13): the walk must find
+ * files, the symbol must appear in more than one file, call sites must be
+ * non-zero, and a CONTRAST CONTROL runs the identical extractor over a
+ * different symbol from the same module and requires it to find call sites
+ * too — so a silently-blind parser cannot pass by finding nothing anywhere.
  */
-describe('LINK-R1 C1 — the dispatcher passes the drafted-from brief, not the wire message', () => {
+describe('LINK-R1 C1 — every caller passes the drafted-from brief, not the wire message', () => {
+  const NAME = 'draftResultToOlumiResponse';
+  /** A symbol from the same dispatch seam, used only as a contrast control. */
+  const CONTRAST_NAME = 'finaliseV5Response';
+
   const DISPATCHER = fileURLToPath(new URL('../draft-graph-dispatch.ts', import.meta.url));
 
-  it('every draftResultToOlumiResponse call site passes effectiveBrief as its 5th argument', () => {
-    const source = readFileSync(DISPATCHER, 'utf8');
-
-    // Call sites only — exclude the declaration, which is `export function`.
-    const calls = source
-      .split('\n')
-      .filter((l) => l.includes('draftResultToOlumiResponse(') && !l.includes('export function'));
-
-    // A positive control on the probe itself: if the name is ever renamed and
-    // this sweep silently finds nothing, an empty list would otherwise pass.
-    expect(calls.length, 'found no draftResultToOlumiResponse call sites — the probe is blind').toBe(2);
-
-    for (const call of calls) {
-      expect(
-        call,
-        `a draftResultToOlumiResponse call site does not pass effectiveBrief: ${call.trim()}`,
-      ).toContain('effectiveBrief');
-      expect(
-        call,
-        `a draftResultToOlumiResponse call site passes the wire message as the brief: ${call.trim()}`,
-      ).not.toContain('payload.message)');
+  /** Walk up from this spec until the directory that holds package.json + tsconfig.json. */
+  const REPO_ROOT = (() => {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 12; i += 1) {
+      if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'tsconfig.json'))) return dir;
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
     }
+    throw new Error('could not locate the repo root from this spec');
+  })();
+
+  const SKIP_DIRS = new Set([
+    'node_modules',
+    'dist',
+    '.git',
+    'coverage',
+    'playwright-report',
+    'test-results',
+    '.turbo',
+  ]);
+
+  function walkTypeScriptFiles(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        walkTypeScriptFiles(join(dir, entry.name), out);
+      } else if (/\.(?:m|c)?tsx?$/.test(entry.name)) {
+        out.push(join(dir, entry.name));
+      }
+    }
+    return out;
+  }
+
+  interface CallSite {
+    readonly file: string;
+    readonly line: number;
+    readonly argCount: number;
+    /** Source text of the argument occupying the brief parameter's position, if any. */
+    readonly briefArgText: string | null;
+  }
+
+  /** Every `NAME(...)` CallExpression in `source`, via the TypeScript parser. */
+  function findCallSites(file: string, source: string, name: string, briefIndex: number): CallSite[] {
+    const sf = ts.createSourceFile(file, source, ts.ScriptTarget.ES2022, true);
+    const found: CallSite[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) {
+        const briefArg = node.arguments[briefIndex];
+        found.push({
+          file,
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          argCount: node.arguments.length,
+          briefArgText: briefArg ? briefArg.getText(sf).replace(/\s+/g, ' ').trim() : null,
+        });
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sf, visit);
+    return found;
+  }
+
+  /** The declaration, read at YOUR tip — the source of every number below. */
+  const declaration = (() => {
+    const source = readFileSync(DISPATCHER, 'utf8');
+    const sf = ts.createSourceFile(DISPATCHER, source, ts.ScriptTarget.ES2022, true);
+    let decl: ts.FunctionDeclaration | undefined;
+    ts.forEachChild(sf, (node) => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === NAME) decl = node;
+    });
+    if (!decl) throw new Error(`could not find the ${NAME} declaration in ${DISPATCHER}`);
+    const params = decl.parameters.map((p) => ({
+      name: ts.isIdentifier(p.name) ? p.name.text : '(destructured)',
+      required: !p.questionToken && !p.initializer && !p.dotDotDotToken,
+    }));
+    return { params, requiredCount: params.filter((p) => p.required).length };
+  })();
+
+  /** The parameter that carries the brief — found BY NAME in the declaration. */
+  const BRIEF_PARAM_INDEX = declaration.params.findIndex((p) => p.name === 'effectiveBrief');
+
+  const allFiles = walkTypeScriptFiles(REPO_ROOT);
+  const sources = new Map<string, string>();
+  for (const f of allFiles) {
+    const text = readFileSync(f, 'utf8');
+    if (text.includes(NAME) || text.includes(CONTRAST_NAME)) sources.set(f, text);
+  }
+
+  const callSites = [...sources].flatMap(([f, text]) => findCallSites(f, text, NAME, BRIEF_PARAM_INDEX));
+  const contrastSites = [...sources].flatMap(([f, text]) => findCallSites(f, text, CONTRAST_NAME, 0));
+
+  const isTestFile = (f: string): boolean => /(?:__tests__|\.test\.tsx?$|\.spec\.tsx?$)/.test(f);
+  const rel = (f: string): string => f.slice(REPO_ROOT.length + 1);
+
+  it('the probe is not blind — the walk, the symbol and the extractor all find something', () => {
+    // Trap 13: an absence/compliance claim needs a demonstrated presence.
+    expect(allFiles.length, 'the repo walk found no TypeScript files at all').toBeGreaterThan(0);
+    expect(
+      new Set(callSites.map((c) => c.file)).size,
+      `${NAME} was found in fewer than two files — a one-file sweep is exactly the blindness that let scripts/capture-goal-constraints-wire.ts through`,
+    ).toBeGreaterThan(1);
+    expect(callSites.length, `found no ${NAME} call sites — the parser is blind`).toBeGreaterThan(0);
+    // CONTRAST CONTROL: the identical extractor over a different symbol. If the
+    // parse silently produced nothing, this fails too, so "0 violations" can
+    // never be manufactured by a broken instrument.
+    expect(
+      contrastSites.length,
+      `contrast control: the same extractor found no ${CONTRAST_NAME} call sites, so it is not discriminating`,
+    ).toBeGreaterThan(0);
+    expect(BRIEF_PARAM_INDEX, `no parameter named effectiveBrief on ${NAME}`).toBeGreaterThanOrEqual(0);
+  });
+
+  it('every call site in the repo passes the arity the declaration REQUIRES (derived, not remembered)', () => {
+    const short = callSites.filter((c) => c.argCount < declaration.requiredCount);
+    expect(
+      short.map((c) => `${rel(c.file)}:${c.line} passes ${c.argCount} of ${declaration.requiredCount}`),
+      `${NAME} requires ${declaration.requiredCount} arguments (${declaration.params
+        .filter((p) => p.required)
+        .map((p) => p.name)
+        .join(', ')}) — these call sites do not pass them`,
+    ).toEqual([]);
+  });
+
+  it('no production call site passes the wire message as the brief', () => {
+    // Test call sites legitimately pass `PAYLOAD.message`: on the ordinary
+    // draft turn the wire message IS the brief, and those specs exercise
+    // exactly that path. The property being pinned is about the PRODUCT.
+    const offenders = callSites
+      .filter((c) => !isTestFile(c.file))
+      .filter((c) => c.briefArgText !== null && /\bpayload\.message\b/i.test(c.briefArgText));
+    expect(
+      offenders.map((c) => `${rel(c.file)}:${c.line} -> ${c.briefArgText}`),
+      'a production call site reinstates the defect: it hands the composer the wire message instead of the brief the pipeline drafted from',
+    ).toEqual([]);
+  });
+
+  it('the dispatcher itself passes its own effectiveBrief, by identity', () => {
+    const inDispatcher = callSites.filter((c) => c.file === DISPATCHER);
+    expect(inDispatcher.length, 'no call sites found in the dispatcher').toBeGreaterThan(0);
+    const wrong = inDispatcher.filter((c) => c.briefArgText !== 'effectiveBrief');
+    expect(
+      wrong.map((c) => `${rel(c.file)}:${c.line} -> ${c.briefArgText}`),
+      'the dispatcher must hand the composer the same value it drafted from — the variable, by name',
+    ).toEqual([]);
   });
 });

@@ -99,6 +99,12 @@ const composed = draftResultToOlumiResponse(
   payload,
   true,
   ctx.requestId,
+  // The brief this capture drafts from. On the ordinary draft turn the wire
+  // message IS the brief, which is why `payload.message` is the same string —
+  // but the composer's 5th parameter means "the brief the pipeline drafted
+  // from", so pass the value that carries that meaning here (`ctx.effectiveBrief`),
+  // not the wire message that happens to equal it.
+  ctx.effectiveBrief,
 );
 
 // Stamp the envelope exactly as the route does before send.
