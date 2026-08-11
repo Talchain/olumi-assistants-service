@@ -903,7 +903,16 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     if (out.matched) {
       expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
       expect(out.assistant_text).toContain('with a probability of 62%');
-      expect(out.assistant_text).toContain("That sits ahead of 'Hire one senior engineer overseas' by 24 percentage points");
+      // ROADMAP 2.1067 — this pin previously required
+      // "That sits ahead of 'Hire one senior engineer overseas' by 24
+      // percentage points". That is the retired runner-up GAP statistic: the
+      // difference between two P(argmax) figures, which inflates by
+      // construction when any third option collapses. The surface now reports
+      // each option's OWN win share and keeps the qualitative verdict the
+      // margin earns. Both halves are pinned so the gap cannot creep back in
+      // as "and that is 24 points clear".
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place, with a probability of 38%, so the lead is meaningful rather than marginal");
+      expect(out.assistant_text).not.toMatch(/percentage points?/i);
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
       // sensitivity-direction phrases from formatSensitivityDirection
@@ -943,7 +952,13 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // Clear-lead opener — quoted label, no "favoured option"/"best".
       expect(text).toContain("Based on this model, 'Hire two senior engineers locally' currently leads");
       expect(text).toContain('with a probability of 62%');
-      expect(text).toContain("For 'Hire one senior engineer overseas' to overtake it, the lead of 24 percentage points would need to close");
+      // ROADMAP 2.1067 — was "For 'Hire one senior engineer overseas' to
+      // overtake it, the lead of 24 percentage points would need to close",
+      // which quantified the gap between two win frequencies as a distance to
+      // be travelled. The contender is still named (this surface answers "what
+      // would flip it?") and now carries its OWN share instead.
+      expect(text).toContain("'Hire one senior engineer overseas' is the most likely contender to overtake it, with a probability of 38%");
+      expect(text).not.toMatch(/percentage points?/i);
       // Names the specific fragile assumption from fragile_edges[0] — no sign/causal claim.
       expect(text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
       // No decision_review.flip_thresholds present → no flip claim, no "favoured option"/"best".
@@ -967,7 +982,10 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     if (out.matched) {
       expect(out.assistant_text).toContain('Hire two senior engineers locally');
       expect(out.assistant_text).toContain('with a probability of 62%');
-      expect(out.assistant_text).toContain("It sits ahead of 'Hire one senior engineer overseas' by 24 percentage points");
+      // ROADMAP 2.1067 — was "It sits ahead of 'Hire one senior engineer
+      // overseas' by 24 percentage points".
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place, with a probability of 38%");
+      expect(out.assistant_text).not.toMatch(/percentage points?/i);
       // Names the specific fragile assumption (parity with explain_results /
       // what_would_flip) — the sentence is itself the "what to check".
       expect(out.assistant_text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch'");
@@ -988,7 +1006,11 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     if (out.matched) {
       expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
       expect(out.assistant_text).toContain('with a probability of 62%');
-      expect(out.assistant_text).toContain('It sits ahead of Hire one senior engineer overseas by 24 percentage points');
+      // ROADMAP 2.1067 — was "It sits ahead of Hire one senior engineer
+      // overseas by 24 percentage points". `advice` quotes no labels, which is
+      // its own voice and is unchanged.
+      expect(out.assistant_text).toContain('Hire one senior engineer overseas sits in second place, with a probability of 38%');
+      expect(out.assistant_text).not.toMatch(/percentage points?/i);
       expect(out.assistant_text).toContain('The biggest thing to examine next is Delivery risk');
       // Readability sectioning: the next-step sentence is a bullet
       // under its own labelled block.

@@ -71,7 +71,7 @@ function expectNaturalProse(text: string) {
 }
 
 describe('composeExplainResultsFallback', () => {
-  it('cites leading option label, probability as percentage, runner-up margin in percentage points, and top drivers with raw sensitivity values', () => {
+  it('cites leading option label, probability as percentage, the runner-up and its OWN win share, and top drivers with raw sensitivity values', () => {
     const text = composeExplainResultsFallback(ANALYSIS);
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
@@ -81,9 +81,13 @@ describe('composeExplainResultsFallback', () => {
     expect(text).toContain('62%');
     expect(text).not.toContain('probability of 0.62');
     expect(text).not.toContain('per cent');
-    // Runner-up label and margin in "N percentage points" prose form
+    // ROADMAP 2.1067 — this pin required '35 percentage points', the retired
+    // runner-up GAP statistic. The runner-up is still named; what it now
+    // carries is its OWN win share, so the reader gets 62% and 27% rather than
+    // their subtraction.
     expect(text).toContain('Hire Two Mid-Level');
-    expect(text).toContain('35 percentage points');
+    expect(text).toContain("'Hire Two Mid-Level' sits in second place, with a probability of 27%");
+    expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivity values rendered as bucketed
     // lead-framing prose (formatSensitivityDirection composes adverb
     // + verb so the sentence reads "Cost moderately weakens the lead").
@@ -151,13 +155,20 @@ describe('composeExplainResultsFallback', () => {
     expect(text).not.toContain('meaningful rather than marginal');
   });
 
-  it('keeps the "meaningful rather than marginal" framing for a decisive margin (12pp)', () => {
+  it('keeps the "meaningful rather than marginal" framing for a decisive margin (12pp), WITHOUT stating the gap', () => {
     const text = composeExplainResultsFallback({
       ...ANALYSIS,
       margin_pp: 12,
     });
-    expect(text).toContain('12 percentage points');
+    // ROADMAP 2.1067 — the margin remains the DECIDER and is no longer the
+    // DISPLAY (the #906 shape). So the qualitative verdict a decisive margin
+    // earns must survive, and the magnitude that produced it must not appear.
+    // This pin previously required '12 percentage points'; asserting its
+    // ABSENCE here is what stops the fix being quietly reverted on the one arm
+    // whose whole purpose is the decisive case.
     expect(text).toContain('meaningful rather than marginal');
+    expect(text).not.toContain('12 percentage points');
+    expect(text).not.toMatch(/percentage points?/i);
     expect(text).not.toContain('effectively tied');
   });
 
@@ -313,7 +324,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
 });
 
 describe('composeWhatWouldFlipFallback', () => {
-  it('cites leading option, margin in percentage points, and top drivers WITH sensitivity values — no mutation language', () => {
+  it('cites leading option, the contender and its OWN win share, and top drivers WITH sensitivity values — no mutation language', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expectNaturalProse(text);
     expect(text).toContain('Hire Senior Engineer');
@@ -322,8 +333,11 @@ describe('composeWhatWouldFlipFallback', () => {
     expect(text).not.toContain('probability of 0.62');
     expect(text).not.toContain('per cent');
     expect(text).toContain('Hire Two Mid-Level');
-    // Margin rendered as full "N percentage points" prose
-    expect(text).toContain('35 percentage points');
+    // ROADMAP 2.1067 — this pin required '35 percentage points' ("the lead of
+    // 35 percentage points would need to close"). The contender is named with
+    // its OWN share instead; the subtraction is gone.
+    expect(text).toContain("'Hire Two Mid-Level' is the most likely contender to overtake it, with a probability of 27%");
+    expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivities as bucketed lead-framing
     // prose. Thresholds align to bandFromMagnitude. No raw decimals.
     expect(text).toContain('Engineering Capacity');

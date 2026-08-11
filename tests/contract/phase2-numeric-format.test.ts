@@ -3,9 +3,19 @@
  *
  * Pin user-facing prose: every probability value sourced from a known
  * structured field renders as a percentage in `assistant_text`, never
- * as a raw decimal. Margins render as "N percentage points". Sensitivity
- * and edge-strength values are deliberately excluded from this assertion
- * (they remain raw — they are not probabilities).
+ * as a raw decimal. Sensitivity and edge-strength values are deliberately
+ * excluded from this assertion (they remain raw — they are not probabilities).
+ *
+ * ⚠ ROADMAP 2.1067 — THE MARGIN HALF OF THIS CONTRACT IS INVERTED. This file
+ * used to assert `margins render as "N percentage points"`. The runner-up gap
+ * is no longer rendered AT ALL: it is the difference between two P(argmax)
+ * statistics, not a difference in outcome, and it inflates by construction when
+ * any third option collapses (PR #906 retired the same family from the
+ * run_analysis headline). Both fallbacks now report each option's OWN win
+ * share. So the contract this file pins is stronger, not weaker: BOTH
+ * probabilities must render as percentages, and the formatted margin must be
+ * ABSENT. The absent-string is DERIVED from `formatPercentagePoints`, not hand
+ * written, so a change to the formatter cannot make this assertion vacuous.
  *
  * The test does NOT use a global regex scan against the prose: that
  * approach would produce false positives on legitimate sensitivity /
@@ -65,20 +75,19 @@ describe('phase2 numeric format — explain_results fallback', () => {
       const expectedLeaderDisplay = formatProbability(fixture.leader_probability);
       expect(prose).toContain(expectedLeaderDisplay);
 
-      // Near-tie margins are the same deliberate claim-honesty carve-out that
-      // the what_would_flip block below already asserts (added 2026-07-09):
-      // composeExplainResultsFallback now mirrors it (S4 / PR #270), so a
-      // near-zero / sub-threshold margin reads "effectively tied" with NO
-      // numeric margin cited — "ahead by 0 percentage points, so the lead is
-      // meaningful" was the exact S4 contradiction against the flip composer.
-      // Fixtures under NEAR_TIE_PP_THRESHOLD must assert the qualitative
-      // phrasing, not a percentage-points figure; decisive margins still cite it.
+      // Near-tie margins are a deliberate claim-honesty carve-out (S4 / PR
+      // #270): a near-zero / sub-threshold margin reads "effectively tied".
+      // ROADMAP 2.1067 — the CLEAR arm no longer cites a percentage-points
+      // figure either; it states the runner-up's OWN win share. So both arms
+      // now assert the ABSENCE of the formatted margin, and the clear arm
+      // additionally pins the second probability that replaced it.
       if (isNearTieByMargin(fixture.margin_pp, null)) {
         expect(prose).toContain('effectively tied');
       } else {
-        const expectedMarginDisplay = formatPercentagePoints(fixture.margin_pp);
-        expect(prose).toContain(expectedMarginDisplay);
+        expect(prose).toContain(formatProbability(fixture.runner_probability));
       }
+      expect(prose).not.toContain(formatPercentagePoints(fixture.margin_pp));
+      expect(prose).not.toMatch(/percentage points?/i);
 
       // The raw leader probability must NOT appear in user-facing prose
       // when its display form differs from the raw stringification (e.g.
@@ -102,20 +111,16 @@ describe('phase2 numeric format — what_would_flip fallback', () => {
       const expectedLeaderDisplay = formatProbability(fixture.leader_probability);
       expect(prose).toContain(expectedLeaderDisplay);
 
-      // Near-tie margins (isNearTieByMargin, robustness-honesty.ts) are a
-      // deliberate claim-honesty carve-out: composeWhatWouldFlipFallback
-      // never states "the lead of 0.1 percentage points would need to
-      // close" for a margin that is statistical noise — it says the
-      // options "are effectively tied" instead, with no numeric margin at
-      // all (see the `nearTie` branch + its comments in
-      // explanation-fallback.ts). Fixtures under the near-tie threshold
-      // must assert the qualitative phrasing, not a percentage-points figure.
+      // ROADMAP 2.1067 — "the lead of N percentage points would need to close"
+      // was never emitted on the near-tie arm; it is now emitted on NO arm.
+      // The contender is named with its own win share instead.
       if (isNearTieByMargin(fixture.margin_pp, null)) {
         expect(prose).toContain('effectively tied');
       } else {
-        const expectedMarginDisplay = formatPercentagePoints(fixture.margin_pp);
-        expect(prose).toContain(expectedMarginDisplay);
+        expect(prose).toContain(formatProbability(fixture.runner_probability));
       }
+      expect(prose).not.toContain(formatPercentagePoints(fixture.margin_pp));
+      expect(prose).not.toMatch(/percentage points?/i);
 
       const rawLeaderStr = String(fixture.leader_probability);
       if (rawLeaderStr !== expectedLeaderDisplay) {
