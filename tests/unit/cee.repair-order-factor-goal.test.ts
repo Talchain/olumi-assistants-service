@@ -378,9 +378,15 @@ describe("repair order — factor→goal must reach the authority that repairs i
       // The fix is the opt-in parameter — substep-2 deferral becomes impossible BY
       // CONSTRUCTION rather than by an argument a constructed case defeats.
       //
-      // The splitter's missing kind guard is NOT fixed here (out of scope, rowed with
-      // the review's other latent findings). It is PINNED below, because it is exactly
-      // what makes this case non-vacuous.
+      // ⚠ RE-DERIVED, exactly as the note below originally instructed. This case was
+      // written when `fixFactorGoalEdges` reused a colliding id WITHOUT checking its
+      // kind, and it used that defect as the VEHICLE for producing a post-sweep
+      // factor→goal edge. The splitter is now collision-safe (it kind-checks and
+      // suffix-searches, matching `fixOptionGoalShortcut`), so that vehicle is gone
+      // and the original precondition can no longer hold. Per the standing rule that
+      // a discriminator must pin its own precondition, the edge is now INJECTED
+      // DIRECTLY rather than conjured from a defect — which is strictly stronger:
+      // the assertion no longer depends on a bug existing to remain non-vacuous.
       const COLLIDER_ID = "out_fac_sales_productivity_impact";
 
       const g = crmRecordSetGraph();
@@ -395,15 +401,24 @@ describe("repair order — factor→goal must reach the authority that repairs i
       const afterStage3 = simpleRepair(g, "test-collider", { deferSweepOwnedPatterns: true });
       expect(hasEdge(afterStage3, LINK_PRODUCTIVITY_TO_GOAL.from, GOAL_ID)).toBe(true);
 
-      // PRECONDITION — the splitter reuses the colliding node and emits a NEW
-      // factor→goal edge. If this ever stops holding, the assertion below is vacuous
-      // and must be re-derived rather than trusted.
       fixFactorGoalEdges(afterStage3, "V1_FLAT");
       const colliderKind = (afterStage3.nodes as any[]).find((n) => n.id === COLLIDER_ID)?.kind;
       expect(colliderKind, "the collider must still be a factor, or nothing illegal is emitted").toBe("factor");
+
+      // The splitter's guarantee, pinned here too: it must NOT wire through the
+      // squatter. (This is the original precondition, inverted by the fix.)
       expect(
         hasEdge(afterStage3, COLLIDER_ID, GOAL_ID),
-        "precondition: the splitter must emit the illegal factor→goal edge for this case to test anything",
+        "the collision-safe splitter must not emit a factor→goal edge through the squatter",
+      ).toBe(false);
+
+      // PRECONDITION for the assertion below — substep 2 must be handed a real
+      // factor→goal edge that appeared AFTER the sweep, or the assertion is vacuous.
+      // Injected directly, since the splitter no longer produces one.
+      (afterStage3.edges as any[]).push(edge(COLLIDER_ID, GOAL_ID, 0.5, "positive"));
+      expect(
+        hasEdge(afterStage3, COLLIDER_ID, GOAL_ID),
+        "precondition: substep 2 must see a post-sweep factor→goal edge for this case to test anything",
       ).toBe(true);
 
       // ── The assertion ─────────────────────────────────────────────────────────
