@@ -45,7 +45,10 @@ import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // F3 — the runner-up gap-statistic policy. Installed at the enricher's single
 // decision_review egress seam (below), beside the DSK grounding policy.
-import { redactRunnerUpGapStatistic } from '../compose/runner-up-gap-statistic.js';
+import {
+  logRunnerUpGapRedaction,
+  redactRunnerUpGapStatistic,
+} from '../compose/runner-up-gap-statistic.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
@@ -543,24 +546,12 @@ export async function enrichRunAnalysisWithDecisionReview(
     // prompt still asks for the margin. See the ruling at the end of
     // `compose/leading-option-egress-guard.ts`.
     const gapRedaction = redactRunnerUpGapStatistic(output as Record<string, unknown>);
-    if (gapRedaction.fields > 0) {
-      log.warn(
-        {
-          event: 'v5.decision_review.runner_up_gap_redacted',
-          request_id: input.requestId,
-          scenario_id: input.scenarioId,
-          // Field PATHS and pattern CODES only — never the matched prose, which
-          // is the user's own decision content (R-004).
-          hit_paths: gapRedaction.paths,
-          hit_codes: gapRedaction.codes,
-          hit_fields: gapRedaction.fields,
-        },
-        'v5.decision_review.runner_up_gap_redacted: the review stated the size of the lead as a ' +
-          'gap between options. The gap between two win frequencies is not a difference in outcome ' +
-          'and inflates when any other option collapses. FIX THE SERVED PROMPT — the repo default ' +
-          'is correct; the PMS `decision_review_default` row is what this alarm is measuring.',
-      );
-    }
+    logRunnerUpGapRedaction(
+      log,
+      'v5.decision_review.runner_up_gap_redacted',
+      { request_id: input.requestId, scenario_id: input.scenarioId },
+      gapRedaction,
+    );
     const reviewOutput = gapRedaction.value as DecisionReviewOutput;
 
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:

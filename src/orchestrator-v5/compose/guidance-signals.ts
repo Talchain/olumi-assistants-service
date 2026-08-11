@@ -357,13 +357,31 @@ export function guidanceSignalsForCoachingKind(
  * above — so this cannot drift from `strengthen`'s ratified urgency class.
  */
 export function fragileEdgeOfferSignals(): GuidanceSignalsWithProvenance {
+  return strengthenOfferSignals(GUIDANCE_SIGNAL_CODES.FRAGILE_RESULT);
+}
+
+/**
+ * The shape every `strengthen`-riding lens offer has: CATEGORY/PRIORITY DERIVED
+ * from the `strengthen` coaching kind, `signal_code` naming the DETECTOR class.
+ *
+ * ⚠ ONE PARAMETERISED FACTORY, NOT THREE BYTE-IDENTICAL ONES. The three
+ * exported factories differed by exactly one constant, so the derivation
+ * `guidanceSignalsForCoachingKind('strengthen').category` was written out three
+ * times — and a fourth offer would have been a fourth copy. That is the
+ * hand-maintained mirror class (CLAUDE.md trap 12) in the module whose own
+ * header exists to stop `signal_code` being invented from the block type: if
+ * the category source ever moves, three call sites must move together, and
+ * nothing goes red if one is missed. Outputs are unchanged and pinned
+ * deep-equal against the three original literal shapes by spec.
+ */
+function strengthenOfferSignals(
+  code: (typeof GUIDANCE_SIGNAL_CODES)[keyof typeof GUIDANCE_SIGNAL_CODES],
+): GuidanceSignalsWithProvenance {
   return {
-    ...signalsOf(
-      // Derived from the kind, never restated: whatever category `strengthen`
-      // carries, this offer carries.
-      guidanceSignalsForCoachingKind('strengthen').category,
-    ),
-    ...provenanceOf(GUIDANCE_SIGNAL_CODES.FRAGILE_RESULT),
+    // Derived from the kind, never restated: whatever category `strengthen`
+    // carries, these offers carry.
+    ...signalsOf(guidanceSignalsForCoachingKind('strengthen').category),
+    ...provenanceOf(code),
   };
 }
 
@@ -377,15 +395,9 @@ export function fragileEdgeOfferSignals(): GuidanceSignalsWithProvenance {
  * block kind, which is the invented-code defect this module exists to kill.
  */
 export function overrideStressTestSignals(): GuidanceSignalsWithProvenance {
-  return {
-    ...signalsOf(guidanceSignalsForCoachingKind('strengthen').category),
-    ...provenanceOf(GUIDANCE_SIGNAL_CODES.OVERRIDE_UNANSWERED),
-  };
+  return strengthenOfferSignals(GUIDANCE_SIGNAL_CODES.OVERRIDE_UNANSWERED);
 }
 
 export function disagreementResolutionSignals(): GuidanceSignalsWithProvenance {
-  return {
-    ...signalsOf(guidanceSignalsForCoachingKind('strengthen').category),
-    ...provenanceOf(GUIDANCE_SIGNAL_CODES.UNRESOLVED_DISAGREEMENT),
-  };
+  return strengthenOfferSignals(GUIDANCE_SIGNAL_CODES.UNRESOLVED_DISAGREEMENT);
 }

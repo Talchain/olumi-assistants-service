@@ -28,7 +28,10 @@ import { getAdapter, getMaxTokensFromConfig } from "../adapters/llm/router.js";
 // F3 carrier 2 — the SAME runner-up gap policy the V5 enricher seam installs.
 // Imported, never re-implemented: two copies of a policy is how one of them
 // gets the next fix (CLAUDE.md trap #12).
-import { redactRunnerUpGapStatistic } from "../orchestrator-v5/compose/runner-up-gap-statistic.js";
+import {
+  logRunnerUpGapRedaction,
+  redactRunnerUpGapStatistic,
+} from "../orchestrator-v5/compose/runner-up-gap-statistic.js";
 import type { CallOpts } from "../adapters/llm/types.js";
 import { UpstreamHTTPError } from "../adapters/llm/errors.js";
 import { HTTP_CLIENT_TIMEOUT_MS } from "../config/timeouts.js";
@@ -898,24 +901,12 @@ export default async function route(app: FastifyInstance) {
       // ───────────────────────────────────────────────────────────────────────
       const rawReviewOutput = extractionResult.json as Record<string, unknown>;
       const gapRedaction = redactRunnerUpGapStatistic(rawReviewOutput);
-      if (gapRedaction.fields > 0) {
-        log.warn(
-          {
-            event: 'cee.decision_review.runner_up_gap_redacted',
-            request_id: requestId,
-            brief_hash: input.brief_hash,
-            // Field PATHS and pattern CODES only — never the matched prose,
-            // which is the user's own decision content (R-004).
-            hit_paths: gapRedaction.paths,
-            hit_codes: gapRedaction.codes,
-            hit_fields: gapRedaction.fields,
-          },
-          'cee.decision_review.runner_up_gap_redacted: the review stated the size of the lead as a ' +
-            'gap between options. The gap between two win frequencies is not a difference in outcome ' +
-            'and inflates when any other option collapses. FIX THE SERVED PROMPT — the repo default ' +
-            'is correct; the PMS `decision_review_default` row is what this alarm is measuring.',
-        );
-      }
+      logRunnerUpGapRedaction(
+        log,
+        'cee.decision_review.runner_up_gap_redacted',
+        { request_id: requestId, brief_hash: input.brief_hash },
+        gapRedaction,
+      );
       const reviewOutput = gapRedaction.value;
       const latencyMs = Date.now() - start;
 

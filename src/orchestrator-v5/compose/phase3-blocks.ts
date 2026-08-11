@@ -1624,15 +1624,18 @@ function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer |
   }
   const edge = selection.judgementEdge;
   if (edge === undefined) return null;
-  const composable =
-    selection.lens === 'override_stress_test'
-      ? isOverrideOfferComposable(edge.fromLabel, edge.toLabel)
-      : isDisagreementOfferComposable(edge.fromLabel, edge.toLabel);
+  // ONE discrimination for the whole function. It was previously spelled out
+  // three times as `selection.lens === 'override_stress_test'` and then bound to
+  // `isOverride` a fourth time further down — four readings of one fact, which
+  // is how a fifth branch acquires the wrong one.
+  const isOverride = selection.lens === 'override_stress_test';
+  const composable = isOverride
+    ? isOverrideOfferComposable(edge.fromLabel, edge.toLabel)
+    : isDisagreementOfferComposable(edge.fromLabel, edge.toLabel);
   if (!composable) return null;
-  const body =
-    selection.lens === 'override_stress_test'
-      ? composeOverrideBody(selection.body, edge.fromLabel, edge.toLabel)
-      : composeDisagreementBody(selection.body, edge.fromLabel, edge.toLabel);
+  const body = isOverride
+    ? composeOverrideBody(selection.body, edge.fromLabel, edge.toLabel)
+    : composeDisagreementBody(selection.body, edge.fromLabel, edge.toLabel);
   // ⭐ PR2 COMPLETE LOOP (L1) — THE ACTION. Gated on a SECOND predicate, asked of
   // the ACTUAL composed prompt on every run: "can this run's producer labels be
   // phrased into a turn that reaches the handler that fulfils it?" A `false`
@@ -1645,7 +1648,6 @@ function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer |
   // ⚠ NO `action_intent`, for the reason recorded at the block mint below: the
   // closed 15-value enum has no edge-mutation member, and the UI never
   // dispatches the field.
-  const isOverride = selection.lens === 'override_stress_test';
   const actionComposable = isOverride
     ? isOverrideActionComposable(edge.fromLabel, edge.toLabel)
     : isDisagreementActionComposable(edge.fromLabel, edge.toLabel);

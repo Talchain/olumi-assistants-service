@@ -22,6 +22,7 @@ import { fieldDeletion, type FieldDeletionEvent } from "../../utils/field-deleti
 // The canonical unit classifier — the question "does this unit denote a
 // dimension?" already has one answer in this service, and this is it.
 import { readUnit } from "../../../provenance/stated-amounts.js";
+import { thousands } from "../../../../orchestrator-v5/compose/format-factor-value.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -257,7 +258,11 @@ export function formatStatedMagnitude(
   // Keep at most two decimals, then drop a trailing ".00"/".x0".
   const fixed = Number.isInteger(abs) ? String(abs) : abs.toFixed(2).replace(/\.?0+$/, "");
   const [whole, fraction] = fixed.split(".");
-  const grouped = (whole ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  // The grouping rule is `orchestrator-v5/compose/format-factor-value.ts`'s
+  // `thousands` — imported, not re-spelled (CLAUDE.md trap 12). The two-decimal
+  // rounding, the sign and the unit dispatch below stay local: those are THIS
+  // formatter's rules, not the grouping's.
+  const grouped = thousands(Number(whole ?? "0"));
   const digits = `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
 
   // '%' is a suffix; a currency SYMBOL is a prefix; an alphabetic unit
@@ -524,19 +529,25 @@ export function handleUnreachableFactors(
       // Until then the honest description of this branch is: the value is
       // preserved, the scale is declared, the rendering is suppressed, and the
       // suppression is recorded where engineers can see it and users cannot.
+      // `data.unit !== undefined` was tested twice, once in each arm, so the
+      // two branches read as independent conditions when they are in fact the
+      // two halves of one decision. Nested, the shape says what it does: a
+      // stated unit either displays or is withheld-and-recorded.
       const withholdUnit = scale === "ratio";
-      if (data.unit !== undefined && !withholdUnit) {
-        (node as any).unit = data.unit;
-      } else if (data.unit !== undefined && withholdUnit) {
-        repairs.push({
-          code: "STATED_UNIT_WITHHELD_RATIO_SCALE",
-          path: `nodes[${node.id}].unit`,
-          action:
-            `Stated unit "${data.unit}" withheld from display on ratio-scale factor ` +
-            `"${node.label ?? node.id}" (value ${originalValue}): the '%' formatter ` +
-            `resolves bounds by magnitude and would render this range as a fraction. ` +
-            `declared_scale="ratio" is stamped; the value is preserved, not dropped.`,
-        });
+      if (data.unit !== undefined) {
+        if (!withholdUnit) {
+          (node as any).unit = data.unit;
+        } else {
+          repairs.push({
+            code: "STATED_UNIT_WITHHELD_RATIO_SCALE",
+            path: `nodes[${node.id}].unit`,
+            action:
+              `Stated unit "${data.unit}" withheld from display on ratio-scale factor ` +
+              `"${node.label ?? node.id}" (value ${originalValue}): the '%' formatter ` +
+              `resolves bounds by magnitude and would render this range as a fraction. ` +
+              `declared_scale="ratio" is stamped; the value is preserved, not dropped.`,
+          });
+        }
       }
       // If remaining data has no semantically valid union key, remove the property
       // so DraftGraphOutput.parse() doesn't fail on a partial object.

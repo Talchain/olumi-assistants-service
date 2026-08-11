@@ -99,9 +99,34 @@ export function composeFragileEdgeActionPrompt(fromLabel: string, toLabel: strin
   return `Adjust the strength of the link from ${fromLabel} to ${toLabel} in my model.`;
 }
 
+/**
+ * NAMING SENTENCE FIRST, THE LENS'S TAIL SECOND — the one composition rule, and
+ * the one length gate, shared by all three offers.
+ *
+ * ⚠ ONE DEFINITION, THREE CALLERS EACH. `compose{FragileEdge,Override,
+ * Disagreement}Body` were three byte-identical `${naming} ${base}` templates and
+ * `is{...}OfferComposable` three byte-identical `naming.length <= CAP` tests, in
+ * two files. Both rules are a PRODUCT decision with a measured cause — the
+ * ordering because a naming sentence placed last is the first thing truncation
+ * eats (it silently dropped an endpoint label on the live capture), the cap
+ * because it is the body cap the block mint truncates at — so three copies of
+ * each is the hand-maintained mirror class (CLAUDE.md trap 12) applied to
+ * user-facing copy: fixing one and missing another ships two different rules
+ * with nothing red. The three NAMING SENTENCES stay distinct; only the
+ * assembly and the gate are shared.
+ */
+export function composeOfferBody(naming: string, base: string): string {
+  return `${naming} ${base}`;
+}
+
+/** Does a naming sentence survive {@link COACHING_BLOCK_BODY_MAX} untruncated? */
+export function namingFitsBodyCap(naming: string): boolean {
+  return naming.length <= COACHING_BLOCK_BODY_MAX;
+}
+
 /** Naming sentence first, the lens's generic tail second. */
 export function composeFragileEdgeBody(base: string, fromLabel: string, toLabel: string): string {
-  return `${composeFragileEdgeNaming(fromLabel, toLabel)} ${base}`;
+  return composeOfferBody(composeFragileEdgeNaming(fromLabel, toLabel), base);
 }
 
 /**
@@ -129,7 +154,7 @@ export function composeFragileEdgeBody(base: string, fromLabel: string, toLabel:
  * guard with many readers and is NOT bundled here.
  */
 export function isFragileEdgeOfferComposable(fromLabel: string, toLabel: string): boolean {
-  if (composeFragileEdgeNaming(fromLabel, toLabel).length > COACHING_BLOCK_BODY_MAX) return false;
+  if (!namingFitsBodyCap(composeFragileEdgeNaming(fromLabel, toLabel))) return false;
   return isEditGraphDispatchable(composeFragileEdgeActionPrompt(fromLabel, toLabel));
 }
 

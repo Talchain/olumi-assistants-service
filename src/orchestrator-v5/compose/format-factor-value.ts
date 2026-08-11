@@ -42,8 +42,28 @@ export interface FormattedFactorValue {
   readonly value: number;
 }
 
-/** Deterministic thousands separator (avoids locale-dependent toLocaleString). */
-function thousands(n: number): string {
+/**
+ * Deterministic thousands separator (avoids locale-dependent toLocaleString).
+ *
+ * ⚠ EXPORTED AS THE ONE GROUPING RULE. Two other formatters carried a
+ * byte-identical `\B(?=(\d{3})+(?!\d))` copy — `unified-pipeline/stages/repair/
+ * unreachable-factors.ts` and `orchestrator-v5/label-value-divergence.ts` — and
+ * a grouping rule spelled three times is the hand-maintained mirror class
+ * (CLAUDE.md trap 12) sitting directly on user-visible numbers. Both now import
+ * this; each keeps its own UNIT DISPATCH, which genuinely differs. Byte-equal
+ * output was settled BY EXECUTION over a hand-written corpus plus 200,000 fuzz
+ * values per call site (0 divergences) — see
+ * `__tests__/thousands-grouping-parity.test.ts`, which runs the OLD inline form
+ * beside the import.
+ *
+ * ⚠ NOT A GENERAL NUMBER FORMATTER, AND DO NOT MAKE IT ONE. It groups the whole
+ * string it is given, so a non-integer argument gets a comma inside the
+ * FRACTION (`3.14159` → `3.14,159`). Every caller passes an INTEGER (or an
+ * already-split integer part), which is why this is correct where it is used —
+ * and it is why `direction-gate.ts`'s currency branch deliberately keeps
+ * `toLocaleString('en-GB')` (measured: 8 divergences on the reachable domain).
+ */
+export function thousands(n: number): string {
   const sign = n < 0 ? '-' : '';
   const digits = Math.abs(n).toString();
   return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');

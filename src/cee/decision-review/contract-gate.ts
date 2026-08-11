@@ -73,26 +73,22 @@ import { collectStrings } from './shape-check.js';
 // Contract count caps — the TIGHT prompt bound  (TELEMETRY-ONLY; see D-11 below)
 //
 // ⚠ A HAND-MAINTAINED MIRROR (trap #12: it drifts silently). These four maxima
-//   MIRROR the served decision_review prompt's own per-field schema.
+//   MIRROR the served decision_review prompt's own per-field schema, so
+//   RE-CHECK THEM ON EVERY decision_review PROMPT BUMP.
 //
-//   ⚠⚠ CORRECTED 2026-08-10 (F3 lane), AND THE CORRECTION MATTERS BECAUSE THE
-//   OLD TEXT TOLD EVERY READER NOT TO LOOK. It said the served prompt "lives
-//   OUTSIDE olumi-assistants-service", that it was PMS v13, and that these
-//   constants "CANNOT be derived in-repo". All three are false:
-//     • the served bytes ARE in this repo, at
-//       `Prompts/canonical/decision_review.txt` (README: "PMS is populated FROM
-//       here. Here is the source of truth");
-//     • the served pointer is **v15** (`Prompts/canonical/manifest.json`,
-//       `served_hash_verified: true`, sha256 `ba4879dd…`);
-//     • so a derivation IS available — parse the caps out of the canonical file,
-//       exactly as `tools/orchestrator-eval/src/decision-review/served-contract.ts`
-//       already parses the BANNED-terms block out of the same file.
-//   Until that derivation lands these constants stay a mirror, so RE-CHECK on
-//   every decision_review prompt bump. The old instruction *"do NOT add an
-//   in-repo copy of the prompt"* still stands and is now trivially satisfied:
-//   there is exactly one in-repo copy and it is the source of truth, not a copy.
-//   Reconciliation owner: the decision_review prompt-estate owner (see
-//   PROMPT-ESTATE-REGISTER.md); durable fix rowed from the PR #645 report.
+//   The served bytes are IN THIS REPO at `Prompts/canonical/decision_review.txt`
+//   (README: "PMS is populated FROM here. Here is the source of truth"), and the
+//   served pointer is v15 (`Prompts/canonical/manifest.json`,
+//   `served_hash_verified: true`, sha256 `ba4879dd…`). A derivation is therefore
+//   AVAILABLE and is the durable fix: parse the caps out of the canonical file,
+//   exactly as `tools/orchestrator-eval/src/decision-review/served-contract.ts`
+//   already parses the BANNED-terms block out of the same file. Until it lands
+//   these constants stay a mirror.
+//
+//   Do NOT add a second in-repo copy of the prompt: there is exactly one, and it
+//   is the source of truth. Reconciliation owner: the decision_review
+//   prompt-estate owner (see PROMPT-ESTATE-REGISTER.md); durable fix rowed from
+//   the PR #645 report.
 //
 // ⚠ BLAST RADIUS IS LOW BY CONSTRUCTION: since A1 ruling D-11 these caps are
 //   TELEMETRY-ONLY (see COUNT_CAP_RULES / isEnforcedRule below). A breach is

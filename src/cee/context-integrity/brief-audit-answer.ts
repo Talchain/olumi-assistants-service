@@ -206,13 +206,6 @@ const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
- * Conjunct 2b — verbs of OMISSION, which have no session-edit reading.
- *
- * The product's edit vocabulary is add / change / update / set. Nothing in it
- * means "leave out", so these identify a fidelity question on their own —
- * *"what did you leave out?"* is unambiguous even with no brief named.
- */
-/**
  * Conjunct 2c — a possessive reference to the user's own DATA rather than to
  * their brief as a document. Weak by construction: it does not distinguish
  * "the numbers I wrote in my brief" from "the numbers I set on the canvas", so
@@ -258,8 +251,7 @@ const RETENTION_VERB_PATTERNS: readonly RegExp[] = [
  * ⚠ `add` and `change` are NOT here, and must never be: they are the verbs the
  * session-edit arm owns, and putting them here would answer "what did you just
  * change?" with a report about the brief.
- */
-/**
+ *
  * ⚠ BOUND TO THE FRAME, NOT MERELY CO-OCCURRING WITH IT. Round 2 tested these
  * verbs anywhere in the sentence, so `Assuming` at the head of a conditional
  * paired with a frame match further along and claimed the turn. The verb must
@@ -289,6 +281,13 @@ const INFERENCE_VERB_PATTERNS: readonly RegExp[] = [
   new RegExp(`\\byou\\s+(?:\\w+\\s+){0,2}(?:${PAST_INFERENCE_VERB})\\b`, "i"),
 ];
 
+/**
+ * Conjunct 2b — verbs of OMISSION, which have no session-edit reading.
+ *
+ * The product's edit vocabulary is add / change / update / set. Nothing in it
+ * means "leave out", so these identify a fidelity question on their own —
+ * *"what did you leave out?"* is unambiguous even with no brief named.
+ */
 const OMISSION_VERB_PATTERNS: readonly RegExp[] = [
   /\ble(?:ave|aving|ft)\s+out\b/i,
   /\bomit(?:ted|ting|s)?\b/i,
