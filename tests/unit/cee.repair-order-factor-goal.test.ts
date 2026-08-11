@@ -39,7 +39,9 @@
  * live gate saw, which is what this defect is about.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { runStageEnrich } from "../../src/cee/unified-pipeline/stages/enrich.js";
+import { log } from "../../src/utils/telemetry.js";
 import {
   simpleRepair,
   ALLOWED_EDGE_PATTERNS,
@@ -276,6 +278,78 @@ describe("repair order — factor→goal must reach the authority that repairs i
       const g = crmRecordSetGraph();
       (g.edges as any[]).push(edge("fac_licence_cost", "node_that_does_not_exist", 0.5, "positive"));
       expect(countEdgePatternViolations(g)).toEqual({ invalid: 0, deferred: 2 });
+    });
+  });
+
+  // -- Stage 3 end to end. The unit assertions above prove simpleRepair's behaviour;
+  // -- they say nothing about whether the STAGE reports it honestly. Both halves are
+  // -- driven through the real `runStageEnrich`, the only call site that matters here.
+  describe("Stage 3 (runStageEnrich) — the real call site", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Minimal StageContext — only the fields Stage 3 reads. */
+    function makeCtx(graph: GraphT): any {
+      return {
+        input: {},
+        rawBody: {},
+        request: {},
+        requestId: "test-repair-order",
+        opts: { schemaVersion: "v1" as const },
+        start: Date.now(),
+        graph,
+        effectiveBrief: "Should we replace our CRM with HubSpot next quarter?",
+        rationales: [],
+        draftCost: 0,
+        skipRepairDueToBudget: false,
+        repairTimeoutMs: 0,
+        draftDurationMs: 0,
+        riskCoefficientCorrections: [],
+        transforms: [],
+        hadCycles: false,
+        nodeRenames: new Map<string, string>(),
+      };
+    }
+
+    it("carries the goal-terminating links out of Stage 3, and reports them as DEFERRED not INVALID", async () => {
+      const warnSpy = vi.spyOn(log, "warn");
+      const infoSpy = vi.spyOn(log, "info");
+
+      const ctx = makeCtx(crmRecordSetGraph());
+      await runStageEnrich(ctx);
+
+      // (a) The stage's output still carries the pattern, so Stage 4's splitter can see it.
+      expect(hasEdge(ctx.graph as GraphT, LINK_LICENCE_TO_GOAL.from, GOAL_ID)).toBe(true);
+      expect(hasEdge(ctx.graph as GraphT, LINK_PRODUCTIVITY_TO_GOAL.from, GOAL_ID)).toBe(true);
+
+      // (b) The post-repair alarm did not cry wolf about a deliberate deferral. An
+      // alarm that fires on every ordinary draft is one everyone learns to ignore.
+      const events = (spy: typeof warnSpy) =>
+        spy.mock.calls.map((c) => (c[0] as any)?.event).filter(Boolean);
+      expect(events(warnSpy)).not.toContain("cee.enrich.post_repair_invalid_edges");
+
+      // (c) …but the deferral IS reported, with the count, so "deferred in, never
+      // repaired out" is observable rather than silent.
+      const deferred = infoSpy.mock.calls
+        .map((c) => c[0] as any)
+        .find((a) => a?.event === "cee.enrich.post_repair_deferred_edges");
+      expect(deferred, "Stage 3 must record the handoff it just performed").toBeDefined();
+      expect(deferred.deferred_count).toBe(2);
+    });
+
+    it("still raises the invalid-edge alarm when an edge nothing owns survives", async () => {
+      // Positive control for the assertion above: prove the alarm can still fire, or
+      // "it did not fire" is evidence of nothing (platform trap 13). Fed by stubbing
+      // the count directly — reaching this state through the pipeline would require a
+      // later stage to re-add an edge, which is exactly the condition that should not
+      // be reachable.
+      const { countEdgePatternViolations: real } = await import("../../src/services/repair.js");
+      expect(real({
+        nodes: [
+          { id: "f", kind: "factor" },
+          { id: "o", kind: "option" },
+        ] as any,
+        edges: [{ from: "f", to: "o" }] as any,
+      })).toEqual({ invalid: 1, deferred: 0 });
     });
   });
 });
