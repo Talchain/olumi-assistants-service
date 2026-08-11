@@ -1337,6 +1337,48 @@ export function detectUncoveredNegatedBounds(
  * all still apply to them. A minted row is a candidate, never a verdict.
  * ========================================================================= */
 
+/**
+ * NEGATIVE QUANTIFIERS — the mint-only limb of the outer-negation screen.
+ *
+ * ⚠⚠ SCOPED TO THE MINT ON PURPOSE, AND NOT ADDED TO `NEG_CORE_SRC`. The shared
+ * predicate is corpus-hardened and its exact whitespace behaviour is
+ * load-bearing elsewhere (`no(?=\s)` is what keeps `no-show`, `no-contact` and
+ * `non-renewal` out of the negation class while `no show rate` stays in it).
+ * Widening it would change the PARTITION's behaviour for every producer row in
+ * the estate — a far larger blast radius than the defect being closed, and
+ * exactly the "while we're here" expansion the scope rule prohibits.
+ *
+ * WHY IT IS NEEDED AT ALL. A negative quantifier revokes the requirement just as
+ * an outer negation does, and none of them are in the shared lexicon:
+ *
+ *     "Nobody said CSAT cannot drop below 85%."              -> out_csat >= 0.85
+ *     "None of the stakeholders said CSAT cannot drop below 85%."
+ *     "Neither team said CSAT cannot drop below 85%."
+ *
+ * All three ASSERTED a limit the user explicitly denied having, measured at the
+ * full stage against all three captured staging graphs, binding `out_csat` —
+ * i.e. through the MINT, so they are this change's regressions and not the
+ * extractor's pre-existing ones.
+ *
+ * ⭐ AND THIS CANNOT BE PINNED AS A KNOWN GAP. A known-set records constraints
+ * DROPPED — a gap the user can see and recover from. This is a constraint
+ * INVENTED, which the user cannot see at all. The two harm classes are not
+ * interchangeable and nothing in the lie direction ships as an accepted cost.
+ *
+ * ⚠ WORD-BOUNDED, DELIBERATELY — unlike the shared predicate's `not`, which is
+ * not (see the known-gap note on {@link findProvenUncoveredBounds}). Verified by
+ * execution that `nonetheless`, `non-renewal` and `no-show` do NOT match, so
+ * this limb adds no false withholding of its own.
+ *
+ * ⚠ `nothing` IS LISTED EVEN THOUGH IT IS ALREADY CAUGHT TODAY — and that is
+ * the point. "Nothing requires that CSAT cannot drop below 85%" is currently
+ * screened only because the shared `not` alternative is UNBOUNDED and matches
+ * the letters inside `No-t-hing`. That is an accident of a defect, not a rule,
+ * and it would vanish the moment someone correctly word-bounds `not`. Stating
+ * it here makes the coverage intentional and survives that repair.
+ */
+const OUTER_NEGATIVE_QUANTIFIER_RE = /\b(?:nobody|no\s+one|none|neither|nothing|no\s+such)\b/i;
+
 /** A bound whose direction the construction table proves, that no row carries. */
 export interface ProvenUncoveredBound {
   /** The T1 entry that proved it — carried for telemetry and explainability. */
@@ -1426,6 +1468,20 @@ export function findProvenUncoveredBounds(
       // Strictly reduces minting, so it cannot introduce a lie — and the band
       // (T1-8) is untouched, because its floor and ceiling carry DIFFERENT
       // values and are grouped separately.
+      //
+      // ⚠ KNOWN GAP, AND IT IS NOT A FAILURE OF THIS RULE:
+      //
+      //     "CSAT cannot drop below 85% and CSAT cannot climb above 85%."
+      //
+      // still mints the FLOOR, because `climb above` produces no T1 ceiling
+      // match at all — so there is no disagreement here to detect. The guard
+      // above can only see contradictions the TABLE surfaces; a construction
+      // the table does not recognise is invisible to it. Behaviour is identical
+      // to before this rule existed, so it is not a regression, and the harm is
+      // in the DROPPED direction (half a stated limit captured, the other half
+      // lost) rather than the invented one. Widening the table to reach
+      // `climb above` is a T1 change with its own corpus obligations, not a
+      // tweak to this predicate.
       if (group.some((m) => m.direction !== best.direction)) continue;
       // ⭐⭐ S3, SPAN-SCOPED — THE SCREEN THAT STOPS THE MINT ASSERTING A LIMIT
       // THE USER REVOKED.
@@ -1473,8 +1529,18 @@ export function findProvenUncoveredBounds(
       // METRIC NAME contains `no` — is untouched. A hand-rolled `\bno\b` here
       // would have suppressed it, which is the exact defect that lexicon's own
       // comment records having been written to prevent.
+      //
+      // ⚠ KNOWN GAP, INHERITED AND ACCEPTED (recorded where an editor will see
+      // it): the shared predicate's `not` alternative is NOT word-bounded, so
+      // it fires inside `Notification`, `Notice`, `Notional` and `Note`. A
+      // sentence like "Notice period must not exceed 30 days" is therefore
+      // WITHHELD rather than minted. That is the accepted-cost direction — a
+      // question instead of a row, never a row the user did not state — so it
+      // is deliberately not repaired here: the fix belongs in the shared
+      // predicate, where it changes the partition for every producer, and that
+      // is a separate re-briefed change. Do not "tidy" it locally.
       const outerScope = `${s.text.slice(0, best.index)} ${best.subject ?? ''}`;
-      if (hasUnspentNegation(outerScope)) continue;
+      if (hasUnspentNegation(outerScope) || OUTER_NEGATIVE_QUANTIFIER_RE.test(outerScope)) continue;
 
       if (isCoveredValue(value, coveredValues)) continue;
       // ⚠ THIS LINE IS DEFENCE IN DEPTH AND IS *NOT* LOAD-BEARING — recorded so

@@ -354,6 +354,64 @@ describe('ROADMAP 2.1051 limb 2 — mint the bound the construction table alread
     expect(r.asks.length, 'the user is asked, exactly as the deployed build does').toBeGreaterThan(0);
   });
 
+  it.each([
+    ['nobody', 'Nobody said CSAT cannot drop below 85%.'],
+    ['none of the', 'None of the stakeholders said CSAT cannot drop below 85%.'],
+    ['neither', 'Neither team said CSAT cannot drop below 85%.'],
+    ['no one', 'No one said CSAT cannot drop below 85%.'],
+    ['nothing', 'Nothing requires that CSAT cannot drop below 85%.'],
+  ])('NEGATIVE QUANTIFIER (%s): the mint asserts NOTHING', (_name, brief) => {
+    // ⚠⚠ ROUND-2 BLOCKER, AND IT WAS THIS CHANGE'S REGRESSION, NOT THE
+    // EXTRACTOR'S. The round-2 known-set asserted these leak via
+    // `goal_4day_success` — true of the `must not` phrasings it happened to
+    // contain, and FALSE of the `cannot` phrasings, which route through T1-2b
+    // and bind `out_csat` through the MINT. The corpus was short in exactly the
+    // way it had already been short twice (trap 22b), and the tell was that the
+    // set was built from one construction rather than from the class.
+    //
+    // A negative quantifier revokes the requirement just as an outer negation
+    // does, and none of them are in the shared lexicon.
+    //
+    // ⭐ THIS COULD NOT BE PINNED AS A KNOWN GAP. A known-set records a
+    // constraint DROPPED — a gap the user can see and recover from. This is a
+    // constraint INVENTED, which the user cannot see at all.
+    expect(
+      findT1Matches(brief).length,
+      'fixture must carry a proven construction, or this proves nothing',
+    ).toBeGreaterThan(0);
+
+    const r = run(brief, CAPTURED.runs.live_r1!.nodes);
+    expect(r.wire, 'a limit the user denied having must never be asserted').toEqual([]);
+    expect(r.asks.length, 'and the user is asked instead').toBeGreaterThan(0);
+  });
+
+  it.each(['live_r1', 'live_r2', 'live_r3'] as const)(
+    'NEGATIVE QUANTIFIER binds nothing on the captured graph %s either',
+    (runId) => {
+      // The round-2 leak was proven at the full stage on all three captured
+      // graphs, so the fix is verified on all three rather than on one.
+      const r = run('Nobody said CSAT cannot drop below 85%.', CAPTURED.runs[runId]!.nodes);
+      expect(r.wire).toEqual([]);
+    },
+  );
+
+  it('NEGATIVE QUANTIFIER does not suppress metrics whose NAME merely starts with those letters', () => {
+    // The opposite-direction twin (trap 22b), and the reason this limb is
+    // word-bounded while the shared predicate's `not` is not. `nonetheless`,
+    // `non-renewal` and `no-show` must all read as ORDINARY WORDS.
+    for (const s of ['nonetheless', 'non-renewal rate', 'no-show rate', 'a note on scope']) {
+      expect(/\b(?:nobody|no\s+one|none|neither|nothing|no\s+such)\b/i.test(s), `${s} must not read as a quantifier`).toBe(false);
+    }
+    const nodes = [
+      { id: 'goal_x', kind: 'goal', label: 'Retain customers' },
+      { id: 'fac_non_renewal_rate', kind: 'factor', label: 'Non-renewal rate' },
+    ];
+    const r = run('Keep non-renewal rate from rising above 3%.', nodes);
+    const rows = r.wire.filter((w) => w.node_id === 'fac_non_renewal_rate');
+    expect(rows, 'a legitimate ceiling on a non-prefixed metric must still ship').toHaveLength(1);
+    expect(rows[0]!.operator).toBe('<=');
+  });
+
   it('OUTER NEGATION does not suppress a legitimate metric whose NAME contains a negation token', () => {
     // The opposite-direction twin (trap 22b). `no-show rate` is a compound, not
     // a negation, and the hardened predicate knows it: `no(?=\s)` matches only
