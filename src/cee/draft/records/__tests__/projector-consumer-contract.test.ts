@@ -52,6 +52,13 @@ const RECORDS: DraftRecordSet = {
   claims: [
     { claim_kind: "factor", label: "implementation cost", basis: [1, 3], category: "controllable", value: 4500 },
     { claim_kind: "causal_link", label: "CRM reduces churn", basis: [1], from_ref: "s1", to_ref: "s4", effect: "negative", strength: 0.4 },
+    // ⚠ THE SPINE IS PART OF THE FIXTURE. The projector withdraws any factor or
+    // constraint that reaches no goal (pass 3b), so an unconnected fixture would
+    // leave almost nothing to validate and every assertion below would agree with
+    // itself on an empty graph — the vacuous pass this file exists to prevent.
+    { claim_kind: "causal_link", label: "churn bears on the goal", basis: [4], from_ref: "s4", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [3], from_ref: "c0", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [3], from_ref: "s3", to_ref: "s0", effect: "negative" },
   ],
 };
 
@@ -77,6 +84,7 @@ const LONG_RECORDS: DraftRecordSet = {
   claims: [
     { claim_kind: "factor", label: "training cost", basis: [1], value: 6000 },
     { claim_kind: "causal_link", label: "training raises adoption", basis: [0, 1], from_ref: "c0", to_ref: "s0", effect: "positive", strength: 0.3 },
+    { claim_kind: "causal_link", label: "the margin floor bears on the goal", basis: [2], from_ref: "s2", to_ref: "s0", effect: "negative" },
   ],
 };
 

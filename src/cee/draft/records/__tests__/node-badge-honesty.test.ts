@@ -47,6 +47,18 @@ const RECORDS: DraftRecordSet = {
     { claim_kind: "factor", label: "implementation cost", basis: [1], category: "controllable", value: 4500 },
     // A factor the model added with no basis at all — pure invention.
     { claim_kind: "factor", label: "staff resistance", category: "external" },
+    // ⚠ THE SPINE IS PART OF THE FIXTURE, not decoration. The projector
+    // withdraws any factor or constraint that reaches no goal (see pass 3b), so
+    // a fixture without connections would silently project to almost nothing and
+    // every badge assertion below would pass vacuously on an empty set — the
+    // failure mode where a test agrees with itself because there is nothing left
+    // to disagree with. Every derived node here is deliberately connected.
+    { claim_kind: "causal_link", label: "the new CRM raises capacity", basis: [1], from_ref: "s1", to_ref: "c0", effect: "positive" },
+    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [1], from_ref: "c0", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "resistance bears on the goal", from_ref: "c1", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "current churn bears on the goal", basis: [3], from_ref: "s3", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "support load bears on the goal", basis: [4], from_ref: "s4", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [5], from_ref: "s5", to_ref: "s0", effect: "negative" },
   ],
 };
 

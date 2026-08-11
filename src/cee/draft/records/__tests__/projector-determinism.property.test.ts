@@ -215,12 +215,29 @@ describe("C-K1 control: the battery is running on something", () => {
 
   it("the real record sets project to graphs with nodes, edges and disclosures", () => {
     const crm = projectRecordsToGraph(REAL_RECORD_SETS[0]!.records);
-    expect(crm.graph.nodes.length).toBeGreaterThan(5);
+    expect(crm.graph.nodes.length).toBeGreaterThan(0);
     expect(crm.graph.edges.length).toBeGreaterThan(0);
 
+    // ⭐ THESE RECORD SETS PREDATE THE CONNECTIVITY INSTRUCTION, and that shows.
+    // They were captured when the instruction asked only for two lists, so most
+    // of their derived material connects to nothing. Pass 3b withdraws it — and
+    // the point of asserting it HERE is that the withdrawal is DISCLOSED: every
+    // node the projector declines to place is named in `dropped`, so the count
+    // that leaves the graph and the count that appears in the disclosure are the
+    // same number. Silent loss would satisfy the graph assertion above and fail
+    // this one.
+    const withdrawn = crm.dropped.filter((d) => d.reason === "unconnected_to_goal");
+    expect(withdrawn.length).toBeGreaterThan(0);
+    for (const d of withdrawn) expect(d.label.length).toBeGreaterThan(0);
+
     const b = projectRecordsToGraph(REAL_RECORD_SETS[1]!.records);
-    // The two bad refs must be DISCLOSED, not silently swallowed.
-    expect(b.dropped.map((d) => d.reason).sort()).toEqual(["ref_out_of_range", "self_loop"]);
+    // The two bad refs must be DISCLOSED, not silently swallowed. Asserted as a
+    // SET MEMBERSHIP rather than an exact list, because the same `dropped`
+    // channel now also carries withdrawals — one vocabulary for "the projector
+    // did not place this", which is the point, but it means this assertion must
+    // name the reasons it is about.
+    const refReasons = b.dropped.map((d) => d.reason).filter((r) => r !== "unconnected_to_goal");
+    expect(refReasons.sort()).toEqual(["ref_out_of_range", "self_loop"]);
   });
 });
 
