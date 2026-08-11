@@ -623,6 +623,16 @@ export interface T1Match {
   readonly amountText: string;
   readonly subject: string | null;
   readonly length: number;
+  /**
+   * Where the construction STARTS in the normalised sentence.
+   *
+   * Carried so a caller can screen the text OUTSIDE the construction's own
+   * span. Inside the partition that is unnecessary — a row with its own T1
+   * verdict is decided by S2 and never reaches S3 — but a caller that MINTS
+   * from the verdict has no row to fall back on, and an outer negation that
+   * revokes the whole construction is invisible from inside it.
+   */
+  readonly index: number;
 }
 
 /**
@@ -645,7 +655,16 @@ export function findT1Matches(sentence: string): T1Match[] {
         if (typeof text !== 'string' || text.length === 0) return;
         const { value, unit } = parseValue(text);
         if (!Number.isFinite(value)) return;
-        out.push({ id: entry.id, direction: dir, value, unit, amountText: text, subject, length: m[0].length });
+        out.push({
+          id: entry.id,
+          direction: dir,
+          value,
+          unit,
+          amountText: text,
+          subject,
+          length: m[0].length,
+          index: m.index ?? 0,
+        });
       };
       if (entry.direction === 'band') {
         // The low amount is the floor, the high amount is the ceiling.
@@ -1212,6 +1231,21 @@ const PREVENTION_CONSTRUCTION_RE =
 
 const BARE_AMOUNT_RE = new RegExp(`(?:(${SUBJ})\\s+)?(?<![\\d.,])(${AMT})`, 'gi');
 
+/**
+ * Does a surviving row already carry this quantity?
+ *
+ * ONE implementation, shared by the detector below and by
+ * {@link findProvenUncoveredBounds}. The two ask the identical question — "has a
+ * producer already spoken for this number?" — and a second copy of the
+ * percent/fraction tolerances would be a hand-maintained mirror of the first
+ * (trap 12), drifting silently the first time either side gained a unit.
+ */
+export function isCoveredValue(value: number, coveredValues: readonly number[]): boolean {
+  return coveredValues.some(
+    (v) => Math.abs(v - value) < 1e-9 || Math.abs(v - value / 100) < 1e-9 || Math.abs(v * 100 - value) < 1e-9,
+  );
+}
+
 export function detectUncoveredNegatedBounds(
   brief: string | null | undefined,
   coveredValues: readonly number[],
@@ -1243,10 +1277,7 @@ export function detectUncoveredNegatedBounds(
       const { value } = parseValue(amountText);
       if (!Number.isFinite(value)) continue;
       // Covered: a surviving PROVEN row already carries this quantity.
-      const covered = coveredValues.some(
-        (v) => Math.abs(v - value) < 1e-9 || Math.abs(v - value / 100) < 1e-9 || Math.abs(v * 100 - value) < 1e-9,
-      );
-      if (covered) continue;
+      if (isCoveredValue(value, coveredValues)) continue;
       // The local capture is the best evidence for WHICH metric, but an
       // interrupted construction leaves it pointing at the aside rather than at
       // the subject ("even during migration — fall below 92%"). When it cleans
@@ -1271,6 +1302,284 @@ export function detectUncoveredNegatedBounds(
       out.push({ metric_text: metric, amount_text: amountText, sentence_index: idx });
     }
   });
+
+  return out;
+}
+
+/* ===========================================================================
+ * 3.7 — THE MINT FROM THE CONSTRUCTION VERDICT
+ *
+ * ⚠⚠ THE ASYMMETRY THIS CLOSES. §3.6's detector turns a dropped bound into a
+ * QUESTION. That is the right answer when the direction is genuinely unknown —
+ * and the WRONG one when this module has already PROVEN it. Measured on
+ * deployed staging (build 32f06dd, 2026-08-10):
+ *
+ *     "Do not let CSAT drop below 85% — that is a hard limit for the board"
+ *
+ * `findT1Matches` returns T1-2 / floor / subject "CSAT" / 0.85 — a proven
+ * verdict — while the extractor's `NEGATION_LEAD` lacks `do not`, so
+ * `NEGATED_FLOOR_PATTERNS` mints nothing and `suppressionWindow` (correctly)
+ * kills the inverted ceiling reading. Net output: silence, and a board-level
+ * limit is asked about rather than captured.
+ *
+ * ⭐ WHY THIS AND NOT A WIDER `NEGATION_LEAD`. Trap 22f ruled that predicate
+ * unwinnable by lexicon rounds, and `NEGATION_LEAD` is BIDIRECTIONAL — it also
+ * drives suppression — so widening it reopens the over-suppression class that
+ * dropped 13 of 14 legitimate ceilings. The T1 table is adjacency-bound, has no
+ * window constants, and is the corpus-hardened artefact of that whole
+ * argument. Minting from ITS verdict reuses the hardened lexicon instead of
+ * growing a second, weaker one beside it.
+ *
+ * ⭐ IT CANNOT INVENT A DIRECTION, BY CONSTRUCTION. This function emits nothing
+ * the construction table has not already proven, and the rows it produces are
+ * fed back through the SAME partition as every other row — so S1 (explicit
+ * ambiguity), the risk-polarity gate, the temporal gate and S4 (contested)
+ * all still apply to them. A minted row is a candidate, never a verdict.
+ * ========================================================================= */
+
+/**
+ * NEGATIVE QUANTIFIERS — the mint-only limb of the outer-negation screen.
+ *
+ * ⚠⚠ SCOPED TO THE MINT ON PURPOSE, AND NOT ADDED TO `NEG_CORE_SRC`. The shared
+ * predicate is corpus-hardened and its exact whitespace behaviour is
+ * load-bearing elsewhere (`no(?=\s)` is what keeps `no-show`, `no-contact` and
+ * `non-renewal` out of the negation class while `no show rate` stays in it).
+ * Widening it would change the PARTITION's behaviour for every producer row in
+ * the estate — a far larger blast radius than the defect being closed, and
+ * exactly the "while we're here" expansion the scope rule prohibits.
+ *
+ * WHY IT IS NEEDED AT ALL. A negative quantifier revokes the requirement just as
+ * an outer negation does, and none of them are in the shared lexicon:
+ *
+ *     "Nobody said CSAT cannot drop below 85%."              -> out_csat >= 0.85
+ *     "None of the stakeholders said CSAT cannot drop below 85%."
+ *     "Neither team said CSAT cannot drop below 85%."
+ *
+ * All three ASSERTED a limit the user explicitly denied having, measured at the
+ * full stage against all three captured staging graphs, binding `out_csat` —
+ * i.e. through the MINT, so they are this change's regressions and not the
+ * extractor's pre-existing ones.
+ *
+ * ⭐ AND THIS CANNOT BE PINNED AS A KNOWN GAP. A known-set records constraints
+ * DROPPED — a gap the user can see and recover from. This is a constraint
+ * INVENTED, which the user cannot see at all. The two harm classes are not
+ * interchangeable and nothing in the lie direction ships as an accepted cost.
+ *
+ * ⚠ WORD-BOUNDED, DELIBERATELY — unlike the shared predicate's `not`, which is
+ * not (see the known-gap note on {@link findProvenUncoveredBounds}). Verified by
+ * execution that `nonetheless`, `non-renewal` and `no-show` do NOT match, so
+ * this limb adds no false withholding of its own.
+ *
+ * ⚠ `nothing` IS LISTED EVEN THOUGH IT IS ALREADY CAUGHT TODAY — and that is
+ * the point. "Nothing requires that CSAT cannot drop below 85%" is currently
+ * screened only because the shared `not` alternative is UNBOUNDED and matches
+ * the letters inside `No-t-hing`. That is an accident of a defect, not a rule,
+ * and it would vanish the moment someone correctly word-bounds `not`. Stating
+ * it here makes the coverage intentional and survives that repair.
+ */
+const OUTER_NEGATIVE_QUANTIFIER_RE = /\b(?:nobody|no\s+one|none|neither|nothing|no\s+such)\b/i;
+
+/** A bound whose direction the construction table proves, that no row carries. */
+export interface ProvenUncoveredBound {
+  /** The T1 entry that proved it — carried for telemetry and explainability. */
+  readonly t1_id: string;
+  readonly direction: 'floor' | 'ceiling';
+  readonly value: number;
+  readonly unit: string;
+  readonly amount_text: string;
+  /** The metric in the user's own words, cleaned. Never a node id. */
+  readonly subject: string;
+  /** The sentence that proved it — the evidence the row will carry. */
+  readonly sentence: string;
+}
+
+/**
+ * Every bound in the brief whose direction T1 PROVES and which no producer row
+ * already covers.
+ *
+ * Fails closed on every axis, and each refusal is a case the detector still
+ * turns into a question, so nothing becomes silent that was not silent before:
+ *
+ *   · a sentence that declares its own ambiguity  -> nothing (S1 outranks it);
+ *   · no subject in the construction              -> nothing (a bound with no
+ *     metric cannot be bound to a node BY IDENTITY, and proximity is not
+ *     identity — trap 19);
+ *   · a subject that cleans to no user word       -> nothing;
+ *   · two constructions of EQUAL length disagreeing on direction -> nothing;
+ *   · a quantity a producer already carries       -> nothing (the mint fills a
+ *     hole; it never competes with, overrides or duplicates a producer).
+ */
+export function findProvenUncoveredBounds(
+  brief: string | null | undefined,
+  coveredValues: readonly number[],
+): ProvenUncoveredBound[] {
+  if (typeof brief !== 'string' || brief.trim().length === 0) return [];
+  const out: ProvenUncoveredBound[] = [];
+  const seen = new Set<string>();
+
+  for (const s of splitSentences(normaliseEvidenceText(brief))) {
+    // S1 outranks the construction verdict in the partition; it outranks the
+    // mint for the same reason. A user who said they had not decided is asked.
+    //
+    // ⚠ ALSO DEFENCE IN DEPTH, AND DEMONSTRATED RATHER THAN ASSERTED (trap
+    // 13c). A mutant deleting this screen SURVIVES, because a minted row is
+    // deliberately routed back through `partitionUnprovenDirection`, whose own
+    // S1 then withholds it: executed on "We are still deciding the target, so
+    // do not let CSAT drop below 85% for now.", the would-be-minted row comes
+    // back `unresolved / explicit_ambiguity`. The redundancy is the DESIGN
+    // working — the mint is a candidate, not a verdict — and this screen stays
+    // so the mint does not depend on a downstream gate to stay honest.
+    if (hasExplicitAmbiguity(s.text)) continue;
+
+    const matches = findT1Matches(s.text);
+    if (matches.length === 0) continue;
+
+    // Group by the amount each construction governs, so the "longest match
+    // wins" rule is applied PER BOUND — exactly as S2 applies it — rather than
+    // once per sentence. A sentence may state a floor and a ceiling.
+    const byValue = new Map<number, T1Match[]>();
+    for (const m of matches) {
+      const list = byValue.get(m.value);
+      if (list) list.push(m);
+      else byValue.set(m.value, [m]);
+    }
+
+    for (const [value, group] of byValue) {
+      const best = group.reduce((a, b) => (b.length > a.length ? b : a));
+      // ⭐⭐ ANY DISAGREEMENT ON ONE QUANTITY IS A CONTRADICTION, NOT A VERDICT —
+      // WIDENED FROM AN EQUAL-LENGTH TIE AFTER MEASURING A REAL SENTENCE.
+      //
+      //     "CSAT must stay above 85% and must not exceed 85%."
+      //
+      // yields T1-5:ceiling(19), T1-5b:ceiling(23) and T1-7b:floor(24) on the
+      // SAME value. The lengths are unequal, so an equal-length tie-break never
+      // fires, and "longest wins" hands the user a FLOOR — one side of a
+      // contradiction they wrote, chosen by which regex happened to match four
+      // characters more. That is an arbitrary discriminator deciding a hard
+      // limit, which is the shape trap 22f ruled against.
+      //
+      // "Longest wins" is right for the PARTITION, where the row is a producer's
+      // own evidence and the construction merely screens it. It is wrong for a
+      // MINT, which has no row and would be manufacturing one from the more
+      // verbose of two contradictory readings. The gate's own S4 already
+      // settles contradiction by withholding BOTH and asking; the mint now
+      // matches that semantic instead of inventing a second one.
+      //
+      // Strictly reduces minting, so it cannot introduce a lie — and the band
+      // (T1-8) is untouched, because its floor and ceiling carry DIFFERENT
+      // values and are grouped separately.
+      //
+      // ⚠ KNOWN GAP, AND IT IS NOT A FAILURE OF THIS RULE:
+      //
+      //     "CSAT cannot drop below 85% and CSAT cannot climb above 85%."
+      //
+      // still mints the FLOOR, because `climb above` produces no T1 ceiling
+      // match at all — so there is no disagreement here to detect. The guard
+      // above can only see contradictions the TABLE surfaces; a construction
+      // the table does not recognise is invisible to it. Behaviour is identical
+      // to before this rule existed, so it is not a regression, and the harm is
+      // in the DROPPED direction (half a stated limit captured, the other half
+      // lost) rather than the invented one. Widening the table to reach
+      // `climb above` is a T1 change with its own corpus obligations, not a
+      // tweak to this predicate.
+      if (group.some((m) => m.direction !== best.direction)) continue;
+      // ⭐⭐ S3, SPAN-SCOPED — THE SCREEN THAT STOPS THE MINT ASSERTING A LIMIT
+      // THE USER REVOKED.
+      //
+      // A negation OUTSIDE the construction scopes OVER it and cancels it:
+      //
+      //     "We do not need to keep CSAT from falling below 85%"
+      //
+      // T1-3 matches `keep CSAT from falling below 85%` and proves a FLOOR —
+      // correctly, because that IS what the construction means. What the
+      // construction cannot see is the `do not need to` in front of it, which
+      // revokes the whole requirement. Minting there asserts a limit the user
+      // has just told us they do not have: the mint-a-lie direction, and the
+      // one thing this gate exists to make impossible.
+      //
+      // ⚠ AND IT IS UNREACHABLE FROM THE PARTITION, BY DESIGN. S3 screens rows
+      // that have NO construction verdict; a row carrying its own verdict is
+      // decided by S2 and never reaches it (see `hasUnspentNegation`'s own
+      // note). That is right for a row a producer already minted — the row is
+      // evidence in its own right. It is WRONG for a mint, which has no row and
+      // is manufacturing one from the construction alone.
+      //
+      // So the same hardened predicate is reused, scoped to the text before the
+      // construction's own negation operator. No new lexicon, no window
+      // constant, no clause discrimination — the three things trap 22f closed.
+      //
+      // ⚠ THE SUBJECT IS PART OF THAT SCOPE, AND MEASURING IS WHAT SHOWED IT.
+      // The subject capture is width-bounded and greedy, so it routinely
+      // SWALLOWS the outer negation:
+      //
+      //   "There is no requirement that CSAT must not drop below 85%"
+      //        -> T1-2b subject = "no requirement that CSAT", prefix = "There is "
+      //   "We are no longer requiring that CSAT does not drop below 85%"
+      //        -> T1-2b subject = "longer requiring that CSAT", prefix = "We are no "
+      //
+      // A prefix-only screen misses BOTH: in the first the negation is inside
+      // the capture, and in the second it sits at the prefix's trailing edge
+      // where `no(?=\s)` cannot fire once the text is trimmed. The construction's
+      // meaning begins at ITS OWN negation token, so everything before that —
+      // prefix AND swallowed subject — is outer context.
+      //
+      // ⚠ AND THE COMPOUND CASE IS WHY THE HARDENED PREDICATE IS REUSED RATHER
+      // THAN REWRITTEN: `no(?=\s)` matches only before whitespace, so
+      // "Keep no-show rate from rising above 3%" — a legitimate ceiling whose
+      // METRIC NAME contains `no` — is untouched. A hand-rolled `\bno\b` here
+      // would have suppressed it, which is the exact defect that lexicon's own
+      // comment records having been written to prevent.
+      //
+      // ⚠ KNOWN GAP, INHERITED AND ACCEPTED (recorded where an editor will see
+      // it): the shared predicate's `not` alternative is NOT word-bounded, so
+      // it fires inside `Notification`, `Notice`, `Notional` and `Note`. A
+      // sentence like "Notice period must not exceed 30 days" is therefore
+      // WITHHELD rather than minted. That is the accepted-cost direction — a
+      // question instead of a row, never a row the user did not state — so it
+      // is deliberately not repaired here: the fix belongs in the shared
+      // predicate, where it changes the partition for every producer, and that
+      // is a separate re-briefed change. Do not "tidy" it locally.
+      const outerScope = `${s.text.slice(0, best.index)} ${best.subject ?? ''}`;
+      if (hasUnspentNegation(outerScope) || OUTER_NEGATIVE_QUANTIFIER_RE.test(outerScope)) continue;
+
+      if (isCoveredValue(value, coveredValues)) continue;
+      // ⚠ THIS LINE IS DEFENCE IN DEPTH AND IS *NOT* LOAD-BEARING — recorded so
+      // the next reader does not mistake it for a guard under test. A mutant
+      // that deletes it SURVIVES, and the survival was DEMONSTRATED rather than
+      // argued (trap 13c): `deriveMetricText(null, null, null)` returns
+      // FALLBACK_METRIC by construction, and every subject-less T1 entry
+      // (T1-1, T1-5, T1-6, T1-7) was executed to confirm it mints nothing with
+      // or without this line. It stays because "no subject means no identity to
+      // bind to" is the RULE, and stating it where it applies is worth one
+      // redundant comparison.
+      if (best.subject === null) continue;
+
+      // THE load-bearing half: a subject that cleans to no user word cannot be
+      // bound to a node BY IDENTITY, and proximity is not identity (trap 19).
+      const subject = deriveMetricText(best.subject, null, null);
+      if (subject === FALLBACK_METRIC) continue;
+
+      const key = `${subject.toLowerCase()}::${value}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({
+        t1_id: best.id,
+        direction: best.direction,
+        value,
+        unit: best.unit,
+        amount_text: best.amountText,
+        subject,
+        // ⚠ THE EVIDENCE KEEPS THE NEGATION. The sentence is what the row will
+        // carry as its `source_quote`, and it is shown back to the user as the
+        // reason the limit exists. It is also what the partition re-reads when
+        // the minted row passes back through S2 — so a quote stripped of the
+        // word that determines its direction would fail to re-prove the very
+        // row it was minted for.
+        sentence: s.text.slice(0, 200),
+      });
+    }
+  }
 
   return out;
 }
@@ -1302,6 +1611,23 @@ export function detectorItem(f: UncoveredNegatedBound): DirectionUnresolvedItem 
  * the user still learns that more limits are unresolved — nothing vanishes.
  */
 export const MAX_DIRECTION_CLARIFICATIONS = 3;
+
+/**
+ * The id prefix every direction clarification carries.
+ *
+ * ⭐ EXPORTED SO CONSUMERS BIND BY IDENTITY, NEVER BY A TEXT PREDICATE. The
+ * post-draft narrative has to tell a direction question apart from ordinary
+ * coaching in order to give it its own slot, and "the detail mentions a floor"
+ * is a predicate another item could satisfy (trap 19). A shared constant is
+ * also the only shape that cannot drift: a second copy of the string in the
+ * consumer would be a hand-maintained mirror of this one (trap 12).
+ */
+export const DIRECTION_CLARIFICATION_ID_PREFIX = 'direction_unresolved_';
+
+/** Is this coaching item a direction clarification produced by this gate? */
+export function isDirectionClarificationId(id: unknown): boolean {
+  return typeof id === 'string' && id.startsWith(DIRECTION_CLARIFICATION_ID_PREFIX);
+}
 
 /** The coaching-card shape, structurally identical to `StrengthenItemSchema`. */
 export interface DirectionStrengthenItem {
@@ -1345,7 +1671,7 @@ export function renderDirectionClarifications(
 
   const shown = unique.slice(0, MAX_DIRECTION_CLARIFICATIONS);
   const out: DirectionStrengthenItem[] = shown.map((it, n) => ({
-    id: `direction_unresolved_${n + 1}`,
+    id: `${DIRECTION_CLARIFICATION_ID_PREFIX}${n + 1}`,
     // ⚠ GRAMMAR, NOT DECORATION. When no user word survives, `metric_text` is
     // the generic fallback and "Confirm the direction of the this measure
     // limit" is what the user reads — a card that looks broken is a card that
@@ -1354,18 +1680,31 @@ export function renderDirectionClarifications(
       it.metric_text === FALLBACK_METRIC
         ? `Confirm the direction of this limit`
         : `Confirm the direction of the ${it.metric_text} limit`,
+    // ⚠⚠ THE COPY ASKS, AND THE QUESTION IS IN THE FIRST TWO SENTENCES ON
+    // PURPOSE. The V5 turn ships no structured `strengthen_items` field, so on
+    // the surface the deployed UI drives this card reaches the user only as
+    // prose — and any consumer that takes a leading slice of it must still be
+    // holding a QUESTION. The previous copy opened with two observation
+    // sentences, and the served narrative's first-sentence slice reduced it to
+    // "You mentioned 85% for CSAT": the user was told a number had been
+    // noticed and never asked which direction it was. A card that states
+    // without asking cannot obtain the answer this gate exists to obtain.
+    //
+    // `question` on the record says the same thing; it is deliberately NOT
+    // read here, because `StrengthenItemSchema` is `.strict()` at 0.39.0 and
+    // has no field to carry it. Same sentence, projected onto the one surface
+    // that exists today.
     detail:
-      `You mentioned ${it.amount_text} for ${it.metric_text}. I couldn't tell from the ` +
-      `wording whether that's a floor (keep it at or above ${it.amount_text}) or a ceiling ` +
-      `(keep it at or below ${it.amount_text}), so it isn't being enforced yet. ` +
-      `Add it as a constraint to make it binding.`,
+      `You mentioned ${it.amount_text} for ${it.metric_text}. Should ${it.metric_text} stay at ` +
+      `or above ${it.amount_text}, or at or below it? I could not tell from the wording, so it ` +
+      `is not being enforced yet. Add it as a constraint to make it binding.`,
     action_type: 'add_constraint' as const,
   }));
 
   const overflow = unique.length - shown.length;
   if (overflow > 0) {
     out.push({
-      id: 'direction_unresolved_more',
+      id: `${DIRECTION_CLARIFICATION_ID_PREFIX}more`,
       label: `${overflow} more limit${overflow === 1 ? ' needs' : 's need'} a direction`,
       detail:
         `${overflow} further limit${overflow === 1 ? '' : 's'} in your brief could be read as ` +

@@ -18,11 +18,15 @@ import {
   remapConstraintTargets,
 } from "../../../compound-goal/index.js";
 import { partitionRiskFramedInversions } from "../../../compound-goal/risk-polarity.js";
+import type { ExtractedGoalConstraint } from "../../../compound-goal/index.js";
 import {
   partitionUnprovenDirection,
   detectUncoveredNegatedBounds,
   detectorItem,
+  findProvenUncoveredBounds,
+  type ProvenUncoveredBound,
 } from "../../../compound-goal/direction-gate.js";
+import { buildBoundDisplayName } from "../../../compound-goal/constraint-display-name.js";
 import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
 import { log } from "../../../../utils/telemetry.js";
 
@@ -171,6 +175,118 @@ export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
   return out;
 }
 
+/**
+ * ROADMAP 2.1051 (limb 2) — WHERE A MINTED BOUND IS ALLOWED TO LAND.
+ *
+ * ⚠⚠ MEASURED, NOT ASSUMED, AND THE MEASUREMENT CHANGED THE DESIGN. Against
+ * all three captured staging graphs the subject "CSAT" binds — through the
+ * SHARED fuzzy matcher, unmodified — to **`goal_4day_success`**, because the
+ * LLM labelled the goal node "Deliver 4-Day Week Within Budget and CSAT Floor"
+ * and the matcher's label fallback hits it. `out_csat` ("Customer Satisfaction
+ * Score") exists in every one of those graphs and is never reached.
+ *
+ * A percentage floor welded onto the GOAL node is precisely the unit-mismatch
+ * class that put `partitionTemporalNonBinding` at the top of this file: a limit
+ * measured in one dimension, bound to a node measured in another, then scored
+ * by an engine that cannot know the difference. A wrong row is strictly worse
+ * than the question the user gets today.
+ *
+ * So the mint binds against MEASURABLE nodes only. A numeric threshold is a
+ * bound on a measured quantity; a goal is the thing being achieved, an option
+ * is a course of action, and neither carries the metric's scale. This narrows
+ * only the NEW path — every existing producer keeps the binding behaviour it
+ * has always had.
+ */
+const MINTABLE_TARGET_KINDS: ReadonlySet<string> = new Set(["outcome", "factor"]);
+
+/**
+ * The node-id families the shared matcher will consider.
+ *
+ * ⚠⚠ AND THIS IS THE OTHER HALF OF THE SAME MEASUREMENT. `fuzzyMatchNodeId`
+ * refuses to cross node families (`structural-reconciliation.ts`: "if
+ * (constraintPrefix && nodePrefix && constraintPrefix !== nodePrefix)
+ * continue"), and `generateNodeId` stamps `fac_` on every extracted target. So
+ * a constraint on a metric the model chose to represent as an OUTCOME —
+ * `out_csat` — can never be stem-matched at all: `fac_csat` and `out_csat` are
+ * different families by construction. That is why "We must not let CSAT drop
+ * below 85%" — a phrasing the extractor's own lexicon DOES recognise — was
+ * still lost, and it is a defect with a much wider blast radius than the one
+ * this lane was commissioned to fix (rowed, not fixed here: fixing the shared
+ * matcher changes every producer's binding and is not this lane's to make).
+ *
+ * The mint therefore offers the subject in each family and requires the
+ * answers to AGREE. Exactly one distinct node across the families is a
+ * binding; zero is silence; two or more is an ambiguity, and an ambiguity
+ * resolves to the question the user was already going to be asked.
+ */
+const MINT_CANDIDATE_PREFIXES = ["fac", "out"] as const;
+
+/** Slugify a metric name the way `generateNodeId` does, under a chosen prefix. */
+function candidateNodeId(subject: string, prefix: string): string {
+  return `${prefix}_${subject
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")}`;
+}
+
+/**
+ * Turn a proven bound into an extractor-shaped row, or `null` when it cannot be
+ * bound to exactly one measurable node.
+ *
+ * Runs through the REAL `remapConstraintTargets` rather than resolving targets
+ * itself — the resolver is corpus-hardened, it is what every other producer
+ * goes through, and a second resolver here would be a mirror of it (trap 12).
+ */
+function bindProvenBound(
+  bound: ProvenUncoveredBound,
+  measurableNodeIds: string[],
+  measurableLabels: Map<string, string>,
+  requestId: string | undefined,
+): ExtractedGoalConstraint | null {
+  const operator = bound.direction === "floor" ? ">=" : "<=";
+  const resolved = new Set<string>();
+  let bindable: ExtractedGoalConstraint | null = null;
+
+  for (const prefix of MINT_CANDIDATE_PREFIXES) {
+    const candidate: ExtractedGoalConstraint = {
+      targetName: bound.subject,
+      targetNodeId: candidateNodeId(bound.subject, prefix),
+      operator,
+      value: bound.value,
+      unit: bound.unit,
+      label: buildBoundDisplayName(bound.subject, operator, bound.amount_text),
+      sourceQuote: bound.sentence,
+      // The construction proved the direction; it did not prove the model's
+      // confidence in the metric NAME. This is the same confidence the
+      // extractor assigns its own subject-bearing negated-floor rows.
+      confidence: 0.85,
+      provenance: "explicit",
+      // An absolute LEVEL on the metric's own scale: the construction states
+      // the quantity itself ("below 85%"), never a change to it.
+      valueFrame: "level",
+    };
+    const remap = remapConstraintTargets(
+      [candidate],
+      measurableNodeIds,
+      measurableLabels,
+      requestId,
+      // No goal node is offered: step 0's goal binding is reserved for temporal
+      // constraints, and a metric threshold is not one.
+      undefined,
+    );
+    const hit = remap.constraints[0];
+    if (hit) {
+      resolved.add(hit.targetNodeId);
+      bindable = hit;
+    }
+  }
+
+  // Exactly one node across every family, or nothing. Two different answers is
+  // an ambiguity, and an ambiguity is a question, not a row.
+  return resolved.size === 1 ? bindable : null;
+}
+
 export function runCompoundGoals(ctx: StageContext): void {
   if (!ctx.graph) return;
 
@@ -295,6 +411,65 @@ export function runCompoundGoals(ctx: StageContext): void {
     merged.set(key, mergeWithProtectedFrame(merged.get(key), c));
   }
 
+  // ROADMAP 2.1051 (limb 2) — MINT FROM THE CONSTRUCTION VERDICT.
+  //
+  // The direction gate's construction table proves directions that NEITHER
+  // producer can mint a row for. Where it has proven one and no producer row
+  // carries that quantity, the honest output is the row, not a question.
+  //
+  // ⭐ WHY HERE, ABOVE THE THREE GATES RATHER THAN BELOW THEM. A minted row is
+  // a CANDIDATE, not a verdict. Inserting it into the merged set means it is
+  // screened by the temporal gate, the risk-polarity gate and the direction
+  // gate itself exactly like any producer row — so an ambiguous sentence still
+  // withholds it, a risk-framed reading still suppresses it, and a contested
+  // node still contests it. Appending it AFTER the partition would have
+  // smuggled a row past every screen this stage exists to apply.
+  //
+  // ⭐ AND WHY COVERAGE IS COMPUTED ON THE MERGED SET. If a producer emitted a
+  // row for this quantity and a gate then suppressed it, that suppression is a
+  // decision — minting a replacement would defeat it. "Covered" therefore means
+  // "a producer spoke for this number", not "a row survived".
+  const producerValues = [...merged.values()]
+    .map((c: any) => (typeof c?.value === "number" ? c.value : NaN))
+    .filter((v) => Number.isFinite(v));
+  const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues);
+  const mintedFromConstruction: any[] = [];
+  if (provenUncovered.length > 0) {
+    const measurable = graphNodes.filter((n) => MINTABLE_TARGET_KINDS.has(String(n.kind)));
+    const measurableNodeIds = measurable.map((n) => n.id);
+    const measurableLabels = new Map<string, string>();
+    for (const n of measurable) {
+      if (n.label) measurableLabels.set(n.id, n.label);
+    }
+    const bound = provenUncovered
+      .map((b) => bindProvenBound(b, measurableNodeIds, measurableLabels, ctx.requestId))
+      .filter((c): c is ExtractedGoalConstraint => c !== null);
+    if (bound.length > 0) {
+      for (const row of toGoalConstraints(normaliseConstraintUnits(bound))) {
+        const key = dedupeKey(row);
+        // The mint fills a hole. It never overwrites a producer.
+        if (merged.has(key)) continue;
+        merged.set(key, row);
+        mintedFromConstruction.push(row);
+      }
+    }
+    // FAIL LOUD, same contract as the gates below: ids, counts and rule names
+    // only. A silent mint would be indistinguishable from an extractor that
+    // suddenly started matching — the one thing a reader of these logs must be
+    // able to tell apart.
+    log.info({
+      event: "cee.compound_goal.minted_from_construction",
+      request_id: ctx.requestId,
+      proven_uncovered: provenUncovered.length,
+      minted_count: mintedFromConstruction.length,
+      unbound_count: provenUncovered.length - bound.length,
+      t1_ids: provenUncovered.map((b) => b.t1_id),
+      directions: provenUncovered.map((b) => b.direction),
+      minted_node_ids: mintedFromConstruction.map((c: any) => c?.node_id ?? null),
+      minted_operators: mintedFromConstruction.map((c: any) => c?.operator ?? null),
+    }, `${mintedFromConstruction.length} constraint(s) minted from a proven construction verdict; ${provenUncovered.length - bound.length} proven bound(s) could not be bound to a measurable node`);
+  }
+
   // ROADMAP 2.349 — the single, source-agnostic gate. See
   // `partitionTemporalNonBinding` for why it is here rather than in either
   // producer, and for what it deliberately does NOT remove.
@@ -412,7 +587,12 @@ export function runCompoundGoals(ctx: StageContext): void {
     ...detectorFindings.map((f) => detectorItem(f)),
   ];
 
-  if (bothProducersEmpty) return;
+  // ⚠ THE MINT IS A THIRD PRODUCER, AND THIS RETURN HAS TO KNOW IT. The live
+  // defect is precisely the state where BOTH original producers emit nothing:
+  // returning here on that condition would build the row, log it, and then drop
+  // it on the floor one line before it was assigned — the silent-drop shape
+  // this stage's own comments were written to end.
+  if (bothProducersEmpty && mintedFromConstruction.length === 0) return;
 
   ctx.goalConstraints = binding;
 

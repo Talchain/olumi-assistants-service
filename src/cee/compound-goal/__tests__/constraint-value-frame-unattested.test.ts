@@ -70,6 +70,21 @@ const STAMP_PATTERN = /\b(?:value_frame|valueFrame)\s*:\s*['"](level|delta)['"]/
 const REGISTERED_STAMPERS = [
   'cee/compound-goal/extractor.ts',
   'cee/compound-goal/qualitative-proxy.ts',
+  // ROADMAP 2.1051 (limb 2) — the construction mint, registered DELIBERATELY.
+  //
+  // It qualifies on the register's own test: it knows its minting arithmetic
+  // exactly. It fires only where the direction gate's T1 table has PROVEN a
+  // construction, and every such construction states an absolute LEVEL on the
+  // metric's own scale ("do not let CSAT drop BELOW 85%" bounds the quantity,
+  // it does not describe a change to it). There is no branch in that mint that
+  // can produce a delta, which is precisely the property the other two
+  // registered stampers have and the four registered NON-stampers lack.
+  //
+  // Stamping matters here rather than being cosmetic: ISL refuses the whole
+  // `constraint_analysis` block with CONSTRAINT_FRAME_UNSPECIFIED on an
+  // unattested row, so a minted-but-frameless constraint would take the
+  // analysis down with it instead of merely arriving thin.
+  'cee/unified-pipeline/stages/repair/compound-goals.ts',
 ] as const;
 
 /**
