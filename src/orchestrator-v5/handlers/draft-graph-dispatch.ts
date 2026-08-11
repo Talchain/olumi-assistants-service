@@ -86,6 +86,9 @@ import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
+// ⚠ SPIKE ARM B — throwaway, spike branch only. Inert unless SPIKE_ARM=B.
+import { formatBriefHeader } from '../../cee/signals/brief-header.js';
+import { computeBriefSignals } from '../../cee/signals/brief-signals.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -424,6 +427,53 @@ function buildPostDraftChips(params: {
   return [{ ...SET_OPTION_VALUES_CHIP }];
 }
 
+/**
+ * ⚠ SPIKE ARM B — the arm switch. THROWAWAY, spike branch only, never merged.
+ *
+ * `SPIKE_ARM=B` in the LOCAL instance env only (protocol §3: staging config
+ * UNTOUCHED). Read per call, never captured at module load, so a test can set
+ * the variable and observe the change — a module-level `const` would freeze the
+ * first value read and make the arm untestable in-process. Same shape as arm
+ * C's `isSpikeArmC()` (`spike/arm-c-records`, `src/spike-c/arm.ts`), so the two
+ * arms are switched identically and neither can be half-on.
+ *
+ * DEFAULT IS OFF: with the variable absent every call site takes the
+ * byte-identical status-quo path, which is what makes arm A on this base a true
+ * control.
+ *
+ * ⚠⚠ WHY NOT `config.cee.briefSignalsHeaderEnabled`, WHICH §2 NAMES — MEASURED
+ * REFUTATION AT THIS BASE SHA. That flag CANNOT BE SET. `config/index.ts:1285`
+ * declares `briefSignalsHeaderEnabled: booleanString.default(false)` with
+ * `// CEE_BRIEF_SIGNALS_HEADER_ENABLED` as a trailing COMMENT, and `parseConfig`
+ * never reads that env var into `rawConfig` — so the value is permanently
+ * `false` on every path and no env setting changes it. Proven with contrast
+ * controls in the same sweep: sibling flags appear TWICE (schema + rawConfig) —
+ * `draftComplianceReminderEnabled` at `1283` and `1755`, `preflightStrict` at
+ * `947` and `1611` — while `briefSignalsHeaderEnabled` appears ONCE. The suite
+ * pins this (see the spike arm-B spec's "protocol correction" test), so it REDs
+ * if the wiring ever lands and quietly changes what arm B means.
+ *
+ * Consequences, both reported to the protocol rather than papered over:
+ *   1. Gating arm B on that flag would have produced a GUARANTEED NO-OP — arm B
+ *      would have measured arm A while reporting arm B. That is the
+ *      guarantee-theatre class this programme's traps exist to catch, and it
+ *      would have been invisible in the run data.
+ *   2. §0.1 is UNDERSTATED, not wrong: the header is dark on the three assist
+ *      routes too, not merely unreachable from V5. §11.4's "cheapest outstanding
+ *      derivation" (the deployed value of the env var) is therefore MOOT — no
+ *      deployed value can light it. `Docs/FEATURE_FLAGS.md:86`, which lists the
+ *      flag as reaching two assist routes, is a hand-maintained mirror that is
+ *      wrong at this SHA.
+ *
+ * The arm switch and the product flag also answer DIFFERENT QUESTIONS (trap 21):
+ * "is spike arm B active on this instance?" vs "should the assist routes append
+ * the header?". They are deliberately not merged into one predicate.
+ */
+function isSpikeArmB(): boolean {
+  // eslint-disable-next-line no-restricted-syntax -- spike-only gate; see above.
+  return process.env.SPIKE_ARM === 'B';
+}
+
 export async function dispatchDraftGraph(
   params: DispatchDraftGraphParams,
 ): Promise<DispatchDraftGraphResult> {
@@ -435,13 +485,42 @@ export async function dispatchDraftGraph(
   // server-side (see DispatchDraftGraphParams.briefOverride).
   const effectiveBrief = params.briefOverride ?? payload.message;
 
+  // ⚠ SPIKE ARM B — THE INTERVENTION (protocol §0.1/§2). Throwaway branch only.
+  //
+  // §0.1 established that the LIVE product draft path is this V5 turn, and that
+  // nothing upstream of it computes the `[BRIEF_SIGNALS v1]` header: the
+  // flag-gated computation exists only in the three legacy assist routes, and
+  // `evaluatePreflightDecision` has zero callers outside them. The downstream
+  // plumbing is complete and waiting (`draft-graph.ts:174` → `parse.ts:409` →
+  // `anthropic.ts:438,451`) — it is simply never fed.
+  //
+  // BYTE-FAITHFULNESS. The assist routes format
+  // `preflightDecision.briefSignals`, which `preflight-decision.ts:151` sets to
+  // `computeBriefSignals(brief)` verbatim and returns unmodified. So this
+  // expression is the same expression. That is a derivation, not a measurement:
+  // the spec proves it by EXECUTION, running both paths on all four frozen
+  // briefs and comparing the produced bytes.
+  const spikeBriefSignalsHeader = isSpikeArmB()
+    ? formatBriefHeader(computeBriefSignals(effectiveBrief))
+    : undefined;
+
+  // With the arm OFF this object is empty and `undefined` is passed — byte-
+  // identical to the status-quo call, so arm A on this base is a true control.
+  const draftOpts: { briefSignalsHeader?: string; requestStartMs?: number } = {};
+  if (spikeBriefSignalsHeader !== undefined) {
+    draftOpts.briefSignalsHeader = spikeBriefSignalsHeader;
+  }
+  if (params.requestStartMs !== undefined) {
+    draftOpts.requestStartMs = params.requestStartMs;
+  }
+
   let draftResult: DraftGraphResult;
   try {
     draftResult = await handleDraftGraph(
       effectiveBrief,
       request,
       payload.turn_id,
-      params.requestStartMs !== undefined ? { requestStartMs: params.requestStartMs } : undefined,
+      Object.keys(draftOpts).length > 0 ? draftOpts : undefined,
     );
   } catch (err) {
     log.error(
