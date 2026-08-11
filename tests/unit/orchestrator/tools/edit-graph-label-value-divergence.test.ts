@@ -46,8 +46,15 @@ vi.mock('../../../../src/config/index.js', async (importOriginal) => {
   };
 });
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { handleEditGraph } from '../../../../src/orchestrator/tools/edit-graph.js';
 import { log } from '../../../../src/utils/telemetry.js';
+import { applyEgressForbiddenPhraseGuard } from '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+} from '../../../../src/orchestrator/routing/value-update-gate.js';
 import type { ConversationContext } from '../../../../src/orchestrator/types.js';
 import type { LLMAdapter } from '../../../../src/adapters/llm/types.js';
 import type { PLoTClient, ValidatePatchResult } from '../../../../src/orchestrator/plot-client.js';
@@ -249,5 +256,214 @@ describe('handleEditGraph — negative control: pure rename with no number stays
     expect(text).not.toMatch(/modelled value|display text only/);
     const actions = result.suggestedActions ?? [];
     expect(actions.find((a) => /configure/i.test(a.label))).toBeUndefined();
+  });
+});
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LEG 2 — the ADD-ONLY shape, driven through `handleEditGraph` on the VERBATIM
+ * graph from a live staging capture.
+ *
+ * This is deliberately at the HANDLER, not at the detector: a sibling review
+ * this week passed a spec that stopped one adapter short of the served turn and
+ * a live defect survived it. `handleEditGraph`'s `assistantText` /
+ * `suggestedActions` / `appliedChanges` are what the V5 dispatcher projects
+ * onto the wire, so this is the closest a unit test gets to the served turn.
+ *
+ * Capture: staging build `69d6e6e`, golden-journey run
+ * `20260811T012704Z-fresh-5e036e` (2026-08-11). User typed "Change Annual CRM
+ * Spend to £63,000."; the edit_graph LLM renamed the factor to embed (£63,000)
+ * and left `observed_state` byte-identical at raw_value 50000 / "£50k".
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+describe('handleEditGraph — LEG 2: an ADDED label quantity the model does not hold', () => {
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    infoSpy = vi.spyOn(log, 'info').mockImplementation(() => log);
+  });
+  afterEach(() => infoSpy.mockRestore());
+
+  const capture = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          '../../../../src/orchestrator-v5/__tests__/fixtures/label-value-divergence-capture-5e036e.json',
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    ),
+  ) as {
+    _provenance: Record<string, unknown>;
+    pre_graph: { nodes: Record<string, unknown>[]; edges: unknown[] };
+  };
+
+  /** The captured pre-edit graph, verbatim, as the handler's context. */
+  function makeCapturedContext(): ConversationContext {
+    return {
+      graph: JSON.parse(JSON.stringify(capture.pre_graph)) as ConversationContext['graph'],
+      analysis_response: null,
+      framing: null,
+      messages: [],
+      scenario_id: 'bcb19db0-f222-418e-92e7-42e47e5aaed8',
+    } as unknown as ConversationContext;
+  }
+
+  /** The op the LLM actually emitted on that turn. */
+  const CAPTURED_LABEL_ONLY_ADD = {
+    op: 'update_node',
+    path: 'fac_annual_crm_cost',
+    value: { label: 'Annual CRM Spend (£63,000)' },
+    old_value: { label: 'Annual CRM Spend' },
+  };
+
+  it('CONTROL — the fixture is the captured payload, and the model holds £50k', () => {
+    expect(capture._provenance.run).toBe('20260811T012704Z-fresh-5e036e');
+    const node = capture.pre_graph.nodes.find((n) => n.id === 'fac_annual_crm_cost');
+    expect(node).toBeDefined();
+    expect(node!.label).toBe('Annual CRM Spend');
+    expect((node!.observed_state as Record<string, unknown>).raw_value).toBe(50000);
+    expect(node!.display_value).toBe('£50k');
+  });
+
+  it('the SERVED assistant text discloses the divergence and names both figures', async () => {
+    const adapter = makeAdapter({
+      operations: [CAPTURED_LABEL_ONLY_ADD],
+      warnings: [],
+      coaching: { summary: 'Updated Annual CRM Spend to £63,000.', rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeCapturedContext(),
+      'Change Annual CRM Spend to £63,000.',
+      adapter,
+      'req-leg2-1',
+      'turn-leg2-1',
+      { plotClient: makePlotClientSuccess() },
+    );
+
+    expect(result.wasRejected).toBe(false);
+    const text = result.assistantText ?? '';
+    expect(text).toBeTruthy();
+    // Names the figure the LABEL now asserts and the figure the MODEL holds.
+    expect(text).toContain('£63,000');
+    expect(text).toContain('£50k');
+    expect(text.toLowerCase()).toMatch(/modelled value|display text only/);
+    // It ASKS. It must never read as a completed value change.
+    expect(text).toContain('?');
+  });
+
+  it('the SERVED graph is renamed but its modelled value is untouched (disclosure, not mutation)', async () => {
+    const adapter = makeAdapter({
+      operations: [CAPTURED_LABEL_ONLY_ADD],
+      warnings: [],
+      coaching: { summary: 'Updated Annual CRM Spend to £63,000.', rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeCapturedContext(),
+      'Change Annual CRM Spend to £63,000.',
+      adapter,
+      'req-leg2-2',
+      'turn-leg2-2',
+      { plotClient: makePlotClientSuccess() },
+    );
+
+    const applied = result.appliedGraph as unknown as { nodes: Record<string, unknown>[] } | null;
+    expect(applied).not.toBeNull();
+    const node = applied!.nodes.find((n) => n.id === 'fac_annual_crm_cost');
+    expect(node).toBeDefined();
+    // The rename the op asked for DID land …
+    expect(node!.label).toBe('Annual CRM Spend (£63,000)');
+    // … and the modelled value is byte-identical to the captured pre-edit node.
+    const preNode = capture.pre_graph.nodes.find((n) => n.id === 'fac_annual_crm_cost')!;
+    expect(node!.observed_state).toEqual(preNode.observed_state);
+    expect((node!.observed_state as Record<string, unknown>).raw_value).toBe(50000);
+  });
+
+  it('offers a typed affordance whose prompt the deterministic value lane CLAIMS', async () => {
+    const adapter = makeAdapter({
+      operations: [CAPTURED_LABEL_ONLY_ADD],
+      warnings: [],
+      coaching: { summary: 'Updated Annual CRM Spend to £63,000.', rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeCapturedContext(),
+      'Change Annual CRM Spend to £63,000.',
+      adapter,
+      'req-leg2-3',
+      'turn-leg2-3',
+      { plotClient: makePlotClientSuccess() },
+    );
+
+    const actions = result.suggestedActions ?? [];
+    const chip = actions.find((a) => /£63,000/.test(a.prompt));
+    expect(chip).toBeDefined();
+    // ⚠ Not "a chip exists" — the chip must actually WORK. Derived against the
+    // real gate: the replayed prompt has to be claimed by the deterministic
+    // value-update lane, or the disclosure points at an affordance that would
+    // route straight back into the edit_graph LLM that caused this.
+    expect(isValueUpdatePhrasing(chip!.prompt)).toBe(true);
+    expect(shouldSuppressEditDispatchForValueUpdate(chip!.prompt)).toBe(true);
+    // Contrast control: the phrasing that CAUSED the defect is NOT claimed —
+    // which is why this disclosure has to exist at all. (Routing is a separate
+    // lane; this asserts the boundary, it does not fix it.)
+    expect(isValueUpdatePhrasing('Change Annual CRM Spend to £63,000.')).toBe(false);
+  });
+
+  it('the receipt cannot read as a completed value change', async () => {
+    const adapter = makeAdapter({
+      operations: [CAPTURED_LABEL_ONLY_ADD],
+      warnings: [],
+      coaching: { summary: 'Updated Annual CRM Spend to £63,000.', rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeCapturedContext(),
+      'Change Annual CRM Spend to £63,000.',
+      adapter,
+      'req-leg2-4',
+      'turn-leg2-4',
+      { plotClient: makePlotClientSuccess() },
+    );
+
+    const receipt = result.appliedChanges;
+    expect(receipt).toBeDefined();
+    expect(receipt!.summary).not.toMatch(/^Renamed "/);
+    expect(receipt!.summary.toLowerCase()).toMatch(/display text only|modelled value/);
+    expect(receipt!.rerun_recommended).toBe(false);
+  });
+
+  it('the SERVED text survives the finaliser egress guard that killed the original', async () => {
+    // On the captured turn the LLM's own sentence tripped this guard and the
+    // WHOLE assistant_text was replaced by the neutral fallback — which is why
+    // the user was told nothing. A disclosure that trips it would die the same
+    // way, so assert the served text passes it intact.
+    const adapter = makeAdapter({
+      operations: [CAPTURED_LABEL_ONLY_ADD],
+      warnings: [],
+      coaching: { summary: 'Updated Annual CRM Spend to £63,000.', rerun_recommended: false },
+    });
+
+    const result = await handleEditGraph(
+      makeCapturedContext(),
+      'Change Annual CRM Spend to £63,000.',
+      adapter,
+      'req-leg2-5',
+      'turn-leg2-5',
+      { plotClient: makePlotClientSuccess() },
+    );
+
+    const text = result.assistantText ?? '';
+    expect(text).toBeTruthy();
+    const guarded = applyEgressForbiddenPhraseGuard(text);
+    expect(guarded.rewritten).toBe(false);
+    expect(guarded.text).toBe(text);
+    // Positive control — the guard is live and destroys a fatal-class text.
+    expect(
+      applyEgressForbiddenPhraseGuard("I haven't applied any changes to the factor.").rewritten,
+    ).toBe(true);
   });
 });
