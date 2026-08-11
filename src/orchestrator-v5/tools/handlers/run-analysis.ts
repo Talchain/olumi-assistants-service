@@ -1226,7 +1226,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // LAST thing in the primary message — the headline has already been
     // withheld above, so the message can no longer lead with an option while
     // this is present.
-    const constraintGapDisclosure = buildConstraintDisclosure(constraintVerdict);
+    // WS-A round 2, B1 — the brief rides along so the quote rung can VERIFY
+    // *"From your brief: …"* against the text the user actually submitted.
+    // `source_quote` is written by the model, and the measured paraphrase mode
+    // STRIPS THE NEGATION (`cee/compound-goal/direction-gate.ts:331-336`), so
+    // an unchecked quote could state the opposite of the limit beside it. Same
+    // `snapshot.briefText` the intake reconciliation above reads; absent ⇒ the
+    // quote stands down and the labelled disclosure ships unchanged.
+    const constraintGapDisclosure = buildConstraintDisclosure(
+      constraintVerdict,
+      snapshot.briefText,
+    );
     // ROADMAP 2.579 disclosure, LAST of the three. It names the option(s) the
     // brief listed and the graph does not carry, and gives BOTH repair paths
     // (add it, or confirm the omission was deliberate). Appended after the

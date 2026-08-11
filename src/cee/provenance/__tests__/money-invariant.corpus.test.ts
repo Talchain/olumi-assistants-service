@@ -326,3 +326,147 @@ describe("WS-A 1(b) — the gates the capture corpus cannot discriminate", () =>
     }
   });
 });
+
+/**
+ * ROUND 2 — B2 AND B3: THE MESSAGE MUST STATE THE MAGNITUDES THE CHECK
+ * REASONED ABOUT.
+ *
+ * ⚠ THE DEFECT CLASS, NAMED BY THE ADVERSARIAL REVIEW AND WORTH KEEPING: the
+ * guard was right and the sentence beside it was not. Round 1 resolved the
+ * de-normalisation ONCE (`denormalisedMagnitude`, whose own docblock cites
+ * CLAUDE.md trap 21 — *"two derivations of one meaning end up disagreeing
+ * inside a single response"*) and then the message path re-derived it anyway
+ * as the naive `level × cap × multiplier`. Two consequences, both measured by
+ * the reviewer at `3038820c`:
+ *
+ *   B2 — the shared inverse is SIGN-SYMMETRIC (`value < 0 || value > 1 ⇒
+ *        raw = value`, `evaluate-factor-value-proposal.ts:280`), because
+ *        off-contract already-raw graphs occur. The check therefore read
+ *        `19000` while the message printed `19000 × 25000 = £475,000,000` — a
+ *        FABRICATED magnitude, in the one sentence whose entire purpose is to
+ *        be honest about magnitudes. This is CLAUDE.md trap 13d verbatim: the
+ *        round-1 invariant was written against the failure mode in hand
+ *        (`[0,1]`) instead of against the consumer's real predicate.
+ *
+ *   B3 — `encoded` has ALREADY been multiplied by `reading.multiplier`, and
+ *        `formatMagnitude` then prefixed the RAW unit string, so a
+ *        magnitude-suffixed unit was counted twice in the copy: `£1m` rendered
+ *        as `£m1,000,000`, and the user's own stated `£0.9m` as `£m900,000`.
+ *        Both lists mislabelled by 10^6.
+ *
+ * ⚠ NEITHER IS SYNTHETIC, AND THAT IS WHY THEY ARE HERE RATHER THAN IN A
+ * ROADMAP ROW. `unit: "£m"` is a PERSISTED shape — it appears on
+ * `source: "brief_extraction"` rows and on capped rows in
+ * `cee/context-integrity/__tests__/fixtures/b1-growth.cold-read.json`, a
+ * deployed cold-read capture. The off-contract raw level is the class the
+ * shared inverse has an explicit branch for. The L2B capture corpus can see
+ * NEITHER — it is 100% `"£"` and 0 of 117 intervention values exceeded 1
+ * (CLAUDE.md trap 12d: check what your corpus EXCLUDES, not what it covers) —
+ * so these rows are hand-built for exactly the classes the captures omit, and
+ * every one carries its OPPOSITE-DIRECTION TWIN (trap 22b).
+ */
+describe("WS-A 1(b) round 2 — the disclosure's magnitudes come from the SAME inverse as the check", () => {
+  const POUNDS_BRIEF =
+    "switching would cost roughly £18,000 one-off, plus around £6,000 of training";
+  /** The `£m` brief. Stated magnitudes: 900,000 and 250,000. */
+  const MILLIONS_BRIEF = "we'd need £0.9m a year and about £0.25m of training";
+
+  function graph(observed: Record<string, unknown>, level: number, briefText: string) {
+    return {
+      nodes: [
+        {
+          id: "fac_switch_cost",
+          kind: "factor",
+          label: "Switching Cost",
+          observed_state: observed,
+        },
+      ] as unknown as NodeV3T[],
+      options: [
+        {
+          id: "opt_a",
+          label: "Option A",
+          status: "ready",
+          interventions: { fac_switch_cost: { value: level } },
+        },
+      ] as unknown as OptionV3T[],
+      briefText,
+    };
+  }
+
+  it("B2 — an OFF-CONTRACT ALREADY-RAW level is reported as the raw magnitude, never as level × cap", () => {
+    // The reviewer's probe P1, verbatim. `resolveExistingRawValue` returns
+    // `raw = 19000` for a level above 1; the message must say the same.
+    const [warning] = detectUnreconciledStatedMagnitudes(
+      graph({ value: 0, unit: "£", cap: 25000, source: "brief_extraction" }, 19_000, POUNDS_BRIEF),
+    );
+    // PRECONDITION PINNED IN-TEST (trap 13b): this row must actually be
+    // flagged, or the assertions below are about a warning that never existed.
+    expect(warning?.affected_node_id).toBe("fac_switch_cost");
+    expect(warning?.details).toMatchObject({ encoded_magnitudes: [0, 19_000] });
+    expect(warning?.message).toContain("£19,000");
+    // The fabricated product, named exactly so this cannot pass by accident.
+    expect(warning?.message).not.toContain("£475,000,000");
+  });
+
+  it("B2 twin — a NEGATIVE level takes the same branch, and reads as negative money", () => {
+    // The sign-symmetric half. `raw = -0.72`, not `-0.72 × 25000`.
+    const [warning] = detectUnreconciledStatedMagnitudes(
+      graph({ value: 0, unit: "£", cap: 25000, source: "brief_extraction" }, -0.72, POUNDS_BRIEF),
+    );
+    expect(warning?.affected_node_id).toBe("fac_switch_cost");
+    expect(warning?.details).toMatchObject({ encoded_magnitudes: [0, -0.72] });
+    expect(warning?.message).not.toContain("£-18,000");
+    // A minus sign belongs OUTSIDE the currency symbol; "£-0.72" is not money
+    // in any English register, and this sentence is the product being careful
+    // about the user's money.
+    expect(warning?.message).toContain("-£0.72");
+    expect(warning?.message).not.toContain("£-");
+  });
+
+  it("B2 opposite direction — an IN-CONTRACT normalised level still reports level × cap", () => {
+    // The twin that proves the fix did not simply stop de-normalising. 0.24 of
+    // a £6,000 cap is £1,440, exactly as round 1 reported it.
+    const [warning] = detectUnreconciledStatedMagnitudes(
+      graph({ value: 0, unit: "£", cap: 6000, source: "brief_extraction" }, 0.24, POUNDS_BRIEF),
+    );
+    expect(warning?.details).toMatchObject({ encoded_magnitudes: [0, 1440] });
+    expect(warning?.message).toContain("£1,440");
+  });
+
+  it("B3 — a magnitude-suffixed unit is applied ONCE: £m renders as £, not as £m", () => {
+    // The reviewer's probe P2, verbatim. 0.5 × cap 2 = 1 unit of £m = £1m.
+    const [warning] = detectUnreconciledStatedMagnitudes(
+      graph({ value: 0, unit: "£m", cap: 2, source: "brief_extraction" }, 0.5, MILLIONS_BRIEF),
+    );
+    expect(warning?.affected_node_id).toBe("fac_switch_cost");
+    expect(warning?.details).toMatchObject({ encoded_magnitudes: [0, 1_000_000] });
+    // Both lists. The stated half matters at least as much: it is the user's
+    // OWN amount being quoted back to them under a 10^6 mislabel.
+    expect(warning?.message).toContain("£1,000,000");
+    expect(warning?.message).toContain("£900,000");
+    expect(warning?.message).not.toContain("£m");
+  });
+
+  it("B3 opposite direction — a £m encoding that DOES reconcile stays silent", () => {
+    // 0.45 × cap 2 = 0.9 units of £m = £900,000, which the brief states. The
+    // formatting fix must not turn a faithful encoding into a warning, and the
+    // de-normalisation must still run for magnitude-suffixed units.
+    expect(
+      detectUnreconciledStatedMagnitudes(
+        graph({ value: 0.45, unit: "£m", cap: 2, source: "brief_extraction" }, 0.45, MILLIONS_BRIEF),
+      ),
+    ).toEqual([]);
+  });
+
+  it("B3 — an ISO-code unit still TRAILS, and its magnitude letter is applied once too", () => {
+    // "GBP18,000" is not English, which is why the trailing branch exists. The
+    // fix formats from the currency token WITHOUT its magnitude suffix, so
+    // `GBPm` must read "GBP", never "GBPm".
+    const [warning] = detectUnreconciledStatedMagnitudes(
+      graph({ value: 0, unit: "GBPm", cap: 2, source: "brief_extraction" }, 0.5, MILLIONS_BRIEF),
+    );
+    expect(warning?.details).toMatchObject({ encoded_magnitudes: [0, 1_000_000] });
+    expect(warning?.message).toContain("1,000,000 GBP");
+    expect(warning?.message).not.toContain("GBPm");
+  });
+});

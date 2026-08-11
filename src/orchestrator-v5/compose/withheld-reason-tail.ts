@@ -384,10 +384,19 @@ const REASON_UNRECORDED_TEXT =
  * @param constraints the ratified conditions, read from the same persisted
  *                    `goal_constraints` the original derivation read
  *                    (`readRatifiedConstraints`).
+ * @param brief       the text the user submitted (`scenarioBriefText`), passed
+ *                    through to the quote rung's presence gate. WS-A round 2,
+ *                    B1: *"From your brief"* is a claim about THIS text, and
+ *                    `source_quote` is model-authored, so the span is quoted
+ *                    only when `locateEvidence` finds it here. Omitting it
+ *                    fails CLOSED — see `constraint-gap-disclosure.ts` for why
+ *                    optionality is defensible on this one parameter and on
+ *                    almost no other in this module's neighbourhood.
  */
 export function composeWithheldReasonTail(
   state: ConstraintVerdictState | null,
   constraints: readonly RatifiedConstraint[],
+  brief?: string | null,
 ): WithheldReasonTail | null {
   const ratified = Array.isArray(constraints) ? constraints : [];
 
@@ -419,7 +428,7 @@ export function composeWithheldReasonTail(
     case 'unevaluated':
     case 'identity_unresolved': {
       // REUSED, not restated — the two voices this estate already got right.
-      const disclosure = buildConstraintDisclosureFromState(state, ratified);
+      const disclosure = buildConstraintDisclosureFromState(state, ratified, brief);
       const kind =
         state === 'unevaluated' ? 'constraint_unevaluated' : 'constraint_unresolved';
       if (disclosure.length === 0) {

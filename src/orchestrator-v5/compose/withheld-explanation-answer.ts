@@ -271,6 +271,13 @@ export interface WithheldExplanationProjection {
  *                    REQUIRED, not optional-with-a-default, for the reason the
  *                    parameter above is: the forgotten value would be the unsafe
  *                    one. `false` drops BOTH openings and ships the tail alone.
+ * @param brief       the text the user submitted (`context.scenarioBriefText`),
+ *                    threaded to the quote rung's presence gate (WS-A round 2,
+ *                    B1). OPTIONAL, unlike the two parameters above, and for
+ *                    the opposite reason: a forgotten brief makes
+ *                    `locateEvidence` report `located: false`, so the quote
+ *                    stands down and the disclosure degrades to its labelled
+ *                    form. The forgotten value here is the SAFE one.
  */
 export function projectExplanationAnswerForWithheldClaim(
   answerText: string,
@@ -278,6 +285,7 @@ export function projectExplanationAnswerForWithheldClaim(
   constraints: readonly RatifiedConstraint[],
   conditionsAreCurrent: boolean,
   analysisExistenceProven: boolean,
+  brief?: string | null,
 ): WithheldExplanationProjection {
   const original = typeof answerText === 'string' ? answerText : '';
 
@@ -319,7 +327,9 @@ export function projectExplanationAnswerForWithheldClaim(
   // one is the one a future caller silently forgets, and the forgotten value
   // would be the unsafe one — the same doctrine
   // `EgressSanitiseOpts.mayNameLeadingOption` applies.
-  const reason = conditionsAreCurrent ? composeWithheldReasonTail(state, constraints) : null;
+  const reason = conditionsAreCurrent
+    ? composeWithheldReasonTail(state, constraints, brief)
+    : null;
   // `null` for the two PERMITTING states (a correct caller cannot reach them —
   // it owns the permission) and for a stale run. Falling back to the cause-free
   // tail rather than inventing one is the same fail-closed posture as the rest

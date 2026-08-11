@@ -9264,6 +9264,12 @@ export async function runTurnExecutor(
           // degraded read withholds with no fact selected, and the substituted
           // copy must not then claim an analysis exists.
           provenanceProvesAnalysisExists(mayNameLeadingOptionVerdictForRun.provenance),
+          // WS-A round 2, B1 — the text the user actually submitted, so the
+          // quote rung can VERIFY the *"From your brief"* claim rather than
+          // asserting it over a model-authored `source_quote`. Same source the
+          // rest of this executor reads the brief from; absent ⇒ the quote
+          // stands down, never a fabricated attribution.
+          context.scenarioBriefText,
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
@@ -11254,6 +11260,10 @@ export async function runTurnExecutor(
       ratifiedConstraints,
       conditionsAreCurrent,
       analysisExistenceProven,
+      // WS-A round 2, B1 — see the in-flow gate above. Both doors onto this
+      // copy pass the brief, or the finalise chokepoint would keep making the
+      // unverified attribution the in-flow gate now refuses to make.
+      context.scenarioBriefText,
     );
     // Structurally unreachable given the `textAssertsLeadingOption` check above
     // (the projection branches on the SAME predicate), but asserted rather than

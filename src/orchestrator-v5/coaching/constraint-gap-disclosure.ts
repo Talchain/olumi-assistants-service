@@ -63,6 +63,7 @@
 
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+import { locateEvidence } from '../../cee/compound-goal/direction-gate.js';
 import type {
   ConstraintVerdict,
   ConstraintVerdictState,
@@ -104,14 +105,34 @@ export const CONSTRAINT_GAP_QUOTE_MAX_CHARS = 120;
 /**
  * The lead-in for the quoted span. Note the claim it makes and the one it does
  * NOT: *"in your brief"* asserts only that the span is present in the text the
- * user submitted, which is exactly what `source_quote` records. It does not
- * say the user AUTHORED the constraint row — the authorship claim this module
- * has already withdrawn twice (ROADMAP 2.653, 2.675) because
- * `goal_constraints[]` rows are minted by the drafter as well as by the user's
- * own `add_constraint` turn. The distinction is the same one
+ * user submitted. It does not say the user AUTHORED the constraint row — the
+ * authorship claim this module has already withdrawn twice (ROADMAP 2.653,
+ * 2.675) because `goal_constraints[]` rows are minted by the drafter as well as
+ * by the user's own `add_constraint` turn. The distinction is the same one
  * `cee/provenance/stated-amounts.ts` is built on: *present in the submitted
  * text* and *asserted by the user* are different claims, and only the first is
  * observable here.
+ *
+ * ⚠⚠ AND ROUND 1 DID NOT OBSERVE EVEN THAT ONE. This docblock used to end
+ * *"…which is exactly what `source_quote` records."* **`source_quote` records
+ * no such thing.** It is MODEL-AUTHORED, and this service already says so, in a
+ * measured docblock, in `cee/compound-goal/direction-gate.ts:331-336`:
+ *
+ *   *"A model row carries a `source_quote` it wrote itself, and models
+ *   routinely paraphrase — and, measured on this very defect class, routinely
+ *   STRIP THE NEGATION while doing so (\"Don't let gross margin drop below
+ *   78%\" is quoted back as \"gross margin drop below 78%\")."*
+ *
+ * So an unverified quote rung attributes to the user a sentence they never
+ * wrote, and the DOCUMENTED paraphrase mode inverts the limit — the fabricated
+ * span can state the opposite of the constraint printed beside it, on the turn
+ * where the product is already refusing to answer, in `assistant_text`. The
+ * brief's premise was *"the user was shown a limit under a name the drafter
+ * minted"*; a minted QUOTE is that defect one level up, because it upgrades the
+ * claim from naming to attribution.
+ *
+ * The gate is {@link locateEvidence}, which that module built for exactly this
+ * reason. See {@link quoteSentence}.
  */
 const QUOTE_LEAD_IN = ' From your brief: ';
 
@@ -403,8 +424,34 @@ function repairStep(voice: DisclosureVoice, total: number): string {
  *     {@link CONSTRAINT_GAP_QUOTE_MAX_CHARS} or would collide with the quote
  *     marks the grammar slot uses. A half-sentence attributed to the user is
  *     not a smaller version of their sentence; it is a different one.
+ *   - ⚠⚠ AND, ROUND 2, THE ONE THAT MAKES THE LEAD-IN TRUE: **the span must
+ *     actually be IN the brief.** See below.
+ *
+ * ⚠⚠ THE PRESENCE GATE (WS-A round 2, B1). `source_quote` is written by the
+ * model, not by the user (see {@link QUOTE_LEAD_IN}), so *"From your brief"* is
+ * an unbacked assertion until something checks it. `locateEvidence(brief, span)`
+ * is that check, and it is not a new instrument: `cee/compound-goal/
+ * direction-gate.ts` built and measured it for this precise failure mode, where
+ * an unlocated quote lets an INVERTED constraint ship as proven.
+ *
+ * THREE PROPERTIES OF THE GATE, each deliberate:
+ *   1. It is asked about `clean` — THE STRING THIS FUNCTION WILL PRINT — not
+ *      about `raw`. The claim is about the text on the screen, so that is the
+ *      text whose presence must be established.
+ *   2. It fails CLOSED on an absent brief. An unverifiable claim is not a
+ *      weaker claim, it is an unmade one, and the ladder makes the fall free.
+ *   3. It does NOT demand byte equality. `locateEvidence` normalises curly
+ *      quotes and whitespace and retries case-insensitively — the differences a
+ *      faithful quote legitimately carries. Suppressing those would cost the
+ *      feature most of its reach and buy no honesty, and both directions are
+ *      pinned by the round-2 spec (CLAUDE.md trap 22b: every case gets its
+ *      opposite-direction twin, because a gate that suppresses everything is
+ *      not a fix — it is the feature deleted).
  */
-function quoteSentence(constraints: readonly RatifiedConstraint[]): string {
+function quoteSentence(
+  constraints: readonly RatifiedConstraint[],
+  brief: string | null | undefined,
+): string {
   if (constraints.length !== 1) return '';
   const only = constraints[0]!;
   const raw = only.source_quote ?? null;
@@ -420,6 +467,10 @@ function quoteSentence(constraints: readonly RatifiedConstraint[]): string {
   // break cannot be rendered inside it, and a disclosure that fails the
   // allowlist reverts the WHOLE summary to the locked template.
   if (/[“”\n\r]/.test(clean)) return '';
+  // THE CLAIM, CHECKED. Everything above asks "can we render this?"; this asks
+  // "is it true?", and a rung that renders beautifully is worth nothing if the
+  // sentence it renders is not the user's.
+  if (!locateEvidence(brief, clean).located) return '';
   return `${QUOTE_LEAD_IN}${quoted(clean)}.`;
 }
 
@@ -445,8 +496,26 @@ function composeDisclosure(
  *
  * Returns a leading-space-prefixed fragment so it appends to the summary the
  * same way the scaffold and reduced-samples disclosures do.
+ *
+ * @param brief the text the user submitted, for the round-2 presence gate on
+ *   the quote rung ({@link quoteSentence}).
+ *
+ * ⚠ OPTIONAL, AND THE REASON IS THE EXACT INVERSE OF THE USUAL ONE. This
+ * estate's standing rule is that a safety-relevant parameter must be REQUIRED,
+ * *"because an optional one is the one a future caller silently forgets, and
+ * the forgotten value would be the unsafe one"* (see
+ * `projectExplanationAnswerForWithheldClaim`'s `conditionsAreCurrent`). Here
+ * the forgotten value is the SAFE one: with no brief, `locateEvidence` reports
+ * `located: false`, the quote rung stands down, and the disclosure degrades to
+ * the labelled form. A caller who forgets loses specificity and cannot gain a
+ * false claim — which is the direction that makes optionality defensible, and
+ * the only reason it is used here rather than forcing every call site and
+ * fixture in the estate to carry a fourth argument.
  */
-export function buildConstraintDisclosure(verdict: ConstraintVerdict): string {
+export function buildConstraintDisclosure(
+  verdict: ConstraintVerdict,
+  brief?: string | null,
+): string {
   // STATE VOICE FIRST, OUT-OF-SCOPE SECOND, and both may be present.
   //
   // Order matters twice over. For the reader, the state voice is the more
@@ -456,8 +525,8 @@ export function buildConstraintDisclosure(verdict: ConstraintVerdict): string {
   // admits exactly one gap-disclosure slot — so composing them the other way
   // round would fail the grammar and silently revert the whole summary to the
   // locked template, which is the #703 failure this module exists to prevent.
-  const stateVoice = buildConstraintDisclosureFromState(verdict.state, verdict.constraints);
-  const outOfScope = buildVoice('out_of_scope', verdict.outOfScopeConstraints);
+  const stateVoice = buildConstraintDisclosureFromState(verdict.state, verdict.constraints, brief);
+  const outOfScope = buildVoice('out_of_scope', verdict.outOfScopeConstraints, brief);
   if (stateVoice.length === 0 || outOfScope.length === 0) return `${stateVoice}${outOfScope}`;
   // COMBINED survival probe. Each half already proved it survives ALONE
   // (`buildVoice`), but the allowlist sees the CONCATENATION, and only a check
@@ -493,11 +562,12 @@ export function buildConstraintDisclosure(verdict: ConstraintVerdict): string {
 export function buildConstraintDisclosureFromState(
   state: ConstraintVerdictState,
   constraints: readonly RatifiedConstraint[],
+  brief?: string | null,
 ): string {
   switch (state) {
     case 'unevaluated':
     case 'identity_unresolved':
-      return buildVoice(state, constraints);
+      return buildVoice(state, constraints, brief);
     case 'not_applicable':
     case 'evaluated_feasible':
       // Nothing happened to the user's conditions that needs saying.
@@ -515,6 +585,7 @@ export function buildConstraintDisclosureFromState(
 function buildVoice(
   voice: DisclosureVoice,
   constraints: readonly RatifiedConstraint[],
+  brief?: string | null,
 ): string {
   if (constraints.length === 0) return '';
 
@@ -539,7 +610,7 @@ function buildVoice(
   // span that would fail the allowlist costs the QUOTE and nothing else,
   // rather than costing the labels too. The ladder is ordered so each fall
   // gives up exactly one thing.
-  const quote = quoteSentence(constraints);
+  const quote = quoteSentence(constraints, brief);
   if (quote.length > 0) {
     const quotedForm = composeDisclosure(voice, constraints.length, named, quote);
     if (survivesEgress(quotedForm)) return quotedForm;

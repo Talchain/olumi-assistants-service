@@ -197,6 +197,27 @@ export function findStatedAmounts(text: string | null | undefined): readonly Sta
 export interface UnitReading {
   readonly kind: AmountKind;
   readonly currencyCode?: string;
+  /**
+   * The unit's currency token WITH ITS MAGNITUDE SUFFIX REMOVED, exactly as the
+   * unit string spelled it: `"£m" ⇒ "£"`, `"GBPm" ⇒ "GBP"`, `"£" ⇒ "£"`.
+   * Present iff `kind === "currency"`.
+   *
+   * ⚠ WHY IT IS HERE RATHER THAN LEFT TO EACH CALLER (WS-A round 2, B3). A
+   * consumer that has applied {@link multiplier} to a level has ALREADY spent
+   * the unit's magnitude letter; prefixing the raw unit string afterwards
+   * spends it twice, and the copy misstates the user's own money by 10^6 —
+   * `£1m` rendered as `£m1,000,000`, and the brief's own `£0.9m` as
+   * `£m900,000` (measured on `money-invariant.ts` at `3038820c`). The two
+   * pieces of information — HOW MUCH to scale by, and WHAT TO CALL IT — are
+   * different questions with one source, so `readUnit` answers both rather
+   * than leaving the second to be re-derived from a string it has already
+   * parsed (CLAUDE.md trap 21).
+   *
+   * DERIVED, NEVER MIRRORED: it is the very capture group this function
+   * already matched, so a new currency added to `CURRENCY_SYMBOL_TO_CODE`
+   * cannot make the display form and the code form disagree.
+   */
+  readonly currencyDisplay?: string;
   /** Multiplier from the unit's own magnitude letter: "£m" ⇒ 1e6. */
   readonly multiplier: number;
 }
@@ -227,9 +248,11 @@ export function readUnit(unit: string | null | undefined): UnitReading {
   if (/^percent(age)?$/i.test(trimmed)) return { kind: "percent", multiplier: 1 };
   const iso = ISO_UNIT_PATTERN.exec(trimmed);
   if (iso) {
+    const code = (iso.groups?.code ?? trimmed).toUpperCase();
     return {
       kind: "currency",
-      currencyCode: (iso.groups?.code ?? trimmed).toUpperCase(),
+      currencyCode: code,
+      currencyDisplay: code,
       multiplier: resolveMagnitude(iso.groups?.mag),
     };
   }
@@ -241,7 +264,10 @@ export function readUnit(unit: string | null | undefined): UnitReading {
   if (symbol) {
     const code =
       CURRENCY_SYMBOL_TO_CODE[symbol] ?? CURRENCY_SYMBOL_TO_CODE[symbol.toUpperCase()] ?? symbol;
-    return { kind: "currency", currencyCode: code, multiplier };
+    // The SYMBOL as written, not the code: "£", never "GBP". The magnitude
+    // letter is deliberately excluded — it lives in `multiplier` and spending
+    // it twice is B3.
+    return { kind: "currency", currencyCode: code, currencyDisplay: symbol, multiplier };
   }
   if (typeof groups.pct === "string") return { kind: "percent", multiplier };
   return { kind: "plain", multiplier };
