@@ -89,6 +89,33 @@ export const MAX_NAMED_CONSTRAINTS_FOR_TEST = MAX_NAMED_CONSTRAINTS;
 export const CONSTRAINT_GAP_LABEL_MAX_CHARS = 60;
 
 /**
+ * WS-A ITEM 2(a) — longest VERBATIM BRIEF SPAN this disclosure will quote back.
+ *
+ * A constraint's `source_quote` is a sentence the user wrote, not a label CEE
+ * minted, so it is meaningfully longer than a label and meaningfully more
+ * valuable: it is the only thing on the message a user can RECOGNISE. 120
+ * characters is the bound the grammar slot and the egress budget are both
+ * derived from — a longer quote degrades to the label-only form rather than
+ * pushing the composed summary past the length cap and silently reverting the
+ * whole message to the locked template.
+ */
+export const CONSTRAINT_GAP_QUOTE_MAX_CHARS = 120;
+
+/**
+ * The lead-in for the quoted span. Note the claim it makes and the one it does
+ * NOT: *"in your brief"* asserts only that the span is present in the text the
+ * user submitted, which is exactly what `source_quote` records. It does not
+ * say the user AUTHORED the constraint row — the authorship claim this module
+ * has already withdrawn twice (ROADMAP 2.653, 2.675) because
+ * `goal_constraints[]` rows are minted by the drafter as well as by the user's
+ * own `add_constraint` turn. The distinction is the same one
+ * `cee/provenance/stated-amounts.ts` is built on: *present in the submitted
+ * text* and *asserted by the user* are different claims, and only the first is
+ * observable here.
+ */
+const QUOTE_LEAD_IN = ' From your brief: ';
+
+/**
  * The three disclosure voices this module can speak.
  *
  * They are SEPARATE COPY, not one sentence with a variable, because they make
@@ -360,12 +387,49 @@ function repairStep(voice: DisclosureVoice, total: number): string {
   return unresolvedRepairStep(total);
 }
 
+/**
+ * WS-A ITEM 2(a) — the user's own words, when we have them and only then.
+ *
+ * NARROW BY DESIGN, and the narrowing is the safety argument:
+ *   - SINGULAR ONLY. With one constraint under discussion there is exactly one
+ *     quote and no ambiguity about which limit it belongs to. With several,
+ *     naming three labels and one quote invites the reader to bind the quote
+ *     to the wrong label — a false statement about the user's own sentence,
+ *     which is worse than saying less.
+ *   - It rides only where a quote genuinely exists; `null`/absent yields the
+ *     empty string and today's message byte-for-byte.
+ *   - The span passes through `sanitiseLabel`, the same treatment a label
+ *     gets, and is dropped entirely rather than truncated when it exceeds
+ *     {@link CONSTRAINT_GAP_QUOTE_MAX_CHARS} or would collide with the quote
+ *     marks the grammar slot uses. A half-sentence attributed to the user is
+ *     not a smaller version of their sentence; it is a different one.
+ */
+function quoteSentence(constraints: readonly RatifiedConstraint[]): string {
+  if (constraints.length !== 1) return '';
+  const only = constraints[0]!;
+  const raw = only.source_quote ?? null;
+  if (raw === null) return '';
+  // `sanitiseLabel` returns null for an empty span, for a raw id, and for a
+  // UUID — every "this is not human text" answer. Absence is the honest
+  // outcome for all of them: this rung may lose the quote and nothing else.
+  const clean = sanitiseLabel(raw, only.constraint_id);
+  if (clean === null || clean.length === 0 || clean.length > CONSTRAINT_GAP_QUOTE_MAX_CHARS) {
+    return '';
+  }
+  // The grammar slot is `“[^”\n]{1,N}”`; a span carrying either mark or a line
+  // break cannot be rendered inside it, and a disclosure that fails the
+  // allowlist reverts the WHOLE summary to the locked template.
+  if (/[“”\n\r]/.test(clean)) return '';
+  return `${QUOTE_LEAD_IN}${quoted(clean)}.`;
+}
+
 function composeDisclosure(
   voice: DisclosureVoice,
   total: number,
   named: readonly string[],
+  quote = '',
 ): string {
-  return ` ${subjectSentence(voice, total, named)}${consequenceSentence(voice, total)}${repairStep(voice, total)}`;
+  return ` ${subjectSentence(voice, total, named)}${quote}${consequenceSentence(voice, total)}${repairStep(voice, total)}`;
 }
 
 /**
@@ -468,6 +532,18 @@ function buildVoice(
   // case is a less specific disclosure rather than no disclosure at all. The
   // count-only form is constant text plus an integer and is pinned as
   // always-surviving by this module's egress test.
+  //
+  // ⚠ WS-A ITEM 2(a) — NOW THREE RUNGS, MOST SPECIFIC FIRST: quoted → labelled
+  // → count-only. The quote is USER PROSE, i.e. the one part of this message
+  // whose content nothing in this repo controls, so it gets its own rung: a
+  // span that would fail the allowlist costs the QUOTE and nothing else,
+  // rather than costing the labels too. The ladder is ordered so each fall
+  // gives up exactly one thing.
+  const quote = quoteSentence(constraints);
+  if (quote.length > 0) {
+    const quotedForm = composeDisclosure(voice, constraints.length, named, quote);
+    if (survivesEgress(quotedForm)) return quotedForm;
+  }
   const labelled = composeDisclosure(voice, constraints.length, named);
   if (named.length > 0 && !survivesEgress(labelled)) {
     return composeDisclosure(voice, constraints.length, []);
@@ -504,6 +580,15 @@ const LABEL_SLOT = `“[^”\\n]{1,${CONSTRAINT_GAP_LABEL_MAX_CHARS}}”`;
 /** `A` · `A and B` · `A, B and C` — mirrors {@link joinLabels} exactly. */
 const JOINED_LABELS = `${LABEL_SLOT}(?:(?:, ${LABEL_SLOT})* and ${LABEL_SLOT})?`;
 
+/**
+ * WS-A item 2(a) — the OPTIONAL quoted-span slot, interpolating
+ * {@link CONSTRAINT_GAP_QUOTE_MAX_CHARS} rather than hand-mirroring a `{1,N}`,
+ * and escaping the lead-in from the very constant {@link quoteSentence} emits.
+ * Optional because the quote rides only the singular, quote-bearing case.
+ */
+const QUOTE_SLOT =
+  `(?:${escapeForRegex(QUOTE_LEAD_IN)}“[^”\\n]{1,${CONSTRAINT_GAP_QUOTE_MAX_CHARS}}”\\.)?`;
+
 /** Grammar branch for the UNEVALUATED voice. */
 const UNEVALUATED_RE_SRC =
   ' ' +
@@ -512,6 +597,7 @@ const UNEVALUATED_RE_SRC =
   '|' +
   `\\d{1,3} limits on your model could not be checked(?:, including ${JOINED_LABELS})?\\.` +
   ')' +
+  QUOTE_SLOT +
   // Both consequence variants ("it" / "them"), derived from the builder.
   `(?:${escapeForRegex(consequenceSentence('unevaluated', 1))}|${escapeForRegex(consequenceSentence('unevaluated', 2))})` +
   escapeForRegex(UNEVALUATED_REPAIR_STEP);
@@ -525,6 +611,7 @@ const UNRESOLVED_RE_SRC =
   '|' +
   `the \\d{1,3} conditions on your model(?:, including ${JOINED_LABELS})?\\.` +
   ')' +
+  QUOTE_SLOT +
   `(?:${escapeForRegex(consequenceSentence('identity_unresolved', 1))}|${escapeForRegex(consequenceSentence('identity_unresolved', 2))})` +
   `(?:${escapeForRegex(unresolvedRepairStep(1))}|${escapeForRegex(unresolvedRepairStep(2))})`;
 
@@ -593,12 +680,21 @@ export const CONSTRAINT_GAP_DISCLOSURE_RE_SRC =
  * locked template with no error anywhere.
  */
 function worstCaseFor(voice: DisclosureVoice): number {
+  // ⚠ WS-A item 2(a): the quote slot is included at ITS OWN worst case, not at
+  // the case the builder can actually reach. `quoteSentence` emits only on the
+  // SINGULAR branch while the labels here are the PLURAL three-at-the-cap
+  // form, so this over-counts on purpose — a budget that is too generous costs
+  // nothing, and a budget that is one character short silently reverts the
+  // whole summary to the locked template with no error anywhere (which is the
+  // failure this derivation exists to prevent).
+  const worstQuote = `${QUOTE_LEAD_IN}${quoted('x'.repeat(CONSTRAINT_GAP_QUOTE_MAX_CHARS))}.`;
   return composeDisclosure(
     voice,
     999,
     Array.from({ length: MAX_NAMED_CONSTRAINTS }, () =>
       'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
     ),
+    voice === 'out_of_scope' ? '' : worstQuote,
   ).length;
 }
 

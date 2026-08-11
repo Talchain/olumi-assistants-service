@@ -82,6 +82,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { resolveExistingRawValue } from "../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js";
 
 /** What KIND of quantity a written amount (or a unit string) denotes. */
 export type AmountKind = "currency" | "percent" | "plain";
@@ -260,6 +261,49 @@ function magnitudesMatch(a: number, b: number): boolean {
 }
 
 /**
+ * WS-A ITEM 1 — THE MAGNITUDE A NORMALISED LEVEL DENOTES, given the producer's
+ * own declared denominator.
+ *
+ * WHY THIS EXISTS. The pipeline reasons in NORMALISED lever space
+ * (`observed_state.value ∈ [0,1]`) and records the denominator beside it
+ * (`observed_state.cap`). Everything that compares a lever against the user's
+ * words — this module's predicate, and the commit-time money invariant in
+ * `money-invariant.ts` — needs the same inverse, so it is resolved ONCE here
+ * rather than multiplied out at each call site (CLAUDE.md trap 21: two
+ * derivations of one meaning end up disagreeing inside a single response).
+ *
+ * THE INVERSE IS NOT RE-DERIVED. `resolveExistingRawValue` is the shared
+ * de-normalisation the validator, the executor precheck and the
+ * `set_factor_value` handler already agree on (the AC.1 parity invariant), and
+ * it is the exact inverse of `normaliseFactorValue`, which stores
+ * `value = raw / cap` for every capped factor and `value = raw` when uncapped.
+ * `raw_value` is deliberately NOT passed: the question is what THIS level
+ * denotes, not what some earlier level denoted (the stale-sibling defect
+ * `reconcileObservedValuePair` exists to repair).
+ *
+ * FAILS TOWARD THE WEAKER CLAIM, like everything else in this module:
+ *   - no usable cap (absent, non-finite, ≤ 0 — all off-contract, since
+ *     `evaluateFactorValueProposal` guarantees a positive cap on the write
+ *     path) ⇒ `null`, and the caller keeps today's raw comparison;
+ *   - `ambiguous` (a raw-value-less `%` whose divisor cannot be recovered)
+ *     ⇒ `null`, so the strong claim is withheld rather than guessed.
+ */
+export function denormalisedMagnitude(
+  value: number,
+  unit: string | null | undefined,
+  cap: number | null | undefined,
+): number | null {
+  if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const resolved = resolveExistingRawValue({
+    value,
+    cap,
+    ...(typeof unit === "string" ? { unit } : {}),
+  });
+  return resolved.kind === "resolved" && Number.isFinite(resolved.raw) ? resolved.raw : null;
+}
+
+/**
  * Is `value` (in `unit`) an amount the user actually stated in `briefText`?
  *
  * KIND COMPATIBILITY IS PART OF THE ANSWER, not a refinement of it:
@@ -282,18 +326,30 @@ function magnitudesMatch(a: number, b: number): boolean {
  *
  * Returns false for a missing brief, a non-finite value, or an empty scan —
  * every "we cannot tell" answer is a refusal.
+ *
+ * ⚠ WS-A ITEM 1(a) — `cap` IS THE FOURTH ARGUMENT, AND ITS ABSENCE IS THE
+ * DEFECT THAT SHIPPED. The one production call site passed a NORMALISED lever
+ * level (0.72) while the brief states raw magnitudes (18000), so the predicate
+ * was structurally incapable of firing: 117 of 117 interventions disowned,
+ * measured at CEE `8e3ad916` (L2B-VARIANCE.md §2.4). Nothing about the
+ * question this function answers was wrong — it was fed the wrong number.
+ * Supplying the producer's own declared denominator answers the same question
+ * about the magnitude the encoding actually denotes. OPTIONAL, so every
+ * existing three-argument caller is byte-identical to before.
  */
 export function isAmountStatedInBrief(
   value: number,
   unit: string | null | undefined,
   briefText: string | null | undefined,
+  cap?: number | null,
 ): boolean {
   if (typeof value !== "number" || !Number.isFinite(value)) return false;
   const amounts = findStatedAmounts(briefText);
   if (amounts.length === 0) return false;
 
   const reading = readUnit(unit);
-  const target = value * reading.multiplier;
+  const magnitude = denormalisedMagnitude(value, unit, cap) ?? value;
+  const target = magnitude * reading.multiplier;
   if (!Number.isFinite(target)) return false;
 
   for (const amount of amounts) {

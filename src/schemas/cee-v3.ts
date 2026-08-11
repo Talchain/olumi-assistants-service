@@ -420,6 +420,14 @@ export const ValidationWarningCode = z.enum([
   CIL_WARNING_CODES.EDGE_STRENGTH_NEGLIGIBLE,
   // STRP constraint direction heuristic (Rule 3b)
   "CONSTRAINT_DIRECTION_HEURISTIC",
+  // WS-A item 1(b) — the commit-time money invariant. A factor the extractor
+  // stamped `brief_extraction`, denominated in a currency the brief uses,
+  // whose encoding (`level × cap`) reproduces NO magnitude the brief states.
+  // Disclosure only: the graph commits unchanged and no magnitude is ever
+  // rewritten (see cee/provenance/money-invariant.ts for why that direction is
+  // a ruling and not a preference). Additive at every hop — the shared
+  // contract types `code` as `z.string()` with `.passthrough()`.
+  "STATED_MAGNITUDE_UNRECONCILED",
   // Causal claims validation warning codes (Phase 2B)
   CAUSAL_CLAIMS_WARNING_CODES.MALFORMED,
   CAUSAL_CLAIMS_WARNING_CODES.DROPPED,

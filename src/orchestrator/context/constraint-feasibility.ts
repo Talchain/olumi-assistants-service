@@ -206,6 +206,37 @@ export interface RatifiedConstraint {
   readonly constraint_id: string;
   /** User-facing label, when the persisted constraint carries one. */
   readonly label: string | null;
+  /**
+   * WS-A ITEM 2(a) — THE VERBATIM SPAN FROM THE BRIEF this constraint was
+   * produced from (`GoalConstraintSchema.source_quote`, already on the shared
+   * contract and already persisted), when the row carries one.
+   *
+   * WHY IT IS HERE. Until now this reader took `constraint_id` and `label`
+   * only, so every disclosure built from a `RatifiedConstraint` could name a
+   * constraint by a LABEL THE DRAFTER MINTED and never by the user's own
+   * words. The measured cost is in L2A-FIDELITY-TRACE.md §4/§5.2: the single
+   * best-preserved atom in the whole corpus — *"without dropping gross margin
+   * below 78%"*, the ONLY `provenance: "explicit"` object across 76 atoms,
+   * carrying unit, magnitude, operator AND its source quote — reached the user
+   * as the label *"Keep gross margin at or above 78%"* while the analysis
+   * refused to answer; and a sibling row reached the coaching pane named
+   * **"Constraint: we"**, a literal fragment of the user's sentence taken as
+   * an entity name. A user cannot recognise, correct, or even locate a limit
+   * they are shown under a name they have never seen.
+   *
+   * `null` when the persisted row carries no quote — never fabricated, and
+   * never derived by re-reading the brief here (this module has no prose
+   * reader and must not grow one).
+   *
+   * OPTIONAL ON THE TYPE, deliberately: there is exactly ONE producer
+   * ({@link readRatifiedConstraints}, the sole reader of `goal_constraints`),
+   * so making it required would buy no safety and would instead break every
+   * hand-built fixture in the estate — including files the build typecheck
+   * excludes, i.e. breakage that would surface only in a later CI job
+   * (CLAUDE.md trap 2's refinement). Every consumer reads it as
+   * `source_quote ?? null` and treats absence exactly like `null`.
+   */
+  readonly source_quote?: string | null;
 }
 
 /**
@@ -392,7 +423,13 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
     const obj = item as Record<string, unknown>;
     const id = readString(obj.constraint_id);
     if (id === null) continue;
-    out.push({ constraint_id: id, label: readString(obj.label) });
+    // WS-A item 2(a): the verbatim brief span, read from the SAME persisted row
+    // as the label, so the two can never come from different records.
+    out.push({
+      constraint_id: id,
+      label: readString(obj.label),
+      source_quote: readString(obj.source_quote),
+    });
   }
   return out;
 }
