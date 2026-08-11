@@ -168,6 +168,24 @@ const EXPECTED: Record<string, Record<string, number>> = {
   projectRecentChanges: {
     'src/orchestrator-v5/context/recent-changes.ts': 1, // authority (definition)
     'src/orchestrator-v5/context/context-pack-assembler.ts': 2, // approved seam
+    // 2026-08-11 PR2 L2 (rerun attribution): +2 (import + one call) — the
+    // attribution join for the rerun consequence sentence, which must name the
+    // authored change that landed between the two compared runs.
+    //
+    // ⭐ THIS IS THE INVERSE OF THE DEBT THIS PIN GUARDS. The tolerated sites
+    // above are call sites that RE-DERIVE context ad-hoc. This one exists
+    // specifically so the sentence does NOT re-derive: per-fact-type label
+    // extraction, the noop filter, the mutation-vs-read dispatch and the
+    // raw-identifier scrub all live in `recent-changes.ts` and are
+    // conformance-tested there against the schema's whole `fact_type` union.
+    // Re-implementing any of it in the signals layer would be the mirror defect
+    // this pin was built to prevent, and would go blind the next time a
+    // mutation handler is added. `RecentMutation.target_label`'s own
+    // doc-comment declares this seam ("so future deterministic copy paths ...
+    // can reference the target without regex-parsing the summary string").
+    //
+    // Reads the projection only; derives no freshness and no canonical state.
+    'src/orchestrator-v5/coaching/intervening-change.ts': 2,
   },
 };
 

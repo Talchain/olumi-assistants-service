@@ -39,6 +39,11 @@ import {
 } from '../coaching/compare-runs.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { CoachingSignalId } from '../coaching/types.js';
+import {
+  deriveInterveningChange,
+  type InterveningChange,
+} from '../coaching/intervening-change.js';
+import type { RecentChangeAction } from '../context/recent-changes.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
@@ -124,6 +129,12 @@ const EDIT_HANDLER_IDS = new Set([
 export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   readonly factorLabel?: string;
   readonly runDelta?: RunDelta | null;
+  /**
+   * PR2 L2 — the authored change that landed between the two runs, or null.
+   * Absent/null reproduces the pre-attribution copy BYTE-IDENTICALLY on every
+   * branch, which is pinned by test.
+   */
+  readonly interveningChange?: InterveningChange | null;
 }) => string> = {
   STALE_ANALYSIS_AFTER_EDIT: () =>
     'This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.',
@@ -131,8 +142,41 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
   FIRST_ANALYSIS_COMPLETE: () =>
     'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
-  RERUN_ANALYSIS_COMPLETE: ({ runDelta }) => composeRerunText(runDelta ?? null),
+  RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange }) =>
+    composeRerunText(runDelta ?? null, interveningChange ?? null),
 };
+
+/**
+ * PR2 L2 — how each kind of authored change is NAMED in the attribution
+ * clause. Exhaustive `Record` over `RecentChangeAction`, so a new mutation
+ * action added to the projection fails to COMPILE here rather than silently
+ * losing its verb (the same construction as {@link COACHING_TEXT}).
+ *
+ * British English, sentence case, no em-dashes (this file's copy contract).
+ * Each verb must be true of every fact the action covers: `constraint_added`
+ * spans a fresh add AND an in-place update, so "set a limit on" is used rather
+ * than "added a limit to", which would be false on an update.
+ */
+const INTERVENING_CHANGE_PHRASE: Record<RecentChangeAction, (label: string) => string> = {
+  constraint_added: (label) => `set a limit on ${label}`,
+  factor_value_updated: (label) => `changed ${label}`,
+  link_strength_updated: (label) => `adjusted ${label}`,
+  graph_edited: (label) => `changed ${label}`,
+};
+
+/**
+ * The attribution opener, or the empty string when nothing may be attributed.
+ *
+ * ⭐ TEMPORAL ONLY. "Since" states sequence; "because" / "caused" / "is why"
+ * would state causation, which is unlicensed without a pinned seed (see
+ * `coaching/intervening-change.ts`). A test asserts the composed output over
+ * every branch carries no causal connective.
+ */
+function attributionPrefix(change: InterveningChange | null): string {
+  if (change === null) return '';
+  if (change.kind === 'several') return 'Since your recent changes, ';
+  return `Since you ${INTERVENING_CHANGE_PHRASE[change.action](change.target_label)}, `;
+}
 
 /**
  * ROADMAP 2.73 — rerun acknowledgment copy, derived from the shared
@@ -141,7 +185,10 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
  * cannot drift in vocabulary. Content-safe: labels + integer percentage
  * points only, no raw decimals, no IDs.
  */
-function composeRerunText(delta: RunDelta | null): string {
+function composeRerunText(
+  delta: RunDelta | null,
+  interveningChange: InterveningChange | null = null,
+): string {
   if (delta === null || !delta.comparable) {
     // Prior run exists but the two runs cannot be lined up (legacy fact
     // without a projectable envelope, or missing labels). Acknowledge the
@@ -159,30 +206,101 @@ function composeRerunText(delta: RunDelta | null): string {
   // and make no claim relating the two (margin included: the lead being
   // compared may belong to a different option).
   if (delta.leader_identity_basis !== 'option_id') {
+    // ⭐ ATTRIBUTION IS SUPPRESSED HERE, AND THIS IS THE SHARPEST CASE IN THE
+    // FILE. This branch's whole point is that NO comparison was made. Opening
+    // it with "Since you changed X ..." would place an authored change
+    // immediately before a statement of what followed, which is precisely how
+    // a reader infers a comparison — the implication the sentence then
+    // explicitly disclaims. Naming the edit beside an unmade comparison is
+    // worse than naming nothing, so the attribution never reaches this arm.
     return (
       `${delta.current_leading_label} leads after this re-run. I cannot line up `
       + 'the earlier result with this one, so I have not compared the two.'
     );
   }
+
+  // Past every abstention. A real comparison exists, so a temporal clause about
+  // what preceded it is licensed. Empty string when there is nothing to
+  // attribute, which reproduces the pre-attribution copy byte-identically.
+  const since = attributionPrefix(interveningChange);
+  const attributed = since.length > 0;
+  // The anaphor must AGREE WITH ITS OWN OPENER. `several` deliberately names no
+  // antecedent, so a singular "that change" after it is a dangling referent AND
+  // makes a claim about one unidentified change when several occurred — the
+  // mirror of the sole-cause-by-omission that `deriveInterveningChange` refuses.
+  const theChange = interveningChange?.kind === 'several' ? 'those changes' : 'that change';
+
   if (delta.leading_option_changed) {
-    return (
-      `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
-      + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
-    );
+    return attributed
+      ? (
+        `${since}the result has changed: ${delta.prior_leading_label} led before, `
+        + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+      )
+      : (
+        `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
+        + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+      );
   }
   if (delta.margin_direction === 'widened') {
     return (
-      `${delta.current_leading_label} still leads after this re-run, and its lead `
+      `${since}${delta.current_leading_label} still leads after this re-run, and its lead `
       + `has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
     );
   }
   if (delta.margin_direction === 'narrowed') {
     return (
-      `${delta.current_leading_label} still leads after this re-run, though its lead `
+      `${since}${delta.current_leading_label} still leads after this re-run, though its lead `
       + `has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
     );
   }
-  return `The result is unchanged: ${delta.current_leading_label} still leads.`;
+  // ⭐⭐ THE MARGIN COULD NOT BE COMPUTED — ITS OWN ARM, BECAUSE IT IS NOT A
+  // NULL RESULT. `deriveMargin` returns 'unavailable' when either run's
+  // `margin_pp` is null (fewer than two recommendable options), and until round
+  // 2 this fell THROUGH to the unchanged arm below — so the product reported a
+  // no-movement finding about a pair whose margin was never compared. The
+  // leader IDENTITY is comparable here (that comparison does not use margins),
+  // so the honest form states exactly that and names the limit, in the shape
+  // the abstention arm already uses: say what was observed, then say what was
+  // not. `since` is empty when nothing is attributable, so the unattributed
+  // form is the same sentence without the clause.
+  if (delta.margin_direction === 'unavailable') {
+    return (
+      `${since}${delta.current_leading_label} still leads after this re-run. `
+      + 'I could not compare the size of its lead between the two runs.'
+    );
+  }
+
+  // ⭐ THE UNCHANGED ARM IS THE SCIENTIFIC ONE AND MUST READ AS A FINDING, NOT
+  // AN APOLOGY: a product that can only report a result when the answer changes
+  // cannot report a null result at all.
+  //
+  // ⚠⚠ BUT THE FINDING IS AN OBSERVATION, NOT A ROBUSTNESS CLAIM. Round 1 said
+  // "the conclusion does not hinge on that change", which asserts causal
+  // INDEPENDENCE — and the temporal-not-causal ruling is SYMMETRIC. Asserting
+  // the ABSENCE of a causal link needs the same evidence class as asserting its
+  // presence, and C2_unpaired licenses neither: with the seed unpinned, "no
+  // observed movement" cannot be separated from "a real effect cancelled by
+  // sampling noise". A change with a true -18pp effect masked to -0.4pp by an
+  // unlucky pair of draws lands HERE (`MARGIN_EPSILON_PP = 0.5`,
+  // compare-runs.ts:266) and would have been reported as non-dependence. The
+  // design's own §2.2 conceded the point in passing — "evidence the conclusion
+  // is robust to it" — and the shipped copy asserted the conclusion of that
+  // inference, unhedged. "Held both before and after" states only what was
+  // observed at the two time points, which is exactly what the pair licenses.
+  //
+  // ⚠ "the conclusion", NOT "the recommendation" — `recommendation` is in
+  // FORBIDDEN_USER_FACING_PHRASES (the founder ruling that the product does not
+  // recommend), so `applyTerminologyRewrite` silently rewrote the design's
+  // wording to "the leading option", MANUFACTURING the banned leader vocabulary
+  // inside our own safety pass. All composed arms are pinned against the real
+  // guard by test.
+  return attributed
+    ? (
+      `${since}the picture has stayed the same: ${delta.current_leading_label} `
+      + `still leads. That is a result in itself: the conclusion held both before `
+      + `and after ${theChange}.`
+    )
+    : `The result is unchanged: ${delta.current_leading_label} still leads.`;
 }
 
 /**
@@ -284,13 +402,24 @@ export function detectCoachingSignal(
     // NAMES an option. So the withheld turn reuses that same comparison-free
     // degrade — the run is still acknowledged, no leader is asserted, and the
     // signal id is unchanged so the telemetry series does not go dark.
+    //
+    // ⭐ ATTRIBUTION CANNOT OUTLIVE ITS HOST. It is a MODIFIER on a delta
+    // sentence, so the withheld path below never receives one: no leader
+    // entitlement ⇒ no delta sentence ⇒ no attribution clause. This is
+    // structural rather than a second permission check — the withheld arm
+    // composes from a null delta and a null change, so there is no branch on
+    // which a "since you changed X" clause could survive a withheld leader
+    // (CLAUDE.md trap 21, the #709/#737 shape this file already carries a
+    // warning about).
+    const rerun = leaderWithheld
+      ? { delta: null, interveningChange: null }
+      : buildRerunAcknowledgement(input);
     return {
       signal_id: 'RERUN_ANALYSIS_COMPLETE',
-      coaching_text: leaderWithheld
-        ? composeRerunText(null)
-        : COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
-            runDelta: buildRerunDelta(input),
-          }),
+      coaching_text: COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
+        runDelta: rerun.delta,
+        interveningChange: rerun.interveningChange,
+      }),
     };
   }
 
@@ -332,20 +461,35 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
  * `computed_at`, or any timestamp skew, made this acknowledgment diff against
  * a different "previous run" than the rest of the turn was reasoning about.
  */
-function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
+function buildRerunAcknowledgement(input: CoachingSignalInput): {
+  readonly delta: RunDelta | null;
+  readonly interveningChange: InterveningChange | null;
+} {
+  const none = { delta: null, interveningChange: null } as const;
+
   const currentFact = input.outcome.handler_facts.find(
     (f) => f.fact_type === 'run_analysis',
   );
-  if (currentFact === undefined) return null;
+  if (currentFact === undefined) return none;
 
-  const priorFact = selectRunAnalysisFact(input.priorFacts)?.fact;
-  if (priorFact === undefined) return null;
+  // ⭐ ONE SELECTION, TWO CONSUMERS. The delta and the attribution clause are
+  // derived from the SAME `selectRunAnalysisFact` result, so "the run we
+  // compared against" and "the run the user's change came after" are one fact
+  // by construction rather than by two call sites agreeing (CLAUDE.md trap
+  // #12; the same reasoning `orderSuccessfulRunAnalysisFactsNewestFirst`
+  // records for the comparison pair). Deriving the index separately here would
+  // let the sentence attribute a change to a comparison it did not precede.
+  const selected = selectRunAnalysisFact(input.priorFacts);
+  if (selected === null) return none;
 
-  const prior = projectRunFact(priorFact);
+  const prior = projectRunFact(selected.fact);
   const current = projectRunFact(currentFact);
-  if (prior === null || current === null) return null;
+  if (prior === null || current === null) return none;
 
-  return compareRuns(prior, current, input.interventionControlledFactorIds);
+  return {
+    delta: compareRuns(prior, current, input.interventionControlledFactorIds),
+    interveningChange: deriveInterveningChange(input.priorFacts, selected.index),
+  };
 }
 
 /**
