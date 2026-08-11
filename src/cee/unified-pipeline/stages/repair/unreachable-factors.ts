@@ -19,6 +19,9 @@ import type { EdgeFormat } from "../../utils/edge-format.js";
 import { neutralCausalEdge } from "../../utils/edge-format.js";
 import { log } from "../../../../utils/telemetry.js";
 import { fieldDeletion, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
+// The canonical unit classifier — the question "does this unit denote a
+// dimension?" already has one answer in this service, and this is it.
+import { readUnit } from "../../../provenance/stated-amounts.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +35,30 @@ export interface UnreachableFactorRepair {
   prior_synthesised?: boolean;
   /** The synthesised prior range (only present when prior_synthesised is true) */
   synthesised_range?: { range_min: number; range_max: number };
+
+  // ── THE PRESERVATION CONTRACT (S2) ───────────────────────────────────────
+  // A stage may TRANSFORM a value; it may not DELETE one without declaring
+  // what it removed, in a form that reaches the user's receipt.
+  //
+  // These three fields exist so `boundary.ts` can fill `ModelAdjustment.before`
+  // — a field DECLARED at `src/schemas/analysis-ready.ts:200` that this path has
+  // never populated. A declared field with no projection line is the estate's
+  // named P0 shape, and this is the line.
+  //
+  // ⚠ `ModelAdjustment` IS CEE-LOCAL, NOT PART OF THE SHARED CONTRACT — an
+  // earlier version of this comment said "the shared contract" and that is
+  // false. Measured with positive controls: ZERO matches in
+  // `@talchain/schemas` 0.39.0 as VENDORED HERE (control: `GraphV3`, 13 files)
+  // and ZERO in `olumi-schemas` main (control: `GoalThresholdFrame`, 4 files).
+  // The conclusion is unchanged — no contract change is needed — but the REASON
+  // matters to the UI lane that has to reconcile this shape: it is reconciling
+  // against a CEE-owned type it cannot find in the schemas package.
+  /** `data.value` as held at deletion — cap-normalised, NOT a magnitude. */
+  deleted_value?: number;
+  /** The magnitude the normalised value stood for (e.g. 1800000). */
+  deleted_raw_value?: number;
+  /** The unit that made the magnitude meaningful (e.g. '£'). */
+  deleted_unit?: string;
 }
 
 export interface UnreachableFactorResult {
@@ -177,6 +204,70 @@ function synthesisePriorFromBaseline(value: number): { range_min: number; range_
 }
 
 /**
+ * Render a magnitude the way the user would recognise it, or NULL.
+ *
+ * NULL is a first-class answer: with nothing a reader would recognise, the
+ * receipt stays quiet. Over-declaring is noise; under-declaring is the defect —
+ * but the AUDIT records every deletion regardless, so nothing is lost, only
+ * unsaid.
+ *
+ * ── TWO CONDITIONS, WRITTEN AGAINST THE SPEC ───────────────────────────────
+ * The sentence exists to show the user the figure THEY would recognise. That
+ * needs a magnitude that is
+ *
+ *   (1) DISTINCT from the pipeline's normalised value — otherwise `raw_value`
+ *       IS the ratio and we are echoing an internal number back; and
+ *   (2) DIMENSIONED — a number with no unit that means anything is not a
+ *       figure, it is a coordinate.
+ *
+ * ⚠ AN EARLIER VERSION GUARDED ONLY `raw_value !== undefined && unit !==
+ * undefined`, WHICH CONTRADICTED ITS OWN COMMENT. Measured on the deployed
+ * captures (17 distinct `(value, raw_value, unit)` triples across seven runs),
+ * that guard produced *"The extracted value 0.5 scale is not used in the
+ * maths"* — `raw_value === value === 0.5`, literally the case the comment
+ * called noise — and *"50 scale"*. Nine of the seventeen have
+ * `raw_value === value`, and `scale` is the drafter's marker for a
+ * dimensionless factor.
+ *
+ * Condition (2) is DERIVED, not hand-listed: `readUnit` is the canonical unit
+ * classifier this service already uses for exactly this question, and it
+ * resolves `scale`, `users` and `""` to `plain` while resolving `£`, `€`, `EUR`
+ * and `%` to a dimension. A local list of "units that count" would be the
+ * fifteenth such copy and would drift the moment the alphabet moved.
+ *
+ * ⚠ NO `toLocaleString`. Its grouping depends on the host's ICU data and
+ * default locale, so the same input can render `1,800,000` on one box and
+ * `1 800 000` on another — a user-visible string that differs by deployment
+ * environment is untestable by construction. Grouping is done explicitly.
+ */
+export function formatStatedMagnitude(
+  rawValue: number | undefined,
+  normalisedValue: number | undefined,
+  unit: string | undefined,
+): string | null {
+  if (rawValue === undefined || !Number.isFinite(rawValue)) return null;
+  if (unit === undefined || unit.length === 0) return null;
+  // (1) DISTINCT — `raw_value === value` means nothing was un-normalised.
+  if (normalisedValue !== undefined && rawValue === normalisedValue) return null;
+  // (2) DIMENSIONED — derived from the canonical classifier, never a local list.
+  if (readUnit(unit).kind === "plain") return null;
+
+  const negative = rawValue < 0;
+  const abs = Math.abs(rawValue);
+  // Keep at most two decimals, then drop a trailing ".00"/".x0".
+  const fixed = Number.isInteger(abs) ? String(abs) : abs.toFixed(2).replace(/\.?0+$/, "");
+  const [whole, fraction] = fixed.split(".");
+  const grouped = (whole ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const digits = `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}`;
+
+  // '%' is a suffix; a currency SYMBOL is a prefix; an alphabetic unit
+  // ('users', 'months') reads as a suffixed word.
+  if (unit === "%") return `${digits}%`;
+  if (/^[^\p{L}\p{N}\s]{1,3}$/u.test(unit)) return `${unit}${digits}`;
+  return `${digits} ${unit}`;
+}
+
+/**
  * The DECLARED scale of a factor's value — stamped by the producer that knows
  * it, never inferred by a consumer that does not.
  *
@@ -301,8 +392,32 @@ export function handleUnreachableFactors(
     // violation. factor_type, uncertainty_drivers, and extractionType are metadata
     // fields that remain useful for downstream enrichment. Promote them to node level
     // (NodeV3 passthrough preserves them) before potentially removing data.
+    // Everything the deletion is about to destroy, captured BEFORE the delete.
+    // Read off the payload only — no brief, no prose, no re-extraction.
+    const priorState = {
+      previous_value: data?.value as unknown,
+      previous_raw_value: typeof data?.raw_value === "number" ? data.raw_value : undefined,
+      previous_unit: typeof data?.unit === "string" ? data.unit : undefined,
+      previous_cap: typeof data?.cap === "number" ? data.cap : undefined,
+      previous_provenance:
+        typeof (node as any).provenance === "string" ? (node as any).provenance : undefined,
+      // S3 is unbuilt. NULL is the only honest value; a minted id with no
+      // referent is a fabrication wearing an identifier.
+      stated_item_id: null,
+    };
+
     if (data) {
-      if (data.value !== undefined) deletions.push(fieldDeletion('unreachable-factors', node.id, 'data.value', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
+      if (data.value !== undefined) {
+        deletions.push(
+          fieldDeletion(
+            'unreachable-factors',
+            node.id,
+            'data.value',
+            'UNREACHABLE_FACTOR_RECLASSIFIED',
+            priorState,
+          ),
+        );
+      }
       delete data.value;
       if (data.factor_type !== undefined) {
         (node as any).factor_type = data.factor_type;
@@ -329,10 +444,29 @@ export function handleUnreachableFactors(
       //
       // These promote to NODE level for the same reason `factor_type` and
       // `uncertainty_drivers` already do: the V1→V3 transform rebuilds the node
-      // FIELD BY FIELD (`transforms/schema-v3.ts:197`), so anything left on a
-      // deleted `data` is dropped with no error anywhere. `raw_value`, `cap`
-      // and `unit` are all declared on the shared node schema, so they survive
-      // the strict re-parse.
+      // FIELD BY FIELD, so anything left on a deleted `data` is dropped with no
+      // error anywhere.
+      //
+      // ⚠⚠ BUT THE PROMOTION DOES NOT REACH THE WIRE, AND THE SENTENCE THAT
+      // USED TO SIT HERE — "`raw_value`, `cap` and `unit` are all declared on
+      // the shared node schema, so they survive the strict re-parse" — IS
+      // FALSE. Measured across four deployed captures: ZERO of 29 factors
+      // carry node-level `raw_value`, `cap` or `unit`.
+      //
+      // THE HOP IS LOCATED. `transforms/schema-v3.ts:296-300` builds
+      // `observed_state` from `node.data.unit` / `node.data.raw_value` /
+      // `node.data.cap` — i.e. from the very object deleted below. The node
+      // level is read at `:411` for `synthesiseDisplayValue` ONLY, and never
+      // copied into `observed_state`. So this code correctly diagnosed that a
+      // field-by-field rebuild drops anything on a deleted `data`, and then
+      // moved the fields to a level that rebuild ALSO does not read — the same
+      // defect one storey up.
+      //
+      // NOT FIXED HERE: correcting it means teaching the V3 transform to read
+      // node-level values, which is a transform change with its own blast
+      // radius and belongs to whoever owns `schema-v3.ts`. Recorded precisely
+      // so the next lane starts from a located hop rather than a live claim
+      // that the values already survive.
       //
       // ⚠ NONE OF THIS READS THE BRIEF. Every value here was already extracted
       // by the pipeline and is merely being carried instead of deleted. Reading
@@ -413,7 +547,15 @@ export function handleUnreachableFactors(
       const hasOperator = typeof data.operator === 'string';
       const hasValue = typeof data.value === 'number';
       if (!hasInterventions && !hasOperator && !hasValue) {
-        deletions.push(fieldDeletion('unreachable-factors', node.id, 'data', 'UNREACHABLE_FACTOR_RECLASSIFIED'));
+        deletions.push(
+          fieldDeletion(
+            'unreachable-factors',
+            node.id,
+            'data',
+            'UNREACHABLE_FACTOR_RECLASSIFIED',
+            priorState,
+          ),
+        );
         delete (node as any).data;
       }
     }
@@ -446,6 +588,48 @@ export function handleUnreachableFactors(
         range_min,
         range_max,
       }, `Synthesised prior for reclassified factor "${node.id}" from baseline ${originalValue}`);
+    }
+
+    // ── THE DECLARATION (S2) ─────────────────────────────────────────────
+    // What this repair destroyed, carried on the record that already reaches
+    // the user (`boundary.ts:100-105` → `analysis_ready.model_adjustments`).
+    // Until now that surface said only that the category had moved, while a
+    // figure the user recognises was removed from the maths in silence.
+    if (originalValue !== undefined) repair.deleted_value = originalValue;
+    if (priorState.previous_raw_value !== undefined) {
+      repair.deleted_raw_value = priorState.previous_raw_value;
+    }
+    if (priorState.previous_unit !== undefined) {
+      repair.deleted_unit = priorState.previous_unit;
+    }
+
+    // The SENTENCE is emitted only when there is a magnitude a reader can
+    // recognise. A bare normalised `0.72` told back to a user is noise, and
+    // over-declaration that makes the receipt unreadable is a real cost
+    // (design §8.2 risk 4) — so the AUDIT records everything and the RECEIPT
+    // speaks only when it has something meaningful to say.
+    const shownFigure = formatStatedMagnitude(
+      priorState.previous_raw_value,
+      originalValue,
+      priorState.previous_unit,
+    );
+    if (shownFigure !== null) {
+      // ⚠ PHRASING IS LOAD-BEARING TWICE OVER.
+      //
+      // (1) It must not attribute the figure to the user. The pipeline
+      //     extracted it; `provenance: "brief_extraction"` is a DEFAULT stamp
+      //     that over-claims (ROADMAP 2.743), and the whole 2.714 revert was
+      //     about a surface telling users the system's reading was their own.
+      //
+      // (2) It must survive the DEPLOYED UI's `sanitiseDetail()`
+      //     (`ModelAdjustments.tsx` at UI `7b5992fc`), which strips
+      //     parenthesised bare numbers, quoted lowercase tokens and the prior
+      //     clause before rendering. A figure written as "(1800000)" would be
+      //     DELETED there and the user would read a sentence with a hole in
+      //     it — worse than saying nothing. Pinned control in the spec.
+      repair.action +=
+        `. The extracted value ${shownFigure} is not used in the maths` +
+        ` — the range shown is a placeholder`;
     }
 
     repairs.push(repair);

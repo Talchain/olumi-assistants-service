@@ -54,6 +54,16 @@ const v3Body = {
   nodes: [
     { id: "g1", label: "Goal One" },
     { id: "o1", label: "Option A" },
+    // `fac_x` / `fac_y` are the nodes the repair fixtures below reclassify.
+    // They were absent from this fixture while the assertions asserted their
+    // ids reached `model_adjustments` — a state the pipeline cannot produce,
+    // because reclassifying a factor leaves it IN the graph. Verified on four
+    // deployed captures (build `32f06dd`): every `model_adjustments.node_id`
+    // resolves in `nodes[]`, 0 exceptions. Added so the fixture describes a
+    // reachable state, not so a guard stops biting — the drop case has its own
+    // test below.
+    { id: "fac_x", label: "Factor X" },
+    { id: "fac_y", label: "Factor Y" },
   ],
   edges: [],
   graph: { nodes: [], edges: [] },
@@ -478,6 +488,80 @@ describe("runStageBoundary", () => {
     expect(ctx.finalResponse.analysis_ready.model_adjustments[1].reason).toBe("Reclassified Y");
     expect(ctx.finalResponse.analysis_ready.model_adjustments[1].source).toBe("deterministic_sweep");
     expect(ctx.finalResponse.analysis_ready.model_adjustments[1].node_id).toBe("fac_y");
+  });
+
+  // ── S2 · the preservation contract at the user surface ──────────────────
+
+  it("drops a node_id that resolves to nothing, and keeps the adjustment", async () => {
+    // Isolate the deterministic-sweep path: makeCtx always carries STRP
+    // mutations, and a leftover STRP adjustment would shift every index below.
+    (mapMutationsToAdjustments as any).mockReturnValue([]);
+    // The id-validation `graph-validator.ts:1407-1420` already applies to
+    // `widening_log.elements_added`, mirrored into the LOSS direction. An id
+    // pointing at a node that is not in the graph invites a consumer to
+    // highlight nothing; the adjustment itself is still true and still shown.
+    //
+    // DISCRIMINATING PAIR with the test above: same code path, same shape, the
+    // ONLY difference is whether the node exists. One must keep the id and one
+    // must drop it, or the guard is not binding to node identity at all.
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_vanished].category", action: "Reclassified a pruned node" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    const adjustments = ctx.finalResponse.analysis_ready.model_adjustments;
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0].reason).toBe("Reclassified a pruned node");
+    expect(adjustments[0].node_id).toBeUndefined();
+    // The path still names it, so nothing is lost — it simply is not offered
+    // as a resolvable id.
+    expect(adjustments[0].field).toBe("nodes[fac_vanished].category");
+  });
+
+  it("projects the deleted magnitude into ModelAdjustment.before — the contract field this path never populated", async () => {
+    // Isolate the deterministic-sweep path: makeCtx always carries STRP
+    // mutations, and a leftover STRP adjustment would shift every index below.
+    (mapMutationsToAdjustments as any).mockReturnValue([]);
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        {
+          code: "UNREACHABLE_FACTOR_RECLASSIFIED",
+          path: "nodes[fac_x].category",
+          action: "Reclassified X. The extracted value £1,800,000 is not used in the maths",
+          deleted_value: 0.72,
+          deleted_raw_value: 1_800_000,
+          deleted_unit: "£",
+        },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    const adjustment = ctx.finalResponse.analysis_ready.model_adjustments[0];
+    // The MAGNITUDE, not the cap-normalised 0.72 — a ratio shown as a business
+    // figure is the display defect this whole slice exists to stop.
+    expect(adjustment.before).toBe(1_800_000);
+    expect(adjustment.node_id).toBe("fac_x");
+  });
+
+  it("falls back to the normalised value only when there is no magnitude, and emits no `before` when there is neither", async () => {
+    // Isolate the deterministic-sweep path: makeCtx always carries STRP
+    // mutations, and a leftover STRP adjustment would shift every index below.
+    (mapMutationsToAdjustments as any).mockReturnValue([]);
+    // OPPOSITE-DIRECTION TWIN. `before: undefined` and `before: 0` must never
+    // collapse — one means "nothing was deleted", the other means "a zero was".
+    const ctx = makeCtx({
+      deterministicRepairs: [
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_x].category", action: "A", deleted_value: 0.5 },
+        { code: "UNREACHABLE_FACTOR_RECLASSIFIED", path: "nodes[fac_y].category", action: "B" },
+      ],
+    });
+    await runStageBoundary(ctx);
+
+    const [withValue, without] = ctx.finalResponse.analysis_ready.model_adjustments;
+    expect(withValue.before).toBe(0.5);
+    expect("before" in without).toBe(false);
   });
 
   // ── bias_findings wiring ────────────────────────────────────────────────

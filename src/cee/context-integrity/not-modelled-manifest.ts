@@ -67,6 +67,77 @@ export type QuantityKind = "money" | "percent" | "count" | "date" | "period";
  *  commentary/coaching but not parameterising anything. absent = nowhere. */
 export type QuantityVerdict = "in_model" | "prose_only" | "absent";
 
+/**
+ * WHAT KIND OF THING THE USER STATED — the second axis, and the one that makes
+ * the retention invariant sayable at all.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * Measured on the deployed cold read for the 4-day-week brief (build
+ * `32f06dd`, 2026-08-10): the board's HARD FLOOR ("Do not let CSAT drop below
+ * 85%"), the ops lead's GUESS ("productivity will fall 10-15%") and the
+ * Manchester PILOT RESULT ("a 4% rise") all report as
+ * `kind=percent, verdict=prose_only`. Three different kinds of claim, one
+ * indistinguishable row each. The invariant — that everything material is
+ * retained and correctly CLASSIFIED — could not be stated, let alone met.
+ *
+ * ── WHAT IT IS NOT ─────────────────────────────────────────────────────────
+ * `QuantityKind` is NOT replaced. It stays exactly as it was, byte for byte,
+ * and remains the axis the deployed UI validates against. This is a SECOND,
+ * ADDITIVE axis. See `stated_kinds` on the manifest for why that is not a
+ * stylistic choice.
+ */
+export const STATED_KINDS = [
+  "goal",
+  "option",
+  "constraint",
+  "figure",
+  "evidence",
+  "assumption",
+  "disagreement",
+  "correction",
+] as const;
+
+export type StatedKind = (typeof STATED_KINDS)[number];
+
+/**
+ * ⛔ THE ADOPTION RULE, AND IT IS NOT OPTIONAL.
+ *
+ * The estate's named historical failure is meaning fields that shipped with no
+ * producer and no consumer, and were therefore dark from birth. A kind may sit
+ * in `sourced` ONLY if a LIVE producer supplies it and this map names that
+ * producer at its bytes. Everything else is `unsourced` — declared, counted,
+ * and visible as a known blind spot rather than an absence a reader mistakes
+ * for "nothing of that kind was said".
+ *
+ * A kind moves out of this map only in the same change train as its producer.
+ */
+export const STATED_KIND_PRODUCERS: Readonly<Partial<Record<StatedKind, string>>> = {
+  // Every quantity the scan finds is at minimum a stated figure — the scan
+  // itself is the producer, and it is the one already shipping.
+  figure: "extractStatedQuantities (this module) — quantities stated in the brief",
+  // The drafting model's typed, provenance-bound constraint rows, carried on
+  // the graph with the exact sentence they came from.
+  constraint:
+    "graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)",
+};
+
+/**
+ * Kinds with no live producer, stated explicitly rather than left absent.
+ *
+ * `option`, `disagreement` and `correction` are ALREADY named in
+ * `NOT_TRACKED_CLASSES` below — the manifest has always known it cannot see
+ * them. That honesty is the starting point, not a defect: a kind listed here is
+ * a blind spot on the record, and a reader can tell it apart from a kind that
+ * was looked for and not found.
+ */
+export const UNSOURCED_STATED_KINDS: readonly StatedKind[] = STATED_KINDS.filter(
+  (k) => STATED_KIND_PRODUCERS[k] === undefined,
+);
+
+export const SOURCED_STATED_KINDS: readonly StatedKind[] = STATED_KINDS.filter(
+  (k) => STATED_KIND_PRODUCERS[k] !== undefined,
+);
+
 export interface NotModelledItem {
   /** The exact bytes as the user wrote them. */
   readonly literal: string;
@@ -78,6 +149,19 @@ export interface NotModelledItem {
   /** The modelled quantity this figure was matched to, when matched
    *  numerically. Null for a text match or no match. */
   readonly matched_node_id: string | null;
+  /**
+   * WHAT KIND OF THING this is — the second axis (see `StatedKind`).
+   *
+   * ⚠ SOURCED FROM PRODUCERS, NEVER RE-DERIVED FROM THE PROSE. `constraint`
+   * means "a live `goal_constraints[]` row quotes the sentence this figure
+   * stands in and corroborates its value"; everything else is `figure`. A
+   * figure that IS a constraint in English but that no producer claimed stays
+   * `figure` — that is the honest answer, and it is the loss made visible.
+   * Guessing it back would be a fifth extractor over free text, which
+   * ROADMAP 2.1051 forbids and which misclassification risk makes worse than
+   * silence.
+   */
+  readonly stated_kind: StatedKind;
 }
 
 export interface NotModelledManifest {
@@ -126,6 +210,28 @@ export interface NotModelledManifest {
   readonly inferred_factors: {
     readonly status: "derived" | "not_recorded";
     readonly items: readonly { readonly node_id: string; readonly label: string }[];
+  };
+  /**
+   * THE KIND AXIS AND ITS ADOPTION STATE — shipped together, deliberately.
+   *
+   * A vocabulary without a statement of which of its words have producers is
+   * how five of eight kinds ship dark and nobody notices for a month. This
+   * block is that statement, ON THE WIRE, so a consumer can render "we do not
+   * track disagreements yet" instead of implying none were stated.
+   *
+   * `sourced ∪ unsourced` is always the complete `STATED_KINDS` set and the two
+   * are always disjoint — asserted in the spec, not merely intended.
+   */
+  readonly stated_kinds: {
+    readonly status: "derived";
+    /** Count of REPORTED items per kind. Sums to `quantities.items.length`. */
+    readonly tally: Readonly<Record<StatedKind, number>>;
+    /** Kinds a live producer supplies today. */
+    readonly sourced: readonly StatedKind[];
+    /** Kinds with no producer — declared blind spots, never silent absences. */
+    readonly unsourced: readonly StatedKind[];
+    /** The producer, named at its bytes, for each sourced kind. */
+    readonly producers: Readonly<Partial<Record<StatedKind, string>>>;
   };
   /** Loss classes this derivation CANNOT observe. The anti-reassurance field. */
   readonly not_tracked: readonly string[];
@@ -1053,6 +1159,108 @@ function classify(
 
 // ── the derivation ──────────────────────────────────────────────────────────
 
+// ── the KIND axis: sourced from producers, never re-derived from prose ──────
+
+/**
+ * A span of the brief that a live `goal_constraints[]` row quotes.
+ *
+ * The row is the ORACLE. It carries `source_quote` — "the exact phrase from the
+ * brief that implies this constraint" — plus `value` and `unit`, all emitted by
+ * the drafting model and validated on the way in. We locate that quote in the
+ * brief and remember WHERE it is. Nothing here parses the brief for constraint
+ * language; the producer already decided, and this only asks *where*.
+ */
+interface ConstraintSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly value: number | null;
+  readonly unit: string | null;
+}
+
+/**
+ * Locate each constraint row's quoted sentence inside the brief.
+ *
+ * ⚠ A QUOTE THAT DOES NOT LOCATE IS DISCARDED, NOT APPROXIMATED. `source_quote`
+ * is model-produced, and a model quote is a claim about the brief, not proof of
+ * one: the estate has measured a hallucinated figure receiving `from_brief`
+ * provenance identically to a quoted one. Substring verification against the
+ * submitted text is the fabrication gate, and an unlocatable quote simply
+ * classifies nothing — it can never invent a `constraint`.
+ */
+function constraintSpans(
+  graph: Record<string, unknown>,
+  briefText: string,
+): ConstraintSpan[] {
+  const rows = graph.goal_constraints;
+  if (!Array.isArray(rows)) return [];
+
+  const spans: ConstraintSpan[] = [];
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const quote = r.source_quote;
+    if (typeof quote !== "string" || quote.trim().length === 0) continue;
+
+    // Verbatim first — the common case and the only one that needs no
+    // judgement. Whitespace-normalised second, because a brief can carry a
+    // newline where the model wrote a space.
+    let start = briefText.indexOf(quote);
+    let matched = quote;
+    if (start < 0) {
+      const loose = new RegExp(
+        quote.trim().split(/\s+/).map(escapeRe).join("\\s+"),
+      );
+      const m = loose.exec(briefText);
+      if (m === null) continue; // unlocatable ⇒ classifies nothing
+      start = m.index;
+      matched = m[0];
+    }
+
+    spans.push({
+      start,
+      end: start + matched.length,
+      value: typeof r.value === "number" ? r.value : null,
+      unit: typeof r.unit === "string" ? r.unit : null,
+    });
+  }
+  return spans;
+}
+
+/**
+ * The kind of one stated quantity.
+ *
+ * `constraint` requires BOTH halves, and the conjunction is the point:
+ *   1. the figure sits INSIDE a span the producer quoted, and
+ *   2. the producer's own `value` corroborates the figure.
+ *
+ * Position alone would sweep up every number that happens to share a sentence
+ * with a limit ("CSAT is 87%. Do not let it drop below 85%" — one sentence, two
+ * very different claims). Value alone would sweep up every restatement of the
+ * same number elsewhere in the brief. Requiring both binds the classification
+ * to the OCCURRENCE the producer actually claimed, which is identity binding,
+ * not a value predicate another object could satisfy.
+ *
+ * Everything the producers do not claim is `figure`. That is not a fallback —
+ * it is the honest answer, and it is what makes a lost constraint VISIBLE
+ * instead of invented back.
+ */
+function classifyStatedKind(q: Quantity, spans: readonly ConstraintSpan[]): StatedKind {
+  const end = q.at + q.literal.length;
+  for (const span of spans) {
+    if (q.at < span.start || end > span.end) continue;
+    if (span.value === null) continue;
+    // The magnitude as written (85) or fully expanded (0.85 → 85%, £11.2m →
+    // 11_200_000); the producer may hold either form.
+    if (
+      (q.value !== null && numbersEqual(q.value, span.value)) ||
+      (q.mantissa !== null && numbersEqual(q.mantissa, span.value))
+    ) {
+      return "constraint";
+    }
+  }
+  return "figure";
+}
+
 const SCOPE = {
   searched:
     "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
@@ -1084,6 +1292,22 @@ const UNAVAILABLE = (
   // NOT an empty tally. We did not look, so we know nothing — and a zero here
   // would be read as "nothing was dropped".
   quantities: null,
+  // The VOCABULARY is a property of this derivation, not of any one scenario,
+  // so it is stated even when we could not look — a consumer must be able to
+  // render "we do not track disagreements" without a successful derivation.
+  // The TALLY is all zeros here for the same reason `quantities` is null: we
+  // counted nothing because we looked at nothing, and the zeros are only
+  // readable alongside `status: "unavailable"`.
+  stated_kinds: {
+    status: "derived",
+    tally: Object.fromEntries(STATED_KINDS.map((k) => [k, 0])) as Record<
+      StatedKind,
+      number
+    >,
+    sourced: SOURCED_STATED_KINDS,
+    unsourced: UNSOURCED_STATED_KINDS,
+    producers: STATED_KIND_PRODUCERS,
+  },
   declared_exclusions: { status: "not_recorded", items: [] },
   inferred_factors: { status: "not_recorded", items: [] },
   not_tracked: NOT_TRACKED_CLASSES,
@@ -1109,9 +1333,13 @@ export function deriveNotModelledManifest(
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>);
   const quantities = extractStatedQuantities(briefText);
+  const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
   const items: NotModelledItem[] = [];
   const matchedNodeIds = new Set<string>();
+  const tally = Object.fromEntries(
+    STATED_KINDS.map((k) => [k, 0]),
+  ) as Record<StatedKind, number>;
   let inModel = 0;
   let proseOnly = 0;
   let absent = 0;
@@ -1123,6 +1351,8 @@ export function deriveNotModelledManifest(
     else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
     if (items.length < MAX_ITEMS) {
+      const statedKind = classifyStatedKind(q, spans);
+      tally[statedKind] += 1;
       items.push({
         literal: q.literal,
         kind: q.kind,
@@ -1131,6 +1361,7 @@ export function deriveNotModelledManifest(
         // Which modelled quantity this figure was matched to. Null for a text
         // match. A numeric match that cannot name its carrier is not a match.
         matched_node_id: matched?.nodeId ?? null,
+        stated_kind: statedKind,
       });
     }
   }
@@ -1148,6 +1379,13 @@ export function deriveNotModelledManifest(
       absent,
       truncated: quantities.length > items.length,
       items,
+    },
+    stated_kinds: {
+      status: "derived",
+      tally,
+      sourced: SOURCED_STATED_KINDS,
+      unsourced: UNSOURCED_STATED_KINDS,
+      producers: STATED_KIND_PRODUCERS,
     },
     declared_exclusions: readDeclaredExclusions(graph as Record<string, unknown>),
     inferred_factors: deriveInferredFactors(

@@ -241,7 +241,19 @@ export interface StageContext {
   repairTrace?: Record<string, unknown>;
 
   // ── Stage 4 Substep 1b (Deterministic sweep) outputs ─────────────────
-  deterministicRepairs?: Array<{ code: string; path: string; action: string }>;
+  // `deleted_*` are the PRESERVATION CONTRACT's carriers (S2): a repair that
+  // removes a value declares what it removed, and `boundary.ts` projects that
+  // into `ModelAdjustment.before` — a contract field declared since 0.x and
+  // never populated on this path. Optional and additive: every producer and
+  // consumer that destructures {code,path,action} is unaffected.
+  deterministicRepairs?: Array<{
+    code: string;
+    path: string;
+    action: string;
+    deleted_value?: number;
+    deleted_raw_value?: number;
+    deleted_unit?: string;
+  }>;
   // `context` carries validator-specific structured detail when available
   // (e.g. OPTIONS_IDENTICAL → { optionIds, signature }). Optional and
   // additive — existing consumers that destructure {code,path,message} are
