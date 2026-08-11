@@ -52,7 +52,21 @@ import {
   LLMExplainDiffResponse as AnthropicExplainDiffResponse,
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
-import { buildDraftGraphSchema } from '../../cee/draft/anthropic-graph-schema.js';
+// ⚠ The graph grammar builder is retained for exactly one train as the REVERT
+// TARGET for the draft-by-records cutover (rollback = code revert, no flag), and
+// is still exercised by its own guards in `anthropic-graph-schema.ts`. It is
+// deliberately no longer imported here: the draft path attaches the RECORDS
+// grammar, and an unused import of the retired builder would read as though both
+// were live.
+import {
+  buildDraftRecordsSchema,
+  draftRecordsGrammarHash,
+  draftRecordsInstructionHash,
+  buildDraftRecordsSidecar,
+  DRAFT_RECORDS_INSTRUCTION,
+  projectDraftRecords,
+  isSalvageableRecordSet,
+} from '../../cee/draft/records/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
@@ -454,8 +468,24 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   // If forceDefault is true, skip store/cache and use hardcoded default directly
   const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
 
+  // ── DRAFT-BY-RECORDS: the output-shape instruction ──────────────────────
+  // Appended as a SECOND system block, AFTER the block carrying the
+  // `cache_control` breakpoint, so the long served prompt stays byte-identical
+  // and cached and no draft pays a cold cache-write for this.
+  //
+  // ⚠ NOT threaded through `args.systemDirective`. That channel is owned by the
+  // lean-draft retry and answers "what should this RETRY do differently?"; this
+  // answers "what SHAPE does every draft emit?". Two questions under one name is
+  // trap 21 — see instruction.ts.
+  //
+  // This also runs on the prompt-only degradation rebuild (which reuses this
+  // builder), which is exactly the intent: without a grammar, the instruction is
+  // the only thing still asking for records.
+  const systemBlocks = buildSystemBlocks(systemPrompt, { operation: "draft_graph" });
+  systemBlocks.push({ type: "text", text: DRAFT_RECORDS_INSTRUCTION });
+
   return {
-    system: buildSystemBlocks(systemPrompt, { operation: "draft_graph" }),
+    system: systemBlocks,
     userContent,
     // Native document attachment (D-59-7): the untrusted-bracketed document block
     // sequence. Present only when a document was attached; appended to the user
@@ -787,13 +817,16 @@ export async function draftGraphWithAnthropic(
     );
   }
 
-  // v11 (2026-07-21, runaway-draft lane fix b) — UNCONDITIONAL. Drops the
-  // zero-reader `topology_plan` key from the grammar (508 output tokens / 8.1%
-  // of a measured draft, and closes the live prompt/grammar contradiction).
-  // Only meaningful on the structured path: the prompt-only fallback has no
-  // grammar to omit it from, and the served prompt v195 already instructs the
-  // model not to emit it there.
-  const draftGraphSchema = buildDraftGraphSchema();
+  // ── DRAFT-BY-RECORDS: the grammar slot ──────────────────────────────────
+  // The records grammar REPLACES the graph grammar in the structured-outputs
+  // slot. The model states what the user said and what it is itself adding, as
+  // two lists; the deterministic projector at the post-LLM seam below turns that
+  // into the GraphV3 every downstream consumer already expects.
+  //
+  // Shipped ON, with no flag and no env gate: rollback is a code revert. The
+  // graph grammar builder stays in the tree for exactly one train as that revert
+  // target and is then deleted.
+  const draftGraphSchema = buildDraftRecordsSchema();
 
   if (draftThinkingEnabled && config.cee.anthropicStructuredOutputs) {
     log.info(
@@ -1721,7 +1754,15 @@ export async function draftGraphWithAnthropic(
         if (repaired) {
           try {
             const salvaged = JSON.parse(repaired) as Record<string, unknown>;
-            if (Array.isArray((salvaged as { nodes?: unknown }).nodes)) {
+            // ⚠ RECORDS-SHAPED, not graph-shaped. This predicate used to read
+            // `Array.isArray(salvaged.nodes)` — the GRAPH's discriminator. On the
+            // records draft path that is permanently false, so salvage would have
+            // silently stopped firing and every truncated draft would have become
+            // a hard failure with nothing in any log saying why. Note the shape of
+            // that defect: not a wrong answer, an instrument that quietly never
+            // fires. Salvage still only ever OFFERS a candidate — the projection
+            // and then `AnthropicDraftResponse.safeParse` remain the gates.
+            if (isSalvageableRecordSet(salvaged)) {
               rawJson = salvaged;
               salvagedFromTruncation = true;
               log.warn({
@@ -1781,16 +1822,72 @@ export async function draftGraphWithAnthropic(
     }
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
-    const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
-      ? ((rawJson as any).nodes as any[])
-        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
-        .filter(Boolean)
-      : [];
     // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. Runs BEFORE
     // normalisation so the degenerate-cap repair below it can never "repair" a
     // quad that is about to be deleted. DRAFT ONLY: the repair_graph call site
     // (:2624) deliberately does NOT strip — it runs after Stage 3 has enriched,
     // where a threshold IS attested and must survive.
+    // ── ⭐ THE PROJECTION SEAM ───────────────────────────────────────────────
+    //
+    // `rawJson` is a RECORD SET, not a graph. The deterministic projector turns
+    // it into GraphV3 right here, so every line below — normalisation, repair,
+    // validation, persistence, analysis, UI — sees exactly the shape it saw
+    // before and is unchanged.
+    //
+    // WHY EXACTLY HERE. Any later and a graph-shaped consumer would already have
+    // read a record set; any earlier and it would run before the truncation
+    // salvage that `rawJson` depends on. It sits immediately above
+    // `stripModelAuthoredGoalThreshold` because that strip is the first consumer
+    // that reads graph structure.
+    //
+    // HONEST FAILURE, NEVER A PHANTOM GRAPH. If the response is not a record set
+    // — including the case where the model ignored the instruction and returned a
+    // GRAPH, which the prompt-only degradation path makes reachable — this throws
+    // the SAME typed error a malformed draft throws today, carrying the same
+    // `_llm_meta`, so it lands on the existing user-visible refusal and the
+    // existing retry. It never substitutes an empty graph: an empty graph is a
+    // lie that validates.
+    const seam = projectDraftRecords(rawJson);
+    if (!seam.ok) {
+      log.error({
+        event: "cee.draft.records_projection_failed",
+        reason: seam.reason,
+        detail: seam.detail,
+        salvaged_from_truncation: salvagedFromTruncation,
+        structured_outputs_used: useStructuredOutputs,
+      }, `[Anthropic] draft_graph response was not a record set (${seam.reason}) — refusing rather than drafting a graph the model did not produce`);
+      throw Object.assign(
+        new Error(`anthropic_response_invalid_schema: draft_records_${seam.reason}: ${seam.detail}`),
+        {
+          _llm_meta: failedCallLlmMeta,
+          ...(truncatedAtMaxTokens ? { truncated_at_max_tokens: true } : {}),
+        },
+      );
+    }
+    const recordsSidecar = buildDraftRecordsSidecar({
+      records: seam.records,
+      projection: seam.projection,
+      instructionSha256: draftRecordsInstructionHash(),
+      grammarSha256: draftRecordsGrammarHash(),
+    });
+    log.info({
+      event: "cee.draft.records_projected",
+      instruction_sha256: recordsSidecar.instruction_sha256,
+      grammar_sha256: recordsSidecar.grammar_sha256,
+      ...recordsSidecar.counts,
+    }, "[Anthropic] draft record set projected to GraphV3 at the post-LLM seam");
+    rawJson = seam.projection.graph as unknown as Record<string, unknown>;
+
+    // Diagnostic census of what the projector produced. Computed AFTER the
+    // projection deliberately: before it, `rawJson.nodes` is absent on every
+    // single draft, so this would have read an empty array forever and the
+    // downstream `node_kinds_raw_json` diagnostic would have gone quietly blind.
+    const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
+      ? ((rawJson as any).nodes as any[])
+        .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
+        .filter(Boolean)
+      : [];
+
     const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
     if (strippedGoal.nodeIds.length > 0) {
       log.info({
