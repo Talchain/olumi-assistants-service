@@ -62,6 +62,42 @@ export function isSpikeArmC(): boolean {
 }
 
 /**
+ * ⭐ ARM C-EXTENDED (`SPIKE_ARM=C_EXT`) — §1.4's own named option, run as a
+ * SEPARATE arm with its OWN pre-registration.
+ *
+ * `C-BUILD-2` (P4C) measured 44 causal links across 9 arm-C runs with ZERO
+ * originating at an option, and traced it to the appendix: the frozen bytes
+ * describe the two lists and never ask for the connections. §1.4 names the
+ * response — "C-extended (records + an explicit structural constraint)" — and
+ * ADDENDUM v1.3 §2 pre-commits it: narrow diagnosis → smallest change →
+ * re-measure.
+ *
+ * ⚠ THE FROZEN ARM-C BYTES ARE NOT EDITED. `SPIKE_C_SYSTEM_APPENDIX` above is
+ * byte-identical to `d3e9fdae` (its sha256 is pinned by a test), so every P4C
+ * arm-C run stays reproducible and the pre-registration hash still verifies.
+ * C-ext is a NEW constant, a NEW hash, and a NEW arm label — never an edit to
+ * v1. §6.1's rule ("post-hoc promotion is forbidden; discovering the list was
+ * wrong is a finding, not an edit") is the governing principle, applied to the
+ * intervention rather than to the atom list.
+ */
+export function isSpikeArmCExt(): boolean {
+  // eslint-disable-next-line no-restricted-syntax -- spike-only gate; see above.
+  return process.env.SPIKE_ARM === "C_EXT";
+}
+
+/**
+ * The three behavioural sites (records grammar in the structured-outputs slot,
+ * system-block appendix, post-LLM projection seam) are SHARED by C and C-ext.
+ * That sharing is deliberate and load-bearing: the ONLY difference between the
+ * two arms is the appendix bytes, so any difference in result is attributable to
+ * the instruction and to nothing else. A second copy of the projector would have
+ * made C-ext a different arm in more ways than the one being tested.
+ */
+export function isSpikeArmCFamily(): boolean {
+  return isSpikeArmC() || isSpikeArmCExt();
+}
+
+/**
  * FROZEN BYTES. Hashed into the evidence manifest before any measured run
  * (§8: "Pre-registration artefacts hashed BEFORE run 1: … arm C's schema +
  * appendix bytes"). Editing this string after run 1 invalidates every measured
@@ -105,9 +141,78 @@ second; \`c0\` is the first claim. A \`causal_link\` needs \`from_ref\` and
 Emit only what the brief supports. An empty \`claims\` list is a valid response.
 `.trim();
 
+/**
+ * ⭐ THE C-EXT EXTENSION — a PURE APPEND to the frozen arm-C bytes.
+ *
+ * A test asserts `SPIKE_C_EXT_SYSTEM_APPENDIX.startsWith(SPIKE_C_SYSTEM_APPENDIX)`,
+ * so the intervention delta is exactly the section below and is legible as such.
+ *
+ * ── WRITTEN AGAINST THE CONSUMER'S PREDICATE, NOT AGAINST THE SYMPTOM ──────
+ * Trap 13d: the failure in hand was "no link starts at an option", but the
+ * consumer's gate is not that. Derived at the bytes:
+ *
+ *   NO_EFFECT_PATH           `graph-validator.ts:822-839` — each option needs a
+ *                            DIRECT forward target that is a `controllable`
+ *                            factor AND can reach the goal. An option-origin
+ *                            link that leads nowhere satisfies none of it.
+ *   NO_PATH_TO_GOAL          `:620-633` — EVERY node except the decision must
+ *                            reach the goal.
+ *   UNREACHABLE_FROM_DECISION`:576-618` — every node except decision/goal must be
+ *                            reachable from the decision (exogenous
+ *                            observable/external factors are exempt only if they
+ *                            reach the goal).
+ *   category                 `:83-134` — `controllable` is INFERRED FROM
+ *                            STRUCTURE (an incoming option edge), never declared.
+ *                            So the instruction asks for the LINK, never for the
+ *                            category — asking for the category would invite
+ *                            `CATEGORY_MISMATCH` (`:787`) instead.
+ *
+ * So instructing option-origin links ALONE would have been the symptom's fix.
+ * The section asks for the whole spine the gate actually checks: option → factor
+ * → … → goal, and every emitted node on it.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT SAY ──────────────────────────────────────
+ * Nothing about provenance (the projector owns that mechanically, and a model
+ * that could speak about provenance could commit false authorship — the property
+ * C-K4 exists to protect). Nothing that pressures the model to invent facts:
+ * "do not emit a factor you cannot connect" removes a claim, it does not add
+ * one, and the next sentence forbids dropping anything the USER stated. No
+ * `strength` request — a number the model was not asked for is invented
+ * precision, and the repair machinery defaults it (`patchEdgeNumeric`
+ * `edge-format.ts:79` treats NONE as V1_FLAT for new edges), so nothing
+ * structural depends on it.
+ */
+export const SPIKE_C_EXT_APPENDIX_SECTION = `
+## CONNECT WHAT YOU EMIT
+
+A decision only holds together if its parts join up, so state the connections as
+\`causal_link\` claims. They are claims like any other — yours, not the user's —
+and \`basis\` still records whatever the user said that you built them on.
+
+- Every \`option\` needs at least one \`causal_link\` FROM it TO a factor claim it
+  changes. An option that changes nothing cannot be told apart from any other
+  option.
+- Every factor needs at least one \`causal_link\` onward, and the chain must end
+  at the \`goal\`. A factor that leads nowhere is not part of the decision.
+- If a stated figure or constraint bears on the goal, say so with a
+  \`causal_link\` from it to the goal.
+- Set \`effect\` to \`positive\` or \`negative\` on every \`causal_link\`.
+
+Do not emit a factor you cannot connect. But never drop something the user
+stated: keep it in \`stated_items\`, and connect it if it bears on the goal.
+`;
+
+/** FROZEN BYTES for arm C-ext. Hashed into the manifest before its run 1. */
+export const SPIKE_C_EXT_SYSTEM_APPENDIX = `${SPIKE_C_SYSTEM_APPENDIX}\n${SPIKE_C_EXT_APPENDIX_SECTION}`.trimEnd();
+
+/** The appendix the ACTIVE arm serves. Never a module-level const — see the switch note. */
+export function activeSpikeCAppendix(): string {
+  return isSpikeArmCExt() ? SPIKE_C_EXT_SYSTEM_APPENDIX : SPIKE_C_SYSTEM_APPENDIX;
+}
+
 /** sha256 of the appendix bytes, for the §8 manifest. */
 export function spikeCAppendixHash(): string {
-  return createHash("sha256").update(SPIKE_C_SYSTEM_APPENDIX, "utf8").digest("hex");
+  return createHash("sha256").update(activeSpikeCAppendix(), "utf8").digest("hex");
 }
 
 /** sha256 of the serialized records schema, for the §8 manifest. */
@@ -117,18 +222,27 @@ export function spikeCSchemaHash(): string {
     .digest("hex");
 }
 
-/** One object for the run record — everything §8 asks the arm to stamp. */
+/**
+ * One object for the run record — everything §8 asks the arm to stamp.
+ *
+ * ⚠ THE ARM LABEL IS DERIVED FROM THE GATE, NOT HARDCODED. It read a literal
+ * `"C"` at `d3e9fdae`; with two arms sharing these three sites, a hardcoded
+ * label would have stamped every C-ext run as arm C and made the two arms
+ * indistinguishable in the very record that is supposed to tell them apart.
+ * The appendix hash is likewise taken from the ACTIVE appendix, so the run
+ * record proves which bytes were served rather than asserting it.
+ */
 export function spikeCPreRegistration(): {
-  arm: "C";
+  arm: "C" | "C_EXT";
   appendix_sha256: string;
   appendix_bytes: number;
   schema_sha256: string;
   schema_bytes: number;
 } {
   return {
-    arm: "C",
+    arm: isSpikeArmCExt() ? "C_EXT" : "C",
     appendix_sha256: spikeCAppendixHash(),
-    appendix_bytes: Buffer.byteLength(SPIKE_C_SYSTEM_APPENDIX, "utf8"),
+    appendix_bytes: Buffer.byteLength(activeSpikeCAppendix(), "utf8"),
     schema_sha256: spikeCSchemaHash(),
     schema_bytes: JSON.stringify(buildSpikeCRecordsSchema()).length,
   };

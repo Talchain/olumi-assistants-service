@@ -55,7 +55,7 @@ import { extractZodIssues } from '../../schemas/llmExtraction.js';
 import { buildDraftGraphSchema } from '../../cee/draft/anthropic-graph-schema.js';
 // ⚠ SPIKE ARM C — throwaway, spike branch only. All three imports are inert
 // unless SPIKE_ARM=C is set in the local instance env.
-import { isSpikeArmC, spikeCPreRegistration, SPIKE_C_SYSTEM_APPENDIX } from '../../spike-c/arm.js';
+import { isSpikeArmCFamily, spikeCPreRegistration, activeSpikeCAppendix } from '../../spike-c/arm.js';
 import { buildSpikeCRecordsSchema, type SpikeCRecordSet } from '../../spike-c/records-schema.js';
 import { projectRecordsToGraph } from '../../spike-c/project.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
@@ -465,8 +465,11 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   // `args.systemDirective`: that channel is owned by the lean-draft retry
   // (parse.ts:387-411) and two meanings under one name is trap 21.
   const systemBlocks = buildSystemBlocks(systemPrompt, { operation: "draft_graph" });
-  if (isSpikeArmC()) {
-    systemBlocks.push({ type: "text", text: SPIKE_C_SYSTEM_APPENDIX });
+  if (isSpikeArmCFamily()) {
+    // ⚠ The APPENDIX is the only thing that differs between arm C and arm C-ext.
+    // Selected per call through `activeSpikeCAppendix()`, never captured at module
+    // load — the switch note in arm.ts is the reason.
+    systemBlocks.push({ type: "text", text: activeSpikeCAppendix() });
   }
 
   return {
@@ -812,7 +815,7 @@ export async function draftGraphWithAnthropic(
   // The records grammar REPLACES the graph grammar in the structured-outputs
   // slot. With the env var absent this is byte-identical to the status quo,
   // which is what lets arm A run on this same lineage as a true control.
-  const draftGraphSchema = isSpikeArmC()
+  const draftGraphSchema = isSpikeArmCFamily()
     ? (buildSpikeCRecordsSchema() as ReturnType<typeof buildDraftGraphSchema>)
     : buildDraftGraphSchema();
 
@@ -1827,7 +1830,7 @@ export async function draftGraphWithAnthropic(
     // `.passthrough()` boundary and have no reader in the pipeline — on this
     // throwaway branch that is deliberate: they exist for the classifier
     // (metric 6.3), not for the product.
-    if (isSpikeArmC() && rawJson) {
+    if (isSpikeArmCFamily() && rawJson) {
       const projection = projectRecordsToGraph(rawJson as unknown as SpikeCRecordSet);
       log.info({
         event: "spike_c.projected",

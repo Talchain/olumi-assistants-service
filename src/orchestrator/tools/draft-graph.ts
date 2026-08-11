@@ -22,7 +22,7 @@ import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/curr
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
 // ⚠ SPIKE ARM C — throwaway, spike branch only. Inert unless SPIKE_ARM=C.
-import { isSpikeArmC, spikeCPreRegistration } from "../../spike-c/arm.js";
+import { isSpikeArmCFamily, spikeCPreRegistration } from "../../spike-c/arm.js";
 
 /**
  * Convert an ISO currency code (e.g. "GBP") to a CurrencySignal.
@@ -178,10 +178,10 @@ export async function handleDraftGraph(
   // branch behaviour. The behavioural difference lives at the adapter's schema
   // slot, system-block assembly, and post-LLM projection seam — one arm, one
   // intervention, three sites that all read the same gate.
-  if (isSpikeArmC()) {
+  if (isSpikeArmCFamily()) {
     log.warn(
       { event: 'spike_c.arm_active', turn_id: turnId, ...spikeCPreRegistration() },
-      '[SPIKE ARM C] active on the live V5 draft path — records grammar + projector. THROWAWAY BRANCH.',
+      '[SPIKE ARM C-family] active on the live V5 draft path — records grammar + projector. THROWAWAY BRANCH.',
     );
   }
 
