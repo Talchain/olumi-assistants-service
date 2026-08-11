@@ -414,9 +414,12 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
       node.observed_state = { value: item.value, raw_value: item.value };
     }
 
-    if (item.role === "target" || item.role === "baseline") {
-      node.category = "observable";
-    }
+    // ⚠ `role` DOES NOT SET A CATEGORY EITHER — same reasoning as the claim
+    // branch below. `target`/`baseline` describe what the user was doing with the
+    // number; `controllable`/`observable`/`external` describe the node's position
+    // in the causal structure. They are two different questions, and answering
+    // one with the other is how a `figure` an option acts on ends up labelled
+    // `observable` and its edge rejected.
 
     nodes.push(node);
   });
@@ -443,7 +446,30 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
 
     const node: ProjectedNode = { id, kind: nodeKind, label, provenance: prov };
     if (nodeKind === "factor") {
-      if (claim.category) node.category = claim.category;
+      // ⚠ THE MODEL'S DECLARED `category` IS DELIBERATELY NOT PROPAGATED.
+      //
+      // Derived at the consumer's bytes, and measured live before this line was
+      // written. `category` is INFERRED FROM STRUCTURE by the validator
+      // (`graph-validator.ts:83-134`): a factor is `controllable` because an
+      // option edge points at it. And the edge rule CONSULTS the category —
+      // `{ fromKind: "option", toKind: "factor", toFactorCategory: "controllable" }`
+      // (`graph-validator.types.ts:295`) — so a factor the model labelled
+      // `observable` that an option points at is not merely mislabelled: the
+      // edge itself becomes `INVALID_EDGE_TYPE` (`:518`), and `CATEGORY_MISMATCH`
+      // fires alongside it (`:787`).
+      //
+      // Measured on a live draft: after the factor→goal split cleared every
+      // kind-level violation, the graph still carried `INVALID_EDGE_TYPE ×2` and
+      // `CATEGORY_MISMATCH ×2` — entirely from copied categories. The instruction
+      // already declines to ASK the model for a category for exactly this reason;
+      // the projector was quietly undoing that by copying the one the grammar
+      // still allows it to volunteer.
+      //
+      // So the honest move is a deletion, not a translation: the projector does
+      // not know the category, the validator derives it, and a value we cannot
+      // justify is not one we should place on the user's graph. (The grammar
+      // keeps the field: removing it is a wire change for no gain, and an
+      // unread optional property costs one slot, not a rejection.)
       if (typeof claim.value === "number") {
         node.data = { value: claim.value };
         node.observed_state = { value: claim.value };
