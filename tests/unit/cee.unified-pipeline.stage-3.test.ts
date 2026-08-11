@@ -24,17 +24,14 @@ vi.mock("../../src/orchestrator/index.js", () => ({
 }));
 
 // Mock repair
-vi.mock("../../src/services/repair.js", () => ({
+vi.mock("../../src/services/repair.js", async (importOriginal) => ({
+  // importOriginal-SPREAD, not a hand-listed factory. A `vi.mock` factory REPLACES the
+  // module, so every export not listed becomes undefined — and the list silently goes
+  // stale as the module grows (platform trap 12: the hand-maintained mirror). This one
+  // previously re-declared ALLOWED_EDGE_PATTERNS by hand, a copy of the real list that
+  // nothing kept in sync. Spread first, then stub only what this suite means to stub.
+  ...(await importOriginal<typeof import("../../src/services/repair.js")>()),
   simpleRepair: vi.fn(),
-  ALLOWED_EDGE_PATTERNS: [
-    { from: "decision", to: "option" },
-    { from: "option", to: "factor" },
-    { from: "factor", to: "outcome" },
-    { from: "factor", to: "risk" },
-    { from: "factor", to: "factor" },
-    { from: "outcome", to: "goal" },
-    { from: "risk", to: "goal" },
-  ],
 }));
 
 // Mock telemetry
