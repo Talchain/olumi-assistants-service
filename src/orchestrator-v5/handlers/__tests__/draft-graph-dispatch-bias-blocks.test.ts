@@ -69,7 +69,7 @@ function makeResult(overrides: Partial<Record<string, unknown>> = {}): DraftGrap
 
 describe('draftResultToOlumiResponse — bias_signal coaching blocks', () => {
   it('emits 2 bias_signal coaching blocks when the graph persisted', () => {
-    const res = draftResultToOlumiResponse(makeResult(), PAYLOAD, true, 'req-1');
+    const res = draftResultToOlumiResponse(makeResult(), PAYLOAD, true, 'req-1', PAYLOAD.message);
 
     const biasBlocks = res.blocks.filter(
       (b) => b.type === 'coaching' && (b as { coaching_kind?: string }).coaching_kind === 'bias_signal',
@@ -90,6 +90,7 @@ describe('draftResultToOlumiResponse — bias_signal coaching blocks', () => {
       PAYLOAD,
       true,
       'req-2',
+      PAYLOAD.message,
     );
     expect(res.blocks).toEqual([]);
     // assistant_text (the prose bullet path) is still produced.
@@ -98,7 +99,7 @@ describe('draftResultToOlumiResponse — bias_signal coaching blocks', () => {
   });
 
   it('emits no blocks on the non-persisted (failure) path', () => {
-    const res = draftResultToOlumiResponse(makeResult(), PAYLOAD, false, 'req-3');
+    const res = draftResultToOlumiResponse(makeResult(), PAYLOAD, false, 'req-3', PAYLOAD.message);
     expect(res.blocks).toEqual([]);
   });
 });
