@@ -333,10 +333,15 @@ interface Quantity {
 
 const toNumber = (raw: string): number => Number(raw.replace(/,/g, ""));
 
+/** The unit word at the tail of a count literal. Hoisted: `UNIT_WORDS` is a
+ *  module constant, so this pattern is invariant and was being recompiled on
+ *  every quantity. */
+const COUNT_UNIT_TAIL_RE = new RegExp(`(${UNIT_WORDS})$`, "i");
+
 /** The unit WORD a count was stated in ("8 people" -> "people"). Load-bearing:
  *  it is the only thing that can tell a headcount from a Trustpilot score. */
 function countUnitWord(literal: string): string | null {
-  const m = literal.match(new RegExp(`(${UNIT_WORDS})$`, "i"));
+  const m = literal.match(COUNT_UNIT_TAIL_RE);
   return m ? m[1].toLowerCase() : null;
 }
 

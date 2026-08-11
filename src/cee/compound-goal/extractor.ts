@@ -364,8 +364,14 @@ export function parseValue(valueStr: string): { value: number; unit: string } {
 
 /**
  * Generate a canonical node ID from a target name.
+ *
+ * ⚠ EXPORTED SO THERE IS EXACTLY ONE SLUG RULE. The compound-goal repair
+ * stage's mint (`unified-pipeline/stages/repair/compound-goals.ts`) carried a
+ * byte-identical copy under the name `candidateNodeId`; it now imports this.
+ * Two slug rules that drift produce ids no node carries, and the failure is
+ * silent (the mint simply binds nothing).
  */
-function generateNodeId(targetName: string, prefix: string = "fac"): string {
+export function generateNodeId(targetName: string, prefix: string = "fac"): string {
   return `${prefix}_${targetName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
@@ -518,6 +524,27 @@ export const NEGATION_OR_PREVENTION_LEAD =
  */
 const CLAUSE_INTRODUCER = String.raw`(?:so|yet|but|however|therefore|thus|then|although|whereas|while|and|or|nor|plus|also|meanwhile|additionally|besides|otherwise)`;
 
+/**
+ * Boundaries that genuinely START A NEW CLAUSE — step 2 of
+ * {@link suppressionWindow}.
+ *
+ * Hoisted to module scope UNCHANGED (same source, same `gi` flags): every part
+ * is a module constant, so the pattern was invariant and was being recompiled
+ * on every suppression-window computation. Its only consumer is `matchAll`,
+ * which builds its own matcher and never advances this object's `lastIndex`.
+ */
+const CLAUSE_BOUNDARY_RE = new RegExp(
+  // sentence terminators and the semicolon
+  String.raw`[.!?;]\s` +
+    // a colon introducing a new clause
+    String.raw`|:\s` +
+    // an UNPAIRED dash (any survivor of step 1) introducing a new clause
+    String.raw`|[—–]\s*|\s--?\s` +
+    // a comma ONLY when a clause-introducing conjunction follows it
+    String.raw`|,\s*${CLAUSE_INTRODUCER}\s`,
+  "gi",
+);
+
 function suppressionWindow(
   brief: string,
   index: number,
@@ -559,18 +586,7 @@ function suppressionWindow(
 
   // 2. Cut at boundaries that genuinely start a new clause.
   let cut = 0;
-  const boundary = new RegExp(
-    // sentence terminators and the semicolon
-    String.raw`[.!?;]\s` +
-      // a colon introducing a new clause
-      String.raw`|:\s` +
-      // an UNPAIRED dash (any survivor of step 1) introducing a new clause
-      String.raw`|[—–]\s*|\s--?\s` +
-      // a comma ONLY when a clause-introducing conjunction follows it
-      String.raw`|,\s*${CLAUSE_INTRODUCER}\s`,
-    "gi",
-  );
-  for (const m of head.matchAll(boundary)) {
+  for (const m of head.matchAll(CLAUSE_BOUNDARY_RE)) {
     cut = Math.max(cut, (m.index ?? 0) + m[0].length);
   }
   return head.slice(cut);

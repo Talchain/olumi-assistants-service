@@ -68,9 +68,11 @@
 
 import {
   COACHING_ACTION_PROMPT_MAX,
-  COACHING_BLOCK_BODY_MAX,
+  FRAGILE_EDGE_ACTION_LABEL,
   composeFragileEdgeActionPrompt,
+  composeOfferBody,
   isEditGraphDispatchable,
+  namingFitsBodyCap,
 } from './fragile-edge-offer-text.js';
 import {
   classifyAnalyticalIntent,
@@ -86,11 +88,11 @@ export function composeOverrideNaming(fromLabel: string, toLabel: string): strin
 
 /** Naming sentence first, the lens's licensed tail second. */
 export function composeOverrideBody(base: string, fromLabel: string, toLabel: string): string {
-  return `${composeOverrideNaming(fromLabel, toLabel)} ${base}`;
+  return composeOfferBody(composeOverrideNaming(fromLabel, toLabel), base);
 }
 
 export function isOverrideOfferComposable(fromLabel: string, toLabel: string): boolean {
-  return composeOverrideNaming(fromLabel, toLabel).length <= COACHING_BLOCK_BODY_MAX;
+  return namingFitsBodyCap(composeOverrideNaming(fromLabel, toLabel));
 }
 
 /** The caption on T1's button. A PROBE, and the word choice says so. */
@@ -161,16 +163,25 @@ export function composeDisagreementBody(
   fromLabel: string,
   toLabel: string,
 ): string {
-  return `${composeDisagreementNaming(fromLabel, toLabel)} ${base}`;
+  return composeOfferBody(composeDisagreementNaming(fromLabel, toLabel), base);
 }
 
 export function isDisagreementOfferComposable(fromLabel: string, toLabel: string): boolean {
-  return composeDisagreementNaming(fromLabel, toLabel).length <= COACHING_BLOCK_BODY_MAX;
+  return namingFitsBodyCap(composeDisagreementNaming(fromLabel, toLabel));
 }
 
-/** The caption on T2's button. A CHANGE — the honest follow-through when two
- *  parties disagree about a relationship. */
-export const DISAGREEMENT_ACTION_LABEL = 'Adjust this relationship';
+/**
+ * The caption on T2's button. A CHANGE — the honest follow-through when two
+ * parties disagree about a relationship.
+ *
+ * ⚠ THE FRAGILE-EDGE LABEL, BY DELEGATION RATHER THAN BY RE-TYPING, on exactly
+ * the grounds this file already gives for delegating the action PROMPT below:
+ * T2 and the fragile-edge lens offer the SAME action on the SAME object, so a
+ * second spelling of the caption is a hand-maintained mirror (CLAUDE.md trap 12)
+ * — and a divergence would put two different captions on one action with
+ * nothing red. Byte-identical to the literal it replaces.
+ */
+export const DISAGREEMENT_ACTION_LABEL = FRAGILE_EDGE_ACTION_LABEL;
 
 /**
  * T2's acceptance turn. This IS the fragile-edge sentence, by DELEGATION rather

@@ -657,4 +657,58 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     ).toBe(true);
     expect(out.unresolvedFactorIds, 'the ask must name the factor the user can fix').toContain(SWITCH_COST);
   });
+
+  /**
+   * ⭐ THE PER-OPTION COUNT IS INDEXED BY `optionIndex`, NOT BY A REFERENCE SCAN.
+   *
+   * `outsideUnitIntervalByRule` used to look its emitted map up with
+   * `perOption[resolved.indexOf(entries)]` — an O(n) reference scan per
+   * intervention. It now reads the `optionIndex` stamped on every entry at
+   * pass 1.
+   *
+   * ⚠ THIS IS A PARITY PIN, NOT A DISCRIMINATING MUTANT, AND SAYING SO IS THE
+   * POINT (trap 13c). `resolved` is built with `.map`, so every option's entry
+   * array is a FRESH reference and `indexOf` could never have returned the
+   * wrong index in practice — the old form was correct, merely quadratic and
+   * one aliasing away from being wrong. So no mutant bites this line, and a
+   * reader must not infer from a green suite that the index is guarded. What
+   * this test DOES buy is that the per-option counting stays correct on a
+   * MULTI-OPTION request whose options emit DIFFERENT values on the same
+   * factors — computed here from the emitted maps independently of the
+   * production counter, so a future indexing change that consulted the wrong
+   * option's map would RED.
+   */
+  it('counts outside-unit-interval emissions per option, indexed by optionIndex', () => {
+    const map = buildFactorScaleMap([capabilityNodePct, ...costNodes]);
+
+    // A request that is NOT demotable, so the promoted values survive to the
+    // count: an explicit raw_value CEE does not own blocks the demote.
+    const req = [
+      { [CAPABILITY]: iv(0.6), [SWITCH_COST]: { value: 0.36, raw_value: 9000 } },
+      { [CAPABILITY]: iv(0.35), [SWITCH_COST]: { value: 0.5, raw_value: 12500 } },
+      { [CAPABILITY]: iv(0.8), [TRAINING]: { value: 0.6, raw_value: 6000 } },
+    ];
+    const out = projectRequestInterventionsToWireScale(req, map);
+
+    // PIN THE PRECONDITION (trap 13b): the three option maps must be DISTINCT,
+    // or reading the wrong one would be undetectable and this proves nothing.
+    expect(out.perOption).toHaveLength(3);
+    expect(new Set(out.perOption.map((o) => JSON.stringify(o))).size).toBe(3);
+
+    // Derived from the emitted maps themselves — the same question the
+    // production counter asks, computed independently of its implementation.
+    const expected: Record<string, number> = {};
+    for (let i = 0; i < req.length; i++) {
+      for (const [factorId, emitted] of Object.entries(out.perOption[i]!)) {
+        if (emitted < 0 || emitted > 1) {
+          const rule = projectInterventionsToRawScale(req[i]!, map).conversions.find(
+            (c) => c.factor_id === factorId,
+          )!.rule;
+          expected[rule] = (expected[rule] ?? 0) + 1;
+        }
+      }
+    }
+    expect(Object.values(expected).reduce((a, b) => a + b, 0), 'the fixture must put something outside [0,1]').toBeGreaterThan(0);
+    expect(out.outsideUnitIntervalByRule).toEqual(expected);
+  });
 });

@@ -51,6 +51,43 @@ import type { DraftCoaching } from "../../../orchestrator/types.js";
 import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
 
+/** The coaching shape this stage appends `strengthen_items` to. */
+type PackagedCoaching = {
+  summary: string;
+  strengthen_items: Array<Record<string, unknown>>;
+  widening_log?: Record<string, unknown>;
+  bias_signals?: unknown[];
+};
+
+/**
+ * The canonical-empty coaching block, built once here rather than inside two
+ * `?? (IIFE-that-sets-a-flag)` expressions.
+ *
+ * v0.11.0 schema amendment: this default is schema-valid against the canonical
+ * `CoachingSchema` (`widening_log` + `bias_signals` required; empty arrays and
+ * `brief_completeness: "thin"` are valid). Both insertion sites fire
+ * `DraftGraphContractDefaultApplied` telemetry — observable, so a regression
+ * after v194 is detectable.
+ *
+ * ⚠ THE INSERTION GUARD IS `undefined || null`, NOT `undefined` ALONE. It
+ * replaces `ctx.coaching ?? …`, and `??` fires on BOTH; `ctx.coaching` is typed
+ * `unknown` and a persisted `null` is reachable, so narrowing the test to
+ * `undefined` would silently stop defaulting for that case and then throw on
+ * `coaching.strengthen_items`.
+ */
+function canonicalEmptyCoaching(): PackagedCoaching {
+  return {
+    summary: "",
+    strengthen_items: [],
+    widening_log: {
+      elements_added: [],
+      elements_considered_but_excluded: [],
+      brief_completeness: "thin",
+    },
+    bias_signals: [],
+  };
+}
+
 /**
  * Project a V1 graph into the minimal GraphV3T shape the coaching scrubber
  * (`sanitiseCoachingProse`) consumes. The scrubber reads `nodes[].id` to
@@ -269,26 +306,9 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       // DraftGraphContractDefaultApplied telemetry — observable so a regression
       // after v194 is detectable. The status-quo strengthen_item uses the
       // canonical BiasType "narrow_framing" (was legacy "framing").
-      let inserted = false;
-      const coaching = (ctx.coaching ?? (() => {
-        inserted = true;
-        return {
-          summary: "",
-          strengthen_items: [],
-          widening_log: {
-            elements_added: [],
-            elements_considered_but_excluded: [],
-            brief_completeness: "thin",
-          },
-          bias_signals: [],
-        };
-      })()) as {
-        summary: string;
-        strengthen_items: Array<Record<string, unknown>>;
-        widening_log?: Record<string, unknown>;
-        bias_signals?: unknown[];
-      };
-      if (inserted) {
+      let coaching = ctx.coaching as PackagedCoaching | null | undefined;
+      if (coaching === undefined || coaching === null) {
+        coaching = canonicalEmptyCoaching();
         emit(TelemetryEvents.DraftGraphContractDefaultApplied, {
           field: "coaching",
           request_id: ctx.requestId,
@@ -336,26 +356,9 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     if (unresolved.length > 0) {
       const clarifications = renderDirectionClarifications(unresolved);
       if (clarifications.length > 0) {
-        let inserted = false;
-        const coaching = (ctx.coaching ?? (() => {
-          inserted = true;
-          return {
-            summary: "",
-            strengthen_items: [],
-            widening_log: {
-              elements_added: [],
-              elements_considered_but_excluded: [],
-              brief_completeness: "thin",
-            },
-            bias_signals: [],
-          };
-        })()) as {
-          summary: string;
-          strengthen_items: Array<Record<string, unknown>>;
-          widening_log?: Record<string, unknown>;
-          bias_signals?: unknown[];
-        };
-        if (inserted) {
+        let coaching = ctx.coaching as PackagedCoaching | null | undefined;
+        if (coaching === undefined || coaching === null) {
+          coaching = canonicalEmptyCoaching();
           emit(TelemetryEvents.DraftGraphContractDefaultApplied, {
             field: "coaching",
             request_id: ctx.requestId,

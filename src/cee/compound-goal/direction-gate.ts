@@ -127,6 +127,7 @@
 
 import { AMT, FALL_VERB, parseValue } from './extractor.js';
 import { POSSIBILITY_MARKER_SRC } from './risk-polarity.js';
+import { CURRENCY_SYMBOL_TO_CODE } from '../extraction/numeric-parser.js';
 
 /* ===========================================================================
  * TYPES
@@ -269,6 +270,46 @@ export function splitSentences(brief: string): Array<{ text: string; start: numb
 }
 
 /**
+ * The brief, NORMALISED AND SPLIT ONCE.
+ *
+ * ⚠ PURE PERFORMANCE PLUMBING — IT CHANGES NOTHING ABOUT WHAT THE GATE DECIDES.
+ * Every field here is exactly what {@link locateEvidence} used to recompute on
+ * each call: `normaliseEvidenceText(brief)`, that string lower-cased, and
+ * `splitSentences` over it. The partition calls the locator ONCE PER ROW and the
+ * repair stage calls three entry points on the SAME brief, so the whole-brief
+ * normalise + split was running O(rows) times over identical input.
+ *
+ * Threaded as an OPTIONAL argument everywhere: absent, each entry point prepares
+ * its own, so every exported signature keeps working unchanged.
+ */
+export interface PreparedBrief {
+  /** `normaliseEvidenceText(brief)` — the string every offset is relative to. */
+  readonly normalised: string;
+  /** The same string lower-cased, for the case-insensitive locate fallback. */
+  readonly lowered: string;
+  /** `splitSentences(normalised)`. */
+  readonly sentences: ReadonlyArray<{ text: string; start: number }>;
+}
+
+/**
+ * Prepare a brief, or `null` when there is nothing to prepare.
+ *
+ * ⚠ THE EMPTINESS TEST IS ON THE RAW STRING, deliberately: it reproduces
+ * {@link locateEvidence}'s own `brief.length === 0` guard exactly. A whitespace-
+ * only brief is NOT null here — it normalises to `''`, finds nothing, and
+ * reports `located: false`, which is what the un-prepared path already did.
+ */
+export function prepareBrief(brief: string | null | undefined): PreparedBrief | null {
+  if (typeof brief !== 'string' || brief.length === 0) return null;
+  const normalised = normaliseEvidenceText(brief);
+  return {
+    normalised,
+    lowered: normalised.toLowerCase(),
+    sentences: splitSentences(normalised),
+  };
+}
+
+/**
  * The sentence that governs a row's evidence.
  *
  * Locate the quote in the brief (exact, then case-insensitive). If the quote is
@@ -307,15 +348,29 @@ export function locateEvidence(
   brief: string | null | undefined,
   quote: string,
 ): { sentence: string; located: boolean } {
+  return locateEvidenceIn(prepareBrief(brief), quote);
+}
+
+/**
+ * {@link locateEvidence} over an already-prepared brief.
+ *
+ * The whole body of the old `locateEvidence`, with the three per-call
+ * derivations (normalise, lower-case, split) lifted into {@link prepareBrief}.
+ * `locateEvidence` is now a wrapper that prepares and delegates, so a caller
+ * holding one brief and many rows prepares once instead of once per row.
+ */
+export function locateEvidenceIn(
+  prepared: PreparedBrief | null,
+  quote: string,
+): { sentence: string; located: boolean } {
   const q = normaliseEvidenceText(quote);
-  if (typeof brief !== 'string' || brief.length === 0 || q.length === 0) {
+  if (prepared === null || q.length === 0) {
     return { sentence: q, located: false };
   }
-  const nb = normaliseEvidenceText(brief);
-  let at = nb.indexOf(q);
-  if (at < 0) at = nb.toLowerCase().indexOf(q.toLowerCase());
+  let at = prepared.normalised.indexOf(q);
+  if (at < 0) at = prepared.lowered.indexOf(q.toLowerCase());
   if (at < 0) return { sentence: q, located: false };
-  for (const s of splitSentences(nb)) {
+  for (const s of prepared.sentences) {
     if (at >= s.start && at < s.start + s.text.length) return { sentence: s.text, located: true };
   }
   return { sentence: q, located: true };
@@ -487,7 +542,7 @@ const ABOVE = '(?:above|over|beyond)';
  * The table. Order is irrelevant to correctness (the LONGEST match covering the
  * row's own amount wins), but entries are grouped floor-first for reading.
  */
-export const T1_TABLE: readonly T1Entry[] = [
+const T1_TABLE: readonly T1Entry[] = [
   // T1-1 — subject-less: "Don't drop below 78%"
   {
     id: 'T1-1',
@@ -645,11 +700,26 @@ export interface T1Match {
  * row's own amount" is not.
  */
 export function findT1Matches(sentence: string): T1Match[] {
+  return findT1MatchesNormalised(normaliseEvidenceText(sentence));
+}
+
+/**
+ * {@link findT1Matches} over ALREADY-NORMALISED text.
+ *
+ * ⚠ `matchAll` DOES NOT MUTATE THE REGEX IT IS GIVEN — it builds its own matcher
+ * via the species constructor and advances THAT one's `lastIndex`. The per-call
+ * `new RegExp(entry.re.source, entry.re.flags)` clone this replaces was
+ * therefore defending against a mutation that cannot happen, at the cost of
+ * recompiling every table entry on every sentence. The table's regexes are
+ * consumed here and nowhere else (no `.test`/`.exec` reader anywhere in the
+ * estate), so their `lastIndex` is 0 at rest and stays 0. Pinned by a spec that
+ * runs the same sentence twice and asserts identical results plus
+ * `entry.re.lastIndex === 0` afterwards.
+ */
+function findT1MatchesNormalised(s: string): T1Match[] {
   const out: T1Match[] = [];
-  const s = normaliseEvidenceText(sentence);
   for (const entry of T1_TABLE) {
-    const re = new RegExp(entry.re.source, entry.re.flags);
-    for (const m of s.matchAll(re)) {
+    for (const m of s.matchAll(entry.re)) {
       const subject = entry.subjectGroup ? (m[entry.subjectGroup] ?? null) : null;
       const push = (text: string | undefined, dir: 'floor' | 'ceiling') => {
         if (typeof text !== 'string' || text.length === 0) return;
@@ -711,7 +781,12 @@ const AMBIGUITY_RE = new RegExp(
 
 /** Does this sentence declare its own ambiguity? */
 export function hasExplicitAmbiguity(sentence: string): boolean {
-  return AMBIGUITY_RE.test(normaliseEvidenceText(sentence));
+  return hasExplicitAmbiguityNormalised(normaliseEvidenceText(sentence));
+}
+
+/** {@link hasExplicitAmbiguity} over ALREADY-NORMALISED text. */
+function hasExplicitAmbiguityNormalised(s: string): boolean {
+  return AMBIGUITY_RE.test(s);
 }
 
 /**
@@ -748,7 +823,12 @@ export function hasExplicitAmbiguity(sentence: string): boolean {
  * never reach the wire.
  */
 export function hasUnspentNegation(sentence: string): boolean {
-  return NEG_PLUS_RE.test(normaliseEvidenceText(sentence));
+  return hasUnspentNegationNormalised(normaliseEvidenceText(sentence));
+}
+
+/** {@link hasUnspentNegation} over ALREADY-NORMALISED text. */
+function hasUnspentNegationNormalised(s: string): boolean {
+  return NEG_PLUS_RE.test(s);
 }
 
 /* ===========================================================================
@@ -774,7 +854,11 @@ const RANGE_RE = /(\d+(?:\.\d+)?)\s*(?:-|–|—|to|and)\s*(\d+(?:\.\d+)?)/gi;
  * (`|value|`) makes the test about this row and not about the sentence.
  */
 export function rangeGovernsAmount(sentence: string, value: number): boolean {
-  const s = normaliseEvidenceText(sentence);
+  return rangeGovernsAmountNormalised(normaliseEvidenceText(sentence), value);
+}
+
+/** {@link rangeGovernsAmount} over ALREADY-NORMALISED text. */
+function rangeGovernsAmountNormalised(s: string, value: number): boolean {
   const target = Math.abs(value);
   RANGE_RE.lastIndex = 0;
   for (const m of s.matchAll(RANGE_RE)) {
@@ -804,8 +888,16 @@ export function classifyNonLimitDelta(
   sentence: string,
   value: number | null,
 ): NonLimitReason | null {
-  if (POSSIBILITY_RE.test(normaliseEvidenceText(sentence))) return 'possibility_framed_delta';
-  if (value !== null && rangeGovernsAmount(sentence, value)) return 'range_valued_delta';
+  return classifyNonLimitDeltaNormalised(normaliseEvidenceText(sentence), value);
+}
+
+/** {@link classifyNonLimitDelta} over ALREADY-NORMALISED text. */
+function classifyNonLimitDeltaNormalised(
+  s: string,
+  value: number | null,
+): NonLimitReason | null {
+  if (POSSIBILITY_RE.test(s)) return 'possibility_framed_delta';
+  if (value !== null && rangeGovernsAmountNormalised(s, value)) return 'range_valued_delta';
   return null;
 }
 
@@ -910,6 +1002,25 @@ export function trailingMetric(sentence: string): string | null {
 /** Used when no user-derived word survives cleaning. */
 export const FALLBACK_METRIC = 'this measure';
 
+/**
+ * The currency symbols this module renders a bare value against.
+ *
+ * ⚠ DERIVED, NEVER RE-SPELLED — the same pattern `label-value-divergence.ts`
+ * uses, and for the same reason: this line previously read `/^[£$€]$/`, a fourth
+ * hand-written currency vocabulary in a repo whose canonical map has TEN
+ * entries (CLAUDE.md trap 12, and precisely the class ROADMAP 2.972 exported
+ * {@link CURRENCY_SYMBOL_TO_CODE} to end). The membership limb of
+ * `cee/extraction/__tests__/currency-vocabulary.union.test.ts` now REDs on a
+ * whole-token currency character class, so the re-spelling cannot come back.
+ *
+ * ⚠ THIS WIDENS RECOGNITION, DELIBERATELY, and it is the only behaviour change
+ * in the file: `¥`, `₹`, `A$`, `C$`, `NZ$`, `CHF` and `kr` now render as the
+ * prefix the user wrote (`¥5,000`) instead of falling through to a bare
+ * `String(value)` (`5000`). The direction is strictly more faithful to the
+ * user's own words, which is this record's whole contract.
+ */
+const CURRENCY_SYMBOLS: ReadonlySet<string> = new Set(Object.keys(CURRENCY_SYMBOL_TO_CODE));
+
 /** Render the amount the way the user wrote it, from the evidence when possible. */
 export function deriveAmountText(
   sentence: string,
@@ -927,8 +1038,26 @@ export function deriveAmountText(
     const pct = value * 100;
     return `${Number.isInteger(pct) ? pct : pct.toFixed(2)}%`;
   }
-  if (unit && /^[£$€]$/.test(unit)) return `${unit}${value.toLocaleString('en-GB')}`;
+  if (unit !== null && CURRENCY_SYMBOLS.has(unit)) {
+    return `${unit}${value.toLocaleString('en-GB')}`;
+  }
   return String(value);
+}
+
+/**
+ * THE floor-or-ceiling question, typed ONCE.
+ *
+ * ⭐ ONE DEFINITION, THREE CALLERS — {@link composeQuestion}'s default arm,
+ * {@link detectorItem}, and the coaching renderer's `detail` copy. It was
+ * previously typed out verbatim at all three sites, which is the
+ * hand-maintained-mirror class (CLAUDE.md trap 12) applied to USER-FACING COPY:
+ * a wording change made at one site and missed at another ships a product that
+ * asks the same question two different ways in one draft, and nothing goes red.
+ * Byte equality of the three sites was verified at the pristine tip before this
+ * collapse and is now pinned by spec.
+ */
+function composeDirectionChoiceQuestion(metric: string, amount: string): string {
+  return `Should ${metric} stay at or above ${amount}, or at or below it?`;
 }
 
 /** The user-answerable question, phrased once, surface-agnostic. */
@@ -943,7 +1072,7 @@ function composeQuestion(reason: UnresolvedReason, metric: string, amount: strin
     case 'evidence_contradiction':
     case 'unspent_negation':
     default:
-      return `Should ${metric} stay at or above ${amount}, or at or below it?`;
+      return composeDirectionChoiceQuestion(metric, amount);
   }
 }
 
@@ -1013,7 +1142,15 @@ export function partitionUnprovenDirection<T extends GateableConstraint>(
   constraints: readonly T[],
   brief?: string | null,
   nodeLabels?: ReadonlyMap<string, string>,
+  /**
+   * The already-prepared `brief`. Optional and purely an optimisation: absent,
+   * this function prepares its own and behaves identically. A caller running
+   * several gate entry points over ONE brief passes it so the whole-brief
+   * normalise + split happens once for the stage rather than once per row.
+   */
+  prepared?: PreparedBrief | null,
 ): DirectionPartition<T> {
+  const preparedBrief = prepared ?? prepareBrief(brief);
   const proven: T[] = [];
   const unresolved: Array<UnresolvedEntry<T>> = [];
   const nonLimit: Array<NonLimitEntry<T>> = [];
@@ -1047,11 +1184,16 @@ export function partitionUnprovenDirection<T extends GateableConstraint>(
       continue;
     }
 
-    const { sentence, located } = locateEvidence(brief, evidence);
+    const { sentence, located } = locateEvidenceIn(preparedBrief, evidence);
+    // Normalised ONCE per row. Every screen below normalises its input, and
+    // `normaliseEvidenceText` is idempotent (pinned by spec over the corpus
+    // fixtures), so handing them the normalised form is the same computation
+    // with four fewer passes over the same string.
+    const s = normaliseEvidenceText(sentence);
 
     // §3.4 — was this ever a limit at all?
     if (c.value_frame === 'delta') {
-      const nonLimitReason = classifyNonLimitDelta(sentence, value);
+      const nonLimitReason = classifyNonLimitDeltaNormalised(s, value);
       if (nonLimitReason !== null) {
         nonLimit.push({ constraint: c, reason: nonLimitReason });
         continue;
@@ -1059,35 +1201,35 @@ export function partitionUnprovenDirection<T extends GateableConstraint>(
     }
 
     // S1 — explicit ambiguity beats everything else.
-    if (hasExplicitAmbiguity(sentence)) {
-      withhold(c, 'explicit_ambiguity', sentence, null);
+    if (hasExplicitAmbiguityNormalised(s)) {
+      withhold(c, 'explicit_ambiguity', s, null);
       continue;
     }
 
     // Operators this gate does not adjudicate pass through untouched: it screens
     // DIRECTION, and a row without a direction has none to contradict.
     if (operator !== '>=' && operator !== '<=') {
-      survivors.push({ row: c, sentence, subject: null });
+      survivors.push({ row: c, sentence: s, subject: null });
       continue;
     }
 
     // S2 — the construction verdict, bound to THIS row's amount by identity.
-    const matches = value === null ? [] : findT1Matches(sentence).filter((m) => amountsMatch(m, value, c.unit));
+    const matches = value === null ? [] : findT1MatchesNormalised(s).filter((m) => amountsMatch(m, value, c.unit));
     if (matches.length > 0) {
       // Longest match wins — the most specific construction covering the bound.
       const best = matches.reduce((a, b) => (b.length > a.length ? b : a));
       const wanted = best.direction === 'floor' ? '>=' : '<=';
       if (wanted === operator) {
-        survivors.push({ row: c, sentence, subject: best.subject });
+        survivors.push({ row: c, sentence: s, subject: best.subject });
       } else {
-        withhold(c, 'evidence_contradiction', sentence, best.subject);
+        withhold(c, 'evidence_contradiction', s, best.subject);
       }
       continue;
     }
 
     // S3 — no construction verdict: any unaccounted negation withholds.
-    if (hasUnspentNegation(sentence)) {
-      withhold(c, 'unspent_negation', sentence, null);
+    if (hasUnspentNegationNormalised(s)) {
+      withhold(c, 'unspent_negation', s, null);
       continue;
     }
 
@@ -1095,11 +1237,11 @@ export function partitionUnprovenDirection<T extends GateableConstraint>(
     // rests entirely on "no negation in the evidence" — which is worth nothing
     // when the evidence is a paraphrase the gate could not find in the brief.
     if (!located) {
-      withhold(c, 'no_evidence', sentence, null);
+      withhold(c, 'no_evidence', s, null);
       continue;
     }
 
-    survivors.push({ row: c, sentence, subject: null });
+    survivors.push({ row: c, sentence: s, subject: null });
   }
 
   // ── Pass 2: S4 — the cross-row CONTESTED screen ──────────────────────
@@ -1250,12 +1392,14 @@ export function detectUncoveredNegatedBounds(
   brief: string | null | undefined,
   coveredValues: readonly number[],
   coveredSentences: ReadonlySet<number>,
+  /** The already-prepared `brief` — optional, see {@link PreparedBrief}. */
+  prepared?: PreparedBrief | null,
 ): UncoveredNegatedBound[] {
   if (typeof brief !== 'string' || brief.trim().length === 0) return [];
   const out: UncoveredNegatedBound[] = [];
   const seen = new Set<string>();
 
-  const sentences = splitSentences(normaliseEvidenceText(brief));
+  const sentences = (prepared ?? prepareBrief(brief))?.sentences ?? [];
   sentences.forEach((s, idx) => {
     if (coveredSentences.has(idx)) return;
     const ambiguous = hasExplicitAmbiguity(s.text);
@@ -1269,9 +1413,12 @@ export function detectUncoveredNegatedBounds(
 
     // An explicitly-ambiguous sentence needs no comparator to be worth asking
     // about: the user has already told us the direction is undecided.
+    // `matchAll` builds its own matcher and never advances the `lastIndex` of
+    // the regex handed to it, so the per-sentence clone this replaced was
+    // guarding against a mutation that cannot occur. Both sources are consumed
+    // here and nowhere else.
     const source = ambiguous ? BARE_AMOUNT_RE : NEGATED_BOUND_NEIGHBOURHOOD;
-    const re = new RegExp(source.source, source.flags);
-    for (const m of s.text.matchAll(re)) {
+    for (const m of s.text.matchAll(source)) {
       const amountText = m[2];
       if (typeof amountText !== 'string') continue;
       const { value } = parseValue(amountText);
@@ -1412,12 +1559,14 @@ export interface ProvenUncoveredBound {
 export function findProvenUncoveredBounds(
   brief: string | null | undefined,
   coveredValues: readonly number[],
+  /** The already-prepared `brief` — optional, see {@link PreparedBrief}. */
+  prepared?: PreparedBrief | null,
 ): ProvenUncoveredBound[] {
   if (typeof brief !== 'string' || brief.trim().length === 0) return [];
   const out: ProvenUncoveredBound[] = [];
   const seen = new Set<string>();
 
-  for (const s of splitSentences(normaliseEvidenceText(brief))) {
+  for (const s of (prepared ?? prepareBrief(brief))?.sentences ?? []) {
     // S1 outranks the construction verdict in the partition; it outranks the
     // mint for the same reason. A user who said they had not decided is asked.
     //
@@ -1593,7 +1742,7 @@ export function detectorItem(f: UncoveredNegatedBound): DirectionUnresolvedItem 
     value: Number.isFinite(value) ? value : null,
     unit: unit.length > 0 ? unit : null,
     reason: 'unspent_negation',
-    question: `Should ${f.metric_text} stay at or above ${f.amount_text}, or at or below it?`,
+    question: composeDirectionChoiceQuestion(f.metric_text, f.amount_text),
     options: OPTION_SET,
   };
 }
@@ -1615,14 +1764,23 @@ export const MAX_DIRECTION_CLARIFICATIONS = 3;
 /**
  * The id prefix every direction clarification carries.
  *
- * ⭐ EXPORTED SO CONSUMERS BIND BY IDENTITY, NEVER BY A TEXT PREDICATE. The
- * post-draft narrative has to tell a direction question apart from ordinary
- * coaching in order to give it its own slot, and "the detail mentions a floor"
- * is a predicate another item could satisfy (trap 19). A shared constant is
- * also the only shape that cannot drift: a second copy of the string in the
- * consumer would be a hand-maintained mirror of this one (trap 12).
+ * ⭐ CONSUMERS BIND BY IDENTITY, NEVER BY A TEXT PREDICATE. The post-draft
+ * narrative has to tell a direction question apart from ordinary coaching in
+ * order to give it its own slot, and "the detail mentions a floor" is a
+ * predicate another item could satisfy (trap 19). A shared constant is also the
+ * only shape that cannot drift: a second copy of the string in the consumer
+ * would be a hand-maintained mirror of this one (trap 12).
+ *
+ * ⚠ THE CONSTANT IS MODULE-PRIVATE AND {@link isDirectionClarificationId} IS
+ * THE EXPORTED SEAM — corrected here rather than left saying "exported",
+ * because a doc comment that describes an export that no longer exists is the
+ * false-label class (trap 14). It carried `export` with zero importers estate-
+ * wide (swept with `isDirectionClarificationId` as the contrast control, which
+ * returned a real consumer in `orchestrator-v5/coaching/post-draft-narrative.ts`).
+ * A consumer that needs the prefix asks the predicate; one that needs the string
+ * itself re-exports it in the same edit that adds the need.
  */
-export const DIRECTION_CLARIFICATION_ID_PREFIX = 'direction_unresolved_';
+const DIRECTION_CLARIFICATION_ID_PREFIX = 'direction_unresolved_';
 
 /** Is this coaching item a direction clarification produced by this gate? */
 export function isDirectionClarificationId(id: unknown): boolean {
@@ -1690,13 +1848,19 @@ export function renderDirectionClarifications(
     // noticed and never asked which direction it was. A card that states
     // without asking cannot obtain the answer this gate exists to obtain.
     //
-    // `question` on the record says the same thing; it is deliberately NOT
-    // read here, because `StrengthenItemSchema` is `.strict()` at 0.39.0 and
-    // has no field to carry it. Same sentence, projected onto the one surface
-    // that exists today.
+    // ⚠ THE SENTENCE IS SHARED, THE RECORD'S `question` IS NOT READ — and the
+    // difference is deliberate, not an oversight. `it.question` varies with
+    // `reason`: an `explicit_ambiguity` record asks "You said you hadn't
+    // settled whether…", a `producer_disagreement` record asks "I read two
+    // conflicting limits…". This surface asks the SAME floor-or-ceiling
+    // question of every item, so it calls the shared composer directly rather
+    // than interpolating a record field that would silently change this card's
+    // copy for three of the five reasons. (`StrengthenItemSchema` is
+    // `.strict()` at 0.39.0 and has no field to carry `question` regardless.)
     detail:
-      `You mentioned ${it.amount_text} for ${it.metric_text}. Should ${it.metric_text} stay at ` +
-      `or above ${it.amount_text}, or at or below it? I could not tell from the wording, so it ` +
+      `You mentioned ${it.amount_text} for ${it.metric_text}. ` +
+      `${composeDirectionChoiceQuestion(it.metric_text, it.amount_text)} ` +
+      `I could not tell from the wording, so it ` +
       `is not being enforced yet. Add it as a constraint to make it binding.`,
     action_type: 'add_constraint' as const,
   }));

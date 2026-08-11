@@ -404,6 +404,20 @@ export const KNOWN_UNDETECTED_GAP_FORMS = [
  */
 export function findRunnerUpGapCodes(value: string): string[] {
   if (typeof value !== 'string' || value.length === 0) return [];
+  // ⚠ A DIGIT-FREE STRING CANNOT MATCH ANY PATTERN, PROVEN AT THE BYTES ON BOTH
+  // PREMISES — this is a short-circuit, not a new discriminator, and it may NOT
+  // be widened into one.
+  //   (a) all eight `GAP_CLAIM_PATTERNS` embed `QTY_SRC`, which OPENS with
+  //       `\d+`, so every one of them requires at least one digit;
+  //   (b) `neutralise` only ever REPLACES spans with a single `#`
+  //       (`GAP_NEUTRALISED_SPAN` and `leading-option-egress-guard`'s
+  //       `ENFORCEMENT_NEUTRALISED_SPAN`, both the literal `'#'`), so it cannot
+  //       INTRODUCE a digit into a string that had none.
+  // Together: no digit in ⇒ no digit after neutralise ⇒ no pattern can match ⇒
+  // `[]`, which is what the loop below would have returned after eight regex
+  // executions over the whole string. Pinned by a spec asserting `[]` both
+  // before and after `neutralise` on a digit-free corpus.
+  if (!/\d/.test(value)) return [];
   const neutralised = neutralise(value);
   const codes: string[] = [];
   for (const { code, re } of GAP_CLAIM_PATTERNS) {
@@ -530,4 +544,48 @@ export function redactRunnerUpGapStatistic<T>(value: T): RunnerUpGapRedaction<T>
     paths: [...paths].sort(),
     fields: paths.size,
   };
+}
+
+/**
+ * THE OPERATOR ALARM for a redaction, emitted identically by both carriers.
+ *
+ * ⚠ ONE COPY, BECAUSE IT IS AN ALARM AND ALARMS DRIFT SILENTLY. This ~20-line
+ * `log.warn` was typed out verbatim at BOTH redaction sites —
+ * `orchestrator-v5/coaching/decision-review-enricher.ts` (the V5 enrichment
+ * seam) and `routes/assist.v1.decision-review.ts` (the M2 route) — differing
+ * only in the event name and one context field. Everything that matters is the
+ * SAME: the redaction-safe payload (field PATHS and pattern CODES only, never
+ * the matched prose, which is the user's own decision content — R-004) and the
+ * operator instruction, which names the PMS row to fix. Two copies of an
+ * instruction is the hand-maintained mirror class (CLAUDE.md trap 12) at its
+ * most expensive: an operator who fixes one alarm's wording and not the other
+ * gets two different accounts of one defect, and nothing goes red. It lives
+ * beside {@link redactRunnerUpGapStatistic} — the reader both carriers already
+ * share — so the reader and its alarm cannot drift apart either.
+ *
+ * No-ops when nothing was redacted, so the caller's `if (fields > 0)` guard is
+ * not a third thing to keep in step.
+ */
+export function logRunnerUpGapRedaction(
+  logger: { warn: (obj: Record<string, unknown>, msg: string) => void },
+  event: string,
+  context: Record<string, unknown>,
+  redaction: Pick<RunnerUpGapRedaction<unknown>, 'codes' | 'paths' | 'fields'>,
+): void {
+  if (redaction.fields === 0) return;
+  logger.warn(
+    {
+      event,
+      ...context,
+      // Field PATHS and pattern CODES only — never the matched prose, which is
+      // the user's own decision content (R-004).
+      hit_paths: redaction.paths,
+      hit_codes: redaction.codes,
+      hit_fields: redaction.fields,
+    },
+    `${event}: the review stated the size of the lead as a ` +
+      'gap between options. The gap between two win frequencies is not a difference in outcome ' +
+      'and inflates when any other option collapses. FIX THE SERVED PROMPT — the repo default ' +
+      'is correct; the PMS `decision_review_default` row is what this alarm is measuring.',
+  );
 }

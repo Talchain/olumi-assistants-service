@@ -24,8 +24,10 @@ import {
   detectUncoveredNegatedBounds,
   detectorItem,
   findProvenUncoveredBounds,
+  prepareBrief,
   type ProvenUncoveredBound,
 } from "../../../compound-goal/direction-gate.js";
+import { generateNodeId } from "../../../compound-goal/extractor.js";
 import { buildBoundDisplayName } from "../../../compound-goal/constraint-display-name.js";
 import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
 import { log } from "../../../../utils/telemetry.js";
@@ -221,14 +223,16 @@ const MINTABLE_TARGET_KINDS: ReadonlySet<string> = new Set(["outcome", "factor"]
  */
 const MINT_CANDIDATE_PREFIXES = ["fac", "out"] as const;
 
-/** Slugify a metric name the way `generateNodeId` does, under a chosen prefix. */
-function candidateNodeId(subject: string, prefix: string): string {
-  return `${prefix}_${subject
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "")}`;
-}
+/**
+ * Slugify a metric name under a chosen prefix.
+ *
+ * ⚠ THE EXTRACTOR'S OWN `generateNodeId`, IMPORTED RATHER THAN RE-SPELLED. This
+ * was a byte-identical copy of it, and the comment above already named the
+ * function it was copying — which is the hand-maintained mirror in its most
+ * literal form (CLAUDE.md trap 12). A slug rule that drifts between the minter
+ * and the extractor mints ids no node carries, silently.
+ */
+const candidateNodeId = generateNodeId;
 
 /**
  * Turn a proven bound into an extractor-shaped row, or `null` when it cannot be
@@ -289,6 +293,14 @@ function bindProvenBound(
 
 export function runCompoundGoals(ctx: StageContext): void {
   if (!ctx.graph) return;
+
+  // The brief NORMALISED AND SPLIT ONCE for the whole stage. The three
+  // direction-gate entry points below (`findProvenUncoveredBounds`,
+  // `partitionUnprovenDirection`, `detectUncoveredNegatedBounds`) each derived
+  // this independently, and the partition derived it AGAIN once per constraint
+  // row. Pure plumbing: each entry point prepares its own when the argument is
+  // absent, so the gate's behaviour is identical with or without it.
+  const preparedBrief = prepareBrief(ctx.effectiveBrief);
 
   const compoundGoalResult = extractCompoundGoals(ctx.effectiveBrief, { includeProxies: false });
 
@@ -432,7 +444,7 @@ export function runCompoundGoals(ctx: StageContext): void {
   const producerValues = [...merged.values()]
     .map((c: any) => (typeof c?.value === "number" ? c.value : NaN))
     .filter((v) => Number.isFinite(v));
-  const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues);
+  const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues, preparedBrief);
   const mintedFromConstruction: any[] = [];
   if (provenUncovered.length > 0) {
     const measurable = graphNodes.filter((n) => MINTABLE_TARGET_KINDS.has(String(n.kind)));
@@ -505,7 +517,7 @@ export function runCompoundGoals(ctx: StageContext): void {
     proven: binding,
     unresolved: directionUnresolved,
     nonLimit: directionNonLimit,
-  } = partitionUnprovenDirection(notRiskFramed as any[], ctx.effectiveBrief, nodeLabels);
+  } = partitionUnprovenDirection(notRiskFramed as any[], ctx.effectiveBrief, nodeLabels, preparedBrief);
 
   // The unmatched-negation detector — the DROPPED-bound half of the same defect.
   // Runs even when both producers emitted nothing (see the note at the merge).
@@ -517,7 +529,12 @@ export function runCompoundGoals(ctx: StageContext): void {
     ...directionUnresolved.map((u) => (typeof (u.constraint as any)?.value === 'number' ? (u.constraint as any).value : NaN)),
     ...directionNonLimit.map((n) => (typeof (n.constraint as any)?.value === 'number' ? (n.constraint as any).value : NaN)),
   ].filter((v) => Number.isFinite(v));
-  const detectorFindings = detectUncoveredNegatedBounds(ctx.effectiveBrief, coveredValues, new Set<number>());
+  const detectorFindings = detectUncoveredNegatedBounds(
+    ctx.effectiveBrief,
+    coveredValues,
+    new Set<number>(),
+    preparedBrief,
+  );
 
   if (temporal.length > 0) {
     // FAIL LOUD, not silent (CLAUDE.md trap 12): a drop that leaves no trace

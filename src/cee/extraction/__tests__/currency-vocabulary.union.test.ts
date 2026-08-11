@@ -69,9 +69,50 @@ export function quotedCurrencyTokensOnLine(line: string): string[] {
   return found;
 }
 
+/**
+ * A regex character class used as a WHOLE-TOKEN MEMBERSHIP TEST — `^[£$€]$`,
+ * `^[£$€]+$`, `^[£$€]{1,3}$` — in a literal or in a string-built source.
+ *
+ * ⚠ WHY THIS SHAPE AND NOT EVERY CHARACTER CLASS. A class is a currency
+ * VOCABULARY when it answers *"is this token one of these currencies?"*. It is
+ * NOT one when it is a limb of an amount GRAMMAR (`[£$€]?\d[\d,]*`), and that
+ * distinction is this guard's own, already recorded in the manifest below:
+ * `cee/factor-extraction/index.ts` is classified "no currency list … the amount
+ * pattern's currency class is the inline regex `[£$€]`". Measured at the tip
+ * this limb was added: 26 src/ files carry SOME multi-symbol class (all but one
+ * an amount grammar), and exactly ONE carries a whole-token membership class —
+ * `cee/compound-goal/direction-gate.ts`'s `/^[£$€]$/`, which was a fourth
+ * hand-written currency vocabulary deciding how a user's own amount is rendered
+ * back to them, three symbols wide against a canonical map of ten.
+ *
+ * Anchoring is what makes the limb honest rather than merely noisy: it fires on
+ * the question the canonical map answers, and stays silent on grammars that
+ * legitimately spell a currency alternation inline (rowed separately — see the
+ * manifest's own note that this estate measurably does not have one vocabulary).
+ */
+const MEMBERSHIP_CLASS = /\^\\?\[\^?((?:\\.|[^\]\\])*)\](?:[*+?]|\{\d+(?:,\d*)?\})?\\?\$/g;
+
+/** Whole-token currency membership classes on one line, ignoring comments. */
+export function currencyMembershipClassesOnLine(line: string): string[] {
+  if (/^\s*(\/\/|\*|\/\*)/.test(line)) return [];
+  const found: string[] = [];
+  for (const m of line.matchAll(MEMBERSHIP_CLASS)) {
+    const body = m[1] ?? "";
+    if (DETECTABLE_SYMBOLS.filter((s) => body.includes(s)).length >= 2) found.push(body);
+  }
+  return found;
+}
+
 /** Does this source text carry a multi-symbol currency vocabulary? */
 export function carriesCurrencyVocabulary(source: string): boolean {
-  const per = source.split("\n").map(quotedCurrencyTokensOnLine);
+  const lines = source.split("\n");
+  // Limb 2 — a whole-token membership CLASS is a vocabulary in one line, so it
+  // needs no window: `/^[£$€]$/` IS the lookup.
+  for (const line of lines) {
+    if (currencyMembershipClassesOnLine(line).length > 0) return true;
+  }
+  // Limb 1 — QUOTED tokens, which take several lines to spell a map.
+  const per = lines.map(quotedCurrencyTokensOnLine);
   for (let i = 0; i < per.length; i++) {
     const seen = new Set<string>();
     for (let j = i; j < Math.min(per.length, i + WINDOW); j++) {
@@ -178,6 +219,27 @@ describe("ROADMAP 2.972 — the canonical currency map is the one this repo deri
     expect(
       carriesCurrencyVocabulary(['const a = "£";', ...Array(WINDOW + 2).fill(""), 'const b = "$";'].join("\n")),
     ).toBe(false);
+  });
+
+  it("the MEMBERSHIP limb bites on `^[£$€]$` and stays quiet on an amount grammar", () => {
+    // The discriminating pair for limb 2, in both directions. Without the
+    // second half a limb of `/./` would pass the first (trap 13b: a guard
+    // agreeing with itself), and without the first the limb could have stopped
+    // discriminating entirely and nothing would say so.
+    expect(carriesCurrencyVocabulary("if (unit && /^[£$€]$/.test(unit)) return unit;")).toBe(true);
+    expect(carriesCurrencyVocabulary("const ONE = /^[£$€]+$/;")).toBe(true);
+    expect(carriesCurrencyVocabulary('const S = new RegExp("^[£$€]{1,3}$");')).toBe(true);
+
+    // NOT vocabularies: the class is a limb of an amount GRAMMAR, which is the
+    // classification this guard's own REVIEWED manifest already makes for
+    // `cee/factor-extraction/index.ts`.
+    expect(carriesCurrencyVocabulary("const AMT = /^[£$€]?[\\d][\\d,.]*[kKmM]?%?$/;")).toBe(false);
+    expect(carriesCurrencyVocabulary("const T = /[£$€]?-?\\d[\\d,]*(?:\\.\\d+)?/gi;")).toBe(false);
+    expect(carriesCurrencyVocabulary("const M = /(?<cur>[£€$])\\s?(?<num>\\d[\\d,]*)/;")).toBe(false);
+    // A ONE-symbol membership class is not a vocabulary — it is a single test.
+    expect(carriesCurrencyVocabulary("const GBP = /^[£]$/;")).toBe(false);
+    // Comment lines are prose, exactly as for limb 1.
+    expect(carriesCurrencyVocabulary("// the old form was /^[£$€]$/")).toBe(false);
   });
 
   it("the module this guard was written for no longer carries a vocabulary", () => {

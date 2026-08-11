@@ -114,23 +114,13 @@ export interface InterventionScaleResult {
    */
   readonly inconsistent: boolean;
   /**
-   * FATE under PLoT's request-level normalisation (round 4 — Finding B closed
-   * the rule-name enumeration for good): `true` when the emitted value is a RAW
-   * user-scale magnitude, so PLoT dividing it by the factor's cap/derived range
-   * is the CORRECT operation. `false` when re-scaling would corrupt it — an
-   * unproven `[0,1]` value (`ambiguous_no_evidence`), a value with no cap
-   * (`no_cap`), or an ENCODED CATEGORY (`encoded_verbatim` — `1` means "buy",
-   * not a magnitude). The request projection classifies stranded siblings by
-   * THIS field plus the value, never by rule name.
-   */
-  readonly rawScaleEmission: boolean;
-  /**
    * True when the emitted number is a CATEGORY CODE, not a magnitude (`2` means
    * "outsource"). A code outside [0,1] fires PLoT's gate by itself and is then
    * rescaled by it (measured at b9f6b5a: 2 → 1) — it can never cross the wire
    * faithfully, so its request is unresolvable regardless of siblings. Distinct
-   * from `rawScaleEmission === false`, which also covers no-cap MAGNITUDES that
-   * ship fine outside [0,1] (PLoT derives their range from their own values).
+   * from a non-raw-scale emission (see {@link RAW_SCALE_EMITTING_RULES}), which
+   * also covers no-cap MAGNITUDES that ship fine outside [0,1] (PLoT derives
+   * their range from their own values).
    */
   readonly codeNotMagnitude?: boolean;
   /**
@@ -159,6 +149,37 @@ export interface InterventionConversion {
   readonly rule: InterventionScaleRule;
   readonly inconsistent: boolean;
 }
+
+/**
+ * FATE under PLoT's request-level normalisation (round 4 — Finding B closed the
+ * rule-name enumeration for good): the rules whose emitted value is a RAW
+ * user-scale magnitude, so PLoT dividing it by the factor's cap/derived range is
+ * the CORRECT operation. Every other rule would be CORRUPTED by re-scaling — an
+ * unproven `[0,1]` value (`ambiguous_no_evidence`), a value with no cap
+ * (`no_cap`), an ENCODED CATEGORY (`encoded_verbatim` — `1` means "buy", not a
+ * magnitude), or a dropped one.
+ *
+ * ⚠ THIS WAS A PER-RESULT BOOLEAN FIELD (`rawScaleEmission`) SET AT EIGHT
+ * CONSTRUCTION SITES, and it was a TOTAL FUNCTION OF `rule` at every one of
+ * them — i.e. eight hand-maintained copies of this one table, with a single
+ * reader (CLAUDE.md trap 12). A ninth rule added with the wrong literal would
+ * have mis-classified a stranded sibling silently. It crossed no wire and
+ * reached no telemetry (swept repo-wide; `resolveRawInterventionValue` as the
+ * contrast control returned consumers in four other files, so the sweep
+ * discriminates), so collapsing it to a lookup at the read site is invisible
+ * outside this module.
+ *
+ * ⚠ AND IT IS STILL NOT A RULE-NAME PREDICATE AT THE DECISION. The request-level
+ * decision reads the emitted VALUE and this FATE together; two earlier revisions
+ * enumerated rule names *as the decision* and each missed a rule. This table
+ * answers only "is this emission a raw magnitude?", which is a property of the
+ * rule by construction.
+ */
+const RAW_SCALE_EMITTING_RULES: ReadonlySet<InterventionScaleRule> = new Set([
+  'raw_value_used',
+  'passthrough',
+  'cap_denormalised',
+]);
 
 /** Relative tolerance for value/raw_value consistency checks (0.5%). */
 const CONSISTENCY_REL_TOL = 0.005;
@@ -228,7 +249,7 @@ export function resolveRawInterventionValue(
   // Mirror `extractNumericIntervention`'s notion of "object": any non-null
   // object (arrays included — they simply have no finite `.value`).
   if (intervention === null || typeof intervention !== 'object') {
-    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false, rawScaleEmission: false };
+    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false };
   }
   const obj = intervention as Record<string, unknown>;
   const value = obj.value;
@@ -236,12 +257,12 @@ export function resolveRawInterventionValue(
   // present only when it has a finite numeric `value`. Anything else is
   // dropped exactly as the pre-existing numeric projection dropped it.
   if (!isFiniteNumber(value)) {
-    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false, rawScaleEmission: false };
+    return { value: null, rule: 'dropped', inputValue: null, inconsistent: false };
   }
   // Encoded categorical/boolean → preserve verbatim, never scale. A code is
   // NOT a raw magnitude: PLoT re-scaling it corrupts it (Finding B).
   if (isEncodedIntervention(obj)) {
-    return { value, rule: 'encoded_verbatim', inputValue: value, inconsistent: false, rawScaleEmission: false, codeNotMagnitude: true };
+    return { value, rule: 'encoded_verbatim', inputValue: value, inconsistent: false, codeNotMagnitude: true };
   }
   // Coerce raw_value to a number (accepts numeric strings like "5000"); a
   // non-numeric string falls through to the factor-evidence path.
@@ -278,20 +299,19 @@ function scaleNumeric(
       rule: 'raw_value_used',
       inputValue: value,
       inconsistent,
-      rawScaleEmission: true,
       ...(pairProvesUnitForm ? { unitIntervalEquivalent: value } : {}),
     };
   }
 
   // 2/3. Cap-based handling requires a usable cap.
   if (!capUsable) {
-    return { value, rule: 'no_cap', inputValue: value, inconsistent: false, rawScaleEmission: false };
+    return { value, rule: 'no_cap', inputValue: value, inconsistent: false };
   }
 
   // Already-raw-looking (outside the unit interval) → pass through. This is the
   // guard that stops a second multiplication after Phase 2 prompt clean-up.
   if (value < 0 || value > 1) {
-    return { value, rule: 'passthrough', inputValue: value, inconsistent: false, rawScaleEmission: true };
+    return { value, rule: 'passthrough', inputValue: value, inconsistent: false };
   }
 
   // [0,1] on a capped factor: ONLY denormalise with proven factor evidence.
@@ -301,7 +321,6 @@ function scaleNumeric(
       rule: 'cap_denormalised',
       inputValue: value,
       inconsistent: false,
-      rawScaleEmission: true,
       unitIntervalEquivalent: value,
     };
   }
@@ -313,7 +332,6 @@ function scaleNumeric(
     rule: 'ambiguous_no_evidence',
     inputValue: value,
     inconsistent: false,
-    rawScaleEmission: false,
   };
 }
 
@@ -561,7 +579,8 @@ export function projectRequestInterventionsToWireScale(
   // ---- Request-level decision: VALUE + FATE, never rule names (round 4) ----
   // PLoT's gate is sign-symmetric and request-level: any value outside [0,1]
   // flips cap/range normalisation for the WHOLE request. Under a fired gate,
-  // re-scaling is CORRECT exactly for raw-scale magnitudes (`rawScaleEmission`)
+  // re-scaling is CORRECT exactly for raw-scale magnitudes
+  // ({@link RAW_SCALE_EMITTING_RULES})
   // and CORRUPTS everything else — an unproven [0,1] value, a no-cap value, or
   // an encoded CATEGORY (Finding B: "buy"=1 renormalised to 0.5). Two earlier
   // revisions enumerated rule names here and each missed a rule; both
@@ -600,7 +619,7 @@ export function projectRequestInterventionsToWireScale(
   );
   const strandedUnitScale = present.some(
     (r) =>
-      !r.result.rawScaleEmission &&
+      !RAW_SCALE_EMITTING_RULES.has(r.result.rule) &&
       r.result.value !== null &&
       r.result.value >= 0 &&
       r.result.value <= 1 &&
@@ -661,9 +680,14 @@ export function projectRequestInterventionsToWireScale(
   // and therefore what actually decides its gate. Counts only — never magnitudes.
   const outsideUnitIntervalByRule: Record<string, number> = {};
   for (const entries of resolved) {
-    for (const { factorId, result } of entries) {
+    for (const { factorId, result, optionIndex } of entries) {
       if (result.value === null) continue;
-      const emitted = perOption[resolved.indexOf(entries)]?.[factorId];
+      // `optionIndex` is stamped on every entry at pass 1 and `perOption` is
+      // pushed in `resolved`'s own order, so it indexes the emitted map
+      // directly. It replaces `resolved.indexOf(entries)` — an O(n) reference
+      // scan per intervention that would additionally have returned the WRONG
+      // option had two option entries ever been the same array reference.
+      const emitted = perOption[optionIndex]?.[factorId];
       if (emitted !== undefined && (emitted < 0 || emitted > 1)) {
         outsideUnitIntervalByRule[result.rule] = (outsideUnitIntervalByRule[result.rule] ?? 0) + 1;
       }

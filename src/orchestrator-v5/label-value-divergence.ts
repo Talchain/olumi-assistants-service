@@ -93,6 +93,7 @@
 import type { SuggestedAction } from '../orchestrator/types.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../cee/extraction/numeric-parser.js';
 import { buildConfigureOptionChip } from './configure-option-chip-text.js';
+import { thousands } from './compose/format-factor-value.js';
 
 type Dict = Record<string, unknown>;
 
@@ -256,10 +257,17 @@ type UnitKind = 'currency' | 'percent' | 'none';
  * The denomination of a rendered token. Derived from the canonical currency
  * vocabulary, never from a re-spelled list.
  */
+/**
+ * The canonical symbols, listed once. Hoisted out of {@link unitKindOfToken}:
+ * `CURRENCY_SYMBOL_TO_CODE` is a module constant, so `Object.keys` was
+ * allocating a fresh ten-element array on every token classified.
+ */
+const CURRENCY_SYMBOLS: readonly string[] = Object.keys(CURRENCY_SYMBOL_TO_CODE);
+
 function unitKindOfToken(raw: string): UnitKind {
   const t = raw.trim();
   if (t.endsWith('%')) return 'percent';
-  for (const symbol of Object.keys(CURRENCY_SYMBOL_TO_CODE)) {
+  for (const symbol of CURRENCY_SYMBOLS) {
     if (t.startsWith(symbol) || t.endsWith(symbol)) return 'currency';
   }
   return 'none';
@@ -287,12 +295,18 @@ function currencySymbolFor(unit: string): string | null {
   return CURRENCY_CODE_TO_SYMBOL.get(unit) ?? null;
 }
 
-/** Group a number's integer part in threes, without locale/ICU dependence. */
+/**
+ * Group a number's integer part in threes, without locale/ICU dependence.
+ *
+ * The grouping itself is `compose/format-factor-value.ts`'s {@link thousands} —
+ * imported, not re-spelled (CLAUDE.md trap 12). The exponent guard, the sign and
+ * the fraction re-attachment stay here: they are THIS formatter's rules.
+ */
 function withThousands(value: number): string {
   const asString = Math.abs(value).toString();
   if (asString.includes('e') || asString.includes('E')) return String(value);
   const [intPart, fracPart] = asString.split('.');
-  const grouped = (intPart ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const grouped = thousands(Number(intPart ?? '0'));
   return `${value < 0 ? '-' : ''}${grouped}${fracPart !== undefined ? `.${fracPart}` : ''}`;
 }
 
