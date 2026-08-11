@@ -122,6 +122,24 @@ describe('thousands() — the shared grouping is byte-equal at both call sites',
     }
   });
 
+  it('the shared formatter itself groups and signs correctly', () => {
+    // ⚠ ADDED AFTER A SURVIVING MUTANT, AND THE REASON IS THE FINDING. Deleting
+    // `thousands`' sign limb (`const sign = n < 0 ? '-' : ''` → `''`) SURVIVED
+    // the two parity tests above — demonstrated, not assumed. Both new callers
+    // strip the sign themselves and hand `thousands` a NON-NEGATIVE integer
+    // (measured: -1234.56 arrives as 1234, -0.35 as 0), so the sign limb is
+    // UNREACHABLE from either of them and a parity test between two callers
+    // that cannot reach it can never see it. The limb is live for the
+    // formatter's ORIGINAL caller, so it is pinned here directly rather than
+    // left to a mutant nobody would explain.
+    expect(thousands(0)).toBe('0');
+    expect(thousands(999)).toBe('999');
+    expect(thousands(1000)).toBe('1,000');
+    expect(thousands(1234567)).toBe('1,234,567');
+    expect(thousands(-1234)).toBe('-1,234');
+    expect(thousands(-1234567)).toBe('-1,234,567');
+  });
+
   it('POSITIVE CONTROL: the corpus really exercises grouping', () => {
     // Trap 13b: without this, two formatters that both returned '' would agree
     // perfectly on every case above.
