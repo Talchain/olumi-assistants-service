@@ -64,6 +64,21 @@ import {
  */
 export const COACHING_BLOCK_BODY_MAX = 300;
 
+/**
+ * The contract cap for `action_prompt` (`PHASE3_ACTION_PROMPT_MAX`, schemas
+ * 0.31.0). SINGLE-SOURCED here for the same reason {@link COACHING_BLOCK_BODY_MAX}
+ * is: `phase3-blocks.ts` TRUNCATES to this number, and a composability gate that
+ * used a different one would let a truncation re-cut a word into — or out of —
+ * a veto token, silently changing which route the shipped prompt takes. Two
+ * copies of this number is the mirror class and the failure is silent.
+ *
+ * The fragile-edge prompt cannot reach it (the naming guard bounds the combined
+ * label length to 224, so that prompt is at most 278 — pinned by test). The
+ * judgement-lens prompts CAN: their naming sentences are shorter, so they admit
+ * longer labels, and `judgement-offer-text.ts` gates on this explicitly.
+ */
+export const COACHING_ACTION_PROMPT_MAX = 300;
+
 /** The label the acceptance chip carries. Producer-authored, fixed. */
 export const FRAGILE_EDGE_ACTION_LABEL = 'Adjust this relationship';
 
@@ -115,8 +130,42 @@ export function composeFragileEdgeBody(base: string, fromLabel: string, toLabel:
  */
 export function isFragileEdgeOfferComposable(fromLabel: string, toLabel: string): boolean {
   if (composeFragileEdgeNaming(fromLabel, toLabel).length > COACHING_BLOCK_BODY_MAX) return false;
-  const actionPrompt = composeFragileEdgeActionPrompt(fromLabel, toLabel);
-  if (!EDIT_GRAPH_POSITIVE_REGEX.test(actionPrompt)) return false;
-  if (EDIT_GRAPH_NEGATIVE_REGEX.test(actionPrompt)) return false;
+  return isEditGraphDispatchable(composeFragileEdgeActionPrompt(fromLabel, toLabel));
+}
+
+/**
+ * Would `route-v2` read this message as an EDIT instruction?
+ *
+ * The two regex gates, in the order the route applies them, over the composed
+ * message — extracted from {@link isFragileEdgeOfferComposable} unchanged so the
+ * judgement-lens offer (`judgement-offer-text.ts`) asks the SAME question of the
+ * SAME string rather than re-stating the pair. One definition, three callers.
+ *
+ * ⚠ THIS IS TWO CONJUNCTS OF FIVE, NOT THE WHOLE ROUTE. `route-v2.ts:4128`'s
+ * `editVerbCandidate` is `positiveEditRegexHit && !negativeEditRegexHit &&
+ * !valueUpdatePhrasingHit && !analyticalQuestionDetected && !stateQuerySuppressed`.
+ * A `false` here is SUFFICIENT for "cannot dispatch"; a `true` here is
+ * NECESSARY-NOT-SUFFICIENT.
+ *
+ * ⚠⚠ AND THE RESIDUE IS REAL, NOT THEORETICAL — this comment previously read
+ * *"(the fragile-edge prompt clears the other three by shape)"* and that was
+ * FALSE, refuted by rebuilding `editVerbCandidate` from the route's own imports
+ * and running it over the committed live captures: on **2 of the 22 capture
+ * label pairs** this predicate says yes and the route says no, via
+ * `valueUpdatePhrasingHit` — the producer label *"Raise Group Operating Profit
+ * by 8% Within 18 Months"* is itself value-update phrasing. Those turns are not
+ * dead buttons and not wrong mutations: they are refused at the edge-phrasing
+ * gate and fall to the generic LLM router, so the guarantee on them is
+ * NON-DETERMINISTIC rather than absent. The exact divergent set is pinned in
+ * `compose/__tests__/judgement-offer-action.test.ts` §6 and REDs if it grows OR
+ * shrinks. Closing the three uncovered conjuncts is rowed separately.
+ *
+ * The asymmetry is also why the probe-side gate in `judgement-offer-text.ts`
+ * asserts `isAnalyticalQuestion`: a prompt can carry a producer-authored edit
+ * verb and still be un-dispatchable, and the measured corpus contains that class.
+ */
+export function isEditGraphDispatchable(message: string): boolean {
+  if (!EDIT_GRAPH_POSITIVE_REGEX.test(message)) return false;
+  if (EDIT_GRAPH_NEGATIVE_REGEX.test(message)) return false;
   return true;
 }

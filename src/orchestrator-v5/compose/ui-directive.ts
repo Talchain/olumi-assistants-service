@@ -117,6 +117,10 @@ const LADDER_SOURCE = 'ladder' as const;
 //   1 · set_factor_value / adjust_edge_strength (applied) → open_inspector @ the
 //       mutated node/edge (label resolved from the persisted-snapshot lookup —
 //       the fact's `after` snapshot carries no label; add_constraint EXCLUDED).
+//   2a· run_analysis + a SURVIVING lens block whose OWN first target_ref is an
+//       EDGE → open_inspector @ that edge (PR2 COMPLETE LOOP, L3). SUPERSEDES
+//       row 3 for the three relationship lenses; can never contend with row 2,
+//       which is structurally unreachable for them. See the builder's comment.
 //   2 · run_analysis + a SURVIVING lens block + a resolvable subject → focus @
 //       the lens subject factor. SUPERSEDES the winner-highlight (D-53-1).
 //   3 · run_analysis, no lens (or lens subject unresolved) → the v1 highlight @
@@ -258,13 +262,73 @@ export function countContestedEdges(graph: unknown): number {
  * drops with it (no "look here" at a caged number). The lens block is the unique
  * `deterministic_signal` / `strengthen` coaching block.
  */
-function hasSurvivingLensBlock(freshBlocks: OlumiResponse['blocks']): boolean {
-  return freshBlocks.some(
+function findSurvivingLensBlock(
+  freshBlocks: OlumiResponse['blocks'],
+): OlumiResponse['blocks'][number] | undefined {
+  return freshBlocks.find(
     (b) =>
       b.type === 'coaching' &&
       b.source === 'deterministic_signal' &&
       b.coaching_kind === 'strengthen',
   );
+}
+
+function hasSurvivingLensBlock(freshBlocks: OlumiResponse['blocks']): boolean {
+  return findSurvivingLensBlock(freshBlocks) !== undefined;
+}
+
+/**
+ * §2.1 ROW 2a (PR2 COMPLETE LOOP, L3) — THE CARD POINTS AT WHAT IT NAMES.
+ *
+ * THE GAP THIS CLOSES, derived at this tip rather than assumed. Every lens that
+ * points at a RELATIONSHIP — `fragile_edge_resolution` and the two judgement
+ * lenses — sets `subjectFactorId: null` in its evaluator
+ * (`lens-selector.ts::evaluateFragileEdgeResolution` / the two judgement
+ * evaluators), so `selection.subjectRef` is ABSENT and row 2's factor `focus` is
+ * STRUCTURALLY UNREACHABLE for them. They fall through to row 3, and the user
+ * reading *"the two drafting passes disagreed about the link from A to B"* is
+ * shown a `highlight` on the LEADING OPTION — or, on a withheld turn, nothing at
+ * all. The one card class that most needs "point at what I name" is the one the
+ * ladder never covered.
+ *
+ * (The design predicted row 2 "targets a FACTOR and cannot collide on kind".
+ * True, and weaker than the measured position: this row displaces ROW 3 for
+ * these lenses and can never contend with row 2.)
+ *
+ * VERB — `open_inspector`, NOT `focus`. It selects WITHOUT moving the camera
+ * (`applyV5State.ts`: `selectEdgeWithoutHistory`), and the user is mid-sentence
+ * in the card; yanking the viewport out from under them is the opposite of "act
+ * where the reasoning is". No new verb, no new schema field, no UI change.
+ *
+ * TARGET — the SURVIVING CARD'S OWN `target_refs[0]`, never a re-derivation from
+ * `selection.judgementEdge`. One derivation, two read points (the rule ROADMAP
+ * 2.211 already applies to `selectLens`, and the route row 7 established): the
+ * ref has already been resolved against the graph and has passed the block's own
+ * strict parse, so this row CANNOT point at an entity that does not exist and
+ * CANNOT disagree with the card the user is reading. Composing the id here from
+ * `${fromId}→${toId}` would be a second spelling of one identity — the
+ * `generateGraphHash`-twins shape.
+ *
+ * GATE — it reads the SURVIVING block list, so it inherits the σ/prose gate
+ * unchanged: a lens block that σ dropped is not in `freshBlocks`, and the
+ * directive drops with it. Never a "look here" at a card that did not ship.
+ *
+ * CLAIM SAFETY — deliberately NOT gated on `mayNameLeadingOptionForFact`. An
+ * EDGE target names no option and asserts no leader, which is the same scoping
+ * row 3's own comment sets out for row 2's factor `focus` and row 7 applies to
+ * factor/edge refs. A withheld turn keeps its pointer.
+ *
+ * Fail-closed: a lens block whose first ref is missing, malformed or not an edge
+ * returns null and the ladder continues to rows 2/3 exactly as before.
+ */
+function buildLensEdgeInspectorDirective(
+  freshBlocks: OlumiResponse['blocks'],
+): UiDirectiveBlock | null {
+  const lensBlock = findSurvivingLensBlock(freshBlocks);
+  if (lensBlock === undefined) return null;
+  const ref = readTargetRefs(lensBlock)[0];
+  if (ref === undefined || ref.kind !== 'edge') return null;
+  return directiveFromRef('open_inspector', ref);
 }
 
 /** §2.1 rows 2 + 3 — lens focus (supersedes) or the v1 winner-highlight floor. */
@@ -276,6 +340,16 @@ function buildRunAnalysisDirective(
   judgementSignals?: JudgementSignals,
 ): UiDirectiveBlock | null {
   if (fact.noop) return suppressDirective('run_analysis', 'noop');
+
+  // Row 2a (PR2 COMPLETE LOOP, L3) — an EDGE lens points at its own edge. Placed
+  // FIRST inside the run_analysis rows because it is strictly more specific than
+  // both of them: it fires only when the surviving card already carries an edge
+  // ref, and on exactly those turns rows 2 and 3 were pointing somewhere else
+  // (row 2 is unreachable for every edge lens — see the builder's own comment —
+  // and row 3 points at the leader, which the card is not about). It cannot
+  // displace rows 1/4/5/6: those key off different fact classes entirely.
+  const edgeInspector = buildLensEdgeInspectorDirective(freshBlocks);
+  if (edgeInspector !== null) return emitDirective('run_analysis', edgeInspector);
 
   // Row 2 — the lens focus supersedes the winner highlight (D-53-1), gated on the
   // lens block's σ/prose survival AND a resolvable subject id.
