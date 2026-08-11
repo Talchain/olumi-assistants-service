@@ -38,7 +38,6 @@ import {
   deriveInterveningChange,
   type InterveningChange,
 } from '../../coaching/intervening-change.js';
-import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from '../../compose/terminology-rewrite.js';
@@ -176,25 +175,6 @@ const ONSHORE_LEADS = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.45 },
 ]);
 
-function minimalContextPack(): ContextPack {
-  return {
-    version: '2.0',
-    stage: 'analyse',
-    graph: {
-      nodes: [], edges: [], options: [], goals: [], constraints: [],
-      counts: { nodes: 0, edges: 0, options: 0, goals: 0, constraints: 0 },
-    },
-    analysis: null,
-    conversation: {
-      recent_turns: [], turn_count: 1, last_tool_used: null, pending_confirmation: false,
-    },
-    coaching: { draft_coaching: null, decision_review: null, last_coaching_signal: null },
-    compound_detected: false,
-    compound_pattern_matched: null,
-    parsed_quantities: [],
-    system_event: null,
-  };
-}
 
 /** Drive the real detector on a re-run turn. */
 function rerunText(args: {
@@ -206,7 +186,7 @@ function rerunText(args: {
     proposedHandlerId: 'run_analysis',
     mayNameLeadingOption: args.mayNameLeadingOption ?? true,
     outcome: currentRunOutcome(args.currentEnv),
-    contextPack: minimalContextPack(),
+    contextPack: null,
     priorFacts: args.priorFacts,
   });
   expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
