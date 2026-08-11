@@ -9,7 +9,7 @@ import type { StageContext } from "../types.js";
 import { enrichGraphWithFactorsAsync } from "../../factor-extraction/enricher.js";
 import { detectCycles } from "../../../utils/graphGuards.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../../../orchestrator/index.js";
-import { simpleRepair, ALLOWED_EDGE_PATTERNS } from "../../../services/repair.js";
+import { simpleRepair, countEdgePatternViolations } from "../../../services/repair.js";
 import { log, emit } from "../../../utils/telemetry.js";
 
 /**
@@ -98,29 +98,44 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   }, "Pipeline stage: First stabiliseGraph complete");
 
   // ── Step 5: simpleRepair ────────────────────────────────────────────────
-  const repaired = simpleRepair(candidate, ctx.requestId);
+  // `deferSweepOwnedPatterns` is opt-in per call site and this is the ONLY site that
+  // may set it: Stage 4 substep 1 (the deterministic sweep) runs immediately after this
+  // stage and unconditionally, and its `fixFactorGoalEdges` repairs the deferred
+  // pattern. Substep 2's simpleRepair (`plot-validation.ts`) must NOT opt in — the
+  // sweep has already run by then, so a deferral there would hand the edge to nobody
+  // and fail closed at the post-enforcement gate.
+  const repaired = simpleRepair(candidate, ctx.requestId, { deferSweepOwnedPatterns: true });
 
   // ── Step 5b: Post-repair edge-pattern assertion ────────────────────────
-  // simpleRepair is the authoritative owner of invalid-edge removal.
-  // This defensive check should never fire — if it does, a later stage is
-  // re-adding edges that simpleRepair already removed.
+  // simpleRepair is the authoritative owner of invalid-edge removal, EXCEPT for the
+  // patterns a downstream authority owns and repairs (SWEEP_OWNED_EDGE_PATTERNS —
+  // today: factor→goal, split by fixFactorGoalEdges in Stage 4 substep 1).
+  //
+  // The two counts are DIFFERENT QUESTIONS and must not share one number: `invalid`
+  // means a later stage re-added an edge simpleRepair removed (should never happen);
+  // `deferred` means an edge is deliberately in flight to its repairer (expected).
+  // Counting a deferral as a violation would make this alarm cry wolf on every draft
+  // whose model emits the shortcut — and an alarm everyone learns to ignore is worse
+  // than no alarm. Both counts are derived from the single list in repair.ts, never
+  // re-listed here.
   {
-    const kindMap = new Map<string, string>();
-    for (const n of repaired.nodes) kindMap.set(n.id, n.kind);
-    let invalidCount = 0;
-    for (const e of repaired.edges) {
-      const fk = kindMap.get(e.from);
-      const tk = kindMap.get(e.to);
-      if (fk && tk && !ALLOWED_EDGE_PATTERNS.some((p) => p.from === fk && p.to === tk)) {
-        invalidCount++;
-      }
-    }
+    const { invalid: invalidCount, deferred: deferredCount } = countEdgePatternViolations(repaired);
     if (invalidCount > 0) {
       log.warn({
         event: "cee.enrich.post_repair_invalid_edges",
         request_id: ctx.requestId,
         invalid_count: invalidCount,
       }, `Post-simpleRepair assertion: ${invalidCount} invalid edge pattern(s) survived — this should not happen`);
+    }
+    if (deferredCount > 0) {
+      // Observability for the handoff: pair this with the sweep's
+      // `cee.deterministic_sweep.factor_goal_split` count. Deferred-in without a
+      // corresponding split-out means the handoff broke.
+      log.info({
+        event: "cee.enrich.post_repair_deferred_edges",
+        request_id: ctx.requestId,
+        deferred_count: deferredCount,
+      }, `Post-simpleRepair: ${deferredCount} edge pattern(s) deferred to a downstream repair authority`);
     }
   }
 
