@@ -55,14 +55,39 @@
  *
  * ⚠ LEG 2 IS DELIBERATELY SILENT WHERE IT CANNOT NAME A TRUE NUMBER. A
  * disclosure that states a magnitude is itself a claim; getting it wrong would
- * be the same class of harm one level up. So it fires only when the node's
- * magnitude is UNAMBIGUOUS (every source agrees) and exactly one quantity was
- * added. A normalised `observed_state.value` (0..1) is NOT a magnitude and is
- * never used as one. The classes this drops are pinned by name in the tests
- * (`label-value-divergence-added-quantity.test.ts`) so the gap stays visible.
+ * be the same class of harm one level up. Four conditions, all necessary:
+ *
+ *   1. exactly ONE quantity was added (several ⇒ no defensible value claim);
+ *   2. every magnitude source on the node AGREES (drift ⇒ nothing quotable);
+ *   3. the magnitude is DENOMINATED — a bare number is a score, not a quantity;
+ *   4. the added token is denominated THE SAME WAY (`unitKindOfToken`).
+ *
+ * (3) and (4) are the same principle from opposite ends, and both were learned
+ * from an outside corpus rather than from this author's head: (3) because a
+ * normalised 0.4 reached the user through `display_value` after the first
+ * revision excluded it only by FIELD NAME, and (4) because without it LEG 2
+ * fired on any added digit — "FY26", "(Phase 2)", "top 3 vendors" — while
+ * offering a chip that would have committed the wrong number to the model.
+ *
+ * The classes this drops are pinned BY NAME in the tests
+ * (`label-value-divergence-added-quantity.test.ts`) so each gap stays visible
+ * and REDs if it silently widens or narrows. Known-dropped today: several added
+ * tokens; undenominated units (weeks, users, headcount); and a cross-unit
+ * assertion (a currency figure appearing on a percent node).
  *
  * Both legs are DISCLOSURE ONLY: nothing in this module writes to a graph, an
  * op, or a value, and a test asserts that against deep-frozen inputs.
+ *
+ * ⭐ THE DISCLOSURE MUST KEEP THREE CARRIERS, AND THE CHAT ONE IS THE WEAK ONE.
+ * Measured on the live capture and confirmed by review: the finaliser egress
+ * guard (`edit-graph-dispatch.ts`) replaces the WHOLE `assistant_text` when any
+ * part of it trips a fatal-class phrase — on the captured turn the LLM's own
+ * success sentence did exactly that, so a chat-only disclosure would have died
+ * with it. `buildLabelValueDivergenceNote` is therefore the PROBABILISTIC
+ * carrier; `buildLabelValueDivergenceDescription` (the applied-changes receipt)
+ * and `buildLabelValueDivergenceActions` (the typed chip) survive that rewrite
+ * and are the RELIABLE ones. Anyone consolidating these surfaces later must not
+ * route the disclosure through the chat path alone.
  */
 
 import type { SuggestedAction } from '../orchestrator/types.js';
@@ -201,12 +226,43 @@ function tokensOnlyIn(a: ValueToken[], b: ValueToken[]): ValueToken[] {
 
 /**
  * A magnitude the node genuinely holds, with a render-safe way to say it.
- * `key` is the canonical comparison key (same alphabet as `tokenKey`, so
- * "£50k" and "£50,000" compare equal); `display` is what the user is shown.
+ * `display` is what the user is shown; `key` is its comparison key, produced by
+ * running `tokenKey` over that SAME rendered string.
+ *
+ * ⚠ THE KEY IS DERIVED FROM `display`, NEVER FROM THE BARE NUMBER, and the
+ * distinction is load-bearing rather than stylistic. The first revision keyed on
+ * `tokenKey(String(value))`, which drops the unit: a percent node holding 5
+ * keyed as `"5"` while every label token `"5%"` keys as `"5%"`, so the two could
+ * never compare equal. That produced a FALSE SENTENCE in one direction ("will
+ * still use 5%, not 5%" on a label that AGREED) and TOTAL SILENCE in the other
+ * (a real 5%→8% divergence read as "sources disagree"). Currency was unaffected,
+ * which is precisely why an all-currency corpus could not see it — the docstring
+ * here even claimed the alphabets matched, and it was false for `%`.
  */
 interface ModelledMagnitude {
   readonly key: string;
   readonly display: string;
+  readonly unit: UnitKind;
+}
+
+/**
+ * What a rendered quantity is denominated in. This is a TYPE, and LEG 2 uses it
+ * as a type check rather than as a phrase list — which is why it does not
+ * reopen the natural-language oscillation class.
+ */
+type UnitKind = 'currency' | 'percent' | 'none';
+
+/**
+ * The denomination of a rendered token. Derived from the canonical currency
+ * vocabulary, never from a re-spelled list.
+ */
+function unitKindOfToken(raw: string): UnitKind {
+  const t = raw.trim();
+  if (t.endsWith('%')) return 'percent';
+  for (const symbol of Object.keys(CURRENCY_SYMBOL_TO_CODE)) {
+    if (t.startsWith(symbol) || t.endsWith(symbol)) return 'currency';
+  }
+  return 'none';
 }
 
 /**
@@ -270,8 +326,13 @@ function collectMagnitudeCandidates(node: Dict): { magnitude: ModelledMagnitude;
   const out: { magnitude: ModelledMagnitude; fromDisplayValue: boolean }[] = [];
   const push = (value: number, unit: unknown): void => {
     const display = formatMagnitude(value, unit);
-    const key = tokenKey(String(value));
-    if (key.length > 0) out.push({ magnitude: { key, display }, fromDisplayValue: false });
+    // Key off the RENDERED string, so the unit is part of the key. See the
+    // warning on ModelledMagnitude — keying off `String(value)` here is the
+    // defect that made every percent node uncomparable.
+    const key = tokenKey(display);
+    if (key.length > 0) {
+      out.push({ magnitude: { key, display, unit: unitKindOfToken(display) }, fromDisplayValue: false });
+    }
   };
 
   const obs = node.observed_state;
@@ -295,7 +356,10 @@ function collectMagnitudeCandidates(node: Dict): { magnitude: ModelledMagnitude;
   // "£50k–£60k" yields two disagreeing keys and therefore blocks the claim.
   if (typeof node.display_value === 'string') {
     for (const token of extractValueTokens(node.display_value)) {
-      out.push({ magnitude: { key: token.key, display: token.raw }, fromDisplayValue: true });
+      out.push({
+        magnitude: { key: token.key, display: token.raw, unit: unitKindOfToken(token.raw) },
+        fromDisplayValue: true,
+      });
     }
   }
 
@@ -317,7 +381,17 @@ function modelledMagnitudeOf(node: Dict): ModelledMagnitude | null {
   // All sources agree, so preferring the rendered string costs no accuracy and
   // matches what the user can see on the canvas ("£50k", not "£50,000").
   const rendered = candidates.find((c) => c.fromDisplayValue);
-  return (rendered ?? candidates[0]!).magnitude;
+  const magnitude = (rendered ?? candidates[0]!).magnitude;
+
+  // ⭐ THE SEMANTIC, NOT THE FIELD NAME. A magnitude may be quoted at the user
+  // only if it is a REAL-WORLD QUANTITY — one that carries a denomination. The
+  // first revision excluded normalised values by naming the field
+  // (`observed_state.value`), and that guard was trivially bypassed: the
+  // captured graph's own `fac_platform_capability` carries no `raw_value` but a
+  // `display_value` of "Moderate (0.4)", so the score 0.4 walked in through the
+  // other door and the product would have said "will still use 0.4". A bare
+  // number is not a quantity, wherever it was read from.
+  return magnitude.unit === 'none' ? null : magnitude;
 }
 
 function detectOne(
@@ -372,6 +446,22 @@ function detectOne(
     if (newOnly.length !== 1) return null;
     const modelled = modelledMagnitudeOf(node);
     if (modelled === null) return null; // no magnitude we can defend naming
+
+    // ⭐ UNIT AGREEMENT — the added token must be DENOMINATED THE SAME WAY as
+    // the value it is being read against. This is a type check, not a phrase
+    // list, which is why it does not reopen the natural-language oscillation
+    // class that has cost this repo five rounds elsewhere.
+    //
+    // Without it, LEG 2 fired on ANY added digit, because LEG 1's
+    // replaced-token requirement had been the only thing holding that line.
+    // Measured on the captured node: "FY26" produced "not 26", "(Phase 2)"
+    // produced "not 2", "top 3 vendors" produced "not 3" — and the chips those
+    // offered were NOT inert, so one click would have set Annual CRM Spend to
+    // 2026. Honesty was also resting on how many digits the user happened to
+    // type: "(renewal Q1 2027)" escaped only by adding two tokens.
+    const addedUnit = unitKindOfToken(newOnly[0]!.raw);
+    if (addedUnit !== modelled.unit) return null;
+
     if (modelled.key === newOnly[0]!.key) return null; // the label AGREES — no harm
     oldValueToken = modelled.display;
   }

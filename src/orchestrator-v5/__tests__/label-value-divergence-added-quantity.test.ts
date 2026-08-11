@@ -324,7 +324,55 @@ describe('ADD-ONLY — safe-biased: no comparable modelled magnitude ⇒ no clai
     expect(detectLabelValueDivergences([op], preGraph(), postGraph())).toHaveLength(0);
   });
 
-  it('DOES fire on an option with a single unambiguous intervention magnitude', () => {
+  it('DOES fire on an option whose single intervention magnitude is DENOMINATED', () => {
+    const node = {
+      id: 'opt_x',
+      kind: 'option',
+      label: 'Raise',
+      interventions: { fac_price: { value: 0.49, raw_value: 49, unit: 'GBP' } },
+    };
+    const op = {
+      op: 'update_node',
+      path: 'opt_x',
+      value: { label: 'Raise (£39)' },
+      old_value: { label: 'Raise' },
+    };
+    const divs = detectLabelValueDivergences([op], graphWith(node), graphWith(node));
+    expect(divs).toHaveLength(1);
+    expect(divs[0]!.path).toBe('opt_x');
+    expect(divs[0]!.isOption).toBe(true);
+    expect(divs[0]!.newValueToken).toBe('£39');
+    expect(divs[0]!.oldValueToken).toBe('£49');
+  });
+
+  it('a BARE number against a BARE magnitude is not a value claim either', () => {
+    // The case the unit-agreement rule CANNOT catch, because both sides are
+    // equally undenominated: "49" vs "39" passes a type check trivially. Only
+    // the semantic rule — a magnitude must be a real-world quantity — stops the
+    // product saying "will still use 49, not 39" about two bare scores.
+    //
+    // Added after a mutant showed the neighbouring KNOWN-DROPPED case was
+    // pinned by unit agreement rather than by the semantic rule, so the
+    // semantic rule had no independent guard on this shape.
+    const node = {
+      id: 'opt_x',
+      kind: 'option',
+      label: 'Raise',
+      interventions: { fac_price: { value: 0.49, raw_value: 49 } },
+    };
+    const op = {
+      op: 'update_node',
+      path: 'opt_x',
+      value: { label: 'Raise (39)' },
+      old_value: { label: 'Raise' },
+    };
+    expect(detectLabelValueDivergences([op], graphWith(node), graphWith(node))).toHaveLength(0);
+  });
+
+  it('KNOWN-DROPPED — an UNDENOMINATED intervention magnitude cannot be quoted', () => {
+    // Same option, but the intervention carries no unit, so "49" is a bare
+    // number. We cannot type-check the label's "$39" against it, and quoting an
+    // undenominated figure at the user is the P2-1 defect. Silence is honest.
     const node = {
       id: 'opt_x',
       kind: 'option',
@@ -337,12 +385,150 @@ describe('ADD-ONLY — safe-biased: no comparable modelled magnitude ⇒ no clai
       value: { label: 'Raise ($39)' },
       old_value: { label: 'Raise' },
     };
-    const divs = detectLabelValueDivergences([op], graphWith(node), graphWith(node));
+    expect(detectLabelValueDivergences([op], graphWith(node), graphWith(node))).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D2 — PERCENT NODES. The unit has to be part of the comparison key, or the
+//      detector is simultaneously a liar and mute on the same node class.
+//      (Round-1 review, P1-1 / P1-2 — found by a corpus written outside the
+//      author's head, and invisible to an all-currency one.)
+// ─────────────────────────────────────────────────────────────────────────────
+function percentNode(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'fac_churn',
+    kind: 'factor',
+    label: 'Monthly churn',
+    observed_state: { value: 0.05, unit: '%', raw_value: 5 },
+    ...extra,
+  };
+}
+
+const percentOp = (label: string) => ({
+  op: 'update_node',
+  path: 'fac_churn',
+  value: { label },
+  old_value: { label: 'Monthly churn' },
+});
+
+describe('PERCENT — the unit is part of the key', () => {
+  it('P1-1 — an AGREEING percent label is silent (it must not say "5%, not 5%")', () => {
+    const node = percentNode();
+    const divs = detectLabelValueDivergences(
+      [percentOp('Monthly churn (5%)')],
+      graphWith(node),
+      graphWith(node),
+    );
+    expect(divs).toHaveLength(0);
+  });
+
+  it('P1-1 twin — a DIVERGENT percent label fires and names both figures', () => {
+    const node = percentNode();
+    const divs = detectLabelValueDivergences(
+      [percentOp('Monthly churn (8%)')],
+      graphWith(node),
+      graphWith(node),
+    );
     expect(divs).toHaveLength(1);
-    expect(divs[0]!.path).toBe('opt_x');
-    expect(divs[0]!.isOption).toBe(true);
-    expect(divs[0]!.newValueToken).toBe('$39');
-    expect(divs[0]!.oldValueToken).toBe('49');
+    expect(divs[0]!.path).toBe('fac_churn');
+    expect(divs[0]!.oldValueToken).toBe('5%');
+    expect(divs[0]!.newValueToken).toBe('8%');
+    const note = buildLabelValueDivergenceNote(divs)!;
+    expect(note).toContain('5%');
+    expect(note).toContain('8%');
+    // The false sentence this class produced before the fix.
+    expect(note).not.toContain('still use 5%, not 5%');
+  });
+
+  it('P1-2 — a percent node WITH an agreeing display_value is not read as "disagreeing"', () => {
+    const node = percentNode({ display_value: '5%' });
+    // Silent when the label agrees …
+    expect(
+      detectLabelValueDivergences([percentOp('Monthly churn (5%)')], graphWith(node), graphWith(node)),
+    ).toHaveLength(0);
+    // … and NOT silent on a genuine divergence — the P1-2 harm was that this
+    // shape was mute in every direction.
+    const divs = detectLabelValueDivergences(
+      [percentOp('Monthly churn (8%)')],
+      graphWith(node),
+      graphWith(node),
+    );
+    expect(divs).toHaveLength(1);
+    expect(divs[0]!.oldValueToken).toBe('5%');
+    expect(divs[0]!.newValueToken).toBe('8%');
+  });
+
+  it('KNOWN-DROPPED — a CROSS-UNIT assertion (currency on a percent node) stays silent', () => {
+    // "£63,000" on a percent factor is denominated differently from the value
+    // it would be read against, so there is no honest magnitude comparison to
+    // state. Reported to the coordinator as a deliberate consequence of the
+    // unit-agreement rule rather than silently absorbed.
+    const node = percentNode({ display_value: '5%' });
+    expect(
+      detectLabelValueDivergences(
+        [percentOp('Monthly churn (£63,000)')],
+        graphWith(node),
+        graphWith(node),
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D3 — BARE DIGITS. LEG 1's replaced-token requirement was the only brake on
+//      this; LEG 2 removed it. Every case below is on the REAL captured node,
+//      and each previously produced a false sentence AND a live chip that would
+//      have committed the wrong number to the model. (Round-1 review, P1-3.)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('BARE DIGITS — an added number with no denomination is not a value claim', () => {
+  const cases: readonly [string, string][] = [
+    ['a fiscal-year suffix', 'Annual CRM Spend FY26'],
+    ['a phase annotation', 'Annual CRM Spend (Phase 2)'],
+    ['a count in prose', 'Annual CRM Spend across top 3 vendors'],
+    ['a quarter and a year', 'Annual CRM Spend (renewal Q1 2027)'],
+    ['an ordinal', 'Annual CRM Spend (2nd revision)'],
+  ];
+
+  it.each(cases)('stays silent on %s', (_why, label) => {
+    const op = {
+      op: 'update_node',
+      path: TARGET_ID,
+      value: { label },
+      old_value: { label: PRE_LABEL },
+    };
+    expect(detectLabelValueDivergences([op], preGraph(), postGraph())).toHaveLength(0);
+  });
+
+  it('CONTRAST CONTROL — the same node still fires on a DENOMINATED figure', () => {
+    // Without this, every row above would pass on a detector that had simply
+    // stopped working (trap 20: a probe returning the same answer for every
+    // input is reporting on itself).
+    const divs = detectLabelValueDivergences([capturedOp()], preGraph(), postGraph());
+    expect(divs).toHaveLength(1);
+    expect(divs[0]!.newValueToken).toBe('£63,000');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D4 — P2-1: the normalised-value exclusion must guard the SEMANTIC, not a
+//      field name. This node is from the captured graph, not invented.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('NORMALISED SCORES — excluded by what they ARE, not by where they are read from', () => {
+  it('stays silent on the captured node whose score reaches display_value', () => {
+    const node = nodeIn(preGraph(), 'fac_platform_capability');
+    // PIN THE PRECONDITION: this fixture only tests what it claims while it
+    // really does carry a bare score with no raw_value (trap 13b).
+    expect((node.observed_state as Record<string, unknown>).raw_value).toBeUndefined();
+    expect(node.display_value).toBe('Moderate (0.4)');
+
+    const op = {
+      op: 'update_node',
+      path: 'fac_platform_capability',
+      value: { label: `${String(node.label)} (0.5)` },
+      old_value: { label: String(node.label) },
+    };
+    expect(detectLabelValueDivergences([op], preGraph(), postGraph())).toHaveLength(0);
   });
 });
 

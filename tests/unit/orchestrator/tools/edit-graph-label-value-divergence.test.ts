@@ -458,6 +458,14 @@ describe('handleEditGraph — LEG 2: an ADDED label quantity the model does not 
 
     const text = result.assistantText ?? '';
     expect(text).toBeTruthy();
+    // ⚠ PIN THE PRECONDITION (round-1 review, P2-2). Without this the test
+    // passed at pristine: it asserted that SOME text survives the guard, which
+    // is true of the plain "Renamed …" receipt too. It has to assert that the
+    // text it is protecting is the DISCLOSURE.
+    expect(text).toContain('£63,000');
+    expect(text).toContain('£50k');
+    expect(text.toLowerCase()).toMatch(/modelled value|display text only/);
+
     const guarded = applyEgressForbiddenPhraseGuard(text);
     expect(guarded.rewritten).toBe(false);
     expect(guarded.text).toBe(text);
