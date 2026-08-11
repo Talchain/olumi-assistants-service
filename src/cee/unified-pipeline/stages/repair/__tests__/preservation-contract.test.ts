@@ -40,6 +40,7 @@ import {
   fieldDeletion,
   type FieldDeletionEvent,
 } from "../../../utils/field-deletion-audit.js";
+import type { EdgeFormat } from "../../../utils/edge-format.js";
 
 /**
  * ── THE INPUT IS THE DEPLOYED STATE, RECONSTRUCTED FROM THE DEPLOYED OUTPUT ──
@@ -89,16 +90,28 @@ function liveGraph() {
     ],
     // fac_support_cost is deliberately UNCONNECTED to any option — that is the
     // condition that makes it unreachable and triggers the repair.
+    //
+    // ⚠ V1_FLAT (`strength_mean`/`strength_std`/`belief_exists`), because this
+    // repair runs BEFORE the V3 transform, where edges still carry the flat
+    // fields rather than the nested `strength: {mean, std}` the cold read shows.
+    // An earlier draft of this fixture passed a format string that does not
+    // exist in `EdgeFormat` ("from_to") — the tests still went green, because
+    // the value is only consulted when the repair PATCHES an edge, so a
+    // meaningless format silently exercised a narrower path than production.
+    // `tsconfig.build.json` excludes tests, so the local typecheck could not
+    // see it; the CI Typecheck Drift ratchet did.
     edges: [
-      { from: "opt_4day", to: "out_csat", kind: "causal" },
-      { from: "opt_status_quo", to: "out_csat", kind: "causal" },
+      { from: "opt_4day", to: "out_csat", kind: "causal", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+      { from: "opt_status_quo", to: "out_csat", kind: "causal", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
     ],
   } as any;
 }
 
+const EDGE_FORMAT: EdgeFormat = "V1_FLAT";
+
 function runRepair() {
   const graph = liveGraph();
-  const result = handleUnreachableFactors(graph, "from_to");
+  const result = handleUnreachableFactors(graph, EDGE_FORMAT);
   const node = graph.nodes.find((n: any) => n.id === "fac_support_cost");
   return { graph, result, node };
 }
@@ -143,7 +156,7 @@ describe("S2 · the audit can say WHAT it deleted", () => {
     const n = graph.nodes.find((x: any) => x.id === "fac_support_cost");
     n.data = { value: 0.5 }; // no raw_value, no cap, no unit
     delete n.provenance;
-    const result = handleUnreachableFactors(graph, "from_to");
+    const result = handleUnreachableFactors(graph, EDGE_FORMAT);
     const ev = result.fieldDeletions.find((d) => d.field === "data.value");
     expect(ev).toBeDefined();
     expect(ev!.previous_value).toBe(0.5);
@@ -191,7 +204,7 @@ describe("S2 · the loss reaches the user's receipt, not just a trace", () => {
     const graph = liveGraph();
     const n = graph.nodes.find((x: any) => x.id === "fac_support_cost");
     delete n.data;
-    const result = handleUnreachableFactors(graph, "from_to");
+    const result = handleUnreachableFactors(graph, EDGE_FORMAT);
     const repair = result.repairs.find((r) => r.path.includes("fac_support_cost"))!;
     expect(repair.action.toLowerCase()).not.toContain("not used");
     expect(repair.deleted_value).toBeUndefined();
