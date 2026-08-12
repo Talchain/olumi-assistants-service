@@ -79,6 +79,7 @@ import {
   stripModelAuthoredGoalThreshold,
 } from "./normalisation.js";
 import { LLMDraftResponse } from "./shared-schemas.js";
+import { projectDraftRecords, isGraphShapedResponse } from "../../cee/draft/records/index.js";
 import { validateGraph } from "../../validators/graph-validator.js";
 import { Graph } from "../../schemas/graph.js";
 
@@ -91,6 +92,45 @@ import { Graph } from "../../schemas/graph.js";
  */
 export function isUsableDraftDocument(document: unknown): boolean {
   if (!document || typeof document !== "object" || Array.isArray(document)) return false;
+
+  // ⭐ THE DRAFT PATH EMITS A RECORD SET, so the usable-document question is
+  // asked of records FIRST. This whole predicate is graph-shaped below, and a
+  // graph-shaped predicate on a records path is not a stricter filter — it is a
+  // filter that rejects EVERYTHING, silently, forever. The caller
+  // (`extractJsonFromResponse`) then falls back to the FIRST document, which is
+  // exactly the "model emits a partial object, then prose, then the real one"
+  // defect this selector exists to close: 7 of 15 captures on 2026-08-09
+  // discarded the finished draft. Leaving it graph-shaped would have made that
+  // defect reachable again in records form, with the selector still present and
+  // still logging, and nothing red anywhere.
+  //
+  // The composition is the SAME one as below, applied to the PROJECTION: the
+  // seam's gate, then the graph-side authorities. No second definition of "a
+  // good draft" is introduced here (trap 21) — the record set is turned into the
+  // graph the pipeline would see, and the existing chain judges that.
+  //
+  // ⚠ KNOWN GAP, NAMED RATHER THAN PAPERED OVER. On the graph path the partial
+  // first document was distinguishable because it was structurally INVALID. A
+  // partial RECORD SET is not: `{stated_items:[goal], claims:[]}` is a perfectly
+  // legitimate record set — zero claims is a deliberate, honest answer the
+  // grammar is built to permit. So the discrimination this selector relies on
+  // comes entirely from the projected graph, and while projected graphs do not
+  // yet clear the structural validator reliably, this predicate will reject
+  // complete documents too and the caller will keep the first one. That is the
+  // SAME limitation acceptance criterion 3 reports, not a new one — and it is
+  // written here so the next reader finds a stated gap rather than a selector
+  // that looks closed. Do not "fix" it with a heuristic (an is-it-big-enough or
+  // has-it-any-links test): that would be exactly the invented predicate this
+  // module's header exists to forbid.
+  if (isGraphShapedResponse(document) === false) {
+    const projected = projectDraftRecords(document);
+    if (!projected.ok) return false;
+    return isUsableDraftDocument(projected.projection.graph);
+  }
+
+  // Graph-shaped documents keep the original verdict. The repair path still
+  // drafts graphs, and the historic multi-document captures are graph-shaped, so
+  // this branch is live and is not dead code kept for sentiment.
   try {
     const candidate = structuredClone(document);
     stripModelAuthoredGoalThreshold(candidate);

@@ -841,11 +841,22 @@ export function isDemandNotBriefFailure(err: unknown): boolean {
   return false;
 }
 
-// Structural "reached the edges array" probe over the accumulated stream text.
-// Edge objects carry `"from":`; healthy drafts emit ≥1, runaways emit 0 (the
-// same signal measureTruncatedDraftAnatomy tallies as approx_edges). NOT global
-// (used with .test(); a global flag would advance lastIndex across calls).
-export const DRAFT_EDGES_REACHED_RE = /"from"\s*:/;
+// Structural "reached the causal links" probe over the accumulated stream text.
+// Healthy drafts emit ≥1, runaways emit 0 (the same signal
+// measureTruncatedDraftAnatomy tallies as approx_edges). NOT global (used with
+// .test(); a global flag would advance lastIndex across calls).
+//
+// ⚠ BOTH SHAPES, AND THE SECOND ONE IS THE LIVE ONE. The draft path now emits a
+// RECORD SET, whose causal links carry `"from_ref":`, not `"from":`. A probe
+// matching only `"from"` would have gone permanently false on every draft — and
+// note the failure mode: not a wrong answer, an instrument that silently stops
+// firing. Everything gated on `edgesReached` would have behaved as though no
+// draft ever reached its links (the 8,000-char total gate staying armed for the
+// whole generation, the stall and hard-ceiling gates applying to healthy long
+// drafts, `time_to_edges_ms` and the drift tripwire never firing), and nothing
+// would have gone red anywhere. `"from"` is retained because the repair path and
+// the historic captures still carry graph-shaped edges.
+export const DRAFT_EDGES_REACHED_RE = /"from(_ref)?"\s*:/;
 
 // ---------------------------------------------------------------------------
 // ⭐⭐ THE PER-STRING-VALUE CEILING — the CLASS closure (2026-07-25)

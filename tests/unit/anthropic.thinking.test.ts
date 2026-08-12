@@ -309,13 +309,39 @@ describe("chatWithAnthropic — thinking (edit_graph path)", () => {
 // draftGraphWithAnthropic — thinking passthrough and max_tokens enforcement
 // ---------------------------------------------------------------------------
 
-const MINIMAL_DRAFT_JSON = JSON.stringify({
-  nodes: [
-    { id: "opt_a", kind: "option", label: "Option A" },
-    { id: "fac_x", kind: "factor", label: "Factor X", data: { baseline: 0.5 } },
+/**
+ * ⚠ A RECORD SET, NOT A GRAPH (draft-by-records cutover).
+ *
+ * The draft path asks the model for `{stated_items, claims}` and projects
+ * GraphV3 itself at the post-LLM seam; a graph-shaped response is refused there,
+ * which made every request-body assertion in this block fail inside the adapter
+ * before it could read the body. The claim is linked through to the goal because
+ * the projector withdraws any factor that cannot reach one.
+ */
+const MINIMAL_DRAFT_RECORDS_JSON = JSON.stringify({
+  stated_items: [
+    { kind: "goal", source_quote: "decide whether to take the job offer" },
+    { kind: "option", source_quote: "take the job offer" },
+    { kind: "option", source_quote: "stay in the current role" },
   ],
-  edges: [
-    { from: "opt_a", to: "fac_x", strength: { mean: 0.6, std: 0.1 } },
+  claims: [
+    { claim_kind: "factor", label: "total compensation", basis: [0] },
+    {
+      claim_kind: "causal_link",
+      label: "the offer raises total compensation",
+      basis: [0],
+      from_stated: 1,
+      to_claim: 0,
+      effect: "positive",
+    },
+    {
+      claim_kind: "causal_link",
+      label: "compensation bears on the decision",
+      basis: [0],
+      from_claim: 0,
+      to_stated: 0,
+      effect: "positive",
+    },
   ],
 });
 
@@ -341,7 +367,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
     vi.resetModules();
     mockCreate.mockReset();
     mockStream.mockReset();
-    mockStream.mockImplementation(makeDraftStream(MINIMAL_DRAFT_JSON));
+    mockStream.mockImplementation(makeDraftStream(MINIMAL_DRAFT_RECORDS_JSON));
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
   });
 

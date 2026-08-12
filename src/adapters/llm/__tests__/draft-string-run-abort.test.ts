@@ -52,11 +52,32 @@ vi.mock('@anthropic-ai/sdk', () => {
   return { default: MockAnthropic };
 });
 
-const HEALTHY_GRAPH =
-  '{"nodes":[{"id":"fac_a","kind":"factor","label":"Support headcount"},' +
-  '{"id":"goal_g","kind":"goal","label":"Resolve support overwhelm"}],' +
-  '"edges":[{"from":"fac_a","to":"goal_g","strength":{"mean":0.5,"std":0.1},' +
-  '"exists_probability":0.9,"effect_direction":"positive"}],"goal_constraints":[]}';
+/**
+ * The healthy (non-runaway) response.
+ *
+ * ⚠ A RECORD SET, NOT A GRAPH (draft-by-records cutover): the draft path now
+ * asks the model for `{stated_items, claims}` and a deterministic projector
+ * builds the graph at the post-LLM seam, so a graph-shaped payload here is
+ * REFUSED by design (`draft_records_graph_shaped_response`) and would fail every
+ * test in this file for a reason that has nothing to do with the runaway guard.
+ * The records below project to the same little graph the previous fixture stated
+ * literally — factor "Support headcount" → goal "Resolve support overwhelm" —
+ * so what this file measures is unchanged.
+ */
+const HEALTHY_RECORDS = JSON.stringify({
+  stated_items: [{ kind: 'goal', source_quote: 'Resolve support overwhelm' }],
+  claims: [
+    { claim_kind: 'factor', label: 'Support headcount', basis: [0] },
+    {
+      claim_kind: 'causal_link',
+      label: 'more headcount resolves the overwhelm',
+      basis: [0],
+      from_claim: 0,
+      to_stated: 0,
+      effect: 'positive',
+    },
+  ],
+});
 
 /**
  * The runaway shape, replayed from the 2026-07-25 wire capture: one string value
@@ -87,11 +108,11 @@ function makeStream(attempt: number) {
         }
         return;
       }
-      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: HEALTHY_GRAPH } };
+      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: HEALTHY_RECORDS } };
     },
     async finalMessage() {
       return {
-        content: [{ type: 'text', text: isRunaway ? runawayDeltas().join('') : HEALTHY_GRAPH }],
+        content: [{ type: 'text', text: isRunaway ? runawayDeltas().join('') : HEALTHY_RECORDS }],
         usage: { input_tokens: 1_000, output_tokens: isRunaway ? 8_550 : 2_000 },
         stop_reason: isRunaway ? 'max_tokens' : 'end_turn',
       };
