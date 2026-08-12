@@ -70,6 +70,8 @@ import {
   projectRecordsToGraph,
   isSalvageableRecordSet,
   enumerateCompletionAsk,
+  countBlockingAskItems,
+  shouldKeepCompletion,
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
@@ -2062,31 +2064,48 @@ export async function draftGraphWithAnthropic(
         completionMeta.parsed = completionParsed !== undefined;
         if (merged.ok) {
           const reprojected = projectRecordsToGraph(merged.records);
-          // ⭐ THE NON-INFERIORITY CHECK, measured by the SAME predicates that
-          // built the ask.
+          // ⭐⭐ THE NON-INFERIORITY CHECK — THE BLOCKING CLASSES ONLY.
           //
-          // ⚠ NOT NODE COUNT, and the first version of this line was node count.
-          // Measured on B1: the option-duplication merge legitimately takes 8
-          // nodes to 6 by collapsing three refinements onto the three stated
-          // options they refine — the same three alternatives, no longer
-          // doubled. A node-count comparator reads that as a regression and
-          // would reject the fix as harm. Counting the artefact rather than the
-          // harm is how a metric ends up arguing against its own purpose
-          // (trap 23).
+          // ⚠ THIS IS THE THIRD SHAPE OF THIS LINE, AND THE FIRST DERIVED ONE.
+          //   v1 counted NODES: it read the option-duplication merge's
+          //     legitimate 8→6 collapse as harm — the artefact, not the harm.
+          //   v2 counted ALL ASK ITEMS: measured over the round-7 acceptance
+          //     block it discarded 7 of 11 completion passes, TWO of them on
+          //     graphs that plainly improved (`ask 5→8` with `nodes 6→9`,
+          //     `edges 4→12`; `ask 2→2` with `edges 17→25`). The ask mixes
+          //     BLOCKING gaps with projector DISCLOSURES whose edges were
+          //     already dropped — and because the merge is append-only, every
+          //     disclosure the completion adds counts against it forever.
           //
-          // So the comparator is the ask itself: strictly FEWER unresolved
-          // problems than pass 1 had. One instrument, one vocabulary, and it
-          // cannot disagree with the thing that decided to make the call.
+          // Two rounds on one predicate is the signal to stop guessing and
+          // derive the thing being measured (trap 22f). So the measure is
+          // `countBlockingAskItems`: items carrying a validator code that the
+          // deterministic sweep routes to Bucket C, imported from the sweep
+          // rather than restated, with the disclosures excluded BY
+          // CONSTRUCTION because they never enter the graph the validator sees.
+          //
+          // ⚠ AND THE TIE IS A KEEP, DELIBERATELY. The condition is
+          // NON-WORSENING, not strict improvement, because that is the property
+          // the completion has to hold — "the completion can never be the reason
+          // a draft got worse". A tie on the blocking classes with claims added
+          // is a strictly richer causal model at no validity cost, which is
+          // precisely the `edges 17→25` case v2 threw away. A completion that
+          // WORSENS a blocking class is still discarded, and that direction is
+          // pinned by its own mutant.
           const askAfter = enumerateCompletionAsk(merged.records, reprojected);
-          const improved = askAfter.items.length < completionAsk.items.length;
+          const blockingBefore = countBlockingAskItems(completionAsk);
+          const blockingAfter = countBlockingAskItems(askAfter);
+          const notWorse = shouldKeepCompletion(completionAsk, askAfter);
           completionMeta.ask_items_after = askAfter.items.length;
+          completionMeta.blocking_before = blockingBefore;
+          completionMeta.blocking_after = blockingAfter;
           completionMeta.claims_added = merged.added;
           completionMeta.nodes_before = activeProjection.graph.nodes.length;
           completionMeta.nodes_after = reprojected.graph.nodes.length;
           completionMeta.edges_before = activeProjection.graph.edges.length;
           completionMeta.edges_after = reprojected.graph.edges.length;
-          completionMeta.kept = improved;
-          if (improved) {
+          completionMeta.kept = notWorse;
+          if (notWorse) {
             activeRecords = merged.records;
             activeProjection = reprojected;
           }

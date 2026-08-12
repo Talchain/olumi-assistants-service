@@ -93,6 +93,9 @@ export type { DraftRecordsSeamResult, DraftRecordsSeamFailure } from "./seam.js"
 
 export {
   enumerateCompletionAsk,
+  countBlockingAskItems,
+  isBlockingAskItem,
+  shouldKeepCompletion,
   buildRecordsCompletionSchema,
   buildRecordsCompletionPrompt,
   mergeCompletionClaims,

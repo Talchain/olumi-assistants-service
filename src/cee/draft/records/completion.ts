@@ -70,6 +70,7 @@ import {
 } from "./grammar.js";
 import type { RecordProjection } from "./projector.js";
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+import { BUCKET_C_CODES } from "../../unified-pipeline/stages/repair/deterministic-sweep.js";
 
 /**
  * Output ceiling for the completion turn. The probe's largest real completion
@@ -99,12 +100,103 @@ export interface CompletionAskItem {
     | "no_chain_reaches_goal"
     | "options_indistinguishable";
   readonly detail: string;
+  /**
+   * ⭐⭐ THE VALIDATOR CODE THIS ITEM PREDICTS, or `null` when the item is a
+   * projector DISCLOSURE about something the validator will never see.
+   *
+   * **REQUIRED, not optional, and that is the whole mechanism.** A new ask kind
+   * cannot be added without an explicit decision about which of the two it is —
+   * the compiler refuses the push site otherwise. An optional field would
+   * default a new kind to "harmless" silently, which is the fail-OPEN direction
+   * and the exact hand-maintained-mirror shape this estate keeps paying for.
+   *
+   * The two classes are distinguished STRUCTURALLY, not by judgement:
+   *
+   * - `null` — the item was built from `projection.dropped`. Those edges are
+   *   NOT in `projection.graph`, so no validator stage can raise anything about
+   *   them. The disclosure exists for the user and for this ask; it carries no
+   *   consequence for the draft's validity.
+   * - a code — the item was computed on `projection.graph`, i.e. on the exact
+   *   structure the validator receives. The code names what it will raise.
+   *
+   * Whether a named code BLOCKS is then read from the sweep's own routing
+   * (`BUCKET_C_CODES`), never restated here: see `isBlockingAskItem`.
+   */
+  readonly validatorCode: string | null;
 }
 
 export interface CompletionAsk {
   readonly items: readonly CompletionAskItem[];
   /** `claims.length` at the time of the ask — the index the model's first new claim will take. */
   readonly baseClaimIndex: number;
+}
+
+/**
+ * ⭐⭐ IS THIS ASK ITEM ONE THAT BLOCKS A DRAFT?
+ *
+ * Derived twice over, so neither derivation has to be trusted alone:
+ *   1. the item must name a validator code at all (built from the graph the
+ *      validator sees, not from the projector's dropped list), and
+ *   2. that code must be routed to **Bucket C** by
+ *      `deterministic-sweep.ts` — the sweep's own SSOT for "cannot be repaired
+ *      deterministically; the draft does not pass on this".
+ *
+ * `BUCKET_C_CODES` is IMPORTED, never retyped. When a code leaves Bucket C —
+ * `CYCLE_DETECTED` already did, to Bucket A — this classification moves with it
+ * on the next build, with nothing for anyone to remember.
+ */
+export function isBlockingAskItem(item: CompletionAskItem): boolean {
+  return item.validatorCode !== null && BUCKET_C_CODES.has(item.validatorCode);
+}
+
+/**
+ * ⭐⭐ THE KEEP/DISCARD MEASURE FOR A COMPLETION PASS.
+ *
+ * Counts only the ask items that correspond to a blocking validator class. The
+ * non-blocking disclosures are excluded BY DERIVATION (they carry `null`
+ * because the projector already dropped their edges), not by a list of kinds
+ * someone has to keep current.
+ *
+ * ── WHY THIS EXISTS, MEASURED ─────────────────────────────────────────────
+ * The first comparator counted NODES, and read the option-duplication merge's
+ * legitimate 8→6 collapse as harm. The second counted ALL ask items, and in the
+ * round-7 acceptance block DISCARDED 7 of 11 completion passes — including two
+ * whose graphs plainly improved (`ask 5→8` while `nodes 6→9`, `edges 4→12`; and
+ * `ask 2→2` while `edges 17→25`). Both were counting the artefact instead of
+ * the harm (trap 23), and the second did it because the ask mixes two classes
+ * that do not carry the same consequence. Two rounds on one predicate is the
+ * signal to stop guessing and DERIVE the thing being measured (trap 22f) —
+ * which is what the `validatorCode`/`BUCKET_C_CODES` pair does.
+ */
+export function countBlockingAskItems(ask: CompletionAsk): number {
+  return ask.items.filter(isBlockingAskItem).length;
+}
+
+/**
+ * ⭐⭐ THE DECISION ITSELF — keep this completion pass, or throw it away?
+ *
+ * **KEEP IFF IT DOES NOT INCREASE THE BLOCKING CLASSES. A TIE IS A KEEP.**
+ *
+ * ── WHY NON-WORSENING RATHER THAN STRICT IMPROVEMENT ───────────────────────
+ * The property the completion has to hold is stated at its own call site:
+ * *"the completion can only ever add; it can never be the reason a draft got
+ * worse"*. That is a NON-WORSENING property, so the test that enforces it is
+ * `<=`. Requiring strict improvement enforces a DIFFERENT property — "the
+ * completion must have fixed something" — which is not a safety property at
+ * all, and it is what threw away run 18's `edges 17→25` at an unchanged
+ * blocking count of 2→0… and run 14's, and run 10's.
+ *
+ * The merge is append-only and already refuses an empty completion, so a tie
+ * with claims added is a strictly richer causal model at no validity cost.
+ *
+ * ── WHY IT LIVES HERE AND NOT AT THE CALL SITE ─────────────────────────────
+ * It was an inline expression in the adapter through two wrong versions, where
+ * no test could reach it: a spec could only RESTATE the comparison, and a
+ * restatement agrees with itself whatever the adapter does. Naming it puts the
+ * real decision under the mutants.
+ */
+export function shouldKeepCompletion(before: CompletionAsk, after: CompletionAsk): boolean {
+  return countBlockingAskItems(after) <= countBlockingAskItems(before);
 }
 
 /**
@@ -123,6 +215,23 @@ export interface CompletionAsk {
  * So the ask is built ONLY from things this projector itself observed:
  * references it refused, shapes it rejected, records it could not place, and
  * reachability computed on its own emitted edges.
+ *
+ * ── ⚠ WHAT THIS ASK DOES NOT PREDICT — stated, not glossed ─────────────────
+ * Three Bucket-C codes are reachable on a projected graph and have NO item
+ * here, so `countBlockingAskItems` cannot see them move in either direction:
+ *
+ *   MISSING_BRIDGE       — no `outcome` or `risk` node at all. The projector
+ *                          mints `constraint` (→ `risk` post-normalisation)
+ *                          only where the model emitted one, so a bare draft
+ *                          fails this on inventory, not on connectivity.
+ *   INVALID_EDGE_TYPE    — a shape the kind gate deliberately lets through
+ *                          because a named downstream repair rescues it.
+ *   INSUFFICIENT_OPTIONS — an option count outside the validator's bounds.
+ *
+ * This is a coverage limit of the ASK, inherited by any measure built on it,
+ * and it is the same limit the ask-count comparator had. Naming it is the
+ * point: a completeness claim for the blocking classes would be false, and the
+ * two the measure DOES carry are the two the failures were made of.
  */
 export function enumerateCompletionAsk(
   records: DraftRecordSet,
@@ -147,12 +256,20 @@ export function enumerateCompletionAsk(
         push({
           kind: "unresolved_reference",
           detail: `"${d.label}" — ${d.from_ref ?? "(no from)"} → ${d.to_ref ?? "(no to)"} did not resolve (${d.reason})`,
+          // NON-BLOCKING BY CONSTRUCTION: this edge is in `projection.dropped`,
+          // which is disjoint from `projection.graph.edges`. The validator is
+          // handed the graph, so it cannot raise anything about an edge that
+          // never entered it.
+          validatorCode: null,
         });
         break;
       case "ref_kind_illegal":
         push({
           kind: "illegal_shape",
           detail: `"${d.label}" — a link from a ${d.from_kind} to a ${d.to_kind} is not a shape this model can hold`,
+          // NON-BLOCKING BY CONSTRUCTION, same reason: the projector's kind gate
+          // refused this edge AT EMISSION. It is disclosed, not carried.
+          validatorCode: null,
         });
         break;
       // ⚠⚠ `unconnected_to_goal` IS DELIBERATELY NOT ASKED ABOUT, and the first
@@ -187,7 +304,20 @@ export function enumerateCompletionAsk(
   // The two connectivity predicates, derived at `graph-validator.ts`:
   //   NO_EFFECT_PATH  (:822) — each option needs ≥1 DIRECT factor target that
   //                            reaches the goal.
-  //   MISSING_BRIDGE  (:384) — satisfied by ANY chain terminating at the goal.
+  //   NO_PATH_TO_GOAL (:620) — every node except the decision must reach the
+  //                            goal. When nothing terminates at the goal at
+  //                            all, this fires on essentially every node.
+  //
+  // ⚠ CORRECTED HERE, at the validator's bytes. The v4 version of this comment
+  // named `MISSING_BRIDGE (:384)` as "satisfied by ANY chain terminating at the
+  // goal". It is not: `:384` reads
+  //   `if (outcomes.length === 0 && risks.length === 0)` → "Graph must have at
+  //   least 1 outcome or risk node"
+  // — a NODE-INVENTORY check with nothing to do with reachability. Both codes
+  // are Bucket C so the keep/discard verdict is unchanged either way, but a
+  // wrong code in the one place a later reader looks up the mapping is how the
+  // next lane inherits a false premise. `MISSING_BRIDGE` is NOT predicted by
+  // any item this function emits — see the coverage note on `enumerateCompletionAsk`.
   const { nodes, edges } = projection.graph;
   const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
   const incoming = new Map<string, string[]>();
@@ -215,11 +345,16 @@ export function enumerateCompletionAsk(
       push({
         kind: "option_without_chain",
         detail: `the option "${node.label}" has no chain of causal_links that reaches the goal`,
+        validatorCode: "NO_EFFECT_PATH",
       });
     }
   }
   if (goalIds.length > 0 && !edges.some((e) => reachesGoal.has(e.from) && e.from !== e.to && reachesGoal.has(e.to))) {
-    push({ kind: "no_chain_reaches_goal", detail: "nothing you emitted terminates at the goal" });
+    push({
+      kind: "no_chain_reaches_goal",
+      detail: "nothing you emitted terminates at the goal",
+      validatorCode: "NO_PATH_TO_GOAL",
+    });
   }
 
   // OPTIONS_IDENTICAL (`graph-validator.ts:841`) — two options the analysis
@@ -251,6 +386,7 @@ export function enumerateCompletionAsk(
       push({
         kind: "options_indistinguishable",
         detail: `${labels.map((l) => `"${l}"`).join(" and ")} change the same factors to the same levels, so nothing can tell them apart`,
+        validatorCode: "OPTIONS_IDENTICAL",
       });
     }
   }
