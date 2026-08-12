@@ -24,7 +24,7 @@ import { simpleRepair } from "../src/services/repair.js";
 import { fixFactorGoalEdges } from "../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
 import { detectEdgeFormat } from "../src/cee/unified-pipeline/utils/edge-format.js";
 import { validateGraph } from "../src/validators/graph-validator.js";
-import { BUCKET_C_CODES } from "../src/cee/unified-pipeline/stages/repair/deterministic-sweep.js";
+import { BUCKET_C_CODES } from "../src/cee/unified-pipeline/stages/repair/bucket-c-codes.js";
 import { canonicalText } from "../src/cee/draft/records/projector.js";
 import { projectRecordsToGraph } from "../src/cee/draft/records/projector.js";
 import type { DraftRecordSet } from "../src/cee/draft/records/grammar.js";

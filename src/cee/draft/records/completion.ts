@@ -75,7 +75,7 @@ import {
 } from "./projector.js";
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
 import { ALLOWED_EDGES } from "../../../validators/graph-validator.types.js";
-import { BUCKET_C_CODES } from "../../unified-pipeline/stages/repair/deterministic-sweep.js";
+import { BUCKET_C_CODES } from "../../unified-pipeline/stages/repair/bucket-c-codes.js";
 
 /**
  * Output ceiling for the completion turn. The probe's largest real completion
@@ -144,8 +144,8 @@ export interface CompletionAsk {
  *   1. the item must name a validator code at all (built from the graph the
  *      validator sees, not from the projector's dropped list), and
  *   2. that code must be routed to **Bucket C** by
- *      `deterministic-sweep.ts` — the sweep's own SSOT for "cannot be repaired
- *      deterministically; the draft does not pass on this".
+ *      `bucket-c-codes.ts` — the sweep's single authority for "cannot be
+ *      repaired deterministically; the draft does not pass on this".
  *
  * `BUCKET_C_CODES` is IMPORTED, never retyped. When a code leaves Bucket C —
  * `CYCLE_DETECTED` already did, to Bucket A — this classification moves with it

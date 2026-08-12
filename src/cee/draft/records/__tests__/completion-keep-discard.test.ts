@@ -41,7 +41,7 @@ import {
 } from "../completion.js";
 import { projectRecordsToGraph } from "../projector.js";
 import type { DraftRecordSet, DraftInferenceClaim } from "../grammar.js";
-import { BUCKET_C_CODES } from "../../../unified-pipeline/stages/repair/deterministic-sweep.js";
+import { BUCKET_C_CODES } from "../../../unified-pipeline/stages/repair/bucket-c-codes.js";
 import { validateGraph } from "../../../../validators/graph-validator.js";
 import type { GraphT } from "../../../../schemas/graph.js";
 
