@@ -15,19 +15,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Buffer } from "node:buffer";
 
-const VALID_GRAPH_JSON = JSON.stringify({
-  nodes: [
-    { id: "goal_1", kind: "goal", label: "Test goal" },
-    { id: "dec_1", kind: "decision", label: "Test decision" },
-    { id: "opt_1", kind: "option", label: "Option A" },
-    { id: "out_1", kind: "outcome", label: "Revenue" },
+/**
+ * ⚠ A RECORD SET, NOT A GRAPH (draft-by-records cutover).
+ *
+ * The draft path now asks the model for `{stated_items, claims}` and a
+ * deterministic projector builds GraphV3 at the post-LLM seam; a graph-shaped
+ * response is refused there by design. This file's subject is the REQUEST
+ * (message assembly and the cached system prefix), so the fixture only has to be
+ * a response the adapter accepts — but it must be a valid one, or every test
+ * here fails inside `draftGraphWithAnthropic` before reaching its assertions.
+ * These records project to a comparable little graph: a decision the projector
+ * mints, two options, a factor, and the goal.
+ */
+const VALID_RECORDS_JSON = JSON.stringify({
+  stated_items: [
+    { kind: "goal", source_quote: "lift conversion" },
+    { kind: "option", source_quote: "extend the free trial" },
+    { kind: "option", source_quote: "keep the current trial length" },
   ],
-  edges: [
-    { from: "goal_1", to: "dec_1" },
-    { from: "dec_1", to: "opt_1" },
-    { from: "opt_1", to: "out_1", belief: 0.7, weight: 0.5 },
+  claims: [
+    { claim_kind: "factor", label: "trial-to-paid conversion rate", basis: [0] },
+    {
+      claim_kind: "causal_link",
+      label: "a longer trial lifts conversion",
+      basis: [0],
+      from_ref: "s1",
+      to_ref: "c0",
+      effect: "positive",
+    },
+    {
+      claim_kind: "causal_link",
+      label: "conversion drives the goal",
+      basis: [0],
+      from_ref: "c0",
+      to_ref: "s0",
+      effect: "positive",
+    },
   ],
-  rationales: [],
 });
 
 function makeFakeStream(jsonText: string) {
@@ -78,7 +102,7 @@ const b64 = (s: string): string => Buffer.from(s, "utf-8").toString("base64");
 describe("draft message assembly — native document attachment (D-59-7)", () => {
   beforeEach(() => {
     vi.resetModules();
-    streamSpy.mockImplementation(makeFakeStream(VALID_GRAPH_JSON));
+    streamSpy.mockImplementation(makeFakeStream(VALID_RECORDS_JSON));
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
   });
