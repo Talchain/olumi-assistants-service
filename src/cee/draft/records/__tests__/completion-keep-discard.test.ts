@@ -274,10 +274,18 @@ describe("⭐ the classification is DERIVED, and its derivation is checked both 
     // Positive control: this graph really is broken, so an empty set would mean
     // the probe, not the graph, is silent.
     expect(raised.size).toBeGreaterThan(0);
-    // The two connectivity codes the ask predicts on exactly this shape —
-    // bare options, nothing terminating at the goal.
+    // The codes the ask predicts on exactly this shape — bare options, nothing
+    // terminating at the goal, and no outcome or risk node anywhere.
     expect(raised).toContain("NO_EFFECT_PATH");
     expect(raised).toContain("NO_PATH_TO_GOAL");
+    // ⭐ ROUND 9 — MISSING_BRIDGE joined this list, and it joined it because the
+    // PRODUCER raises it here, which is what this assertion checks. The v4 ask
+    // did not predict it and said in terms that no completion pass could; that
+    // was wrong. `fixFactorGoalEdges` runs unconditionally and MINTS an outcome
+    // node for every `factor → goal` edge, so the code is a CONNECTIVITY symptom
+    // and fires exactly when no such edge and no bridge node survive — which is
+    // true of this graph and is why the validator raises it.
+    expect(raised).toContain("MISSING_BRIDGE");
     // And the ask, on the same shape, names those and only those.
     const bare: DraftRecordSet = {
       stated_items: [
@@ -289,7 +297,15 @@ describe("⭐ the classification is DERIVED, and its derivation is checked both 
     };
     const ask = enumerateCompletionAsk(bare, projectRecordsToGraph(bare));
     const codes = new Set(ask.items.map((i) => i.validatorCode).filter((c) => c !== null));
-    expect([...codes].sort()).toEqual(["NO_EFFECT_PATH", "NO_PATH_TO_GOAL"]);
+    expect([...codes].sort()).toEqual(["MISSING_BRIDGE", "NO_EFFECT_PATH", "NO_PATH_TO_GOAL"]);
+    // ⭐ AND THE DERIVED DIRECTION, which the literal above cannot give:
+    // EVERY code the ask names must be one the real validator actually raises on
+    // this graph. The literal is a completeness claim about the ask and has to be
+    // maintained by hand; this is a soundness claim about it and maintains
+    // itself. An ask item that predicted a code the validator never raises would
+    // spend a completion turn manufacturing claims for a problem that does not
+    // exist, and only this direction can see that.
+    for (const code of codes) expect(raised).toContain(code);
   });
 
   it("a code the sweep does NOT route to Bucket C does not block", () => {
