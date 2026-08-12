@@ -315,9 +315,14 @@ describe("what the demote deliberately does NOT touch", () => {
         { claim_kind: "factor", label: "headcount" },
         { claim_kind: "option_refinement", label: "Expand, but offshore", basis: [1, 2] },
         { claim_kind: "causal_link", label: "expansion raises headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
-        // ONE DIGIT APART from the stated option's magnitude — and at the 4dp
-        // boundary the validator's own signature uses.
-        { claim_kind: "causal_link", label: "offshore raises headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 12.0001 },
+        // DISTINCT AT THE VALIDATOR'S OWN RESOLUTION. The signature is
+        // `toFixed(4)` over what the validator SEES — which, post pass 3d, is
+        // the scale-projected level (frame 20 here). 12 vs 13 → 0.6 vs 0.65:
+        // distinct. (The previous fixture used 12 vs 12.0001 — distinct raw,
+        // but 0.6000 vs 0.6000 at the validator's own 4dp over the levels it
+        // now receives, i.e. genuinely indistinguishable to the analysis; the
+        // twin test below pins that side of the boundary.)
+        { claim_kind: "causal_link", label: "offshore raises headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 13 },
         { claim_kind: "causal_link", label: "steady holds headcount", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 0 },
         { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
       ],
@@ -325,11 +330,42 @@ describe("what the demote deliberately does NOT touch", () => {
     const { graph, dropped } = projectRecordsToGraph(records);
     expect(optionLabels(graph)).toContain("Expand, but offshore");
     expect(dropped.filter((d) => d.reason.startsWith("undeveloped_duplicate"))).toEqual([]);
-    // The 4dp boundary is the discriminator: at 3dp these two round together and
-    // the option would be demoted for a difference the validator can see.
+    // Distinct at the validator's 4dp over the projected levels (0.6 vs 0.65).
     expect(signatureOf(graph, idOf(graph, "Expand, but offshore"))).not.toBe(
       signatureOf(graph, idOf(graph, "expand the sales team")),
     );
+  });
+
+  it("demotes (and DISCLOSES) a MODEL option whose magnitude differs below the validator's own resolution", () => {
+    // The twin of the test above, pinning the other side of the boundary: the
+    // validator's signature is `toFixed(4)` over the values it receives, and
+    // post pass 3d it receives LEVELS. 12 vs 12.0001 under frame 20 are 0.6000
+    // vs 0.6000 at that resolution — indistinguishable to the analysis, so the
+    // model option is withdrawn and disclosed, exactly as the validator's own
+    // OPTIONS_IDENTICAL would otherwise judge them downstream. The projector
+    // and the validator read the SAME values through the SAME function — the
+    // demote can never disagree with the gate it pre-empts.
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "grow revenue" },
+        { kind: "option", source_quote: "expand the sales team" },
+        { kind: "option", source_quote: "hold steady" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "headcount" },
+        { claim_kind: "option_refinement", label: "Expand, but offshore", basis: [1, 2] },
+        { claim_kind: "causal_link", label: "expansion raises headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+        { claim_kind: "causal_link", label: "offshore raises headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 12.0001 },
+        { claim_kind: "causal_link", label: "steady holds headcount", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 0 },
+        { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
+      ],
+    };
+    const { graph, dropped } = projectRecordsToGraph(records);
+    expect(optionLabels(graph)).not.toContain("Expand, but offshore");
+    const demotes = dropped.filter((d) => d.reason === "undeveloped_duplicate_of_stated");
+    expect(demotes).toHaveLength(1);
+    expect(demotes[0]!.label).toBe("Expand, but offshore");
+    expect(demotes[0]!.duplicate_of_label).toBe("expand the sales team");
   });
 
   it("keeps the LOWEST claim index when two MODEL options collide with no stated member", () => {

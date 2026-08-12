@@ -240,8 +240,12 @@ describe("⭐ the seam carries every field the grammar declares", () => {
     const option = result.projection.graph.nodes.find((n) => n.label === "hire more people")!;
     const factor = result.projection.graph.nodes.find((n) => n.label === "sales capacity")!;
     // Keyed by the MINTED id of the factor the link named — identity, not position.
+    // The MAGNITUDE arrives scale-projected by pass 3d: {42} → frame 50
+    // (smallest {1,2,5}·10^k strictly above 42) → level 0.84. The seam-carry
+    // property this test pins is unchanged — a dropped `sets_to` would leave NO
+    // interventions key at all, not a projected one.
     expect((option.data as { interventions?: Record<string, number> }).interventions).toEqual({
-      [factor.id]: 42,
+      [factor.id]: 0.84,
     });
   });
 });

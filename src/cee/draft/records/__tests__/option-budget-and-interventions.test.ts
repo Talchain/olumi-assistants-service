@@ -34,7 +34,7 @@ const interventionsOf = (
 ): Record<string, number> | undefined =>
   graph.nodes.find((n) => n.id === optionId)?.data?.interventions as Record<string, number> | undefined;
 
-describe("interventions are the model's stated magnitudes, and nothing else", () => {
+describe("interventions are the model's stated magnitudes (scale-projected onto one per-factor frame), and nothing else", () => {
   const RECORDS: DraftRecordSet = {
     stated_items: [
       { kind: "goal", source_quote: "raise sales productivity" },
@@ -59,7 +59,10 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
     const cost = idOf(graph, "licence cost");
     const hours = idOf(graph, "rep hours saved");
 
-    expect(interventionsOf(graph, newCrm)).toEqual({ [cost]: 240000, [hours]: 12 });
+    // Magnitudes arrive scale-projected by pass 3d, ONE frame per factor
+    // (hand-computed): cost {240000} → frame 500000 → 0.48; hours {12} →
+    // frame 20 → 0.6. The KEYING property this test pins is unchanged.
+    expect(interventionsOf(graph, newCrm)).toEqual({ [cost]: 0.48, [hours]: 0.6 });
   });
 
   it("gives an option with no stated magnitude NO interventions key at all", () => {
@@ -73,16 +76,20 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
     expect(node.data === undefined || !("interventions" in (node.data as object))).toBe(true);
   });
 
-  it("invents no magnitude — every entry traces to a sets_to the model emitted", () => {
+  it("invents no magnitude — every entry is a stated sets_to projected by its factor's one frame", () => {
     const { graph } = projectRecordsToGraph(RECORDS);
-    const stated = new Set(
-      RECORDS.claims.filter((c) => typeof c.sets_to === "number").map((c) => c.sets_to!),
-    );
+    // Hand-computed expectations, NOT derived from the implementation: the two
+    // stated magnitudes and their pass-3d frames are 240000/500000 = 0.48 and
+    // 12/20 = 0.6. Nothing else may appear: an extra entry would be an invented
+    // magnitude, a missing one a dropped record.
+    const expected = new Set([0.48, 0.6]);
     const emitted = graph.nodes.flatMap((n) =>
       Object.values((n.data?.interventions ?? {}) as Record<string, number>),
     );
     expect(emitted.length).toBeGreaterThan(0); // positive control: the check can see a presence
-    for (const v of emitted) expect(stated).toContain(v);
+    for (const v of emitted) expect(expected).toContain(v);
+    // And every stated magnitude survives (projected): the trace is two-way.
+    expect(new Set(emitted)).toEqual(expected);
   });
 
   it("ignores sets_to on a link that is not option→factor", () => {
@@ -147,9 +154,10 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
     const built = interventionsOf(graph, newCrm) ?? {};
     expect(Object.keys(built)).not.toContain(goalId);
     expect(Object.values(built)).not.toContain(555);
-    // The legitimate magnitude on the same option survives — so this is not
-    // passing because interventions were dropped wholesale.
-    expect(built).toEqual({ [idOf(graph, "rep hours saved")]: 12 });
+    // The legitimate magnitude on the same option survives (scale-projected:
+    // {12} → frame 20 → 0.6) — so this is not passing because interventions
+    // were dropped wholesale.
+    expect(built).toEqual({ [idOf(graph, "rep hours saved")]: 0.6 });
   });
 
   it("never names a factor the connectivity prune withdrew", () => {
@@ -178,10 +186,11 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
         expect(liveIds.has(factorId)).toBe(true);
       }
     }
-    // And the surviving magnitude is still there — so the assertion above is not
-    // passing merely because interventions were emptied wholesale.
+    // And the surviving magnitude is still there (scale-projected: {12} →
+    // frame 20 → 0.6) — so the assertion above is not passing merely because
+    // interventions were emptied wholesale.
     const newCrm = idOf(graph, "replace the CRM");
-    expect(interventionsOf(graph, newCrm)).toEqual({ [idOf(graph, "rep hours saved")]: 12 });
+    expect(interventionsOf(graph, newCrm)).toEqual({ [idOf(graph, "rep hours saved")]: 0.6 });
   });
 });
 
