@@ -25,15 +25,57 @@ import {
   draftRecordsInstructionHash,
 } from "../instruction.js";
 
-/** HISTORIC. The bytes served on every measured run. Never update to match a change. */
-const PINNED_INSTRUCTION_SHA256 =
+/**
+ * HISTORIC — v2. The bytes served on every run measured up to and including
+ * 2026-08-11 (the 0/27-accepted enumeration and the two arm-R1 measured blocks).
+ * This literal is a RECORD and is never re-pointed: it is what makes those runs
+ * attributable. The current instruction is v3 and deliberately does NOT hash to
+ * it; the assertion below is that the two are DISTINCT, which is the honest
+ * statement and the one that stays true forever.
+ */
+const HISTORIC_V2_INSTRUCTION_SHA256 =
   "e630587523d29ace5739d5c26754d787fb00479d542a3cb1fc7ca13ceb1eca26";
-const PINNED_INSTRUCTION_BYTES = 2351;
+const HISTORIC_V2_INSTRUCTION_BYTES = 2351;
+
+/**
+ * ⭐ PRE-REGISTERED — v3, frozen 2026-08-12 BEFORE any run was spent on it.
+ *
+ * Pre-registration is the point: these bytes were hashed and written to the
+ * evidence dir (`v3/PRE-REGISTRATION-V3.md`) before measurement, so the result of
+ * the five-gate block cannot be attributed to an instruction that was quietly
+ * tuned after seeing it.
+ *
+ * ⚠ STATUS AT THE TIME OF PINNING: UNMEASURED. v3 was written against the gate's
+ * grammar derived at the validator's bytes and against the emission anatomy of the
+ * banked corpus — NOT against a live result. A reader must not infer from the
+ * existence of this pin that a measurement stands behind it; the evidence file
+ * says so in terms, and this comment says so here because the pin is what a future
+ * session will find first.
+ *
+ * These bytes SUPERSEDE the spike's pinned instruction BY DESIGN: the spike's
+ * §1.4 pin governed the falsification experiment, and this is productionisation
+ * under R1's own acceptance design, which is a different question.
+ */
+const PREREGISTERED_V3_INSTRUCTION_SHA256 =
+  "494e52b9fca948660927849c870ca8a689cac7399ac100b185243f99a54f416b";
+const PREREGISTERED_V3_INSTRUCTION_BYTES = 3673;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the pinned historic value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PINNED_INSTRUCTION_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(PINNED_INSTRUCTION_BYTES);
+  it("hashes to the PRE-REGISTERED v3 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V3_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
+      PREREGISTERED_V3_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v2 bytes, so v2's measurements stay attributable", () => {
+    // The failure this guards is not a typo — it is someone "restoring" the old
+    // pin, or hand-editing v3 back toward v2, and thereby making two different
+    // instructions share one evidence base.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V2_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V2_INSTRUCTION_BYTES,
+    );
   });
 
   it("is exactly the two declared sections, in order, and nothing else", () => {
@@ -62,6 +104,17 @@ describe("the draft records instruction is the measured artefact", () => {
       "a6de4225a94bf321185775a7b34d01b1eb4f7f9def5c0c6ee7b2f1fc95692a80",
     );
     expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(1443);
+  });
+
+  it("pins the v3 CONNECT half independently, so the half that changed is legible", () => {
+    // v3 changed the connect half ONLY — the shape half above is byte-identical to
+    // the one v2 measured, which is why its 1,443-byte pin still holds. Pinning the
+    // connect half separately is what lets a future measurement be attributed to
+    // the connectivity/magnitude ask rather than to the record shape.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).toBe("53a6955a40d9a8c877d8f1dc09f24343b3cfac540d74dfcc82aa507ea131d856");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(2230);
   });
 });
 

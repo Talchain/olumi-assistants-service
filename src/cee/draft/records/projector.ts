@@ -56,6 +56,11 @@
  */
 
 import { createHash } from "node:crypto";
+// ⭐ DERIVED, NEVER MIRRORED. The bound the projector honours is the validator's own
+// constant, imported. A hand-copied `6` here would be a second authority for one
+// number and would drift silently the day CEE retunes it (trap 12, the estate's
+// dominant defect class).
+import { MAX_OPTIONS as MAX_PROJECTED_OPTIONS } from "../../../validators/graph-validator.types.js";
 import type {
   DraftInferenceClaim,
   DraftRecordSet,
@@ -176,7 +181,21 @@ export interface DroppedRecordRef {
      * withdrawal happens after both node passes and a stated item has no claim
      * index to point at.
      */
-    | "unconnected_to_goal";
+    | "unconnected_to_goal"
+    /**
+     * The projected option set exceeded `MAX_OPTIONS` (6, `graph-validator.types.ts:287`)
+     * and this refinement was left off the graph to bring it inside the bound.
+     * DISCLOSED rather than silently truncated: over-budget is the projector's
+     * problem to report, never the user's to discover from a shorter list.
+     *
+     * ⚠ A STATED option is NEVER dropped for budget. Dropping one narrows the
+     * user's own choice set, which is the single thing a decision tool may not
+     * do (the same reasoning the connectivity prune states for options). If the
+     * user's own options alone exceed the bound, every one of them is kept and
+     * `INSUFFICIENT_OPTIONS` is allowed to fire VISIBLY — a loud rejection beats
+     * a quiet amputation.
+     */
+    | "option_budget_exceeded";
   readonly from_ref?: string;
   readonly to_ref?: string;
 }
@@ -336,6 +355,8 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
   const nodes: ProjectedNode[] = [];
   const edges: ProjectedEdge[] = [];
   const dropped: DroppedRecordRef[] = [];
+  /** edge id → the model's stated option→factor intervention level (`sets_to`). */
+  const setsToByEdgeId = new Map<string, number>();
   const provenance: Record<string, RecordProvenance> = {};
   const usedIds = new Map<string, number>();
 
@@ -540,6 +561,10 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     // between different pairs stay distinct.
     const edgeId = mintUnique(sha8("edge", label, from.id, to.id), usedIds);
     provenance[edgeId] = prov;
+    // Recorded per EDGE ID, not per claim index, so pass 3c reads the magnitude of
+    // the edge that actually survived rather than re-deriving it from the claim
+    // array — the two can diverge once the prune and the option budget have run.
+    if (typeof claim.sets_to === "number") setsToByEdgeId.set(edgeId, claim.sets_to);
     edges.push({
       id: edgeId,
       from: from.id,
@@ -634,6 +659,91 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
       const keptNodes = nodes.filter((n) => !unmodelledIds.has(n.id));
       nodes.length = 0;
       nodes.push(...keptNodes);
+    }
+  }
+
+  // ── Pass 3b: OPTION BUDGET. The projector mints an option per stated option AND
+  // per `option_refinement` claim (CLAIM_KIND_TO_NODE_KIND), so the minted count can
+  // exceed the validator's `MAX_OPTIONS` even when the user named only two or three
+  // things. Measured on the banked corpus: minted options ran 3..7 per set against a
+  // bound of 6.
+  //
+  // Same three-way choice as the connectivity prune, and the same answer: FORCE IT IN
+  // (let `INSUFFICIENT_OPTIONS` reject the whole draft) and DROP IT (silently shorten
+  // the user's choice set) are both defects; DISCLOSE IT is the honest one. Refinements
+  // are surrendered first and in reverse emission order, so the result is deterministic
+  // and a stated option is never the thing that goes.
+  {
+    const optionNodesForBudget = nodes.filter((n) => n.kind === "option");
+    if (optionNodesForBudget.length > MAX_PROJECTED_OPTIONS) {
+      const isRefinement = (id: string) => provenance[id]?.provenance_class === "ai_inferred";
+      const surrenderable = optionNodesForBudget.filter((n) => isRefinement(n.id)).reverse();
+      const overBy = optionNodesForBudget.length - MAX_PROJECTED_OPTIONS;
+      const surrendered = surrenderable.slice(0, overBy);
+      if (surrendered.length > 0) {
+        const goneIds = new Set(surrendered.map((n) => n.id));
+        for (const node of surrendered) {
+          dropped.push({
+            claim_index: -1,
+            claim_kind: "claim",
+            label: node.label,
+            reason: "option_budget_exceeded",
+          });
+          delete provenance[node.id];
+        }
+        for (const edge of edges.filter((e) => goneIds.has(e.from) || goneIds.has(e.to))) {
+          delete provenance[edge.id];
+        }
+        const keptEdges = edges.filter((e) => !goneIds.has(e.from) && !goneIds.has(e.to));
+        edges.length = 0;
+        edges.push(...keptEdges);
+        const keptNodes = nodes.filter((n) => !goneIds.has(n.id));
+        nodes.length = 0;
+        nodes.push(...keptNodes);
+      }
+    }
+  }
+
+  // ── Pass 3c: INTERVENTIONS. `sets_to` on an option→factor causal_link is the level
+  // that factor takes under that option, and `OptionData.interventions`
+  // (`schemas/graph.ts:163`, `z.record(z.string(), z.number())`) is where the analysis
+  // reads it. Without this the maths can only compare bare labels.
+  //
+  // ⭐ THE PROJECTOR INVENTS NOTHING HERE. An entry exists if and only if the model
+  // stated a number for that exact option→factor pair; there is no default, no
+  // neutral fill and no derivation from `strength` (a different question — see the
+  // grammar's note on why the two fields are named apart). A missing magnitude stays
+  // missing, and the analysis is entitled to see that it is missing.
+  //
+  // Built from the SURVIVING edges, after both the connectivity prune and the option
+  // budget, so an intervention can never name a factor that is no longer on the graph
+  // — a dangling `interventions` key is `INVALID_INTERVENTION_REF` downstream.
+  {
+    const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
+    const interventionsByOption = new Map<string, Record<string, number>>();
+    for (const edge of edges) {
+      if (kindById.get(edge.from) !== "option") continue;
+      if (kindById.get(edge.to) !== "factor") continue;
+      const setsTo = setsToByEdgeId.get(edge.id);
+      if (typeof setsTo !== "number" || !Number.isFinite(setsTo)) continue;
+      const bucket = interventionsByOption.get(edge.from) ?? {};
+      bucket[edge.to] = setsTo;
+      interventionsByOption.set(edge.from, bucket);
+    }
+    for (const node of nodes) {
+      const built = interventionsByOption.get(node.id);
+      // An option with no stated magnitude gets NO `interventions` key at all. An
+      // empty object is a sentinel the sweep strips (`deterministic-sweep.ts:494`)
+      // and would claim we looked and found nothing, which is not what happened.
+      //
+      // ⭐ The `undefined` check is the WHOLE check, deliberately. A defensive
+      // `Object.keys(built).length === 0` clause stood here and a mutant proved it
+      // UNREACHABLE: a bucket is only ever stored after a key has been written to
+      // it, so an empty one cannot exist. It was removed rather than left in — an
+      // unreachable guard is a branch no test can ever kill, which is the same
+      // "guard that cannot fail" shape this module's tests exist to hunt.
+      if (built === undefined) continue;
+      node.data = { ...(node.data ?? {}), interventions: built };
     }
   }
 

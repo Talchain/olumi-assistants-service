@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import {
   DRAFT_RECORDS_INSTRUCTION,
   buildDraftRecordsSchema,
+  draftRecordsInstructionHash,
 } from '../../../cee/draft/records/index.js';
 
 const h = vi.hoisted(() => ({
@@ -143,9 +144,18 @@ describe('2. the instruction rides as a second system block, after the cached on
     expect(Array.isArray(system)).toBe(true);
     expect(system.length).toBeGreaterThanOrEqual(2);
     expect(system[system.length - 1]!.text).toBe(DRAFT_RECORDS_INSTRUCTION);
+    // ⭐ DERIVED, NOT A SECOND LITERAL. This assertion's question is "do the bytes
+    // on the wire equal the bytes we SERVE" — so the right-hand side must be the
+    // served constant's own hash. A hardcoded copy of the pin lived here and made
+    // the instruction's hash a TWO-AUTHORITY number: moving the pin deliberately
+    // in `instruction-pin.test.ts` (v2 → the pre-registered v3) left this copy
+    // pointing at the old value, and the wire test failed for a reason that had
+    // nothing to do with the wire. Which version is pinned is that file's
+    // question and only that file's; this one asks whether the adapter ships it
+    // intact, and it must keep answering that across every future version bump.
     expect(
       createHash('sha256').update(system[system.length - 1]!.text, 'utf8').digest('hex'),
-    ).toBe('e630587523d29ace5739d5c26754d787fb00479d542a3cb1fc7ca13ceb1eca26');
+    ).toBe(draftRecordsInstructionHash());
   });
 
   /**

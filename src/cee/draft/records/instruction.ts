@@ -24,14 +24,37 @@ import { createHash } from "node:crypto";
  * differently?" versus "what SHAPE does every draft emit?". Two questions under
  * one name is trap 21, and this estate has paid for it.
  *
- * ── ⭐ THESE BYTES ARE THE MEASURED ONES ───────────────────────────────────
- * sha256 `e630587523d29ace5739d5c26754d787fb00479d542a3cb1fc7ca13ceb1eca26`,
- * 2,351 bytes. That hash is pinned by a test carrying a HISTORIC literal, and
- * the literal may never be "updated" to match a change: every measurement that
- * justified this mechanism was taken against exactly these bytes, and a silently
- * edited instruction makes all of it unattributable. Changing the instruction is
- * legitimate — changing it while leaving the pin pointing at the new value is
- * not. Move the pin deliberately, in the same commit, with the new measurement.
+ * ── ⭐ VERSIONS, AND WHICH ONE THE EVIDENCE BELONGS TO ─────────────────────
+ * v2 — sha256 `e630587523d29ace…`, 2,351 bytes. THE MEASURED ONE. Every result
+ *      recorded up to 2026-08-11 (the 0/27-accepted enumeration, both arm-R1
+ *      measured blocks) was taken against exactly these bytes.
+ * v3 — sha256 `494e52b9fca94866…`, 3,673 bytes. PRE-REGISTERED 2026-08-12 and
+ *      ⚠ UNMEASURED at the time of writing. It was written against the gate's
+ *      grammar DERIVED at the validator's bytes (ALLOWED_EDGES, the structural
+ *      category inference, MAX_OPTIONS) and against the emission anatomy of the
+ *      banked corpus — not against a live result. Do not read the pin as
+ *      evidence; read `v3/PRE-REGISTRATION-V3.md` in the evidence dir.
+ *
+ * Both hashes are pinned by a test, and the v2 literal is a RECORD that may
+ * never be re-pointed: a silently edited instruction makes the whole evidence
+ * base unattributable, and two instructions sharing one pin is the same defect
+ * wearing a tidier face. Changing the instruction is legitimate; changing it
+ * while re-pointing the pin in the same motion is not.
+ *
+ * ⭐ WHAT v3 CHANGED, and why each line exists (all derived, none observed):
+ *   · An `option_refinement` IS an option (`projector.ts` CLAIM_KIND_TO_NODE_KIND
+ *     maps it to `option`), so it needs its own chain. MEASURED on the banked
+ *     corpus: 0 of 26 refinement claims carried an outgoing causal_link — 0.0% —
+ *     so every one was born as an option that could never reach the goal. The
+ *     instruction had never told the model this mapping existed.
+ *   · The edge rule, stated POSITIVELY. `ALLOWED_EDGES` has no
+ *     `factor→factor[controllable]` rule and a factor is `controllable` exactly
+ *     when an option points at it, so nothing may point INTO a factor an option
+ *     acts on. v3 says where such an influence SHOULD go instead.
+ *   · An option budget, because the projector mints one option per stated option
+ *     AND per refinement, and MAX_OPTIONS is 6.
+ *   · `sets_to`, so the analysis can compute a real number instead of comparing
+ *     bare labels — asked for only where the brief supports it.
  *
  * ── WHAT IT DELIBERATELY DOES NOT SAY ──────────────────────────────────────
  * NOTHING ABOUT PROVENANCE. The projector owns provenance mechanically, and a
@@ -107,17 +130,40 @@ A decision only holds together if its parts join up, so state the connections as
 \`causal_link\` claims. They are claims like any other — yours, not the user's —
 and \`basis\` still records whatever the user said that you built them on.
 
-- Every \`option\` needs at least one \`causal_link\` FROM it TO a factor claim it
-  changes. An option that changes nothing cannot be told apart from any other
-  option.
-- Every factor needs at least one \`causal_link\` onward, and the chain must end
-  at the \`goal\`. A factor that leads nowhere is not part of the decision.
+- Every option needs a chain that reaches the \`goal\`: a \`causal_link\` FROM the
+  option TO a factor it changes, then onward from that factor until the chain
+  ends at the goal. An option whose chain stops short cannot be compared with
+  any other option.
+- An \`option_refinement\` IS an option. It needs its own chain to the goal, on
+  the same terms. If you are not going to connect a refinement, state it as part
+  of the option it refines instead of as a separate claim.
+- Count your options: stated options plus \`option_refinement\` claims together
+  should come to six or fewer. Prefer a few well-connected options over many
+  bare ones.
+- The factor an option acts on is where a chain STARTS. Draw links onward from
+  it — to another factor, or to the goal. Do not draw a link INTO it: if
+  something else bears on that factor, connect that influence to a factor
+  further along the chain, or to the goal.
+- Every other factor needs at least one \`causal_link\` onward, and the chain
+  must end at the \`goal\`. A factor that leads nowhere is not part of the
+  decision.
 - If a stated figure or constraint bears on the goal, say so with a
-  \`causal_link\` from it to the goal.
+  \`causal_link\` from it to the goal, or into the chain that reaches the goal.
 - Set \`effect\` to \`positive\` or \`negative\` on every \`causal_link\`.
 
 Do not emit a factor you cannot connect. But never drop something the user
 stated: keep it in \`stated_items\`, and connect it if it bears on the goal.
+
+## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES
+
+On a \`causal_link\` FROM an option TO a factor, set \`sets_to\` to the value that
+factor would take if that option were chosen, in the same unit the factor is
+measured in.
+
+Set it only where the brief gives you the basis for it — a figure the user
+stated, or a change they described. Where the brief does not support a number,
+leave \`sets_to\` out. An absent number is a truthful answer; a guessed one is
+read as the user's own and cannot be told apart from a figure they gave you.
 `;
 
 /**

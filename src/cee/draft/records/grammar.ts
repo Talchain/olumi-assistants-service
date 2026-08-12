@@ -142,6 +142,21 @@ export interface DraftInferenceClaim {
   strength?: number;
   category?: DraftRecordCategory;
   value?: number;
+  /**
+   * `causal_link` FROM AN OPTION ONLY — the value the target factor takes if
+   * that option is chosen, in the factor's own unit. Becomes an entry in the
+   * option node's `OptionData.interventions` (`schemas/graph.ts:163`), which is
+   * what lets the analysis compute a real number rather than compare bare
+   * labels.
+   *
+   * ⚠ DELIBERATELY NOT `strength`, and the two must never be merged. `strength`
+   * answers "how strongly does A cause B" and lands on the EDGE as
+   * `strength_mean`. `sets_to` answers "what level does this option put the
+   * factor at" and lands on the OPTION NODE. Two questions under one name is
+   * trap 21, and this estate has paid for it repeatedly; the extra optional
+   * slot is cheap (13 free against Anthropic's 24) and the conflation is not.
+   */
+  sets_to?: number;
 }
 
 export interface DraftRecordSet {
@@ -198,6 +213,9 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             strength: { type: "number" },
             category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
             value: { type: "number" },
+            // Option→factor intervention level. See the interface note: named
+            // apart from `strength` on purpose.
+            sets_to: { type: "number" },
           },
           required: ["claim_kind", "label"],
           additionalProperties: false,
