@@ -57,8 +57,15 @@ const BUCKET_B_CODES = new Set([
   "INVALID_INTERVENTION_REF",  // Fuzzy-match intervention keys against factor node IDs
 ]);
 
-/** Bucket C: semantic, LLM only — we identify these to decide llmRepairNeeded */
-const BUCKET_C_CODES = new Set([
+/**
+ * Bucket C: semantic, LLM only — we identify these to decide llmRepairNeeded.
+ *
+ * EXPORTED so an acceptance oracle can DERIVE which violations actually block a
+ * draft rather than hand-listing them. A hand-list here would drift from the
+ * routing the moment a code changed bucket, and would then harden the producer
+ * against violations this sweep already repairs.
+ */
+export const BUCKET_C_CODES = new Set([
   "NO_PATH_TO_GOAL",
   "NO_EFFECT_PATH",
   "UNREACHABLE_FROM_DECISION",
