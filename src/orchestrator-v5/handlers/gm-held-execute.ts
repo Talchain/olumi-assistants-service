@@ -46,6 +46,7 @@ import {
   stampUserEditProvenance,
   reconcileObservedValuePair,
   batchFullyLanded,
+  findAmbiguousScaleValueOps,
 } from '../../orchestrator/canonicalise-value-ops.js';
 import {
   PatchOperationsArraySchema,
@@ -383,8 +384,31 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // formatter reads first describing the number the user just replaced. ONE
   // function, both seams — the no-second-copy rule this module already keeps
   // for canonicalisation and the provenance stamp.
+  // R2-1 (PR #926) — the ambiguous scale class (bare sub-1 value against a
+  // frame-scaled capless factor) is REFUSED, never guessed, on this seam too:
+  // the same predicate the normal edit path prescreens with, so the two seams
+  // cannot disagree (one function, one module). A confirmed batch carrying
+  // one is declined whole — nothing persists — exactly like any other apply
+  // failure; `reconcileObservedValuePair` would throw on it anyway (the
+  // fail-loud backstop), and this prescreen turns that into the seam's
+  // honest decline instead of an unhandled error.
+  const heldCanonicalisedOps = stampUserEditProvenance(
+    canonicaliseValueOps(operations, input.currentGraph).operations,
+  );
+  const heldAmbiguousOps = findAmbiguousScaleValueOps(heldCanonicalisedOps, input.currentGraph);
+  if (heldAmbiguousOps.length > 0) {
+    log.warn(
+      {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        ambiguous_paths: heldAmbiguousOps.map((o) => o.path),
+      },
+      'GM held-execute — confirmed batch carries a scale-ambiguous value op (bare sub-1 on a frame-scaled factor); declining whole batch (nothing persisted)',
+    );
+    return { status: 'apply_failed', reason: 'apply_error' };
+  }
   const opsToApply: PatchOperation[] = reconcileObservedValuePair(
-    stampUserEditProvenance(canonicaliseValueOps(operations, input.currentGraph).operations),
+    heldCanonicalisedOps,
     input.currentGraph,
   );
 

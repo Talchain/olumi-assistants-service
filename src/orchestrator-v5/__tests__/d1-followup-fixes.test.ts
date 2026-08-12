@@ -269,16 +269,32 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
       },
     } as unknown as Parameters<typeof createRunAnalysisHandler>[0]['plotClient'];
 
+    // The baseline gate (row 2.1085, PR #926 round 3) refuses a CAPLESS factor
+    // whose observed baseline sits outside [0,1] — the shared fixture's
+    // `f-uncapped` ({value: 12, raw_value: 12}) is exactly that class, and this
+    // test's question is goal_constraints FORWARDING, not scale. Localised:
+    // carry the same magnitude as a framed pair (level 0.12, raw 12).
+    const scaleCoherentFixture = () => {
+      const g = buildD1Fixture();
+      return {
+        ...g,
+        nodes: g.nodes.map((n) =>
+          n.id === 'f-uncapped'
+            ? { ...n, observed_state: { ...n.observed_state, value: 0.12, raw_value: 12 } }
+            : n,
+        ),
+      };
+    };
     const handler = createRunAnalysisHandler({
       plotClient: fakePlotClient,
       scenarioReader: async () => ({
-        graph: buildD1Fixture() as unknown as never,
+        graph: scaleCoherentFixture() as unknown as never,
         options: [
           { id: 'o-launch', option_id: 'o-launch', label: 'Launch now', interventions: { 'f-churn': 1 } },
         ],
         goal_node_id: 'g-revenue',
         goal_constraints: goalConstraints,
-        rawPersistedGraph: buildD1Fixture(),
+        rawPersistedGraph: scaleCoherentFixture(),
       }),
     });
 

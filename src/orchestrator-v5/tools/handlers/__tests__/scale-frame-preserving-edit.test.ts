@@ -77,7 +77,10 @@ describe("recoverScaleFrame recovers exactly the draft-written frame shape and n
     expect(recoverScaleFrame({ value: 0, raw_value: 0 })).toBeUndefined(); // zero is scale-ambiguous
     expect(recoverScaleFrame({ value: -0.5, raw_value: -50000 })).toBeUndefined(); // sign-symmetric refusal
     expect(recoverScaleFrame({ value: 0.5, raw_value: 0.25 })).toBeUndefined(); // raw < value: not a downscale
-    expect(recoverScaleFrame({ value: 2, raw_value: 50000 })).toBeUndefined(); // value outside (0,1]
+    // ⚠ ROUND-3 PIN MOVE (review order): {value: 2, raw_value: 50000} was
+    // refused here in round 2 and that refusal WAS the U2 defect — the
+    // over-frame pair the writer itself creates encodes frame 25000 exactly.
+    // Its recovery is now pinned in scale-frame-round3.test.ts.
     expect(recoverScaleFrame({ value: 0.5 })).toBeUndefined();
     expect(recoverScaleFrame({ raw_value: 50000 })).toBeUndefined();
     expect(recoverScaleFrame({ value: Number.NaN, raw_value: 50000 })).toBeUndefined();
@@ -177,14 +180,16 @@ describe("edit_graph value ops are frame-preserving on framed capless factors", 
     expect(observed.raw_value).toBe(74000);
   });
 
-  it("a level-looking new value ([0,1]) keeps the level and re-derives raw as level×frame — the capped-factor rule with frame in place of cap", () => {
-    const [out] = reconcileObservedValuePair(
-      [mergedOp(FRAMED, 0.42) as never],
-      graphWith(FRAMED),
-    );
-    const observed = (out as { value: { observed_state: Record<string, unknown> } }).value.observed_state;
-    expect(observed.value).toBe(0.42);
-    expect(observed.raw_value).toBe(0.42 * 100000);
+  it("a bare sub-1 new value is AMBIGUOUS and refused — round 3 replaced the round-2 level guess with the ask", () => {
+    // ⚠ DELIBERATE ORACLE CHANGE (round-2 re-review blocker R2-1). Round 2
+    // had this path GUESS "level" (×frame) while the D1 writer guessed "raw"
+    // (÷frame) — the same utterance, 10^5 apart, measured. Neither guess was
+    // defensible; the ambiguity is now the product: the callers prescreen via
+    // findAmbiguousScaleValueOps and ASK, and reconcile throws as the
+    // fail-loud backstop (pinned in scale-frame-round3.test.ts).
+    expect(() =>
+      reconcileObservedValuePair([mergedOp(FRAMED, 0.42) as never], graphWith(FRAMED)),
+    ).toThrow(/ambiguous/i);
   });
 
   it("an UNFRAMED capless factor keeps today's behaviour exactly (raw_value re-derived, value untouched)", () => {

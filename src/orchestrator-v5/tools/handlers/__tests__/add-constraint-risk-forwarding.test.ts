@@ -42,7 +42,16 @@ function withRiskNode(): GraphV3T {
   return {
     ...base,
     nodes: [
-      ...base.nodes,
+      // The baseline gate (row 2.1085, PR #926 round 3) refuses a CAPLESS
+      // factor whose observed baseline sits outside [0,1] — the shared
+      // fixture's `f-uncapped` is exactly that class, and this suite's
+      // question is risk-constraint forwarding, not scale. Carry the same
+      // magnitude as a framed pair (level 0.12, raw 12).
+      ...base.nodes.map((n) =>
+        n.id === 'f-uncapped'
+          ? { ...n, observed_state: { ...n.observed_state, value: 0.12, raw_value: 12 } }
+          : n,
+      ),
       {
         id: 'r-churn-risk',
         kind: 'risk',

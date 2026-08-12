@@ -10,15 +10,27 @@
  *
  *   frame = raw_value / value          (50000 / 0.5 = 100000)
  *
- * ── PRECONDITIONS MIRROR THE ANALYSIS SEAM'S OWN PROOF ──────────────────────
- * `buildFactorScaleMap`'s normalised-convention evidence
- * (`plot-intervention-scale.ts:369`): a pair proves a frame only when
- * `value ∈ (0,1]` (zero is scale-ambiguous, negatives sign-symmetrically
- * refused) AND `raw_value > value` (real downscaling occurred — this is what
- * makes recovery IMPOSSIBLE on the unframed capless shape `raw == value`,
- * so ordinary count/ratio factors are untouched). Both finite; the quotient
- * finite and > 1 by construction, asserted anyway because this function is a
- * spec, not an optimisation.
+ * ── PRECONDITIONS COVER THE PRODUCERS' WHOLE PAIR DOMAIN (round 3) ──────────
+ * ⚠ The first version copied `buildFactorScaleMap`'s normalised-convention
+ * proof verbatim (`value ∈ (0,1]`) — a DRAFT-time invariant. But this
+ * function's own consumer creates states OUTSIDE that domain: an over-frame
+ * edit writes `{value: 5, raw_value: 500000}` (honest — 5× the frame), and
+ * the `value ≤ 1` precondition then refused the very pair the writer had just
+ * written, so the NEXT bare edit fell back to the raw write — resurrecting
+ * the exact corruption this module exists to close (round-2 re-review, U2,
+ * measured). The pair still encodes the frame EXACTLY (raw/value); refusing
+ * it was the defect.
+ *
+ * The predicate is therefore derived from the PRODUCERS' pair domain
+ * (enumerated in `__tests__/scale-frame-round3.test.ts`):
+ *   framed (draft or edit): {raw/frame, raw} with frame > 1 ⇒ value > 0 and
+ *     raw = value×frame > value — IN, whatever side of 1 the value is on;
+ *   unframed writers: {x, x} — OUT (`raw > value` fails);
+ *   zero / negative pairs: OUT (`value > 0` fails; zero is scale-ambiguous,
+ *     negatives sign-symmetrically refused — a negative pair is never a
+ *     framed producer state, since frames divide positives).
+ * Quotient asserted finite and > 1 because this function is a spec, not an
+ * optimisation.
  *
  * Pure, total, no I/O. Consumed by BOTH post-draft baseline writers
  * (`normalise-factor-value.ts` and `canonicalise-value-ops.ts`'s
@@ -32,7 +44,7 @@ export function recoverScaleFrame(before: {
   const raw = before.raw_value;
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
-  if (!(value > 0 && value <= 1)) return undefined;
+  if (!(value > 0)) return undefined;
   if (!(raw > value)) return undefined;
   const frame = raw / value;
   if (!Number.isFinite(frame) || frame <= 1) return undefined;

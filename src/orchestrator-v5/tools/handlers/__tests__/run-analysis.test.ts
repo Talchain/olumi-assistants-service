@@ -364,7 +364,10 @@ describe('run_analysis handler — freshness fields on the fact', () => {
           graph: {
             nodes: [
               { id: 'g', kind: 'goal', label: 'Goal' },
-              { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 100 } },
+              // Capped: the factor declares its scale, so the round-3 baseline
+              // coherence gate (row 2.1085) is exempt — this suite's question is
+              // hash mechanics, and a capless raw 100 now honestly refuses.
+              { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 100, cap: 1000 } },
             ],
             edges: [],
           },
@@ -396,7 +399,10 @@ describe('run_analysis handler — freshness fields on the fact', () => {
       graph: {
         nodes: [
           { id: 'g', kind: 'goal', label: 'Goal' },
-          { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 100 } },
+          // Capped: the factor declares its scale, so the round-3 baseline
+              // coherence gate (row 2.1085) is exempt — this suite's question is
+              // hash mechanics, and a capless raw 100 now honestly refuses.
+              { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 100, cap: 1000 } },
         ],
         edges: [],
       },
@@ -405,7 +411,7 @@ describe('run_analysis handler — freshness fields on the fact', () => {
       graph: {
         nodes: [
           { id: 'g', kind: 'goal', label: 'Goal' },
-          { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 200 } },
+          { id: 'f', kind: 'factor', label: 'F', observed_state: { value: 200, cap: 1000 } },
         ],
         edges: [],
       },
