@@ -79,15 +79,52 @@ const HISTORIC_V3_INSTRUCTION_BYTES = 3673;
  * measured blocks were taken against exactly those bytes; re-pointing the
  * literal would detach that evidence from the artefact that produced it.
  */
-const PREREGISTERED_V4_INSTRUCTION_SHA256 =
+const HISTORIC_V4_INSTRUCTION_SHA256 =
   "edc329f9d2496be3c1fbfba4f5f5968439d4178913f0b5b1967773ee6430e9f3";
-const PREREGISTERED_V4_INSTRUCTION_BYTES = 4426;
+const HISTORIC_V4_INSTRUCTION_BYTES = 4426;
+
+/**
+ * ⭐ PRE-REGISTERED — v5, frozen 2026-08-12 BEFORE any acceptance run was spent
+ * on it (`round9/PRE-REGISTRATION-V5.md`).
+ *
+ * v5 changes ONE thing in the connect half, and the shape half does not move at
+ * all (`175af059…` / 1,771 bytes, unchanged from v4 — asserted below):
+ *
+ *   **the goal is a `stated_item`, so a link that reaches it sets `to_stated`.**
+ *
+ * DERIVED, not guessed: `projector.ts` `CLAIM_KIND_TO_NODE_KIND` maps the four
+ * claim kinds to `factor | option | null` and NEVER to `goal`, so no claims index
+ * IS the goal. MEASURED cause: on round 7's run 8 the single link intended for
+ * the goal was written with a claim reference. It resolved SUCCESSFULLY — to a
+ * factor — so nothing terminated at the goal, every derived factor was withheld
+ * as unconnected, and a completion pass that emitted TEN well-formed causal links
+ * contributed ZERO nodes and ZERO edges.
+ *
+ * ⚠ THE GRAMMAR CANNOT ENFORCE THIS AND NO SCHEMA CAN. `{"to_claim": 0}` is
+ * well-formed, in range, and denotes a real node of a legal kind; its wrongness
+ * is a fact about what the model MEANT. A schema constrains documents, not
+ * intentions. The instruction and the completion ask are the only places this can
+ * be said, which is why it is said in both.
+ *
+ * ⚠ v4 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED — round 7's five-gate
+ * block was measured against exactly those bytes.
+ */
+const PREREGISTERED_V5_INSTRUCTION_SHA256 =
+  "2e5bc9695f1907a802ab9f2dfa7f697bf36692f10c3675e9227c06994de98182";
+const PREREGISTERED_V5_INSTRUCTION_BYTES = 4688;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v4 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V4_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v5 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V5_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V4_INSTRUCTION_BYTES,
+      PREREGISTERED_V5_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v4 bytes, so round 7's block stays attributable", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V4_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V4_INSTRUCTION_BYTES,
     );
   });
 
@@ -142,21 +179,48 @@ describe("the draft records instruction is the measured artefact", () => {
     );
   });
 
-  it("pins the v4 CONNECT half independently, so the half that changed is legible", () => {
+  it("pins the v5 CONNECT half independently, so the half that changed is legible", () => {
     // v4 changes the connect half too: "chain the option the USER named" replaces
     // v3's "an option_refinement IS an option needing its own chain". That v3
     // sentence closed one direction of a defect and opened its mirror — the model
     // complied and left the user's own options bare — so the load-bearing half of
     // the v4 fix is DETERMINISTIC (the projector merges a lone refinement onto its
     // stated parent) and this sentence is only its instruction-side complement.
+    //
+    // ⭐ v5 adds ONE bullet to this half and changes nothing else: the goal is a
+    // `stated_item`, so `to_stated` is how a link reaches it. That sentence is
+    // the instruction-side half of round 9's goal-targeting fix; its
+    // completion-side half names the goal's exact index in the ask.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("cb7fa43faf8237c974f044c098a6c97d8d9003733705f58ff2df3cf41786af74");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(2655);
+    ).toBe("6f395141d575f2b1b6e04454da84dc0b755cadfc60bd77fde7894207913a5b87");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(2917);
+    // HISTORIC — v4's connect half, asserted DISTINCT.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("cb7fa43faf8237c974f044c098a6c97d8d9003733705f58ff2df3cf41786af74");
     // HISTORIC — v3's connect half, asserted DISTINCT.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
     ).not.toBe("53a6955a40d9a8c877d8f1dc09f24343b3cfac540d74dfcc82aa507ea131d856");
+  });
+
+  /**
+   * ⭐ THE v5 SENTENCE, PINNED BY CONTENT rather than only by a hash.
+   *
+   * A hash pin fails on ANY edit, which means it cannot tell "someone removed
+   * the goal-targeting rule" from "someone fixed a typo two bullets away". This
+   * is the one sentence round 9's whole goal-link fix rests on, so it is bound to
+   * its own content — and bound to BOTH halves of the claim, because the negative
+   * half ("`to_claim` cannot reach it") is the one that names the actual defect.
+   */
+  it("keeps the goal-is-a-stated-item rule that round 9 added", () => {
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
+      "The goal is a `stated_item`, so a link that reaches it sets `to_stated`.",
+    );
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
+      "goal is never one of your `claims`, so `to_claim` cannot reach it",
+    );
   });
 });
 

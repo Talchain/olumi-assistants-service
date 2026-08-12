@@ -434,7 +434,7 @@ const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | n
  * `constraint → goal` — an edge the instruction asks for and the validator
  * accepts.
  */
-const PROJECTED_KIND_AFTER_NORMALISATION: Readonly<Record<string, string>> = {
+export const PROJECTED_KIND_AFTER_NORMALISATION: Readonly<Record<string, string>> = {
   // `normalisation.ts` NODE_KIND_MAP. Only the kinds this projector can mint.
   constraint: "risk",
   goal: "goal",
@@ -444,10 +444,20 @@ const PROJECTED_KIND_AFTER_NORMALISATION: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Post-normalisation kind for a kind this projector minted. EXPORTED so the
+ * completion ask can predict `MISSING_BRIDGE` on the same kinds the validator
+ * will judge, instead of carrying its own copy of the normalisation map — the
+ * hand-maintained mirror this file already pays to avoid elsewhere (trap 12).
+ */
+export function projectedKindAfterNormalisation(kind: string): string {
+  return PROJECTED_KIND_AFTER_NORMALISATION[kind] ?? kind;
+}
+
+/**
  * `${fromKind}->${toKind}` pairs (post-normalisation) that no repair rescues.
  * Each entry carries the derivation that admits it.
  */
-const UNRESCUABLE_EDGE_SHAPES: ReadonlySet<string> = new Set([
+export const UNRESCUABLE_EDGE_SHAPES: ReadonlySet<string> = new Set([
   // NOTHING MAY POINT INTO AN OPTION. `decision → option` (rule :294) is the
   // only inbound rule, and the decision node is projector-structural and has no
   // wire reference, so no model-emitted link can legally target an option.

@@ -68,8 +68,13 @@ import {
   type DraftInferenceClaim,
   type DraftRecordSet,
 } from "./grammar.js";
-import type { RecordProjection } from "./projector.js";
+import {
+  type RecordProjection,
+  UNRESCUABLE_EDGE_SHAPES,
+  projectedKindAfterNormalisation,
+} from "./projector.js";
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+import { ALLOWED_EDGES } from "../../../validators/graph-validator.types.js";
 import { BUCKET_C_CODES } from "../../unified-pipeline/stages/repair/deterministic-sweep.js";
 
 /**
@@ -98,6 +103,7 @@ export interface CompletionAskItem {
     | "unconnected_record"
     | "option_without_chain"
     | "no_chain_reaches_goal"
+    | "no_outcome_or_risk"
     | "options_indistinguishable";
   readonly detail: string;
   /**
@@ -216,22 +222,52 @@ export function shouldKeepCompletion(before: CompletionAsk, after: CompletionAsk
  * references it refused, shapes it rejected, records it could not place, and
  * reachability computed on its own emitted edges.
  *
- * ── ⚠ WHAT THIS ASK DOES NOT PREDICT — stated, not glossed ─────────────────
- * Three Bucket-C codes are reachable on a projected graph and have NO item
- * here, so `countBlockingAskItems` cannot see them move in either direction:
+ * ── ⚠ THE THREE NAMED COVERAGE LIMITS, CLOSED (round 9) ────────────────────
+ * The v4 version of this note listed three Bucket-C codes as invisible to the
+ * ask. Each is now adjudicated rather than left open.
  *
- *   MISSING_BRIDGE       — no `outcome` or `risk` node at all. The projector
- *                          mints `constraint` (→ `risk` post-normalisation)
- *                          only where the model emitted one, so a bare draft
- *                          fails this on inventory, not on connectivity.
- *   INVALID_EDGE_TYPE    — a shape the kind gate deliberately lets through
- *                          because a named downstream repair rescues it.
- *   INSUFFICIENT_OPTIONS — an option count outside the validator's bounds.
+ * ⭐⭐ MISSING_BRIDGE — **NOW PREDICTED. The v4 note was WRONG about it**, and
+ * said so in the strongest terms: *"a bare draft fails this on inventory, not on
+ * connectivity"* and *"no completion pass can see that coming"*. Derived at the
+ * sweep's bytes: `fixFactorGoalEdges` (`deterministic-sweep.ts:963-1059`) RUNS
+ * UNCONDITIONALLY and **MINTS AN `outcome` NODE** for every `factor → goal`
+ * edge. `MISSING_BRIDGE` (`graph-validator.ts:384`) is
+ * `outcomes.length === 0 && risks.length === 0`. So one surviving `factor → goal`
+ * edge makes it structurally unable to fire, and the code is a CONNECTIVITY
+ * symptom after all — entailed by the same collapse that produces
+ * `NO_PATH_TO_GOAL`, not an independent inventory gap.
  *
- * This is a coverage limit of the ASK, inherited by any measure built on it,
- * and it is the same limit the ask-count comparator had. Naming it is the
- * point: a completeness claim for the blocking classes would be false, and the
- * two the measure DOES carry are the two the failures were made of.
+ * MEASURED before this item was written, on the eleven banked round-7 passes at
+ * both phases (22 rows, `round9/instruments/r9-d2-missing-bridge.ts`): the
+ * predicate below and the oracle's `MISSING_BRIDGE` agree **22/22, with ZERO
+ * rows where a bridge was available and the code still fired**. The
+ * refutation question was stated before the run, and a contrast control
+ * (`NO_PATH_TO_GOAL`, present in 10 rows) proves the probe discriminates rather
+ * than reading blind zeros (trap 13e).
+ *
+ * INVALID_EDGE_TYPE — **askable in principle, DELIBERATELY NOT ASKED.** Every
+ * shape the projector's kind gate ADMITS is admitted because a NAMED repair
+ * rescues it (`projector.ts` UNRESCUABLE_EDGE_SHAPES derivation). Asking the
+ * model to restate a shape the pipeline repairs spends a turn manufacturing
+ * causal claims for a problem that does not exist, and every such claim is an
+ * assertion shown to the user. ⚠ ONE ADMITTED SHAPE IS FLAG-GATED: `option →
+ * goal` is rescued by `fixOptionGoalShortcut` behind `optionShortcutRepair`
+ * (default true). Under a posture where that flag is false the code becomes
+ * reachable and unasked. Named rather than glossed; the deployed value of that
+ * flag is not derived here.
+ *
+ * INSUFFICIENT_OPTIONS — **two harms under one code (trap 21), and they split.**
+ * `graph-validator.ts:366-382` raises it for BOTH `< MIN_OPTIONS` and
+ * `> MAX_OPTIONS`.
+ *   · too many  — UNASKABLE BY DESIGN. The projector already caps by dropping
+ *                 REFINEMENTS and never a stated option, because dropping one
+ *                 narrows the user's own choice set. The only repair left is
+ *                 amputating an option the user named. Refused.
+ *   · too few   — ASKABLE (the completion can mint an option via
+ *                 `option_refinement`) and deliberately NOT asked here: it means
+ *                 asking the model to AUTHOR an alternative the user did not
+ *                 name, which is a product-authorship decision outside this
+ *                 lane's remit. Rowed, not silently skipped.
  */
 export function enumerateCompletionAsk(
   records: DraftRecordSet,
@@ -349,12 +385,71 @@ export function enumerateCompletionAsk(
       });
     }
   }
+  // ⭐⭐ THE GOAL IS NAMED BY ITS STATED INDEX AND ITS FIELD — round 9.
+  //
+  // Run 8 collapsed a 5-node graph to nothing because the ONE link intended for
+  // the goal was written with `to_claim`. It resolved successfully, to a factor;
+  // nothing reached the goal; every derived factor was withheld as
+  // `unconnected_to_goal`; and all ten of the completion's links died attached
+  // to a withheld node, disclosed once rather than once each.
+  //
+  // The grammar CANNOT prevent this and no schema can: `{"to_claim": 0}` is
+  // well-formed, in range, and denotes a real node of a legal kind. Its
+  // wrongness is a fact about what the model MEANT. A schema constrains
+  // documents, not intentions (round9/DERIVATIONS.md D1). So the ask carries the
+  // target explicitly instead — the stated index AND the field name — which is
+  // the one thing the v4 prompt never said.
+  const goalStatedIndices = records.stated_items
+    .map((s, i) => (s.kind === "goal" ? i : -1))
+    .filter((i) => i >= 0);
+  const goalTargetPhrase =
+    goalStatedIndices.length > 0
+      ? goalStatedIndices.map((i) => `\`to_stated: ${i}\` (${JSON.stringify(records.stated_items[i]!.source_quote)})`).join(" or ")
+      : null;
+
   if (goalIds.length > 0 && !edges.some((e) => reachesGoal.has(e.from) && e.from !== e.to && reachesGoal.has(e.to))) {
     push({
       kind: "no_chain_reaches_goal",
-      detail: "nothing you emitted terminates at the goal",
+      detail:
+        goalTargetPhrase === null
+          ? "nothing you emitted terminates at the goal"
+          : `nothing you emitted terminates at the goal — the goal is ${goalTargetPhrase}, and a link reaches it with that exact field, never with \`to_claim\``,
       validatorCode: "NO_PATH_TO_GOAL",
     });
+  }
+
+  // ⭐⭐ MISSING_BRIDGE, PREDICTED — see the derivation on this function.
+  //
+  // Post-normalisation kinds, taken from the projector's own exported map rather
+  // than a second copy of `normalisation.ts` NODE_KIND_MAP. A bridge exists if
+  // the graph already carries an outcome/risk node, OR if any `factor → goal`
+  // edge survives — because the sweep mints an outcome for every one of those.
+  if (goalIds.length > 0) {
+    const hasBridgeNode = nodes.some((n) => {
+      const k = projectedKindAfterNormalisation(n.kind);
+      return k === "outcome" || k === "risk";
+    });
+    const sweepWillMintOutcome = edges.some(
+      (e) =>
+        projectedKindAfterNormalisation(kindById.get(e.from) ?? "") === "factor" &&
+        projectedKindAfterNormalisation(kindById.get(e.to) ?? "") === "goal",
+    );
+    if (!hasBridgeNode && !sweepWillMintOutcome) {
+      push({
+        kind: "no_outcome_or_risk",
+        // The ask is for the OUTCOME the options produce, stated as the model's
+        // own `factor` claim and linked to the goal. It is NOT an invitation to
+        // restate the user: the completion grammar has no `stated_items` at all,
+        // so a fabricated user quote is structurally impossible here rather than
+        // merely forbidden, and the claim carries the `ai_inferred` badge the
+        // projector gives every claim-derived node.
+        detail:
+          goalTargetPhrase === null
+            ? "nothing in this model is an outcome or a risk — name the outcome the options produce as a factor claim, and link it to the goal"
+            : `nothing in this model is an outcome or a risk, so there is nothing between the options and the goal — name the outcome(s) these options actually produce as your own \`factor\` claim, and link that factor to the goal with ${goalTargetPhrase}`,
+        validatorCode: "MISSING_BRIDGE",
+      });
+    }
   }
 
   // OPTIONS_IDENTICAL (`graph-validator.ts:841`) — two options the analysis
@@ -412,6 +507,176 @@ export function buildRecordsCompletionSchema(): Record<string, unknown> {
   };
 }
 
+/**
+ * ⭐⭐ THE LEGAL EDGE VOCABULARY THE COMPLETION TURN IS SHOWN — DERIVED, NEVER
+ * RESTATED.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * Round 6 PROVED the model restates within the legal vocabulary when it is shown
+ * one: B3's three `INVALID_EDGE_TYPE` links were re-pointed correctly in 3.9 s
+ * with nothing invented. The v4 completion prompt then HAND-RESTATED the shapes
+ * in prose, and on the round-7 block **14 completion links across runs 16 and 22
+ * were dropped `ref_kind_illegal` in bulk** — 7 and 7, almost all `factor →
+ * factor` into an option-controlled factor. The prompt stated that rule and the
+ * model broke it anyway. A restatement is a hand-maintained mirror of three
+ * different authorities (trap 12), and this one had already drifted from all of
+ * them.
+ *
+ * ── ⭐ TWO AUTHORITIES, EACH ASKED THE QUESTION IT ACTUALLY ANSWERS ────────
+ * It would be easy — and wrong — to derive this from the projector's own gate
+ * alone. `UNRESCUABLE_EDGE_SHAPES` answers *"what will I refuse to carry?"*. The
+ * model needs the answer to *"what should I emit?"*, and those are two questions
+ * under one name (trap 21). `option → goal` is the case that separates them: the
+ * projector ADMITS it, but it is rescued only by `fixOptionGoalShortcut` behind
+ * the `optionShortcutRepair` flag, and an option that shortcuts to the goal has
+ * no direct factor target, which is exactly what `NO_EFFECT_PATH` (:822) fires
+ * on. Telling the model that shape is legal would buy one class of failure with
+ * another.
+ *
+ * So:
+ *   · what to EMIT comes from `ALLOWED_EDGES` — the validator's own matrix —
+ *     restricted to the kinds a model-emitted reference can actually land on,
+ *     plus the one shape an UNCONDITIONAL repair extends it by;
+ *   · what is DROPPED OUTRIGHT comes from the projector's own
+ *     `UNRESCUABLE_EDGE_SHAPES` — the set that actually did the dropping.
+ * Neither is retyped, and each classification is asserted COMPLETE below, so a
+ * new rule in either authority fails loud instead of silently going unstated.
+ */
+const MODEL_REACHABLE_KIND_PHRASE: Readonly<Record<string, string>> = {
+  option: "an option",
+  factor: "a factor",
+  risk: "a constraint you recorded",
+  goal: "the goal",
+};
+
+/**
+ * Kinds that appear in the authorities but that NO model-emitted reference can
+ * reach. Each carries its reason; the completeness assertion below refuses any
+ * kind that is in neither table.
+ */
+const MODEL_UNREACHABLE_KIND_REASON: Readonly<Record<string, string>> = {
+  // The decision node is projector-structural and has no wire reference.
+  decision: "projector-structural; the model has no way to name it",
+  // Never projected from a record: `fixFactorGoalEdges` mints it.
+  outcome: "never emitted by the model; the sweep mints it from a factor→goal edge",
+};
+
+/**
+ * The ONE shape `ALLOWED_EDGES` omits and an UNCONDITIONAL repair adds back.
+ *
+ * ⚠ THIS ENTRY IS HAND-WRITTEN, WHICH IS EXACTLY THE THING THIS FILE OTHERWISE
+ * REFUSES TO DO — so it is guarded rather than trusted. `assertVocabularyIsComplete`
+ * refuses it if it ever appears in `ALLOWED_EDGES` (then it is not an extension)
+ * or in `UNRESCUABLE_EDGE_SHAPES` (then it is not legal). Where a list cannot be
+ * derived, the mirror must FAIL LOUD on drift rather than assume good (trap 12).
+ */
+const UNCONDITIONALLY_REPAIRED_SHAPES: readonly { from: string; to: string; note: string }[] = [
+  {
+    from: "factor",
+    to: "goal",
+    note: "the sweep splits this into factor → outcome → goal, and that minted outcome is what a model needs at least one of",
+  },
+];
+
+/** Every kind either authority mentions must be classified. Throws if not. */
+function assertVocabularyIsComplete(): void {
+  const kinds = new Set<string>();
+  for (const rule of ALLOWED_EDGES) {
+    kinds.add(rule.fromKind);
+    kinds.add(rule.toKind);
+  }
+  for (const shape of UNRESCUABLE_EDGE_SHAPES) {
+    const [from, to] = shape.split("->");
+    if (from) kinds.add(from);
+    if (to) kinds.add(to);
+  }
+  const unclassified = [...kinds].filter(
+    (k) => !(k in MODEL_REACHABLE_KIND_PHRASE) && !(k in MODEL_UNREACHABLE_KIND_REASON),
+  );
+  if (unclassified.length > 0) {
+    throw new Error(
+      `records completion vocabulary is incomplete: unclassified node kind(s) ${unclassified.join(", ")} — ` +
+        "classify each as model-reachable or model-unreachable before this prompt can be built",
+    );
+  }
+  for (const ext of UNCONDITIONALLY_REPAIRED_SHAPES) {
+    if (ALLOWED_EDGES.some((r) => r.fromKind === ext.from && r.toKind === ext.to)) {
+      throw new Error(
+        `${ext.from}->${ext.to} is in ALLOWED_EDGES and is therefore not a repair extension — remove it from UNCONDITIONALLY_REPAIRED_SHAPES`,
+      );
+    }
+    if (UNRESCUABLE_EDGE_SHAPES.has(`${ext.from}->${ext.to}`)) {
+      throw new Error(
+        `${ext.from}->${ext.to} is in UNRESCUABLE_EDGE_SHAPES and is therefore not legal to emit — remove it from UNCONDITIONALLY_REPAIRED_SHAPES`,
+      );
+    }
+  }
+}
+
+/**
+ * The vocabulary block, rendered in the model's own terms.
+ *
+ * Exported so a test can assert it against BOTH authorities rather than against
+ * a copy of its own output.
+ */
+export function renderLegalEdgeVocabulary(): string {
+  assertVocabularyIsComplete();
+
+  const phrase = (kind: string): string | null => MODEL_REACHABLE_KIND_PHRASE[kind] ?? null;
+
+  const legal: string[] = [];
+  const seen = new Set<string>();
+  for (const rule of ALLOWED_EDGES) {
+    const from = phrase(rule.fromKind);
+    const to = phrase(rule.toKind);
+    if (from === null || to === null) continue;
+    const key = `${rule.fromKind}->${rule.toKind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    legal.push(`- ${from} → ${to}`);
+  }
+  for (const ext of UNCONDITIONALLY_REPAIRED_SHAPES) {
+    const from = phrase(ext.from);
+    const to = phrase(ext.to);
+    if (from === null || to === null) continue;
+    const key = `${ext.from}->${ext.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    legal.push(`- ${from} → ${to} — ${ext.note}`);
+  }
+
+  // The forbidden half, grouped by source kind so the list stays readable. Built
+  // from the projector's own set, so a shape that stops being unrescuable stops
+  // being listed here on the next build.
+  const forbiddenByFrom = new Map<string, string[]>();
+  for (const shape of [...UNRESCUABLE_EDGE_SHAPES].sort()) {
+    const [from, to] = shape.split("->");
+    if (from === undefined || to === undefined) continue;
+    const fromPhrase = phrase(from);
+    const toPhrase = phrase(to);
+    if (fromPhrase === null || toPhrase === null) continue;
+    const list = forbiddenByFrom.get(fromPhrase);
+    if (list) list.push(toPhrase);
+    else forbiddenByFrom.set(fromPhrase, [toPhrase]);
+  }
+  const forbidden = [...forbiddenByFrom.entries()].map(
+    ([from, tos]) => `- ${from} → ${tos.join(", ")}`,
+  );
+
+  return [
+    "These are the ONLY shapes a link can take. Every other shape is discarded:",
+    ...legal,
+    "",
+    "One further rule, and it is the one your last set of links broke most often:",
+    "**nothing may point INTO a factor that an option acts on.** A factor an option changes is",
+    "where a chain STARTS. If something else bears on it, connect that influence to a factor",
+    "FURTHER ALONG the chain, or to the goal.",
+    "",
+    "These shapes are dropped outright — nothing downstream can rescue them:",
+    ...forbidden,
+  ].join("\n");
+}
+
 /** Render the record set for the model, with the exact indices its references must use. */
 function renderRecordsForAsk(records: DraftRecordSet): string {
   const stated = records.stated_items
@@ -443,6 +708,14 @@ export function buildRecordsCompletionPrompt(args: {
 }): string {
   const { brief, records, ask } = args;
   const problems = ask.items.map((i) => `- ${i.detail}`).join("\n");
+  // The goal's stated index, named explicitly so pass 2 always has the correct
+  // target. Run 8's completion emitted TEN well-formed links and contributed
+  // zero nodes and zero edges, because the one link that had to reach the goal
+  // used `to_claim`. The v4 prompt's only reference instruction named the claim
+  // namespace and nothing else.
+  const goalLines = records.stated_items
+    .map((s, i) => (s.kind === "goal" ? `- the goal is \`stated_items[${i}]\` ${JSON.stringify(s.source_quote)} — reach it with \`to_stated: ${i}\`` : null))
+    .filter((l): l is string => l !== null);
   return [
     "## COMPLETE THE RECORD SET YOU JUST EMITTED",
     "",
@@ -464,25 +737,33 @@ export function buildRecordsCompletionPrompt(args: {
     "",
     "### What to emit now",
     `Emit ONLY new claims. Your first new claim will be claims[${ask.baseClaimIndex}], the next`,
-    `claims[${ask.baseClaimIndex + 1}], and so on — reference them with \`from_claim\`/\`to_claim\``,
-    "using those numbers. Everything above keeps the index it already has.",
+    `claims[${ask.baseClaimIndex + 1}], and so on. Everything above keeps the index it already has.`,
     "",
-    "The shapes a chain can take:",
-    "- an option → a factor it changes (`from_stated` or `from_claim` → `to_claim`)",
-    "- a factor → another factor further along the chain",
-    "- a factor → the goal",
-    "- nothing points INTO an option, and nothing points INTO a factor that an option acts on;",
-    "  connect such an influence further down the chain, or to the goal",
-    "- nothing leaves the goal",
+    "### Which list a reference points into — the field says which, and it is not interchangeable",
+    "- `from_stated` / `to_stated` — a position in `stated_items`, the list of things the USER said.",
+    "- `from_claim` / `to_claim` — a position in `claims`, the list of things YOU said.",
+    ...(goalLines.length > 0
+      ? [
+          "",
+          ...goalLines,
+          "`to_claim` can never reach the goal: the goal is not in `claims`, so a `to_claim` link",
+          "lands on a factor instead and the whole chain behind it is dropped as unconnected.",
+        ]
+      : []),
+    "",
+    "### The shapes a link can take",
+    renderLegalEdgeVocabulary(),
     "",
     "Set `effect` to `positive` or `negative` on every link. On a link FROM an option TO a factor,",
     "set `sets_to` to the level that factor takes under that option, in the factor's own unit —",
     "but only where the brief gives you the basis for it.",
     "",
-    "Where two options are listed above as indistinguishable: if the brief says they act differently",
-    "on some factor, say so with a link and a `sets_to` that reflects it. If the brief does NOT say",
-    "they differ, leave them alone — a difference made up to separate two options is a number the",
-    "user will read as their own.",
+    "Where two options are listed above as indistinguishable: the analysis cannot compare them, and",
+    "a model carrying such a pair is rejected outright — so leaving them as they are is not a safe",
+    "answer. Separate them using what the brief SAYS: a factor one of them acts on and the other",
+    "does not, or the same factor at different levels via `sets_to`. Use only levels the brief gives",
+    "you the basis for. Do not invent a number to tell them apart — a difference made up here is a",
+    "number the user will read as their own, and that is a worse failure than the rejection.",
     "",
     "Do not restate anything the user said; you cannot, and you do not need to.",
     "Do not add a factor or a link the brief does not support. If a gap above cannot be closed from",

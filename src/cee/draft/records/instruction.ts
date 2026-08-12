@@ -139,6 +139,10 @@ and \`basis\` still records whatever the user said that you built them on.
   option TO a factor it changes, then onward from that factor until the chain
   ends at the goal. An option whose chain stops short cannot be compared with
   any other option.
+- The goal is a \`stated_item\`, so a link that reaches it sets \`to_stated\`. The
+  goal is never one of your \`claims\`, so \`to_claim\` cannot reach it: a link that
+  tries lands on a factor instead, and every record behind it is dropped for not
+  reaching the goal.
 - **Chain the option the USER named.** When you add an \`option_refinement\` that
   spells out one of the user's own options, start the chain at the user's option
   (\`from_stated\`), not at your refinement — the two are one alternative and the
