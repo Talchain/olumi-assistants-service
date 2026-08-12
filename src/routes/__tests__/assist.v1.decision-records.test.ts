@@ -2,10 +2,10 @@
  * Calibration R0 — the recording-seam ROUTES.
  *
  * The JWT half is verified with REAL tokens against the REAL
- * `verifySupabaseUserJwt` util (jose, HS256 on a test secret) — not a mocked
- * verifier. A mocked verifier would prove the route calls something; only a
- * real token can prove the `aud` guard, the `exp` guard and the UUID-`sub`
- * guard are the things doing the work.
+ * `verifySupabaseUserJwt` util (jose, ES256 against an in-process JWKS) — not
+ * a mocked verifier. A mocked verifier would prove the route calls something;
+ * only a real token can prove the `aud` guard, the `exp` guard and the
+ * UUID-`sub` guard are the things doing the work.
  *
  * The store is a hand-rolled port fake injected through the route's `deps`
  * seam — no Supabase client, no network.
@@ -16,24 +16,27 @@
 
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { SignJWT } from 'jose';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const JWT_SECRET = 'test-supabase-jwt-secret-value-for-hs256-verification';
+import {
+  forgeUserToken,
+  makeEs256Key,
+  startJwksFixture,
+  type JwksFixture,
+} from '../../utils/__tests__/helpers/supabase-jwks-fixture.js';
 
 // CEE_REQUIRE_USER_JWT is DELIBERATELY FALSE throughout this file. Every 401
 // and 403 below therefore proves the endpoint's verification is ALWAYS-ON and
 // independent of that flag — which is the whole point of T4.
-vi.mock('../../config/index.js', () => ({
-  config: {
-    auth: {
-      supabaseJwtSecret: JWT_SECRET,
-      supabaseJwksUrl: undefined,
-      supabaseUrl: undefined,
-      requireUserJwt: false,
-    },
+const mockConfig = {
+  auth: {
+    supabaseJwksUrl: undefined as string | undefined,
+    supabaseUrl: undefined as string | undefined,
+    requireUserJwt: false,
   },
-}));
+};
+
+vi.mock('../../config/index.js', () => ({ config: mockConfig }));
 
 vi.mock('../../utils/telemetry.js', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -59,6 +62,9 @@ type OutcomeWrite =
   import('../../orchestrator-v5/decision-records/store-adapter.js').RecordDecisionOutcomeWrite;
 
 const decisionRecordsRoute = (await import('../assist.v1.decision-records.js')).default;
+const { resetSupabaseJwksCacheForTests } = await import(
+  '../../utils/supabase-user-jwt.js'
+);
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const OWNER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -69,36 +75,35 @@ const COMPUTED_AT = '2026-07-10T12:00:00.000Z';
 const GRAPH_HASH = `${AAG_V1_GRAPH_HASH_PREFIX}${HASH_AT_RUN}`;
 const NOW = new Date('2026-08-06T09:00:00.000Z');
 
-const secretKey = new TextEncoder().encode(JWT_SECRET);
+/** The project's signing key and the JWKS endpoint publishing it. */
+let projectKey: Awaited<ReturnType<typeof makeEs256Key>>;
+let jwks: JwksFixture;
 
 /** A genuine Supabase-shaped user access token. */
 async function userToken(
   sub: string = OWNER_ID,
   opts?: { expired?: boolean; audience?: string | null },
 ): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  let jwt = new SignJWT({ role: 'authenticated' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject(sub)
-    .setIssuedAt(opts?.expired === true ? now - 7200 : now)
-    .setExpirationTime(opts?.expired === true ? now - 3600 : now + 3600);
-  if (opts?.audience !== null) {
-    jwt = jwt.setAudience(opts?.audience ?? 'authenticated');
-  }
-  return jwt.sign(secretKey);
+  return forgeUserToken(projectKey.privateKey, jwks.issuer, {
+    sub,
+    expired: opts?.expired,
+    aud: opts?.audience === null ? null : (opts?.audience ?? 'authenticated'),
+    extraClaims: { role: 'authenticated' },
+  });
 }
 
 /**
- * POSITIVE CONTROL for the `aud` guard: the project's anon API key is itself
- * an HS256 JWT on the SAME secret, but carries no `authenticated` audience
- * and no `sub`. If this ever verifies, the guard is not doing the work.
+ * POSITIVE CONTROL for the `aud` guard: a token signed by the project's OWN
+ * key — so the signature is genuine — but carrying no `authenticated`
+ * audience and no `sub`, the shape of a project API key rather than a user
+ * session. If this ever verifies, the guard is not doing the work.
  */
 async function anonApiKeyShapedToken(): Promise<string> {
-  return new SignJWT({ role: 'anon', iss: 'supabase' })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('2h')
-    .sign(secretKey);
+  return forgeUserToken(projectKey.privateKey, jwks.issuer, {
+    sub: null,
+    aud: null,
+    extraClaims: { role: 'anon' },
+  });
 }
 
 interface FakeStoreState {
@@ -177,7 +182,16 @@ const COMMIT_BODY = {
 let token: string;
 
 beforeEach(async () => {
+  projectKey = await makeEs256Key('kid-1');
+  jwks = await startJwksFixture([projectKey.jwk]);
+  mockConfig.auth.supabaseJwksUrl = undefined;
+  mockConfig.auth.supabaseUrl = jwks.base;
+  resetSupabaseJwksCacheForTests();
   token = await userToken();
+});
+
+afterEach(async () => {
+  await jwks.close();
 });
 
 // ---------------------------------------------------------------------------

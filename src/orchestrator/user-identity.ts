@@ -124,8 +124,9 @@ export async function resolveUserIdentity(
       // Fail closed and say so loudly (reason code only — no secrets).
       log.error(
         { request_id: requestId },
-        "CEE_REQUIRE_USER_JWT is on but no verification material is configured " +
-          "(SUPABASE_JWT_SECRET / SUPABASE_JWKS_URL / SUPABASE_URL) — refusing turn",
+        "CEE_REQUIRE_USER_JWT is on but the Supabase JWKS is not usable " +
+          "(SUPABASE_JWKS_URL / SUPABASE_URL unset, or the key set is " +
+          "unreachable) — refusing turn",
       );
     }
     emit(TelemetryEvents.UserJwtRefused, {
