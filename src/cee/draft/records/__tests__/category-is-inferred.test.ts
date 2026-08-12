@@ -74,7 +74,9 @@ function codes(records: DraftRecordSet): Record<string, number> {
   const graph = normalised(records);
   fixFactorGoalEdges(graph, detectEdgeFormat(graph.edges as never));
   const out: Record<string, number> = {};
-  for (const issue of validateGraph({ graph, requestId: "category-test", phase: "post_repair" }).errors) {
+  for (const issue of validateGraph({ graph, // The phase the LIVE gate reports these codes under (`post_sweep_authoritative`
+    // in the instance log), so the verdict here is the one the product acts on.
+    requestId: "category-test", phase: "post_sweep_authoritative" }).errors) {
     out[issue.code] = (out[issue.code] ?? 0) + 1;
   }
   return out;
