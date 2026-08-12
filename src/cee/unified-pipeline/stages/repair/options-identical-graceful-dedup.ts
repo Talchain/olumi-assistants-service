@@ -84,6 +84,14 @@ import { validateGraph } from "../../../../validators/graph-validator.js";
 import { sweepNodePath, pathsNameNode } from "../../../../validators/violation-paths.js";
 import type { GraphT } from "../../../../schemas/graph.js";
 import { findDisconnectedOptions } from "./status-quo-fix.js";
+// Bucket C codes, used below to re-derive ctx.llmRepairNeeded after the drop
+// with the deterministic sweep's exact formula. THE AUTHORITY IS
+// ./bucket-c-codes.ts — imported, never restated. Deliberately NOT imported
+// from ./deterministic-sweep.js: two wiring specs replace that module wholesale
+// with a `vi.mock` factory, and this file's `BUCKET_C_CODES.has(...)` throws
+// under them (measured). The authority module has no behaviour and nothing to
+// mock, so the hazard cannot recur.
+import { BUCKET_C_CODES } from "./bucket-c-codes.js";
 import {
   buildSignature,
   isExplicitBaseline,
@@ -91,26 +99,6 @@ import {
   type OptionLike,
   type EdgeLike,
 } from "./auto-baseline-dedup.js";
-
-/**
- * Bucket C codes (semantic, LLM-repair-only), used to re-derive
- * ctx.llmRepairNeeded after the drop with the deterministic sweep's exact
- * formula. KEEP IN SYNC with BUCKET_C_CODES in deterministic-sweep.ts —
- * duplicated (not imported) because the sweep module is vi.mock-replaced
- * wholesale in wiring tests, which would turn an import into `undefined`.
- */
-const BUCKET_C_CODES = new Set([
-  "NO_PATH_TO_GOAL",
-  "NO_EFFECT_PATH",
-  "UNREACHABLE_FROM_DECISION",
-  "MISSING_BRIDGE",
-  "MISSING_GOAL",
-  "MISSING_DECISION",
-  "INVALID_EDGE_TYPE",
-  "OPTIONS_IDENTICAL",
-  "GOAL_NUMBER_AS_FACTOR",
-  "INSUFFICIENT_OPTIONS",
-]);
 
 /**
  * from_brief detection mirroring nodeProvenanceDisplay
