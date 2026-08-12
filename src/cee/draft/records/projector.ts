@@ -624,10 +624,42 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
   //
   // ── THE PARENT LINK WAS ALREADY ON THE WIRE ────────────────────────────────
   // `basis` is the array positions of the stated_items a claim builds on. A
-  // refinement whose basis is exactly ONE stated `option` is, by the grammar's
-  // own semantics, a refinement of that option. No new field, no new prompt
-  // sentence. Measured on B1: three of four refinements name exactly one stated
-  // option (`c0→s20`, `c1→s21`, `c2→s22`).
+  // refinement whose basis NAMES EXACTLY ONE stated `option` is, by the
+  // grammar's own semantics, a refinement of that option. No new field, no new
+  // prompt sentence. Measured on B1: three of four refinements name exactly one
+  // stated option (`c0→s20`, `c1→s21`, `c2→s22`).
+  //
+  // ── ⭐⭐ COUNT THE OPTIONS, NOT THE ENTRIES (round 10) ──────────────────────
+  // This test was `basis.length === 1` and that was a DEFECT in the
+  // implementation of the rule above, not a different rule. The property is
+  // "names exactly one stated OPTION"; what was tested is "has exactly one basis
+  // ENTRY". `basis` is an EVIDENCE field — the instruction says "set `basis` to
+  // the array positions of the stated_items your claim builds on" — which this
+  // projector REPURPOSED as a parent pointer ("the link was already on the
+  // wire"). So one field answers two questions: *what did you build on?* and
+  // *which option is this a refinement of?* A figure in the basis answers the
+  // first and says nothing about the second, and the length test let it veto the
+  // parent link. Two questions under one name (trap 21), at FIELD level.
+  //
+  // ⭐ MEASURED over 28 banked record sets / 50 refinements, deduplicated by
+  // capture body hash (`round9/ROUND10-STEP1-2-DECISION-AND-POPULATION.md`):
+  //
+  //     names NO stated option                              9   18.0%
+  //     exactly one option, ALONE                          15   30.0%
+  //     exactly one option PLUS non-option entries         17   34.0%   ← was refused
+  //     two or more stated options                          9   18.0%
+  //
+  // **The refused shape is the MOST COMMON composition in the corpus** — more
+  // common than the one the rule was written for — because the instruction
+  // actively produces it. Blast radius of the correction: 17 refinements start
+  // merging, **ZERO stop**. The corpus the original decision was written against
+  // (B1's four refinements) contained no option-plus-non-option basis at all, so
+  // no prior decision covered this shape.
+  //
+  // The two-or-more-OPTIONS case is unchanged and still does not merge: those are
+  // genuinely distinct alternatives (B1's `[19,20]`; B3's "Rewrite first, then
+  // copilot (sequenced)" naming both stated options). Collapsing one would narrow
+  // the user's own choice set, which this projector may never do.
   //
   // ── ⚠ WHERE IT DELIBERATELY DOES NOT FIRE, AND WHY ─────────────────────────
   // If TWO OR MORE refinements name the same stated option, they are competing
@@ -648,10 +680,15 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     claims.forEach((claim, index) => {
       if (claim.claim_kind !== "option_refinement") return;
       const basis = claim.basis ?? [];
-      if (basis.length !== 1) return;
-      const parent = basis[0];
-      if (!Number.isInteger(parent)) return;
-      if (statedItems[parent]?.kind !== "option") return;
+      // The stated OPTIONS this refinement names, deduplicated: naming the same
+      // option twice still names one option.
+      const namedOptions = [
+        ...new Set(
+          basis.filter((b) => Number.isInteger(b) && statedItems[b]?.kind === "option"),
+        ),
+      ];
+      if (namedOptions.length !== 1) return;
+      const parent = namedOptions[0]!;
       const list = candidates.get(parent);
       if (list) list.push(index);
       else candidates.set(parent, [index]);
