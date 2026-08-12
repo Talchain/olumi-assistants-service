@@ -294,6 +294,40 @@ describe("what the demote deliberately does NOT touch", () => {
     expect(demote?.duplicate_of).toBe(idOf(graph, "Expand via contractors"));
   });
 
+  it("trades OPTIONS_IDENTICAL for a VISIBLE INSUFFICIENT_OPTIONS rather than inventing a difference", () => {
+    // ⚠ THE REACHABLE EDGE OF THIS PASS, PINNED RATHER THAN DISCOVERED LATER.
+    // The user named ONE alternative; the model added a second and gave it the
+    // same magnitude. Withdrawing the model's leaves a one-option graph, so the
+    // blocking code changes from `OPTIONS_IDENTICAL` to `INSUFFICIENT_OPTIONS`.
+    //
+    // BOTH block, so the gate outcome is unchanged — and the second one is the
+    // TRUE statement: the problem is not that two options look alike, it is that
+    // there is only one real alternative on the table. The three things the
+    // projector could do here are the same three as everywhere else in this file
+    // (force it in, drop it silently, disclose it), and this is the disclosed
+    // one. A stated option is still never touched.
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "grow revenue" },
+        { kind: "option", source_quote: "keep what we have" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "headcount" },
+        // Basis names NO stated option, so the merge rule correctly declines it
+        // and it stands as a rival alternative.
+        { claim_kind: "option_refinement", label: "Hire a growth team", basis: [] },
+        { claim_kind: "causal_link", label: "the status quo holds headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+        { claim_kind: "causal_link", label: "the growth team holds headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+        { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
+      ],
+    };
+    const { graph, dropped } = projectRecordsToGraph(records);
+    expect(optionLabels(graph)).toEqual(["keep what we have"]); // the USER's, and only the user's
+    const demote = dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated");
+    expect(demote?.label).toBe("Hire a growth team");
+    expect(demote?.duplicate_of_label).toBe("keep what we have");
+  });
+
   it("changes NOTHING on a record set with no colliding options", () => {
     // The no-op property: absent a collision the projection must be byte-identical
     // to what the projector produced before this pass existed. 21 of the 25 banked
