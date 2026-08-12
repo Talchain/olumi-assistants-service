@@ -88,35 +88,98 @@ describe("draftGraphWithAnthropic — multi-document selection is WIRED (2.996)"
     vi.unstubAllEnvs();
   });
 
-  it("returns the COMPLETE second document, not the 5-node placeholder (armD-0)", async () => {
-    const result = await draft(capture(0));
-    // Bound by IDENTITY: the exact node-id set of the SECOND document, derived
-    // from the capture. The discarded first document holds a strict subset of
-    // five ids, so no other document in this response can satisfy this.
-    expect(result.graph.nodes.map((n) => n.id).sort()).toEqual([
-      "dec_crm",
-      "fac_current_licence_cost",
-      "fac_migration_effort",
-      "fac_new_crm_spend",
-      "fac_team_size",
-      "fac_training_investment",
-      "fac_vendor_market",
-      "goal_crm_value",
-      "opt_hybrid",
-      "opt_replace",
-      "opt_status_quo",
-      "opt_train",
-      "out_data_quality",
-      "out_productivity",
-      "risk_adoption",
-      "risk_budget_overrun",
-      "risk_disruption",
-    ]);
-    expect(result.graph.edges).toHaveLength(29);
+  /**
+   * ⭐ THE LIVE PATH IS RECORDS-SHAPED, so the wiring assertion is made with a
+   * records-shaped multi-document response. The two historic graph captures
+   * remain in `tests/fixtures/` and are still read below — they are a RECORD of
+   * what the model emitted on 2026-08-09 and may not be rewritten — but the
+   * behaviour they used to pin (adapter returns the complete document) can only
+   * be pinned on the shape the adapter now accepts.
+   *
+   * The response text reproduces the captured PATTERN exactly: a deliberately
+   * partial first document, then the model's prose about starting again, then
+   * the complete one.
+   */
+  const PARTIAL_RECORDS = JSON.stringify({
+    stated_items: [{ kind: "goal", source_quote: "get more value from the CRM" }],
+    claims: [],
+  });
+  const COMPLETE_RECORDS = JSON.stringify({
+    stated_items: [
+      { kind: "goal", source_quote: "get more value from the CRM" },
+      { kind: "option", source_quote: "replace the CRM" },
+      { kind: "option", source_quote: "invest in training" },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "team productivity", basis: [0] },
+      { claim_kind: "causal_link", label: "a new CRM lifts productivity", basis: [1], from_ref: "s1", to_ref: "c0", effect: "positive" },
+      { claim_kind: "causal_link", label: "training lifts productivity", basis: [2], from_ref: "s2", to_ref: "c0", effect: "positive" },
+      { claim_kind: "causal_link", label: "productivity drives the goal", basis: [0], from_ref: "c0", to_ref: "s0", effect: "positive" },
+    ],
+  });
+  const MULTI_DOCUMENT =
+    `${PARTIAL_RECORDS}\n\nGiven the complexity here, let me actually build this out ` +
+    `properly rather than leaving placeholders.\n\n${COMPLETE_RECORDS}`;
+
+  /**
+   * ⭐⭐ KNOWN GAP, PINNED EXACTLY — the multi-document defect is NOT closed on
+   * the records path, and this test exists so that fact is a red line in the
+   * suite rather than an assumption in someone's head.
+   *
+   * On the graph path the partial first document was distinguishable because it
+   * was structurally INVALID. A partial RECORD SET is not: `{stated_items:[goal],
+   * claims:[]}` is a legitimate record set — zero claims is a deliberate, honest
+   * answer the grammar is built to permit. The selector's only remaining
+   * discrimination comes from the projected graph, and projected graphs do not
+   * yet clear the structural validator (acceptance criterion 3), so the predicate
+   * rejects BOTH documents and the caller keeps the first.
+   *
+   * The assertion is written to fail if the gap CLOSES as well as if it widens:
+   * whoever fixes the projection's structural yield must come here and re-pin
+   * this deliberately.
+   */
+  it("KNOWN GAP: neither records document is selectable, so the partial one survives", async () => {
+    const { isUsableDraftDocument } = await import("../../src/adapters/llm/draft-document-acceptance.js");
+    expect(isUsableDraftDocument(JSON.parse(PARTIAL_RECORDS))).toBe(false);
+    expect(isUsableDraftDocument(JSON.parse(COMPLETE_RECORDS))).toBe(false);
+
+    const result = await draft(MULTI_DOCUMENT);
+    expect(result.graph.nodes.map((n) => n.label).sort()).toEqual(["get more value from the CRM"]);
   });
 
-  it("is unchanged for a single-document response (armD-3)", async () => {
-    const result = await draft(capture(3));
-    expect(result.graph.nodes).toHaveLength(15);
+  /**
+   * THE POSITIVE CONTROL, without which the assertion above proves nothing: a
+   * predicate that answered `false` to everything would satisfy it perfectly.
+   * The historic capture's COMPLETE document is a structurally valid graph, and
+   * the predicate must still say yes to it — so `false` above is a verdict about
+   * those documents, not about a broken predicate.
+   */
+  it("[control] the predicate still returns TRUE for a structurally valid graph document", async () => {
+    const { isUsableDraftDocument } = await import("../../src/adapters/llm/draft-document-acceptance.js");
+    const documents = capture(0).match(/\{[\s\S]*?\n\}/g) ?? [];
+    expect(documents.length, "capture must yield at least two documents").toBeGreaterThanOrEqual(2);
+    const verdicts = documents.map((d) => {
+      try { return isUsableDraftDocument(JSON.parse(d)); } catch { return null; }
+    });
+    expect(verdicts, "the capture's complete document must still score usable").toContain(true);
+  });
+
+  it("is unchanged for a single-document response", async () => {
+    const result = await draft(COMPLETE_RECORDS);
+    expect(result.graph.nodes.map((n) => n.label)).toContain("team productivity");
+  });
+
+  /**
+   * ⚠ THE HISTORIC CAPTURES, KEPT AND STILL ASSERTED — as evidence of what the
+   * retired path emitted, and as the guard on the cutover's own honesty rule.
+   * A graph-shaped response is now REFUSED rather than silently accepted; if it
+   * were accepted, the old draft path would have re-entered as an undeclared
+   * fallback and every provenance claim this mechanism makes would hold only on
+   * the runs nobody checked.
+   */
+  it("REFUSES the historic graph-shaped captures rather than re-admitting the old path", async () => {
+    for (const n of [0, 3]) {
+      await expect(draft(capture(n))).rejects.toThrow(/draft_records_graph_shaped_response/);
+    }
   });
 });

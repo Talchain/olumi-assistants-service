@@ -22,7 +22,27 @@ vi.mock('@anthropic-ai/sdk', () => {
     messages = {
       stream: (body: Record<string, unknown>) => {
         h.bodies.push(body);
-        const payload = '{"nodes":[{"id":"a","kind":"factor","label":"A"}],"edges":[]}';
+        // ⚠ A RECORD SET, NOT A GRAPH (draft-by-records cutover): the draft path
+        // asks for `{stated_items, claims}` and projects the graph itself, so a
+        // graph payload is refused at the seam. This file reads the REQUEST, but
+        // a fixture that makes every draft fail would leave these request
+        // assertions riding on a swallowed rejection rather than a real draft.
+        const payload = JSON.stringify({
+          stated_items: [
+            { kind: 'goal', source_quote: 'open a second warehouse in Leeds' },
+          ],
+          claims: [
+            { claim_kind: 'factor', label: 'A', basis: [0] },
+            {
+              claim_kind: 'causal_link',
+              label: 'A bears on the goal',
+              basis: [0],
+              from_ref: 'c0',
+              to_ref: 's0',
+              effect: 'positive',
+            },
+          ],
+        });
         return {
           async *[Symbol.asyncIterator]() {
             yield { type: 'content_block_delta', delta: { type: 'text_delta', text: payload } };
@@ -82,9 +102,12 @@ describe('draft_graph structured outputs — claude-sonnet-5 capability (ROADMAP
     const oc = body.output_config as { format?: { type?: string; schema?: Record<string, unknown> } } | undefined;
     expect(oc, 'sonnet-5 draft fell back to prompt-only JSON').toBeDefined();
     expect(oc!.format!.type).toBe('json_schema');
-    // Bind to the DRAFT grammar specifically, not any schema.
+    // Bind to the DRAFT grammar specifically, not any schema. RE-POINTED, not
+    // relaxed: the draft grammar is now the RECORDS grammar (`stated_items` /
+    // `claims`), because the model states records and the projector builds the
+    // graph. The assertion still fails if the slot carries some other schema.
     expect(Object.keys((oc!.format!.schema as { properties: Record<string, unknown> }).properties))
-      .toEqual(expect.arrayContaining(['nodes', 'edges']));
+      .toEqual(expect.arrayContaining(['stated_items', 'claims']));
   });
 
   it('claude-sonnet-4-6 keeps carrying output_config (must-not-change regression fixture)', async () => {

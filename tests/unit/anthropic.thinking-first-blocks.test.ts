@@ -118,20 +118,41 @@ function makeDraftStream(finalContent: object[], streamedText: string) {
   };
 }
 
-/** Minimal valid graph JSON — passes normaliseDraftResponse + Zod for draft & repair. */
-const VALID_GRAPH_JSON = JSON.stringify({
-  nodes: [
-    { id: "goal_1", kind: "goal", label: "Test goal" },
-    { id: "dec_1", kind: "decision", label: "Test decision" },
-    { id: "opt_1", kind: "option", label: "Option A" },
-    { id: "out_1", kind: "outcome", label: "Revenue" },
+/**
+ * ⚠ A RECORD SET, NOT A GRAPH (draft-by-records cutover) — what the draft path
+ * now expects back from the model. The deterministic projector builds GraphV3
+ * from it at the post-LLM seam, so a graph-shaped fixture is refused there and
+ * this file's [thinking, text] parse test never reached its assertions.
+ *
+ * The projector mints the decision node and the decision→option edges; the
+ * factor is linked through to the goal because a factor that cannot reach one is
+ * withdrawn (projector.ts pass 3b).
+ */
+const VALID_RECORDS_JSON = JSON.stringify({
+  stated_items: [
+    { kind: "goal", source_quote: "grow revenue without over-hiring" },
+    { kind: "option", source_quote: "hire a contractor" },
+    { kind: "option", source_quote: "hire a full-time employee" },
   ],
-  edges: [
-    { from: "goal_1", to: "dec_1" },
-    { from: "dec_1", to: "opt_1" },
-    { from: "opt_1", to: "out_1", belief: 0.7, weight: 0.5 },
+  claims: [
+    { claim_kind: "factor", label: "delivery capacity", basis: [0] },
+    {
+      claim_kind: "causal_link",
+      label: "a contractor adds capacity sooner",
+      basis: [0],
+      from_ref: "s1",
+      to_ref: "c0",
+      effect: "positive",
+    },
+    {
+      claim_kind: "causal_link",
+      label: "capacity drives revenue",
+      basis: [0],
+      from_ref: "c0",
+      to_ref: "s0",
+      effect: "positive",
+    },
   ],
-  rationales: [],
 });
 
 const VALID_OPTIONS_JSON = JSON.stringify({
@@ -215,7 +236,7 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
 
   it("draftGraphWithAnthropic parses a [thinking, text] response", async () => {
     mockStream.mockImplementation(
-      makeDraftStream([THINKING_BLOCK, { type: "text", text: VALID_GRAPH_JSON }], VALID_GRAPH_JSON),
+      makeDraftStream([THINKING_BLOCK, { type: "text", text: VALID_RECORDS_JSON }], VALID_RECORDS_JSON),
     );
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -226,8 +247,19 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
       model: "claude-sonnet-4-6",
     });
 
-    expect(result.graph.nodes.map((n) => n.id)).toContain("goal_1");
-    expect(result.graph.nodes).toHaveLength(4);
+    // RE-POINTED, still bound by IDENTITY. The record set carries no ids — the
+    // projector MINTS them as content hashes — so the identity that survives the
+    // cutover is the LABEL, which is the user's own quote for a stated item and
+    // the model's own words for a claim. Asserting the whole label set (not a
+    // count) keeps this failing if the text block were dropped, mis-parsed, or
+    // projected from the wrong document.
+    expect(result.graph.nodes.map((n) => n.label).sort()).toEqual([
+      "Decision",
+      "delivery capacity",
+      "grow revenue without over-hiring",
+      "hire a contractor",
+      "hire a full-time employee",
+    ]);
   });
 
   it("draftGraphWithAnthropic still rejects a response with no text block", async () => {
