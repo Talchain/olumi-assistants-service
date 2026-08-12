@@ -574,7 +574,7 @@ const UNCONDITIONALLY_REPAIRED_SHAPES: readonly { from: string; to: string; note
   {
     from: "factor",
     to: "goal",
-    note: "the sweep splits this into factor → outcome → goal, and that minted outcome is what a model needs at least one of",
+    note: "this is how a chain ends, and every model needs at least one chain that ends here",
   },
 ];
 
@@ -664,7 +664,14 @@ export function renderLegalEdgeVocabulary(): string {
   );
 
   return [
-    "These are the ONLY shapes a link can take. Every other shape is discarded:",
+    // ⚠ DELIBERATELY "use these and no others" RATHER THAN "every other shape is
+    // discarded". The second is FALSE: `option → constraint` and `factor →
+    // constraint` are neither in this legal list nor in the unrescuable set —
+    // the pipeline REPAIRS them. A directive the model should follow is not the
+    // same claim as a fact about what the pipeline does, and stating the second
+    // when we mean the first is exactly the guarantee-shaped falsehood this
+    // estate keeps paying for.
+    "Use these shapes and no others:",
     ...legal,
     "",
     "One further rule, and it is the one your last set of links broke most often:",
