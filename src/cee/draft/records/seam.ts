@@ -149,7 +149,33 @@ export function projectDraftRecords(rawJson: unknown): DraftRecordsSeamResult {
       detail: [fieldIssues, formIssues].filter(Boolean).join(" | ") || "unknown record-set validation error",
     };
   }
-  const records = parsed.data as unknown as DraftRecordSet;
+  // Rebuilt field-by-field rather than double-cast. The wire schema is
+  // `.passthrough()`, so its inferred type carries an index signature the
+  // declared interface does not; converting explicitly keeps the boundary a
+  // CONVERSION rather than an assertion, and a field the projector reads but the
+  // wire schema stopped validating would fail to compile here instead of
+  // arriving as `undefined` at runtime.
+  const records: DraftRecordSet = {
+    stated_items: parsed.data.stated_items.map((item) => ({
+      kind: item.kind,
+      source_quote: item.source_quote,
+      ...(item.value !== undefined ? { value: item.value } : {}),
+      ...(item.unit !== undefined ? { unit: item.unit } : {}),
+      ...(item.role !== undefined ? { role: item.role } : {}),
+      ...(item.direction !== undefined ? { direction: item.direction } : {}),
+    })),
+    claims: parsed.data.claims.map((claim) => ({
+      claim_kind: claim.claim_kind,
+      label: claim.label,
+      ...(claim.basis !== undefined ? { basis: claim.basis } : {}),
+      ...(claim.from_ref !== undefined ? { from_ref: claim.from_ref } : {}),
+      ...(claim.to_ref !== undefined ? { to_ref: claim.to_ref } : {}),
+      ...(claim.effect !== undefined ? { effect: claim.effect } : {}),
+      ...(claim.strength !== undefined ? { strength: claim.strength } : {}),
+      ...(claim.category !== undefined ? { category: claim.category } : {}),
+      ...(claim.value !== undefined ? { value: claim.value } : {}),
+    })),
+  };
   return { ok: true, records, projection: projectRecordsToGraph(records) };
 }
 

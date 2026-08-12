@@ -1876,7 +1876,10 @@ export async function draftGraphWithAnthropic(
       grammar_sha256: recordsSidecar.grammar_sha256,
       ...recordsSidecar.counts,
     }, "[Anthropic] draft record set projected to GraphV3 at the post-LLM seam");
-    rawJson = seam.projection.graph as unknown as Record<string, unknown>;
+    // A spread, not a double-cast: the projected graph is copied into a plain
+    // record so `rawJson` keeps its declared type, and nothing downstream holds a
+    // reference to the projection the sidecar also describes.
+    rawJson = { ...seam.projection.graph } as Record<string, unknown>;
 
     // Diagnostic census of what the projector produced. Computed AFTER the
     // projection deliberately: before it, `rawJson.nodes` is absent on every
