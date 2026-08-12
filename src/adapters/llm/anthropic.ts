@@ -60,6 +60,7 @@ import { extractZodIssues } from '../../schemas/llmExtraction.js';
 // were live.
 import {
   buildDraftRecordsSchema,
+  DRAFT_RECORDS_CLAIM_PROGRESS_RE,
   draftRecordsGrammarHash,
   draftRecordsInstructionHash,
   buildDraftRecordsSidecar,
@@ -1027,6 +1028,42 @@ export async function draftGraphWithAnthropic(
       let edgesProbeOffset = 0;
       const EDGES_PROBE_OVERLAP = 32;
       let edgesReached = false;
+      // ⭐⭐ RECORDS PROGRESS — the second forward-progress signal (R1 round 6).
+      //
+      // THE DEFECT THIS CLOSES. The draft path asks for a RECORD SET and the
+      // only structural progress probe the detector had was
+      // `DRAFT_EDGES_REACHED_RE`. That probe DOES match the records grammar
+      // (`33a1dda3` widened it to `"from(_ref)?"`), so the inherited claim that
+      // records "can never" lift the gates is false — but it lifts them on
+      // `from_ref`, which is a `causal_link`-ONLY, OPTIONAL field emitted after
+      // the whole `stated_items` array. Two consequences, both measured:
+      //   · LATE  — on the banked long-brief streams the first `from_ref` lands
+      //     at char 3,869/7,627 and 3,790/6,845, i.e. halfway.
+      //   · ABSENT — `claims` carries no `minItems` by design, and a record set
+      //     of `factor`/`prior` claims is strictly conformant and contains no
+      //     `from_ref` at all. Such a draft can NEVER lift the gates and is
+      //     aborted as a runaway for being healthy.
+      // `claim_kind` is REQUIRED on every claim, so counting it measures claims
+      // DECODED — forward progress through the records grammar's own structure,
+      // available from the first claim rather than from the first causal link.
+      // The probe is derived from the grammar's own field name (see
+      // `DRAFT_RECORD_CLAIM_DISCRIMINATOR`), never restated here, so a rename
+      // cannot silently blind it.
+      let recordsProbeOffset = 0;
+      let recordsClaimsDecoded = 0;
+      let timeToFirstClaimMs: number | null = null;
+      // Global twin of the (deliberately non-global) probe, built once per
+      // attempt and re-aimed per window, so a delta carrying several claims
+      // counts all of them.
+      const recordsClaimScanner = new RegExp(DRAFT_RECORDS_CLAIM_PROGRESS_RE.source, "g");
+      /**
+       * The two forward-progress signals, joined. EDGES OR CLAIMS — never
+       * either one replacing the other: a graph-shaped stream still lifts on
+       * `from`, so this function returns exactly what `edgesReached` returned
+       * for every stream that carries no `claim_kind` (i.e. every graph draft),
+       * and the graph path is unchanged by construction.
+       */
+      const pastBottleneck = (): boolean => edgesReached || recordsClaimsDecoded > 0;
       // Time from stream start to the first edge — the empirical signal that
       // validates DRAFT_RUNAWAY_DETECT_MS live (a healthy draft should reach
       // edges well under the deadline). Recorded on success, surfaced on meta.
@@ -1116,7 +1153,7 @@ export async function draftGraphWithAnthropic(
           // first event we are in TTFB (heavier for a document) — never a stall.
           if (
             streamingStarted &&
-            !edgesReached &&
+            !pastBottleneck() &&
             !runaway &&
             Date.now() - lastDeltaAt >= DRAFT_RUNAWAY_STALL_MS
           ) {
@@ -1125,7 +1162,7 @@ export async function draftGraphWithAnthropic(
           }
         }, (detectDeadlineMs as number) + attachAllowanceMs);
         ceilingTimer = setTimeout(() => {
-          if (!edgesReached && !runaway) {
+          if (!pastBottleneck() && !runaway) {
             runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "time" };
             perAttempt.abort();
           }
@@ -1173,6 +1210,44 @@ export async function draftGraphWithAnthropic(
               perAttempt.abort();
               break;
             }
+            // ── RECORDS PROGRESS COUNT ───────────────────────────────
+            // Tail-windowed like the edges probe, but the window is advanced to
+            // the END OF THE LAST MATCH rather than by a fixed overlap, so a
+            // claim straddling a delta boundary is counted once and never twice.
+            {
+              const window = acc.slice(recordsProbeOffset);
+              recordsClaimScanner.lastIndex = 0;
+              let hits = 0;
+              let lastEnd = -1;
+              let m: RegExpExecArray | null;
+              while ((m = recordsClaimScanner.exec(window)) !== null) {
+                hits++;
+                lastEnd = m.index + m[0].length;
+              }
+              if (hits > 0) {
+                const wasZero = recordsClaimsDecoded === 0;
+                recordsClaimsDecoded += hits;
+                recordsProbeOffset += lastEnd;
+                if (wasZero) {
+                  // Past the stated_items bottleneck — the records analogue of
+                  // reaching the edges array. Cancel the detector exactly as the
+                  // edges branch does; a stream that has produced real structure
+                  // is a healthy generation, not a constrained-decode thrash.
+                  timeToFirstClaimMs = Date.now() - attemptStart;
+                  clearDetectTimers();
+                  log.info({
+                    event: "cee.llm.draft_records_progress",
+                    model,
+                    time_to_first_claim_ms: timeToFirstClaimMs,
+                    chars: acc.length,
+                    detect_ms: detectDeadlineMs,
+                    hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
+                  }, "[Anthropic] draft_graph decoded its first RECORD CLAIM — healthy generation past the stated_items bottleneck (the records analogue of reaching the edges array)");
+                }
+              } else {
+                recordsProbeOffset = Math.max(recordsProbeOffset, acc.length - EDGES_PROBE_OVERLAP);
+              }
+            }
             if (!edgesReached && DRAFT_EDGES_REACHED_RE.test(acc.slice(edgesProbeOffset))) {
               // Past the nodes bottleneck — this is a healthy generation; cancel
               // the detector and let the stream complete.
@@ -1208,7 +1283,7 @@ export async function draftGraphWithAnthropic(
                   hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
                 }, "[Anthropic] draft_graph reached edges in the SLOW TAIL — time-to-edges is approaching the runaway ceiling; a rising rate of this WARN means the healthy corpus is drifting and the ceiling may need re-derivation (F4-class early alarm)");
               }
-            } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS + attachAllowanceChars) {
+            } else if (detectionActive && !pastBottleneck() && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS + attachAllowanceChars) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
               brokeMidStream = true;
               perAttempt.abort();

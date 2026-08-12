@@ -107,6 +107,36 @@ export type DraftRecordDirection = (typeof DRAFT_RECORD_DIRECTIONS)[number];
 export const DRAFT_RECORD_CLAIM_KINDS = ["factor", "causal_link", "option_refinement", "prior"] as const;
 export type DraftRecordClaimKind = (typeof DRAFT_RECORD_CLAIM_KINDS)[number];
 
+/**
+ * The REQUIRED discriminator on every claim — and therefore the only field that
+ * is present EXACTLY ONCE PER DECODED CLAIM, whatever the claim's kind.
+ *
+ * ⭐ WHY IT IS A CONSTANT RATHER THAN A LITERAL IN TWO PLACES. The streaming
+ * runaway detector needs a structural "this stream is making forward progress"
+ * probe for the records grammar, the way `"from"`/`"from_ref"` serves the graph
+ * one. A probe written as its own string literal is a HAND-MAINTAINED MIRROR of
+ * this schema (trap 12): rename the field here and the probe silently stops
+ * matching, the detector silently stops seeing progress, and every slow records
+ * draft is silently aborted as a runaway. Nothing goes red. So the schema below
+ * and the probe are both BUILT FROM THIS ONE NAME, and cannot drift.
+ *
+ * ⚠ `label` is also required, but it is NOT a safe progress probe: the string
+ * `"label"` appears in no other claim field today, yet nothing in the grammar
+ * prevents a future optional field from containing it inside a VALUE. The
+ * discriminator is the field whose semantics are "exactly one per claim".
+ */
+export const DRAFT_RECORD_CLAIM_DISCRIMINATOR = "claim_kind";
+
+/**
+ * Structural "a claim has been decoded" probe over accumulated stream text —
+ * the records analogue of `DRAFT_EDGES_REACHED_RE`.
+ *
+ * Deliberately NOT global: it is used with `.test()`/`.exec()` on a moving
+ * window, and a global flag would carry `lastIndex` across calls (the same note
+ * the edges probe carries).
+ */
+export const DRAFT_RECORDS_CLAIM_PROGRESS_RE = new RegExp(`"${DRAFT_RECORD_CLAIM_DISCRIMINATOR}"\\s*:`);
+
 /** `FactorCategory` (graph.ts). */
 export const DRAFT_RECORD_CATEGORIES = ["controllable", "observable", "external"] as const;
 export type DraftRecordCategory = (typeof DRAFT_RECORD_CATEGORIES)[number];
@@ -204,7 +234,11 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
         items: {
           type: "object",
           properties: {
-            claim_kind: { type: "string", enum: [...DRAFT_RECORD_CLAIM_KINDS] },
+            // Built from DRAFT_RECORD_CLAIM_DISCRIMINATOR so the streaming
+            // progress probe and this schema cannot drift apart. Serialises
+            // byte-identically to the literal it replaces — the grammar hash is
+            // unchanged, and a test asserts that.
+            [DRAFT_RECORD_CLAIM_DISCRIMINATOR]: { type: "string", enum: [...DRAFT_RECORD_CLAIM_KINDS] },
             label: { type: "string" },
             basis: { type: "array", items: { type: "integer" } },
             from_ref: { type: "string" },
@@ -217,7 +251,7 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             // apart from `strength` on purpose.
             sets_to: { type: "number" },
           },
-          required: ["claim_kind", "label"],
+          required: [DRAFT_RECORD_CLAIM_DISCRIMINATOR, "label"],
           additionalProperties: false,
         },
       },
