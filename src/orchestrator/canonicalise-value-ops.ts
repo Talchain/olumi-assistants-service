@@ -80,6 +80,37 @@ import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapter
 // rather than reimplemented — a second copy of a scale convention is the
 // hand-maintained-twin defect this module's header exists to warn about.
 import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { recoverScaleFrame } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
+
+/**
+ * R2-1 — a bare sub-1 value against a FRAME-RECOVERABLE factor is genuinely
+ * ambiguous (a proportion of the frame, or a raw sub-unit amount?), and the
+ * round-2 writers measurably disagreed on it (10^5 divergence, REVIEW-926.md
+ * U1). The ambiguity is the PRODUCT: callers prescreen with
+ * `findAmbiguousScaleValueOps` and surface an ask; `reconcileObservedValuePair`
+ * throws this typed error as the fail-loud backstop, so a future caller that
+ * skips the prescreen cannot silently guess.
+ */
+export class AmbiguousScaleValueError extends Error {
+  constructor(
+    readonly path: string,
+    readonly newValue: number,
+    readonly currentRawValue: number,
+  ) {
+    super(
+      `Value ${newValue} on a frame-scaled factor is ambiguous (a proportion, or an amount of ${currentRawValue}-scale?) — the caller must ask, not guess`,
+    );
+    this.name = 'AmbiguousScaleValueError';
+  }
+}
+
+/** One ambiguous value op, as the callers' prescreen reports it. */
+export interface AmbiguousScaleValueOp {
+  readonly path: string;
+  readonly newValue: number;
+  readonly currentRawValue: number;
+  readonly label?: string;
+}
 import type { PatchOperation } from './types.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -396,6 +427,62 @@ export function stampUserEditProvenance(
  *                       supplies the `unit`/`cap` scale context and the
  *                       existing `raw_value` that may need clearing.
  */
+/**
+ * THE CALLERS' PRESCREEN for the ambiguous scale class (R2-1). Same
+ * extraction as `reconcileObservedValuePair` (op → observed root → new value;
+ * node → before pair), same predicate as the D1 stated-value ambiguity gate's
+ * framed arm: capless factor, frame recoverable from the BEFORE pair, bare
+ * value `v ≠ 0 ∧ |v| < 1` that actually MOVES the stored value. Both live
+ * callers (`edit-graph.ts` and `gm-held-execute.ts`) call this before
+ * reconcile and surface an ASK for any hit; reconcile's typed throw is the
+ * backstop, and this function is exported so the ask and the backstop cannot
+ * disagree on membership (one predicate, one module — trap 12).
+ */
+export function findAmbiguousScaleValueOps(
+  operations: readonly PatchOperation[],
+  currentGraph: unknown,
+): AmbiguousScaleValueOp[] {
+  const out: AmbiguousScaleValueOp[] = [];
+  for (const op of operations) {
+    if (op.op !== 'update_node') continue;
+    const value = asRecord(op.value);
+    if (value === null) continue;
+    const observed = asRecord(value[OBSERVED_ROOT]);
+    if (observed === null) continue;
+    if (!Object.prototype.hasOwnProperty.call(observed, 'value')) continue;
+    const newValue = observed.value;
+    if (typeof newValue !== 'number' || !Number.isFinite(newValue)) continue;
+    if (newValue === 0 || Math.abs(newValue) >= 1) continue;
+    const node = findNode(currentGraph, op.path);
+    const nodeObserved = asRecord(node?.observed_state) ?? {};
+    if (nodeObserved.value === newValue) continue; // no move — not an edit
+    const payloadCap = typeof observed.cap === 'number' ? observed.cap : undefined;
+    const nodeCap = typeof nodeObserved.cap === 'number' ? nodeObserved.cap : undefined;
+    if (payloadCap !== undefined || nodeCap !== undefined) continue; // capped: existing machinery owns it
+    // `%` factors: a sub-1 op value is the model-scale convention, not the
+    // ambiguous class — the percentage path owns them (same exclusion as
+    // reconcile's framed branch; one predicate, kept together).
+    const payloadUnit = typeof observed.unit === 'string' ? observed.unit : undefined;
+    const nodeUnit = typeof nodeObserved.unit === 'string' ? nodeObserved.unit : undefined;
+    if ((payloadUnit ?? nodeUnit) === '%') continue;
+    const frame = recoverScaleFrame({
+      value: nodeObserved.value,
+      raw_value: nodeObserved.raw_value,
+    });
+    if (frame === undefined) continue;
+    const currentRaw =
+      typeof nodeObserved.raw_value === 'number' ? nodeObserved.raw_value : Number.NaN;
+    const label = typeof node?.label === 'string' ? node.label : undefined;
+    out.push({
+      path: op.path,
+      newValue,
+      currentRawValue: currentRaw,
+      ...(label !== undefined ? { label } : {}),
+    });
+  }
+  return out;
+}
+
 export function reconcileObservedValuePair(
   operations: readonly PatchOperation[],
   currentGraph: unknown,
@@ -464,6 +551,55 @@ export function reconcileObservedValuePair(
         : typeof nodeObserved.cap === 'number'
           ? nodeObserved.cap
           : undefined;
+
+    // ── FRAMED CAPLESS FACTORS (records pass 3d) — the frame is preserved,
+    // not destroyed (PR #926 round-1 BLOCKER), and the genuinely ambiguous
+    // input class is REFUSED, not guessed (round-2 blocker R2-1). The
+    // projector writes magnitude-scaled factors as {value: raw/frame,
+    // raw_value: raw} with NO cap (a stored cap would flip
+    // normaliseFactorValue to cap-normalised writes and break the user-scale
+    // round-trip). The frame is recoverable from the node's BEFORE pair —
+    // including the over-frame pair a >frame edit creates (round-2 blocker
+    // R2-2: the earlier `value ≤ 1` precondition refused the very pair the
+    // writer itself wrote, so the SECOND edit resurrected the raw write).
+    //
+    //   · bare sub-1 non-zero input → AMBIGUOUS (proportion of the frame, or
+    //     a raw sub-unit amount?). Round 2 measured the two writers guessing
+    //     OPPOSITE answers (10^5 apart). Callers prescreen via
+    //     `findAmbiguousScaleValueOps` and ASK; this throw is the fail-loud
+    //     backstop so no future caller can silently guess (trap 22f: make
+    //     the ambiguity the product).
+    //   · everything else (raw magnitudes, 0, negatives ≤ -1) → RAW, divided
+    //     onto the factor's own frame — the same semantics as writer 1, and
+    //     the cross-writer parity pin holds both to it.
+    // ⚠ `unit === '%'` DEFERS to the percentage convention below — that path
+    // is `resolveExistingRawValue`'s own special case, and it is ITSELF
+    // frame-preserving for percent factors (model value stays the 0–1 level,
+    // raw_value = value×100 — i.e. frame 100, exactly what the pair encodes).
+    // Intercepting it here misread an unambiguous 0.4 (= 40%) as the
+    // ambiguous class (caught by observed-value-pair-authority.test.ts).
+    if (cap === undefined && unit !== '%') {
+      const frame = recoverScaleFrame({
+        value: nodeObserved.value,
+        raw_value: nodeObserved.raw_value,
+      });
+      if (frame !== undefined) {
+        if (newValue !== 0 && Math.abs(newValue) < 1) {
+          const currentRaw =
+            typeof nodeObserved.raw_value === 'number' ? nodeObserved.raw_value : Number.NaN;
+          throw new AmbiguousScaleValueError(op.path, newValue, currentRaw);
+        }
+        const framedValue = newValue / frame;
+        if (Number.isFinite(framedValue)) {
+          const nextObserved: Record<string, unknown> = { ...observed };
+          nextObserved.value = framedValue;
+          nextObserved.raw_value = newValue;
+          return { ...op, value: { ...value, [OBSERVED_ROOT]: nextObserved } };
+        }
+        // Non-finite arithmetic: fall through to the pre-existing path below,
+        // which re-derives or clears raw_value — never a silent no-op.
+      }
+    }
 
     // `raw_value` deliberately OMITTED: we are asking what the NEW value
     // denotes, not echoing the old answer back (which is the defect).

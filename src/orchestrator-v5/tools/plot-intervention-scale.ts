@@ -720,6 +720,124 @@ export function projectRequestInterventionsToWireScale(
 }
 
 /**
+ * ── THE BASELINE GATE (row 2.1085; PR #926 rounds 2–3) ─────────────────────
+ * THE QUESTION THIS PREDICATE ANSWERS, NAMED APART (trap 21): "is this factor
+ * SCALE-COHERENT WITHIN ITSELF?" — it is NOT "is any baseline outside [0,1]?"
+ * and it is NOT an arbitrary exemption. It reconciles two measured prior
+ * cases, and a future session must not "fix" either half away:
+ *
+ *   · THE R2-2 SILENT-CORRUPTION CLASS (round-2 re-review, measured): a
+ *     capless baseline OUTSIDE [0,1] beside that factor's own IN-unit-interval
+ *     interventions is internally INCOHERENT — the baseline reaches PLoT's
+ *     kernel raw (a structural root's `observed_state.value` enters the
+ *     linear sum) while its levels are framed, and the intervention-scoped
+ *     projection above cannot see it. BLOCK with the honest ask, never
+ *     compute. Also covers the no-evidence subcase (baseline outside, NO
+ *     user-authored interventions — e.g. a chat-added raw-magnitude factor):
+ *     DEFAULT TO THE ASK, derived not assumed — the 13-real-capture corpus
+ *     (`__tests__/fixtures/staging-draft-captures-2026-08-10.json`, the
+ *     round-4/5 evidence base, pre-cutover quartet) contains ZERO capless
+ *     out-of-unit baselines of ANY quadrant, so no legitimate shape is known
+ *     to occupy it; prefer the visible ask over confident wrongness.
+ *
+ *   · THE ROUND-5 RATIFIED ASTRIDE-1 CLASS (pinned ⭐ in
+ *     run-analysis-final-payload-scale.test.ts): a factor whose USER-AUTHORED
+ *     interventions are themselves outside [0,1] is a user working in their
+ *     own raw scale — its own values define its comparison frame (PLoT's
+ *     spread normalisation is the intended relative comparison; blocking this
+ *     shape broke 102 legitimate tests in round 4b). A baseline outside [0,1]
+ *     on such a factor is CONSISTENT with its own scale. COMPUTES.
+ *
+ * Provenance is load-bearing exactly as in the round-5 exemption above: a
+ * value CEE synthesised (`scaffoldUnconfiguredOptions`' placeholders, marked
+ * per option in `synthesisedByOption`) is not evidence about the user's
+ * scale, so only USER-AUTHORED out-of-unit interventions grant coherence.
+ *
+ * Capped factors are exempt (their cap IS the declared scale); non-factor
+ * kinds are exempt (constraint thresholds are raw by contract — "PLoT
+ * normalises"; goals carry their own baseline machinery); a factor with no
+ * finite observed value states nothing. Writer-agnostic by design: this is
+ * the closure that does not depend on writer enumeration.
+ */
+export function findScaleIncoherentBaselineFactorIds(
+  nodes: unknown,
+  perOptionRawObjects: ReadonlyArray<Record<string, unknown>>,
+  synthesisedByOption?: ReadonlyArray<ReadonlySet<string>>,
+): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(nodes)) return out;
+  for (const n of nodes) {
+    if (n === null || typeof n !== 'object') continue;
+    const node = n as Record<string, unknown>;
+    if (node.kind !== 'factor') continue;
+    const id = node.id;
+    if (typeof id !== 'string' || id.length === 0) continue;
+    const observed =
+      node.observed_state !== null && typeof node.observed_state === 'object'
+        ? (node.observed_state as Record<string, unknown>)
+        : undefined;
+    const data =
+      node.data !== null && typeof node.data === 'object'
+        ? (node.data as Record<string, unknown>)
+        : undefined;
+    // Same cap fallback chain as buildFactorScaleMap — one convention.
+    const cap = firstFiniteNumber(observed?.cap, data?.cap, node.cap);
+    if (cap !== undefined) continue;
+    const baseline = firstFiniteNumber(observed?.value);
+    if (baseline === undefined) continue;
+    if (baseline >= 0 && baseline <= 1) continue;
+    // Baseline outside [0,1]: coherent ONLY if the factor's own USER-AUTHORED
+    // interventions establish the same raw frame (round-5 semantics: any
+    // user-authored value outside the unit interval).
+    const selfFramed = perOptionRawObjects.some((rawObjects, optionIndex) => {
+      if (synthesisedByOption?.[optionIndex]?.has(id) === true) return false;
+      const v = extractNumericInterventionValue(rawObjects[id]);
+      return v !== null && (v < 0 || v > 1);
+    });
+    if (!selfFramed) out.push(id);
+  }
+  return out;
+}
+
+/** The analysis-seam scale verdict, as one pure decision. */
+export type AnalysisScaleBlockVerdict =
+  | { readonly blocked: false }
+  | {
+      readonly blocked: true;
+      /** Two different questions, named apart (trap 21). */
+      readonly reason_code: 'mixed_scale_unresolved' | 'baseline_scale_unresolved';
+      readonly unresolvedFactorIds: string[];
+    };
+
+/**
+ * Compose the request projection's intervention verdict with the baseline
+ * gate into the ONE decision `run_analysis` acts on. Pure and exported so the
+ * decision — which ids, which reason — is pinned by tests; the handler's only
+ * residual is the throw itself (the same thin residual the pre-existing
+ * mixed-scale block carries).
+ */
+export function decideAnalysisScaleBlock(
+  projection: Pick<RequestScaleProjection, 'mixedUnresolved' | 'unresolvedFactorIds'>,
+  caplessRawBaselineFactorIds: readonly string[],
+): AnalysisScaleBlockVerdict {
+  if (projection.mixedUnresolved) {
+    const ids = [...projection.unresolvedFactorIds];
+    for (const id of caplessRawBaselineFactorIds) {
+      if (!ids.includes(id)) ids.push(id);
+    }
+    return { blocked: true, reason_code: 'mixed_scale_unresolved', unresolvedFactorIds: ids };
+  }
+  if (caplessRawBaselineFactorIds.length > 0) {
+    return {
+      blocked: true,
+      reason_code: 'baseline_scale_unresolved',
+      unresolvedFactorIds: [...caplessRawBaselineFactorIds],
+    };
+  }
+  return { blocked: false };
+}
+
+/**
  * Redaction-safe aggregate of conversions for a single snapshot load. Carries
  * rule counts and factor-id lists ONLY — never input/output magnitudes or caps
  * — so the diagnostic logged from it cannot leak business values.

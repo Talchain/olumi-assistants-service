@@ -75,7 +75,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance, reconcileObservedValuePair } from "../canonicalise-value-ops.js";
+import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -2812,8 +2812,59 @@ export async function handleEditGraph(
     // recomputes the anchor from the same stale field). Re-derive the sibling
     // from the authoritative `value`, or clear it when the scale is genuinely
     // ambiguous — never leave the superseded claim standing.
+    // R2-1 (PR #926) — THE AMBIGUOUS SCALE CLASS ASKS, IT DOES NOT GUESS.
+    // A bare sub-1 value against a frame-scaled (capless records) factor is
+    // genuinely ambiguous — a proportion of the factor's frame, or a raw
+    // sub-unit amount — and the two baseline writers were measured guessing
+    // OPPOSITE answers (10^5 apart). Prescreen with the module's own
+    // predicate and surface a clarification instead of writing either guess;
+    // `reconcileObservedValuePair` throws on the same class as the fail-loud
+    // backstop, so this prescreen and the backstop cannot disagree.
+    const canonicalisedOps = stampUserEditProvenance(
+      canonicaliseValueOps(operations, context.graph).operations,
+    );
+    const ambiguousScaleOps = findAmbiguousScaleValueOps(canonicalisedOps, context.graph);
+    if (ambiguousScaleOps.length > 0) {
+      const first = ambiguousScaleOps[0]!;
+      const factorName = first.label ?? 'this factor';
+      const rejectionCtx: PatchRejectionContext = {
+        reason: 'structural_violation',
+        detail:
+          `${first.newValue} reads as a proportion, but “${factorName}” is recorded as an amount` +
+          `${Number.isFinite(first.currentRawValue) ? ` (currently ${first.currentRawValue})` : ''}. ` +
+          `Tell me the amount you want, or give the value with its unit.`,
+        violations: ambiguousScaleOps.map(
+          (o) => `ambiguous_scale_value: ${o.newValue} on ${o.label ?? o.path}`,
+        ),
+        suggested_actions: [
+          {
+            role: 'facilitator',
+            label: 'State the amount',
+            prompt: `Set ${factorName} to the exact amount I mean, once I say it with its unit.`,
+          },
+        ],
+      };
+      const envelope = buildPatchRejectionEnvelope(rejectionCtx, turnId, context);
+      validationOutcome = 'ambiguous_scale_value';
+      recoveryPathChosen = 'patch_rejection_envelope';
+      branchTaken = 'rejection';
+      branchReason = 'ambiguous_scale_value';
+      return {
+        blocks: [],
+        assistantText: envelope.assistant_text,
+        latencyMs: Date.now() - startTime,
+        appliedGraph: null,
+        wasRejected: true,
+        suggestedActions: envelope.suggested_actions?.map((action: SuggestedAction) => ({
+          label: action.label,
+          prompt: action.prompt,
+          role: action.role,
+        })),
+        diagnostics: diagnostics(),
+      };
+    }
     const opsToApply: PatchOperation[] = reconcileObservedValuePair(
-      stampUserEditProvenance(canonicaliseValueOps(operations, context.graph).operations),
+      canonicalisedOps,
       context.graph,
     );
 

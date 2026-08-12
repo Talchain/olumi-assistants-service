@@ -98,6 +98,8 @@ import {
   projectRequestInterventionsToWireScale,
   summariseConversions,
   summaryIsNoteworthy,
+  findScaleIncoherentBaselineFactorIds,
+  decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import {
@@ -484,7 +486,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // copy names the factors and asks for their units. This replaces the
     // round-3 log-only warn, which let the run ship `robustness: high` with no
     // hedge on numbers computed from a corrupted payload.
-    if (requestProjection.mixedUnresolved) {
+    // Row 2.1085 (PR #926 rounds 2–3): the BASELINE gate — within-factor
+    // scale coherence. Interventions were gated above; a capless factor's
+    // observed BASELINE also reaches the compute (PLoT feeds a structural
+    // root's observed_state.value straight into the linear sum), and a raw
+    // one beside framed levels was measured shipping under a fully green
+    // intervention verdict. Scoped by the factor's OWN user-authored
+    // interventions (see the predicate's doc for the two prior cases it
+    // reconciles — R2-2 corruption vs the ratified round-5 astride-1 class);
+    // provenance comes from the scaffold's own disclosure record, exactly as
+    // the request projection's synthesised-marker does above.
+    const caplessRawBaselineIds = findScaleIncoherentBaselineFactorIds(
+      graphNodesForScale,
+      rawObjectsPerOption,
+      synthesisedByOption,
+    );
+    const scaleBlock = decideAnalysisScaleBlock(requestProjection, caplessRawBaselineIds);
+    if (scaleBlock.blocked) {
       const labelById = new Map<string, string>();
       if (Array.isArray(graphNodesForScale)) {
         for (const n of graphNodesForScale) {
@@ -494,30 +512,37 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           }
         }
       }
-      const factorNames = requestProjection.unresolvedFactorIds
+      const factorNames = scaleBlock.unresolvedFactorIds
         .map((id) => labelById.get(id))
         .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
       const named = factorNames.length > 0 ? factorNames.join(', ') : 'some of the factors';
       log.warn(
         {
-          event: 'run_analysis.intervention_scale_mixed_unresolved',
+          event:
+            scaleBlock.reason_code === 'mixed_scale_unresolved'
+              ? 'run_analysis.intervention_scale_mixed_unresolved'
+              : 'run_analysis.baseline_scale_unresolved',
           request_id: invocation.requestId,
           scenario_id: args.scenario_id,
-          unresolved_factor_ids: requestProjection.unresolvedFactorIds,
+          unresolved_factor_ids: scaleBlock.unresolvedFactorIds,
           by_rule_outside_unit_interval: requestProjection.outsideUnitIntervalByRule,
+          capless_raw_baseline_ids: caplessRawBaselineIds,
         },
-        'run_analysis outbound payload is unresolvably mixed-scale — analysis BLOCKED with a typed ask (never computed)',
+        'run_analysis outbound payload has an unresolvable value scale — analysis BLOCKED with a typed ask (never computed)',
       );
       throw new HandlerInvocationFailedError(
-        'Outbound analysis payload mixes value scales in a way CEE cannot safely resolve',
+        'Outbound analysis payload carries value scales CEE cannot safely resolve',
         {
           cause_kind: 'analysis_not_ready',
           retryable: false,
           details: {
             handler_id: 'run_analysis',
             scenario_id: args.scenario_id,
-            reason_code: 'mixed_scale_unresolved',
-            next_step: `I can't run this analysis safely yet: the scale of ${named} is unclear — some values look like raw amounts and others like 0–1 proportions, and mixing them would distort the results. Tell me the unit for ${named} (for example “percent, 0–100” or “£”), and I'll re-run the analysis.`,
+            reason_code: scaleBlock.reason_code,
+            next_step:
+              scaleBlock.reason_code === 'mixed_scale_unresolved'
+                ? `I can't run this analysis safely yet: the scale of ${named} is unclear — some values look like raw amounts and others like 0–1 proportions, and mixing them would distort the results. Tell me the unit for ${named} (for example “percent, 0–100” or “£”), and I'll re-run the analysis.`
+                : `I can't run this analysis safely yet: the recorded value of ${named} doesn't sit on the 0–1 scale the rest of the model uses, so including it would distort the results. Tell me the value for ${named} with its unit (for example “£74,000” or “percent, 0–100”), and I'll re-run the analysis.`,
           },
         },
       );

@@ -32,6 +32,7 @@
  */
 
 import { formatValueWithUnit } from './format-confirmation.js';
+import { recoverScaleFrame } from './scale-frame.js';
 
 /**
  * Operators the handler's `applyOperator` supports. Mirrors the union
@@ -551,21 +552,43 @@ function evaluateFactorValueProposalImpl(
   //     does not apply). The cap-range guard below still runs normally, so
   //     an out-of-[0,1] value on a cap-1 factor is still rejected.
   const isProportionScaledFactor = cap === 1;
+  // R2-1 (PR #926 round-2 re-review): the gate above keyed ONLY on a unit
+  // string, and records-drafted factors can never carry one (the records
+  // grammar has no unit field on claims) — so the whole records population
+  // was structurally invisible to this ask, and the two baseline writers
+  // were measured GUESSING opposite answers for a bare 0.7 on a framed
+  // factor (÷frame vs ×frame — 10^5 apart). A FRAME-RECOVERABLE factor
+  // (capless, `raw_value/value` pair proving a frame — the records pass-3d
+  // shape) declares an amount scale exactly as a unit string does, so the
+  // same bare-sub-1 input is the same ambiguity and gets the same ask.
+  const frameRecoverable =
+    cap === undefined &&
+    recoverScaleFrame({
+      value: factorObservedValue,
+      raw_value: factorObservedRawValue,
+    }) !== undefined;
   if (
     !suppressBareRatioGate &&
     operator !== 'multiply' &&
     !isProportionScaledFactor &&
     !inputHasUnit &&
-    effectiveUnit !== undefined &&
+    (effectiveUnit !== undefined || frameRecoverable) &&
     rawInput !== 0 &&
     Math.abs(rawInput) < 1
   ) {
     return {
       ok: false,
       reason: 'bare_ratio_on_unit_factor',
+      // The unit arm's copy is byte-identical to what it always was; only the
+      // framed (unitless) arm carries new copy, naming the recorded amount so
+      // the user can answer in one turn.
       specific_issue:
-        `${rawInput} looks like a proportion, not a value in ${effectiveUnit}. ` +
-        `Tell me the amount in ${effectiveUnit}.`,
+        effectiveUnit !== undefined
+          ? `${rawInput} looks like a proportion, not a value in ${effectiveUnit}. ` +
+            `Tell me the amount in ${effectiveUnit}.`
+          : `${rawInput} looks like a proportion, but this factor is recorded as an amount` +
+            `${typeof factorObservedRawValue === 'number' ? ` (currently ${factorObservedRawValue})` : ''}. ` +
+            `Tell me the amount you want.`,
     };
   }
 

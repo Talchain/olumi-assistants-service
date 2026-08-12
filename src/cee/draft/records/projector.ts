@@ -576,6 +576,144 @@ function isOptionControlledFactor(
   return edges.some((e) => e.to === targetId && kindById.get(e.from) === "option");
 }
 
+// ── Scale projection (pass 3d) ──────────────────────────────────────────────
+
+/**
+ * ⭐⭐ WHY DRAFTED MAGNITUDES ARE PROJECTED ONTO THE UNIT INTERVAL.
+ *
+ * The model states magnitudes RAW, verbatim, in the factor's own unit — that is
+ * the records contract, and it is right (asking the model to normalise is
+ * asking it to do arithmetic, the failure class this design exists to end).
+ * But the analysis seam's scale guard (`plot-intervention-scale.ts`, derived at
+ * its bytes) admits a request only when (a) every intervention is within
+ * [0,1] — PLoT's request-level gate then SKIPS and reads the values as the
+ * levels they are — or (b) every outside value carries a provable unit-interval
+ * form. Bare raw magnitudes on capless factors are neither, so a realistic
+ * brief (£ costs beside 0–1 proportions) was HONESTLY REFUSED at run_analysis
+ * ("the scale of … is unclear", witnessed live 2026-08-12). The guard is
+ * correct; the records must satisfy it truthfully. This pass is that
+ * satisfaction: per factor, one deterministic frame, every magnitude divided by
+ * it, ratios preserved exactly, raw user magnitudes kept on baselines via
+ * `raw_value` (which the display chain prefers — `display-value.ts` priorities
+ * 1–4 — so the user still sees "£50k", never "0.5").
+ *
+ * ── ⚠ NO `cap` IS STORED, AND THAT IS LOAD-BEARING, NOT AN OMISSION ─────────
+ * Derived at the edit seam's bytes (`d1-shared/normalise-factor-value.ts`):
+ * "When `cap` is defined, value = raw_value / cap … when absent,
+ * value = raw_value". A stored cap therefore flips every later user edit to a
+ * NORMALISED `observed_state.value` write — and the golden-journey harness
+ * (INV-7) binds `observed_state.value === <user-stated raw>` after an edit, so
+ * a faithful edit would read as a failure. Capless factors keep user-scale
+ * round-trips intact. The frame is not persisted; it is recoverable on
+ * baseline-bearing factors from the `value`/`raw_value` pair.
+ *
+ * ── THE FRAME, AND WHY EACH RULE (all deterministic, no model arithmetic) ───
+ *   · any magnitude < 0  → NO frame. A negative magnitude has no unit-interval
+ *     representation (the guard is sign-symmetric: `v < 0 || v > 1`), and
+ *     shifting or folding it would fabricate a value class the user never
+ *     stated. The factor stays raw and the guard's honest typed ask stays
+ *     reachable — disclosure over fabrication, by construction.
+ *   · all magnitudes ≤ 1 → NO frame needed: already the natural unit scale.
+ *   · percent-scaled unit AND max ≤ 100 → frame = 100 exactly. A percentage
+ *     DECLARES its scale; deriving one instead would discard information the
+ *     record genuinely states (3% must be level 0.03, not 0.6-of-a-derived-5).
+ *     Detection is corpus-validated: every percent unit across the 30 banked
+ *     record sets starts with '%' ('%', '% NRR', '% YoY growth', …).
+ *   · otherwise frame = the smallest {1,2,5}·10^k STRICTLY greater than the
+ *     largest magnitude. Strictness means no value lands exactly on 1.0 (except
+ *     a 100% percentage, where 1.0 is the truth).
+ *
+ * ── EDITS PRESERVE THE FRAME AT THE EDIT SEAMS, NOT HERE ────────────────────
+ * The projector runs at draft time only. A later user edit reaches the
+ * persisted baseline through exactly two writers (enumerated repo-wide,
+ * pinned in `handlers/__tests__/scale-frame-preserving-edit.test.ts`):
+ * `d1-shared/normalise-factor-value.ts` and `canonicalise-value-ops.ts`'s
+ * `reconcileObservedValuePair`. Both recover the frame from the factor's own
+ * pair (`recoverScaleFrame`, d1-shared/scale-frame.ts: raw_value / value) and
+ * write `{value: raw/frame, raw_value: raw}` — so the golden £50,000 → £74,000
+ * edit lands as {0.74, 74000} on the SAME 100,000 frame the draft established.
+ * An over-frame edit yields an honest level > 1 rather than a silent
+ * re-framing (which would rescale every sibling intervention).
+ *
+ * ── DISCLOSED TRADE: OPTION-IDENTITY RESOLUTION IS NOW 4dp-OF-LEVEL ─────────
+ * The demote pass and CEE's OPTIONS_IDENTICAL gate both judge identity via
+ * `buildInterventionSignature` (`toFixed(4)`) over the values the graph
+ * carries — which are now LEVELS. Raw differences below frame×1e-4 (e.g. £50
+ * apart under a £500k frame) therefore collide and the model twin demotes,
+ * disclosed. That is consistent with what the analysis itself can distinguish.
+ *
+ * The frame is a NORMALISATION REFERENCE derived from the user's/model's own
+ * stated magnitudes — no invented business value enters the analysis, and
+ * within-factor ratios are exact. Where no truthful frame exists (negatives),
+ * nothing is invented and the analysis seam asks the user — the same
+ * suppress-rather-than-guess principle the guard itself follows.
+ */
+
+/**
+ * Percent spellings: the banked corpus's ('%-prefixed, all 30 record sets),
+ * plus the spelt-out forms the adversarial review supplied from OUTSIDE that
+ * corpus ("per cent" — this is a British-English estate — and "pct"). Trap 22:
+ * the corpus-only version silently read "3 per cent" as a derived-frame 0.6.
+ */
+export function isPercentScaledUnit(unit: string | undefined): boolean {
+  if (typeof unit !== "string") return false;
+  const t = unit.trim().toLowerCase();
+  return t.startsWith("%") || t.startsWith("percent") || t.startsWith("per cent") || t.startsWith("pct");
+}
+
+/**
+ * Basis points declare scale 10,000 — NOT 100. Lumping "bps" into the percent
+ * set would be a 100× error in the opposite direction (30 bps = 0.003, never
+ * 0.3). Narrow on purpose: "bps" and "basis point(s)"; a bare "bp" is left to
+ * the derived frame rather than guessed.
+ */
+export function isBasisPointsUnit(unit: string | undefined): boolean {
+  if (typeof unit !== "string") return false;
+  const t = unit.trim().toLowerCase();
+  return t.startsWith("bps") || t.startsWith("basis point");
+}
+
+/**
+ * The smallest {1,2,5}·10^k STRICTLY greater than `x` (x > 0, finite).
+ * Pure arithmetic, no floating log tricks at the boundaries: the exponent scan
+ * starts safely below x and walks up, so exact powers (100 → 200) behave.
+ */
+export function nextNiceNumberAbove(x: number): number {
+  let magnitude = 10 ** Math.floor(Math.log10(x));
+  // Math.log10 can land one bucket high or low at representation boundaries;
+  // step down until magnitude ≤ x so the candidate walk below is complete.
+  while (magnitude > x) magnitude /= 10;
+  for (;;) {
+    for (const m of [1, 2, 5]) {
+      const candidate = m * magnitude;
+      if (candidate > x) return candidate;
+    }
+    magnitude *= 10;
+  }
+}
+
+/**
+ * The per-factor frame, or `undefined` when none is needed (already unit
+ * interval) or none truthfully exists (a negative magnitude).
+ */
+export function deriveFactorScaleFrame(
+  magnitudes: readonly number[],
+  unit: string | undefined,
+): number | undefined {
+  if (magnitudes.length === 0) return undefined;
+  if (magnitudes.some((m) => m < 0)) return undefined;
+  const max = Math.max(...magnitudes);
+  if (max <= 1) return undefined;
+  if (isPercentScaledUnit(unit) && max <= 100) return 100;
+  if (isBasisPointsUnit(unit) && max <= 10000) return 10000;
+  const frame = nextNiceNumberAbove(max);
+  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows to Infinity, and an
+  // infinite frame would ship a fabricated level 0 under a green guard
+  // (review breadth finding). Non-finite frame → unframed, the honest path.
+  if (!Number.isFinite(frame)) return undefined;
+  return frame;
+}
+
 // ── The projector ───────────────────────────────────────────────────────────
 
 /** One demote decision, keyed by the claim index it withdraws. */
@@ -1235,6 +1373,55 @@ function projectOnce(
       // "guard that cannot fail" shape this module's tests exist to hunt.
       if (built === undefined) continue;
       node.data = { ...(node.data ?? {}), interventions: built };
+    }
+  }
+
+  // ── Pass 3d: SCALE PROJECTION — one wire scale per request, one frame per
+  // factor. See the module-level note above `isPercentScaledUnit` for the full
+  // derivation (why unit-interval, why no `cap`, why negatives are left raw).
+  // Runs AFTER the connectivity prune, the option budget and pass 3c, so the
+  // frame is a function of exactly the magnitudes that survive onto the graph
+  // — and stays a pure function of the record set (determinism preserved: the
+  // inputs are the surviving nodes, whose derivation is itself deterministic).
+  {
+    const optionNodes3d = nodes.filter(
+      (n): n is ProjectedNode & { data: { interventions: Record<string, number> } } =>
+        n.kind === "option" &&
+        n.data !== undefined &&
+        typeof (n.data as { interventions?: unknown }).interventions === "object" &&
+        (n.data as { interventions?: unknown }).interventions !== null,
+    );
+    for (const factor of nodes) {
+      if (factor.kind !== "factor") continue;
+      const observed = factor.observed_state as { value?: unknown } | undefined;
+      const baseline =
+        typeof observed?.value === "number" && Number.isFinite(observed.value)
+          ? observed.value
+          : undefined;
+      const magnitudes: number[] = baseline !== undefined ? [baseline] : [];
+      for (const opt of optionNodes3d) {
+        const v = opt.data.interventions[factor.id];
+        if (typeof v === "number" && Number.isFinite(v)) magnitudes.push(v);
+      }
+      if (magnitudes.length === 0) continue;
+      const unit = (factor.data as { unit?: unknown } | undefined)?.unit;
+      const frame = deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
+      if (frame === undefined) continue;
+      if (baseline !== undefined) {
+        // The raw user magnitude is KEPT (`raw_value`), never overwritten with
+        // the level: the display chain and the edit path's delta operators both
+        // read `raw_value` first, so this is what keeps "£50,000" true on
+        // screen while the analysis computes on 0.5. Both carriers are written
+        // because `schema-v3.ts` rebuilds factor observed_state FROM `data`.
+        factor.observed_state = { ...factor.observed_state, value: baseline / frame, raw_value: baseline };
+        factor.data = { ...(factor.data ?? {}), value: baseline / frame, raw_value: baseline };
+      }
+      for (const opt of optionNodes3d) {
+        const v = opt.data.interventions[factor.id];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          opt.data.interventions[factor.id] = v / frame;
+        }
+      }
     }
   }
 
