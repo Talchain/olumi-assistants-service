@@ -116,6 +116,25 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     expect(r.v3Keeps).toBe(true);
   });
 
+  it("⭐ THE TIE — blocking unchanged, graph richer, and the completion is KEPT", () => {
+    // ⚠ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED. The first mutation run
+    // reverted `<=` to `<` (strict improvement) and NOTHING went red: both
+    // banked keep cases happen to improve strictly (5→1 and 2→0), so the tie —
+    // the exact shape `<=` was chosen for — was untested. A survivor is a
+    // claim, and the only way to settle one is a discriminating fixture
+    // (trap 13c). This is that fixture, and it is a real run, not a
+    // construction: round 7's pass 05, whose completion added two edges at an
+    // unchanged blocking count and was thrown away.
+    const pass = banked("round7-completion-pass05-tie.json");
+    const r = replay(pass);
+
+    expect(r.v2Keeps).toBe(false);                              // v2 discarded it
+    expect(r.blockingAfter).toBe(r.blockingBefore);              // …at a TIE
+    expect(r.blockingBefore).toBeGreaterThan(0);                 // a non-trivial tie
+    expect(r.reprojected.graph.edges.length).toBeGreaterThan(r.projection.graph.edges.length);
+    expect(r.v3Keeps).toBe(true);                               // v3 keeps it
+  });
+
   it("the improvement v2 could not see is NON-BLOCKING disclosure growth, not blocking growth", () => {
     // The mechanism, asserted rather than described: on run 16 the total ask
     // GREW (5→8) while the blocking count FELL. Everything the ask gained is a
