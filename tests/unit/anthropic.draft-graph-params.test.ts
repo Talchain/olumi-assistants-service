@@ -286,16 +286,24 @@ const VALID_RECORDS_JSON = JSON.stringify({
       claim_kind: "causal_link",
       label: "a contractor adds capacity sooner",
       basis: [0],
-      from_ref: "s1",
-      to_ref: "c0",
+      from_stated: 1,
+      to_claim: 0,
+      effect: "positive",
+    },
+    {
+      claim_kind: "causal_link",
+      label: "a full-time hire adds capacity too",
+      basis: [0],
+      from_stated: 2,
+      to_claim: 0,
       effect: "positive",
     },
     {
       claim_kind: "causal_link",
       label: "capacity drives revenue",
       basis: [0],
-      from_ref: "c0",
-      to_ref: "s0",
+      from_claim: 0,
+      to_stated: 0,
       effect: "positive",
     },
   ],
@@ -341,6 +349,14 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
   afterEach(() => {
     streamSpy.mockReset();
+    // ⚠ `createSpy` TOO, and it did not need resetting until v4. The draft path
+    // STREAMS, so it never touched `messages.create` — until the two-pass
+    // completion turn, which is a non-streaming call. Without this, completion
+    // calls accumulate across this describe and leak into the `chatWithAnthropic`
+    // block below, whose `toHaveBeenCalledOnce()` then measures another
+    // describe's traffic instead of its own. Caught by that assertion going to
+    // "called 2 times" — a cross-describe contamination, not a chat defect.
+    createSpy.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });

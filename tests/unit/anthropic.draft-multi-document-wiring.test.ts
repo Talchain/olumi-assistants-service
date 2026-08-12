@@ -112,9 +112,9 @@ describe("draftGraphWithAnthropic — multi-document selection is WIRED (2.996)"
     ],
     claims: [
       { claim_kind: "factor", label: "team productivity", basis: [0] },
-      { claim_kind: "causal_link", label: "a new CRM lifts productivity", basis: [1], from_ref: "s1", to_ref: "c0", effect: "positive" },
-      { claim_kind: "causal_link", label: "training lifts productivity", basis: [2], from_ref: "s2", to_ref: "c0", effect: "positive" },
-      { claim_kind: "causal_link", label: "productivity drives the goal", basis: [0], from_ref: "c0", to_ref: "s0", effect: "positive" },
+      { claim_kind: "causal_link", label: "a new CRM lifts productivity", basis: [1], from_stated: 1, to_claim: 0, effect: "positive" },
+      { claim_kind: "causal_link", label: "training lifts productivity", basis: [2], from_stated: 2, to_claim: 0, effect: "positive" },
+      { claim_kind: "causal_link", label: "productivity drives the goal", basis: [0], from_claim: 0, to_stated: 0, effect: "positive" },
     ],
   });
   const MULTI_DOCUMENT =
