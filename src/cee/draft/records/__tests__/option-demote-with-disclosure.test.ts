@@ -341,8 +341,10 @@ describe("what the demote deliberately does NOT touch", () => {
     // validator's signature is `toFixed(4)` over the values it receives, and
     // post pass 3d it receives LEVELS. 12 vs 12.0001 under frame 20 are 0.6000
     // vs 0.6000 at that resolution — indistinguishable to the analysis, so the
-    // model option is withdrawn and disclosed, exactly as the validator's own
-    // OPTIONS_IDENTICAL would otherwise judge them downstream. The projector
+    // model option is withdrawn and disclosed, exactly as CEE's own
+    // OPTIONS_IDENTICAL gate (graph-validator.ts, via buildInterventionSignature
+    // — the BINDING authority; PLoT's identical-options uses a separate 1e-9
+    // epsilon and is not what fires here) would otherwise judge them. The projector
     // and the validator read the SAME values through the SAME function — the
     // demote can never disagree with the gate it pre-empts.
     const records: DraftRecordSet = {

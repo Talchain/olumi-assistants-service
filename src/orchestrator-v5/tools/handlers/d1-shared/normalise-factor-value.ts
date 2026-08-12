@@ -28,6 +28,7 @@ import {
   evaluatePostOperatorFactorValue,
   type ProposalRejectionReason,
 } from './evaluate-factor-value-proposal.js';
+import { recoverScaleFrame } from './scale-frame.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './user-guidance.js';
 
 export interface NormaliseInput {
@@ -135,9 +136,32 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
 
   const cap = proposalCap ?? factorCap;
 
-  // No cap → store raw_value as-is in both fields. Useful for absolute
-  // values like counts or unbounded scales.
+  // No cap → two shapes, told apart by the factor's own before-pair:
+  //
+  //   · FRAMED (records pass 3d wrote it: value = raw/frame, raw_value = raw,
+  //     frame not persisted BY DESIGN — a stored cap would flip this very
+  //     branch and break the user-scale round-trip). The frame is recovered
+  //     from the pair (`raw_value / value`) and the write PRESERVES it:
+  //     {value: rawInput/frame, raw_value: rawInput}. Without this, the first
+  //     accepted bare edit rewrote the baseline to RAW beside framed levels
+  //     and the next analysis computed on it silently (PR #926 review,
+  //     BLOCKER 1 — the scale guard gates interventions only).
+  //     Deliberately NO clamp and NO re-framing: an over-frame edit yields an
+  //     honest level > 1 (the truth about the frame), because inventing a new
+  //     frame mid-edit would silently rescale every sibling intervention.
+  //   · UNFRAMED (raw == value, or no recorded pair) → store raw_value as-is
+  //     in both fields, exactly as before. Counts, ratios, unbounded scales.
   if (cap === undefined) {
+    const frame = recoverScaleFrame({
+      value: factorObservedValue,
+      raw_value: factorObservedRawValue,
+    });
+    if (frame !== undefined) {
+      const framedValue = rawInput / frame;
+      if (Number.isFinite(framedValue)) {
+        return { raw_value: rawInput, value: framedValue };
+      }
+    }
     return { raw_value: rawInput, value: rawInput };
   }
 

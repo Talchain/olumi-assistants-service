@@ -621,9 +621,26 @@ function isOptionControlledFactor(
  *     record sets starts with '%' ('%', '% NRR', '% YoY growth', …).
  *   · otherwise frame = the smallest {1,2,5}·10^k STRICTLY greater than the
  *     largest magnitude. Strictness means no value lands exactly on 1.0 (except
- *     a 100% percentage, where 1.0 is the truth) and gives ordinary follow-up
- *     edits headroom under the frame (the golden £50,000 → £74,000 edit stays
- *     inside a 100,000 frame).
+ *     a 100% percentage, where 1.0 is the truth).
+ *
+ * ── EDITS PRESERVE THE FRAME AT THE EDIT SEAMS, NOT HERE ────────────────────
+ * The projector runs at draft time only. A later user edit reaches the
+ * persisted baseline through exactly two writers (enumerated repo-wide,
+ * pinned in `handlers/__tests__/scale-frame-preserving-edit.test.ts`):
+ * `d1-shared/normalise-factor-value.ts` and `canonicalise-value-ops.ts`'s
+ * `reconcileObservedValuePair`. Both recover the frame from the factor's own
+ * pair (`recoverScaleFrame`, d1-shared/scale-frame.ts: raw_value / value) and
+ * write `{value: raw/frame, raw_value: raw}` — so the golden £50,000 → £74,000
+ * edit lands as {0.74, 74000} on the SAME 100,000 frame the draft established.
+ * An over-frame edit yields an honest level > 1 rather than a silent
+ * re-framing (which would rescale every sibling intervention).
+ *
+ * ── DISCLOSED TRADE: OPTION-IDENTITY RESOLUTION IS NOW 4dp-OF-LEVEL ─────────
+ * The demote pass and CEE's OPTIONS_IDENTICAL gate both judge identity via
+ * `buildInterventionSignature` (`toFixed(4)`) over the values the graph
+ * carries — which are now LEVELS. Raw differences below frame×1e-4 (e.g. £50
+ * apart under a £500k frame) therefore collide and the model twin demotes,
+ * disclosed. That is consistent with what the analysis itself can distinguish.
  *
  * The frame is a NORMALISATION REFERENCE derived from the user's/model's own
  * stated magnitudes — no invented business value enters the analysis, and
@@ -632,11 +649,28 @@ function isOptionControlledFactor(
  * suppress-rather-than-guess principle the guard itself follows.
  */
 
-/** Exact spellings the corpus exhibits, plus the spelt-out form. */
+/**
+ * Percent spellings: the banked corpus's ('%-prefixed, all 30 record sets),
+ * plus the spelt-out forms the adversarial review supplied from OUTSIDE that
+ * corpus ("per cent" — this is a British-English estate — and "pct"). Trap 22:
+ * the corpus-only version silently read "3 per cent" as a derived-frame 0.6.
+ */
 export function isPercentScaledUnit(unit: string | undefined): boolean {
   if (typeof unit !== "string") return false;
   const t = unit.trim().toLowerCase();
-  return t.startsWith("%") || t.startsWith("percent");
+  return t.startsWith("%") || t.startsWith("percent") || t.startsWith("per cent") || t.startsWith("pct");
+}
+
+/**
+ * Basis points declare scale 10,000 — NOT 100. Lumping "bps" into the percent
+ * set would be a 100× error in the opposite direction (30 bps = 0.003, never
+ * 0.3). Narrow on purpose: "bps" and "basis point(s)"; a bare "bp" is left to
+ * the derived frame rather than guessed.
+ */
+export function isBasisPointsUnit(unit: string | undefined): boolean {
+  if (typeof unit !== "string") return false;
+  const t = unit.trim().toLowerCase();
+  return t.startsWith("bps") || t.startsWith("basis point");
 }
 
 /**
@@ -671,7 +705,13 @@ export function deriveFactorScaleFrame(
   const max = Math.max(...magnitudes);
   if (max <= 1) return undefined;
   if (isPercentScaledUnit(unit) && max <= 100) return 100;
-  return nextNiceNumberAbove(max);
+  if (isBasisPointsUnit(unit) && max <= 10000) return 10000;
+  const frame = nextNiceNumberAbove(max);
+  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows to Infinity, and an
+  // infinite frame would ship a fabricated level 0 under a green guard
+  // (review breadth finding). Non-finite frame → unframed, the honest path.
+  if (!Number.isFinite(frame)) return undefined;
+  return frame;
 }
 
 // ── The projector ───────────────────────────────────────────────────────────

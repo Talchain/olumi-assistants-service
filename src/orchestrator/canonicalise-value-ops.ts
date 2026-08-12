@@ -80,6 +80,7 @@ import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapter
 // rather than reimplemented — a second copy of a scale convention is the
 // hand-maintained-twin defect this module's header exists to warn about.
 import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { recoverScaleFrame } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 import type { PatchOperation } from './types.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -464,6 +465,47 @@ export function reconcileObservedValuePair(
         : typeof nodeObserved.cap === 'number'
           ? nodeObserved.cap
           : undefined;
+
+    // ── FRAMED CAPLESS FACTORS (records pass 3d) — the frame is preserved,
+    // not destroyed (PR #926 review, BLOCKER 1). The projector writes
+    // magnitude-scaled factors as {value: raw/frame, raw_value: raw} with NO
+    // cap (a stored cap would flip normaliseFactorValue to cap-normalised
+    // writes and break the user-scale round-trip). The frame is recoverable
+    // from the node's BEFORE pair, and the new value is classified by the
+    // SAME rule `resolveExistingRawValue` applies to capped factors, with
+    // frame in place of cap:
+    //   · outside [0,1] → the user stated a RAW magnitude: rescale onto the
+    //     factor's own frame ({value: raw/frame, raw_value: raw});
+    //   · within [0,1] → a LEVEL: keep it, re-derive raw as level×frame
+    //     (the exact inverse the capped branch uses via value*cap).
+    // Without this, the merged payload's raw write shipped {74000, 74000}
+    // beside framed sibling levels and the next analysis computed on it
+    // silently — the intervention-scoped guard cannot see baselines.
+    if (cap === undefined) {
+      const frame = recoverScaleFrame({
+        value: nodeObserved.value,
+        raw_value: nodeObserved.raw_value,
+      });
+      if (frame !== undefined) {
+        const nextObserved: Record<string, unknown> = { ...observed };
+        if (newValue < 0 || newValue > 1) {
+          const framedValue = newValue / frame;
+          if (Number.isFinite(framedValue)) {
+            nextObserved.value = framedValue;
+            nextObserved.raw_value = newValue;
+            return { ...op, value: { ...value, [OBSERVED_ROOT]: nextObserved } };
+          }
+        } else {
+          const derivedRaw = newValue * frame;
+          if (Number.isFinite(derivedRaw)) {
+            nextObserved.raw_value = derivedRaw;
+            return { ...op, value: { ...value, [OBSERVED_ROOT]: nextObserved } };
+          }
+        }
+        // Non-finite arithmetic: fall through to the pre-existing path below,
+        // which re-derives or clears raw_value — never a silent no-op.
+      }
+    }
 
     // `raw_value` deliberately OMITTED: we are asking what the NEW value
     // denotes, not echoing the old answer back (which is the defect).

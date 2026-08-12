@@ -290,6 +290,77 @@ describe("percent-scaled stated figures use the scale a percentage declares (÷1
     expect(interventionsOf(graph, nothing)[churn]).toBe(0.045);
   });
 
+  it('spelt-out percent units use the declared scale too: "3 per cent" is 0.03, never 0.6 (review breadth finding)', () => {
+    // From OUTSIDE this lane's corpus: the adversarial review's exact strings
+    // (REVIEW-926.md Q3 — a British-English estate writes "per cent"). At the
+    // pre-fix head these fell to the derived frame: 3 "per cent" → frame 5 →
+    // 0.6, a silent 20× scale error, structurally the M5 class.
+    const brief = (unit: string) =>
+      projectRecordsToGraph({
+        stated_items: [
+          { kind: "goal", source_quote: "keep churn under control" },
+          { kind: "option", source_quote: "invest" },
+          { kind: "option", source_quote: "hold" },
+          { kind: "figure", source_quote: "churn is 3", value: 3, unit },
+        ],
+        claims: [
+          { claim_kind: "causal_link", label: "investing cuts churn", from_stated: 1, to_stated: 3, effect: "negative", sets_to: 2 },
+          { claim_kind: "causal_link", label: "holding lets churn drift", from_stated: 2, to_stated: 3, effect: "positive", sets_to: 4.5 },
+          { claim_kind: "causal_link", label: "churn bears on the goal", from_stated: 3, to_stated: 0, effect: "negative" },
+        ],
+      }).graph;
+    for (const unit of ["per cent", "pct", "Per Cent"]) {
+      const g = brief(unit);
+      const churn = idOf(g, "churn is 3");
+      expect(observedOf(g, churn), `unit "${unit}"`).toMatchObject({ value: 0.03, raw_value: 3 });
+    }
+  });
+
+  it("basis points declare scale 10000, NOT 100 — treating bps as percent would be a 100× error the other way", () => {
+    const { graph } = projectRecordsToGraph({
+      stated_items: [
+        { kind: "goal", source_quote: "hold the spread" },
+        { kind: "option", source_quote: "hedge" },
+        { kind: "option", source_quote: "ride it" },
+        { kind: "figure", source_quote: "the spread is 30 bps", value: 30, unit: "bps" },
+      ],
+      claims: [
+        { claim_kind: "causal_link", label: "hedging narrows the spread", from_stated: 1, to_stated: 3, effect: "negative", sets_to: 15 },
+        { claim_kind: "causal_link", label: "riding widens the spread", from_stated: 2, to_stated: 3, effect: "positive", sets_to: 60 },
+        { claim_kind: "causal_link", label: "the spread bears on the goal", from_stated: 3, to_stated: 0, effect: "negative" },
+      ],
+    });
+    const spread = idOf(graph, "the spread is 30 bps");
+    // 30 bps = 0.003 exactly (÷10000). A percent reading would say 0.3 (100×);
+    // the derived frame would say 30/100 = 0.3 too (nextNice(60)=100). Both wrong.
+    expect(observedOf(graph, spread)).toMatchObject({ value: 0.003, raw_value: 30 });
+    const hedge = idOf(graph, "hedge");
+    expect(interventionsOf(graph, hedge)[spread]).toBe(0.0015);
+  });
+
+  it("an astronomically large magnitude cannot mint an infinite frame — it stays raw (honest) rather than shipping level 0", () => {
+    // Review breadth finding: ≥ ~1.6e308 → nextNiceNumberAbove overflows to
+    // Infinity → level 0 shipped green. The honest posture is UNFRAMED.
+    const { graph } = projectRecordsToGraph({
+      stated_items: [
+        { kind: "goal", source_quote: "cap the exposure" },
+        { kind: "option", source_quote: "act" },
+        { kind: "option", source_quote: "wait" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Absurd Exposure", value: 1.7e308 },
+        { claim_kind: "causal_link", label: "acting moves exposure", from_stated: 1, to_claim: 0, effect: "negative", sets_to: 1.7e308 },
+        { claim_kind: "causal_link", label: "waiting holds exposure", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 0 },
+        { claim_kind: "causal_link", label: "exposure bears on the goal", from_claim: 0, to_stated: 0, effect: "negative" },
+      ],
+    });
+    const exposure = idOf(graph, "Absurd Exposure");
+    // Unframed: the raw magnitude passes through verbatim (no fabricated 0).
+    expect(observedOf(graph, exposure)).toMatchObject({ value: 1.7e308 });
+    const act = idOf(graph, "act");
+    expect(interventionsOf(graph, act)[exposure]).toBe(1.7e308);
+  });
+
   it("a percentage above 100 cannot use the declared scale — it falls to the derived frame", () => {
     const { graph } = projectRecordsToGraph({
       stated_items: [
