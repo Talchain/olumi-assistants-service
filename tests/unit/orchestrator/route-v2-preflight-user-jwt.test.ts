@@ -25,11 +25,16 @@
  * runs against the REAL config (flag default false) and is unchanged by this
  * feature — its passing is the flag-off wire-contract pin.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SignJWT } from 'jose';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const TEST_SECRET = 'test-only-supabase-jwt-secret-0123456789abcdef';
-const JWT_SUB = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+import {
+  FIXTURE_SUB as JWT_SUB,
+  forgeUserToken,
+  makeEs256Key,
+  startJwksFixture,
+  type JwksFixture,
+} from '../../../src/utils/__tests__/helpers/supabase-jwks-fixture.js';
+
 const FIXED_REQUEST_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 const BODY_USER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -37,7 +42,6 @@ const BODY_USER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const mockConfig = {
   auth: {
     requireUserJwt: false,
-    supabaseJwtSecret: TEST_SECRET as string | undefined,
     supabaseJwksUrl: undefined as string | undefined,
     supabaseUrl: undefined as string | undefined,
   },
@@ -72,19 +76,25 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 }));
 
 const { runPreFlight } = await import('../../../src/orchestrator/route-v2-preflight.js');
+const { resetSupabaseJwksCacheForTests } = await import(
+  '../../../src/utils/supabase-user-jwt.js'
+);
 
-async function forgeJwt(opts?: { expired?: boolean; secret?: string }): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  let jwt = new SignJWT({})
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-    .setSubject(JWT_SUB)
-    .setAudience('authenticated');
-  if (opts?.expired) {
-    jwt = jwt.setIssuedAt(now - 7200).setExpirationTime(now - 3600);
-  } else {
-    jwt = jwt.setIssuedAt().setExpirationTime('5m');
-  }
-  return jwt.sign(new TextEncoder().encode(opts?.secret ?? TEST_SECRET));
+/** The project's real signing key, and an attacker's key of the same shape. */
+let projectKey: Awaited<ReturnType<typeof makeEs256Key>>;
+let attackerKey: Awaited<ReturnType<typeof makeEs256Key>>;
+let jwks: JwksFixture;
+
+async function forgeJwt(opts?: {
+  expired?: boolean;
+  /** Sign with a key the project's JWKS does NOT publish. */
+  wrongKey?: boolean;
+}): Promise<string> {
+  return forgeUserToken(
+    opts?.wrongKey === true ? attackerKey.privateKey : projectKey.privateKey,
+    jwks.issuer,
+    { expired: opts?.expired },
+  );
 }
 
 function makeBody(userId?: string): Record<string, unknown> {
@@ -107,12 +117,21 @@ function makeReq(
   return { body, headers: { 'x-request-id': FIXED_REQUEST_ID, ...headers } };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  projectKey = await makeEs256Key('kid-1');
+  attackerKey = await makeEs256Key('kid-1');
+  jwks = await startJwksFixture([projectKey.jwk]);
   mockConfig.auth.requireUserJwt = true;
-  mockConfig.auth.supabaseJwtSecret = TEST_SECRET;
+  mockConfig.auth.supabaseJwksUrl = undefined;
+  mockConfig.auth.supabaseUrl = jwks.base;
+  resetSupabaseJwksCacheForTests();
   emitSpy.mockReset();
   ensureScenarioExistsSpy.mockReset();
   ensureScenarioExistsSpy.mockResolvedValue({ user_id: null });
+});
+
+afterEach(async () => {
+  await jwks.close();
 });
 
 describe('runPreFlight — flag OFF (dormancy pin)', () => {
@@ -191,7 +210,7 @@ describe('runPreFlight — flag ON', () => {
 
   it('invalid-signature JWT: 401 with auth_reason invalid_token', async () => {
     const req = makeReq(makeBody(BODY_USER_ID), {
-      authorization: `Bearer ${await forgeJwt({ secret: 'another-test-only-secret-000' })}`,
+      authorization: `Bearer ${await forgeJwt({ wrongKey: true })}`,
     });
 
     const result = await runPreFlight(req as never);

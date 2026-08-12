@@ -17,19 +17,24 @@
  *                                   no downgrade-to-carve-out by sending
  *                                   garbage)
  *
- * All tokens are forged locally with a test-only secret.
+ * All tokens are forged locally with a throwaway ES256 key pair published by
+ * an in-process JWKS endpoint — user-JWT verification is JWKS-only.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SignJWT } from "jose";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const TEST_SECRET = "test-only-supabase-jwt-secret-0123456789abcdef";
-const SUB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+import {
+  FIXTURE_SUB as SUB,
+  forgeUserToken,
+  makeEs256Key,
+  startJwksFixture,
+  type JwksFixture,
+} from "../../utils/__tests__/helpers/supabase-jwks-fixture.js";
+
 const FIXED_REQUEST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 const mockConfig = {
   auth: {
     requireUserJwt: false,
-    supabaseJwtSecret: TEST_SECRET as string | undefined,
     supabaseJwksUrl: undefined as string | undefined,
     supabaseUrl: undefined as string | undefined,
   },
@@ -49,32 +54,44 @@ vi.mock("../../utils/telemetry.js", () => ({
 
 const { resolveUserIdentity, buildSignInRequiredError, extractJwtCandidate } =
   await import("../user-identity.js");
+const { resetSupabaseJwksCacheForTests } = await import(
+  "../../utils/supabase-user-jwt.js"
+);
+
+/** The project's real signing key, and an attacker's key of the same shape. */
+let projectKey: Awaited<ReturnType<typeof makeEs256Key>>;
+let attackerKey: Awaited<ReturnType<typeof makeEs256Key>>;
+let jwks: JwksFixture;
 
 async function forgeJwt(opts?: {
   expired?: boolean;
-  secret?: string;
+  /** Sign with a key the project's JWKS does NOT publish. */
+  wrongKey?: boolean;
 }): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  let jwt = new SignJWT({})
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setSubject(SUB)
-    .setAudience("authenticated");
-  if (opts?.expired) {
-    jwt = jwt.setIssuedAt(now - 7200).setExpirationTime(now - 3600);
-  } else {
-    jwt = jwt.setIssuedAt().setExpirationTime("5m");
-  }
-  return jwt.sign(new TextEncoder().encode(opts?.secret ?? TEST_SECRET));
+  return forgeUserToken(
+    opts?.wrongKey === true ? attackerKey.privateKey : projectKey.privateKey,
+    jwks.issuer,
+    { expired: opts?.expired },
+  );
 }
 
 function makeReq(headers: Record<string, string>): { headers: Record<string, string> } {
   return { headers };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  projectKey = await makeEs256Key("kid-1");
+  attackerKey = await makeEs256Key("kid-1");
+  jwks = await startJwksFixture([projectKey.jwk]);
   mockConfig.auth.requireUserJwt = true;
-  mockConfig.auth.supabaseJwtSecret = TEST_SECRET;
+  mockConfig.auth.supabaseJwksUrl = undefined;
+  mockConfig.auth.supabaseUrl = jwks.base;
+  resetSupabaseJwksCacheForTests();
   emitSpy.mockReset();
+});
+
+afterEach(async () => {
+  await jwks.close();
 });
 
 describe("extractJwtCandidate", () => {
@@ -138,7 +155,7 @@ describe("resolveUserIdentity — flag ON", () => {
 
   it("invalid-signature JWT → refused invalid_token (no downgrade to carve-out)", async () => {
     const req = makeReq({
-      authorization: `Bearer ${await forgeJwt({ secret: "another-test-only-secret-000" })}`,
+      authorization: `Bearer ${await forgeJwt({ wrongKey: true })}`,
     });
     const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
     expect(result).toEqual({ mode: "refused", reason: "invalid_token" });
@@ -151,8 +168,11 @@ describe("resolveUserIdentity — flag ON", () => {
   });
 
   it("JWT present but no verification material configured → refused verification_unavailable (fail closed)", async () => {
-    mockConfig.auth.supabaseJwtSecret = undefined;
-    const req = makeReq({ authorization: `Bearer ${await forgeJwt()}` });
+    const token = await forgeJwt();
+    mockConfig.auth.supabaseUrl = undefined;
+    mockConfig.auth.supabaseJwksUrl = undefined;
+    resetSupabaseJwksCacheForTests();
+    const req = makeReq({ authorization: `Bearer ${token}` });
     const result = await resolveUserIdentity(req as never, FIXED_REQUEST_ID);
     expect(result).toEqual({ mode: "refused", reason: "verification_unavailable" });
   });

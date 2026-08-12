@@ -68,9 +68,11 @@ config.auth.hmacMaxSkewMs   // HMAC_MAX_SKEW_MS (default: 300000)
 config.auth.islApiKey       // ISL_API_KEY
 config.auth.shareSecret     // CEE_SHARE_SECRET ?? SHARE_SECRET
 config.auth.requireUserJwt  // CEE_REQUIRE_USER_JWT (default: false — login 3.4 CEE-half, ships dark)
-config.auth.supabaseJwtSecret // SUPABASE_JWT_SECRET (legacy HS256 secret for user-JWT verification)
 config.auth.supabaseJwksUrl // SUPABASE_JWKS_URL (JWKS endpoint for asymmetric signing keys)
-config.auth.supabaseUrl     // SUPABASE_URL (used only to derive the default JWKS URL)
+config.auth.supabaseUrl     // SUPABASE_URL (derives the default JWKS URL and the required token issuer)
+// NOTE: SUPABASE_JWT_SECRET is deliberately NOT read — user-JWT verification
+// is JWKS-only (asymmetric). The legacy shared secret was a symmetric forgery
+// key; see src/utils/supabase-user-jwt.ts.
 ```
 
 ### LLM Configuration
