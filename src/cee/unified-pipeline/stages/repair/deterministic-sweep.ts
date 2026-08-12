@@ -29,6 +29,7 @@ import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../../utils/field-deletion-audit.js";
+import { BUCKET_C_CODES } from "./bucket-c-codes.js";
 
 // ---------------------------------------------------------------------------
 // Bucket classification (SSOT)
@@ -57,21 +58,17 @@ const BUCKET_B_CODES = new Set([
   "INVALID_INTERVENTION_REF",  // Fuzzy-match intervention keys against factor node IDs
 ]);
 
-/** Bucket C: semantic, LLM only — we identify these to decide llmRepairNeeded */
-const BUCKET_C_CODES = new Set([
-  "NO_PATH_TO_GOAL",
-  "NO_EFFECT_PATH",
-  "UNREACHABLE_FROM_DECISION",
-  "MISSING_BRIDGE",
-  "MISSING_GOAL",
-  "MISSING_DECISION",
-  "INVALID_EDGE_TYPE",
-  // CYCLE_DETECTED: moved to Bucket A (deterministic back-edge removal)
-  "OPTIONS_IDENTICAL",
-  "GOAL_NUMBER_AS_FACTOR",
-  "INSUFFICIENT_OPTIONS",
-  // INVALID_INTERVENTION_REF: moved to Bucket B (fuzzy matching)
-]);
+/**
+ * Bucket C: semantic, LLM only — we identify these to decide llmRepairNeeded.
+ *
+ * Declared in `./bucket-c-codes.js`, the single authority, and re-exported here
+ * so existing `deterministic-sweep.js` importers keep working. ⚠ An importer
+ * that reads it from THIS module inherits this module's mock exposure: two
+ * wiring specs replace deterministic-sweep wholesale with a `vi.mock` factory,
+ * and the binding is absent under them. Import from `./bucket-c-codes.js`
+ * instead — that module has no behaviour and nothing to mock.
+ */
+export { BUCKET_C_CODES } from "./bucket-c-codes.js";
 
 // ---------------------------------------------------------------------------
 // Types
