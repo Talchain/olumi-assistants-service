@@ -35,12 +35,31 @@ import {
  * draft as `grammar_sha256`. Pinned to the HISTORIC value (trap 12b: a control
  * pinned to "whatever the code currently produces" is a tautology).
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V3_GRAMMAR_SHA256 =
   "e2d6797fb4fcb44698f336de135f0209003900fd1af310594e27e2d05e73b669";
 
+/**
+ * ⭐ v4, pre-registered 2026-08-12. The grammar MOVED, deliberately and for the
+ * first time: `from_ref`/`to_ref` (strings whose first character selected the
+ * namespace) became four typed integer fields, because the namespace confusion
+ * they permitted destroyed a whole acceptance block and a schema cannot
+ * constrain a string's shape here (`pattern` is a forbidden keyword).
+ *
+ * ⚠ THE HISTORIC VALUE STAYS AND IS ASSERTED DISTINCT. Every draft up to and
+ * including the 2026-08-12 blocks emitted `grammar_sha256:e2d6797f…`; a reader
+ * of those logs must be able to tell which grammar produced them, and re-pointing
+ * the literal would silently merge two grammars into one evidence base.
+ */
+const PINNED_GRAMMAR_SHA256 =
+  "e7505d3feaea15fc437acbb36066784d186c744e524cb07de5606fdf2a050bbf";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("does not move the compiled grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v4 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
+  });
+
+  it("is DISTINCT from the historic v3 grammar, so v3's runs stay attributable", () => {
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V3_GRAMMAR_SHA256);
   });
 
   it("DERIVED — the probe's field is a REQUIRED key of the schema's own claim object", () => {

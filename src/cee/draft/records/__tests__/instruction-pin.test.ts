@@ -56,15 +56,45 @@ const HISTORIC_V2_INSTRUCTION_BYTES = 2351;
  * §1.4 pin governed the falsification experiment, and this is productionisation
  * under R1's own acceptance design, which is a different question.
  */
-const PREREGISTERED_V3_INSTRUCTION_SHA256 =
+const HISTORIC_V3_INSTRUCTION_SHA256 =
   "494e52b9fca948660927849c870ca8a689cac7399ac100b185243f99a54f416b";
-const PREREGISTERED_V3_INSTRUCTION_BYTES = 3673;
+const HISTORIC_V3_INSTRUCTION_BYTES = 3673;
+
+/**
+ * ⭐ PRE-REGISTERED — v4, frozen 2026-08-12 BEFORE any acceptance run was spent
+ * on it (`round7/PRE-REGISTRATION-V4.md`).
+ *
+ * v4 changes the REFERENCE SYNTAX and the option-chaining rule:
+ *   · references are typed by FIELD (`from_stated`/`from_claim`/`to_stated`/
+ *     `to_claim`, integers) instead of by a prefix character inside a string.
+ *     A grammar cannot constrain a string's shape here — `pattern` is a
+ *     forbidden structured-outputs keyword — so a TYPE on a FIELD is the only
+ *     enforcement available.
+ *   · the model is told to chain the option THE USER NAMED rather than its own
+ *     refinement, which is the instruction-side half of a fix whose load-bearing
+ *     half is deterministic (the projector merges a single refinement onto its
+ *     stated parent).
+ *
+ * ⚠ v3 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. Both long-brief
+ * measured blocks were taken against exactly those bytes; re-pointing the
+ * literal would detach that evidence from the artefact that produced it.
+ */
+const PREREGISTERED_V4_INSTRUCTION_SHA256 =
+  "edc329f9d2496be3c1fbfba4f5f5968439d4178913f0b5b1967773ee6430e9f3";
+const PREREGISTERED_V4_INSTRUCTION_BYTES = 4426;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v3 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V3_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v4 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V4_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V3_INSTRUCTION_BYTES,
+      PREREGISTERED_V4_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v3 bytes, so v3's measured blocks stay attributable", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V3_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V3_INSTRUCTION_BYTES,
     );
   });
 
@@ -88,33 +118,45 @@ describe("the draft records instruction is the measured artefact", () => {
     expect(DRAFT_RECORDS_INSTRUCTION.startsWith(DRAFT_RECORDS_SHAPE_INSTRUCTION)).toBe(true);
   });
 
-  it("keeps the shape half independently pinned, so a connect-half edit is legible as one", () => {
+  it("keeps the shape half independently pinned, so a reference-syntax edit is legible as one", () => {
     // The two halves were measured separately: the shape half alone produced
     // ZERO option-origin causal links over 44 links / 9 runs; adding the connect
     // half moved that to 28 of 75 on the first attempt. Pinning them apart is
     // what makes a future edit attributable to one half or the other.
     //
-    // ⚠ The evidence record carries this hash to EIGHT hex characters
-    // (`a6de4225…`) and a byte count (1,443). Both are asserted; the remaining
-    // digits are this file's own, computed here, and are pinned so a future edit
-    // is caught at full precision rather than at the precision the record
-    // happened to print. Saying which part is inherited and which part is local
-    // is the difference between a pin and a claim.
+    // ⚠⚠ THE SHAPE HALF MOVED IN v4, AND IT HAD NEVER MOVED BEFORE. v2 and v3
+    // shared it byte-for-byte (`a6de4225…`, 1,443 bytes) because both described
+    // the same reference syntax. v4 changes that syntax — the namespace is now
+    // the FIELD, not a prefix character inside a string — and the sentence that
+    // teaches it lives in the shape half. Recorded explicitly because "the shape
+    // half is unchanged" was true for two versions running and is exactly the
+    // kind of inherited sentence that survives past the change that falsified it.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "175af059317040381c4529c0e9ec0342070b7d14425b62fd6c5b374df48a99d6",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(1771);
+    // HISTORIC — v2/v3's shared shape half. Asserted DISTINCT so the two cannot
+    // be conflated in the record.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "a6de4225a94bf321185775a7b34d01b1eb4f7f9def5c0c6ee7b2f1fc95692a80",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(1443);
   });
 
-  it("pins the v3 CONNECT half independently, so the half that changed is legible", () => {
-    // v3 changed the connect half ONLY — the shape half above is byte-identical to
-    // the one v2 measured, which is why its 1,443-byte pin still holds. Pinning the
-    // connect half separately is what lets a future measurement be attributed to
-    // the connectivity/magnitude ask rather than to the record shape.
+  it("pins the v4 CONNECT half independently, so the half that changed is legible", () => {
+    // v4 changes the connect half too: "chain the option the USER named" replaces
+    // v3's "an option_refinement IS an option needing its own chain". That v3
+    // sentence closed one direction of a defect and opened its mirror — the model
+    // complied and left the user's own options bare — so the load-bearing half of
+    // the v4 fix is DETERMINISTIC (the projector merges a lone refinement onto its
+    // stated parent) and this sentence is only its instruction-side complement.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("53a6955a40d9a8c877d8f1dc09f24343b3cfac540d74dfcc82aa507ea131d856");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(2230);
+    ).toBe("cb7fa43faf8237c974f044c098a6c97d8d9003733705f58ff2df3cf41786af74");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(2655);
+    // HISTORIC — v3's connect half, asserted DISTINCT.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("53a6955a40d9a8c877d8f1dc09f24343b3cfac540d74dfcc82aa507ea131d856");
   });
 });
 

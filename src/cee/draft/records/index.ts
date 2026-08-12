@@ -20,9 +20,16 @@ export {
   DRAFT_RECORD_CLAIM_KINDS,
   DRAFT_RECORD_CLAIM_DISCRIMINATOR,
   DRAFT_RECORDS_CLAIM_PROGRESS_RE,
+  DRAFT_RECORD_STATED_DISCRIMINATOR,
+  DRAFT_RECORDS_STATED_PROGRESS_RE,
+  DRAFT_RECORD_REF_FIELDS,
+  DRAFT_RECORD_REF_FIELD_NAMES,
   DRAFT_RECORD_CATEGORIES,
   DRAFT_RECORD_EFFECTS,
   buildDraftRecordsSchema,
+  buildDraftClaimItemSchema,
+  draftClaimSchemaKeys,
+  draftStatedItemSchemaKeys,
   draftRecordsGrammarHash,
   measureDraftRecordsSchemaBudget,
   countOptionalParams,
@@ -79,9 +86,20 @@ export {
   projectDraftRecords,
   isGraphShapedResponse,
   isSalvageableRecordSet,
+  findGrammarFieldsDroppedBySeam,
   DraftRecordSetWire,
 } from "./seam.js";
 export type { DraftRecordsSeamResult, DraftRecordsSeamFailure } from "./seam.js";
+
+export {
+  enumerateCompletionAsk,
+  buildRecordsCompletionSchema,
+  buildRecordsCompletionPrompt,
+  mergeCompletionClaims,
+  RECORDS_COMPLETION_MAX_TOKENS,
+  RECORDS_COMPLETION_WALL_MS,
+} from "./completion.js";
+export type { CompletionAsk, CompletionAskItem, CompletionMergeResult } from "./completion.js";
 
 export { buildDraftRecordsSidecar, DRAFT_RECORDS_SIDECAR_VERSION } from "./sidecar.js";
 export type { DraftRecordsSidecar, RecordBinding, BindingClass } from "./sidecar.js";

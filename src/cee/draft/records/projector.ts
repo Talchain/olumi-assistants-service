@@ -160,6 +160,15 @@ export interface RecordProvenance {
    * distinguishable to a downstream reader that only checks `.length`.
    */
   readonly unbased?: boolean;
+  /**
+   * Labels of `option_refinement` claims merged into this STATED option (see the
+   * merge note in pass 1b). APPEND-ONLY and additive: the node's
+   * `provenance_class` and `source_quote` are never rewritten, so the user's own
+   * words remain the only thing badged `stated`. This records what the model
+   * contributed to an alternative WITHOUT attributing the model's wording to the
+   * user — the distinction the whole provenance mechanism exists to hold.
+   */
+  readonly merged_refinements?: readonly string[];
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -195,9 +204,45 @@ export interface DroppedRecordRef {
      * `INSUFFICIENT_OPTIONS` is allowed to fire VISIBLY — a loud rejection beats
      * a quiet amputation.
      */
-    | "option_budget_exceeded";
+    | "option_budget_exceeded"
+    /**
+     * BOTH namespace fields of one endpoint were present (`from_stated` AND
+     * `from_claim`, or the `to_*` pair). The two say different things and the
+     * projector has no basis for preferring either, so it refuses and discloses.
+     * Guessing here would reintroduce exactly the silent mis-binding the typed
+     * fields were introduced to end.
+     */
+    | "ambiguous_ref"
+    /**
+     * ⭐ THE NAMESPACE RESIDUE, CAUGHT. Both endpoints resolved, but their node
+     * KINDS cannot form a legal edge under any repair the pipeline performs —
+     * see `UNRESCUABLE_EDGE_SHAPES`. This is the class the typed reference
+     * fields cannot reach: a well-formed reference into the wrong namespace
+     * lands on a real node of the wrong kind, and a well-formed reference into
+     * the RIGHT namespace can still express an illegal shape.
+     *
+     * MEASURED on B1: `c25`/`c28` were namespace slips (they meant the goal
+     * `s0`, wrote `c0`, an option refinement) and `c29` was a deliberate,
+     * correctly-referenced `factor → option` — three bad edges, two different
+     * defects, and only this check sees all three. Disclosing them is what lets
+     * the completion pass be asked a precise question instead of being shown a
+     * downstream connectivity symptom.
+     */
+    | "ref_kind_illegal"
+    /**
+     * An `option_refinement` that names exactly one stated `option` as its whole
+     * basis is a refinement OF that option, not a second alternative. The
+     * projector binds it to the parent's node instead of minting a competing
+     * option, and every link the model drew from or to the refinement lands on
+     * the parent. Recorded here so the merge is visible, never silent.
+     */
+    | "refinement_merged_into_stated_option";
+  /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
+  /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
+  readonly from_kind?: string;
+  readonly to_kind?: string;
 }
 
 export interface RecordProjection {
@@ -343,8 +388,112 @@ const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | n
   causal_link: null,
 };
 
-/** `s3` → stated_items[3]; `c1` → claims[1]. Anything else is unparseable. */
-const REF_PATTERN = /^([sc])(\d+)$/;
+/**
+ * ⭐⭐ THE UNRESCUABLE EDGE SHAPES — the only edges this projector refuses.
+ *
+ * ── WHY THE PROJECTOR CHECKS EDGE SHAPE AT ALL ─────────────────────────────
+ * Because a mis-referenced link does not fail; it SUCCEEDS onto the wrong node.
+ * B1's three goal-bound links resolved cleanly to an option refinement, so
+ * nothing reached the goal, the connectivity prune below removed everything that
+ * could not, and a complete 23-item / 34-claim emission became 8 nodes and 6
+ * edges. Every instrument upstream reported a healthy draft. The defect was
+ * observable HERE, at the moment the endpoints resolve, and nowhere earlier.
+ *
+ * ── ⚠ THE REJECTION SET IS DELIBERATELY THE *PROVABLY UNRESCUABLE* SET ─────
+ * This is not a second copy of `ALLOWED_EDGES` and must never become one. The
+ * pipeline legitimately repairs several shapes that `ALLOWED_EDGES` alone would
+ * call illegal, and a projector that rejected those would DELETE REAL CAUSALITY
+ * the user's model needs — a lie by omission, which is worse than the loud
+ * `INVALID_EDGE_TYPE` a wrong acceptance produces. The two errors are not
+ * symmetric, so the threshold is not symmetric either (trap 22b): reject only
+ * what nothing downstream can rescue, and let everything else meet the real
+ * validator.
+ *
+ * DERIVED at the bytes, 2026-08-12, against `ALLOWED_EDGES`
+ * (`graph-validator.types.ts:293-302`) AND every kind-sensitive stage of
+ * `deterministic-sweep.ts`. What is NOT rejected, and why:
+ *   factor → goal          `fixFactorGoalEdges` (:963-1059, runs unconditionally)
+ *                          mints an outcome node and bridges it. LEGAL TO EMIT.
+ *   option → goal          `fixOptionGoalShortcut` (:1406-1590) reroutes it when
+ *                          the option already has a factor target. Flag-gated
+ *                          (`optionShortcutRepair`, default true), so the
+ *                          projector stays out of it.
+ *   option → constraint    `fixOptionRiskShortcut` (:1223-1390) handles it.
+ *   factor → constraint    legal as `factor → risk` (rule :299) — see the
+ *                          normalisation note below.
+ *   constraint → goal      legal as `risk → goal` (rule :301). The v3
+ *                          instruction explicitly asks for this edge.
+ *
+ * ── ⚠⚠ THE KIND THIS TABLE JUDGES IS THE POST-NORMALISATION KIND ───────────
+ * `normaliseDraftResponse` runs at `anthropic.ts:1978` — 53 lines AFTER the
+ * projection seam at `:1925` — and `NODE_KIND_MAP` (`normalisation.ts:47`) maps
+ * `'constraint' → 'risk'`. So a node this projector mints as `constraint` is a
+ * RISK node by the time any validator or sweep stage sees it, and its edges are
+ * judged by the risk rules. Verified at the bytes rather than inferred, because
+ * judging a constraint edge by the (nonexistent) constraint rules would reject
+ * `constraint → goal` — an edge the instruction asks for and the validator
+ * accepts.
+ */
+const PROJECTED_KIND_AFTER_NORMALISATION: Readonly<Record<string, string>> = {
+  // `normalisation.ts` NODE_KIND_MAP. Only the kinds this projector can mint.
+  constraint: "risk",
+  goal: "goal",
+  option: "option",
+  factor: "factor",
+  decision: "decision",
+};
+
+/**
+ * `${fromKind}->${toKind}` pairs (post-normalisation) that no repair rescues.
+ * Each entry carries the derivation that admits it.
+ */
+const UNRESCUABLE_EDGE_SHAPES: ReadonlySet<string> = new Set([
+  // NOTHING MAY POINT INTO AN OPTION. `decision → option` (rule :294) is the
+  // only inbound rule, and the decision node is projector-structural and has no
+  // wire reference, so no model-emitted link can legally target an option.
+  // Confirmed exhaustively: no sweep stage rewrites, retargets or bridges an
+  // edge whose `to` is an option.
+  "factor->option",
+  "option->option",
+  "risk->option",
+  "goal->option",
+  // NOTHING MAY LEAVE A GOAL. `fixGoalHasOutgoing` (:266-293) deletes every edge
+  // whose `from` is a goal. Emitting one is pure loss, so disclose it instead.
+  "goal->factor",
+  "goal->risk",
+  "goal->goal",
+  "goal->decision",
+  // constraint(→risk) as a SOURCE, other than `risk → goal`.
+  "risk->factor",   // no rule; nothing rewrites it
+  "risk->risk",     // SIMPLE_REMOVE_PATTERNS (:783-786) deletes it
+  "risk->decision",
+  "factor->decision",
+  "option->decision",
+]);
+
+/**
+ * THE ONE EDGE RULE, as a predicate rather than a table entry.
+ *
+ * `factor → factor` is legal only when the TARGET is `observable` or `external`
+ * (rules :296/:297), and `inferFactorCategories` (`graph-validator.ts:83-134`)
+ * makes a factor `controllable` EXACTLY when a directed option edge points at
+ * it. So a link into a factor that an option acts on is illegal, and no sweep
+ * stage rewrites `factor → factor`. This is B3's entire failure — three edges,
+ * all this one shape.
+ *
+ * The projector can decide it exactly, because option→factor edges are its own
+ * output: the predicate is a function of the projected edge set, not of any
+ * category the model declared (which the projector deliberately never
+ * propagates).
+ */
+function isOptionControlledFactor(
+  targetId: string,
+  kindById: ReadonlyMap<string, string>,
+  edges: readonly { from: string; to: string }[],
+): boolean {
+  if (kindById.get(targetId) !== "factor") return false;
+  return edges.some((e) => e.to === targetId && kindById.get(e.from) === "option");
+}
 
 // ── The projector ───────────────────────────────────────────────────────────
 
@@ -445,12 +594,103 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     nodes.push(node);
   });
 
+  // ── Pass 1b: WHICH REFINEMENTS ARE THE SAME ALTERNATIVE AS A STATED OPTION ──
+  //
+  // ⭐⭐ THE OPTION-DUPLICATION FIX, and it is deterministic rather than a
+  // request to the model.
+  //
+  // MEASURED, and it is the mirror of a fix that already shipped. Instruction v3
+  // told the model that an `option_refinement` IS an option needing its own
+  // chain, because 0 of 26 refinements had carried an outgoing link. The model
+  // complied — and stopped chaining the USER'S OWN options instead. B1 then
+  // emitted three refinements, each with a full chain, alongside three bare
+  // stated options, and the projector minted SIX option nodes for THREE
+  // alternatives. One predicate, two opposite harms, and closing one direction
+  // reopened the other (trap 22b).
+  //
+  // A third instruction sentence would have to pick a side. This does not: the
+  // duplication itself is removed, so it no longer matters which of the two
+  // names the model chose to chain. Whatever it connected lands on ONE node.
+  //
+  // ── THE PARENT LINK WAS ALREADY ON THE WIRE ────────────────────────────────
+  // `basis` is the array positions of the stated_items a claim builds on. A
+  // refinement whose basis is exactly ONE stated `option` is, by the grammar's
+  // own semantics, a refinement of that option. No new field, no new prompt
+  // sentence. Measured on B1: three of four refinements name exactly one stated
+  // option (`c0→s20`, `c1→s21`, `c2→s22`).
+  //
+  // ── ⚠ WHERE IT DELIBERATELY DOES NOT FIRE, AND WHY ─────────────────────────
+  // If TWO OR MORE refinements name the same stated option, they are competing
+  // sub-alternatives of a category the user named, not two words for one thing —
+  // and collapsing them would silently narrow the user's choice set, the single
+  // thing a decision tool may never do. B1's fourth refinement (`c3`, basis
+  // `[19,20]`, "Defer Germany 12 months, accelerate UK NRR") names two items and
+  // correctly does not merge: it is a genuinely distinct alternative.
+  //
+  // The parent keeps its `stated` provenance and the user's VERBATIM quote as
+  // its label. The refinement's wording is never promoted onto it: a model
+  // paraphrase wearing a `stated` badge is the exact false authorship this
+  // mechanism exists to prevent. The refinement is recorded in the parent's
+  // provenance (append-only) and disclosed in `dropped`.
+  const refinementParentStatedIndex = new Map<number, number>();
+  {
+    const candidates = new Map<number, number[]>();
+    claims.forEach((claim, index) => {
+      if (claim.claim_kind !== "option_refinement") return;
+      const basis = claim.basis ?? [];
+      if (basis.length !== 1) return;
+      const parent = basis[0];
+      if (!Number.isInteger(parent)) return;
+      if (statedItems[parent]?.kind !== "option") return;
+      const list = candidates.get(parent);
+      if (list) list.push(index);
+      else candidates.set(parent, [index]);
+    });
+    for (const [parent, claimIndices] of candidates) {
+      // Exactly one refinement for this option ⇒ one alternative under two
+      // names. Two or more ⇒ distinct alternatives; leave every one of them
+      // standing.
+      if (claimIndices.length === 1) refinementParentStatedIndex.set(claimIndices[0], parent);
+    }
+  }
+
   // ── Pass 2: claims → nodes. Badge is `ai_inferred`, again taken from the loop.
   claims.forEach((claim, index) => {
     const nodeKind = CLAIM_KIND_TO_NODE_KIND[claim.claim_kind];
     if (nodeKind === null || nodeKind === undefined) return;
 
     const label = canonicalText(claim.label ?? "");
+
+    // A merged refinement mints NO node. Its wire reference resolves to the
+    // parent option, so every link the model drew from or to it lands there and
+    // pass 3 needs no knowledge of the merge.
+    const mergedParent = refinementParentStatedIndex.get(index);
+    if (mergedParent !== undefined) {
+      const parentId = statedIdByIndex.get(mergedParent);
+      if (parentId !== undefined) {
+        claimIdByIndex.set(index, parentId);
+        const parentProv = provenance[parentId];
+        if (parentProv) {
+          // APPEND-ONLY. The parent's class and quote are untouched; the
+          // refinement is added alongside them so the record shows what the
+          // model contributed without the model's words ever being attributed to
+          // the user.
+          provenance[parentId] = {
+            ...parentProv,
+            merged_refinements: [...(parentProv.merged_refinements ?? []), label],
+          };
+          const parentNode = nodes.find((n) => n.id === parentId);
+          if (parentNode) parentNode.provenance = provenance[parentId];
+        }
+        dropped.push({
+          claim_index: index,
+          claim_kind: claim.claim_kind,
+          label,
+          reason: "refinement_merged_into_stated_option",
+        });
+        return;
+      }
+    }
     const id = mintUnique(sha8(claim.claim_kind, label), usedIds);
     claimIdByIndex.set(index, id);
 
@@ -503,22 +743,62 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
   // link may reference a claim declared later in the array.
   const nodeIds = new Set(nodes.map((n) => n.id));
 
-  const resolveRef = (ref: string | undefined): { id?: string; reason?: DroppedRecordRef["reason"] } => {
-    if (ref === undefined) return { reason: "missing_ref" };
-    const m = REF_PATTERN.exec(ref);
-    if (!m) return { reason: "unparseable_ref" };
-    const idx = Number(m[2]);
-    const id = m[1] === "s" ? statedIdByIndex.get(idx) : claimIdByIndex.get(idx);
+  /**
+   * Resolve ONE endpoint from its typed namespace fields.
+   *
+   * The namespace is the FIELD, so there is no token to parse and no prefix that
+   * could be mistyped — `unparseable_ref` is now unreachable through the grammar
+   * and survives only for the fixture/test callers the header mentions.
+   * Emitting BOTH fields of a pair is a contradiction, not a preference: the two
+   * index different arrays and nothing here is entitled to choose.
+   */
+  const resolveEndpoint = (
+    statedIdx: number | undefined,
+    claimIdx: number | undefined,
+  ): { id?: string; reason?: DroppedRecordRef["reason"] } => {
+    if (statedIdx !== undefined && claimIdx !== undefined) return { reason: "ambiguous_ref" };
+    if (statedIdx === undefined && claimIdx === undefined) return { reason: "missing_ref" };
+    const idx = statedIdx ?? claimIdx!;
+    if (!Number.isInteger(idx)) return { reason: "unparseable_ref" };
+    const id = statedIdx !== undefined ? statedIdByIndex.get(idx) : claimIdByIndex.get(idx);
     if (id === undefined) return { reason: "ref_out_of_range" };
     if (!nodeIds.has(id)) return { reason: "ref_target_not_a_node" };
     return { id };
   };
 
+  /** How an endpoint reads back to a human, for the disclosure only. */
+  const renderRef = (statedIdx: number | undefined, claimIdx: number | undefined): string | undefined => {
+    if (statedIdx !== undefined && claimIdx !== undefined) return `stated_items[${statedIdx}]+claims[${claimIdx}]`;
+    if (statedIdx !== undefined) return `stated_items[${statedIdx}]`;
+    if (claimIdx !== undefined) return `claims[${claimIdx}]`;
+    return undefined;
+  };
+
+  const kindAtLinkTime = new Map(nodes.map((n) => [n.id, n.kind as string]));
+
+  // Provisional option→factor edge set, needed by the one-edge rule below. Built
+  // from ALL the claims up front rather than from the `edges` array as it fills,
+  // because the rule must give the same answer for the FIRST link considered as
+  // for the last. Evaluating it against a partially-built edge list would make
+  // the verdict depend on emission order, and this projector's entire premise is
+  // that its output is a pure function of the record set's content AND order —
+  // an order-dependent guard would be a non-determinism source wearing a
+  // correctness rationale.
+  const provisionalOptionTargets: { from: string; to: string }[] = [];
+  for (const claim of claims) {
+    if (claim.claim_kind !== "causal_link") continue;
+    const f = resolveEndpoint(claim.from_stated, claim.from_claim);
+    const t = resolveEndpoint(claim.to_stated, claim.to_claim);
+    if (f.id && t.id && kindAtLinkTime.get(f.id) === "option") provisionalOptionTargets.push({ from: f.id, to: t.id });
+  }
+
   claims.forEach((claim, index) => {
     if (claim.claim_kind !== "causal_link") return;
     const label = canonicalText(claim.label ?? "");
-    const from = resolveRef(claim.from_ref);
-    const to = resolveRef(claim.to_ref);
+    const from = resolveEndpoint(claim.from_stated, claim.from_claim);
+    const to = resolveEndpoint(claim.to_stated, claim.to_claim);
+    const fromRef = renderRef(claim.from_stated, claim.from_claim);
+    const toRef = renderRef(claim.to_stated, claim.to_claim);
 
     const bad = from.reason ?? to.reason;
     if (bad || !from.id || !to.id) {
@@ -527,8 +807,8 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
         claim_kind: claim.claim_kind,
         label,
         reason: bad ?? "missing_ref",
-        ...(claim.from_ref !== undefined ? { from_ref: claim.from_ref } : {}),
-        ...(claim.to_ref !== undefined ? { to_ref: claim.to_ref } : {}),
+        ...(fromRef !== undefined ? { from_ref: fromRef } : {}),
+        ...(toRef !== undefined ? { to_ref: toRef } : {}),
       });
       return;
     }
@@ -538,8 +818,36 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
         claim_kind: claim.claim_kind,
         label,
         reason: "self_loop",
-        ...(claim.from_ref !== undefined ? { from_ref: claim.from_ref } : {}),
-        ...(claim.to_ref !== undefined ? { to_ref: claim.to_ref } : {}),
+        ...(fromRef !== undefined ? { from_ref: fromRef } : {}),
+        ...(toRef !== undefined ? { to_ref: toRef } : {}),
+      });
+      return;
+    }
+
+    // ── THE KIND-LEGALITY GATE. Both endpoints resolved; are they a shape any
+    // repair can rescue? See `UNRESCUABLE_EDGE_SHAPES` for the derivation and
+    // for why the set is the provably-unrescuable one rather than a copy of
+    // `ALLOWED_EDGES`.
+    const fromRaw = kindAtLinkTime.get(from.id) ?? "";
+    const toRaw = kindAtLinkTime.get(to.id) ?? "";
+    const fromKind = PROJECTED_KIND_AFTER_NORMALISATION[fromRaw] ?? fromRaw;
+    const toKind = PROJECTED_KIND_AFTER_NORMALISATION[toRaw] ?? toRaw;
+    const illegal =
+      UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`) ||
+      // The one edge rule: nothing may point INTO a factor an option acts on.
+      (fromKind === "factor" &&
+        toKind === "factor" &&
+        isOptionControlledFactor(to.id, kindAtLinkTime, provisionalOptionTargets));
+    if (illegal) {
+      dropped.push({
+        claim_index: index,
+        claim_kind: claim.claim_kind,
+        label,
+        reason: "ref_kind_illegal",
+        ...(fromRef !== undefined ? { from_ref: fromRef } : {}),
+        ...(toRef !== undefined ? { to_ref: toRef } : {}),
+        from_kind: fromKind,
+        to_kind: toKind,
       });
       return;
     }

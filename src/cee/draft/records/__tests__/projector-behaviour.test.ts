@@ -24,16 +24,16 @@ const RECORDS: DraftRecordSet = {
   claims: [
     { claim_kind: "factor", label: "implementation cost", basis: [1, 2], category: "controllable", value: 4500 },
     { claim_kind: "prior", label: "market grows 8% annually", value: 8 },
-    { claim_kind: "causal_link", label: "CRM reduces churn", basis: [1], from_ref: "s1", to_ref: "s4", effect: "negative", strength: 0.4 },
+    { claim_kind: "causal_link", label: "CRM reduces churn", basis: [1], from_stated: 1, to_stated: 4, effect: "negative", strength: 0.4 },
     // ⚠ THE SPINE IS PART OF THE FIXTURE. The projector withdraws any factor or
     // constraint that reaches no goal (pass 3b), so an unconnected fixture would
     // project to almost nothing and the assertions below would agree with
     // themselves on an empty set. Every derived node here is connected on purpose.
-    { claim_kind: "causal_link", label: "churn bears on the goal", basis: [0], from_ref: "s4", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [0], from_ref: "c0", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "market growth bears on the goal", from_ref: "c1", to_ref: "s0", effect: "positive" },
-    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [2], from_ref: "s2", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "the margin floor bears on the goal", basis: [3], from_ref: "s3", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "churn bears on the goal", basis: [0], from_stated: 4, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [0], from_claim: 0, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "market growth bears on the goal", from_claim: 1, to_stated: 0, effect: "positive" },
+    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [2], from_stated: 2, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "the margin floor bears on the goal", basis: [3], from_stated: 3, to_stated: 0, effect: "negative" },
   ],
 };
 
@@ -168,10 +168,21 @@ describe("unresolvable references are DISCLOSED, never silently swallowed", () =
   const bad: DraftRecordSet = {
     stated_items: [{ kind: "goal", source_quote: "grow revenue" }],
     claims: [
-      { claim_kind: "causal_link", label: "out of range", from_ref: "s0", to_ref: "s9" },
-      { claim_kind: "causal_link", label: "unparseable", from_ref: "s0", to_ref: "banana" },
-      { claim_kind: "causal_link", label: "self loop", from_ref: "s0", to_ref: "s0" },
-      { claim_kind: "causal_link", label: "missing", from_ref: "s0" },
+      { claim_kind: "causal_link", label: "out of range", from_stated: 0, to_stated: 9 },
+      // ⚠ v4: `unparseable_ref` IS NO LONGER REACHABLE THROUGH THE GRAMMAR, and
+      // that is the namespace fix working rather than a case going missing. The
+      // reference used to be a free string whose first character selected the
+      // namespace (`s0` / `c0`), so `"banana"` was an emittable value; the
+      // namespace is now the FIELD and the value is a typed integer, so a
+      // provider that honours the schema cannot produce an unparseable
+      // reference. The reason code survives for the fixture and test callers the
+      // projector's header names, and the class it is replaced by here —
+      // `ambiguous_ref` — is the one v4 actually introduced: BOTH namespace
+      // fields of one endpoint set, which say different things and which the
+      // projector refuses to choose between.
+      { claim_kind: "causal_link", label: "ambiguous", from_stated: 0, to_stated: 0, to_claim: 0 },
+      { claim_kind: "causal_link", label: "self loop", from_stated: 0, to_stated: 0 },
+      { claim_kind: "causal_link", label: "missing", from_stated: 0 },
     ],
   };
 
@@ -179,7 +190,7 @@ describe("unresolvable references are DISCLOSED, never silently swallowed", () =
     const { dropped, graph } = projectRecordsToGraph(bad);
     expect(dropped.map((d) => [d.claim_index, d.reason])).toEqual([
       [0, "ref_out_of_range"],
-      [1, "unparseable_ref"],
+      [1, "ambiguous_ref"],
       [2, "self_loop"],
       [3, "missing_ref"],
     ]);

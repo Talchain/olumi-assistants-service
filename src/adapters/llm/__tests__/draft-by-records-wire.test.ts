@@ -60,8 +60,8 @@ const RECORD_SET_RESPONSE = JSON.stringify({
   ],
   claims: [
     { claim_kind: 'factor', label: 'handling capacity', basis: [0], category: 'controllable' },
-    { claim_kind: 'causal_link', label: 'more capacity cuts time', basis: [0], from_ref: 's1', to_ref: 'c0', effect: 'positive' },
-    { claim_kind: 'causal_link', label: 'capacity drives the goal', basis: [0], from_ref: 'c0', to_ref: 's0', effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'more capacity cuts time', basis: [0], from_stated: 1, to_claim: 0, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'capacity drives the goal', basis: [0], from_claim: 0, to_stated: 0, effect: 'positive' },
   ],
 });
 

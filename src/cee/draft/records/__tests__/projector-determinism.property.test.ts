@@ -154,8 +154,8 @@ const REAL_RECORD_SETS: ReadonlyArray<{ name: string; records: DraftRecordSet }>
       claims: [
         { claim_kind: "factor", label: "implementation cost", basis: [1, 3], category: "controllable", value: 4500 },
         { claim_kind: "factor", label: "churn rate", basis: [4], category: "observable", value: 12 },
-        { claim_kind: "causal_link", label: "new CRM reduces churn", basis: [1], from_ref: "s1", to_ref: "c1", effect: "negative", strength: 0.4 },
-        { claim_kind: "causal_link", label: "cost pressures budget", from_ref: "c0", to_ref: "s3", effect: "positive", strength: 0.6 },
+        { claim_kind: "causal_link", label: "new CRM reduces churn", basis: [1], from_stated: 1, to_claim: 1, effect: "negative", strength: 0.4 },
+        { claim_kind: "causal_link", label: "cost pressures budget", from_claim: 0, to_stated: 3, effect: "positive", strength: 0.6 },
       ],
     },
   },
@@ -170,9 +170,9 @@ const REAL_RECORD_SETS: ReadonlyArray<{ name: string; records: DraftRecordSet }>
         // Pure invention — `unbased: true`. The honesty half under test.
         { claim_kind: "prior", label: "market grows 8% annually", value: 8 },
         // Deliberately unresolvable: c9 does not exist. MUST be disclosed.
-        { claim_kind: "causal_link", label: "dangling link", from_ref: "s0", to_ref: "c9" },
+        { claim_kind: "causal_link", label: "dangling link", from_stated: 0, to_claim: 9 },
         // Deliberately a self-loop. MUST be disclosed.
-        { claim_kind: "causal_link", label: "self loop", from_ref: "s0", to_ref: "s0" },
+        { claim_kind: "causal_link", label: "self loop", from_stated: 0, to_stated: 0 },
       ],
     },
   },

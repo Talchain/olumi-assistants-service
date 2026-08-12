@@ -48,11 +48,52 @@
  * ── DESIGN DECISIONS THAT ARE NOT FREE (each one recorded) ─────────────────
  *
  * 1. THE MODEL MINTS NO IDENTIFIERS. It cannot cite an id CEE has not minted
- *    yet, so records reference each other by ARRAY POSITION on the wire
- *    (`basis` = integer indices into `stated_items`; `from_ref`/`to_ref` =
- *    `s<N>` / `c<N>` tokens) and the PROJECTOR resolves position → minted id.
- *    No identifier crosses the wire; the projector — a pure function — owns
- *    identity.
+ *    yet, so records reference each other by ARRAY POSITION on the wire and the
+ *    PROJECTOR resolves position → minted id. No identifier crosses the wire;
+ *    the projector — a pure function — owns identity.
+ *
+ * 1b. ⭐⭐ THE NAMESPACE IS CARRIED BY THE FIELD NAME, NOT BY A PREFIX INSIDE A
+ *    STRING (v4, 2026-08-12). This replaces `from_ref`/`to_ref`, which were
+ *    single strings whose FIRST CHARACTER selected the namespace: `s<N>` =
+ *    `stated_items[N]`, `c<N>` = `claims[N]`.
+ *
+ *    MEASURED, and it cost a whole acceptance block. On the long brief B1 the
+ *    model emitted `to_ref="c0"` on the only three links intended to terminate
+ *    at the goal. The goal was `s0`; `c0` was `claims[0]`, an
+ *    `option_refinement`. Every one resolved SUCCESSFULLY — to the wrong node —
+ *    so nothing reached the goal, the projector pruned everything that could
+ *    not, and a complete 23-item / 34-claim emission collapsed to 8 nodes and 6
+ *    edges. A one-character namespace selector inside a free string is
+ *    unguardable: both spellings are well-formed, so the error is invisible
+ *    everywhere upstream of the graph.
+ *
+ *    ⚠ THE GRAMMAR CANNOT ENFORCE A STRING'S SHAPE HERE. `pattern` is in
+ *    `FORBIDDEN_SCHEMA_KEYWORDS` — the structured-outputs compiler rejects it —
+ *    so there is no regex the schema could carry. The only enforcement the
+ *    grammar CAN apply is a TYPE, and a type applies to a FIELD. So the
+ *    namespace becomes four typed integer fields:
+ *
+ *      from_stated / to_stated → an index into `stated_items`
+ *      from_claim  / to_claim  → an index into `claims`
+ *
+ *    A claims index can no longer be written where a stated index belongs while
+ *    LOOKING correct: it would have to be written into a differently-named,
+ *    self-describing field. `"c0"` is not even emittable — a string in an
+ *    integer field is rejected by the decoder itself.
+ *
+ *    ⚠ HONEST LIMIT, stated because the fix is not total: the model can still
+ *    put the right integer in the WRONG FIELD. That residue is caught
+ *    downstream, not here — `projector.ts` rejects and DISCLOSES any reference
+ *    whose resolved node kinds cannot form a legal edge, instead of silently
+ *    mis-binding it. Two harms, two mechanisms (trap 21/22b); neither is asked
+ *    to cover the other.
+ *
+ *    A UNIFIED namespace (one flat index over stated_items ++ claims) was
+ *    considered and REJECTED: referencing `claims[k]` would require the model to
+ *    emit `stated_items.length + k`, converting a class confusion into an
+ *    ARITHMETIC one — and an off-by-one still lands on a real node of a
+ *    plausible kind, which is strictly harder to machine-catch than what it
+ *    replaces.
  *
  * 2. `stated_items` CARRIES `minItems: 1`; `claims` DELIBERATELY DOES NOT.
  *    `required` + an unbounded array means `[]` is strictly conformant, and
@@ -128,6 +169,81 @@ export type DraftRecordClaimKind = (typeof DRAFT_RECORD_CLAIM_KINDS)[number];
 export const DRAFT_RECORD_CLAIM_DISCRIMINATOR = "claim_kind";
 
 /**
+ * ⭐ THE TYPED REFERENCE FIELDS — one per (endpoint × namespace), and the ONE
+ * place their names are written.
+ *
+ * The schema below, the projector's resolver, the seam's carried-key set, the
+ * completion grammar and the streaming edge-progress probe are ALL built from
+ * this object. A rename therefore moves every consumer at once; none of them is
+ * a hand-maintained mirror of the others (trap 12), which is the defect that put
+ * `sets_to` on the wire and silently dropped it at the seam.
+ *
+ * `stated` and `claim` are the ARRAY NAMES the model is already emitting, so the
+ * field name tells the model which list it is indexing without the instruction
+ * having to teach a token grammar.
+ */
+export const DRAFT_RECORD_REF_FIELDS = {
+  fromStated: "from_stated",
+  fromClaim: "from_claim",
+  toStated: "to_stated",
+  toClaim: "to_claim",
+} as const;
+
+/** Every reference field name, derived — never re-listed. */
+export const DRAFT_RECORD_REF_FIELD_NAMES = Object.values(DRAFT_RECORD_REF_FIELDS) as readonly string[];
+
+/**
+ * ⚠ NOTE FOR THE ADAPTER, recorded because a silence here is invisible.
+ * `DRAFT_EDGES_REACHED_RE` (`draft-budget.ts`) is `/"from(_ref)?"\s*:/`, and it
+ * matched records streams ONLY because the old reference field happened to be
+ * called `from_ref`. With the fields renamed (design note 1b) it no longer
+ * matches a records stream at all. That regex is NOT widened to chase them: it
+ * is the GRAPH path's probe, the historic captures it serves still carry
+ * graph-shaped edges, and adding records field names to it would make one
+ * literal serve two grammars — the mirror this file exists to avoid. The records
+ * path carries its own derived signals instead: the claim probe above and the
+ * stated-item probe below.
+ */
+
+/**
+ * The REQUIRED discriminator on every `stated_item` — present exactly once per
+ * decoded stated item, whatever its kind.
+ */
+export const DRAFT_RECORD_STATED_DISCRIMINATOR = "source_quote";
+
+/**
+ * ⭐ THE EARLY PROGRESS SIGNAL — what closes the late-lift hole properly.
+ *
+ * The claim probe cannot fire until the ENTIRE `stated_items` array and every
+ * preceding non-causal claim has been emitted. Measured on the two banked
+ * long-brief streams, the first `claim_kind` lands at roughly characters 2,568
+ * and 2,777 — and the one runaway abort the measured block observed fired at
+ * **1,034 characters**, inside `stated_items`, thousands of characters before
+ * any lift was possible. A healthy draft was killed for being slow at the one
+ * point in the stream where nothing could vouch for it.
+ *
+ * `source_quote` appears in the first stated item, so this fires within a few
+ * dozen characters of the first content. Derived from the discriminator constant
+ * exactly as the claim probe is, so a rename moves the schema and the probe
+ * together and cannot silently blind the detector (trap 12).
+ *
+ * ⚠ RESIDUAL EXPOSURE, STATED RATHER THAN GLOSSED. Joining this into the
+ * bottleneck latch means a stream that emits `stated_items` forever is no longer
+ * aborted by the 25 s ceiling. It is not unbounded: `max_tokens` is a hard
+ * provider-side cap on the generation, so the exposure is a pathological stream
+ * costing its full token budget in latency instead of being cut at 25 s. That is
+ * the trade the #923 design already made for `claims`; this widens it to the
+ * one region where a FALSE abort was actually measured, and the alternative —
+ * leaving the hole open — kills healthy long-brief drafts, which is the failure
+ * we have evidence for rather than the one we can imagine.
+ *
+ * Not global, for the same `lastIndex` reason the other probes carry.
+ */
+export const DRAFT_RECORDS_STATED_PROGRESS_RE = new RegExp(
+  `"${DRAFT_RECORD_STATED_DISCRIMINATOR}"\\s*:`,
+);
+
+/**
  * Structural "a claim has been decoded" probe over accumulated stream text —
  * the records analogue of `DRAFT_EDGES_REACHED_RE`.
  *
@@ -163,11 +279,25 @@ export interface DraftStatedItem {
 export interface DraftInferenceClaim {
   claim_kind: DraftRecordClaimKind;
   label: string;
-  /** Indices into `stated_items`. Empty/absent ⇒ pure invention, and marked so. */
+  /**
+   * Indices into `stated_items`. Empty/absent ⇒ pure invention, and marked so.
+   *
+   * ⭐ ALSO THE PARENT LINK FOR AN `option_refinement`. A refinement whose
+   * `basis` names exactly one stated `option` is a refinement OF that option,
+   * and the projector merges the two rather than minting a second option node
+   * for one alternative. No new field was needed: the link was already on the
+   * wire (measured on B1 — 3 of 4 refinements named exactly one stated option).
+   */
   basis?: number[];
-  /** `causal_link` only. `s<N>` = stated_items[N]; `c<N>` = claims[N]. */
-  from_ref?: string;
-  to_ref?: string;
+  /**
+   * `causal_link` only. TYPED BY NAMESPACE — see design note 1b. Exactly one
+   * `from_*` and one `to_*` per link; emitting both of a pair is a contradiction
+   * the projector discloses rather than resolves by preference.
+   */
+  from_stated?: number;
+  from_claim?: number;
+  to_stated?: number;
+  to_claim?: number;
   effect?: DraftRecordEffect;
   strength?: number;
   category?: DraftRecordCategory;
@@ -231,34 +361,74 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
       claims: {
         type: "array",
         // NO minItems — see design note 2. This absence is load-bearing.
-        items: {
-          type: "object",
-          properties: {
-            // Built from DRAFT_RECORD_CLAIM_DISCRIMINATOR so the streaming
-            // progress probe and this schema cannot drift apart. Serialises
-            // byte-identically to the literal it replaces — the grammar hash is
-            // unchanged, and a test asserts that.
-            [DRAFT_RECORD_CLAIM_DISCRIMINATOR]: { type: "string", enum: [...DRAFT_RECORD_CLAIM_KINDS] },
-            label: { type: "string" },
-            basis: { type: "array", items: { type: "integer" } },
-            from_ref: { type: "string" },
-            to_ref: { type: "string" },
-            effect: { type: "string", enum: [...DRAFT_RECORD_EFFECTS] },
-            strength: { type: "number" },
-            category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
-            value: { type: "number" },
-            // Option→factor intervention level. See the interface note: named
-            // apart from `strength` on purpose.
-            sets_to: { type: "number" },
-          },
-          required: [DRAFT_RECORD_CLAIM_DISCRIMINATOR, "label"],
-          additionalProperties: false,
-        },
+        items: buildDraftClaimItemSchema(),
       },
     },
     required: ["stated_items", "claims"],
     additionalProperties: false,
   };
+}
+
+/**
+ * The `claims[]` ITEM schema, factored out as its own builder.
+ *
+ * ⭐ WHY IT IS SEPARATE. The two-pass completion turn emits CLAIMS ONLY, and its
+ * grammar must be this exact shape. Restating it there would be a second copy of
+ * the model-facing contract (trap 12) — and the copy that drifts is the one the
+ * SECOND pass uses, which is the pass nobody has a banked corpus for. So the
+ * completion grammar is BUILT FROM THIS FUNCTION and cannot diverge.
+ */
+export function buildDraftClaimItemSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      // Built from DRAFT_RECORD_CLAIM_DISCRIMINATOR so the streaming progress
+      // probe and this schema cannot drift apart.
+      [DRAFT_RECORD_CLAIM_DISCRIMINATOR]: { type: "string", enum: [...DRAFT_RECORD_CLAIM_KINDS] },
+      label: { type: "string" },
+      basis: { type: "array", items: { type: "integer" } },
+      // Typed reference fields — the namespace IS the field (design note 1b).
+      // Keyed from DRAFT_RECORD_REF_FIELDS so the projector's resolver, the
+      // seam's carried-key set and the streaming edge probe all move together.
+      [DRAFT_RECORD_REF_FIELDS.fromStated]: { type: "integer" },
+      [DRAFT_RECORD_REF_FIELDS.fromClaim]: { type: "integer" },
+      [DRAFT_RECORD_REF_FIELDS.toStated]: { type: "integer" },
+      [DRAFT_RECORD_REF_FIELDS.toClaim]: { type: "integer" },
+      effect: { type: "string", enum: [...DRAFT_RECORD_EFFECTS] },
+      strength: { type: "number" },
+      category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
+      value: { type: "number" },
+      // Option→factor intervention level. See the interface note: named apart
+      // from `strength` on purpose.
+      sets_to: { type: "number" },
+    },
+    required: [DRAFT_RECORD_CLAIM_DISCRIMINATOR, "label"],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Every property key the `claims[]` item schema declares, DERIVED from the
+ * schema itself.
+ *
+ * This is the completeness source for `seam.ts`'s field-by-field rebuild. That
+ * rebuild is a hand-written list, and it HAS already drifted: `sets_to` shipped
+ * on the wire and in the projector while the seam silently discarded it, so no
+ * live draft ever produced an intervention and every test agreed, because every
+ * interventions test calls the projector directly. A derived guard turns the
+ * next such omission into a red instead of a dark capability.
+ */
+export function draftClaimSchemaKeys(): readonly string[] {
+  const props = (buildDraftClaimItemSchema() as { properties: Record<string, unknown> }).properties;
+  return Object.keys(props).sort();
+}
+
+/** The same, for `stated_items[]`. */
+export function draftStatedItemSchemaKeys(): readonly string[] {
+  const schema = buildDraftRecordsSchema() as {
+    properties: { stated_items: { items: { properties: Record<string, unknown> } } };
+  };
+  return Object.keys(schema.properties.stated_items.items.properties).sort();
 }
 
 // ── Static budget instruments (C-K0's cheap half) ───────────────────────────

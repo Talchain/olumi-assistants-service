@@ -48,9 +48,9 @@ const HUB_RECORDS: DraftRecordSet = {
   ],
   claims: [
     { claim_kind: "factor", label: "sales productivity uplift", basis: [0], category: "observable" },
-    { claim_kind: "causal_link", label: "the new CRM lifts productivity", basis: [1], from_ref: "s1", to_ref: "c0", effect: "positive" },
-    { claim_kind: "causal_link", label: "the status quo holds it flat", basis: [2], from_ref: "s2", to_ref: "c0", effect: "negative" },
-    { claim_kind: "causal_link", label: "uplift drives the goal", basis: [0], from_ref: "c0", to_ref: "s0", effect: "positive" },
+    { claim_kind: "causal_link", label: "the new CRM lifts productivity", basis: [1], from_stated: 1, to_claim: 0, effect: "positive" },
+    { claim_kind: "causal_link", label: "the status quo holds it flat", basis: [2], from_stated: 2, to_claim: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "uplift drives the goal", basis: [0], from_claim: 0, to_stated: 0, effect: "positive" },
   ],
 };
 
@@ -149,8 +149,8 @@ describe("`role` is not a category either", () => {
         { kind: "figure", source_quote: "margin is 71%", value: 71, unit: "%", role: "target" },
       ],
       claims: [
-        { claim_kind: "causal_link", label: "prices move margin", basis: [1], from_ref: "s1", to_ref: "s2", effect: "positive" },
-        { claim_kind: "causal_link", label: "margin is the goal", basis: [2], from_ref: "s2", to_ref: "s0", effect: "positive" },
+        { claim_kind: "causal_link", label: "prices move margin", basis: [1], from_stated: 1, to_stated: 2, effect: "positive" },
+        { claim_kind: "causal_link", label: "margin is the goal", basis: [2], from_stated: 2, to_stated: 0, effect: "positive" },
       ],
     };
     const figure = projectRecordsToGraph(records).graph.nodes.filter(

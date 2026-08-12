@@ -44,12 +44,12 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
     claims: [
       { claim_kind: "factor", label: "licence cost" },
       { claim_kind: "factor", label: "rep hours saved" },
-      { claim_kind: "causal_link", label: "the new CRM costs more", from_ref: "s1", to_ref: "c0", effect: "negative", sets_to: 240000 },
-      { claim_kind: "causal_link", label: "the new CRM saves hours", from_ref: "s1", to_ref: "c1", effect: "positive", sets_to: 12 },
+      { claim_kind: "causal_link", label: "the new CRM costs more", from_stated: 1, to_claim: 0, effect: "negative", sets_to: 240000 },
+      { claim_kind: "causal_link", label: "the new CRM saves hours", from_stated: 1, to_claim: 1, effect: "positive", sets_to: 12 },
       // Deliberately NO sets_to: the status quo's magnitude was not stated.
-      { claim_kind: "causal_link", label: "the status quo holds cost flat", from_ref: "s2", to_ref: "c0", effect: "positive" },
-      { claim_kind: "causal_link", label: "cost bears on the goal", from_ref: "c0", to_ref: "s0", effect: "negative" },
-      { claim_kind: "causal_link", label: "hours saved bear on the goal", from_ref: "c1", to_ref: "s0", effect: "positive" },
+      { claim_kind: "causal_link", label: "the status quo holds cost flat", from_stated: 2, to_claim: 0, effect: "positive" },
+      { claim_kind: "causal_link", label: "cost bears on the goal", from_claim: 0, to_stated: 0, effect: "negative" },
+      { claim_kind: "causal_link", label: "hours saved bear on the goal", from_claim: 1, to_stated: 0, effect: "positive" },
     ],
   };
 
@@ -98,17 +98,17 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
       claims: [
         { claim_kind: "factor", label: "licence cost" },
         { claim_kind: "factor", label: "renewal risk" },
-        { claim_kind: "causal_link", label: "the new CRM moves cost", from_ref: "s1", to_ref: "c0", effect: "negative" },
-        { claim_kind: "causal_link", label: "the status quo moves cost", from_ref: "s2", to_ref: "c0", effect: "positive" },
+        { claim_kind: "causal_link", label: "the new CRM moves cost", from_stated: 1, to_claim: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "the status quo moves cost", from_stated: 2, to_claim: 0, effect: "positive" },
         // FACTOR→FACTOR carrying a magnitude. This is the case that discriminates
         // the source check: the target IS a factor, so a projector that only
         // checked the TARGET kind would happily mint an intervention here — on a
         // factor node, which cannot carry one. A mutant proved an earlier version
         // of this test blind, because its only fixture was factor→GOAL, which the
         // target check rejects on its own.
-        { claim_kind: "causal_link", label: "cost drives renewal risk", from_ref: "c0", to_ref: "c1", effect: "negative", sets_to: 888 },
-        { claim_kind: "causal_link", label: "cost bears on the goal", from_ref: "c0", to_ref: "s0", effect: "negative", sets_to: 999 },
-        { claim_kind: "causal_link", label: "renewal risk bears on the goal", from_ref: "c1", to_ref: "s0", effect: "negative" },
+        { claim_kind: "causal_link", label: "cost drives renewal risk", from_claim: 0, to_claim: 1, effect: "negative", sets_to: 888 },
+        { claim_kind: "causal_link", label: "cost bears on the goal", from_claim: 0, to_stated: 0, effect: "negative", sets_to: 999 },
+        { claim_kind: "causal_link", label: "renewal risk bears on the goal", from_claim: 1, to_stated: 0, effect: "negative" },
       ],
     });
     for (const n of graph.nodes) {
@@ -136,10 +136,10 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
       ],
       claims: [
         { claim_kind: "factor", label: "rep hours saved" },
-        { claim_kind: "causal_link", label: "the new CRM saves hours", from_ref: "s1", to_ref: "c0", effect: "positive", sets_to: 12 },
-        { claim_kind: "causal_link", label: "the new CRM lifts the goal directly", from_ref: "s1", to_ref: "s0", effect: "positive", sets_to: 555 },
-        { claim_kind: "causal_link", label: "the status quo holds hours flat", from_ref: "s2", to_ref: "c0", effect: "negative" },
-        { claim_kind: "causal_link", label: "hours bear on the goal", from_ref: "c0", to_ref: "s0", effect: "positive" },
+        { claim_kind: "causal_link", label: "the new CRM saves hours", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+        { claim_kind: "causal_link", label: "the new CRM lifts the goal directly", from_stated: 1, to_stated: 0, effect: "positive", sets_to: 555 },
+        { claim_kind: "causal_link", label: "the status quo holds hours flat", from_stated: 2, to_claim: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "hours bear on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
       ],
     });
     const goalId = idOf(graph, "raise sales productivity");
@@ -165,10 +165,10 @@ describe("interventions are the model's stated magnitudes, and nothing else", ()
       claims: [
         { claim_kind: "factor", label: "rep hours saved" },
         { claim_kind: "factor", label: "an orphan nobody connected" },
-        { claim_kind: "causal_link", label: "the new CRM saves hours", from_ref: "s1", to_ref: "c0", effect: "positive", sets_to: 12 },
-        { claim_kind: "causal_link", label: "the new CRM touches the orphan", from_ref: "s1", to_ref: "c1", effect: "positive", sets_to: 77 },
-        { claim_kind: "causal_link", label: "the status quo holds hours flat", from_ref: "s2", to_ref: "c0", effect: "negative" },
-        { claim_kind: "causal_link", label: "hours bear on the goal", from_ref: "c0", to_ref: "s0", effect: "positive" },
+        { claim_kind: "causal_link", label: "the new CRM saves hours", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+        { claim_kind: "causal_link", label: "the new CRM touches the orphan", from_stated: 1, to_claim: 1, effect: "positive", sets_to: 77 },
+        { claim_kind: "causal_link", label: "the status quo holds hours flat", from_stated: 2, to_claim: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "hours bear on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
       ],
     });
     expect(dropped.map((d) => d.label)).toContain("an orphan nobody connected");
@@ -201,8 +201,8 @@ describe("the option budget is the validator's own, and overflow is disclosed", 
       { claim_kind: "option_refinement", label: "keep it but retrain" },
       { claim_kind: "option_refinement", label: "keep it but re-licence" },
       { claim_kind: "option_refinement", label: "buy the add-on and retrain" },
-      { claim_kind: "causal_link", label: "the new CRM saves hours", from_ref: "s1", to_ref: "c0", effect: "positive" },
-      { claim_kind: "causal_link", label: "hours bear on the goal", from_ref: "c0", to_ref: "s0", effect: "positive" },
+      { claim_kind: "causal_link", label: "the new CRM saves hours", from_stated: 1, to_claim: 0, effect: "positive" },
+      { claim_kind: "causal_link", label: "hours bear on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
     ],
   };
 
@@ -259,8 +259,8 @@ describe("the option budget is the validator's own, and overflow is disclosed", 
           claim_kind: "option_refinement" as const,
           label: `refinement ${i}`,
         })),
-        { claim_kind: "causal_link" as const, label: "the new CRM saves hours", from_ref: "s1", to_ref: "c0", effect: "positive" as const },
-        { claim_kind: "causal_link" as const, label: "hours bear on the goal", from_ref: "c0", to_ref: "s0", effect: "positive" as const },
+        { claim_kind: "causal_link" as const, label: "the new CRM saves hours", from_stated: 1, to_claim: 0, effect: "positive" as const },
+        { claim_kind: "causal_link" as const, label: "hours bear on the goal", from_claim: 0, to_stated: 0, effect: "positive" as const },
       ],
     });
     // 2 stated + 5 refinements = 7 minted, exactly one over MAX_OPTIONS.
@@ -278,9 +278,9 @@ describe("the option budget is the validator's own, and overflow is disclosed", 
       ],
       claims: [
         { claim_kind: "factor", label: "rep hours saved" },
-        { claim_kind: "causal_link", label: "the new CRM saves hours", from_ref: "s1", to_ref: "c0", effect: "positive" },
-        { claim_kind: "causal_link", label: "the status quo holds hours flat", from_ref: "s2", to_ref: "c0", effect: "negative" },
-        { claim_kind: "causal_link", label: "hours bear on the goal", from_ref: "c0", to_ref: "s0", effect: "positive" },
+        { claim_kind: "causal_link", label: "the new CRM saves hours", from_stated: 1, to_claim: 0, effect: "positive" },
+        { claim_kind: "causal_link", label: "the status quo holds hours flat", from_stated: 2, to_claim: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "hours bear on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
       ],
     });
     expect(graph.nodes.filter((n) => n.kind === "option")).toHaveLength(2);

@@ -61,12 +61,21 @@ import { extractZodIssues } from '../../schemas/llmExtraction.js';
 import {
   buildDraftRecordsSchema,
   DRAFT_RECORDS_CLAIM_PROGRESS_RE,
+  DRAFT_RECORDS_STATED_PROGRESS_RE,
   draftRecordsGrammarHash,
   draftRecordsInstructionHash,
   buildDraftRecordsSidecar,
   DRAFT_RECORDS_INSTRUCTION,
   projectDraftRecords,
+  projectRecordsToGraph,
   isSalvageableRecordSet,
+  enumerateCompletionAsk,
+  buildRecordsCompletionPrompt,
+  buildRecordsCompletionSchema,
+  mergeCompletionClaims,
+  RECORDS_COMPLETION_MAX_TOKENS,
+  RECORDS_COMPLETION_WALL_MS,
+  type DraftInferenceClaim,
 } from '../../cee/draft/records/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 
@@ -1063,7 +1072,31 @@ export async function draftGraphWithAnthropic(
        * for every stream that carries no `claim_kind` (i.e. every graph draft),
        * and the graph path is unchanged by construction.
        */
-      const pastBottleneck = (): boolean => edgesReached || recordsClaimsDecoded > 0;
+      /**
+       * ⭐ THE EARLY RECORDS SIGNAL — added in v4 to close the late-lift hole
+       * the #923 review left open and MEASURED.
+       *
+       * `claim_kind` cannot appear until the whole `stated_items` array is out:
+       * first claim at ~2,568 and ~2,777 chars on the two banked long-brief
+       * streams. The one abort the measured block observed fired at **1,034
+       * chars**, inside `stated_items` — a healthy draft killed thousands of
+       * characters before any lift was possible. `source_quote` appears in the
+       * FIRST stated item, so this fires within a few dozen characters of the
+       * first content and the hole closes rather than narrows.
+       *
+       * Probe derived from `DRAFT_RECORD_STATED_DISCRIMINATOR`, exactly as the
+       * claim probe is derived from its own — never a literal restated here.
+       */
+      let recordsStatedSeen = false;
+      let timeToFirstStatedMs: number | null = null;
+      /**
+       * The forward-progress signals, JOINED — never one replacing another. A
+       * stream carrying neither `source_quote` nor `claim_kind` (i.e. every
+       * graph-shaped draft) evaluates to exactly what `edgesReached` returned,
+       * so the graph path stays unchanged BY CONSTRUCTION rather than by test
+       * coverage.
+       */
+      const pastBottleneck = (): boolean => edgesReached || recordsClaimsDecoded > 0 || recordsStatedSeen;
       // Time from stream start to the first edge — the empirical signal that
       // validates DRAFT_RUNAWAY_DETECT_MS live (a healthy draft should reach
       // edges well under the deadline). Recorded on success, surfaced on meta.
@@ -1209,6 +1242,23 @@ export async function draftGraphWithAnthropic(
               brokeMidStream = true;
               perAttempt.abort();
               break;
+            }
+            // ── RECORDS EARLY PROGRESS (stated_items) ────────────────
+            // Fires on the first stated item, i.e. essentially immediately —
+            // this is the gate that stops a healthy long-brief draft being
+            // aborted while it is still transcribing what the user said.
+            if (!recordsStatedSeen && DRAFT_RECORDS_STATED_PROGRESS_RE.test(acc)) {
+              recordsStatedSeen = true;
+              timeToFirstStatedMs = Date.now() - attemptStart;
+              clearDetectTimers();
+              log.info({
+                event: "cee.llm.draft_records_stated_progress",
+                model,
+                time_to_first_stated_ms: timeToFirstStatedMs,
+                chars: acc.length,
+                detect_ms: detectDeadlineMs,
+                hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
+              }, "[Anthropic] draft_graph decoded its first STATED ITEM — the records stream is producing content");
             }
             // ── RECORDS PROGRESS COUNT ───────────────────────────────
             // Tail-windowed like the edges probe, but the window is advanced to
@@ -1939,9 +1989,127 @@ export async function draftGraphWithAnthropic(
         },
       );
     }
+    // ── ⭐⭐ PASS 2: THE COMPLETION TURN ─────────────────────────────────────
+    //
+    // Pass 1 produced a complete, well-formed record set. Where it does not join
+    // up, ONE focused turn is given the projector's own verdict and asked for the
+    // missing links — validated by probe, which cleared every blocking class on
+    // both long briefs with 0 unresolvable references across 63 new claims.
+    //
+    // ⚠ STRICTLY ADDITIVE, AND IT FAILS TO PASS 1. Every failure path here —
+    // abort at the wall, provider error, unparseable output, a merge that would
+    // disturb `stated_items`, or a second projection that is not an improvement —
+    // keeps pass 1's projection EXACTLY as it was. The completion can only ever
+    // add; it can never be the reason a draft got worse.
+    //
+    // ⚠ NON-STREAMING, DELIBERATELY. The streaming runaway detector cannot bound
+    // this call: the completion emits `claim_kind` at ~character 12, so every
+    // detector gate lifts on the first delta. Rather than leave a lifted detector
+    // in place looking like a bound, the call takes it out of the picture and is
+    // held by two limits the completion module owns and states — an output
+    // ceiling and a hard wall-clock abort.
+    let activeRecords = seam.records;
+    let activeProjection = seam.projection;
+    const completionAsk = enumerateCompletionAsk(seam.records, seam.projection);
+    const completionMeta: Record<string, unknown> = {
+      attempted: false,
+      ask_items: completionAsk.items.length,
+      base_claim_index: completionAsk.baseClaimIndex,
+    };
+    if (completionAsk.items.length > 0) {
+      completionMeta.attempted = true;
+      const completionStartedAt = Date.now();
+      const ac = new AbortController();
+      const wall = setTimeout(() => ac.abort(new Error("records_completion_wall")), RECORDS_COMPLETION_WALL_MS);
+      try {
+        const completionPrompt = buildRecordsCompletionPrompt({
+          brief: prompt.userContent,
+          records: seam.records,
+          ask: completionAsk,
+        });
+        const completionMessage = await getClient().messages.create(
+          {
+            model,
+            max_tokens: RECORDS_COMPLETION_MAX_TOKENS,
+            temperature: draftTemperature,
+            messages: [{ role: "user", content: completionPrompt }],
+            ...(useStructuredOutputs
+              ? { output_config: { format: { type: "json_schema", schema: buildRecordsCompletionSchema() } } }
+              : {}),
+            thinking: { type: "disabled" },
+          } as Anthropic.MessageCreateParamsNonStreaming,
+          { signal: ac.signal },
+        );
+        const completionText = (completionMessage.content ?? [])
+          .filter((b: { type: string }) => b.type === "text")
+          .map((b: unknown) => (b as { text: string }).text)
+          .join("");
+        // Plain parse, not the draft path's `safeExtractJson`: that helper throws
+        // an `UpstreamNonJsonError` carrying a 500-char slice of the response,
+        // which is the right behaviour for a draft that must fail loudly and the
+        // wrong one here, where an unparseable completion is a NON-EVENT that
+        // must leave pass 1 standing.
+        let completionParsed: unknown;
+        try {
+          completionParsed = JSON.parse(completionText);
+        } catch {
+          completionParsed = undefined;
+        }
+        const merged =
+          completionParsed !== undefined
+            ? mergeCompletionClaims(seam.records, completionParsed as { claims?: DraftInferenceClaim[] })
+            : ({ ok: false, reason: "no_new_claims" } as const);
+        completionMeta.parsed = completionParsed !== undefined;
+        if (merged.ok) {
+          const reprojected = projectRecordsToGraph(merged.records);
+          // ⭐ THE NON-INFERIORITY CHECK, measured by the SAME predicates that
+          // built the ask.
+          //
+          // ⚠ NOT NODE COUNT, and the first version of this line was node count.
+          // Measured on B1: the option-duplication merge legitimately takes 8
+          // nodes to 6 by collapsing three refinements onto the three stated
+          // options they refine — the same three alternatives, no longer
+          // doubled. A node-count comparator reads that as a regression and
+          // would reject the fix as harm. Counting the artefact rather than the
+          // harm is how a metric ends up arguing against its own purpose
+          // (trap 23).
+          //
+          // So the comparator is the ask itself: strictly FEWER unresolved
+          // problems than pass 1 had. One instrument, one vocabulary, and it
+          // cannot disagree with the thing that decided to make the call.
+          const askAfter = enumerateCompletionAsk(merged.records, reprojected);
+          const improved = askAfter.items.length < completionAsk.items.length;
+          completionMeta.ask_items_after = askAfter.items.length;
+          completionMeta.claims_added = merged.added;
+          completionMeta.nodes_before = activeProjection.graph.nodes.length;
+          completionMeta.nodes_after = reprojected.graph.nodes.length;
+          completionMeta.edges_before = activeProjection.graph.edges.length;
+          completionMeta.edges_after = reprojected.graph.edges.length;
+          completionMeta.kept = improved;
+          if (improved) {
+            activeRecords = merged.records;
+            activeProjection = reprojected;
+          }
+        } else {
+          completionMeta.merge_declined = merged.reason;
+        }
+      } catch (completionErr) {
+        // Never fatal. Pass 1 stands.
+        completionMeta.error_class = (completionErr as Error)?.name ?? "unknown";
+        completionMeta.aborted = ac.signal.aborted;
+      } finally {
+        clearTimeout(wall);
+        completionMeta.elapsed_ms = Date.now() - completionStartedAt;
+      }
+      log.info({
+        event: "cee.draft.records_completion_pass",
+        ...completionMeta,
+      }, "[Anthropic] records completion pass");
+    }
+
     const recordsSidecar = buildDraftRecordsSidecar({
-      records: seam.records,
-      projection: seam.projection,
+      records: activeRecords,
+      projection: activeProjection,
       instructionSha256: draftRecordsInstructionHash(),
       grammarSha256: draftRecordsGrammarHash(),
     });
@@ -1949,12 +2117,14 @@ export async function draftGraphWithAnthropic(
       event: "cee.draft.records_projected",
       instruction_sha256: recordsSidecar.instruction_sha256,
       grammar_sha256: recordsSidecar.grammar_sha256,
+      completion_attempted: completionMeta.attempted,
+      completion_kept: completionMeta.kept ?? false,
       ...recordsSidecar.counts,
     }, "[Anthropic] draft record set projected to GraphV3 at the post-LLM seam");
     // A spread, not a double-cast: the projected graph is copied into a plain
     // record so `rawJson` keeps its declared type, and nothing downstream holds a
     // reference to the projection the sidecar also describes.
-    rawJson = { ...seam.projection.graph } as Record<string, unknown>;
+    rawJson = { ...activeProjection.graph } as Record<string, unknown>;
 
     // Diagnostic census of what the projector produced. Computed AFTER the
     // projection deliberately: before it, `rawJson.nodes` is absent on every

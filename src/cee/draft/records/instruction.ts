@@ -115,9 +115,14 @@ builds on. If a claim rests on nothing the user said, leave \`basis\` empty — 
 is a legitimate and expected answer, and marking it honestly is more useful than
 attaching a basis that does not hold.
 
-Reference other records by position: \`s0\` is the first stated_item, \`s1\` the
-second; \`c0\` is the first claim. A \`causal_link\` needs \`from_ref\` and
-\`to_ref\`.
+Reference other records by ARRAY POSITION, and say WHICH ARRAY you mean by
+choosing the field. A \`causal_link\` needs exactly one \`from_\` and one \`to_\`:
+- \`from_stated\` / \`to_stated\` — a position in \`stated_items\`. \`0\` is the
+  first thing the user said.
+- \`from_claim\` / \`to_claim\` — a position in \`claims\`. \`0\` is your first
+  claim.
+Never set both \`from_stated\` and \`from_claim\` on one link, or both \`to_\`
+fields: they point into different lists and the pair contradicts itself.
 
 Emit only what the brief supports. An empty \`claims\` list is a valid response.
 `.trim();
@@ -134,12 +139,18 @@ and \`basis\` still records whatever the user said that you built them on.
   option TO a factor it changes, then onward from that factor until the chain
   ends at the goal. An option whose chain stops short cannot be compared with
   any other option.
-- An \`option_refinement\` IS an option. It needs its own chain to the goal, on
-  the same terms. If you are not going to connect a refinement, state it as part
-  of the option it refines instead of as a separate claim.
-- Count your options: stated options plus \`option_refinement\` claims together
-  should come to six or fewer. Prefer a few well-connected options over many
-  bare ones.
+- **Chain the option the USER named.** When you add an \`option_refinement\` that
+  spells out one of the user's own options, start the chain at the user's option
+  (\`from_stated\`), not at your refinement — the two are one alternative and the
+  refinement's \`basis\` already records which option it belongs to. Give a
+  refinement its OWN chain only when it is a genuinely different alternative the
+  user did not name.
+- Count your alternatives: the user's stated options plus any \`option_refinement\`
+  that introduces a NEW alternative should come to six or fewer. Prefer a few
+  well-connected options over many bare ones.
+- Nothing points INTO an option. An option is where a chain starts. If something
+  bears on whether an option is viable, connect it to a factor on that option's
+  chain, or to the goal.
 - The factor an option acts on is where a chain STARTS. Draw links onward from
   it — to another factor, or to the goal. Do not draw a link INTO it: if
   something else bears on that factor, connect that influence to a factor

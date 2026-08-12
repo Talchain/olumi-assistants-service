@@ -30,7 +30,7 @@ const VALID: DraftRecordSet = {
     { kind: "figure", source_quote: "churn is 12%", value: 12, unit: "%", role: "baseline" },
   ],
   claims: [
-    { claim_kind: "causal_link", label: "CRM reduces churn", basis: [1], from_ref: "s1", to_ref: "s2", effect: "negative" },
+    { claim_kind: "causal_link", label: "CRM reduces churn", basis: [1], from_stated: 1, to_stated: 2, effect: "negative" },
   ],
 };
 

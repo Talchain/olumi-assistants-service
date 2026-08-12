@@ -108,11 +108,31 @@ const RECORDS_HEALTHY = JSON.stringify({
       claim_kind: 'causal_link',
       label: 'more headcount resolves the overwhelm',
       basis: [0],
-      from_ref: 'c0',
-      to_ref: 's0',
+      from_claim: 0,
+      to_stated: 0,
       effect: 'positive',
     },
   ],
+});
+
+/**
+ * A stream carrying the GRAPH path's edge marker.
+ *
+ * ⚠ WHY THIS FIXTURE NOW EXISTS SEPARATELY. Until v4 the records grammar's
+ * reference field happened to be called `from_ref`, so `DRAFT_EDGES_REACHED_RE`
+ * (`/"from(_ref)?"\s*:/`) matched records streams incidentally and case C could
+ * use the healthy record set to show the edges path still worked. v4's typed
+ * reference fields end that coincidence: a v4 records stream carries no
+ * `from`/`from_ref` anywhere. The edges probe is deliberately NOT widened to
+ * chase the new names — it is the graph path's probe, the historic captures it
+ * serves still carry graph-shaped edges, and one literal serving two grammars is
+ * the mirror the records module exists to avoid. So case C keeps testing the
+ * edges probe with a payload that actually carries an edge marker.
+ */
+const EDGES_MARKER_STREAM = JSON.stringify({
+  stated_items: [{ kind: 'goal', source_quote: 'Resolve support overwhelm' }],
+  claims: [{ claim_kind: 'factor', label: 'Support headcount', basis: [0] }],
+  from_ref: 'legacy-edge-marker',
 });
 
 vi.mock('@anthropic-ai/sdk', () => {
@@ -263,11 +283,23 @@ describe('⭐⭐ the runaway detector must lift on RECORDS progress, not only on
   });
 
   it('B — CONTROL: a records stream with NO decoded claim is still aborted (the detector survives)', async () => {
-    // Only the opening of `stated_items`: real bytes, real forward progress at
-    // the delta level, but nothing structural decoded. A stream that hangs here
-    // is exactly what the ceiling exists for, and it MUST still die.
-    const partial = '{"stated_items":[{"kind":"goal","source_quote":"Resolve support overwhelm"}';
+    // ⚠ NARROWED IN v4, AND THE NARROWING IS THE POINT. This fixture used to
+    // include a whole `source_quote`. v4 lifts the gates on the FIRST STATED
+    // ITEM — because the one abort the measured block observed fired at 1,034
+    // chars, inside `stated_items`, on a healthy stream — so a payload
+    // containing `source_quote` now legitimately survives, and case F asserts
+    // exactly that.
+    //
+    // The window in which the detector still bites a records stream is therefore
+    // the one BEFORE the first stated item is decoded, and that is what this
+    // control now occupies: real bytes, real delta-level forward progress,
+    // nothing structural decoded at all. Widening a lift until no case can
+    // trigger the guard is how a detector is switched off by accident; this case
+    // exists so the guard still has a reachable trigger, and it is asserted by
+    // NAME below rather than by count.
+    const partial = '{"stated_items":[{"kind":"goal",';
     expect(partial).not.toContain('"claim_kind"');
+    expect(partial).not.toContain('"source_quote"');
     expect(partial).not.toMatch(/"from(_ref)?"\s*:/);
 
     const meta = await runWithHang([partial], [']}']);
@@ -282,13 +314,13 @@ describe('⭐⭐ the runaway detector must lift on RECORDS progress, not only on
     expect(h.callCount).toBe(2);
   });
 
-  it('C — CONTROL: the edges path is untouched — a `from_ref` stream still lifts', async () => {
-    const cut = RECORDS_HEALTHY.indexOf('"to_ref"');
+  it('C — CONTROL: the edges path is untouched — a stream carrying the edge marker still lifts', async () => {
+    const cut = EDGES_MARKER_STREAM.indexOf('"from_ref"') + '"from_ref":"legacy-edge-marker"'.length;
     expect(cut).toBeGreaterThan(0);
-    const prefix = [RECORDS_HEALTHY.slice(0, cut)];
-    expect(prefix[0]).toMatch(/"from_ref"\s*:/);
+    const prefix = [EDGES_MARKER_STREAM.slice(0, cut)];
+    expect(prefix[0]).toMatch(/"from(_ref)?"\s*:/);
 
-    const meta = await runWithHang(prefix, [RECORDS_HEALTHY.slice(cut)]);
+    const meta = await runWithHang(prefix, [EDGES_MARKER_STREAM.slice(cut)]);
 
     expect(meta.runaway_abort_count).toBe(0);
     expect(meta.runaway_abort_triggers).toEqual([]);
@@ -347,13 +379,43 @@ describe('⭐⭐ the runaway detector must lift on RECORDS progress, not only on
     // lift were written as "any delta counts as progress" instead of "a CLAIM
     // was decoded", this case would survive and the detector would be off.
     h.keepAliveTicks = 20;
-    const partial = '{"stated_items":[{"kind":"goal","source_quote":"Resolve support overwhelm"}';
+    const partial = '{"stated_items":[{"kind":"goal",';
     expect(partial).not.toContain('"claim_kind"');
+    expect(partial).not.toContain('"source_quote"');
 
-    const meta = await runWithHang([partial], [']}']);
+    const meta = await runWithHang([partial], ['"source_quote":"Resolve support overwhelm"}]}']);
 
     expect(meta.runaway_abort_count).toBe(1);
     expect(meta.runaway_abort_triggers).toEqual(['time']);
     expect(h.callCount).toBe(2);
+  });
+
+  it('F — ⭐ v4: a stream that has decoded ONE STATED ITEM survives the ceiling', async () => {
+    // THE HOLE THIS CLOSES, with the measurement that found it. `claim_kind`
+    // cannot appear until the whole `stated_items` array is out — first claim at
+    // ~2,568 and ~2,777 chars on the two banked long-brief streams — and the one
+    // abort the 2026-08-12 block observed fired at **1,034 chars**, inside
+    // `stated_items`. A healthy draft was killed thousands of characters before
+    // any lift was possible. Cases A–E could not see it: every one of them
+    // either decodes a claim or decodes nothing at all.
+    //
+    // ⚠ THE DISCRIMINATING PROPERTY, stated so it cannot rot: this payload
+    // carries a `source_quote` and NO `claim_kind` and NO edge marker, and is
+    // comfortably under the char gate. So a survival here can ONLY be the
+    // stated-item lift — the claim probe and the edges probe are both provably
+    // blind to it, and case B (the same prefix truncated BEFORE `source_quote`)
+    // still aborts, which is the pair that shows the lift is bound to this
+    // signal rather than to "any bytes at all".
+    const partial = '{"stated_items":[{"kind":"goal","source_quote":"Resolve support overwhelm"}';
+    expect(partial).toContain('"source_quote"');
+    expect(partial).not.toContain('"claim_kind"');
+    expect(partial).not.toMatch(/"from(_ref)?"\s*:/);
+    expect(partial.length).toBeLessThan(DRAFT_RUNAWAY_DETECT_CHARS);
+
+    const meta = await runWithHang([partial], [',{"kind":"option","source_quote":"hire more support staff"}],"claims":[]}']);
+
+    expect(meta.runaway_abort_count).toBe(0);
+    expect(meta.runaway_abort_triggers).toEqual([]);
+    expect(h.callCount).toBe(1);
   });
 });

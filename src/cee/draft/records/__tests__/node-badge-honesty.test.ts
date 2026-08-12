@@ -53,12 +53,12 @@ const RECORDS: DraftRecordSet = {
     // every badge assertion below would pass vacuously on an empty set — the
     // failure mode where a test agrees with itself because there is nothing left
     // to disagree with. Every derived node here is deliberately connected.
-    { claim_kind: "causal_link", label: "the new CRM raises capacity", basis: [1], from_ref: "s1", to_ref: "c0", effect: "positive" },
-    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [1], from_ref: "c0", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "resistance bears on the goal", from_ref: "c1", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "current churn bears on the goal", basis: [3], from_ref: "s3", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "support load bears on the goal", basis: [4], from_ref: "s4", to_ref: "s0", effect: "negative" },
-    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [5], from_ref: "s5", to_ref: "s0", effect: "negative" },
+    { claim_kind: "causal_link", label: "the new CRM raises capacity", basis: [1], from_stated: 1, to_claim: 0, effect: "positive" },
+    { claim_kind: "causal_link", label: "cost bears on the goal", basis: [1], from_claim: 0, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "resistance bears on the goal", from_claim: 1, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "current churn bears on the goal", basis: [3], from_stated: 3, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "support load bears on the goal", basis: [4], from_stated: 4, to_stated: 0, effect: "negative" },
+    { claim_kind: "causal_link", label: "the budget bears on the goal", basis: [5], from_stated: 5, to_stated: 0, effect: "negative" },
   ],
 };
 
