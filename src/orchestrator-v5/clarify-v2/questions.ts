@@ -6,9 +6,10 @@
  * (16 Jul 2026 ruling; clarify-brief-1.94.md §E3):
  *
  *   1. EVERY question ships 2–5 tap-able candidate answers. The response
- *      additionally carries an explicit default-forward chip ("go ahead
- *      with sensible defaults"), so no question is ever a dead end — a
- *      user can always answer in one tap or exit in one tap.
+ *      additionally carries an explicit default-forward chip ("Draft it
+ *      anyway" — the copy stopped claiming stored defaults exist, Track-1
+ *      intake fix), so no question is ever a dead end — a user can always
+ *      answer in one tap or exit in one tap.
  *   2. The bare "can you give more details" class is BANNED. The
  *      postcheck (`isBannedBareDetailRequest`) is exported and applied to
  *      every emitted question; the retired clarifier's fallback templates

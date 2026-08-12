@@ -1,0 +1,76 @@
+{
+  "description": "REAL WIRE CAPTURES — append-only (trap 14b: records of briefs actually sent to deployed staging CEE a9022e7 on 2026-08-12; verified 16/16 by sha256 prefix against olumi-docs/PHASE0-EVIDENCE-2026-07-28/draft-reliability-2026-08-12/raw/*.json briefSha8). Never edit a brief's text; add new entries only. Expected outcomes live in the consuming tests, not here, so re-adjudication never rewrites the record.",
+  "briefs": {
+    "P0": {
+      "class": "pilot",
+      "note": "instrument validation only — NOT one of the 15",
+      "brief": "Should we move our weekly all-hands meeting to Monday mornings, or keep it on Friday afternoons? Attendance has been slipping and the team is split on the change."
+    },
+    "S1": {
+      "class": "short",
+      "brief": "Should we hire a second support engineer this quarter, or wait until January?"
+    },
+    "S2": {
+      "class": "short",
+      "brief": "Should our 12-person startup move to a four-day work week, or keep five days?"
+    },
+    "S3": {
+      "class": "short",
+      "brief": "Should we sponsor the industry conference in March, or skip it this year?"
+    },
+    "S4": {
+      "class": "short",
+      "brief": "Should we renew our office lease for two years, or go fully remote?"
+    },
+    "S5": {
+      "class": "short",
+      "brief": "Should we raise our subscription price by 10% next quarter, or hold it steady?"
+    },
+    "M1": {
+      "class": "medium",
+      "note": "golden CRM class, GBP-scale",
+      "brief": "Should we replace our current CRM with HubSpot next quarter, or keep what we have? We are a 34-person B2B sales team. Annual CRM cost is about £50,000 and switching would cost roughly £20,000 one-off. The goal is higher sales productivity without blowing the budget."
+    },
+    "M2": {
+      "class": "medium",
+      "note": "GBP-scale",
+      "brief": "Should we outsource our payroll to an external provider, or keep it in-house? Payroll admin currently costs us about £85,000 a year in staff time, and the provider quotes £3,000 a month plus a £10,000 setup fee. We are worried about error rates and losing control of our data."
+    },
+    "M3": {
+      "class": "medium",
+      "note": "GBP-scale incl. £million",
+      "brief": "Should we open a second warehouse in Manchester next year, or expand our existing site? A new site would cost roughly £1.2 million up front with £300,000 a year in running costs; expanding the current one is about £450,000. Faster delivery to northern customers is the main prize."
+    },
+    "M4": {
+      "class": "medium",
+      "brief": "Should we switch our 40-person engineering team from quarterly releases to continuous deployment? Release overhead currently eats about two engineer-days per sprint, but several enterprise customers say they value predictable, well-documented quarterly release notes."
+    },
+    "M5": {
+      "class": "medium",
+      "brief": "Should we launch our beta programme in September with 50 hand-picked customers, or wait for the polished full release in December? Early feedback would shape the roadmap while it can still change, but a buggy beta could damage our reputation with the key accounts we most need to impress."
+    },
+    "L1": {
+      "class": "long",
+      "note": "GBP-scale",
+      "brief": "Should we enter the German market next year via a local distributor, our own sales office, or an acquisition of a small local reseller? We are a UK industrial-sensors firm with £8 million revenue. A Munich office would cost about £600,000 in year one and give us full control of the brand, but hiring is slow and we have no local network. The distributor route costs almost nothing up front but surrenders roughly 35% margin and risks weak commitment — our Nordic distributor generated only a fifth of its forecast. Acquiring the reseller we know would cost around £1.5 million and bring 12 experienced people plus 200 accounts, but integration would distract engineering leadership for months. Board members disagree strongly: the CFO wants the low-risk distributor path, while the sales director insists only direct presence wins the big automotive contracts we actually need."
+    },
+    "L2": {
+      "class": "long",
+      "brief": "Should we rewrite our ten-year-old monolithic platform as microservices, modernise it incrementally module by module, or leave the architecture alone and spend the effort on features? The monolith serves 900 enterprise tenants with 99.9% uptime, but deployments take four hours, onboarding a new engineer takes three months, and two of our five most senior engineers have threatened to leave over the state of the codebase. A full rewrite is estimated at 18 months with feature development largely frozen — and our main competitor ships monthly. Incremental modernisation avoids the freeze but past attempts stalled twice when product deadlines intervened. Doing nothing preserves velocity today but our defect rate has doubled year on year, and the last major outage cost us a flagship customer. Engineering, product and the CEO each favour a different option, and morale is fragile."
+    },
+    "L3": {
+      "class": "long",
+      "note": "GBP-scale",
+      "brief": "Should we electrify our 45-vehicle delivery fleet over the next two years, or run the existing diesel vans until 2030? Replacing all 45 vans costs about £1.8 million, partly offset by a government grant worth up to £225,000 that expires next year. Fuel and maintenance savings are estimated at £280,000 a year, but our depot needs £150,000 of charging infrastructure and the local grid connection may add six months of delay. Diesel keeps capital free for the warehouse automation project the operations director champions, but the city centre we serve introduces a clean-air charge in 2028 of roughly £60,000 a year, and two major retail customers have started asking about our emissions in tender documents. Drivers are split: some love the new vans, others fear range problems on rural rounds. The board wants a defensible recommendation this quarter."
+    },
+    "L4": {
+      "class": "long",
+      "note": "GBP-scale",
+      "brief": "Should we move our B2B software pricing from per-seat licences to usage-based pricing, offer both models side by side, or keep per-seat and simply raise prices 8% at renewal? Per-seat brings in £4.2 million a year and is predictable, but seat counts have stagnated and three of our ten largest customers cut seats at the last renewal, costing about £190,000. Usage-based pricing could grow revenue from our heaviest users — our top decile consumes 40 times the median — but finance fears revenue volatility and our billing system would need roughly £120,000 of work plus four months of integration. Running both models risks confusing the sales team and inviting every renewal into a repricing negotiation. Sales, finance and product each back a different option, churn is creeping up, and we have promised investors a decision before the next board meeting."
+    },
+    "L5": {
+      "class": "long",
+      "brief": "Should we build our own applicant-tracking capability into our HR platform, partner deeply with the market leader, or acquire the struggling five-person startup whose product our customers already love? Building in-house keeps the roadmap under our control and the margin whole, but our engineers estimate a year to reach parity and we have missed our last two roadmap dates. Partnering gets us to market in a quarter with revenue share, but the leader also talks to our biggest competitor and could switch sides. The acquisition would cost somewhere near the top of our available cash, founders may leave after earn-out, and technical due diligence found their codebase depends on a deprecated framework. Meanwhile two large customers have made applicant tracking a renewal condition for next year, and our win rate against the integrated suites has fallen for three consecutive quarters. What should we do?"
+    }
+  }
+}

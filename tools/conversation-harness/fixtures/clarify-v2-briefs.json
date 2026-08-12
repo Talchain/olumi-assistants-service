@@ -1,5 +1,5 @@
 {
-  "description": "Clarify v2 eval-floor fixture pack (E0-B, ROADMAP 1.94 Option A replacement). ~20 decision briefs annotated with expected preflight behaviour: 'clarify' = the rubric MUST fire >=1 question (the retired clarifier's baseline was 0 questions on 100% of firings — this floor is RED against that baseline by construction); 'silent' = a complete brief MUST proceed with 0 questions (no busywork). Consumed by __tests__/clarify-v2-floors.harness-test.ts, which imports the PRODUCTION rubric/composer from src/ (never copies). All briefs are draft-shaped (>=30 chars + the decision regex) so they would actually reach the draft preflight on the live route.",
+  "description": "Clarify v2 eval-floor fixture pack (E0-B, ROADMAP 1.94 Option A replacement). ~20 decision briefs annotated with expected preflight behaviour: 'clarify' = the rubric MUST fire >=1 question (the retired clarifier's baseline was 0 questions on 100% of firings — this floor is RED against that baseline by construction); 'silent' = a complete brief MUST proceed with 0 questions (no busywork); 'draft_first' = EXACTLY ONE dimension missing — the Track-1 intake fix (2026-08-13, INTAKE-FUNNEL §5b) proceeds to the draft and defers the one question to a non-blocking, provenance-honest post-draft ask (reason single_gap_draft_first). Consumed by __tests__/clarify-v2-floors.harness-test.ts, which imports the PRODUCTION rubric/composer from src/ (never copies). All briefs are draft-shaped (>=30 chars + the decision regex) so they would actually reach the draft preflight on the live route.",
   "briefs": [
     {
       "id": "thin-01-market-entry",
@@ -76,8 +76,8 @@
     {
       "id": "thin-13-no-quantities",
       "brief": "Should we hire a contractor or a permanent engineer this quarter? The goal is to reduce delivery risk.",
-      "expected": "clarify",
-      "note": "Only quantities missing — the rubric must fire exactly one question."
+      "expected": "draft_first",
+      "note": "Only quantities missing — the rubric must fire exactly one question. MOVED LOUDLY 2026-08-13 (Track-1 intake fix): quantities is the ONLY missing dimension, so this brief now drafts first-turn with the quantities question deferred to a disclosed post-draft ask."
     },
     {
       "id": "complete-01-hiring",
@@ -148,8 +148,8 @@
     {
       "id": "calib-b2-one-more-review",
       "brief": "To win, do we ship today or wait for one more review?",
-      "expected": "clarify",
-      "note": "Round-2 calibration, direction B: 'one more review' carries no magnitude — quantities are genuinely missing and must be asked."
+      "expected": "draft_first",
+      "note": "Round-2 calibration, direction B: 'one more review' carries no magnitude — quantities are genuinely missing and must be asked. MOVED LOUDLY 2026-08-13 (Track-1 intake fix): quantities is the ONLY missing dimension — drafts first-turn with the deferred disclosed ask."
     },
     {
       "id": "calib-b3-or-not",

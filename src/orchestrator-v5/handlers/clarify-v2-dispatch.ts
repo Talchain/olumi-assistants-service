@@ -56,6 +56,7 @@ import {
   composeClarifyV2DeclineResponse,
   composeClarifyV2ReofferResponse,
   composeClarifyV2Response,
+  composeDraftFirstDisclosure,
   decideClarifyV2Resume,
   decideClarifyV2Round1,
   type ClarifyV2Decision,
@@ -94,6 +95,20 @@ export type ClarifyV2Outcome =
       /** Proceed to the ordinary draft dispatch with this brief. */
       readonly kind: 'draft';
       readonly briefOverride: string;
+      /**
+       * TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b): present when
+       * round 1 found EXACTLY ONE missing dimension — the composed
+       * disclosure (assumption named as ASSISTANT-authored + the one
+       * deferred question) that route-v2 appends to the draft response's
+       * assistant_text after a successful draft commit. No pending is
+       * persisted for it: the clarify flow is strictly pre-draft, and the
+       * answer routes through the ordinary post-draft turn flow (typed
+       * answer or direct canvas edit).
+       */
+      readonly deferredAsk?: {
+        readonly dimension: ClarifyDimension;
+        readonly disclosure: string;
+      };
     };
 
 function latestLiveClarifyPending(
@@ -272,6 +287,11 @@ function emitDecisionTelemetry(
       scenario_id: payload.scenario_id,
       reason: decision.reason,
       resumed,
+      // TRACK-1 INTAKE FIX: additive — names the dimension riding as the
+      // non-blocking deferred ask on a draft-first proceed.
+      ...(decision.deferredQuestion !== undefined
+        ? { deferred_dimension: decision.deferredQuestion.dimension }
+        : {}),
     });
   } else {
     // 1.152 (A1/A4): decline + re-offer share one deflection event —
@@ -379,7 +399,22 @@ export async function tryClarifyV2Turn(
       });
       if (decision.kind === 'proceed') {
         emitDecisionTelemetry(decision, payload, requestId, true);
-        return { kind: 'draft', briefOverride: decision.brief };
+        return {
+          kind: 'draft',
+          briefOverride: decision.brief,
+          // TRACK-1 INTAKE FIX: the "start over" arm re-runs round 1 over
+          // the new brief, so a single-gap restart carries the same
+          // deferred disclosure as a fresh single-gap round 1 would.
+          ...(decision.reason === 'single_gap_draft_first' &&
+          decision.deferredQuestion !== undefined
+            ? {
+                deferredAsk: {
+                  dimension: decision.deferredQuestion.dimension,
+                  disclosure: composeDraftFirstDisclosure(decision.deferredQuestion),
+                },
+              }
+            : {}),
+        };
       }
       if (decision.kind === 'decline') {
         // Review fix A1 (1.152): release the round honestly. The commit
@@ -481,9 +516,28 @@ export async function tryClarifyV2Turn(
     params.explicitGenerateBrief !== null,
   );
   if (decision.kind === 'proceed') {
+    emitDecisionTelemetry(decision, payload, requestId, false);
+    // ── TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b) ────────────────
+    // EXACTLY ONE missing dimension: draft NOW and hand the route the
+    // composed disclosure to append after a successful draft commit. No
+    // clarify turn commits and no pending persists — the ask is
+    // non-blocking by construction. Unreachable on explicit-generate
+    // (reason 'explicit_generate' proceeds above the rubric).
+    if (
+      decision.reason === 'single_gap_draft_first' &&
+      decision.deferredQuestion !== undefined
+    ) {
+      return {
+        kind: 'draft',
+        briefOverride: decision.brief,
+        deferredAsk: {
+          dimension: decision.deferredQuestion.dimension,
+          disclosure: composeDraftFirstDisclosure(decision.deferredQuestion),
+        },
+      };
+    }
     // Complete brief: proceed SILENTLY — return null so the route's draft
     // dispatch runs bit-identically to the flag-off path.
-    emitDecisionTelemetry(decision, payload, requestId, false);
     return null;
   }
   const response = composeClarifyV2Response(decision.questions, decision.phase);

@@ -156,6 +156,18 @@ const CHOICE_LEAD =
  * not the trap-12 mirror class (there is no other source of truth it must be
  * kept in sync with); it is a precision floor that can only under-credit.
  */
+/**
+ * State-transition verbs for the from-X-to-Y options arm (Track-1 intake
+ * fix). Deliberately CLOSED and SMALL: each verb must make "from X to Y"
+ * read as two states of the same thing — i.e. a status-quo alternative and
+ * a proposed one. Growth/measurement verbs (grew, rose, went) are excluded
+ * on purpose: their from…to names a RANGE, not a choice set. Fails safe:
+ * an unlisted verb scores options-MISSING (one tap-able question), never a
+ * silent false "satisfied".
+ */
+const FROM_TO_CHANGE_VERBS =
+  'switch(?:ing)?|mov(?:e|ing)|shift(?:ing)?|transition(?:ing)?|migrat(?:e|ing)|chang(?:e|ing)|convert(?:ing)?|go(?:ing)?|pivot(?:ing)?|upgrad(?:e|ing)|downgrad(?:e|ing)';
+
 const CHOICE_ACTION_VERBS =
   'abandon|acquire|adopt|automate|begin|bring|build|buy|cancel|centralise|centralize|close|commission|consolidate|continue|contract|cut|defer|delay|develop|divest|do|double|drop|end|enter|exit|expand|extend|finance|fire|focus|fund|go|grow|halt|hire|hold|insource|integrate|invest|keep|launch|lease|licence|license|merge|migrate|modernise|modernize|move|offer|open|outsource|partner|patch|pause|pilot|pivot|procure|promote|prototype|raise|rebuild|recruit|reduce|refactor|rehire|reinvest|relaunch|renegotiate|renew|rent|replace|restructure|retain|rewrite|run|scale|sell|ship|spend|split|sponsor|standardise|standardize|start|stay|stop|subcontract|switch|take|test|train|trial|upgrade|use|wait';
 
@@ -210,6 +222,17 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // decision a success?" — the outcome half of ROADMAP 2.103. Anchored on
     // the modal so a bare "success is important" cannot fire.
     /\bsuccess\s+(?:would|will|should)\s+be\b/i,
+    // TRACK-1 INTAKE FIX (2026-08-13) — the predicate-nominative PRIZE
+    // construction, MEASURED as a detection miss on a real wire brief
+    // (INTAKE-FUNNEL §2.1, brief M3: "Faster delivery to northern customers
+    // is the main prize" — an explicit objective statement no arm could see;
+    // the fourth instance of the same class the three corrections above
+    // record). Anchored on the copula + determiner ("is/are/remains the …
+    // prize") so prize-as-subject ("First prize is a weekend in Paris"),
+    // "a prize draw" and "the prize money" cannot fire — the opposite-
+    // direction twins are pinned in clarify-v2.rubric-widening.test.ts
+    // (trap 22b: every positive ships with its inverse).
+    /\b(?:is|are|remains)\s+the\s+(?:(?:main|real|big|biggest|key|top)\s+)?prize\b/i,
   ],
   options: [
     /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|(?:choice|choos(?:e|ing)|decid(?:e|ing)) between|option[s]? (?:are|would be|include))\b/i,
@@ -349,6 +372,26 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
         `,?\\s*(?:and|or)\\s+(?:${CHOICE_ACTION_VERBS})\\b`,
       'i',
     ),
+    // TRACK-1 INTAKE FIX (2026-08-13) — the FROM-X-TO-Y change construction
+    // under a deliberative lead, MEASURED as a detection miss on a real wire
+    // brief (INTAKE-FUNNEL §2.1, brief M4: "switch our 40-person engineering
+    // team from quarterly releases to continuous deployment" names both
+    // alternatives — status quo X and proposed Y — with no `or` anywhere).
+    //
+    // THREE anchors, same discipline as the serial-list arm above:
+    //   1. CHOICE_LEAD — deliberative only. "We WILL migrate from AWS to
+    //      GCP" is an announcement, not a choice (twin pinned).
+    //   2. a CHANGE VERB head — a closed list of state-transition verbs, so
+    //      "revenue grew from £2m to £4m" (a numeric range) and "went from
+    //      strength to strength" (an idiom) cannot fire. Closed and failing
+    //      SAFE: an unlisted verb scores options-MISSING, one tap-able
+    //      question — never a silent false "satisfied".
+    //   3. bounded same-sentence spans between verb → `from` → `to`, so an
+    //      unrelated later clause can supply neither preposition.
+    new RegExp(
+      `\\b${CHOICE_LEAD}\\s+(?:${FROM_TO_CHANGE_VERBS})\\b[^.!?;]{0,60}?\\bfrom\\b[^.!?;]{1,80}?\\bto\\b\\s+\\S`,
+      'i',
+    ),
   ],
   quantities: [
     // Digits, EXCEPT a bare calendar year (1900–2099): "this 2026" is a
@@ -406,6 +449,33 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // A bare calendar-month deadline. "by the end of March" already matched
     // the `by (?:the )?end of` arm at the top; the bare "by March" did not.
     /\bby\s+(?:next\s+|early\s+|mid[- ]|late\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/i,
+    // TRACK-1 INTAKE FIX (2026-08-13) — bare `for + word-form duration`,
+    // MEASURED as a detection miss on a real wire brief (INTAKE-FUNNEL §2.1,
+    // brief S4: "renew our office lease for two years" — the lease term IS
+    // the horizon, and `for` was only accepted with `the next/coming`). The
+    // digit form ("for 2 years") already fires via the digit-duration arm
+    // above; this admits the word form.
+    //
+    // Two guards keep the backward-looking uses out, and BOTH are bounded
+    // precision devices, not complete grammars (trap 22f — no punctuation
+    // rule settles tense; the residual false-satisfied class is an unlisted
+    // past verb, which costs one silently-skipped question on a brief that
+    // does state a duration):
+    //   - a same-sentence perfective/past lookbehind blocks "we have been in
+    //     this office for two years" / "we ran the pilot for six months";
+    //   - a trailing `now|already` lookahead blocks elapsed-time "for two
+    //     years now". The known-blocked set is pinned as opposite-direction
+    //     twins in clarify-v2.rubric-widening.test.ts.
+    /(?<!\b(?:been|has|have|had|was|were|ran|spent|lasted|took|used|tried)\b[^.!?;]{0,50})\bfor\s+(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)[\s-](?:week|month|quarter|year)s?\b(?!\s+(?:now|already)\b)/i,
+    // TRACK-1 INTAKE FIX (2026-08-13) — a bare calendar month behind
+    // in/until/before/during, MEASURED as a detection miss on a real wire
+    // brief (INTAKE-FUNNEL §2.1, brief M5: "launch … in September … or wait
+    // for … December" — the timing IS the decision, and months matched only
+    // behind `by`). Same bounded past-context guard as the arm above
+    // (blocks "we tried this in March", "the pilot we launched in
+    // September") plus a `last(-year)` lookahead (blocks "in May last
+    // year"). Twins pinned in clarify-v2.rubric-widening.test.ts.
+    /(?<!\b(?:was|were|did|had|launched|ran|tried|started|began|happened|failed|joined|opened)\b[^.!?;]{0,50})\b(?:in|until|before|during)\s+(?:early\s+|mid[- ]|late\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b(?!\s+(?:last|of\s+last)\b)/i,
   ],
 };
 
