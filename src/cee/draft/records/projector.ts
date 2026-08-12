@@ -290,10 +290,24 @@ export interface DroppedRecordRef {
   /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
   readonly from_kind?: string;
   readonly to_kind?: string;
-  /** Present only on the demote reasons: the minted id of the option this one duplicated. */
+  /**
+   * Present only on the demote reasons: the minted id of the option kept.
+   *
+   * ⭐ IT ALWAYS NAMES A NODE ON THE FINAL GRAPH, or it is absent. It is
+   * RE-RESOLVED at the fixed point rather than copied from the round that
+   * decided it, because a model survivor can merge into its stated parent on a
+   * later pass and take its id with it.
+   */
   readonly duplicate_of?: string;
   /** Its label, so the disclosure reads without a second lookup. */
   readonly duplicate_of_label?: string;
+  /**
+   * Present only when the option originally kept has itself since merged away:
+   * the label it carried. `duplicate_of` then names the node that ABSORBED it,
+   * and this names what was actually duplicated — so the record stays true to
+   * both questions instead of quietly answering one with the other.
+   */
+  readonly merged_survivor_label?: string;
   /**
    * The signature the two shared, from the validator's own function. Present on
    * the demote reasons, where it IS the finding — a reader can re-derive the
@@ -569,9 +583,23 @@ interface DemoteDecision {
   readonly claimIndex: number;
   readonly label: string;
   readonly reason: "undeveloped_duplicate_of_stated" | "undeveloped_duplicate_of_model";
-  /** The minted id of the option kept — bound by IDENTITY, never by a label. */
-  readonly duplicateOf: string;
-  readonly duplicateOfLabel: string;
+  /** The minted id of the option kept, AS OBSERVED when the decision fired. */
+  readonly survivorId: string;
+  readonly survivorLabel: string;
+  /**
+   * Present IFF the survivor is a MODEL option, and it is what makes the
+   * disclosure re-resolvable.
+   *
+   * ⭐⭐ A MODEL SURVIVOR IS NOT A STABLE ADDRESS. Withdrawing this option's
+   * rival can leave the SURVIVOR the only refinement of its parent, so on the
+   * next pass the survivor MERGES and mints no node at all — and a disclosure
+   * still pointing at its id names nothing the reader can find. (Measured: the
+   * round-11 review's B1, `duplicate_of: "b1d470fa"` against a graph whose
+   * parent is `234dcb3d`.) A STATED survivor has no such problem — options are
+   * exempt from the connectivity prune and the budget surrender, and a stated
+   * option cannot be demoted — so only the model case carries this.
+   */
+  readonly survivorClaimIndex?: number;
   readonly signature: string;
 }
 
@@ -1249,27 +1277,76 @@ function projectOnce(
   // ── Pass 5: THE DEMOTE DISCLOSURES, written once against the FINAL node set.
   // Sorted by claim index so the list is a function of the record set's content
   // and order, never of the round in which a decision happened to fire.
+  //
+  // ⭐⭐ THE DISCLOSURE IS RE-RESOLVED HERE, NOT COPIED FROM THE DECISION. A
+  // survivor recorded in round 1 can be gone by the fixed point — merged into
+  // its stated parent, or demoted in its own right — and an id that names
+  // nothing is a record the reader cannot follow. So a MODEL survivor is chased
+  // by CLAIM INDEX (identity) to whatever node it ended up as, and the chain is
+  // followed if that node was itself withdrawn. The walk is bounded by the
+  // number of demotes, which is an EXHAUSTION bound: every hop moves to a
+  // different demoted claim, and there are finitely many.
+  const labelOf = (id: string): string | undefined => nodes.find((n) => n.id === id)?.label;
+  const resolveSurvivor = (
+    d: DemoteDecision,
+  ): { id?: string; label?: string; mergedFrom?: string } => {
+    if (d.survivorClaimIndex === undefined) {
+      // A stated survivor is on the graph by construction — see the field note.
+      return { id: d.survivorId, label: labelOf(d.survivorId) ?? d.survivorLabel };
+    }
+    let idx = d.survivorClaimIndex;
+    for (let hop = 0; hop <= demoted.size; hop++) {
+      // Its own minted node, OR — when it merged — the parent it now resolves to.
+      const landed = claimIdByIndex.get(idx);
+      if (landed !== undefined) {
+        return {
+          id: landed,
+          label: labelOf(landed) ?? d.survivorLabel,
+          mergedFrom: landed === d.survivorId ? undefined : d.survivorLabel,
+        };
+      }
+      const next = demoted.get(idx);
+      if (next === undefined) break;
+      if (next.survivorClaimIndex === undefined) {
+        return { id: next.survivorId, label: labelOf(next.survivorId), mergedFrom: d.survivorLabel };
+      }
+      idx = next.survivorClaimIndex;
+    }
+    return {};
+  };
+
   for (const decision of [...demoted.values()].sort((a, b) => a.claimIndex - b.claimIndex)) {
+    const survivor = resolveSurvivor(decision);
     dropped.push({
       claim_index: decision.claimIndex,
       claim_kind: "option_refinement",
       label: decision.label,
       reason: decision.reason,
-      duplicate_of: decision.duplicateOf,
-      duplicate_of_label: decision.duplicateOfLabel,
+      // Emitted only when they name a node on THIS graph. A missing pointer is
+      // honest; a dangling one is not.
+      ...(survivor.id !== undefined && survivor.label !== undefined
+        ? { duplicate_of: survivor.id, duplicate_of_label: survivor.label }
+        : {}),
+      // The option originally kept, when that option has since merged away — so
+      // `undeveloped_duplicate_of_model` still names the model option it
+      // duplicated even though `duplicate_of` now points at the node that
+      // absorbed it. Two different questions, named apart (trap 21).
+      ...(survivor.mergedFrom !== undefined ? { merged_survivor_label: survivor.mergedFrom } : {}),
       intervention_signature: decision.signature,
     });
-    // APPEND-ONLY on the SURVIVOR. Its class and its quote are untouched, so the
-    // user's own words remain the only thing badged `stated`; this records that
-    // the model offered something the analysis could not distinguish from it.
-    const survivorProv = provenance[decision.duplicateOf];
-    if (survivorProv) {
-      provenance[decision.duplicateOf] = {
+    // APPEND-ONLY on whatever the survivor RESOLVED to — the merged parent when
+    // the survivor merged, which is where a reader will look. Its class and its
+    // quote are untouched, so the user's own words remain the only thing badged
+    // `stated`; this records that the model offered something the analysis could
+    // not distinguish from it.
+    const survivorProv = survivor.id === undefined ? undefined : provenance[survivor.id];
+    if (survivor.id !== undefined && survivorProv) {
+      provenance[survivor.id] = {
         ...survivorProv,
         undeveloped_duplicates: [...(survivorProv.undeveloped_duplicates ?? []), decision.label],
       };
-      const survivorNode = nodes.find((n) => n.id === decision.duplicateOf);
-      if (survivorNode) survivorNode.provenance = provenance[decision.duplicateOf];
+      const survivorNode = nodes.find((n) => n.id === survivor.id);
+      if (survivorNode) survivorNode.provenance = provenance[survivor.id];
     }
   }
 
@@ -1313,6 +1390,15 @@ function projectOnce(
  * id (trap 19). Never from its label, its position, or the shape of its data.
  */
 function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] {
+  // ⭐ THE CONSUMER'S OWN PRECONDITION, derived at its bytes rather than
+  // inferred from the symptom (13d). `validateSemantic` opens with
+  //   `const goals = nodeMap.byKind.get("goal") ?? []; if (goals.length === 0) return issues;`
+  // so `OPTIONS_IDENTICAL` CANNOT fire on a goal-less graph. Without this gate
+  // the demote would withdraw an option to pre-empt a violation the validator
+  // would never raise — a predicate broader than the rule it serves, which is
+  // this estate's most-repeated defect shape.
+  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return [];
+
   const groups = new Map<string, { id: string; label: string; claimIndex?: number }[]>();
   for (const node of projection.graph.nodes) {
     if (node.kind !== "option") continue;
@@ -1361,8 +1447,8 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
           claimIndex: m.claimIndex!,
           label: m.label,
           reason: "undeveloped_duplicate_of_stated",
-          duplicateOf: survivor.id,
-          duplicateOfLabel: survivor.label,
+          survivorId: survivor.id,
+          survivorLabel: survivor.label,
           signature,
         });
       }
@@ -1379,8 +1465,11 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
           claimIndex: m.claimIndex!,
           label: m.label,
           reason: "undeveloped_duplicate_of_model",
-          duplicateOf: survivor.id,
-          duplicateOfLabel: survivor.label,
+          survivorId: survivor.id,
+          survivorLabel: survivor.label,
+          // The survivor is a MODEL option, so its address can move — see the
+          // field note on `survivorClaimIndex`.
+          survivorClaimIndex: survivor.claimIndex!,
           signature,
         });
       }

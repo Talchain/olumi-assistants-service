@@ -153,10 +153,13 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     // and the trade is a valid graph carrying the user's own three options
     // instead of a 500 carrying none.
     expect(r.reprojected.graph.edges.length).toBe(r.projection.graph.edges.length);
+    // Pinned to the EXACT measured count, not `> 0`: this is a banked capture,
+    // so the number is a fact about it. A loose bound would stay green if the
+    // demote started swallowing more of the completion than it does today.
     const demotedEndpoints = r.reprojected.dropped.filter(
       (d) => d.reason === "endpoint_demoted_duplicate",
     );
-    expect(demotedEndpoints.length).toBeGreaterThan(0);
+    expect(demotedEndpoints.map((d) => d.claim_index).sort((a, b) => a - b)).toEqual([14, 30, 31, 32]);
     const demote = r.reprojected.dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated");
     expect(demote?.label).toBe("Rewrite first, then copilot (sequenced)");
     expect(demote?.duplicate_of_label).toBe("finally do the platform rewrite");

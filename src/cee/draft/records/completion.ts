@@ -331,7 +331,23 @@ export function enumerateCompletionAsk(
       // `option_budget_exceeded` and `refinement_merged_into_stated_option` are
       // likewise projector DECISIONS, not gaps: asking about either would ask the
       // model to undo a deliberate, disclosed choice.
+      //
+      // ⭐ AND THE THREE DEMOTE REASONS ARE LISTED EXPLICITLY BELOW rather than
+      // left to `default`, so their silence is a DECISION. A demote is a
+      // projector RESOLUTION, not a gap in the record set: the model gave two
+      // options the same intervention signature, and the projector has already
+      // withdrawn the one the user did not write, disclosed it, and recorded it
+      // on the survivor's provenance. Asking would invite the model to re-add
+      // the alternative it just lost — and round 9 (D4) MEASURED that the
+      // append-only completion cannot retract, so the ask would create the
+      // duplication it was written to remove. `endpoint_demoted_duplicate` goes
+      // with them: that link resolved perfectly well and the projector withdrew
+      // what it pointed at. The coaching question — "what would make these two
+      // different?" — belongs to the USER, not to a second model turn.
       case "unconnected_to_goal":
+      case "undeveloped_duplicate_of_stated":
+      case "undeveloped_duplicate_of_model":
+      case "endpoint_demoted_duplicate":
       default:
         break;
     }

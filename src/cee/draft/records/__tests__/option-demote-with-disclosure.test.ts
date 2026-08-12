@@ -209,6 +209,76 @@ describe("the demote pass runs to a FIXED POINT, because a merge can change a si
 // These PASS at pristine. That is what makes them discriminators rather than a
 // second copy of the positive case.
 
+const MODEL_MODEL_SHAPE: DraftRecordSet = {
+    stated_items: [
+      { kind: "goal", source_quote: "grow revenue" },
+      { kind: "option", source_quote: "expand the sales team" },
+      { kind: "option", source_quote: "hold steady" },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "headcount" },
+      // Two refinements, each naming BOTH stated options, so neither merges —
+      // and they duplicate EACH OTHER, not the user.
+      { claim_kind: "option_refinement", label: "Expand via contractors", basis: [1, 2] },
+      { claim_kind: "option_refinement", label: "Expand via an agency", basis: [1, 2] },
+      { claim_kind: "causal_link", label: "expansion raises headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+      { claim_kind: "causal_link", label: "steady holds headcount", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 0 },
+      { claim_kind: "causal_link", label: "contractors raise headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 7 },
+      { claim_kind: "causal_link", label: "the agency raises headcount", from_claim: 2, to_claim: 0, effect: "positive", sets_to: 7 },
+      { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
+    ],
+  };
+
+const ONE_OPTION_SHAPE: DraftRecordSet = {
+    stated_items: [
+      { kind: "goal", source_quote: "grow revenue" },
+      { kind: "option", source_quote: "keep what we have" },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "headcount" },
+      // Basis names NO stated option, so the merge rule correctly declines it
+      // and it stands as a rival alternative.
+      { claim_kind: "option_refinement", label: "Hire a growth team", basis: [] },
+      { claim_kind: "causal_link", label: "the status quo holds headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+      { claim_kind: "causal_link", label: "the growth team holds headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+      { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
+    ],
+  };
+
+const SURVIVOR_MERGES_SHAPE: DraftRecordSet = {
+    stated_items: [
+      { kind: "goal", source_quote: "grow revenue 15%" },
+      { kind: "option", source_quote: "push into Germany next year" },
+      { kind: "option", source_quote: "double down on the UK" },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "germany investment" },
+      { claim_kind: "factor", label: "uk investment" },
+      // Both name stated_items[1] — the guard refuses both merges on pass 1.
+      { claim_kind: "option_refinement", label: "Germany Direct", basis: [1] },
+      { claim_kind: "option_refinement", label: "Germany via Partner", basis: [1] },
+      { claim_kind: "causal_link", label: "the germany push invests", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 0.5 },
+      { claim_kind: "causal_link", label: "germany direct invests", from_claim: 2, to_claim: 0, effect: "positive", sets_to: 1 },
+      { claim_kind: "causal_link", label: "germany via partner invests", from_claim: 3, to_claim: 0, effect: "positive", sets_to: 1 },
+      { claim_kind: "causal_link", label: "the uk push invests", from_stated: 2, to_claim: 1, effect: "positive", sets_to: 0.9 },
+      { claim_kind: "causal_link", label: "germany investment bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
+      { claim_kind: "causal_link", label: "uk investment bears on the goal", from_claim: 1, to_stated: 0, effect: "positive" },
+    ],
+  };
+
+/**
+ * Every shape in this file that PRODUCES a demote disclosure. The dangling-id
+ * invariant sweeps this list, so a new demoting shape added here is covered by
+ * construction rather than by anyone remembering to extend a second list.
+ */
+const DEMOTING_SHAPES: ReadonlyArray<readonly [string, DraftRecordSet]> = [
+  ["run12", RUN12_SHAPE],
+  ["fixed-point", FIXED_POINT_SHAPE],
+  ["model-model", MODEL_MODEL_SHAPE],
+  ["one-option", ONE_OPTION_SHAPE],
+  ["survivor-merges", SURVIVOR_MERGES_SHAPE],
+];
+
 describe("what the demote deliberately does NOT touch", () => {
   it("leaves a (stated, stated) collision standing and blocking — the user's duplication is the user's to resolve", () => {
     const records: DraftRecordSet = {
@@ -266,26 +336,7 @@ describe("what the demote deliberately does NOT touch", () => {
     // ⚠ This shape does NOT occur in the banked corpus (round-11 population:
     // 4 collision groups, all four (stated, model), zero (model, model)). It is
     // tested synthetically and that is stated rather than implied.
-    const records: DraftRecordSet = {
-      stated_items: [
-        { kind: "goal", source_quote: "grow revenue" },
-        { kind: "option", source_quote: "expand the sales team" },
-        { kind: "option", source_quote: "hold steady" },
-      ],
-      claims: [
-        { claim_kind: "factor", label: "headcount" },
-        // Two refinements, each naming BOTH stated options, so neither merges —
-        // and they duplicate EACH OTHER, not the user.
-        { claim_kind: "option_refinement", label: "Expand via contractors", basis: [1, 2] },
-        { claim_kind: "option_refinement", label: "Expand via an agency", basis: [1, 2] },
-        { claim_kind: "causal_link", label: "expansion raises headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
-        { claim_kind: "causal_link", label: "steady holds headcount", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 0 },
-        { claim_kind: "causal_link", label: "contractors raise headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 7 },
-        { claim_kind: "causal_link", label: "the agency raises headcount", from_claim: 2, to_claim: 0, effect: "positive", sets_to: 7 },
-        { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
-      ],
-    };
-    const { graph, dropped } = projectRecordsToGraph(records);
+        const { graph, dropped } = projectRecordsToGraph(MODEL_MODEL_SHAPE);
     // The EARLIER claim survives; the later one is demoted against it.
     expect(optionLabels(graph)).toContain("Expand via contractors");
     expect(optionLabels(graph)).not.toContain("Expand via an agency");
@@ -306,26 +357,94 @@ describe("what the demote deliberately does NOT touch", () => {
     // projector could do here are the same three as everywhere else in this file
     // (force it in, drop it silently, disclose it), and this is the disclosed
     // one. A stated option is still never touched.
-    const records: DraftRecordSet = {
-      stated_items: [
-        { kind: "goal", source_quote: "grow revenue" },
-        { kind: "option", source_quote: "keep what we have" },
-      ],
-      claims: [
-        { claim_kind: "factor", label: "headcount" },
-        // Basis names NO stated option, so the merge rule correctly declines it
-        // and it stands as a rival alternative.
-        { claim_kind: "option_refinement", label: "Hire a growth team", basis: [] },
-        { claim_kind: "causal_link", label: "the status quo holds headcount", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
-        { claim_kind: "causal_link", label: "the growth team holds headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 12 },
-        { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
-      ],
-    };
-    const { graph, dropped } = projectRecordsToGraph(records);
+        const { graph, dropped } = projectRecordsToGraph(ONE_OPTION_SHAPE);
     expect(optionLabels(graph)).toEqual(["keep what we have"]); // the USER's, and only the user's
     const demote = dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated");
     expect(demote?.label).toBe("Hire a growth team");
     expect(demote?.duplicate_of_label).toBe("keep what we have");
+  });
+
+  it("keeps its disclosure RESOLVABLE when the survivor itself later merges away", () => {
+    // ⭐⭐ THE REVIEWER'S SHAPE (round-11 review, B1). Two refinements name the
+    // SAME single stated option, so the choice-set guard refuses both merges and
+    // they stand as rivals — and they duplicate EACH OTHER. R2 is demoted
+    // against R1 (lowest claim index). On the next pass R2's withdrawal leaves
+    // R1 the ONLY refinement of that parent, so R1 MERGES and mints no node.
+    //
+    // The disclosure written in round 1 pointed at R1's minted id, and after
+    // round 2 that id names nothing on the graph — a record referring to a node
+    // the user cannot find. The projector's whole premise is that a disclosure
+    // is better than a silent loss, and a dangling disclosure is neither.
+        const { graph, dropped, provenance } = projectRecordsToGraph(SURVIVOR_MERGES_SHAPE);
+
+    // Precondition, pinned in-test: this really is the (model, model) path AND
+    // the survivor really did merge away. Without both, the assertion below
+    // passes for the wrong reason (trap 13b).
+    const demote = dropped.find((d) => d.reason === "undeveloped_duplicate_of_model");
+    expect(demote?.label).toBe("Germany via Partner");
+    expect(dropped.find((d) => d.claim_index === 2)?.reason).toBe(
+      "refinement_merged_into_stated_option",
+    );
+
+    // THE INVARIANT: the disclosure names a node that is ON THE FINAL GRAPH.
+    const parent = idOf(graph, "push into Germany next year");
+    expect(demote?.duplicate_of).toBe(parent);
+    expect(demote?.duplicate_of_label).toBe("push into Germany next year");
+    // …and the option it ORIGINALLY duplicated is not lost from the record.
+    expect(demote?.merged_survivor_label).toBe("Germany Direct");
+
+    // The withdrawal is recorded on the node that absorbed the survivor, not
+    // dropped on the floor because the survivor's own provenance had gone.
+    expect(provenance[parent]?.undeveloped_duplicates).toEqual(["Germany via Partner"]);
+    expect(provenance[parent]?.provenance_class).toBe("stated");
+    expect(provenance[parent]?.source_quote).toBe("push into Germany next year");
+  });
+
+  it("NEVER leaves a dangling id in any disclosure, across every demoting shape in this spec", () => {
+    // The general form of the invariant, so a future shape cannot reintroduce
+    // B1 quietly. Written against the SPEC — "an id in a disclosure names a node
+    // the reader can find" — not against the one case that failed (13d).
+    let checkedIds = 0;
+    for (const [name, records] of DEMOTING_SHAPES) {
+      const { graph, dropped } = projectRecordsToGraph(records);
+      const ids = new Set(graph.nodes.map((n) => n.id));
+      const labelById = new Map(graph.nodes.map((n) => [n.id, n.label]));
+      for (const d of dropped) {
+        if (d.duplicate_of === undefined) continue;
+        checkedIds += 1;
+        expect(ids.has(d.duplicate_of), `${name}: dangling duplicate_of ${d.duplicate_of}`).toBe(true);
+        expect(d.duplicate_of_label).toBe(labelById.get(d.duplicate_of));
+      }
+    }
+    // Positive control: the sweep really did examine some ids (an invariant over
+    // an empty set passes by testing nothing — trap 13).
+    expect(checkedIds).toBeGreaterThan(3);
+  });
+
+  it("does NOT fire on a graph with no goal — the validator's own precondition", () => {
+    // ⭐ DERIVED FROM THE CONSUMER, not from the symptom (13d).
+    // `validateSemantic` (graph-validator.ts) opens with
+    //   `const goals = nodeMap.byKind.get("goal") ?? []; if (goals.length === 0) return issues;`
+    // so `OPTIONS_IDENTICAL` CANNOT fire on a goal-less graph. A demote pass
+    // without that gate withdraws an option to pre-empt a violation the consumer
+    // would never raise — the predicate would be broader than the rule it serves.
+    const records: DraftRecordSet = {
+      stated_items: [{ kind: "option", source_quote: "keep what we have" }],
+      claims: [
+        { claim_kind: "factor", label: "headcount" },
+        { claim_kind: "option_refinement", label: "Hire a growth team", basis: [] },
+        { claim_kind: "causal_link", label: "the status quo holds headcount", from_stated: 0, to_claim: 0, effect: "positive", sets_to: 12 },
+        { claim_kind: "causal_link", label: "the growth team holds headcount", from_claim: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+      ],
+    };
+    const { graph, dropped } = projectRecordsToGraph(records);
+    // Precondition: the collision really is present — both options carry the
+    // SAME signature, so the only reason nothing is demoted is the goal gate.
+    const a = signatureOf(graph, idOf(graph, "keep what we have"));
+    const b = signatureOf(graph, idOf(graph, "Hire a growth team"));
+    expect(a).toBeDefined();
+    expect(a).toBe(b);
+    expect(dropped.filter((d) => d.reason.startsWith("undeveloped_duplicate"))).toEqual([]);
   });
 
   it("changes NOTHING on a record set with no colliding options", () => {
