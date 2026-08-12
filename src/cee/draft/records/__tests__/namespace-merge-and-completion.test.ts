@@ -96,6 +96,47 @@ describe("⭐ the namespace residue is CAUGHT at emission, never silently mis-bo
     expect(graph.edges.filter((e) => e.provenance_source === "inferred")).toHaveLength(3);
   });
 
+  it("THE ONE EDGE RULE — refuses a link INTO a factor an option acts on", () => {
+    // B3's entire failure: three edges, all this one shape. `ALLOWED_EDGES`
+    // admits `factor → factor` only when the TARGET is observable or external,
+    // and `inferFactorCategories` makes a factor `controllable` EXACTLY when an
+    // option points at it — so a link into an option-targeted factor is illegal
+    // and no sweep stage rewrites `factor → factor`.
+    const oneEdge: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "grow revenue" },
+        { kind: "option", source_quote: "hire more people" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "sales capacity", basis: [1] },
+        { claim_kind: "factor", label: "market conditions" },
+        { claim_kind: "causal_link", label: "hiring lifts capacity", from_stated: 1, to_claim: 0, effect: "positive" },
+        { claim_kind: "causal_link", label: "capacity lifts revenue", from_claim: 0, to_stated: 0, effect: "positive" },
+        // ⭐ ILLEGAL: `market conditions` points INTO the option-controlled factor.
+        { claim_kind: "causal_link", label: "conditions bear on capacity", from_claim: 1, to_claim: 0, effect: "negative" },
+      ],
+    };
+    const { dropped } = projectRecordsToGraph(oneEdge);
+    const d = dropped.find((x) => x.claim_index === 4);
+    expect(d?.label).toBe("conditions bear on capacity");
+    expect(d?.reason).toBe("ref_kind_illegal");
+    expect(d?.from_kind).toBe("factor");
+    expect(d?.to_kind).toBe("factor");
+
+    // ⚠ DISCRIMINATING TWIN. The SAME `factor → factor` shape is LEGAL when the
+    // target is not option-controlled — otherwise the rule would forbid every
+    // chain the instruction asks for. Without this half, a mutant that rejected
+    // all factor→factor links would pass the assertion above.
+    const legal = projectRecordsToGraph({
+      ...oneEdge,
+      claims: [
+        ...oneEdge.claims.slice(0, 4),
+        { claim_kind: "causal_link", label: "capacity bears on conditions", from_claim: 0, to_claim: 1, effect: "negative" },
+      ],
+    });
+    expect(legal.dropped.find((x) => x.claim_index === 4)?.reason).not.toBe("ref_kind_illegal");
+  });
+
   it("refuses BOTH namespace fields on one endpoint rather than preferring either", () => {
     const { dropped } = projectRecordsToGraph({
       stated_items: [{ kind: "goal", source_quote: "grow revenue" }],
