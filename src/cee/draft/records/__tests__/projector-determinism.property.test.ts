@@ -188,6 +188,46 @@ const REAL_RECORD_SETS: ReadonlyArray<{ name: string; records: DraftRecordSet }>
       claims: [],
     },
   },
+  {
+    /**
+     * ⭐ THE ITERATED DEMOTE PASS, under the SAME determinism battery.
+     *
+     * Two refinements name one stated parent, so the choice-set guard refuses
+     * both merges. Withdrawing one (its signature duplicates a STATED option's)
+     * makes the other the parent's only refinement — so it merges, its magnitude
+     * lands on the parent, and the parent's signature CHANGES, exposing a second
+     * collision that did not exist on the first pass. The projection is therefore
+     * a fixed point reached over MULTIPLE passes, and "same input ⇒ same bytes"
+     * has to hold across all of them, not just one.
+     *
+     * The control immediately below pins that this set really does drive two
+     * rounds — a determinism claim about an iteration that never happened would
+     * be a guard agreeing with itself (trap 13b).
+     */
+    name: "two-round-demote-fixed-point",
+    records: {
+      stated_items: [
+        { kind: "goal", source_quote: "grow revenue 15%" },
+        { kind: "option", source_quote: "push into Germany next year" },
+        { kind: "option", source_quote: "double down on the UK" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "germany investment" },
+        { claim_kind: "factor", label: "uk investment" },
+        { claim_kind: "option_refinement", label: "Germany Direct (2027)", basis: [1] },
+        { claim_kind: "option_refinement", label: "Germany via Partner", basis: [1] },
+        { claim_kind: "option_refinement", label: "Defer Germany 12 Months (CFO path)", basis: [1, 2] },
+        { claim_kind: "causal_link", label: "germany push invests in germany", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 1 },
+        { claim_kind: "causal_link", label: "uk depth invests in the uk", from_stated: 2, to_claim: 1, effect: "positive", sets_to: 0.5 },
+        { claim_kind: "causal_link", label: "germany direct invests in the uk", from_claim: 2, to_claim: 1, effect: "positive", sets_to: 0.5 },
+        { claim_kind: "causal_link", label: "germany via partner invests in the uk", from_claim: 3, to_claim: 1, effect: "positive", sets_to: 0.25 },
+        { claim_kind: "causal_link", label: "cfo path invests in germany", from_claim: 4, to_claim: 0, effect: "positive", sets_to: 1 },
+        { claim_kind: "causal_link", label: "cfo path invests in the uk", from_claim: 4, to_claim: 1, effect: "positive", sets_to: 0.25 },
+        { claim_kind: "causal_link", label: "germany investment bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" },
+        { claim_kind: "causal_link", label: "uk investment bears on the goal", from_claim: 1, to_stated: 0, effect: "positive" },
+      ],
+    },
+  },
 ];
 
 // ── (3) NON-VACUITY CONTROL ─────────────────────────────────────────────────
@@ -238,6 +278,33 @@ describe("C-K1 control: the battery is running on something", () => {
     // name the reasons it is about.
     const refReasons = b.dropped.map((d) => d.reason).filter((r) => r !== "unconnected_to_goal");
     expect(refReasons.sort()).toEqual(["ref_out_of_range", "self_loop"]);
+  });
+
+  it("the fixed-point set really drives TWO demote rounds — the iteration is not vacuous", () => {
+    // WITHOUT this, the ×10 fingerprint test below would certify the determinism
+    // of an iteration that never ran: one pass and no demote produces a single
+    // stable fingerprint just as happily. So the precondition is pinned in-test.
+    const p = projectRecordsToGraph(REAL_RECORD_SETS[3]!.records);
+
+    // Round 1 — claims[2] duplicates a STATED option, so it is withdrawn.
+    expect(p.dropped.find((d) => d.claim_index === 2)?.reason).toBe(
+      "undeveloped_duplicate_of_stated",
+    );
+    // That withdrawal made claims[3] the parent's ONLY refinement, so it merged…
+    expect(p.dropped.find((d) => d.claim_index === 3)?.reason).toBe(
+      "refinement_merged_into_stated_option",
+    );
+    // …and round 2 could then see claims[4] duplicating the parent's NEW
+    // signature. This entry is only reachable through a second pass.
+    expect(p.dropped.find((d) => d.claim_index === 4)?.reason).toBe(
+      "undeveloped_duplicate_of_stated",
+    );
+    // The user's own two options both survive — nothing the user said is
+    // withdrawn by any number of rounds.
+    expect(p.graph.nodes.filter((n) => n.kind === "option").map((n) => n.label).sort()).toEqual([
+      "double down on the UK",
+      "push into Germany next year",
+    ]);
   });
 });
 

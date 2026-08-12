@@ -61,6 +61,11 @@ import { createHash } from "node:crypto";
 // number and would drift silently the day CEE retunes it (trap 12, the estate's
 // dominant defect class).
 import { MAX_OPTIONS as MAX_PROJECTED_OPTIONS } from "../../../validators/graph-validator.types.js";
+// ⭐ THE CONSUMER'S OWN PREDICATE, IMPORTED. `OPTIONS_IDENTICAL` fires when two
+// options share this string (`graph-validator.ts:841-862`), and the function is
+// EXPORTED for exactly this reuse. A local copy would drift from the rule it
+// claims to pre-empt, and this file's own history says the drift reads as green.
+import { buildInterventionSignature } from "../../../validators/graph-validator.js";
 import type {
   DraftInferenceClaim,
   DraftRecordSet,
@@ -169,6 +174,14 @@ export interface RecordProvenance {
    * user — the distinction the whole provenance mechanism exists to hold.
    */
   readonly merged_refinements?: readonly string[];
+  /**
+   * Labels of MODEL options withdrawn because their intervention signature was
+   * identical to this one's (`undeveloped_duplicate_of_*`). APPEND-ONLY, and
+   * DELIBERATELY NOT `merged_refinements`: a demote is not a merge. Nothing of
+   * the withdrawn option's content is folded into this node, and saying so in
+   * the merge field would claim an absorption that never happened.
+   */
+  readonly undeveloped_duplicates?: readonly string[];
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -236,13 +249,57 @@ export interface DroppedRecordRef {
      * option, and every link the model drew from or to the refinement lands on
      * the parent. Recorded here so the merge is visible, never silent.
      */
-    | "refinement_merged_into_stated_option";
+    | "refinement_merged_into_stated_option"
+    /**
+     * ⭐⭐ THE DEMOTE. A MODEL-emitted option whose intervention signature is
+     * IDENTICAL to a USER-STATED option's: the model proposed an alternative and
+     * never quantified how it differs, so the analysis cannot tell the two apart
+     * (`OPTIONS_IDENTICAL`). The model's one is withdrawn from the option set and
+     * DISCLOSED here, naming the stated option it duplicated.
+     *
+     * A STATED option is NEVER demoted, and a (stated, stated) collision is left
+     * standing and blocking — the user's own duplication is the user's to
+     * resolve, and resolving it behind them would narrow their choice set.
+     *
+     * The IDEA is not deleted: it is named here and on the survivor's provenance,
+     * so it remains coaching material ("what would make these two different?").
+     */
+    | "undeveloped_duplicate_of_stated"
+    /**
+     * Two MODEL options with identical signatures and no stated member in the
+     * group. The lowest claim index is kept — a deterministic tie-break, not a
+     * judgement about which is better — and the rest are disclosed here.
+     *
+     * ⚠ MEASURED: this shape does not occur in the banked corpus (round-11
+     * population: 4 collision groups, all four (stated, model)). It is
+     * implemented and tested synthetically, and that is stated rather than
+     * implied.
+     */
+    | "undeveloped_duplicate_of_model"
+    /**
+     * A link whose endpoint was demoted above. The reference itself was
+     * well-formed — it named a real record — so it is NOT reported as an
+     * unresolved reference, which would blame the model for a withdrawal the
+     * projector performed. Named apart for that reason (trap 21: two questions
+     * under one name is how a disclosure vocabulary starts lying).
+     */
+    | "endpoint_demoted_duplicate";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
   /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
   readonly from_kind?: string;
   readonly to_kind?: string;
+  /** Present only on the demote reasons: the minted id of the option this one duplicated. */
+  readonly duplicate_of?: string;
+  /** Its label, so the disclosure reads without a second lookup. */
+  readonly duplicate_of_label?: string;
+  /**
+   * The signature the two shared, from the validator's own function. Present on
+   * the demote reasons, where it IS the finding — a reader can re-derive the
+   * decision from it rather than take the projector's word for it.
+   */
+  readonly intervention_signature?: string;
 }
 
 export interface RecordProjection {
@@ -507,7 +564,37 @@ function isOptionControlledFactor(
 
 // ── The projector ───────────────────────────────────────────────────────────
 
-export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection {
+/** One demote decision, keyed by the claim index it withdraws. */
+interface DemoteDecision {
+  readonly claimIndex: number;
+  readonly label: string;
+  readonly reason: "undeveloped_duplicate_of_stated" | "undeveloped_duplicate_of_model";
+  /** The minted id of the option kept — bound by IDENTITY, never by a label. */
+  readonly duplicateOf: string;
+  readonly duplicateOfLabel: string;
+  readonly signature: string;
+}
+
+/** `projectOnce`'s output plus the binding the demote pass needs. */
+interface OneProjection extends RecordProjection {
+  /** Minted option-node id → the claim index that minted it. Model options only. */
+  readonly optionClaimIndexById: ReadonlyMap<string, number>;
+}
+
+/**
+ * ONE projection pass. `demoted` names claim indices withdrawn by a previous
+ * pass: they mint no node, they are not merge candidates, and links naming them
+ * are disclosed as `endpoint_demoted_duplicate`.
+ *
+ * ⚠ The claims ARRAY IS NOT FILTERED, deliberately. Every wire reference is an
+ * array POSITION (`from_claim`, `to_claim`, `basis`), so removing an element
+ * would silently re-point every later reference — the exact class of silent
+ * mis-binding the typed reference fields were introduced to end.
+ */
+function projectOnce(
+  records: DraftRecordSet,
+  demoted: ReadonlyMap<number, DemoteDecision>,
+): OneProjection {
   const statedItems: readonly DraftStatedItem[] = records.stated_items ?? [];
   const claims: readonly DraftInferenceClaim[] = records.claims ?? [];
 
@@ -522,6 +609,8 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
   /** Wire-ref token → minted node id. Populated in emission order. */
   const statedIdByIndex = new Map<number, string>();
   const claimIdByIndex = new Map<number, string>();
+  /** Minted OPTION node id → the claim index that minted it (model options only). */
+  const optionClaimIndexById = new Map<string, number>();
 
   // ── Pass 1: stated items → nodes. Provenance badge is `stated`, taken from
   // the loop, not from any model-supplied field.
@@ -679,6 +768,13 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     const candidates = new Map<number, number[]>();
     claims.forEach((claim, index) => {
       if (claim.claim_kind !== "option_refinement") return;
+      // ⭐ A DEMOTED REFINEMENT IS NOT A CANDIDATE, AND THIS IS WHY THE PASS MUST
+      // ITERATE. Two refinements naming one parent trip the choice-set guard and
+      // NEITHER merges. Withdraw one and the other becomes the parent's only
+      // refinement — so it merges, its magnitudes land on the parent, and the
+      // PARENT'S SIGNATURE CHANGES. A collision that did not exist on the first
+      // pass can exist on the second.
+      if (demoted.has(index)) return;
       const basis = claim.basis ?? [];
       // The stated OPTIONS this refinement names, deduplicated: naming the same
       // option twice still names one option.
@@ -703,6 +799,10 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
 
   // ── Pass 2: claims → nodes. Badge is `ai_inferred`, again taken from the loop.
   claims.forEach((claim, index) => {
+    // A demoted claim mints nothing at all. Its disclosure is written once, by
+    // the fixed-point wrapper, with the collision that caused it — not here,
+    // where the reason would have to be re-derived.
+    if (demoted.has(index)) return;
     const nodeKind = CLAIM_KIND_TO_NODE_KIND[claim.claim_kind];
     if (nodeKind === null || nodeKind === undefined) return;
 
@@ -740,6 +840,10 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     }
     const id = mintUnique(sha8(claim.claim_kind, label), usedIds);
     claimIdByIndex.set(index, id);
+    // The demote pass binds a model option to the claim that minted it BY
+    // IDENTITY. Recorded here, at the one construction site, so no later pass
+    // has to infer provenance from a label or a value (trap 19).
+    if (nodeKind === "option") optionClaimIndexById.set(id, index);
 
     const basisIds = (claim.basis ?? [])
       .filter((i) => Number.isInteger(i) && statedIdByIndex.has(i))
@@ -807,6 +911,10 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     if (statedIdx === undefined && claimIdx === undefined) return { reason: "missing_ref" };
     const idx = statedIdx ?? claimIdx!;
     if (!Number.isInteger(idx)) return { reason: "unparseable_ref" };
+    // A demoted endpoint resolved perfectly well; the projector then withdrew
+    // the node. Reporting `ref_out_of_range` here would blame the model for our
+    // own decision, so the two are named apart.
+    if (claimIdx !== undefined && demoted.has(idx)) return { reason: "endpoint_demoted_duplicate" };
     const id = statedIdx !== undefined ? statedIdByIndex.get(idx) : claimIdByIndex.get(idx);
     if (id === undefined) return { reason: "ref_out_of_range" };
     if (!nodeIds.has(id)) return { reason: "ref_target_not_a_node" };
@@ -1138,11 +1246,39 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     }
   }
 
+  // ── Pass 5: THE DEMOTE DISCLOSURES, written once against the FINAL node set.
+  // Sorted by claim index so the list is a function of the record set's content
+  // and order, never of the round in which a decision happened to fire.
+  for (const decision of [...demoted.values()].sort((a, b) => a.claimIndex - b.claimIndex)) {
+    dropped.push({
+      claim_index: decision.claimIndex,
+      claim_kind: "option_refinement",
+      label: decision.label,
+      reason: decision.reason,
+      duplicate_of: decision.duplicateOf,
+      duplicate_of_label: decision.duplicateOfLabel,
+      intervention_signature: decision.signature,
+    });
+    // APPEND-ONLY on the SURVIVOR. Its class and its quote are untouched, so the
+    // user's own words remain the only thing badged `stated`; this records that
+    // the model offered something the analysis could not distinguish from it.
+    const survivorProv = provenance[decision.duplicateOf];
+    if (survivorProv) {
+      provenance[decision.duplicateOf] = {
+        ...survivorProv,
+        undeveloped_duplicates: [...(survivorProv.undeveloped_duplicates ?? []), decision.label],
+      };
+      const survivorNode = nodes.find((n) => n.id === decision.duplicateOf);
+      if (survivorNode) survivorNode.provenance = provenance[decision.duplicateOf];
+    }
+  }
+
   // ── meta: derived, in node-emission order (never Set-iteration order).
   const hasIncoming = new Set(edges.map((e) => e.to));
   const hasOutgoing = new Set(edges.map((e) => e.from));
 
   return {
+    optionClaimIndexById,
     graph: {
       version: "1",
       // The frozen default (`schemas/graph.ts` `default_seed: 17`). A projector
@@ -1161,6 +1297,138 @@ export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection
     provenance,
     dropped,
   };
+}
+
+/**
+ * Every MODEL option this projection cannot distinguish from another option,
+ * with the decision to withdraw it.
+ *
+ * ⭐ THE GROUPING IS THE VALIDATOR'S, NOT A RESTATEMENT OF IT. Membership is
+ * `data.interventions` present (the validator's own `continue`, :843) and the
+ * key is its own exported `buildInterventionSignature`. An option with NO stated
+ * magnitude does not participate — the validator skips it, and demoting on a
+ * shared absence would withdraw alternatives for a collision that never fires.
+ *
+ * ⚠ AN OPTION'S CLASS COMES FROM THE PROJECTOR'S PROVENANCE MAP, keyed by minted
+ * id (trap 19). Never from its label, its position, or the shape of its data.
+ */
+function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] {
+  const groups = new Map<string, { id: string; label: string; claimIndex?: number }[]>();
+  for (const node of projection.graph.nodes) {
+    if (node.kind !== "option") continue;
+    const interventions = (node.data as { interventions?: Record<string, number> } | undefined)
+      ?.interventions;
+    if (!interventions) continue;
+    const signature = buildInterventionSignature(interventions);
+    const member = {
+      id: node.id,
+      label: node.label,
+      claimIndex: projection.optionClaimIndexById.get(node.id),
+    };
+    const list = groups.get(signature);
+    if (list) list.push(member);
+    else groups.set(signature, [member]);
+  }
+
+  const decisions: DemoteDecision[] = [];
+  for (const [signature, members] of groups) {
+    if (members.length < 2) continue;
+    const stated = members.filter(
+      (m) => projection.provenance[m.id]?.provenance_class === "stated",
+    );
+    // A model option is one this projector minted FROM A CLAIM.
+    //
+    // ⭐⭐ AND THIS IS WHY A STATED OPTION CANNOT BE DEMOTED — by CONSTRUCTION,
+    // not by a filter clause someone could delete. Withdrawal works by excluding
+    // a CLAIM INDEX from the next projection, and a stated option has none: its
+    // node is minted in pass 1 from `stated_items` and never enters
+    // `optionClaimIndexById`. There is literally no lever here that removes the
+    // user's own alternative. (An explicit `!stated.includes(m)` clause stood
+    // here and a reading proved it unreachable for exactly this reason; it was
+    // removed rather than left in, because an unreachable guard is a branch no
+    // test can kill — the same call this file makes in pass 3c.)
+    const model = members.filter((m) => m.claimIndex !== undefined);
+
+    if (stated.length > 0 && model.length > 0) {
+      // A USER-STATED OPTION IS NEVER DEMOTED. Every model duplicate goes; the
+      // stated one it duplicated is named in the disclosure. Where more than one
+      // stated option is in the group, the first in node-emission order is named
+      // — the group is already blocking on its own (stated, stated) collision,
+      // which this pass deliberately leaves for the user to resolve.
+      const survivor = stated[0]!;
+      for (const m of model) {
+        decisions.push({
+          claimIndex: m.claimIndex!,
+          label: m.label,
+          reason: "undeveloped_duplicate_of_stated",
+          duplicateOf: survivor.id,
+          duplicateOfLabel: survivor.label,
+          signature,
+        });
+      }
+      continue;
+    }
+    if (stated.length === 0 && model.length > 1) {
+      // Deterministic tie-break, and it is a tie-break rather than a judgement:
+      // nothing here knows which of two indistinguishable model options is
+      // better, so the earliest-emitted one is kept for reproducibility alone.
+      const ordered = [...model].sort((a, b) => a.claimIndex! - b.claimIndex!);
+      const survivor = ordered[0]!;
+      for (const m of ordered.slice(1)) {
+        decisions.push({
+          claimIndex: m.claimIndex!,
+          label: m.label,
+          reason: "undeveloped_duplicate_of_model",
+          duplicateOf: survivor.id,
+          duplicateOfLabel: survivor.label,
+          signature,
+        });
+      }
+    }
+    // (stated, stated) — and any group with fewer than two withdrawable members
+    // — falls through untouched, and OPTIONS_IDENTICAL fires VISIBLY.
+  }
+  return decisions;
+}
+
+/**
+ * ⭐⭐ THE PROJECTOR — projection to a FIXED POINT.
+ *
+ * `projectOnce` is run, its option signatures are compared with the VALIDATOR'S
+ * OWN function, and any MODEL option indistinguishable from another is withdrawn
+ * and re-projected. The loop repeats because a withdrawal can change what merges
+ * (pass 1b), and a merge can change a surviving option's signature — so a
+ * collision invisible on the first pass can exist on the second.
+ *
+ * TERMINATION IS STRUCTURAL: every iteration adds at least one claim index to
+ * `demoted`, a demoted claim mints no option and so can never be chosen again,
+ * and only claims can be demoted. The bound is therefore the claim count and it
+ * is an EXHAUSTION bound, not a truncation — reaching it means every claim has
+ * been withdrawn, at which point no option remains to collide.
+ *
+ * ⚠ WHY HERE AND NOT AT THE REPAIR STAGE. `options-identical-graceful-dedup.ts`
+ * dedups colliding options later, and its guard 3b DECLINES whenever the labels
+ * differ — because, in its own words, *"with no per-option brief provenance
+ * reaching this stage, differently-LABELLED duplicates are the only remaining
+ * signal that ≥2 user-traceable alternatives were collapsed onto one signature"*.
+ * That decline is right, and it names precisely what is missing there and present
+ * here: the projector BUILT the option set and knows which node is the user's.
+ * The two stages answer different questions (trap 21), and this one DISCLOSES
+ * where the repair stage is deliberately silent.
+ */
+export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection {
+  const claimCount = (records.claims ?? []).length;
+  const demoted = new Map<number, DemoteDecision>();
+  let projection = projectOnce(records, demoted);
+  for (let pass = 0; pass < claimCount; pass++) {
+    const decisions = findUndevelopedDuplicates(projection);
+    if (decisions.length === 0) break;
+    for (const d of decisions) demoted.set(d.claimIndex, d);
+    projection = projectOnce(records, demoted);
+  }
+  // The internal binding is not part of the contract: consumers get the same
+  // three fields they always did.
+  return { graph: projection.graph, provenance: projection.provenance, dropped: projection.dropped };
 }
 
 /** The determinism-comparison value: one canonical string per projection. */

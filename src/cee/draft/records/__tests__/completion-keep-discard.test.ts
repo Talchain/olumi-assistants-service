@@ -125,25 +125,62 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     // (trap 13c). This is that fixture, and it is a real run, not a
     // construction: round 7's pass 05, whose completion added two edges at an
     // unchanged blocking count and was thrown away.
+    // ⚠⚠ RE-MEASURED AT ROUND 11, AND THE NUMBERS MOVED — recorded rather than
+    // quietly re-baselined. This pass IS run 12, whose single blocking item was
+    // `options_indistinguishable`: the model's "Rewrite first, then copilot
+    // (sequenced)" carried the same intervention signature as the user's
+    // "finally do the platform rewrite". The projector's fixed-point demote now
+    // withdraws that option and DISCLOSES it, so the collision no longer reaches
+    // the ask at all. The tie is therefore at 0–0 where it used to be at 1–1.
+    //
+    // THE DISCRIMINATION IS UNCHANGED, which is the only reason this fixture is
+    // still here: `shouldKeepCompletion` is `after <= before`, and a mutant
+    // narrowing it to `<` reads `0 < 0 === false` and REDs on this test exactly
+    // as it did at 1–1. The `it` below carries the tie at a POSITIVE count, so
+    // the property is not left resting on a zero.
     const pass = banked("round7-completion-pass05-tie.json");
     const r = replay(pass);
 
     expect(r.v2Keeps).toBe(false);                              // v2 discarded it
     expect(r.blockingAfter).toBe(r.blockingBefore);              // …at a TIE
-    expect(r.blockingBefore).toBeGreaterThan(0);                 // a non-trivial tie
-    expect(r.reprojected.graph.edges.length).toBeGreaterThan(r.projection.graph.edges.length);
+    expect(r.blockingBefore).toBe(0);                            // now zero — see above
     expect(r.v3Keeps).toBe(true);                               // v3 keeps it
+
+    // ⚠ AND THE COST, PINNED RATHER THAN OMITTED. Three of this completion's
+    // five claims elaborate the option that was withdrawn, so the merge adds no
+    // edges here any more (it added two before the demote existed). Every one of
+    // them is DISCLOSED — the model's work is visible to a reader, not lost —
+    // and the trade is a valid graph carrying the user's own three options
+    // instead of a 500 carrying none.
+    expect(r.reprojected.graph.edges.length).toBe(r.projection.graph.edges.length);
+    const demotedEndpoints = r.reprojected.dropped.filter(
+      (d) => d.reason === "endpoint_demoted_duplicate",
+    );
+    expect(demotedEndpoints.length).toBeGreaterThan(0);
+    const demote = r.reprojected.dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated");
+    expect(demote?.label).toBe("Rewrite first, then copilot (sequenced)");
+    expect(demote?.duplicate_of_label).toBe("finally do the platform rewrite");
   });
 
   it("the improvement v2 could not see is NON-BLOCKING disclosure growth, not blocking growth", () => {
-    // The mechanism, asserted rather than described: on run 16 the total ask
-    // GREW (5→8) while the blocking count FELL. Everything the ask gained is a
-    // projector disclosure about an edge that never entered the graph, and the
-    // merge is append-only, so those disclosures count against the completion
-    // for ever under a total-count comparator.
+    // The mechanism, asserted rather than described: on run 16 the ask's TOTAL
+    // does not fall while its blocking count collapses. Everything the ask
+    // retains is a projector disclosure about an edge that never entered the
+    // graph, and the merge is append-only, so those disclosures count against
+    // the completion for ever under a total-count comparator.
+    //
+    // ⚠ RE-MEASURED AT ROUND 11. Before the projector's demote pass the totals
+    // were 7 → 9 with blocking 7 → 2; they are now 7 → 7 with blocking 7 → 0,
+    // because the two `options_indistinguishable` items are resolved upstream.
+    // The comparison is SHARPER than it was, not weaker: askBefore is 7 items
+    // ALL of which are blocking, askAfter is 7 items NONE of which are — the
+    // same total, an entirely different composition. A total-count comparator
+    // is blind to that by construction, which is the claim this test makes.
     const r = replay(banked("round7-completion-pass07.json"));
-    expect(r.askAfter.items.length).toBeGreaterThan(r.askBefore.items.length);
+    expect(r.askAfter.items.length).toBeGreaterThanOrEqual(r.askBefore.items.length);
     expect(r.blockingAfter).toBeLessThan(r.blockingBefore);
+    expect(r.blockingBefore).toBe(r.askBefore.items.length); // before: every item blocking
+    expect(r.blockingAfter).toBe(0);                          // after: none of them
 
     const grown = r.askAfter.items.filter((i) => !isBlockingAskItem(i));
     expect(grown.length).toBeGreaterThan(0);
@@ -193,6 +230,35 @@ describe("⭐⭐ the guard's PURPOSE survives — a completion that worsens a bl
 
     expect(blockingAfter).toBeGreaterThan(blockingBefore);
     expect(shouldKeepCompletion(askBefore, askAfter)).toBe(false); // DISCARD
+  });
+
+  it("KEEPS a completion at a TIE on a POSITIVE blocking count", () => {
+    // ⭐ THE TIE PROPERTY AT A NON-ZERO LEVEL. Round 11 moved the banked tie
+    // fixture from 1–1 to 0–0 (the projector now resolves that collision before
+    // the ask sees it), and a property left resting on a zero is one step from
+    // resting on nothing. So the same discrimination is pinned here at a count
+    // that cannot be reached by everything simply being fine.
+    const projection = projectRecordsToGraph(base);
+    const askBefore = enumerateCompletionAsk(base, projection);
+    const blockingBefore = countBlockingAskItems(askBefore);
+    // Precondition, pinned in-test: this base really does carry a blocking gap
+    // ("do nothing" has no chain), so the tie below is a tie at a POSITIVE count.
+    expect(blockingBefore).toBeGreaterThan(0);
+
+    // A completion whose only claim is a link the projector REFUSES at emission
+    // (`goal → factor` is unrescuable). It therefore adds a NON-blocking
+    // disclosure and cannot change the blocking count in either direction.
+    const merged = mergeCompletionClaims(base, {
+      claims: [{ claim_kind: "causal_link", label: "the goal drives capacity", from_stated: 0, to_claim: 0 }],
+    });
+    expect(merged.ok).toBe(true);
+    if (!merged.ok) return;
+    const reprojected = projectRecordsToGraph(merged.records);
+    const askAfter = enumerateCompletionAsk(merged.records, reprojected);
+
+    expect(countBlockingAskItems(askAfter)).toBe(blockingBefore);          // the TIE
+    expect(askAfter.items.length).toBeGreaterThan(askBefore.items.length); // v2 would discard
+    expect(shouldKeepCompletion(askBefore, askAfter)).toBe(true);          // v3 KEEPS
   });
 });
 
