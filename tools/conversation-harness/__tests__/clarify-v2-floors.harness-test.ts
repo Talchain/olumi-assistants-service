@@ -174,10 +174,20 @@ describe('FLOOR DF — draft-first on a single gap (Track-1 intake fix, 2026-08-
       expect(d.reason).toBe('single_gap_draft_first');
       // Identity binding: the deferred question is the missing dimension's.
       expect(d.deferredQuestion?.dimension).toBe(assessment.missing[0]);
-      // The disclosure is provenance-honest: the assumed value is the
-      // ASSISTANT's, never presented as user-stated, and the question rides.
+      // The disclosure is provenance-honest: the assumed value is named as
+      // the ASSISTANT's, and the question rides.
+      //
+      // ⚠ MARKER CHANGED AT #928 ROUND 4. This asserted the literal
+      // `'not something you told me'` — which is itself A CLAIM ABOUT THE
+      // USER'S WORDS, i.e. exactly what round 4 removes (the product may
+      // describe what IT did; it may not tell the user what THEY said). A
+      // floor that pins the defect is a floor holding the defect in place.
       const disclosure = composeDraftFirstDisclosure(d.deferredQuestion!);
-      expect(disclosure).toContain('not something you told me');
+      expect(disclosure).toContain("I've assumed");
+      // …and it must assert NOTHING about the brief, in either branch. This
+      // floor runs over the fixture pack, so it is the broadest place the
+      // property is checked.
+      expect(disclosure).not.toMatch(/your brief|\byou (?:didn't|did not|said|told|stated)\b/i);
       expect(disclosure).toContain(d.deferredQuestion!.text);
       expect(isBannedBareDetailRequest(disclosure)).toBe(false);
     },
