@@ -34,10 +34,17 @@ import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-ba
 
 export interface DisplaySafeAnalysisOption {
   readonly label: string;
-  /** Integer-percent string, e.g. `"86%"`. Never a raw decimal. */
+  /**
+   * Display percent string, e.g. `"86%"`. Never a raw decimal. Whole percent
+   * except at the ends of the range: ROADMAP 2.229 slice 3 renders a value
+   * that is not EXACTLY 1 as `">99%"` and one that is not EXACTLY 0 as
+   * `"<1%"`, so rounding cannot claim a certainty the analysis never
+   * computed. See {@link formatProbability}.
+   */
   readonly win_probability: string;
   /**
-   * Lane 30 — integer-percent string of the option's goal-fit value (the
+   * Lane 30 — display percent string of the option's goal-fit value, on the
+   * same scale and with the same end-of-range honesty as `win_probability` (the
    * modelled probability it MEETS THE USER'S TARGET; PLoT #204
    * `probability_of_joint_goal`). Deliberately a separate key from
    * `win_probability`: win% says the option beats the alternatives most
@@ -56,10 +63,14 @@ export interface DisplaySafeAnalysisOption {
   readonly outcome_band?: string;
   /**
    * ROADMAP 2.54 (a) — honest explanation attached ONLY when the option's
-   * win probability renders as zero percent (raw value below
-   * {@link NEAR_ZERO_WIN_PROBABILITY_THRESHOLD}). An unexplained "0%" reads
-   * as a bug or a silent elimination (live papercut: behavioural re-test
-   * 2026-07-14, Hybrid at ~zero percent); the note states only what the
+   * raw win probability is below {@link NEAR_ZERO_WIN_PROBABILITY_THRESHOLD},
+   * i.e. the bottom band of the range. ⚠ Since ROADMAP 2.229 slice 3 that
+   * band renders as `"<1%"`, NOT as `"0%"` — the note explains what a
+   * near-zero result MEANS and is no longer the only thing standing between
+   * the reader and a bare zero (historic papercut, still the reason this
+   * exists: behavioural re-test 2026-07-14, Hybrid at ~zero percent, where an
+   * unexplained "0%" read as a bug or a silent elimination). The note states
+   * only what the
    * analysis data supports — the option almost never came out best across
    * the sampled runs — and explicitly forbids fabricating a causal reason.
    * Display prose only: the `win_probability` string is untouched.
@@ -84,7 +95,10 @@ export interface DisplaySafeAnalysisOption {
 export interface DisplaySafeRankedOption {
   readonly rank: string;
   readonly label: string;
-  /** Integer-percent string, e.g. `"72%"`. Never a raw decimal. */
+  /**
+   * Display percent string, e.g. `"72%"` — same end-of-range honesty as
+   * {@link DisplaySafeAnalysisOption.win_probability}.
+   */
   readonly win_probability: string;
   /** Lane 30 — see {@link DisplaySafeAnalysisOption.target_fit}. */
   readonly target_fit?: string;
@@ -251,7 +265,7 @@ export interface DisplaySafeAnalysis {
    * Lane 21 (P0-A) breadth fields. All optional, all omitted (never null /
    * never empty-array) when the raw source is missing or empty:
    *
-   *  - `options`: EVERY option, ranked, integer-percent probability
+   *  - `options`: EVERY option, ranked, display-percent probability
    *    (Lane 30: plus a `target_fit` percent when goal fit was scored).
    *  - `tipping_points`: banded flip-risk phrases (never raw thresholds).
    *  - `fragile_edge_count`: string count behind the capped edge list.
@@ -378,9 +392,16 @@ export function outcomeBandPhrase(outcomeMean: number): string | null {
 }
 
 /**
- * ROADMAP 2.54 (a) — the raw win probability below which the display
- * percent rounds to "0%" (`Math.round(p * 100) === 0` ⇔ `p < 0.005`).
- * The note fires on exactly the band that renders an unexplained zero.
+ * ROADMAP 2.54 (a) — the raw win probability below which a plain
+ * `Math.round(p * 100)` would render "0%" (⇔ `p < 0.005`). The note fires on
+ * exactly that band.
+ *
+ * ⚠ What this band RENDERS changed in ROADMAP 2.229 slice 3: it is now
+ * `"<1%"`, because a non-zero value may not be reported as an impossibility.
+ * The threshold is unchanged and still selects the right band for the note;
+ * only the sentence about what the reader sees was falsified. Kept as its own
+ * constant deliberately — {@link formatProbability} states its rule over the
+ * whole domain and has no threshold to drift against this one.
  */
 export const NEAR_ZERO_WIN_PROBABILITY_THRESHOLD = 0.005;
 
