@@ -41,7 +41,10 @@
  * cannot be determined, make the ambiguity the product rather than guessing.
  */
 import { describe, it, expect } from "vitest";
-import { extractInterventionsForOption } from "../../src/cee/extraction/intervention-extractor.js";
+import {
+  extractInterventionsForOption,
+  extractRawInterventions,
+} from "../../src/cee/extraction/intervention-extractor.js";
 import { matchInterventionToFactor } from "../../src/cee/extraction/factor-matcher.js";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
 import type { NodeV3T, EdgeV3T } from "../../src/schemas/cee-v3.js";
@@ -126,8 +129,6 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     // decline on principle, not from doubt.
     expect(asked).not.toMatch(/not confident/i);
     expect(asked).toMatch(/by meaning/i);
-    // Asked ONCE per factor: several patterns can match one phrase.
-    expect(option.user_questions?.filter((q) => /Churn Rate/.test(q)).length).toBe(1);
   });
 
   it("reports an edge-hinted match by its MEASURED type, never upgraded to exact_id", () => {
@@ -210,6 +211,36 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     );
     expect(Object.keys(option.interventions)).not.toContain(TECH_ID);
     expect((option.unresolved_targets ?? []).some((t) => /technology/i.test(t))).toBe(true);
+  });
+
+  it("asks once per factor when several patterns match the same phrase", () => {
+    // ⚠ THE INPUT IS THE WHOLE TEST, AND MY FIRST ATTEMPT GOT IT WRONG.
+    // This assertion originally rode the "Cut price by 15%" case, which yields
+    // exactly ONE raw extraction — so it could never observe a duplicate and
+    // the "remove the dedupe" mutant SURVIVED against it. The `<target> to <N>`
+    // family is the one that duplicates: "Set price to 40" matches both the
+    // leading-verb rule ("set price to 40") and the bare rule ("price to 40"),
+    // and `processedSegments` dedupes by FULL MATCH, so both survive as two
+    // raws with the same target.
+    const { nodes, edges } = churnOnlyGraph();
+
+    // Precondition pinned in-test: the input really does produce two raws.
+    expect(extractRawInterventions("Set price to 40", "brief_extraction").length).toBe(2);
+
+    const option = extractInterventionsForOption(
+      "Set price to 40",
+      undefined,
+      nodes,
+      edges,
+      GOAL_ID,
+      new Set<string>(),
+      [],
+      undefined,
+      "opt_a",
+    );
+
+    expect(option.user_questions?.filter((q) => /Churn Rate/.test(q)).length).toBe(1);
+    expect(option.unresolved_targets?.length).toBe(1);
   });
 
   it("the two surfaces agree: analysis_ready must not offer to run what the panel refused", () => {
