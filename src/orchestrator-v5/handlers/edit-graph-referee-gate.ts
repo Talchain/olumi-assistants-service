@@ -420,6 +420,64 @@ export function buildGmProtectedHeldAssistantText(
   );
 }
 
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE AMBIGUOUS HOLD — "the product may describe what IT did; it may not
+// tell the user what THEY said."
+//
+// The copy above is TRUE when the user protected something and FALSE the
+// moment the same cue served a constraint. On "Keep Customer churn below 3%."
+// the gate answered "You asked for 'Customer churn' to stay as it is, and this
+// change would affect it: change 'Customer churn' to 0.03" — the opposite of
+// what the user wrote, contradicting itself inside one sentence.
+//
+// Root cause is NOT a short word list. `keep` is a legitimate cue for BOTH
+// "preserve this" and "bound this", so one predicate was deciding two things
+// with opposite error costs: whether to HOLD (broad is right) and what to
+// ASSERT about the user's intent (broad is a lie). See BOUNDED_CLAUSE in
+// protection-scope.ts for the split; CLAUDE.md traps 21 and 22b.
+//
+// The hold is UNCHANGED — same breadth, same conservative bias, so the F-3
+// silent-wrong-write class cannot reopen. Only the sentence changes, and only
+// where the reading is genuinely undetermined. Then we state the product's own
+// uncertainty and ask, rather than inventing a reading of the user's words
+// (trap 22f: where direction cannot be determined, ask).
+// ---------------------------------------------------------------------------
+
+/** Fallback when no protected label survives the render-safety filter. */
+export const GM_PROTECTED_AMBIGUOUS_HELD_ASSISTANT_TEXT =
+  'Your message could be read as asking to change part of the model or to ' +
+  'leave it alone, and I could not tell which, so I am holding this rather ' +
+  'than guessing. Nothing in the model moves until you confirm. Reply yes to ' +
+  'continue, or tell me what to adjust instead.';
+
+/**
+ * The undetermined-reading hold ask, NAMED. States the entity, the product's
+ * own uncertainty, and what is being held. Makes NO claim about what the user
+ * asked for, in either direction.
+ */
+export function buildGmAmbiguousHeldAssistantText(
+  labels: readonly string[],
+  subject: string | null,
+  opCount: number = 1,
+): string {
+  const safeLabels = labels.filter((l) => l.trim().length > 0 && subjectIsSafe(l));
+  if (safeLabels.length === 0) return GM_PROTECTED_AMBIGUOUS_HELD_ASSISTANT_TEXT;
+  const named = joinQuotedLabels(safeLabels);
+  const them = safeLabels.length === 1 ? 'it' : 'them';
+  const held =
+    subject !== null && subjectIsSafe(subject)
+      ? opCount > 1
+        ? `these changes rather than guessing: ${subject}`
+        : `this change rather than guessing: ${subject}`
+      : `${opCount > 1 ? 'these changes' : 'this change'} rather than guessing`;
+  return (
+    `Your message could be read as asking to change ${named} or to leave ` +
+    `${them} alone, and I could not tell which, so I am holding ${held}. ` +
+    'Nothing in the model moves until you confirm. Reply yes to continue, or ' +
+    'tell me what to adjust instead.'
+  );
+}
+
 /**
  * ROADMAP 2.11 / P1-3 — needs-encoding disclosure ON THE HOLD. An
  * `add_node` option op whose payload requests NO interventions will, once
@@ -976,13 +1034,31 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       // in the same batch (e.g. structural hold + protected tunable), the
       // standard ask is used — the whole batch is still held behind the
       // one confirm, so nothing auto-applies against the protection.
+      //
+      // ⭐ WHICH protection copy: the NAMED protective claim is made only for
+      // entities whose protective clause did NOT also state a bound. When
+      // every named entity's reading is bounded, the "you asked for this to
+      // stay as it is" claim would be FALSE, so the ambiguous ask is used
+      // instead. Per-entity, not per-message: "Keep churn below 3%, but do
+      // not touch CRM Platform Cost" still names CRM Platform Cost
+      // protectively while refusing to characterise the churn clause.
+      const protectedLabels = protection.demotedEntityLabels;
+      const assertableLabels = protectedLabels.filter(
+        (l) => !protection.boundedReadingLabels.includes(l),
+      );
       const heldAsk =
         gv.blocker?.code === USER_PROTECTED_ENTITY
-          ? buildGmProtectedHeldAssistantText(
-              protection.demotedEntityLabels,
-              heldChangesetSubject,
-              input.operations.length,
-            )
+          ? assertableLabels.length > 0
+            ? buildGmProtectedHeldAssistantText(
+                assertableLabels,
+                heldChangesetSubject,
+                input.operations.length,
+              )
+            : buildGmAmbiguousHeldAssistantText(
+                protection.boundedReadingLabels,
+                heldChangesetSubject,
+                input.operations.length,
+              )
           : buildGmHeldAssistantText(heldChangesetSubject, input.operations.length);
       return {
         governing,
