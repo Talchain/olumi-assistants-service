@@ -694,16 +694,14 @@ export function extractInterventionsForOption(
     // A semantic match becomes an unresolved target and a question, which is the
     // honest shape: where the mapping cannot be determined, make the ambiguity
     // the product rather than guessing (CLAUDE.md trap 22f).
-    if (matchResult.matched && matchResult.match_type === "semantic") {
-      unresolvedTargets.push(raw.target_text);
-      userQuestions.push(
-        `Which factor does "${raw.target_text}" refer to? We matched it to ` +
-          `"${matchResult.matched_node?.label ?? matchResult.node_id}", but we are not confident enough ` +
-          `to set a value from that.`
-      );
-      continue; // Do not emit intervention
-    }
-
+    // ⚠ THE GUARD SITS INSIDE, AFTER THE BASELINE CHECK, AND THE ORDER IS
+    // LOAD-BEARING. Placed before this block it also pre-empted the P1-CEE-1
+    // relative-without-baseline limb — which ALREADY refuses to emit a value
+    // and asks the better question ("What is the current Cost?"). The guard
+    // would have replaced a specific, useful question with a generic one while
+    // preventing no wrong value at all, and it broke
+    // `p1-cee-verification.test.ts`'s baseline-prompt case exactly there. A
+    // refusal belongs only where a value would OTHERWISE BE WRITTEN.
     if (matchResult.matched && matchResult.node_id && raw.value) {
       const baseline = matchResult.matched_node?.observed_state?.value;
       const hasBaseline = baseline !== undefined;
@@ -718,6 +716,16 @@ export function extractInterventionsForOption(
         const relativeDesc = formatRelativeDescription(raw.value);
         userQuestions.push(
           `What is the current ${factorLabel}? We need a baseline to apply the ${relativeDesc}.`
+        );
+        continue; // Do not emit intervention
+      }
+
+      if (matchResult.match_type === "semantic") {
+        unresolvedTargets.push(raw.target_text);
+        userQuestions.push(
+          `Which factor does "${raw.target_text}" refer to? We matched it to ` +
+            `"${matchResult.matched_node?.label ?? matchResult.node_id}", but we are not confident enough ` +
+            `to set a value from that.`
         );
         continue; // Do not emit intervention
       }
