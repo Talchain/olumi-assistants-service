@@ -56,7 +56,7 @@ import {
   isKnownMagnitude,
   resolveMagnitude,
 } from "../../../utils/magnitude-alphabet.js";
-import { MULTIPLIERS, parseNumericValue } from "../numeric-parser.js";
+import { MULTIPLIERS, extractAllNumericValues, parseNumericValue } from "../numeric-parser.js";
 import { findStatedAmounts } from "../../provenance/stated-amounts.js";
 
 /* ===========================================================================
@@ -212,6 +212,23 @@ describe("ROADMAP 2.1130 Part C — the stated magnitude survives, in both direc
     expect(scanned).toEqual([50_000, 20_000]);
   });
 
+  it("the SECOND amount in a segment — reachable only through the inline scan — keeps its magnitude", () => {
+    // ⭐ A DISCRIMINATING FIXTURE, not merely a passing one. `extractAllNumericValues`
+    // has two readers: a segment split (which returns only the FIRST match per
+    // segment) and an inline /g scan. Both amounts below sit in ONE segment — no
+    // comma, no "and", no "or" — so `£250 grand` can ONLY have come from the
+    // inline pattern. A mutant that strips the alphabet from that pattern
+    // therefore reddens HERE and nowhere else; without this case it survived.
+    const found = extractAllNumericValues("budget £5m rising to £250 grand");
+    const byText = new Map(found.map((p) => [p.originalText, p.value]));
+    expect(byText.get("£5m")).toBe(5_000_000);
+    expect(
+      byText.get("£250 grand"),
+      "the inline currency scan lost the magnitude alphabet — the second amount in a " +
+        "segment is reachable through no other reader.",
+    ).toBe(250_000);
+  });
+
   it("agrees with the canonical scanner on every corpus row that states one amount", () => {
     // A SECOND, INDEPENDENT reading of the same text. Absolute values are
     // asserted above; this pins the two consumers of one alphabet together, so
@@ -225,5 +242,91 @@ describe("ROADMAP 2.1130 Part C — the stated magnitude survives, in both direc
           `the writer stated ${expected}.`,
       ).toBe(expected);
     }
+  });
+});
+
+/* ===========================================================================
+ * PART D — A KNOWN, UNFIXED DEFECT, PINNED RATHER THAN LEFT INVISIBLE.
+ *
+ * `extractAllNumericValues` splits its input on `[,;]` before parsing, and a
+ * thousands separator IS a comma. So "£50,000" is torn into "£50" and "000",
+ * and BOTH survive into the result: a 1,000x truncation (50) beside a
+ * fabricated ZERO (parseFloat("000")). It is the same magnitude-loss class this
+ * file exists to close, arriving through the SPLIT rather than the alphabet.
+ *
+ * IT IS NOT FIXED HERE, and the reason is measured, not assumed:
+ * `extractAllNumericValues` has ZERO consumers in `src/` (swept at
+ * `dbd012eb`; the only occurrence is its own declaration). Its blast radius is
+ * zero by construction, so repairing it is a behaviour change to dead code and
+ * belongs in its own row, not smuggled into a fix for the live path.
+ *
+ * ⚠ BUT AN UNPINNED GAP IS HOW A DEFECT SURVIVES A REPAIR OF ITS OWN MODULE.
+ * This asserts the EXACT set of spurious readings, so the suite stays green for
+ * the right reason and REDs if the set GROWS (a new loss) or SHRINKS (someone
+ * fixed it and this note went stale). The correct reading is asserted alongside
+ * it, so the pin can never be mistaken for approval.
+ * ======================================================================== */
+
+describe("ROADMAP 2.1130 Part D — the comma-split gap in extractAllNumericValues", () => {
+  it("tears a thousands separator apart — pinned exactly, fix rows separately", () => {
+    const found = extractAllNumericValues("Annual CRM cost is about £50,000");
+    const pairs = found.map((p) => [p.originalText, p.value] as const);
+    // The CORRECT reading is present…
+    expect(pairs).toContainEqual(["£50,000", 50_000]);
+    // …and so are exactly these two spurious ones, and no others.
+    expect(
+      pairs,
+      "the comma-split gap changed shape. If it was FIXED, delete this test and the " +
+        "Part D note. If it GREW, a new magnitude-loss class has arrived.",
+    ).toEqual([
+      ["£50", 50],
+      ["000", 0],
+      ["£50,000", 50_000],
+    ]);
+  });
+
+  it("has no consumer in src/ — which is why the gap above is pinned rather than fixed", async () => {
+    // The claim that licenses Part D is an ABSENCE claim, so it gets a positive
+    // control: the same sweep must FIND a symbol from the same module that is
+    // genuinely consumed (trap 13/13e). A sweep that can see nothing would
+    // otherwise "prove" every absence in the tree.
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
+    const srcRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (full.endsWith(".ts")) files.push(full);
+      }
+    };
+    walk(srcRoot);
+    expect(files.length, "the sweep found no TypeScript files — it is blind").toBeGreaterThan(500);
+
+    const count = (symbol: string): number =>
+      files.filter(
+        (f) =>
+          !f.endsWith("numeric-parser.ts") &&
+          !f.includes("__tests__") &&
+          readFileSync(f, "utf8").includes(symbol),
+      ).length;
+
+    // POSITIVE CONTROL — a sibling export of the SAME module that is live.
+    expect(
+      count("parseNumericValue"),
+      "the positive control found no consumer of `parseNumericValue`, which " +
+        "cee/extraction/intervention-extractor.ts demonstrably imports. The sweep is blind, " +
+        "so the absence claim below is unsupported.",
+    ).toBeGreaterThan(0);
+
+    // THE ABSENCE CLAIM, in the same sweep, at the same moment.
+    expect(
+      count("extractAllNumericValues"),
+      "`extractAllNumericValues` has gained a consumer. Part D's comma-split gap now has a " +
+        "blast radius and must be fixed rather than pinned.",
+    ).toBe(0);
   });
 });
