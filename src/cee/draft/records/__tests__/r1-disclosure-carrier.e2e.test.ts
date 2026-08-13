@@ -228,6 +228,54 @@ it("a WITHDRAWN record still reaches the wire, flagged rather than deleted", () 
 });
 
 /**
+ * ⭐⭐ D3 — THE ANCHOR RESOLVES BY ID, NOT BY LABEL, AND THIS TEST IS WHY.
+ *
+ * The first version built a label→id map, FIRST-WINS. Two nodes can legitimately
+ * share a label (`mintUnique` disambiguates the ID, never the label), so a notice
+ * about the second one silently anchored to the first — a disclosure pointing at
+ * the wrong entity, which is worse than one pointing at nothing because it reads
+ * as authoritative.
+ *
+ * ⚠ ADDED AFTER A MUTANT SURVIVED: reverting the transform to a label lookup left
+ * every other test in this lane GREEN. The fix was real and nothing was watching
+ * it — a fix without a biting test is a fix waiting to be undone.
+ */
+it("anchors by ID when two nodes share a label, not by first-label-wins", () => {
+  const graph = {
+    nodes: [
+      { id: "n_first", kind: "factor", label: "Handling capacity" },
+      { id: "n_second", kind: "factor", label: "Handling capacity" },
+    ],
+    edges: [],
+  };
+  // The disclosure is about the SECOND node. A label lookup would return the first.
+  const wire = CEEGraphResponseV3.parse(
+    transformResponseToV3(
+      {
+        graph,
+        record_disclosures: [
+          {
+            claim_index: -1,
+            claim_kind: "claim",
+            label: "Handling capacity",
+            node_id: "n_second",
+            reason: "parallel_intervention_conflict",
+          },
+        ],
+      } as never,
+      { brief: BRIEF },
+    ),
+  );
+  const d = (wire.record_disclosures ?? [])[0];
+  expect(d, "the disclosure must survive").toBeDefined();
+  // The precondition that gives this test its power, pinned in-test: the two
+  // nodes really do share a label, so a label lookup really is ambiguous.
+  expect(wire.nodes.filter((n) => n.label === "Handling capacity")).toHaveLength(2);
+  expect(d!.withdrawn).toBe(false);
+  expect(d!.node_id, "must anchor to the node the projector named").toBe("n_second");
+});
+
+/**
  * ⭐⭐ THE VOLUME TEST, ON REAL MODEL OUTPUT. This is the assertion that would
  * have caught D1: the first design passed every unit test it had while delivering
  * 1 of 56 on the real captures. A per-case test cannot see a systematic loss —
