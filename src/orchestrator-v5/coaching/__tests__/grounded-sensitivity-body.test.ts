@@ -52,14 +52,31 @@ function liveEnrichment(name: 'session-a' | 'session-b2'): Record<string, unknow
   return JSON.parse(readFileSync(join(FIXTURE_DIR, `${name}.enrichment.json`), 'utf8'));
 }
 
-/** The subject factor id of a live capture's top-influence row. */
+/**
+ * ⚠ THIS HELPER WAS THE DEFECT IN MINIATURE (CEE #933 review).
+ *
+ * It was named `topFactorId`, documented "top-influence row", and returned
+ * `rows[0]` — ARRAY ORDER. On `session-a` that is rank 4 of 4, roughly 104x
+ * less influential than rank 1. A corpus helper that encodes the same wrong
+ * assumption as the code cannot see the code's defect (CLAUDE.md trap 13d).
+ *
+ * It now derives the answer from the PRODUCER's `influence_rank`, which is the
+ * same oracle the module itself must satisfy.
+ */
+function topFactorRow(en: Record<string, unknown>): { factor_id: string; factor_label: string } {
+  const rows = en.factor_sensitivity as {
+    factor_id: string;
+    factor_label: string;
+    influence_rank?: number;
+  }[];
+  const top = rows.reduce((a, b) => ((a.influence_rank ?? 999) <= (b.influence_rank ?? 999) ? a : b));
+  return top;
+}
 function topFactorId(en: Record<string, unknown>): string {
-  const rows = en.factor_sensitivity as { factor_id: string }[];
-  return rows[0]!.factor_id;
+  return topFactorRow(en).factor_id;
 }
 function topFactorLabel(en: Record<string, unknown>): string {
-  const rows = en.factor_sensitivity as { factor_label: string }[];
-  return rows[0]!.factor_label;
+  return topFactorRow(en).factor_label;
 }
 
 describe('selectGroundedSensitivityBody — it names the factor', () => {
@@ -169,7 +186,9 @@ describe('selectGroundedSensitivityBody — the honest empties', () => {
 
   it('refuses an ungroundable label rather than shipping it', () => {
     const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_x', {
-      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'Margin above 0.78 threshold' }],
+      factor_sensitivity: [
+        { factor_id: 'fac_x', factor_label: 'Margin above 0.78 threshold', influence_rank: 1 },
+      ],
     });
     expect(r.grounded).toBeNull();
     expect(r.refusalReason).toBe('not_composable');
@@ -177,7 +196,7 @@ describe('selectGroundedSensitivityBody — the honest empties', () => {
 
   it('refuses a label long enough to breach the body cap', () => {
     const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_x', {
-      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'L'.repeat(300) }],
+      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'L'.repeat(300), influence_rank: 1 }],
     });
     expect(r.grounded).toBeNull();
     expect(r.refusalReason).toBe('not_composable');
@@ -361,4 +380,176 @@ describe('drift guard — the RUNTIME refusal arm, exercised', () => {
     expect(r.refusalReason).toBeNull();
     expect(r.grounded).not.toBeNull();
   });
+});
+
+// ============================================================================
+// ⭐⭐ THE SELECTOR/SENTENCE MISMATCH — CEE #933 review.
+//
+// THE GENERAL LESSON, because it outlives this bug: GROUNDING A TEMPLATE
+// PROMOTES EVERY LATENT SELECTION DEFECT INTO AN EXPLICIT CLAIM. Vague copy
+// quietly tolerated a wrong subject; specific copy asserts it. When you replace
+// a deictic with a name you inherit responsibility for the correctness of every
+// input the vague version was tolerating — check the SELECTOR before the
+// SENTENCE.
+//
+// The concrete mismatch: `evaluateSensitivityFlipRisk` picks its subject with
+// `.find(f => f.flipRiskCategory === 'isolated')` — a FLIPPABILITY category, on
+// the FIRST array match. `SENSITIVITY_ISOLATED_NO_FLIP` asserts "moves the
+// result more than any other" — a MAGNITUDE SUPERLATIVE. Different properties.
+//
+// ⚠ THE ORACLE IS THE PRODUCER'S `influence_rank`, NOT THE SELECTION. Deriving
+// the expectation from the selection under test is why a `.find`→`.findLast`
+// mutant survived 34 green tests (trap 13c: a mutant kit measures whether a
+// test can DETECT a change, never whether the EXPECTATION is right).
+// ============================================================================
+
+const WITNESS_2267 = JSON.parse(
+  readFileSync(
+    join(HERE, '..', '..', '..', '..', 'tests', 'fixtures', 'cross-service', 'witness-2267-attested-no-flip.json'),
+    'utf8',
+  ),
+) as { runs: Record<string, { factor_sensitivity: FactorRow[] }> };
+
+interface FactorRow {
+  readonly factor_id: string;
+  readonly factor_label: string;
+  readonly influence_rank?: number;
+  readonly influence_score?: number;
+  readonly flip_risk_category?: string;
+}
+
+/** Reproduces the live selector's pick — first array match on the category. */
+function selectorPick(rows: readonly FactorRow[]): FactorRow {
+  return rows.find((f) => f.flip_risk_category === 'isolated')!;
+}
+/** The PRODUCER's answer to "which factor moves the result most?" */
+function producerTopInfluence(rows: readonly FactorRow[]): FactorRow {
+  return rows.reduce((a, b) => ((a.influence_rank ?? 999) <= (b.influence_rank ?? 999) ? a : b));
+}
+
+describe('the sentence asserts a superlative — so the subject must BE the superlative', () => {
+  it('POSITIVE CONTROL: run r3 is genuinely a mismatch (selector pick is not rank 1)', () => {
+    const rows = WITNESS_2267.runs.r3!.factor_sensitivity;
+    const picked = selectorPick(rows);
+    const top = producerTopInfluence(rows);
+
+    // The oracle, referenced explicitly — the producer's own rank field.
+    expect(top.influence_rank).toBe(1);
+    expect(picked.influence_rank).toBeGreaterThan(1);
+    expect(picked.factor_id).not.toBe(top.factor_id);
+  });
+
+  it('REFUSES rather than asserting a false superlative about a lower-ranked factor', () => {
+    const rows = WITNESS_2267.runs.r3!.factor_sensitivity;
+    const picked = selectorPick(rows);
+
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', picked.factor_id, {
+      factor_sensitivity: rows,
+    });
+
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('subject_not_top_influence');
+  });
+
+  it('GROUNDS when the selector\'s pick IS the producer\'s rank-1 factor', () => {
+    // Discriminating twin: same code, same shape, subject that satisfies the
+    // superlative. Without this, the refusal above could be the module simply
+    // never grounding this code.
+    const rows = WITNESS_2267.runs.r2!.factor_sensitivity;
+    const picked = selectorPick(rows);
+    const top = producerTopInfluence(rows);
+
+    expect(picked.factor_id).toBe(top.factor_id);
+    expect(top.influence_rank).toBe(1);
+
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', picked.factor_id, {
+      factor_sensitivity: rows,
+    });
+
+    expect(r.refusalReason).toBeNull();
+    expect(r.grounded!.factorLabel).toBe(top.factor_label);
+    expect(r.grounded!.body).toContain(top.factor_label);
+  });
+
+  it('refuses when the producer supplied no influence_rank to check against', () => {
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_x', {
+      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'Some Factor' }],
+    });
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('no_influence_rank');
+  });
+
+  it('codes whose sentence asserts NO superlative are unaffected', () => {
+    // FLIP_RISK_CORRELATED names the subject as a MEMBER of a combination, so a
+    // lower-ranked subject is not a false claim and must still ground.
+    const rows = WITNESS_2267.runs.r3!.factor_sensitivity;
+    const lowRanked = rows.find((f) => (f.influence_rank ?? 0) > 1)!;
+    const r = selectGroundedSensitivityBody('FLIP_RISK_CORRELATED', lowRanked.factor_id, {
+      factor_sensitivity: rows,
+    });
+    expect(r.refusalReason).toBeNull();
+    expect(r.grounded!.body).toContain(lowRanked.factor_label);
+  });
+});
+
+describe('INVARIANT — no false superlative can reach the wire, whatever the selector does', () => {
+  /**
+   * ⭐ THE ORACLE IS THE PRODUCER, NOT THE SELECTION.
+   *
+   * The wiring proofs above derive their expectation from `selection.subjectRef`
+   * — the very thing under test — which is why swapping the evaluator's `.find`
+   * for `.findLast` left 34 tests green (trap 13c). This invariant closes that:
+   * it asks the PRODUCER which factor ranks first, and asserts the shipped body
+   * either names THAT factor or names none at all.
+   *
+   * Any future change to `evaluateSensitivityFlipRisk`'s subject that ships a
+   * magnitude superlative about a lower-ranked factor turns this RED.
+   */
+  const SUPERLATIVE_CODES = new Set(['SENSITIVITY_ISOLATED_NO_FLIP', 'DOMINANT_DRIVER_NO_FLIP']);
+
+  it.each(['session-a', 'session-b2'] as const)(
+    '%s: a superlative body names the producer rank-1 factor, or no factor',
+    (name) => {
+      const en = liveEnrichment(name);
+      const fact = {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: 'scen-test',
+          leading_option_id: 'opt_a',
+          summary: '',
+          graph_hash_at_run: 'gh_a1b2c3d4e5f60001',
+          enrichment: en,
+        },
+      } as unknown as RunAnalysisHandlerFact;
+
+      const surface = buildLensSurface(
+        fact,
+        { created_at: '2026-08-13T00:00:00.000Z', graph_hash_at_generation: 'gh_a1b2c3d4e5f60001' } as never,
+        null,
+      );
+      if (surface === null || surface.selection.lens !== 'sensitivity_flip_risk') return;
+      if (!SUPERLATIVE_CODES.has(surface.selection.rationaleCode)) return;
+
+      const rows = en.factor_sensitivity as {
+        factor_id: string;
+        factor_label: string;
+        influence_rank?: number;
+      }[];
+      const top = topFactorRow(en);
+      const body = surface.suggestion.body ?? '';
+
+      // Producer-derived oracle, referenced explicitly.
+      expect((top as { influence_rank?: number }).influence_rank).toBe(1);
+
+      for (const row of rows) {
+        if (row.factor_id === top.factor_id) continue;
+        expect(
+          body.includes(row.factor_label),
+          `shipped a superlative naming ${row.factor_label} (rank ${row.influence_rank}) over rank-1 ${top.factor_label}`,
+        ).toBe(false);
+      }
+    },
+  );
 });

@@ -84,7 +84,24 @@ describe('selectGroundedCounterCase — grounding', () => {
     expect(a!.counterCase).not.toContain('Automated Packing Investment');
   });
 
-  it('consumes the producer\'s order and never re-ranks', () => {
+  it('selects the producer MAXIMUM switch_probability, not merely the head', () => {
+    // CEE #933 review: the "arrives sorted DESC" guarantee is absent — 3 of 28
+    // committed arrays violate it. The copy claims a superlative, so the
+    // superlative must be COMPUTED from the producer's own metric.
+    const result = selectGroundedCounterCase({
+      robustness: {
+        fragile_edges: [
+          { from_id: 'fac_a', to_id: 'out_a', from_label: 'Alpha', to_label: 'Alpha Out', switch_probability: 0.11 },
+          { from_id: 'fac_b', to_id: 'out_b', from_label: 'Beta', to_label: 'Beta Out', switch_probability: 0.42 },
+        ],
+      },
+    });
+    expect(result.grounded).not.toBeNull();
+    expect(result.grounded!.fromLabel).toBe('Beta');
+    expect(result.grounded!.counterCase).toContain('Beta Out');
+  });
+
+  it('keeps producer order on ties, so a sorted array is unchanged', () => {
     // session-a's rows arrive sorted by switch_probability DESC. The selection
     // is the HEAD row, not a locally-recomputed maximum: re-ranking here would
     // be a second opinion about importance computed from a subset of the

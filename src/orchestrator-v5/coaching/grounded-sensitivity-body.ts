@@ -83,6 +83,7 @@ import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.j
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-user-facing-phrases.js';
 import { BODY_BY_RATIONALE, type LensRationaleCode } from '../compose/lens-selector.js';
+import { COACHING_BLOCK_BODY_MAX } from './fragile-edge-offer-text.js';
 
 export type GroundedSensitivityRefusalReason =
   /** The lens carried no single-factor subject (e.g. an option-level lens). */
@@ -97,6 +98,14 @@ export type GroundedSensitivityRefusalReason =
    * recognise. A test makes this loud at rest.
    */
   | 'copy_drifted'
+  /**
+   * ⭐ The sentence asserts a MAGNITUDE SUPERLATIVE and the subject is not the
+   * producer's top-influence factor. Refusing is the whole point — see the
+   * `requiresTopInfluence` note on the substitution table.
+   */
+  | 'subject_not_top_influence'
+  /** The producer supplied no `influence_rank`, so the superlative is uncheckable. */
+  | 'no_influence_rank'
   /** The composed body trips a prose gate or the body cap. */
   | 'not_composable';
 
@@ -119,7 +128,15 @@ export interface GroundedSensitivityDecision {
  * name sits at the FRONT of the sentence, so truncation would eat the reviewed
  * tail and leave a body that names a factor and then stops mid-clause.
  */
-export const GROUNDED_SENSITIVITY_BODY_MAX = 300;
+export const GROUNDED_SENSITIVITY_BODY_MAX = COACHING_BLOCK_BODY_MAX;
+
+/**
+ * The producer's rank for "moves the result more than any other".
+ * `influence_rank` is 1-based and producer-authored; this module never computes
+ * a ranking of its own (that would be a second opinion about importance derived
+ * from a subset of the producer's inputs).
+ */
+const TOP_INFLUENCE_RANK = 1;
 
 /**
  * The declared substitutions. `expectedOpening` must be a PREFIX of the
@@ -133,38 +150,82 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
   Readonly<
     Record<
       LensRationaleCode,
-      { readonly expectedOpening: string; readonly ground: (label: string) => string }
+      {
+        readonly expectedOpening: string;
+        readonly ground: (label: string) => string;
+        /**
+         * ⭐ DOES THIS SENTENCE ASSERT A MAGNITUDE SUPERLATIVE ABOUT ITS SUBJECT?
+         *
+         * CEE #933 review. `evaluateSensitivityFlipRisk` picks its subject with
+         * `.find(f => f.flipRiskCategory === 'isolated')` — the FIRST array
+         * match on a FLIPPABILITY category. That is the right subject for a
+         * sentence about flippability and the WRONG subject for a sentence
+         * about magnitude, and the two are not the same factor: on the repo's
+         * own `witness-2267` r3 the pick is rank 5 of 6 (score 0.242) while the
+         * true rank-1 scores 1.0.
+         *
+         * While the copy was vague this was a silent mis-highlight. Naming the
+         * factor turns it into an explicit false sentence — GROUNDING A
+         * TEMPLATE PROMOTES EVERY LATENT SELECTION DEFECT INTO A CLAIM.
+         *
+         * So the sentence declares the property it needs, and this module
+         * verifies it against the PRODUCER (`influence_rank`) before grounding.
+         * Where it does not hold, it REFUSES and the vague constant ships — the
+         * pre-existing mis-highlight remains (it is another owner's selector to
+         * fix) but the product never states something untrue.
+         */
+        readonly requiresTopInfluence: boolean;
+      }
     >
   >
 > = {
   // ── The two codes real traffic actually produces ───────────────────────────
+  // "more than any other" — an explicit superlative over influence.
   SENSITIVITY_ISOLATED_NO_FLIP: {
     expectedOpening: 'This factor moves the result more than any other.',
     ground: (l) => `${l} moves the result more than any other.`,
+    requiresTopInfluence: true,
   },
+  // "doing most of the work" — a dominance claim. Its subject comes from
+  // `findDominantDriver` (a STRICT majority of summed influence), so this
+  // should hold by construction; the check is a cheap safety net, not a
+  // suspicion, and costs nothing when the derivation is right.
   DOMINANT_DRIVER_NO_FLIP: {
     expectedOpening: 'One factor is doing most of the work in this result.',
     ground: (l) => `${l} is doing most of the work in this result.`,
+    requiresTopInfluence: true,
   },
   // ── Declared for completeness; unobserved in the 45-capture census ─────────
+  // "alongside others rather than on its own" — a claim about HOW it moves the
+  // result, not about being the largest. No superlative, no rank requirement.
   SENSITIVITY_CORRELATED_NO_FLIP: {
     expectedOpening: 'This factor moves the result alongside others rather than on its own.',
     ground: (l) => `${l} moves the result alongside others rather than on its own.`,
+    requiresTopInfluence: false,
   },
   DOMINANT_DRIVER: {
     expectedOpening: 'One factor is doing most of the work in this result.',
     ground: (l) => `${l} is doing most of the work in this result.`,
+    requiresTopInfluence: true,
   },
+  // The restrictive clause DEFINES the subject by flippability ("that could tip
+  // which option leads on its own"), which is exactly what the selector's
+  // `isolated` category means. "Leans on" is coloured by that clause rather
+  // than asserting an independent magnitude ranking — so no rank requirement.
   FLIP_RISK_ISOLATED: {
     expectedOpening: 'The result leans on a single factor that could tip which option leads on its own',
     ground: (l) => `The result leans on ${l}, which could tip which option leads on its own`,
+    requiresTopInfluence: false,
   },
   // ⚠ "No single factor is decisive here" is KEPT VERBATIM — see the header.
   // `correlated` means "tips only in combination", so the subject is named as a
   // MEMBER of the combination, never as the factor that could tip it.
+  // Membership in a combination. Explicitly NOT singular, so a lower-ranked
+  // subject is not a false claim.
   FLIP_RISK_CORRELATED: {
     expectedOpening: 'No single factor is decisive here, but the right combination of factors',
     ground: (l) => `No single factor is decisive here, but the right combination of factors — ${l} among them —`,
+    requiresTopInfluence: false,
   },
 };
 
@@ -182,15 +243,25 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-/** The producer's own label for this factor id, from the lens's grounding field. */
-function resolveFactorLabel(enrichment: unknown, factorId: string): string | null {
+/**
+ * The producer's own row for this factor id, from the lens's grounding field.
+ * Returns the label AND the rank, because the superlative check needs both and
+ * two separate walks over the same array is two chances to disagree.
+ */
+function resolveFactorRow(
+  enrichment: unknown,
+  factorId: string,
+): { label: string | null; rank: number | null } | null {
   const root = readRecord(enrichment);
   const rows = root !== null && Array.isArray(root.factor_sensitivity) ? root.factor_sensitivity : [];
   for (const raw of rows) {
     const row = readRecord(raw);
     if (row === null) continue;
     if (nonEmptyString(row.factor_id) !== factorId) continue;
-    return nonEmptyString(row.factor_label);
+    const rank = typeof row.influence_rank === 'number' && Number.isFinite(row.influence_rank)
+      ? row.influence_rank
+      : null;
+    return { label: nonEmptyString(row.factor_label), rank };
   }
   return null;
 }
@@ -243,9 +314,25 @@ export function selectGroundedSensitivityBody(
     return { grounded: null, refusalReason: 'no_grounded_form' };
   }
 
-  const factorLabel = resolveFactorLabel(enrichment, factorId);
+  const row = resolveFactorRow(enrichment, factorId);
+  const factorLabel = row?.label ?? null;
   if (factorLabel === null) {
     return { grounded: null, refusalReason: 'no_factor_label' };
+  }
+
+  // ⭐ THE SELECTOR/SENTENCE CHECK. The subject was chosen to answer the
+  // evaluator's question ("what triggered this lens?"). Where the SENTENCE
+  // asserts a superlative, that is a DIFFERENT question, and the producer —
+  // never the selection — is the authority on the answer. Deriving this
+  // expectation from the selection under test is what let a `.find`/`.findLast`
+  // swap survive a full mutant kit (trap 13c).
+  if (substitution.requiresTopInfluence) {
+    if (row!.rank === null) {
+      return { grounded: null, refusalReason: 'no_influence_rank' };
+    }
+    if (row!.rank !== TOP_INFLUENCE_RANK) {
+      return { grounded: null, refusalReason: 'subject_not_top_influence' };
+    }
   }
 
   // THE ANTI-MIRROR ASSERTION. We do not restate the copy; we check the copy we

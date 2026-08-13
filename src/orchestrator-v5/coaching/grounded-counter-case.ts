@@ -206,6 +206,31 @@ function isComposable(sentence: string): boolean {
   return true;
 }
 
+
+/**
+ * The row carrying the greatest `switch_probability`. Producer order breaks
+ * ties (strict `>`), so a correctly-sorted array yields its head unchanged.
+ * When no row carries a finite value the producer's head is returned — the
+ * pre-existing behaviour, and the identity/label gates below still apply.
+ */
+function selectMostSensitiveRow(rows: readonly unknown[]): unknown {
+  let best = rows[0];
+  let bestValue: number | null = null;
+  for (const raw of rows) {
+    const row = readRecord(raw);
+    if (row === null) continue;
+    const value = typeof row.switch_probability === 'number' && Number.isFinite(row.switch_probability)
+      ? row.switch_probability
+      : null;
+    if (value === null) continue;
+    if (bestValue === null || value > bestValue) {
+      bestValue = value;
+      best = raw;
+    }
+  }
+  return best;
+}
+
 /** The composite separator the graph-edit path accepts (`parseEdgeId`). */
 const EDGE_IDENTITY_SEPARATOR = '→'; // →
 
@@ -226,8 +251,21 @@ export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterC
     return { grounded: null, refusalReason: 'no_fragile_edges' };
   }
 
-  // PRODUCER ORDER. The head is the answer; we do not scan for a maximum.
-  const head = readRecord(rows[0]);
+  // ⚠ THE MAXIMUM, NOT THE HEAD (CEE #933 review).
+  //
+  // This module previously consumed `rows[0]` on the stated guarantee that
+  // `fragile_edges` "arrives sorted by switch_probability DESCENDING". A sweep
+  // of all 28 committed fragile-edge arrays found **3 violations**, one in a
+  // staging capture. Head happened to equal max in every case examined, so no
+  // false sentence was ever witnessed — but the copy says "the one the
+  // robustness check found MOST SENSITIVE", and an unguaranteed ordering is not
+  // a basis for a superlative.
+  //
+  // Reading the maximum of the producer's OWN metric is not manufacturing
+  // importance (the rule this module's header invokes) — it is declining to
+  // infer that metric from arrival order. Ties keep producer order, so where
+  // the array IS sorted the behaviour is byte-identical to before.
+  const head = readRecord(selectMostSensitiveRow(rows));
   const fromId = head !== null ? nonEmptyString(head.from_id) : null;
   const toId = head !== null ? nonEmptyString(head.to_id) : null;
   if (head === null || fromId === null || toId === null) {
