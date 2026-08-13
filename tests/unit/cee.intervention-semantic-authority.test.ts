@@ -312,9 +312,14 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     // every target group is greedy over two words, so "Increase price by 20%"
     // captured "price by", which matches the factor "Price" neither by id nor
     // by label and could only ever land semantically — i.e. exactly the limb
-    // the value path must now refuse. Measured on an 82-case corpus, that cost
-    // 34 previously-correct extractions; stripping the trailing preposition
-    // restores all of them and reopens none of the 18 prevented-wrong ones.
+    // the value path must now refuse.
+    //
+    // ⚠ This case originally cited an 82-case corpus in which the strip
+    // recovered 34 otherwise-lost extractions. That figure is WITHDRAWN: on 355
+    // real captured graphs a mutant removing the strip left 1,182/1,182 records
+    // identical — 0 recovered, 0 cost. The behaviour below is still the correct
+    // behaviour, and this case still pins it; it simply is not load-bearing for
+    // anything else in this change.
     const nodes = [
       { id: "goal_rev", kind: "goal", label: "Revenue" },
       {

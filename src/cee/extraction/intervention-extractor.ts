@@ -300,14 +300,24 @@ function cleanTargetText(text: string): string {
     // exact_label limbs: `normalizeText("price by") === "price_by"` matches
     // neither `factor_price` nor the label `"Price"`. It only ever landed via
     // the semantic limb — which is exactly the limb the value path must now
-    // refuse. Measured on an independently-authored 82-case corpus: without
-    // this strip the refusal cost 34 previously-correct extractions to buy 18
-    // prevented-wrong ones; stripping restores all 34 and reopens none of the
-    // 18, because a real exact match never depended on the preposition.
+    // refuse.
     //
-    // So the price of the refusal boundary was a TOKENISER DEFECT, not a
-    // property of the boundary. Fixed here rather than by widening the
-    // boundary, which would have re-admitted the guesses.
+    // ⚠⚠ THE JUSTIFICATION THIS COMMENT ORIGINALLY CARRIED WAS WRONG, AND THE
+    // CORRECTION IS THE POINT. It claimed an 82-case corpus showed the strip
+    // recovering "34 previously-correct extractions" otherwise lost to the
+    // refusal. Re-measured against 355 REAL CAPTURED GRAPHS (1,182 records): a
+    // mutant removing this strip left 1,182 of 1,182 records IDENTICAL —
+    // 0 recovered, 0 cost — with a positive control proving this function is on
+    // the live path. The 34 was a property of a self-authored corpus and is
+    // INERT on real captures.
+    //
+    // The strip is kept because it is correct on its own terms and provably
+    // costless, not because it rescues anything: a trailing preposition is not
+    // part of a factor's name, and `normalizeText("price by") === "price_by"`
+    // matches neither `factor_price` nor the label "Price". But NOTHING in this
+    // PR's value rests on it. A corpus drawn from one head cannot see the class
+    // that head did not imagine — and, as here, it can equally MANUFACTURE a
+    // class that does not exist. Do not restore the old figure.
     //
     // Repeated until stable: `of the` and similar can leave a second trailing
     // stop word behind the first. A target that is nothing BUT prepositions

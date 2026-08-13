@@ -510,16 +510,34 @@ export function buildAnalysisReadyPayload(
     //
     // A promotion block stood here: when the fallback had filled interventions
     // it flipped this COPY to "ready" while public `options[]` — the object the
-    // team is shown — stayed `needs_user_mapping`. `chip-generator.ts:358`
-    // reads this status, so the product refused in the panel and offered an
-    // executable "Run the analysis" chip at the same moment.
+    // team is shown — stayed `needs_user_mapping`. The product refused in the
+    // panel and offered an executable "Run the analysis" chip at the same
+    // moment: `chip-generator.ts` reads `input.analysisReady?.status` (:310)
+    // and gates the run chip on it (:358). ⚠ Note the hop — it reads the
+    // PAYLOAD status, never a per-option one (zero per-option status reads in
+    // that file). A per-option promotion reached the chip only because the
+    // payload status is derived from the option statuses. The causal chain is
+    // real; describing it as "the chip reads this status" was one hop short.
     //
-    // With the substitution withdrawn above, `analysisOpt.interventions` can no
-    // longer grow after `transformOptionToAnalysisReady` computed the status
-    // from it — so there is nothing to re-evaluate, and the two surfaces cannot
-    // disagree by construction rather than by a second rule kept in step by
-    // hand. That is the stronger guarantee: the set shown and the set analysed
-    // are the same set, not two sets that agree today.
+    // ⚠ WHAT THIS DOES AND DOES NOT GUARANTEE — an earlier version of this
+    // comment claimed the two surfaces "cannot disagree BY CONSTRUCTION". That
+    // is FALSIFIED, and the falsifying call site is downstream of this file:
+    //
+    //   `repairFactorScaleConsistency` (`graph-data-integrity.ts:171-177`)
+    //   binds `v3Body.analysis_ready.options` and MUTATES
+    //   `option.interventions[factorId]` IN PLACE (:285-295). It runs at
+    //   `boundary.ts:63` — AFTER `transformResponseToV3` computed status at
+    //   :37 — and it never touches public `v3Body.options` (0 hits; contrast
+    //   control `analysis_ready.options` = 6, positive control `v3Body` = 18).
+    //
+    // So the honest, narrow claim: no KEY can be added to `interventions` after
+    // its status is computed, because the only writer that did so is gone. The
+    // broad claim does not hold — a later pass can still change a VALUE on this
+    // copy without changing the public one, so the two sets can diverge in
+    // CONTENT even while their statuses agree.
+    //
+    // "By construction" is exactly the class of claim one missed call site
+    // falsifies. State what the code supports.
   }
 
   // Task 7: Deduplicate blockers by (option_id, factor_id) pair
