@@ -433,7 +433,12 @@ describe("ROOT 2(d) — a demote may not collapse genuinely distinct meaning", (
 
 // ───────────────────────────────────────────────────────────────────────────
 describe("ROOT 3 — the completion pass is genuinely append-only", () => {
-  const pass1 = {
+  // ⚠ ANNOTATED, not left to inference: these fixtures are handed to
+  // `projectRecordsToGraph` DIRECTLY (not through the `project` helper, which takes
+  // `unknown`), so an unannotated literal widens `kind` to `string` and fails the
+  // TYPECHECK DRIFT ratchet — which is the only gate that sees test files, because
+  // `tsconfig.build.json` excludes them (CLAUDE.md trap 2).
+  const pass1: DraftRecordSet = {
     stated_items: [
       { kind: "goal", source_quote: "Grow revenue" },
       { kind: "option", source_quote: "Launch" },
@@ -480,7 +485,7 @@ describe("ROOT 3 — the completion pass is genuinely append-only", () => {
    * from the graph, while the comparator reported no worsening at all.
    */
   it("rejects a completion that makes a protected pass-1 stated figure disappear", () => {
-    const records = {
+    const records: DraftRecordSet = {
       stated_items: [
         { kind: "goal", source_quote: "Grow revenue" },
         { kind: "option", source_quote: "Launch" },
