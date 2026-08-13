@@ -1053,16 +1053,25 @@ describe('buildPostDraftNarrative — widening_log brief completeness', () => {
     expect(result.telemetry.brief_completeness_surfaced).toBe(true);
   });
 
-  it('surfaces the partial-brief advisory line', () => {
+  it('surfaces NO advisory line for a partial brief (ROADMAP 2.972(d) — withdrawn 2026-08-13)', () => {
+    // Was `surfaces the partial-brief advisory line`. The advisory said "Your
+    // brief covered the main points", which is a claim about the user's input
+    // that nothing derives — and it was witnessed on deployed staging being
+    // paid to a 52-character brief the product had itself just called
+    // insufficient. The rule and the witness live at COMPLETENESS_ADVISORY;
+    // the behavioural pins live in
+    // `src/cee/provenance/__tests__/brief-completeness-claim.test.ts`.
     const wideningLog: DraftCoachingWideningLog = {
       elements_added: [],
       elements_considered_but_excluded: ['Regulatory pause unlikely in this horizon'],
       brief_completeness: 'partial',
     };
     const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, wideningLog });
-    expect(result.text).toContain('adding detail on the lighter areas would sharpen the comparison');
-    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
-    // The enum value is mapped to a phrase and never emitted verbatim.
+    expect(result.text).not.toContain('covered the main points');
+    expect(result.text).not.toContain('sharpen the comparison');
+    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
+    // The enum is still reported to ops, and still never emitted verbatim.
+    expect(result.telemetry.brief_completeness).toBe('partial');
     expect(result.text).not.toMatch(/\bpartial\b/i);
     assertPassesAllGuards(result.text);
   });
@@ -1250,13 +1259,18 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
       wideningLog: fixture.coaching.widening_log,
     });
 
-    // Brief-completeness advisory reached the rendered surface text.
-    expect(result.text).toContain('adding detail on the lighter areas would sharpen the comparison');
+    // ROADMAP 2.972(d): this fixture carries `brief_completeness: "partial"`,
+    // whose advisory was WITHDRAWN on 2026-08-13 (it made a claim about the
+    // user's brief that nothing derived). The delivery contract this test
+    // exists for — strengthen_items and bias_signals reaching the surface —
+    // is unchanged and asserted below; only the advisory is gone.
+    expect(result.text).not.toContain('covered the main points');
+    expect(result.telemetry.brief_completeness).toBe('partial');
+    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
     // A primary assumption AND a deduped second check bullet both reached the surface.
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('Worth a look:');
     expect(result.telemetry.additional_checks_surfaced).toBe(1);
-    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
 
     // No raw IDs leak — elements_added node-id and strengthen item ids.
     expect(result.text).not.toContain('risk_runway');
