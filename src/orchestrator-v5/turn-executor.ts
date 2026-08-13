@@ -52,6 +52,9 @@ import {
   composeToolCallResponse,
   type AnswerKind,
 } from './compose.js';
+// ROADMAP 2.640 §3.4 — the gate-close remedy gesture (the advice gate's
+// deterministic "open the surface the blocker is fixed on").
+import { buildGateRemedySectionDirective } from './compose/ui-directive.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import {
   buildTurnContext,
@@ -6775,10 +6778,32 @@ export async function runTurnExecutor(
               : 'fallthrough_other',
         });
         if (adviceOutcome.matched) {
+          // ROADMAP 2.640 §3.4 — THE HOP THAT REACHES A USER. Without this the
+          // builder and the gate field are working code nobody can see, which
+          // is this estate's single most-repeated failure.
+          //
+          // When the gate answered a "why can't this run?" question and named a
+          // top blocker, also open the Model-tab section that blocker is fixed
+          // on. Null whenever the class is not `readiness`, the projection had
+          // no items, or the blocker has no mapped surface — the gesture is
+          // strictly ADDITIVE to the answer and never a precondition for it, so
+          // every fail-closed arm still ships the prose.
+          //
+          // Not a mutation: opening a section proposes a place to look and
+          // changes no graph state, so it needs no consent warrant. The user
+          // reverses it by navigating away.
+          const remedyDirective =
+            adviceOutcome.remedy_open_item_kind !== undefined
+              ? buildGateRemedySectionDirective(adviceOutcome.remedy_open_item_kind)
+              : null;
           const adviceResponse = composeAnswer({
             assistant_text: adviceOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: [...adviceOutcome.suggested_actions],
+            // N=1 across the turn: the gate short-circuits before any ladder
+            // builder runs (the ladder rides handler facts and a gate turn has
+            // none), so this is the turn's only directive.
+            ...(remedyDirective !== null ? { blocks: [remedyDirective] } : {}),
             // ROADMAP 1.132 (F1) — THE fix. The deterministic post-analysis
             // advice-gate answer (explain_results / meaning / advice /
             // evidence_gap / canonical_rich, composed from the analysis
