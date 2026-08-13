@@ -126,16 +126,81 @@ const MAX_DIRECTION_BULLETS = 2;
 /**
  * Calm advisory phrases mapped from the widening_log `brief_completeness`
  * enum. The enum value is NEVER emitted verbatim — it selects a phrase.
- * `complete` surfaces nothing (no nudge needed). Hard-coded trusted copy
- * (same pattern as {@link FIXED_GENERIC_ASSUMPTION}): British English, no
- * graph-shape words, no schema terms, no sentence-leading commit verbs, no
- * em / en dashes — so it passes both the assumption-fragment gate and the
- * egress success-claim / forbidden-phrase guards by construction.
+ * Hard-coded trusted copy (same pattern as {@link FIXED_GENERIC_ASSUMPTION}):
+ * British English, no graph-shape words, no schema terms, no sentence-leading
+ * commit verbs, no em / en dashes — so it passes both the assumption-fragment
+ * gate and the egress success-claim / forbidden-phrase guards by construction.
+ *
+ * ⚠⚠ TWO OF THE THREE ARMS SURFACE NOTHING, AND THAT IS THE DESIGN, NOT AN
+ * OVERSIGHT. `complete` never had a nudge to give. `partial` was WITHDRAWN on
+ * 2026-08-13 — see below. Only `thin` still speaks, and only when
+ * {@link buildBriefCompletenessLine} cannot refute it.
+ *
+ * ── ROADMAP 2.972(d): why `partial` is now silent ─────────────────────────
+ *
+ * It used to read:
+ *
+ *     "Your brief covered the main points; adding detail on the lighter areas
+ *      would sharpen the comparison."
+ *
+ * WITNESSED on deployed staging 2026-08-13 (UI `5deee0cf` / CEE `219490e`,
+ * `WITNESS-20260813-EVENING.md`, scenario `e17089bf`): the product emitted
+ * that sentence verbatim for a 52-CHARACTER brief — "Should we move the whole
+ * company to a four-day week?" — that it had itself, two messages earlier,
+ * declared insufficient, asking three clarifying questions because it had no
+ * goal, no options and no timeframe.
+ *
+ * THE GOVERNING RULE: the product may describe what IT did; it may not tell
+ * the user what THEY said. A false COMPLIMENT breaches that rule exactly as a
+ * false criticism does, and it is WORSE in company: a user who reads a
+ * compliment about their brief directly above our own question about the same
+ * brief concludes we are not paying attention.
+ *
+ * THE DISAGREEMENT IS DERIVED, NOT ARGUED. `assessBriefCompleteness`
+ * (clarify-v2/rubric.ts) is a pure function over the brief text and returns
+ * `complete: false, missing: [goal, options, timeframe]` for that exact
+ * string — pinned in `provenance/__tests__/brief-completeness-claim.test.ts`.
+ * `widening_log.brief_completeness` is an LLM-AUTHORED enum that nothing
+ * derives and nothing can refute, and it returned `partial`. Two authorities,
+ * one question, opposite answers, same screen.
+ *
+ * ⚠ AND THE TREE ALREADY KNEW. `context/intake-option-reconciliation.ts`
+ * classifies this very enum as THE WRONG ORACLE, in its own words: `partial`
+ * "was measured TRUE in the failing run" and "fires on most briefs". A value
+ * that fires on most briefs cannot discriminate, and copy selected by it
+ * cannot be a finding about any particular brief.
+ *
+ * WHY WITHDRAWN AND NOT GATED. A gate could only make the sentence less OFTEN
+ * false; it could not make it TRUE. The rubric tests four named dimensions
+ * and "covered the main points" is unbounded, so even a clean rubric pass
+ * would not establish it (traps 13e / 22 — a narrow probe cannot support a
+ * broad claim). The sentence is prohibited by its SUBJECT, not by its
+ * accuracy, and a gate leaves the same lie shipping less often.
+ *
+ * WHY WITHDRAWN AND NOT REPHRASED. The estate has settled this choice twice,
+ * in opposite directions, on a principle that decides it here. `preflight.ts`
+ * REPHRASED its draft-first disclosure onto ourselves because "disclosure is
+ * its whole job" — it must say something. This advisory must not: it is the
+ * block {@link assembleSectionedNarrative} sheds at RUNG 3, ahead of
+ * everything but the options list, so the builder's own priority ladder
+ * already ranks it the least load-bearing content in the message. ROADMAP
+ * 2.972(c) is the matching precedent — silence where the claim cannot be
+ * established.
+ *
+ * NOTHING OF VALUE IS LOST, because the honest version already ships. The
+ * DERIVED surface — `composeDraftFirstDisclosure` — names the exact dimension
+ * we guessed ("I've assumed the goal in this draft, and I haven't confirmed it
+ * with you"). This advisory was a second, underived authority answering the
+ * same question. Removing it deletes a contradiction, not a capability.
+ *
+ * ⚠ FOR ANYONE RESTORING A PHRASE HERE: telemetry still reports the enum
+ * (`brief_completeness`), so ops keeps the signal. What may not return is a
+ * SENTENCE WHOSE SUBJECT IS THE USER'S BRIEF. If a nudge is wanted, its
+ * subject must be this service or the model we built.
  */
 const COMPLETENESS_ADVISORY: Record<DraftCoachingWideningLog['brief_completeness'], string | null> = {
   complete: null,
-  partial:
-    'Your brief covered the main points; adding detail on the lighter areas would sharpen the comparison.',
+  partial: null,
   thin: 'Your brief was light on detail, so adding specifics will make the comparison more reliable.',
 };
 
@@ -1044,8 +1109,17 @@ function buildBriefCompletenessLine(
   // "add specifics"; a brief that already states an amount has already
   // supplied specifics, so the advice is unearned however few there are. The
   // honest output where the claim cannot be established is SILENCE, never the
-  // stronger claim. `partial` is left alone: it makes no negative claim about
-  // the user's input and nothing measured it false.
+  // stronger claim.
+  //
+  // ⚠ THE SECOND CLAUSE OF THIS COMMENT USED TO READ: "`partial` is left
+  // alone: it makes no negative claim about the user's input and nothing
+  // measured it false." ROADMAP 2.972(d) falsified the second half on
+  // 2026-08-13 and retired the first as never having been the rule — the
+  // rule is about the SUBJECT of the sentence, not its sign. `partial` now
+  // resolves to null in {@link COMPLETENESS_ADVISORY}, where the witness and
+  // the reasoning are recorded. NOTE THE CONSEQUENCE FOR THIS FUNCTION: the
+  // refutation below is now the ONLY conditional arm, and it guards the ONLY
+  // arm that still emits.
   if (wideningLog.brief_completeness === "thin" && findStatedAmounts(briefText).length > 0) {
     return null;
   }
