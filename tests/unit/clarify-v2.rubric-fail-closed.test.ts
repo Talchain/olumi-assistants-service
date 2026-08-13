@@ -47,6 +47,9 @@ import {
   CLARIFY_V2_DIMENSION_DETECTORS,
   type ClarifyDimension,
 } from '../../src/orchestrator-v5/clarify-v2/rubric.js';
+// The measured over-detection sentence lives in ONE place, a non-spec module:
+// a spec that imports another spec re-executes its suites (measured at round 4).
+import { MEASURED_OVER_DETECTION_GOAL_SENTENCE } from '../fixtures/clarify-v2-measured-strings.js';
 
 const satisfied = (brief: string, dimension: ClarifyDimension): boolean =>
   assessBriefCompleteness(brief).satisfied.includes(dimension);
@@ -413,7 +416,7 @@ const RECORDED_FAIL_OPEN: ReadonlyArray<{ readonly brief: string; readonly dimen
  * cannot quietly grow into the 2.103 class again.
  */
 const KNOWN_OVER_DETECTION: ReadonlyArray<{ readonly brief: string; readonly dimension: ClarifyDimension }> = [
-  { brief: 'Our goal is not just cost but speed.', dimension: 'goal' },
+  { brief: MEASURED_OVER_DETECTION_GOAL_SENTENCE, dimension: 'goal' },
 ];
 
 describe('REVIEWER CORPUS (#928) — the exact known-behaviour set, both directions', () => {

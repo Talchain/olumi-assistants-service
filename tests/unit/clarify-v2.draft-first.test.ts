@@ -55,6 +55,9 @@ import {
 } from '../../src/orchestrator-v5/clarify-v2/preflight.js';
 import { composeClarifyQuestions } from '../../src/orchestrator-v5/clarify-v2/questions.js';
 import type { ClarifyDimension } from '../../src/orchestrator-v5/clarify-v2/rubric.js';
+// The measured over-detection sentence is IMPORTED from the corpus that owns
+// it — never retyped here (round 4: it was mirrored across two specs).
+import { MEASURED_OVER_DETECTION_GOAL_SENTENCE } from '../fixtures/clarify-v2-measured-strings.js';
 import { TelemetryEvents } from '../../src/utils/telemetry.js';
 import {
   resetClarifyV2Harness,
@@ -102,7 +105,7 @@ const EXPECTED_FIRST_TURN: ReadonlyArray<
   ['M1', 'complete'],
   ['M2', 'ask'],
   ['M3', 'draft_first', 'goal'], // prize arm DROPPED at review — drafts first-turn WITH a disclosure
-  ['M4', 'ask'], // options now detected (from-X-to-Y); goal+timeframe still missing
+  ['M4', 'ask'], // from-X-to-Y arm DROPPED at round 4 — goal+options+timeframe missing; asks either way
   ['M5', 'ask'], // timeframe arm ABLATED at review (#928) — goal+timeframe missing
   ['L1', 'draft_first', 'goal'],
   ['L2', 'draft_first', 'goal'],
@@ -330,21 +333,37 @@ describe('B3 — the disclosure is true in BOTH branches (it claims nothing abou
   };
 
   /**
-   * BRANCH B — THE OVER-DETECTION BRANCH. `KNOWN_OVER_DETECTION`'s exact
-   * string ("Our goal is not just cost but speed.") embedded in an otherwise
-   * complete brief, exactly as the reviewer measured it (REVIEW-928-R3 §6
-   * D-iv). The brief STATES the goal in plain English and the rubric scores
-   * goal MISSING — this is the input on which round 3's copy was false.
+   * BRANCH B — THE OVER-DETECTION BRANCH. The reviewer's measured
+   * over-detection sentence, IMPORTED from the corpus that owns it, embedded
+   * in an otherwise complete brief exactly as measured (REVIEW-928-R3 §6 D-iv).
+   *
+   * ⚠ COMPOSED FROM THE IMPORT, NOT RETYPED. These bytes were previously
+   * duplicated here with no import — two specs depending on one adjudication
+   * with nothing tying them together (trap 12).
    */
   const OVER_DETECTED_BRIEF =
     'Should we open a second warehouse in Manchester next year, or expand our existing site? ' +
-    'A new site would cost roughly £1.2 million up front. Our goal is not just cost but speed.';
+    `A new site would cost roughly £1.2 million up front. ${MEASURED_OVER_DETECTION_GOAL_SENTENCE}`;
 
-  it('the over-detection branch is REAL at this tip (the pin is not vacuous)', () => {
-    // If the rubric ever stops over-detecting here, this test must RED so the
-    // branch below cannot silently become a duplicate of the missing branch —
-    // a guard whose discriminating fixture is unpinned decays into agreeing
-    // with itself (trap 13b).
+  it('the over-detection branch is REAL at this tip — BOTH halves (the pin is not vacuous)', () => {
+    // ⭐⭐ THIS PIN HAD ONLY ONE HALF UNTIL #928 ROUND 4, AND A REVIEWER PROVED
+    // IT BY EXECUTION. It asserted only that the rubric SCORES GOAL MISSING.
+    // That is half of "over-detection"; the other half is that the brief
+    // ACTUALLY STATES THE GOAL. Measured: a `ROT-B` mutant deleting the goal
+    // sentence — turning branch B into a genuine MISS, i.e. a duplicate of
+    // branch A — left the suite 109/109 GREEN. The discriminating fixture was
+    // unpinned in exactly the direction that silently destroys the property
+    // (trap 13b: a guard whose discrimination depends on a fixture nothing
+    // pins is real only on the day it was written).
+    //
+    // HALF ONE — the brief provably contains a sentence the reviewer's corpus
+    // records as STATING a goal. This is the assertion whose absence let the
+    // branch decay; it REDs the moment the fixture stops being an
+    // over-detection input.
+    expect(OVER_DETECTED_BRIEF).toContain(MEASURED_OVER_DETECTION_GOAL_SENTENCE);
+    // HALF TWO — and the rubric nevertheless scores goal MISSING. Together
+    // these two are what "the detector over-detected" MEANS; either alone is
+    // satisfiable by a brief that is not an over-detection at all.
     const decision = decideClarifyV2Round1(OVER_DETECTED_BRIEF);
     expect(decision.kind).toBe('proceed');
     if (decision.kind !== 'proceed') return;
