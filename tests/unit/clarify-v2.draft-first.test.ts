@@ -20,7 +20,15 @@
  * The 15-brief table is driven by REAL WIRE CAPTURES (tests/fixtures/
  * clarify-v2-wire-briefs-2026-08-12.json — append-only, sha-verified against
  * the deployed-staging baseline runs). The expected column is this change's
- * whole point: 7 of the 13 re-asked briefs draft first-turn.
+ * whole point: 5 of the 13 re-asked briefs draft first-turn.
+ *
+ * ⚠ THE TABLE MOVED AT REVIEW, AND THE MOVE IS THE POINT (#928, REVIEW-928.md
+ * §1). It predicted 7 flips while two of them (S4, M5) rode timeframe arms
+ * that an independent corpus measured as FAIL-UNSAFE; those arms were ablated,
+ * so S4 and M5 correctly return to the blocking ask. Five flips still clears
+ * the ≥5 acceptance target — the capability was never what the defect
+ * threatened. **This table is a routing OUTCOME metric (trap 23): it counts
+ * briefs that draft, not arms that fire.**
  */
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -82,13 +90,13 @@ const EXPECTED_FIRST_TURN: ReadonlyArray<
   ['S1', 'ask'],
   ['S2', 'ask'],
   ['S3', 'ask'],
-  ['S4', 'draft_first', 'goal'], // timeframe now detected ("for two years")
+  ['S4', 'ask'], // timeframe arm ABLATED at review (#928) — goal+timeframe missing
   ['S5', 'draft_first', 'goal'],
   ['M1', 'complete'],
   ['M2', 'ask'],
   ['M3', 'complete'], // goal now detected ("…is the main prize")
   ['M4', 'ask'], // options now detected (from-X-to-Y); goal+timeframe still missing
-  ['M5', 'draft_first', 'goal'], // timeframe now detected ("in September")
+  ['M5', 'ask'], // timeframe arm ABLATED at review (#928) — goal+timeframe missing
   ['L1', 'draft_first', 'goal'],
   ['L2', 'draft_first', 'goal'],
   ['L3', 'draft_first', 'goal'],
@@ -122,6 +130,11 @@ describe('the 15-brief first-turn table (real wire captures)', () => {
     const flips = EXPECTED_FIRST_TURN.filter(
       (r) => r[0] !== 'M1' && r[0] !== 'L5' && (r[1] === 'draft_first' || r[1] === 'complete'),
     );
+    // EXACT, not a floor-only assertion: a floor alone would stay green if a
+    // future widening silently flipped more briefs than were measured, which
+    // is the direction that carries invented-value risk. Growth must be a
+    // deliberate, re-measured change to this list (S5, M3, L1, L2, L3).
+    expect(flips.map((r) => r[0])).toEqual(['S5', 'M3', 'L1', 'L2', 'L3']);
     expect(flips.length).toBeGreaterThanOrEqual(5);
   });
 });

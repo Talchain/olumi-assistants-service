@@ -11,6 +11,11 @@
  * opposite-direction twin — a same-vocabulary sentence that must NOT satisfy
  * the dimension — shown failing in the same run.
  *
+ * SCOPE (after the #928 review ablation): TWO arms remain — goal `is the …
+ * prize` and options from-X-to-Y. Both are guarded by CLOSED POSITIVE lists
+ * and fail safe; the two timeframe arms that were guarded by a closed
+ * NEGATIVE list are gone (see the note below the goal block).
+ *
  * RED-first: at pristine (335a9380) every `widened:` positive fails
  * (dimension still missing) and every twin already passes; the twins are the
  * regression floor that keeps the widening from crediting briefs that supply
@@ -61,78 +66,15 @@ describe('goal widening — predicate-nominative "…is the (main) prize" (measu
   });
 });
 
-describe('timeframe widening — bare "for + word-form duration" (measured miss: S4)', () => {
-  it('widened: S4 wire capture — "renew our office lease for two years"', () => {
-    expect(
-      satisfied('Should we renew our office lease for two years, or go fully remote?', 'timeframe'),
-    ).toBe(true);
-  });
-
-  it('widened: "commit to the vendor contract for three years"', () => {
-    expect(
-      satisfied('Should we commit to the vendor contract for three years, or negotiate annually?', 'timeframe'),
-    ).toBe(true);
-  });
-
-  it('twin (opposite direction): perfective "we have been … for two years" is history, not a horizon', () => {
-    expect(
-      satisfied('We have been in this office for two years. Should we renew the lease or go fully remote?', 'timeframe'),
-    ).toBe(false);
-  });
-
-  it('twin (opposite direction): "for two years now" is elapsed time, not a horizon', () => {
-    expect(
-      satisfied('We used the old system for two years now — should we switch or stay?', 'timeframe'),
-    ).toBe(false);
-  });
-
-  it('twin (opposite direction): past-tense "we ran the pilot for six months" is history', () => {
-    expect(
-      satisfied('We ran the pilot for six months. Should we roll it out or stop?', 'timeframe'),
-    ).toBe(false);
-  });
-
-  it('control (pre-existing exclusion holds): a compound adjective is not a horizon', () => {
-    expect(satisfied('Should we adopt a two-year plan or stay flexible?', 'timeframe')).toBe(false);
-  });
-});
-
-describe('timeframe widening — bare month behind in/until/before/during (measured miss: M5)', () => {
-  it('widened: M5 wire capture — "launch our beta programme in September … or wait for … December"', () => {
-    expect(
-      satisfied(
-        'Should we launch our beta programme in September with 50 hand-picked customers, or wait for the polished full release in December? Early feedback would shape the roadmap while it can still change, but a buggy beta could damage our reputation with the key accounts we most need to impress.',
-        'timeframe',
-      ),
-    ).toBe(true);
-  });
-
-  it('widened: "before March" (deadline without "by")', () => {
-    expect(satisfied('We must decide before March, or the grant lapses. Do we commit or pass?', 'timeframe')).toBe(true);
-  });
-
-  it('widened: "until January"', () => {
-    expect(satisfied('Should we open the store now or wait until January?', 'timeframe')).toBe(true);
-  });
-
-  it('twin (opposite direction): "we tried this in March" is a past attempt, not a horizon', () => {
-    expect(
-      satisfied('We tried this in March and it flopped. Should we try again or drop the idea?', 'timeframe'),
-    ).toBe(false);
-  });
-
-  it('twin (opposite direction): "the pilot we launched in September" is history', () => {
-    expect(
-      satisfied('The pilot we launched in September underperformed. Do we persist or cancel it?', 'timeframe'),
-    ).toBe(false);
-  });
-
-  it('twin (opposite direction): "in May last year" is explicitly backward-looking', () => {
-    expect(
-      satisfied('Churn spiked in May last year. Should we change the pricing or hold?', 'timeframe'),
-    ).toBe(false);
-  });
-});
+// ── THE TWO TIMEFRAME ARMS WERE ABLATED BEFORE MERGE ──────────────────────
+// #928 adversarial review (REVIEW-928.md §1) measured them as FAIL-UNSAFE: a
+// closed NEGATIVE list over an unbounded domain (English past-tense verbs), so
+// "We trialled it for six months" / "The board met in October" scored
+// timeframe-SATISFIED. Their tests are deleted with them rather than left
+// skipped — a skipped suite for deleted code is a mirror that goes stale. The
+// exact strings that exposed them are PINNED as a known-behaviour corpus in
+// clarify-v2.rubric-fail-closed.test.ts, so re-introducing either arm in its
+// old shape turns that suite RED.
 
 describe('options widening — deliberative from-X-to-Y change construction (measured miss: M4)', () => {
   it('widened: M4 wire capture — "switch our 40-person engineering team from quarterly releases to continuous deployment"', () => {
