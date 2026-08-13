@@ -1641,7 +1641,26 @@ describe("fixFactorGoalEdges", () => {
     expect(result.repairs).toHaveLength(0);
   });
 
-  it("deduplicates outcome node when same factor targets multiple goals", () => {
+  // ===========================================================================
+  // Duplicate causal paths — one relationship must arrive as ONE edge
+  // ===========================================================================
+  //
+  // ⚠ THIS BLOCK PREVIOUSLY PINNED THE DEFECT. It asserted FOUR edges here and
+  // narrated the duplicate in its own comment ("fac→out (edge 3, same from/to)")
+  // as though it were the intended shape. It is not, and the consequence is not
+  // cosmetic: the two `fac_cost→out_fac_cost_impact` edges this graph produces
+  // carry DIFFERENT numerics (0.5/0.9 and 0.3/0.8), and PLoT's ISL preflight
+  // fingerprints duplicates on exactly those fields —
+  // `plot-lite-service` b9f6b5a7 `src/integrations/isl/preflight.ts:334-344`,
+  // emitted at `src/routes/v2/run.ts:6804-6826`. A divergent duplicate is a
+  // `DUPLICATE_EDGE_CONFLICT` blocker: HTTP 422, `blocks_analysis: true`, ISL
+  // never called. So the unsuppressed shape did not mis-weight the analysis —
+  // it made the graph UNANALYSABLE, and told the user to "keep one edge per
+  // relationship" about edges this repair had just minted on their behalf.
+  //
+  // Assertions bind by ENDPOINT IDENTITY, never by count alone: a bare length
+  // check passes for any four edges, including the wrong four.
+  it("emits ONE factor→outcome edge when the same factor targets multiple goals", () => {
     const graph: any = {
       nodes: [
         { id: "fac_cost", kind: "factor", label: "Cost" },
@@ -1656,14 +1675,119 @@ describe("fixFactorGoalEdges", () => {
 
     const result = fixFactorGoalEdges(graph, "V1_FLAT");
 
+    // Both source edges were still re-routed — suppression removes the duplicate
+    // LIMB, never the handling of a source claim.
     expect(result.splitCount).toBe(2);
+
     // Only 1 synthetic outcome node created (shared by both goals)
     const outcomeNodes = graph.nodes.filter((n: any) => n.kind === "outcome");
     expect(outcomeNodes).toHaveLength(1);
     expect(outcomeNodes[0].id).toBe("out_fac_cost_impact");
-    // 4 edges: fac→out (x1, shared), out→goal_1, fac→out (x1 shared source), out→goal_2
-    // Actually: fac→out (edge 1), out→goal_1 (edge 2), fac→out (edge 3, same from/to), out→goal_2 (edge 4)
-    expect(graph.edges).toHaveLength(4);
+
+    // The shared limb appears exactly ONCE, identified by its endpoints.
+    const facToOut = graph.edges.filter(
+      (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
+    );
+    expect(facToOut).toHaveLength(1);
+    // First claim wins the numerics — a stated value, never an invented merge.
+    expect(facToOut[0].strength_mean).toBe(0.5);
+
+    // Both goals still reached, one edge each.
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_1"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_2"),
+    ).toHaveLength(1);
+
+    expect(graph.edges).toHaveLength(3);
+
+    // The discarded claim is DISCLOSED, not dropped in silence.
+    const suppressions = result.repairs.filter((r) => r.code === "DUPLICATE_CAUSAL_EDGE_SUPPRESSED");
+    expect(suppressions).toHaveLength(1);
+    expect(suppressions[0].path).toBe("edges[fac_cost→out_fac_cost_impact]");
+  });
+
+  it("collapses two EQUIVALENT source claims to one path, not two", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.splitCount).toBe(2);
+    expect(
+      graph.edges.filter((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_1"),
+    ).toHaveLength(1);
+    expect(graph.edges).toHaveLength(2);
+    // BOTH limbs of the second claim were duplicates.
+    expect(
+      result.repairs.filter((r) => r.code === "DUPLICATE_CAUSAL_EDGE_SUPPRESSED"),
+    ).toHaveLength(2);
+  });
+
+  it("SURFACES a direction conflict rather than adding a contradicting parallel edge", () => {
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    const facToOut = graph.edges.filter(
+      (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
+    );
+    expect(facToOut).toHaveLength(1);
+    expect(facToOut[0].effect_direction).toBe("positive");
+
+    // A disagreement about DIRECTION is information, so it gets its own code —
+    // never folded into the duplicate count, which would hide it.
+    const conflicts = result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION");
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].path).toBe("edges[fac_cost→out_fac_cost_impact]");
+    expect(conflicts[0].action).toContain("negative");
+    expect(conflicts[0].action).toContain("positive");
+  });
+
+  it("does not add a second limb when the graph ALREADY carries that edge", () => {
+    // Ordering must not decide the outcome: the pass-through edge is listed
+    // AFTER the factor→goal edge that would mint the same limb.
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "out_fac_cost_impact", kind: "outcome", label: "Cost Impact" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9 },
+        { from: "fac_cost", to: "out_fac_cost_impact", strength_mean: 0.7, strength_std: 0.1, belief_exists: 0.95 },
+      ],
+    };
+
+    fixFactorGoalEdges(graph, "V1_FLAT");
+
+    const facToOut = graph.edges.filter(
+      (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
+    );
+    expect(facToOut).toHaveLength(1);
+    // The pre-existing, user-owned edge survives — the repair yields to it.
+    expect(facToOut[0].strength_mean).toBe(0.7);
   });
 
   // ===========================================================================

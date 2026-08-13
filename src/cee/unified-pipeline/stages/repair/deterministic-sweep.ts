@@ -975,6 +975,88 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
   //    mint makes the previous id taken — turning one shared outcome into N.
   const resolvedOutcomeId = new Map<string, string>();
 
+  // ── Duplicate-path suppression, keyed on ENDPOINTS **AND SIGN** ───────────
+  //
+  // Every factor→goal edge is re-routed as a factor→outcome→goal PATH. Where
+  // several source claims share a limb — one factor mediated by one outcome, or
+  // one outcome feeding one goal — the loop below used to emit that limb once
+  // PER CLAIM, so a single causal relationship left this function as N parallel
+  // edges. The old test pinned that as intended and narrated it in its own
+  // comment.
+  //
+  // ⚠ THE HARM IS NOT MIS-WEIGHTING, WHICH IS WHAT IT LOOKS LIKE FROM HERE.
+  // Derived at the consumer's bytes (`plot-lite-service` b9f6b5a7,
+  // `src/integrations/isl/preflight.ts:334-344`, emitted at
+  // `src/routes/v2/run.ts:6804-6826`): PLoT fingerprints duplicate endpoints on
+  // `exists_probability`, `strength.mean`, `strength.std` and `label`. Identical
+  // duplicates it coalesces; DIVERGENT ones are a `DUPLICATE_EDGE_CONFLICT`
+  // blocker — HTTP 422, `blocks_analysis: true`, ISL never called. And divergent
+  // is the ORDINARY case here, because each limb inherits its own source edge's
+  // numerics. So the unsuppressed shape did not tilt the maths; it stopped the
+  // maths running at all, and returned "keep one edge per relationship" about
+  // edges this repair had just minted on the user's behalf.
+  //
+  // SIGN IS PART OF THE KEY, deliberately. Two claims that agree on direction
+  // are one relationship stated twice and collapse to one edge. Two that
+  // DISAGREE are not a duplicate at all — they are a genuine conflict, so they
+  // get their own code and stay visible. Suppressing them under the duplicate
+  // count would hide a disagreement a human needs to settle, and adding the
+  // opposite edge anyway would re-create the double-weighting this exists to
+  // remove.
+  //
+  // FIRST CLAIM WINS THE NUMERICS. Not a mean, not a max: every surviving value
+  // is one a source actually stated, and a merged average would be a number
+  // nobody asserted.
+  const signByEndpoints = new Map<string, string>();
+  const canonicalSign = (e: EdgeT): string =>
+    ((e as Record<string, unknown>).effect_direction as string | undefined) ?? "positive";
+
+  // Seed from the edges that pass through untouched. They survive this repair,
+  // so their endpoints are already spoken for before the first split emits
+  // anything — and seeding up front is what makes the result independent of
+  // where the factor→goal edges happen to sit in the list.
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) === "factor" && nodeKindMap.get(edge.to) === "goal") continue;
+    const endpoints = `${edge.from}::${edge.to}`;
+    if (!signByEndpoints.has(endpoints)) signByEndpoints.set(endpoints, canonicalSign(edge));
+  }
+
+  /**
+   * Add one synthetic limb unless its endpoints are already carried. Returns a
+   * Repair when the limb was NOT added, so the caller records why — a
+   * suppression nobody can see is indistinguishable from a lost edge.
+   */
+  const addLimb = (limb: EdgeT, sourcePath: string): Repair | undefined => {
+    const endpoints = `${limb.from}::${limb.to}`;
+    const sign = canonicalSign(limb);
+    const existingSign = signByEndpoints.get(endpoints);
+
+    if (existingSign === undefined) {
+      signByEndpoints.set(endpoints, sign);
+      keptEdges.push(limb);
+      return undefined;
+    }
+
+    if (existingSign === sign) {
+      return {
+        code: "DUPLICATE_CAUSAL_EDGE_SUPPRESSED",
+        path: `edges[${limb.from}→${limb.to}]`,
+        action:
+          `Did not add a second ${limb.from}→${limb.to} edge for ${sourcePath}: ` +
+          `the same relationship, in the same direction, is already carried once. Kept the first claim's strength.`,
+      };
+    }
+
+    return {
+      code: "CONFLICTING_CAUSAL_DIRECTION",
+      path: `edges[${limb.from}→${limb.to}]`,
+      action:
+        `${sourcePath} makes ${limb.from}→${limb.to} "${sign}" while an edge already present makes it ` +
+        `"${existingSign}". Kept the existing direction and did not add a contradicting parallel edge — ` +
+        `the two claims disagree and a human needs to settle which is right.`,
+    };
+  };
+
   for (const edge of edges) {
     const fromKind = nodeKindMap.get(edge.from);
     const toKind = nodeKindMap.get(edge.to);
@@ -1016,18 +1098,22 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
       const origStd = edge.strength_std ?? 0.15;
       const origExist = edge.belief_exists ?? ((edge as Record<string, unknown>).belief as number | undefined) ?? 0.9;
 
-      keptEdges.push(patchEdgeNumeric(
+      const sourcePath = `edges[${edge.from}→${edge.to}]`;
+
+      const factorLimb = addLimb(patchEdgeNumeric(
         { from: edge.from, to: outcomeId, effect_direction: edge.effect_direction ?? "positive", origin: "repair", provenance: { source: "synthetic", quote: "Split factor→goal into factor→outcome→goal" }, provenance_source: "synthetic" } as EdgeT,
         format,
         { mean: origMean, std: origStd, existence: origExist },
-      ));
+      ), sourcePath);
+      if (factorLimb) repairs.push(factorLimb);
 
       // outcome→goal: moderate defaults
-      keptEdges.push(patchEdgeNumeric(
+      const goalLimb = addLimb(patchEdgeNumeric(
         { from: outcomeId, to: edge.to, effect_direction: "positive", origin: "repair", provenance: { source: "synthetic", quote: "Split factor→goal into factor→outcome→goal" }, provenance_source: "synthetic" } as EdgeT,
         format,
         { mean: 0.5, std: 0.15, existence: 0.9 },
-      ));
+      ), sourcePath);
+      if (goalLimb) repairs.push(goalLimb);
 
       splitCount++;
       repairs.push({
