@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 
@@ -76,16 +76,40 @@ export const ObservedStateV3 = z.object({
    *  journey-witness-final-2026-08-04). The shared contract types this field
    *  as a free string (`ObservedStateSchema.source: z.string()`), and ISL as
    *  `Optional[str]` — this enum is the narrowest validator in the chain, so
-   *  it is the one that must name every legitimate writer. */
-  source: z.enum([
-    "brief_extraction",
-    "cee_inference",
-    "user_override",
-    "user_confirmed",
-    "user_assumption",
-    "user",
-    "user_edited",
-  ]).optional(),
+   *  it is the one that must name every legitimate writer.
+   *
+   *  ⭐ 0.40.0 — THIS LIST IS NO LONGER HAND-MAINTAINED. It is DERIVED from the
+   *  shared contract's `OBSERVED_STATE_SOURCE_LITERALS`, which 0.40.0 minted as
+   *  the single owner of this vocabulary precisely so the two mirrors it names
+   *  (this enum, and the UI's `SOURCE_CLASSES`) stop drifting. The contract's
+   *  own instruction: "consumers should DERIVE their classifier/validator
+   *  membership from this list at their >=0.40.0 re-vendor". CLAUDE.md trap 12
+   *  — a list a human must remember to sync WILL drift, and the drift reads
+   *  green. `observed-state-source-derivation.test.ts` asserts SET EQUALITY
+   *  with the canonical list, so this fails loud in BOTH directions.
+   *
+   *  ⚠ MEASURED CONSEQUENCE, disclosed rather than glossed. The derivation
+   *  WIDENS this validator from 7 literals to 12. The five newly-accepted are
+   *  `explicit`, `inferred`, `cee_repair`, `user_calibration`, `panel_elicited`.
+   *  Four of those five were ALREADY writable somewhere in the estate — they
+   *  are members of the UI's 11-literal `SOURCE_CLASSES`, which the paragraph
+   *  above names as "the acknowledged cross-repo source of this list" — and so
+   *  were already capable of failing this parse. The widening closes latent
+   *  refusals; it does not open a new hole. Nothing in CEE BRANCHES on any
+   *  `source` value other than `brief_extraction` (complete non-test sweep at
+   *  this tip: `cee/decision-review/graph-normalizer.ts:122` and
+   *  `cee/provenance/money-invariant.ts`, both testing only for
+   *  `brief_extraction`, whose behaviour is byte-unchanged), so a wider accept
+   *  set cannot redirect an existing decision.
+   *
+   *  `panel_elicited` is the one genuinely NEW member, and CEE is its ONLY
+   *  stamper — `set_factor_value`, and only after `verifyAppliedFrom` has
+   *  checked the client's claim against CEE's own collab store. Without it
+   *  here CEE REJECTS ITS OWN STAMP: the post-mutation `GraphV3.safeParse` in
+   *  `system-events/factor-value-edit.ts` fails and the user is told "I
+   *  couldn't save that change." Derived BY EXECUTION at this tip, with a
+   *  `user_override` positive control, before this line was written. */
+  source: z.enum(OBSERVED_STATE_SOURCE_LITERALS).optional(),
   /** Raw value before normalization (preserves original extraction) */
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */

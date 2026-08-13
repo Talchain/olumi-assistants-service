@@ -48,6 +48,10 @@ import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../t
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { buildRescaleCapPendingActions } from '../session/rescale-cap-pending.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { verifyAppliedFrom } from '../../collab/apply-verification.js';
+import { getCollabStore } from '../../collab/store.js';
+import { isCollabRefusal, type CollabStore } from '../../collab/types.js';
+import type { AppliedValueProvenance } from '../tools/registry.js';
 
 /**
  * The ONLY `observed_state` field this event may edit today. `field` is optional
@@ -127,6 +131,18 @@ export interface ApplyFactorValueEditParams {
   readonly persistedGraph: unknown;
   /** Prior handler facts for this scenario — drives the staleness narrative. */
   readonly priorFacts: readonly HandlerFact[];
+  /**
+   * Collab store for verifying an `applied_from` claim. Injected for tests;
+   * production resolves the real store lazily and ONLY when the event actually
+   * carries a claim, so an ordinary inspector edit costs no store construction
+   * and no behaviour change.
+   *
+   * Resolved here rather than threaded from `dispatch.ts` deliberately: the
+   * dispatcher is a shared, contested file and this slice needs nothing from
+   * it. Keeping the dependency local means the apply path can land without
+   * touching another lane's seam.
+   */
+  readonly collabStore?: CollabStore;
 }
 
 function refuse(
@@ -293,10 +309,86 @@ export async function applyFactorValueEdit(
   const factorCap = typeof observed?.cap === 'number' ? observed.cap : undefined;
   const factorUnit = typeof observed?.unit === 'string' ? observed.unit : undefined;
 
+  // ── the PANEL APPLY claim, verified before anything else is decided ──────
+  //
+  // `applied_from` is the owner clicking "Use Grace's 0.85" on a reveal row.
+  // It is an ATTRIBUTION CLAIM and it is verified against CEE's own collab
+  // store — round on this scenario, participant on that round, that
+  // participant's latest belief for THIS target, round closed, value equal to
+  // the server's record — before a single byte is written. A mismatch refuses
+  // loud and stamps nothing (INV-F).
+  //
+  // ⚠ THE SERVER'S NUMBER REPLACES THE CLIENT'S, and the client's `raw_value` /
+  // `unit` are DROPPED rather than merged. The verified belief is a MODEL-SCALE
+  // number — that is what the reveal shows beside `model_value_at_version`, and
+  // it is the scale the UI's own `buildFactorValueEditEvent` model-scale basis
+  // already emits — so it is handed to the existing machinery exactly as an
+  // ordinary model-scale edit and inverted with the factor's OWN stored cap.
+  // Carrying the client's user-unit fields alongside a server-substituted model
+  // value would put the value/raw_value cross-check below into an inconsistent
+  // state it would then correctly refuse.
+  let appliedProvenance: AppliedValueProvenance | undefined;
+  let effectiveValue = event.value;
+  let effectiveRawValue = event.raw_value;
+  let effectiveUnit = event.unit;
+
+  if (event.applied_from !== undefined) {
+    const store: CollabStore = params.collabStore ?? getCollabStore();
+    try {
+      const verified = await verifyAppliedFrom(store, {
+        scenario_id: payload.scenario_id,
+        target_id: event.target_id,
+        claim: event.applied_from,
+        claimed_value: event.value,
+      });
+
+      appliedProvenance = {
+        source: 'panel_elicited',
+        elicited_from: {
+          round_id: verified.round_id,
+          participant_id: verified.participant_id,
+        },
+      };
+      effectiveValue = verified.value;
+      effectiveRawValue = undefined;
+      effectiveUnit = undefined;
+
+      log.info(
+        {
+          event: 'v5.system_event.factor_value_edit.panel_apply_verified',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          target_id: event.target_id,
+          round_id: verified.round_id,
+          participant_id: verified.participant_id,
+        },
+        'factor_value_edit — panel attribution verified against the collab store',
+      );
+    } catch (err) {
+      if (isCollabRefusal(err)) {
+        log.info(
+          {
+            event: 'v5.system_event.factor_value_edit.panel_apply_refused',
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            target_id: event.target_id,
+            code: err.code,
+          },
+          'factor_value_edit — panel attribution claim refused; no graph written',
+        );
+        // The refusal message is already written for the owner (the collab
+        // refusal vocabulary is user-facing on this path), so it is passed
+        // through rather than re-worded — two copies of one refusal drift.
+        return refuse(payload, err.code, `${err.message} I haven't changed anything.`);
+      }
+      throw err;
+    }
+  }
+
   // ── the scale ────────────────────────────────────────────────────────────
   const resolved = resolveUserUnitInput({
-    value: event.value,
-    rawValue: event.raw_value,
+    value: effectiveValue,
+    rawValue: effectiveRawValue,
     cap: factorCap,
   });
   if (!resolved.ok) {
@@ -320,7 +412,7 @@ export async function applyFactorValueEdit(
   // The proposal's unit: the client's if stated, else the factor's own. This
   // drives `inputHasUnit`, which decides WHICH cap guard fires
   // (`value_exceeds_cap` vs the stricter `bare_number_outside_cap`).
-  const proposalUnit = event.unit ?? factorUnit;
+  const proposalUnit = effectiveUnit ?? factorUnit;
 
   // ── the proposal ─────────────────────────────────────────────────────────
   // Shape mirrors `buildTypedChipMutationProposal` — the estate's other
@@ -428,6 +520,11 @@ export async function applyFactorValueEdit(
     orientationText: '',
     proposal: validation.proposal,
     graphForTurn: graph,
+    // Present ONLY after `verifyAppliedFrom` succeeded above. `set_factor_value`
+    // is the single writer of `observed_state`, so the stamp is threaded IN to
+    // it rather than applied here — this file deliberately contains no
+    // `node.observed_state = …` (see the module header).
+    ...(appliedProvenance !== undefined ? { appliedProvenance } : {}),
   };
 
   let outcome;

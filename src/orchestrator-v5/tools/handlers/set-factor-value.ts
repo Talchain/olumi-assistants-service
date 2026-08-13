@@ -221,6 +221,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       );
     }
 
+    // The verified panel attribution for this write, if any. Read once here so
+    // the stamp site below reads as a single expression; `undefined` on every
+    // path except a verified panel apply.
+    const appliedProvenance = invocation.appliedProvenance;
+
     const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
     if (!rawGraph) {
       throw new D1HandlerError(
@@ -418,7 +423,24 @@ export function createSetFactorValueHandler(): HandlerFn {
         // node.provenance from extractionType), so `observed_state.source` is
         // the carrier that actually reaches the UI's isReviewedByUser rungs.
         // Overrides any producer stamp deliberately: this write IS the user's.
-        source: USER_EDIT_SOURCE,
+        //
+        // ⭐ 0.40.0 — UNLESS THE SERVER HAS VERIFIED THAT IT IS SOMEBODY ELSE'S.
+        // `appliedProvenance` is present only after `verifyAppliedFrom` has
+        // checked an `applied_from` claim against CEE's own collab store, so
+        // this branch stamps a fact the server established, never one the
+        // client asserted. It exists because the alternative — the owner
+        // retyping a colleague's revealed number — stamps `user_override` and
+        // renders as "User edited", i.e. the product relabels Grace's
+        // expertise as the owner's own work. Absence keeps today's behaviour
+        // byte-for-byte; absence means "an ordinary edit", never "attribution
+        // lost".
+        source: appliedProvenance?.source ?? USER_EDIT_SOURCE,
+        // Ids only. A display name here would sit inside `scenarios.graph`,
+        // beyond the reach of the R-2 redaction routine; the label is resolved
+        // at render from round data instead.
+        ...(appliedProvenance !== undefined
+          ? { elicited_from: appliedProvenance.elicited_from }
+          : {}),
       };
       node.observed_state = merged;
 
