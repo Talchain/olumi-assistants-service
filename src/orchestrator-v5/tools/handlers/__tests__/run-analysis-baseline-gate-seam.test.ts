@@ -155,7 +155,21 @@ describe('2.1089 — baseline gate BLOCKING arm at the handler seam (kills mutan
     expect(details.next_step ?? '').toContain('Annual Licence Cost');
     // …and not the healthy one.
     expect(details.next_step ?? '').not.toContain('Adoption Rate');
-    expect((details.next_step ?? '').toLowerCase(), 'the ask must tell the user what to provide').toMatch(/unit|scale/);
+    // ⚠ REPLACED 2026-08-13 (row 2.1091). This assertion used to read
+    // `.toMatch(/unit|scale/)` under the intent "the ask must tell the user
+    // what to provide". That intent is now WRONG, not merely stale: the copy
+    // deliberately no longer asks for a unit, because `FactorScaleInfo.unit` is
+    // read by no predicate on this path and the product was measured asking for
+    // a unit and then declining the answer. A `/unit|scale/` match would also
+    // have passed by ACCIDENT on the word "rescale" (trap 19: a test passing on
+    // the wrong object). The contract it now pins is the honest one.
+    const baselineCopy = details.next_step ?? '';
+    expect(baselineCopy.toLowerCase(), 'the copy must not ask for the inert `unit` field').not.toMatch(
+      /\bunits?\b/,
+    );
+    expect(baselineCopy, 'the copy must own the limit rather than blame the model').toContain(
+      'a limit in how I record and prepare values, not a verdict on your model',
+    );
   });
 
   it('CONTROL: the same shape with an IN-unit baseline computes — the harness can reach PLoT at all (and stays green under R3-C)', async () => {

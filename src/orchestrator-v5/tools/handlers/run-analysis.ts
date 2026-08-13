@@ -539,10 +539,48 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             handler_id: 'run_analysis',
             scenario_id: args.scenario_id,
             reason_code: scaleBlock.reason_code,
+            // ── THE COPY (row 2.1091, 2026-08-13) ─────────────────────────
+            // The previous wording said "the scale of X is unclear — some
+            // values look like raw amounts and others like 0–1 proportions"
+            // and asked for a UNIT. Both halves were defects:
+            //
+            //  · FALSE AS A STATEMENT ABOUT THE USER'S MODEL in 4 of 4
+            //    refusals measured on deployed staging (2026-08-13). In two of
+            //    them the persisted graph contained NO out-of-[0,1] value at
+            //    all — the raw magnitude was one CEE had synthesised into the
+            //    request moments earlier.
+            //  · THE ASK WAS INERT. `FactorScaleInfo.unit` is declared,
+            //    written twice and read by NO predicate on this path (see
+            //    plot-intervention-scale.ts:80). Measured closed loop: the
+            //    product asked for a unit and then declined the answer, "this
+            //    factor is recorded without a unit". Its own "Review the
+            //    model" chip replied "nothing needs 'fixing' structurally",
+            //    and the one edit that DID apply landed the user on the
+            //    baseline refusal below having destroyed a correctly-framed
+            //    pair.
+            //
+            // GOVERNING RULE: the product may describe what IT did; it may not
+            // tell the user what THEY said or did wrong.
+            //
+            // ⚠ AND IT MAY NOT CLAIM THE VALUE IS CEE'S EITHER. Every measured
+            // refusal was CEE-manufactured, but a USER-authored out-of-range
+            // value on a capless factor beside an `ambiguous_no_evidence`
+            // sibling reaches this same branch, so "this number is mine, not
+            // yours" would be false there. What IS true in every branch — the
+            // three that reach `mixedUnresolved` (undemotable mixture, an
+            // encoded code outside [0,1], a demotion postcondition violation)
+            // and the baseline gate — is that the INABILITY is CEE's: this is
+            // CEE's own verdict on the request CEE assembled. So the copy owns
+            // the limit and makes no claim about authorship.
+            //
+            // It also promises no remedy. All three remedies the old copy
+            // implied were measured NOT to clear the block, and one made the
+            // user strictly worse off. A refusal that prescribes a futile
+            // action is worse than one that says plainly it cannot proceed.
             next_step:
               scaleBlock.reason_code === 'mixed_scale_unresolved'
-                ? `I can't run this analysis safely yet: the scale of ${named} is unclear — some values look like raw amounts and others like 0–1 proportions, and mixing them would distort the results. Tell me the unit for ${named} (for example “percent, 0–100” or “£”), and I'll re-run the analysis.`
-                : `I can't run this analysis safely yet: the recorded value of ${named} doesn't sit on the 0–1 scale the rest of the model uses, so including it would distort the results. Tell me the value for ${named} with its unit (for example “£74,000” or “percent, 0–100”), and I'll re-run the analysis.`,
+                ? `I can't run this analysis safely. The request I assembled carries values for ${named} that the analysis engine would silently rescale, so the numbers it gave back would not be the ones your model states — I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I prepare the analysis, not a verdict on your model. I don't have a step I can promise will clear it, so please don't rewrite your own numbers to try; ask me to run it again after any change and I'll re-check.`
+                : `I can't run this analysis safely. ${named} is recorded as a bare amount with no range for me to measure it against, so I can't tell the analysis engine what it means next to everything else, and the numbers would not be the ones your model states — I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I record and prepare values, not a verdict on your model. Telling me the same amount again won't clear it; ask me to run it again after any change and I'll re-check.`,
           },
         },
       );

@@ -23,8 +23,13 @@
  * never an invented magnitude; same class as the engine-side
  * CONSTRAINT_NODE_DEFAULT_BASE defaulting convention: default + coded
  * disclosure). Candidate provenance, in order:
- *   1. the factor's own `observed_state` numbers (`{value, raw_value}` as
- *      stored — the factor's current position);
+ *   1. the factor's own `observed_state` numbers — `{value, raw_value}` on a
+ *      CAPPED factor, `{value}` alone on a CAPLESS one. A capless factor's
+ *      `raw_value` is the DISPLAY magnitude stored beside the framed level
+ *      (`{value: 0.6, raw_value: 600000}` for "£600,000"), and with no cap it
+ *      is undemotable, so synthesising it onto a placeholder shipped a raw
+ *      magnitude beside unit-scale siblings and blocked the whole analysis —
+ *      see the inline note in `buildNeutralFactorValues` for the measurement;
  *   2. `prior.range_min`/`range_max` midpoint — centre-of-range;
  *   3. no projectable provenance → the factor is SKIPPED (never fabricated).
  *
@@ -195,11 +200,21 @@ function buildNeutralFactorValues(
   const neutral = new Map<string, unknown>();
   const nodes = nodesOf(graph);
   // The SAME evidence map the loader's net-ON sibling projection builds
-  // (buildFactorScaleMap over the graph nodes) — only needed when the net
-  // is on.
-  const scaleById = scaleNetEnabled ? buildFactorScaleMap(nodes) : undefined;
+  // (buildFactorScaleMap over the graph nodes). Built UNCONDITIONALLY since
+  // 2026-08-13: the factor's cap now also decides the `raw_value` provenance
+  // question below, which is a property of the candidate OBJECT and therefore
+  // of both wire conventions. The net-OFF projection is still handed
+  // `undefined`, so OFF selection semantics are byte-identical.
+  const scaleById = buildFactorScaleMap(nodes);
   for (const node of nodes) {
     if (node.kind !== 'factor' || typeof node.id !== 'string') continue;
+    const factorScale = scaleById.get(node.id);
+    // Derived from the SAME FactorScaleInfo the projection reads — never a
+    // local re-implementation of the cap fallback chain (CLAUDE.md trap 12:
+    // a hand-maintained mirror drifts silently and the drift reads as green).
+    // `> 0` mirrors `scaleNumeric`'s own `capUsable`, which is the predicate
+    // that actually decides whether `raw_value` can be demoted.
+    const capUsable = factorScale?.cap !== undefined && factorScale.cap > 0;
     const candidates: Dict[] = [];
     const obs = isPlainObject(node.observed_state) ? node.observed_state : undefined;
     if (obs !== undefined) {
@@ -207,7 +222,33 @@ function buildNeutralFactorValues(
       const value = finiteNum(obs.value);
       const rawValue = finiteNum(obs.raw_value);
       if (value !== undefined) observedCandidate.value = value;
-      if (rawValue !== undefined) observedCandidate.raw_value = rawValue;
+      // ⭐ A `raw_value` is only a LEVEL on a factor that declares the frame
+      // making it one. On a CAPPED factor it is exactly that (PLoT divides by
+      // the cap) and a consistent pair carries a `unitIntervalEquivalent`, so
+      // it is demotable — keep it, unchanged.
+      //
+      // On a CAPLESS factor it is a DISPLAY magnitude that the drafter stored
+      // beside the framed level it also wrote (`{value: 0.6, raw_value:
+      // 600000}` for "£600,000"), and `projector.ts` deliberately stores no
+      // cap. Copying it into a SYNTHESISED placeholder made
+      // `resolveRawInterventionValue` rule 1 — where `raw_value` WINS — emit
+      // 600000 onto the wire beside its siblings' 0.6 and 0; with no cap that
+      // emission can carry no `unitIntervalEquivalent`, so it was UNDEMOTABLE
+      // and the request became unresolvably mixed. `run_analysis` then refused,
+      // naming a factor whose incoherent value CEE had just manufactured.
+      //
+      // Measured at the wire on deployed staging CEE 6079f2d, 2026-08-13
+      // (DIAGNOSIS-MIXED-SCALE.md §3.3, arms M2 and N; banked in
+      // `__tests__/fixtures/staging-mixed-scale-captures-2026-08-13.json`):
+      // 3 of 3 big-money briefs blocked, and the one that computed did so only
+      // because both its options happened to be configured.
+      //
+      // Omitting it lets the candidate fall to rule `no_cap`, which emits the
+      // factor's own `value` — the sibling convention this module's header
+      // (P1-1) already commits to, and on a capless factor the level itself.
+      // An honest absence beats a fabricated magnitude: the scaffold may
+      // default, never invent.
+      if (capUsable && rawValue !== undefined) observedCandidate.raw_value = rawValue;
       if (Object.keys(observedCandidate).length > 0) candidates.push(observedCandidate);
     }
     const prior = isPlainObject(node.prior) ? node.prior : undefined;
@@ -227,7 +268,11 @@ function buildNeutralFactorValues(
       }
     }
     for (const candidate of candidates) {
-      const wire = projectNeutralCandidate(candidate, scaleById?.get(node.id), scaleNetEnabled);
+      const wire = projectNeutralCandidate(
+        candidate,
+        scaleNetEnabled ? factorScale : undefined,
+        scaleNetEnabled,
+      );
       if (wire !== undefined) {
         // Selection passed — keep the OBJECT; the single request-level
         // projection downstream derives the wire value in request context.
