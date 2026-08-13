@@ -225,11 +225,33 @@ const PROTECTION_CUE = new RegExp(
  * it missed were "at least 1%", "Leave X below 3%", "to no more than 3%",
  * "at 3%" and the mixed clause (message-level cannot discriminate per entity).
  *
- * ⚠ MONOTONE IN THE SAFE DIRECTION. A construction this misses keeps today's
- * named copy (a gap — the product says something true of the common case);
- * every construction it catches makes the product assert LESS. So an
- * incomplete list can never manufacture a NEW falsehood, which is why bare
- * `to` was dropped after measuring: it is redundant against `no more than` /
+ * ⚠⚠ THIS PREDICATE IS **NOT** SAFE IN ONE DIRECTION. An earlier version of
+ * this comment claimed it was monotone — "a construction it misses keeps
+ * today's copy; every construction it catches makes the product assert LESS,
+ * so an incomplete list can never manufacture a NEW falsehood". **That claim
+ * is FALSE and was refuted by execution.** `CLAUSE_BOUNDARY` deliberately does
+ * not split on bare commas (list protections must stay in one clause), so an
+ * OUTRIGHT protection absorbs an INCIDENTAL number:
+ *
+ *   "Do not touch Customer churn, it is at 3% and that is fine"
+ *
+ * flags as bounded, and the product answers "I could not tell which" about a
+ * sentence that is not ambiguous at all. Measured 8/10 on the hand-written
+ * comma corpus below (10/10 on the reviewer's independent one); at the merge
+ * base those same inputs produced a TRUE sentence. **So catching a
+ * construction CAN install a falsehood, and widening this list is not free.**
+ *
+ * ⛔ DO NOT "FIX" THIS WITH A THIRD PREDICATE. An outright-protection
+ * lookahead was measured: it repairs all 10 comma cases, keeps all 10 twins
+ * and leaves the suite green — and then flips 7 genuine bounds carrying an
+ * outright verb back to the ORIGINAL lie. Two rounds, each closing one
+ * direction and opening the other. That is CLAUDE.md trap 22f, and the exit is
+ * not a better rule. The gap is therefore PINNED, not narrowed: see
+ * `COMMA_CLAUSE_KNOWN_DROPPED` in
+ * `__tests__/edit-graph-protected-bounded-reading.test.ts`, which asserts
+ * EXACTLY that set so the suite REDs if it grows OR shrinks.
+ *
+ * Bare `to` was dropped after measuring: redundant against `no more than` /
  * `at`, and it collides with ordinary prose ("do not touch X, we set it to 3
  * last week").
  */

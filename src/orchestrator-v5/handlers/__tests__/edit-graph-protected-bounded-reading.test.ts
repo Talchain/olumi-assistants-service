@@ -65,6 +65,22 @@
  * captures come from the S-AUDIT probe (probe-edit-lane.md P8/P9), and the
  * constraint phrasings from `mutation-warrant.test.ts`'s corpora, written by
  * the constraint lane. Every case carries its OPPOSITE-DIRECTION TWIN.
+ *
+ * ── WHAT THIS CORPUS EXCLUDES (corrected after review) ────────────────────
+ * ⚠ THE RESIDUAL THAT MATTERS IS THE COMMA-CLAUSE CLASS, and it is pinned
+ * below as `COMMA_CLAUSE_KNOWN_DROPPED` — an outright protection whose clause
+ * absorbs an incidental number now reads as undetermined, which is a NEW
+ * falsehood this change installs. It is measured, bounded and asserted
+ * exactly, not hidden in a prose list.
+ *
+ * The earlier version of this note led with bounds written in words ("keep
+ * churn below three percent"). That was the wrong thing to point at: an
+ * independent sweep sized the word-form residual at 0.59%, a rounding error,
+ * and it fails SAFE (no digit, so no bound detected, so today's copy stands).
+ *
+ * Genuinely still excluded, all failing safe: non-English phrasing; currency
+ * forms beyond a leading £/$/€; and multi-turn context, where the protection
+ * was stated on an earlier turn and never appears in this turn's message.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
@@ -74,7 +90,11 @@ import {
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { extractProtectedEntities } from '../../graph-management/protection-scope.js';
+import {
+  extractProtectedEntities,
+  USER_PROTECTED_ENTITY_READABLE,
+  USER_PROTECTED_ENTITY_AMBIGUOUS_READABLE,
+} from '../../graph-management/protection-scope.js';
 import * as telemetry from '../../../utils/telemetry.js';
 
 // ── fixtures ───────────────────────────────────────────────────────────────
@@ -207,6 +227,49 @@ describe('THE REPORTED FALSEHOOD — "Keep Customer churn below 3%."', () => {
   });
 });
 
+// ── 1b. THE WIRE READABLE, GUARDED IN BOTH DIRECTIONS ──────────────────────
+//
+// P1 from review: asserting only "the bounded case is not the false readable"
+// leaves `opIsBounded := hits.length > 0` free to make EVERY hold emit the
+// ambiguous readable — a mutant that survived 1,213 tests across 80 files,
+// because nothing anywhere pinned the PROTECTIVE readable. A one-directional
+// guard on a two-valued seam is half a guard. Both values are bound by
+// IDENTITY to their exported constants, never by a substring another string
+// could satisfy.
+
+describe('WIRE READABLE — both values pinned by identity, so neither branch can swallow the other', () => {
+  function readableFor(message: string, ops?: readonly unknown[]): string {
+    const d = evaluateEditGraphMutations(
+      baseInput(ops === undefined ? { userMessage: message } : { userMessage: message, operations: ops }),
+    );
+    return String(d.publicReason?.blocker_readable ?? '');
+  }
+
+  it('a BOUNDED reading emits exactly USER_PROTECTED_ENTITY_AMBIGUOUS_READABLE', () => {
+    expect(readableFor(REPORTED)).toBe(USER_PROTECTED_ENTITY_AMBIGUOUS_READABLE);
+  });
+
+  it('⭐ an OUTRIGHT protection emits exactly USER_PROTECTED_ENTITY_READABLE (the direction that was unguarded)', () => {
+    expect(readableFor('Do not touch Customer churn.')).toBe(USER_PROTECTED_ENTITY_READABLE);
+  });
+
+  it('DISCRIMINATION IS REAL: the two readables differ, and the seam returns a DIFFERENT one for each input', () => {
+    // Pins its own precondition (trap 13b): if the two constants were ever
+    // made equal, every assertion above would pass while discriminating
+    // nothing.
+    expect(USER_PROTECTED_ENTITY_READABLE).not.toBe(USER_PROTECTED_ENTITY_AMBIGUOUS_READABLE);
+    expect(readableFor(REPORTED)).not.toBe(readableFor('Do not touch Customer churn.'));
+  });
+
+  it('a MIXED op — one bounded target, one outright-protected target — is NOT reported as undetermined', () => {
+    // `opIsBounded` uses every(), so a single outright-protected target makes
+    // the protective readable true for that op. Pins the every()/some()
+    // choice on the READABLE seam as well as on the copy seam.
+    const mixed = 'Keep Customer churn below 3%, but do not touch CRM Platform Cost.';
+    expect(readableFor(mixed, [COST_OP])).toBe(USER_PROTECTED_ENTITY_READABLE);
+  });
+});
+
 // ── 2. THE CORPUS, WITH OPPOSITE-DIRECTION TWINS ───────────────────────────
 //
 // Two opposite harms, so two lists. LEFT: a bound was stated, asserting
@@ -305,6 +368,74 @@ describe('MIXED CLAUSE — one entity bounded, another protected in the same mes
   });
 });
 
+// ── 3b. THE KNOWN GAP, PINNED EXACTLY ──────────────────────────────────────
+//
+// ⚠⚠ THE SAFETY ARGUMENT THIS FIX WAS ORIGINALLY SOLD ON WAS FALSE.
+// It claimed the bound predicate was monotone: "a construction it misses keeps
+// today's copy; every one it catches makes the product assert LESS, so an
+// incomplete list cannot manufacture a NEW falsehood." Refuted by execution.
+// `CLAUSE_BOUNDARY` does not split on bare commas (list protections must stay
+// in one clause), so an OUTRIGHT protection absorbs an INCIDENTAL number and
+// the product says "I could not tell which" about a sentence that is not
+// ambiguous. At the merge base these produced a TRUE sentence, so catching a
+// construction CAN install a falsehood.
+//
+// ⛔ NOT FIXED HERE, DELIBERATELY. An outright-protection lookahead repairs
+// every case below and then flips 7 genuine bounds back to the ORIGINAL lie —
+// two rounds, each closing one direction and opening the other (trap 22f). The
+// honest move is to PIN the gap, not to narrow it: this set is asserted
+// EXACTLY, so the suite stays green for the RIGHT reason and REDs if the class
+// GROWS (a new falsehood) or SHRINKS (someone fixed it, and this pin plus the
+// comment in protection-scope.ts must be retired together).
+
+/** Outright protections that carry an incidental number in the same
+ *  comma-joined clause. Every one of these is CURRENTLY MISREPORTED as an
+ *  undetermined reading. This is a known, measured, unfixed gap. */
+const COMMA_CLAUSE_KNOWN_DROPPED: readonly string[] = [
+  'Do not touch Customer churn, it is at 3% and that is fine',
+  'Do not touch Customer churn, it is below 3% already',
+  'Leave Customer churn alone, it sits at 3% right now',
+  'Keep Customer churn as it is, currently at 3%',
+  "Don't change Customer churn, we measured it at 3% last week",
+  'Leave Customer churn as is, it has been under 3% all year',
+  'Preserve Customer churn, it is above 1% and healthy',
+  'Keep Customer churn unchanged, it is at 3% and we like it',
+];
+
+/** Same shape, but the number is NOT preceded by a comparator inside the
+ *  window, so these escape the gap and still read TRUE. They are the contrast
+ *  control: without them a blind predicate would look identical. */
+const COMMA_CLAUSE_STILL_CORRECT: readonly string[] = [
+  'Do not touch Customer churn, the 3% figure is correct',
+  "Don't touch Customer churn, our 3% target is already met",
+];
+
+describe('KNOWN GAP — comma-joined outright protections carrying an incidental number', () => {
+  it('the dropped set is EXACTLY this, no more and no fewer', () => {
+    const dropped = [...COMMA_CLAUSE_KNOWN_DROPPED, ...COMMA_CLAUSE_STILL_CORRECT].filter(
+      (m) =>
+        extractProtectedEntities(m, GRAPH).find((e) => e.nodeId === 'fac_churn')
+          ?.boundedReading === true,
+    );
+    // Exact-set equality: REDs if the gap grows AND if it shrinks.
+    expect(dropped.sort()).toEqual([...COMMA_CLAUSE_KNOWN_DROPPED].sort());
+  });
+
+  it('CONTRAST CONTROL — the two escapees still produce the TRUE named sentence, so the pin above is not measuring a dead predicate', () => {
+    for (const m of COMMA_CLAUSE_STILL_CORRECT) {
+      expect(textFor(m), m).toMatch(/to stay as it is/i);
+    }
+  });
+
+  it('the gap costs only truthfulness, never safety: every dropped case is still HELD', () => {
+    for (const m of COMMA_CLAUSE_KNOWN_DROPPED) {
+      const d = evaluateEditGraphMutations(baseInput({ userMessage: m }));
+      expect(d.governing, m).toBe('held');
+      expect(d.blockApply, m).toBe(true);
+    }
+  });
+});
+
 // ── 4. THE PREDICATE ITSELF, bound by identity ─────────────────────────────
 
 describe('boundedReading is per-entity and identity-bound', () => {
@@ -326,7 +457,31 @@ describe('boundedReading is per-entity and identity-bound', () => {
     // be said. Pinning this closes the `every` -> `some` mutant, which
     // otherwise survives: no other case in this corpus names one entity in
     // two protective clauses of different kinds.
+    const PROTECTIVE_HALF = 'Do not change Customer churn.';
+    const BOUNDED_HALF = 'Keep Customer churn below 3%.';
     const MIXED_SAME_ENTITY = 'Do not change Customer churn; keep Customer churn below 3%.';
+
+    // ⭐ PRECONDITION, PINNED IN-TEST (trap 13b). The `every` vs `some` result
+    // is only evidence about the CODE if the fixture really does present two
+    // LIVE clauses of DIFFERENT kinds. Rot either half — a word change that
+    // stops one clause matching the entity, or stops it carrying a bound — and
+    // the combined assertion below would pass under BOTH every() and some(),
+    // discriminating nothing while staying green. So assert each half's kind
+    // independently, first.
+    const protHalf = extractProtectedEntities(PROTECTIVE_HALF, GRAPH).find(
+      (e) => e.nodeId === 'fac_churn',
+    );
+    const boundHalf = extractProtectedEntities(BOUNDED_HALF, GRAPH).find(
+      (e) => e.nodeId === 'fac_churn',
+    );
+    expect(protHalf, 'protective half must still protect the entity').toBeDefined();
+    expect(protHalf?.boundedReading, 'protective half must be UNBOUNDED').toBe(false);
+    expect(boundHalf, 'bounded half must still protect the entity').toBeDefined();
+    expect(boundHalf?.boundedReading, 'bounded half must be BOUNDED').toBe(true);
+    // The two halves genuinely differ — so the combined result below is the
+    // code's doing and not the fixture's failure.
+    expect(protHalf?.boundedReading).not.toBe(boundHalf?.boundedReading);
+
     const found = extractProtectedEntities(MIXED_SAME_ENTITY, GRAPH);
     expect(found.find((e) => e.nodeId === 'fac_churn')?.boundedReading).toBe(false);
     expect(textFor(MIXED_SAME_ENTITY)).toMatch(/to stay as it is/i);
