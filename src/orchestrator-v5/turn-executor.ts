@@ -6612,9 +6612,32 @@ export async function runTurnExecutor(
         // has paid for exactly that class of mislabelling before (CLAUDE.md
         // trap #14) — a wrong description of a mechanism teaches everyone to
         // stop looking at it.
-        const analysisForAdviceGate = mayNameLeadingOptionForRun
+        const analysisForAdviceGateBase = mayNameLeadingOptionForRun
           ? contextPack.analysis
           : projectContextPackAnalysisForWithheldClaim(contextPack.analysis);
+        // ⭐ THE ENGINE'S DEFAULTED-VALUE VERDICT RIDES THE ANALYSIS OBJECT.
+        // Same fact, same canonical `selectRunAnalysisFact` as `rawRobustness`
+        // and `decisionReview` below, so every grounding layer on this turn is
+        // aligned on one run. Carried HERE rather than as a parallel gate input
+        // because whether the numbers rest on defaulted inputs is a property of
+        // the ANALYSIS — which is what makes it reach all five of the gate's
+        // `robustnessVerdictFor` call sites without a per-composer parameter.
+        // Key absent when there is nothing to disclose: byte-identical turns.
+        const defaultedForAdviceGate = pickLatestDefaultedAssumptions(context.prior_facts);
+        // ⚠ `leading_option` is re-stated after the spread ON PURPOSE. The two
+        // branches of the base differ on its optionality, so spreading the union
+        // widens it to `| undefined` and the literal stops satisfying
+        // `AdviceGateAnalysis`, whose `leading_option` is required-but-nullable.
+        // `?? null` restores the gate's own contract without changing any value:
+        // absent and null already mean the same thing to every branch below.
+        const analysisForAdviceGate =
+          analysisForAdviceGateBase != null && defaultedForAdviceGate !== null
+            ? {
+                ...analysisForAdviceGateBase,
+                leading_option: analysisForAdviceGateBase.leading_option ?? null,
+                defaulted_assumptions: defaultedForAdviceGate,
+              }
+            : analysisForAdviceGateBase;
         const adviceOutcome = tryPostAnalysisAdviceGate({
           message: payload.message,
           // ROADMAP 1.233 — CLAIM-SAFETY GATE, applied to this gate's INPUT.
@@ -6667,8 +6690,6 @@ export async function runTurnExecutor(
           // signal is available — composer falls back to margin_pp +
           // projected robustness_band.
           rawRobustness: pickLatestRawRobustness(context.prior_facts),
-          // Same fact, same selector — see the field's doc on HandlerInvocation.
-          defaultedAssumptions: pickLatestDefaultedAssumptions(context.prior_facts),
           // ROADMAP 2.278 — the same fact's flip evidence, so the gate's
           // fragility copy cannot claim the result could change when the
           // producer attested it cannot. Same canonical selector as the two

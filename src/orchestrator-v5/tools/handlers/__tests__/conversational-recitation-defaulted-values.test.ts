@@ -196,6 +196,56 @@ describe('conversational recitation — defaulted values', () => {
     });
   });
 
+  describe('EVERY READER — the suppression lands on the CATEGORY', () => {
+    // ⭐ THE LOAD-BEARING TEST OF THIS LANE. `stability_clause` is only ONE
+    // reader of this verdict. The free-text advice gate
+    // (`routing/post-analysis-advice-gate.ts`) branches on `stability_category`
+    // at five call sites and writes its OWN sentences. A fix that nulled the
+    // clause would have left the gate asserting the same thing in its own
+    // words — updating two readers of three and reproducing the defect.
+    it('collapses stability_category to unknown for EVERY band', () => {
+      for (const band of ['stable', 'highly_stable', 'moderate', 'fragile', 'unknown', null]) {
+        for (const mode of ['explain', 'flip'] as const) {
+          const projection: RobustnessVerdictInput = {
+            ...clearStableProjection(),
+            robustness_band: band,
+          };
+          const verdict = composeRobustnessVerdict(projection, null, mode, {
+            count: 1,
+            named: ['Market Conditions'],
+          });
+          expect(verdict.stability_category).toBe('unknown');
+          expect(verdict.headline.endsWith(':unknown')).toBe(true);
+        }
+      }
+    });
+
+    it('CONTRAST CONTROL: the measured band survives when nothing is defaulted', () => {
+      // Without this the test above would pass on a composer that always
+      // returned `unknown` — a guard agreeing with itself (trap 13b).
+      const stable = composeRobustnessVerdict(clearStableProjection(), null, 'flip', null);
+      expect(stable.stability_category).toBe('stable');
+      const fragile = composeRobustnessVerdict(
+        { ...clearStableProjection(), robustness_band: 'fragile' },
+        null,
+        'flip',
+        null,
+      );
+      expect(fragile.stability_category).toBe('fragile');
+    });
+
+    it('leaves the MARGIN axis untouched — the recitation is qualified, not withheld', () => {
+      const withDefaults = composeRobustnessVerdict(clearStableProjection(), null, 'flip', {
+        count: 1,
+        named: ['Market Conditions'],
+      });
+      const without = composeRobustnessVerdict(clearStableProjection(), null, 'flip', null);
+      expect(withDefaults.margin_category).toBe(without.margin_category);
+      expect(withDefaults.margin_clause).toBe(without.margin_clause);
+      expect(withDefaults.margin_clause).not.toBeNull();
+    });
+  });
+
   describe('FALSEHOOD 1 — the disclosure the analyse turn already makes', () => {
     it('the flip fallback carries the disclosure and drops the stability line', () => {
       const before = composeWhatWouldFlipFallback(clearStableProjection(), null, null, null);

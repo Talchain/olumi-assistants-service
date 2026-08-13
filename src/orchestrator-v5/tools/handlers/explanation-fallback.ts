@@ -233,13 +233,62 @@ export function composeRobustnessVerdict(
   // either the raw level OR the canonical band (older facts may carry only the
   // canonicalised verdict).
   const fragile = isRawFragile(rawRobustness) || band === CANONICAL_FRAGILE_BAND;
-  const stabilityCat: RobustnessStabilityCategory = fragile
+  const measuredStability: RobustnessStabilityCategory = fragile
     ? 'fragile'
     : band === 'stable' || band === 'highly_stable'
       ? 'stable'
       : band === 'moderate'
         ? 'moderate'
         : 'unknown';
+
+  // ── DEFAULTED VALUES COLLAPSE THE STABILITY AXIS TO `unknown` ───────────
+  //
+  // ⚠⚠ THE WORST LINE IN THE 13 Aug DEPLOYED WITNESS. On an ORDINARY CHAT TURN,
+  // with `analysis_ready.options[].status = needs_encoding` on the same payload,
+  // the flip fallback recited the numbers and then added:
+  //
+  //   "This result looks stable, so smaller changes are less likely to flip
+  //    the outcome on their own."
+  //
+  // A confidence claim, stacked on numbers the product itself calls
+  // placeholders. The ANALYSE turn discloses correctly
+  // (`coaching/scaffold-disclosure.ts`); the conversational recitation dropped
+  // the disclosure and then asserted stability over it.
+  //
+  // ⭐⭐ THE SUPPRESSION LANDS ON THE CATEGORY, NOT ON THE CLAUSE, AND THAT IS
+  // THE WHOLE POINT. `stability_clause` is only ONE of this verdict's readers.
+  // The free-text advice gate (`routing/post-analysis-advice-gate.ts`) reads
+  // `stability_category` and writes its OWN sentences from it — five call
+  // sites. Nulling the clause would have fixed the two fallbacks and left the
+  // gate asserting the same thing in its own words: a fix that updates two of
+  // three readers REPRODUCES the defect it closes. Collapsing the axis makes
+  // every reader stand down at once, and a reader added later inherits it
+  // without needing to know this rule exists (CLAUDE.md trap 12: derive, don't
+  // mirror; trap 21: one concept, several readers).
+  //
+  // ⭐ `unknown` IS THE TRUTHFUL VALUE, not a fail-safe fiction. This axis
+  // means "how steady is each option's OWN score under variation". Measured
+  // over defaulted inputs, that is genuinely not known — and `unknown` is
+  // already a member of the type, already handled by every consumer as
+  // "omit, no overclaim". Nothing new has to be taught to anybody.
+  //
+  // ⭐ MODE-BLIND AND DIRECTION-BLIND. Suppressing only the REASSURING arms
+  // would leave the FRAGILITY arms making the same class of claim in the other
+  // direction. The question is not whether the claim is comforting, it is
+  // whether the run supports it (CLAUDE.md trap 22b: one predicate must not be
+  // asked to police two opposite harms with one window).
+  //
+  // The MARGIN axis is deliberately untouched: it states each option's OWN win
+  // share, which is what the analysis returned. The recitation is QUALIFIED by
+  // the disclosure below, never withheld — withholding the standing result
+  // would trade a dishonest answer for no answer, which the ratified per-field
+  // egress ruling rejects.
+  const defaultedDisclosure =
+    defaultedAssumptions !== null && defaultedAssumptions.count > 0
+      ? buildDefaultedAssumptionsDisclosure(defaultedAssumptions)
+      : null;
+  const stabilityCat: RobustnessStabilityCategory =
+    defaultedDisclosure !== null ? 'unknown' : measuredStability;
 
   const headline = `${marginCat}:${stabilityCat}` as RobustnessVerdict['headline'];
   const stabilityPhrase = describeRobustnessBand(band);
@@ -342,44 +391,24 @@ export function composeRobustnessVerdict(
     // moderate, unknown, or indeterminate-stable → omit (no overclaim).
   }
 
-  // ── DEFAULTED VALUES SUPPRESS EVERY STABILITY ASSERTION ─────────────────
+  // ⭐ AND THE SECOND HALF, WHICH THE CATEGORY COLLAPSE DOES NOT REACH — this
+  // is NOT belt-and-braces, it closes a DIFFERENT arm. In `flip` mode the
+  // near-tie clause is gated on `marginCat`, not on the stability axis, so it
+  // survives the collapse:
   //
-  // ⚠⚠ THE WORST LINE IN THE 13 Aug DEPLOYED WITNESS. On an ORDINARY CHAT TURN,
-  // with `analysis_ready.options[].status = needs_encoding` on the same payload,
-  // the flip fallback emitted the two recitation sentences above AND THEN:
+  //   "The result is sensitive to small movements in the strongest drivers, so
+  //    the leading option could change without much shifting."
   //
-  //   "This result looks stable, so smaller changes are less likely to flip
-  //    the outcome on their own."
+  // That is a BEHAVIOURAL PREDICTION about how the result moves, on inputs the
+  // engine defaulted — the same unlicensed claim as the reassuring arm, merely
+  // pointing the other way. The margin clause already tells the user the
+  // options are effectively tied, which IS what the analysis returned; the
+  // extra sentence predicts what would happen next, which it does not support.
+  // Suppressing only the comforting direction is exactly the one-parameter-two-
+  // harms mistake (CLAUDE.md trap 22b), so both go.
   //
-  // A confidence claim, stacked on numbers the product itself calls
-  // placeholders. The ANALYSE turn discloses correctly (scaffold-disclosure.ts);
-  // the conversational recitation dropped the disclosure and then added a
-  // stability assertion on top of it.
-  //
-  // ⭐ SUPPRESSION IS TOTAL AND MODE-BLIND, AND THAT IS DELIBERATE. Every
-  // `stability_clause` this function can emit — in BOTH modes, on every
-  // margin/stability pair — asserts something about how the result behaves
-  // under variation. That behaviour was measured on defaulted inputs, so NONE
-  // of them is licensed. Suppressing only the reassuring arms would leave the
-  // fragility arms making the same class of claim in the other direction; the
-  // question is not whether the claim is comforting, it is whether the run
-  // supports it (CLAUDE.md trap 22b: one predicate, two opposite harms).
-  //
-  // ⚠ `stability_implies_flippability` is suppressed WITH the clause it
-  // describes. It is that clause's own summary for downstream callers, so a
-  // `true` surviving a suppressed sentence would let a caller re-assert the
-  // flippability finding the suppression just withdrew (trap 21: two readers of
-  // one concept, only one updated — the defect this whole lane exists to close).
-  //
-  // The MARGIN clause is deliberately NOT suppressed: it states each option's
-  // OWN win share, which is what the analysis returned, and the recitation is
-  // qualified by the disclosure rather than withheld. Withholding the standing
-  // result on a defaulted run would trade a dishonest answer for no answer,
-  // which the ratified per-field egress ruling rejects.
-  const defaultedDisclosure =
-    defaultedAssumptions !== null && defaultedAssumptions.count > 0
-      ? buildDefaultedAssumptionsDisclosure(defaultedAssumptions)
-      : null;
+  // The `NO ARM ESCAPES` test sweeps the whole mode × margin × band matrix and
+  // is what proved the collapse alone was insufficient here.
   if (defaultedDisclosure !== null) {
     stability_clause = null;
     stability_implies_flippability = false;
@@ -391,6 +420,11 @@ export function composeRobustnessVerdict(
     stability_category: stabilityCat,
     margin_clause,
     stability_clause,
+    // Follows the collapsed axis by construction: no arm sets this on
+    // `unknown`. Pinned by `suppresses stability_implies_flippability with the
+    // clause it describes` — the flag is that clause's own summary for
+    // downstream callers, so a `true` surviving a suppressed sentence would let
+    // a caller re-assert the finding the suppression just withdrew.
     stability_implies_flippability,
     defaulted_disclosure: defaultedDisclosure,
   };
