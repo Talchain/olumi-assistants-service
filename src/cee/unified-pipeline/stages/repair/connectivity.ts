@@ -16,6 +16,10 @@ import {
   hasGoalNode,
   wireOutcomesToGoal,
 } from "../../../structure/index.js";
+import { fixTerminalBridge } from "./terminal-bridge.js";
+import { detectEdgeFormat } from "../../utils/edge-format.js";
+import type { EdgeFormat } from "../../utils/edge-format.js";
+import type { EdgeT } from "../../../../schemas/graph.js";
 import { isProduction } from "../../../../config/index.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 
@@ -96,6 +100,45 @@ export function runConnectivity(ctx: StageContext): void {
           goal_node_id: goalId,
         }, "Edge repair: wired outcomes/risks to goal");
       }
+    }
+  }
+
+  // Terminal-bridge synthesis (ROADMAP 2.1099). MUST run after `ensureGoalNode`
+  // above: when the model omits the goal, CEE mints it here and the enforcement
+  // gate then rejects the graph because that freshly-minted node is unreachable.
+  // Sited in the sweep instead, this repair could not see that goal at all.
+  //
+  // `wireOutcomesToGoal` has just run and, on this shape, wired nothing — its
+  // outcome/risk set is empty. That is the whole failure class: six connectivity
+  // repairs, all presupposing a bridge node that does not exist. See
+  // terminal-bridge.ts for the measured evidence and the honesty contract on the
+  // node it mints.
+  {
+    const liveFormat = detectEdgeFormat((ctx.graph as any).edges as EdgeT[]);
+    const format: EdgeFormat = liveFormat === "NONE" ? (ctx.detectedEdgeFormat ?? "V1_FLAT") : liveFormat;
+
+    const bridgeResult = fixTerminalBridge(ctx.graph as any, format, { collector: ctx.collector });
+
+    if (bridgeResult.repairs.length > 0) {
+      ctx.deterministicRepairs = [...(ctx.deterministicRepairs ?? []), ...bridgeResult.repairs];
+      ctx.repairTrace = {
+        ...(ctx.repairTrace ?? {}),
+        terminal_bridge: {
+          ran: true,
+          bridge_node_id: bridgeResult.bridgeNodeId,
+          edges_added: bridgeResult.edgesAdded,
+        },
+      };
+
+      structure = validateMinimumStructure(ctx.graph!);
+
+      log.info({
+        event: "cee.connectivity.terminal_bridge_synthesised",
+        request_id: ctx.requestId,
+        bridge_node_id: bridgeResult.bridgeNodeId,
+        edges_added: bridgeResult.edgesAdded,
+        goal_node_id: (ctx.graph as any).nodes.find((n: any) => n.kind === "goal")?.id,
+      }, "Connectivity: synthesised terminal bridge (draft had no outcome or risk node)");
     }
   }
 
