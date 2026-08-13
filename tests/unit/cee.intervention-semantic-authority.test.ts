@@ -47,7 +47,6 @@ import type { NodeV3T, EdgeV3T } from "../../src/schemas/cee-v3.js";
 
 const GOAL_ID = "goal_profit";
 const CHURN_ID = "factor_churn_rate";
-const PRICE_ID = "factor_unit_price";
 
 function churnOnlyGraph(): { nodes: NodeV3T[]; edges: EdgeV3T[] } {
   return {
@@ -61,21 +60,6 @@ function churnOnlyGraph(): { nodes: NodeV3T[]; edges: EdgeV3T[] } {
       },
     ] as unknown as NodeV3T[],
     edges: [{ id: "e_churn_goal", from: CHURN_ID, to: GOAL_ID }] as unknown as EdgeV3T[],
-  };
-}
-
-function exactIdGraph(): { nodes: NodeV3T[]; edges: EdgeV3T[] } {
-  return {
-    nodes: [
-      { id: GOAL_ID, kind: "goal", label: "Annual profit" },
-      {
-        id: PRICE_ID,
-        kind: "factor",
-        label: "Unit Price",
-        observed_state: { value: 50, source: "brief_extraction" },
-      },
-    ] as unknown as NodeV3T[],
-    edges: [{ id: "e_price_goal", from: PRICE_ID, to: GOAL_ID }] as unknown as EdgeV3T[],
   };
 }
 
@@ -136,29 +120,52 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     expect((option.user_questions ?? []).join(" ")).toMatch(/price/i);
   });
 
-  it("never launders a semantic match into exact_id via an edge hint", () => {
-    // The laundering is the mechanism that routed the value around the
-    // resolved/unresolved rule. Pin the mechanism, not only its consequence —
-    // otherwise a future change could re-open the hole from the other side.
-    const { nodes, edges } = exactIdGraph();
+  it("reports an edge-hinted match by its MEASURED type, never upgraded to exact_id", () => {
+    // ⚠ THIS TEST WAS VACUOUS IN ITS FIRST FORM AND A MUTANT CAUGHT IT.
+    // It originally drove a SEMANTIC match and looped over the resulting
+    // interventions — but the fix refuses semantic matches, so the map is empty
+    // and the loop body never ran. It passed while asserting nothing, and the
+    // "restore the laundering" mutant SURVIVED against it (CLAUDE.md trap 13b:
+    // a guard whose evidence comes from itself).
+    //
+    // Bound instead to an EXACT_LABEL match, which is reachable past the guard
+    // and is precisely where laundering can still misreport: the hint must not
+    // promote exact_label to exact_id. The two answer different questions —
+    // "are these nodes connected?" vs "did the text name this factor?".
+    const FACTOR_ID = "f_1";
+    const nodes = [
+      { id: GOAL_ID, kind: "goal", label: "Annual profit" },
+      {
+        id: FACTOR_ID,
+        kind: "factor",
+        label: "Price",
+        observed_state: { value: 50, source: "brief_extraction" },
+      },
+    ] as unknown as NodeV3T[];
+    const edges = [{ id: "e", from: FACTOR_ID, to: GOAL_ID }] as unknown as EdgeV3T[];
+
+    // Precondition pinned in-test: this really is an exact_label match, so the
+    // assertion below cannot pass merely because nothing was extracted.
+    const truth = matchInterventionToFactor("price", nodes, edges, GOAL_ID);
+    expect(truth.node_id).toBe(FACTOR_ID);
+    expect(truth.match_type).toBe("exact_label");
+
     const option = extractInterventionsForOption(
-      "Cut price by 15%",
+      "Set price to 40",
       undefined,
       nodes,
       edges,
       GOAL_ID,
       new Set<string>(),
-      [{ from_option_id: "opt_a", to_factor_id: PRICE_ID }],
+      // The hint is present — it is what did the laundering before the fix.
+      [{ from_option_id: "opt_a", to_factor_id: FACTOR_ID }],
       undefined,
       "opt_a",
     );
-    for (const [factorId, intervention] of Object.entries(option.interventions)) {
-      const declared = intervention.target_match.match_type;
-      const truth = matchInterventionToFactor("price", nodes, edges, GOAL_ID);
-      if (truth.node_id === factorId && truth.match_type === "semantic") {
-        expect(declared).not.toBe("exact_id");
-      }
-    }
+
+    // Non-vacuity: the intervention must EXIST before its match_type means anything.
+    expect(Object.keys(option.interventions)).toContain(FACTOR_ID);
+    expect(option.interventions[FACTOR_ID].target_match.match_type).toBe("exact_label");
   });
 
   it("refuses a semantically-matched CATEGORICAL target instead of writing a placeholder", () => {
