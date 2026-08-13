@@ -106,6 +106,13 @@ export type GroundedSensitivityRefusalReason =
   | 'subject_not_top_influence'
   /** The producer supplied no `influence_rank`, so the superlative is uncheckable. */
   | 'no_influence_rank'
+  /**
+   * ⭐ The sentence asserts a FLIP-RISK CATEGORY the producer does not give this
+   * factor — the second dimension a selector controls. See `requiresCategory`.
+   */
+  | 'subject_category_mismatch'
+  /** The producer supplied no `flip_risk_category`, so the claim is uncheckable. */
+  | 'no_flip_risk_category'
   /** The composed body trips a prose gate or the body cap. */
   | 'not_composable';
 
@@ -175,6 +182,27 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
          * fix) but the product never states something untrue.
          */
         readonly requiresTopInfluence: boolean;
+        /**
+         * ⭐ THE FLIP-RISK CATEGORY THIS SENTENCE ASSERTS, or `null` when it
+         * asserts none. Verified against the producer's own
+         * `flip_risk_category`, exactly as `requiresTopInfluence` is verified
+         * against `influence_rank`.
+         *
+         * WHY IT EXISTS THOUGH NOTHING REACHES IT TODAY. Each of these codes is
+         * currently selected BY the very category its sentence asserts, so the
+         * claim holds by construction — a property of today's PREDICATES, not of
+         * the contract. A future selector change touching the category
+         * predicates (rather than their ordering) would make these sentences lie
+         * with no gate and no test; 43 such false sentences exist in the input
+         * space (e.g. "The result leans on X, which could tip which option leads
+         * on its own" where the producer says `negligible`).
+         *
+         * `requiresTopInfluence` already makes honesty independent of WHICH
+         * factor a selector picks; this makes it independent of the CATEGORY
+         * dimension too, so the deferred selector decision can be taken in
+         * either dimension without re-opening a truth defect.
+         */
+        readonly requiresCategory: string | null;
       }
     >
   >
@@ -185,6 +213,9 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
     expectedOpening: 'This factor moves the result more than any other.',
     ground: (l) => `${l} moves the result more than any other.`,
     requiresTopInfluence: true,
+    // Asserts magnitude only. Its `_NO_FLIP` remap exists BECAUSE the run's own
+    // evidence contradicts flippability, so it claims no category.
+    requiresCategory: null,
   },
   // "doing most of the work" — a dominance claim. Its subject comes from
   // `findDominantDriver` (a STRICT majority of summed influence), so this
@@ -194,6 +225,7 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
     expectedOpening: 'One factor is doing most of the work in this result.',
     ground: (l) => `${l} is doing most of the work in this result.`,
     requiresTopInfluence: true,
+    requiresCategory: null,
   },
   // ── Declared for completeness; unobserved in the 45-capture census ─────────
   // "alongside others rather than on its own" — a claim about HOW it moves the
@@ -202,11 +234,14 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
     expectedOpening: 'This factor moves the result alongside others rather than on its own.',
     ground: (l) => `${l} moves the result alongside others rather than on its own.`,
     requiresTopInfluence: false,
+    // "alongside others rather than on its own" IS the `correlated` category.
+    requiresCategory: 'correlated',
   },
   DOMINANT_DRIVER: {
     expectedOpening: 'One factor is doing most of the work in this result.',
     ground: (l) => `${l} is doing most of the work in this result.`,
     requiresTopInfluence: true,
+    requiresCategory: null,
   },
   // The restrictive clause DEFINES the subject by flippability ("that could tip
   // which option leads on its own"), which is exactly what the selector's
@@ -216,6 +251,8 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
     expectedOpening: 'The result leans on a single factor that could tip which option leads on its own',
     ground: (l) => `The result leans on ${l}, which could tip which option leads on its own`,
     requiresTopInfluence: false,
+    // "could tip which option leads on its own" IS the `isolated` category.
+    requiresCategory: 'isolated',
   },
   // ⚠ "No single factor is decisive here" is KEPT VERBATIM — see the header.
   // `correlated` means "tips only in combination", so the subject is named as a
@@ -226,6 +263,8 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
     expectedOpening: 'No single factor is decisive here, but the right combination of factors',
     ground: (l) => `No single factor is decisive here, but the right combination of factors — ${l} among them —`,
     requiresTopInfluence: false,
+    // "the right combination of factors" IS the `correlated` category.
+    requiresCategory: 'correlated',
   },
 };
 
@@ -251,7 +290,7 @@ function nonEmptyString(value: unknown): string | null {
 function resolveFactorRow(
   enrichment: unknown,
   factorId: string,
-): { label: string | null; rank: number | null } | null {
+): { label: string | null; rank: number | null; category: string | null } | null {
   const root = readRecord(enrichment);
   const rows = root !== null && Array.isArray(root.factor_sensitivity) ? root.factor_sensitivity : [];
   for (const raw of rows) {
@@ -261,7 +300,11 @@ function resolveFactorRow(
     const rank = typeof row.influence_rank === 'number' && Number.isFinite(row.influence_rank)
       ? row.influence_rank
       : null;
-    return { label: nonEmptyString(row.factor_label), rank };
+    return {
+      label: nonEmptyString(row.factor_label),
+      rank,
+      category: nonEmptyString(row.flip_risk_category),
+    };
   }
   return null;
 }
@@ -332,6 +375,20 @@ export function selectGroundedSensitivityBody(
     }
     if (row!.rank !== TOP_INFLUENCE_RANK) {
       return { grounded: null, refusalReason: 'subject_not_top_influence' };
+    }
+  }
+
+  // ⭐ THE SECOND DIMENSION. Same shape, same authority: where the sentence
+  // names a flip-risk category, the PRODUCER decides whether this factor has
+  // it. Unreachable today (each such code is selected by that very category),
+  // which is precisely why it is here — that is a property of today's
+  // predicates, not of the contract, so the gate must not depend on it.
+  if (substitution.requiresCategory !== null) {
+    if (row!.category === null) {
+      return { grounded: null, refusalReason: 'no_flip_risk_category' };
+    }
+    if (row!.category !== substitution.requiresCategory) {
+      return { grounded: null, refusalReason: 'subject_category_mismatch' };
     }
   }
 

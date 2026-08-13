@@ -39,6 +39,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { BODY_BY_RATIONALE } from '../../compose/lens-selector.js';
+import { COACHING_BLOCK_BODY_MAX } from '../fragile-edge-offer-text.js';
 import { buildLensSurface } from '../../compose/phase3-blocks.js';
 import {
   GROUNDED_SENSITIVITY_BODY_MAX,
@@ -203,6 +204,15 @@ describe('selectGroundedSensitivityBody — the honest empties', () => {
   });
 });
 
+/** The category each declared sentence asserts, so a probe can satisfy its gate. */
+const SUBSTITUTION_EXPECTATIONS: Record<string, { category: string }> = {
+  FLIP_RISK_ISOLATED: { category: 'isolated' },
+  FLIP_RISK_CORRELATED: { category: 'correlated' },
+  DOMINANT_DRIVER: { category: 'isolated' },
+  SENSITIVITY_ISOLATED_NO_FLIP: { category: 'isolated' },
+  DOMINANT_DRIVER_NO_FLIP: { category: 'isolated' },
+};
+
 describe('selectGroundedSensitivityBody — drift guard on the borrowed copy', () => {
   /**
    * ⚠ THE ANTI-MIRROR GUARD. The substitution is expressed as an EXPECTED
@@ -217,7 +227,6 @@ describe('selectGroundedSensitivityBody — drift guard on the borrowed copy', (
    * quietly off in production.
    */
   it('every declared substitution still matches its constant', () => {
-    const en = liveEnrichment('session-a');
     const declared = [
       'FLIP_RISK_ISOLATED',
       'FLIP_RISK_CORRELATED',
@@ -226,8 +235,22 @@ describe('selectGroundedSensitivityBody — drift guard on the borrowed copy', (
       'DOMINANT_DRIVER_NO_FLIP',
     ] as const;
     for (const code of declared) {
-      const r = selectGroundedSensitivityBody(code, topFactorId(en), en);
-      expect(r.refusalReason, `${code} no longer matches its constant`).toBeNull();
+      // Each code is asked with a subject satisfying BOTH producer gates, so the
+      // only refusal this can surface is copy drift — which is what this test is
+      // for. Asserting `refusalReason === null` would conflate a copy edit with
+      // a rank/category mismatch and send the next reader to the wrong file.
+      const sub = SUBSTITUTION_EXPECTATIONS[code]!;
+      const r = selectGroundedSensitivityBody(code, 'fac_probe', {
+        factor_sensitivity: [
+          {
+            factor_id: 'fac_probe',
+            factor_label: 'Probe Factor',
+            influence_rank: 1,
+            flip_risk_category: sub.category,
+          },
+        ],
+      });
+      expect(r.refusalReason, `${code} no longer matches its constant`).not.toBe('copy_drifted');
       expect(r.grounded, `${code} produced no grounded body`).not.toBeNull();
     }
   });
@@ -261,8 +284,14 @@ describe('selectGroundedSensitivityBody — drift guard on the borrowed copy', (
     expect(r.refusalReason).toBe('not_composable');
   });
 
-  it('the cap is bounded below the block cap so truncation cannot eat the name', () => {
-    expect(GROUNDED_SENSITIVITY_BODY_MAX).toBeLessThanOrEqual(300);
+  /**
+   * ⚠ THIS USED TO READ `toBeLessThanOrEqual(300)`, WHICH WOULD HAVE SURVIVED
+   * THE OWNER SHRINKING THE CONSTANT TO 250 — it looked like the guarantee
+   * while contributing nothing. The real protection is the nine behavioural
+   * failures a shrink causes; this now pins the BINDING itself.
+   */
+  it('the cap IS the owner\'s constant — not a copy that happens to match', () => {
+    expect(GROUNDED_SENSITIVITY_BODY_MAX).toBe(COACHING_BLOCK_BODY_MAX);
   });
 });
 
@@ -552,4 +581,83 @@ describe('INVARIANT — no false superlative can reach the wire, whatever the se
       }
     },
   );
+});
+
+describe('requiresCategory — honesty in the SECOND dimension the selector controls', () => {
+  /**
+   * ⭐ THE LANDMINE THIS DEFUSES.
+   *
+   * `requiresTopInfluence` makes the superlative sentences honest no matter
+   * WHICH factor a selector picks. Three codes assert something different — a
+   * FLIP-RISK CATEGORY — and for those, honesty still depended on the selector
+   * picking within the category the sentence names. Nothing pinned that.
+   *
+   * It is unreachable TODAY only because each of those codes is selected BY the
+   * very category it asserts. That is a property of today's PREDICATES, not of
+   * the contract — so a future selector change touching the CATEGORY predicates
+   * (rather than their ordering) would make these three sentences lie with no
+   * gate and no test. Deferring the selector decision is sound; handing its next
+   * owner a trap is not.
+   *
+   * Verified exactly as `requiresTopInfluence` is: against the producer's own
+   * `flip_risk_category`, never against the selection.
+   */
+  const NEGLIGIBLE_ROWS = [
+    {
+      factor_id: 'fac_req_change',
+      factor_label: 'Requirements Change Rate',
+      influence_rank: 1,
+      flip_risk_category: 'negligible',
+    },
+    {
+      factor_id: 'fac_iso',
+      factor_label: 'Genuinely Isolated Factor',
+      influence_rank: 2,
+      flip_risk_category: 'isolated',
+    },
+  ];
+
+  it('refuses a flippability sentence about a factor the producer calls negligible', () => {
+    const r = selectGroundedSensitivityBody('FLIP_RISK_ISOLATED', 'fac_req_change', {
+      factor_sensitivity: NEGLIGIBLE_ROWS,
+    });
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('subject_category_mismatch');
+  });
+
+  it('DISCRIMINATING TWIN: grounds when the producer agrees the factor is isolated', () => {
+    const r = selectGroundedSensitivityBody('FLIP_RISK_ISOLATED', 'fac_iso', {
+      factor_sensitivity: NEGLIGIBLE_ROWS,
+    });
+    expect(r.refusalReason).toBeNull();
+    expect(r.grounded!.body).toContain('Genuinely Isolated Factor');
+  });
+
+  it('refuses a combination sentence about a factor the producer calls isolated', () => {
+    const r = selectGroundedSensitivityBody('FLIP_RISK_CORRELATED', 'fac_iso', {
+      factor_sensitivity: NEGLIGIBLE_ROWS,
+    });
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('subject_category_mismatch');
+  });
+
+  it('refuses when the producer supplied no category to check against', () => {
+    const r = selectGroundedSensitivityBody('FLIP_RISK_ISOLATED', 'fac_x', {
+      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'No Category', influence_rank: 1 }],
+    });
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('no_flip_risk_category');
+  });
+
+  it('codes asserting NO category are unaffected by the producer category', () => {
+    // SENSITIVITY_ISOLATED_NO_FLIP asserts a magnitude superlative and says
+    // nothing about flippability — its own `_NO_FLIP` remap exists BECAUSE the
+    // run's evidence contradicts flippability. A `negligible` rank-1 factor is
+    // therefore a perfectly honest subject for it.
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_req_change', {
+      factor_sensitivity: NEGLIGIBLE_ROWS,
+    });
+    expect(r.refusalReason).toBeNull();
+    expect(r.grounded!.body).toContain('Requirements Change Rate');
+  });
 });
