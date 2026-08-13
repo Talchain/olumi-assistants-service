@@ -163,6 +163,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
         CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
 
+        // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
+        CeeEnforcementAutoRetry: "cee.draft_graph.enforcement_auto_retry",
+        CeeEnforcementAutoRetrySkipped: "cee.draft_graph.enforcement_auto_retry_skipped",
+        CeeEnforcementAutoRetryExhausted: "cee.draft_graph.enforcement_auto_retry_exhausted",
+
         // CEE v1 Explain Graph events (v1.12.0)
         CeeExplainGraphRequested: "cee.explain_graph.requested",
         CeeExplainGraphSucceeded: "cee.explain_graph.succeeded",
@@ -1167,6 +1172,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeEnforcementPostValidationWarnings,
         TelemetryEvents.CeeEnforcementPostValidationFailed,
         TelemetryEvents.CeeEnforcementBlocked,
+        // Bounded auto-retry (ROADMAP 2.1086) — diagnostic, no Datadog
+        TelemetryEvents.CeeEnforcementAutoRetry,
+        TelemetryEvents.CeeEnforcementAutoRetrySkipped,
+        TelemetryEvents.CeeEnforcementAutoRetryExhausted,
         TelemetryEvents.NodeKindNormalized,
         TelemetryEvents.GoalGeneration,
         TelemetryEvents.ClarificationRequired,
@@ -1760,6 +1769,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.enforcement_post_validation_warnings",
         "cee.draft_graph.enforcement_post_validation_failed",
         "cee.draft_graph.enforcement_blocked",
+
+        // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
+        "cee.draft_graph.enforcement_auto_retry",
+        "cee.draft_graph.enforcement_auto_retry_skipped",
+        "cee.draft_graph.enforcement_auto_retry_exhausted",
 
         // CEE v1 Explain Graph events
         "cee.explain_graph.requested",

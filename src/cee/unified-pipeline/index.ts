@@ -27,6 +27,9 @@ import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, Ups
 import { isDemandNotBriefFailure } from "../../adapters/llm/draft-budget.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
 import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
+import { decideEnforcementAutoRetry, applyEnforcementRetryExhaustedCopy } from "./draft-auto-retry.js";
+import { isEnforcementBlockedResult } from "./stages/repair/graph-enforcement.js";
+import { MIN_DRAFT_RETRY_BUDGET_MS } from "../../config/timeouts.js";
 import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-timings.js";
 
 import { runStageParse } from "./stages/parse.js";
@@ -614,7 +617,99 @@ function drainEarlyReturn(ctx: StageContext): UnifiedPipelineResult | undefined 
   return er;
 }
 
+/**
+ * ROADMAP 2.1086 — the bounded auto-retry entry point.
+ *
+ * ONE pipeline attempt for every caller and every outcome EXCEPT the
+ * post-enforcement fail-closed 422 (`isEnforcementBlockedResult` — the
+ * producer's own signature, shared constants with the emitter in
+ * graph-enforcement.ts). That failure class is self-declared stochastic
+ * model topology (`retryable: true` at the gate), completes far inside the
+ * request budget (17–28s observed vs a 120s envelope), and recovered 3/5 on
+ * a same-brief retry (BASELINE.md, draft-reliability-2026-08-12) — so the
+ * server spends the retry the user would otherwise be asked to click.
+ *
+ * Guarantees, each pinned in
+ * tests/unit/cee.unified-pipeline.enforcement-auto-retry.test.ts:
+ *  - EXACTLY one retry, only on that class, never on thrown errors;
+ *  - byte-identical input (same object; `ctx.input` is readonly and the
+ *    pipeline never writes it — asserted at the parse seam);
+ *  - attempt 2 measures elapsed time from the ORIGINAL request start
+ *    (`requestStartMs` pinned below), so parse's per-attempt window clamp,
+ *    the Step-11 budget guard and the runaway funding rules all account for
+ *    attempt 1's spend — the composition cannot exceed
+ *    DRAFT_REQUEST_BUDGET_MS by construction;
+ *  - the retry is funded only when the remaining window fits a healthy
+ *    draft (`decideEnforcementAutoRetry`), and a skip is telemetry-visible;
+ *  - a second identical failure ships the honest exhausted copy
+ *    (`applyEnforcementRetryExhaustedCopy`) instead of the now-stale
+ *    "usually succeeds" hint.
+ */
 export async function runUnifiedPipeline(
+  input: DraftInputWithCeeExtras,
+  rawBody: unknown,
+  request: FastifyRequest,
+  opts: UnifiedPipelineOpts,
+): Promise<UnifiedPipelineResult> {
+  // The elapsed-time baseline for the RETRY decision and for attempt 2's
+  // budgets. When the caller threads requestStartMs (the live turn + assist
+  // routes), that is the baseline; when it doesn't (legacy callers), the
+  // wrapper's own entry time is the closest honest stand-in. Attempt 1
+  // receives opts UNCHANGED — its documented LLM-start fallback behaviour
+  // (review-576 condition 2) is untouched on the no-retry path.
+  const retryBaselineMs = opts.requestStartMs ?? Date.now();
+
+  const first = await runUnifiedPipelineAttempt(input, rawBody, request, opts);
+
+  const elapsedMs = Date.now() - retryBaselineMs;
+  const decision = decideEnforcementAutoRetry(first, elapsedMs);
+  if (!decision.retry) {
+    if (decision.reason === "budget_unaffordable") {
+      log.warn({
+        event: TelemetryEvents.CeeEnforcementAutoRetrySkipped,
+        request_id: getRequestId(request),
+        auto_retry_skip_reason: decision.reason,
+        elapsed_ms: elapsedMs,
+        retry_budget_ms: decision.retryBudgetMs,
+        min_retry_budget_ms: MIN_DRAFT_RETRY_BUDGET_MS,
+      }, "Post-enforcement draft failure is retryable but the remaining request budget cannot fund a fresh draft — returning the single-attempt failure");
+    }
+    return first;
+  }
+
+  const firstDetails = ((first.body as Record<string, unknown> | null)?.details ?? {}) as Record<string, unknown>;
+  log.info({
+    event: TelemetryEvents.CeeEnforcementAutoRetry,
+    request_id: getRequestId(request),
+    attempt: 2,
+    elapsed_ms: elapsedMs,
+    retry_budget_ms: decision.retryBudgetMs,
+    // Fixed validator enum strings (the codes-only mirror, ROADMAP 2.718) —
+    // no user content.
+    first_attempt_validation_error_codes: firstDetails.validation_error_codes,
+  }, "Post-enforcement draft validation failed on stochastic topology — funding ONE automatic retry with byte-identical input");
+
+  // Byte-identical input and rawBody (same objects — the pipeline treats
+  // both as readonly); requestStartMs pinned so attempt 2's budget
+  // arithmetic starts where the REQUEST started, not where the retry did.
+  const second = await runUnifiedPipelineAttempt(input, rawBody, request, {
+    ...opts,
+    requestStartMs: retryBaselineMs,
+  });
+
+  if (isEnforcementBlockedResult(second)) {
+    log.warn({
+      event: TelemetryEvents.CeeEnforcementAutoRetryExhausted,
+      request_id: getRequestId(request),
+      attempt: 2,
+      elapsed_ms: Date.now() - retryBaselineMs,
+    }, "The automatic retry hit the post-enforcement gate again — returning the typed failure with honest exhausted copy");
+    return applyEnforcementRetryExhaustedCopy(second);
+  }
+  return second;
+}
+
+async function runUnifiedPipelineAttempt(
   input: DraftInputWithCeeExtras,
   rawBody: unknown,
   request: FastifyRequest,

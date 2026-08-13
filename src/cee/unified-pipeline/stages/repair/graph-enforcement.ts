@@ -43,6 +43,49 @@ import { validateGraph as validateGraphDeterministic } from "../../../../validat
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 
 // ---------------------------------------------------------------------------
+// The fail-closed block signature (ROADMAP 2.1086)
+// ---------------------------------------------------------------------------
+// These constants ARE the emission: the earlyReturn built at the bottom of
+// `applyDeterministicEnforcement` uses them directly, and the trigger below
+// reads the same bytes — so the auto-retry trigger cannot drift from the
+// producer (derive, don't mirror; trap 12). Note what is deliberately NOT
+// here: a list of validator codes. The gate fires iff
+// `validateGraphDeterministic(...).errors.length > 0` at phase
+// `post_enforcement`, so the retryable code set is whatever that validator
+// classifies as blocking — present or future — by construction.
+
+export const ENFORCEMENT_BLOCK_STATUS_CODE = 422;
+export const ENFORCEMENT_BLOCK_ERROR_CODE = "CEE_GRAPH_INVALID" as const;
+export const ENFORCEMENT_BLOCK_LAST_PHASE = "deterministic_enforcement" as const;
+
+/**
+ * Recognises the post-enforcement fail-closed result THIS module emits —
+ * and only it. Four conjuncts, each carried by the emission below:
+ * the status code, the error code, the producer's own retryability
+ * declaration (`retryable: true` — the gate's judgement that the failure is
+ * stochastic model topology, not a bad brief), and the phase marker that
+ * separates this gate from the orchestrator-validation emitter (the only
+ * other `last_phase` producer in the tree — both named in ROADMAP 2.718).
+ *
+ * Consumed by the bounded auto-retry seam (`draft-auto-retry.ts`); pinned
+ * against the REAL emission in
+ * tests/unit/cee.enforcement-auto-retry-producer-agreement.test.ts.
+ */
+export function isEnforcementBlockedResult(
+  result: { statusCode: number; body: unknown } | undefined,
+): boolean {
+  if (!result || result.statusCode !== ENFORCEMENT_BLOCK_STATUS_CODE) return false;
+  const body = result.body;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const b = body as Record<string, unknown>;
+  if (b.code !== ENFORCEMENT_BLOCK_ERROR_CODE) return false;
+  if (b.retryable !== true) return false;
+  const details = b.details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return false;
+  return (details as Record<string, unknown>).last_phase === ENFORCEMENT_BLOCK_LAST_PHASE;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -515,7 +558,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       }, `Enforcement blocked packaging: ${postValidationErrorCount} topology error(s) remain`);
 
       const errorBody = buildCeeErrorResponse(
-        "CEE_GRAPH_INVALID",
+        ENFORCEMENT_BLOCK_ERROR_CODE,
         `Graph failed post-enforcement validation (${postValidationErrorCount} topology error(s))`,
         {
           requestId,
@@ -556,11 +599,11 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
             // codes. Derived from the same array, so the two cannot drift.
             validation_error_codes: revalidation.errors.map((e) => e.code),
             enforcement_repairs: allRepairs.length,
-            last_phase: "deterministic_enforcement",
+            last_phase: ENFORCEMENT_BLOCK_LAST_PHASE,
           },
         },
       );
-      ctx.earlyReturn = { statusCode: 422, body: errorBody };
+      ctx.earlyReturn = { statusCode: ENFORCEMENT_BLOCK_STATUS_CODE, body: errorBody };
     }
   } catch (err) {
     // Validator throws are non-fatal by codebase convention — a system-level
