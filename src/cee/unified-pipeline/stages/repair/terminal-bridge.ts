@@ -28,15 +28,43 @@
  * incoherence — the sharpest form of the defect — untouched. Substep 8 is the
  * last connectivity-owning step before the gate.
  *
- * ⛔ THE NODE THIS MINTS IS ONE THE USER NEVER WROTE. It is therefore marked
- * synthetic at every layer that reaches a human: a self-disclosing label and
- * `body` (projected to the V3 wire as `description`), NO `extractionType` /
- * `observed_state` / `data` — so `nodeProvenanceDisplay` resolves to
- * `ai_inferred` and can never resolve to `from_brief` — `origin: "repair"` and
- * `provenance.source: "synthetic"` on every edge, and a `node_added` correction
- * so the addition is auditable rather than silent. Pinned by
- * `tests/unit/cee.terminal-bridge-synthesis.test.ts`, which asserts the WIRE
- * values through the real V3 transform, not the internal fields.
+ * ⛔ THE NODE THIS MINTS IS ONE THE USER NEVER WROTE, so what it is marked with
+ * matters — and so does what a user can actually SEE. Those are different
+ * questions, and an earlier version of this comment answered the second with the
+ * first. The measured position, by channel:
+ *
+ *   REACHES A USER (verified by execution through the real `transformGraphToV3`,
+ *   `tests/unit/cee.terminal-bridge-synthesis.test.ts`):
+ *     - `label` — "…(added by Olumi)", a required V3 node field;
+ *     - `body` → V3 `description` (`schema-v3.ts`), a declared V3 node field,
+ *       carrying "…It is not from your brief — review or replace it."
+ *   These two are the disclosure. Everything else below is defence in depth.
+ *
+ *   ON THE WIRE BUT NOT RENDERED (reported stripped by the UI adapter allowlist —
+ *   an independent review's measurement, NOT re-derived here, and the UI is not
+ *   this seam): node `provenance` (`ai_inferred`, and it can never be
+ *   `from_brief` because this node has no `extractionType` / `observed_state` /
+ *   `data` for `mayClaimFromBrief` to read) and the edges' `origin: "repair"` /
+ *   `provenance.source: "synthetic"`.
+ *
+ *   ⚠ DOES NOT REACH A USER AT ALL — do not describe either as an audit trail:
+ *     - the `node_added` CORRECTION below. `corrections` is not a declared field
+ *       on the V3 response (`schemas/cee-v3.ts`: 0 occurrences, against 18 for
+ *       `nodes` as a contrast control), so it is dropped at the V1→V3 boundary.
+ *       It is kept because it is the convention every sibling repair follows and
+ *       it is real telemetry — not because a human sees it.
+ *     - the `TERMINAL_BRIDGE_SYNTHESISED` repair via
+ *       `trace.repair_summary.deterministic_repairs`. Its only consumer,
+ *       `extractRepairsApplied` (`orchestrator/tools/draft-graph.ts`), requires
+ *       `typeof rec.reason === "string"` before it will build a `RepairEntry` —
+ *       and ALL FOUR `Repair` interfaces in this tree are `{code, path, action}`.
+ *       Measured with a complete manifest and a contrast control: 0 producers
+ *       emit `reason`, 44 emit `action`; `reason` appears only in that consumer's
+ *       own test fixtures. That whole limb is dead for every deterministic
+ *       repair, not just this one. Rowed, not fixed here.
+ *
+ * RUNG: MOUNTED. The wire values are asserted by execution; no fresh-journey
+ * witness has been taken on a deployed build carrying this code. Not "live".
  */
 
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
@@ -74,7 +102,12 @@ interface Repair {
 }
 
 interface TerminalBridgeOptions {
-  /** CorrectionCollector — the audit channel every sibling repair writes to. */
+  /**
+   * CorrectionCollector — the channel every sibling repair writes to. Telemetry
+   * only: `corrections` is dropped at the V1→V3 boundary and never reaches a
+   * user (see the header). Written for consistency with the siblings, not as a
+   * disclosure.
+   */
   collector?: {
     addByStage(
       stage: number,

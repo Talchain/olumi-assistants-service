@@ -302,7 +302,13 @@ describe("ROADMAP 2.1099 — terminal-bridge synthesis (R1)", () => {
       }
     });
 
-    it("records the mint as a correction so the addition is auditable, not silent", async () => {
+    // ⚠ TELEMETRY ONLY — NOT a user-facing disclosure. `corrections` is not a
+    // declared field on the V3 response and is dropped at the V1→V3 boundary, so
+    // nothing here reaches a human. The disclosure that DOES reach a user is the
+    // label and `description`, asserted two tests above. This test exists so the
+    // sibling-repair convention is not dropped silently — do not read it as
+    // evidence that the addition is visible.
+    it("records the mint as a correction (telemetry channel, not a user-facing one)", async () => {
       const ctx = makeCtx(buildS3Graph());
       await runStageRepair(ctx);
 
