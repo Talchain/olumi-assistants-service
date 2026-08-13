@@ -403,9 +403,10 @@ export function buildAnalysisReadyPayload(
   // enrichment didn't set data.value on factor nodes. We recover values from
   // the V3 factor node's observed_state or V1 data field (preserved via passthrough).
   const blockers: AnalysisBlockerT[] = [];
-  let fallbackCount = 0;
-  // Task 9: Track provenance of each fallback intervention
-  const fallbackSources: Array<{ optionId: string; factorId: string; source: string }> = [];
+  // What we DECLINED to substitute, and from where. Recorded for the trace so
+  // the refusal is observable — an operator can see how often a current level
+  // was available and deliberately not used as an option's lever.
+  const declinedFallbacks: Array<{ optionId: string; factorId: string; source: string }> = [];
 
   // Build factor node lookup and node kind map
   const factorNodeMap = new Map<string, NodeV3T>();
@@ -445,72 +446,80 @@ export function buildAnalysisReadyPayload(
       // potentially controllable (the edge IS the signal).
       if (factorNode.category && factorNode.category !== "controllable") continue;
 
-      // Fallback chain: observed_state.value → data.value (V1 passthrough)
+      // ⛔ NO SILENT INVENTION. This branch used to WRITE a value here —
+      // `observed_state.value`, else the V1 `data.value` passthrough — into an
+      // option that had none.
+      //
+      // Neither is a statement about THIS OPTION. `observed_state.value` is the
+      // factor's CURRENT level, i.e. what happens if nobody acts; writing it as
+      // the option's intervention asserts "this option sets churn to 0.12",
+      // which the user never said. It is invention with a citation, and it is
+      // the more persuasive kind because the number is real — just an answer to
+      // a different question (CLAUDE.md trap 21).
+      //
+      // Two measured consequences, both of which the refusal removes:
+      //  · Every option with no stated magnitude received the SAME value (the
+      //    shared baseline), so the analysis compared strategies that were
+      //    numerically identical while reporting itself ready.
+      //  · Public `options[]` showed `{}` while this copy showed a value, so
+      //    THE SET SHOWN AND THE SET ANALYSED WERE DIFFERENT OBJECTS WITH
+      //    DIFFERENT CONTENTS.
+      //
+      // A path that can only proceed by inventing must refuse, and say why.
+      // The blocker below is that refusal: it names the option, the factor and
+      // the action needed, so the gap is visible rather than papered over.
+      const factorLabel = factorNode.label ?? factorId ?? "Unknown factor";
       const observedValue = factorNode.observed_state?.value;
       const rawData = (factorNode as Record<string, unknown>).data;
       const dataValue =
         typeof rawData === "object" && rawData !== null && "value" in rawData
           ? (rawData as { value: unknown }).value
           : undefined;
-
-      if (typeof observedValue === "number") {
-        analysisOpt.interventions[factorId] = observedValue;
-        fallbackCount++;
-        // Task 9: Track provenance of fallback source
-        fallbackSources.push({ optionId: analysisOpt.id, factorId, source: "observed_state" });
-      } else if (typeof dataValue === "number") {
-        analysisOpt.interventions[factorId] = dataValue;
-        fallbackCount++;
-        // Task 9: Track provenance of fallback source
-        fallbackSources.push({ optionId: analysisOpt.id, factorId, source: "data.value" });
-      } else {
-        // No computable value — emit blocker (Task 2B)
-        // Task 5: factor_label fallback chain
-        const factorLabel = factorNode.label ?? factorId ?? "Unknown factor";
-        blockers.push({
-          option_id: analysisOpt.id,
-          option_label: analysisOpt.label,
-          factor_id: factorId,
-          factor_label: factorLabel,
-          blocker_type: "missing_value",
-          message: `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
-          suggested_action: "add_value",
+      const currentLevel =
+        typeof observedValue === "number"
+          ? observedValue
+          : typeof dataValue === "number"
+            ? dataValue
+            : undefined;
+      if (currentLevel !== undefined) {
+        declinedFallbacks.push({
+          optionId: analysisOpt.id,
+          factorId,
+          source: typeof observedValue === "number" ? "observed_state" : "data.value",
         });
       }
+
+      blockers.push({
+        option_id: analysisOpt.id,
+        option_label: analysisOpt.label,
+        factor_id: factorId,
+        factor_label: factorLabel,
+        blocker_type: "missing_value",
+        // Knowing the current level is genuinely useful to the user — it just
+        // is not an answer. Say both things rather than substituting one for
+        // the other.
+        message:
+          currentLevel !== undefined
+            ? `Factor "${factorLabel}" is currently ${currentLevel}. What should option "${analysisOpt.label}" set it to?`
+            : `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
+        suggested_action: "add_value",
+      });
     }
 
-    // ⛔ THE FALLBACK NO LONGER PROMOTES AN OPTION TO `ready`.
+    // ⛔ NOTHING RE-EVALUATES STATUS HERE ANY MORE, AND THAT IS THE POINT.
     //
-    // This block used to flip the COPY's status to "ready" while public
-    // `options[]` — the object the team is shown — stayed `needs_user_mapping`.
-    // `chip-generator.ts:358` reads this status, so the product refused in the
-    // panel ("we have not set a value for this") and simultaneously offered an
-    // executable "Run the analysis" chip. Two surfaces, one payload, opposite
-    // claims.
+    // A promotion block stood here: when the fallback had filled interventions
+    // it flipped this COPY to "ready" while public `options[]` — the object the
+    // team is shown — stayed `needs_user_mapping`. `chip-generator.ts:358`
+    // reads this status, so the product refused in the panel and offered an
+    // executable "Run the analysis" chip at the same moment.
     //
-    // ⚠ WHY IT IS FIXED HERE rather than parked as pre-existing. The promotion
-    // can only fire on an option with ZERO real interventions — with one or
-    // more, `transformOptionToAnalysisReady` has already set a non-mapping
-    // status and this branch is unreachable. That population was near-empty
-    // before the prose fallback stopped authoring values from semantic guesses;
-    // the refusal in `intervention-extractor.ts` is what creates it. A defect
-    // that could not fire before a change and fires after it belongs to that
-    // change, whatever its age.
-    //
-    // The fallback VALUES are kept: they feed `intervention_details` and the
-    // display layer, and `run_analysis` never reads this payload (it reloads
-    // the persisted graph and rebuilds from the option nodes via
-    // `mergeInterventionSourceObjects`). What is withdrawn is only the CLAIM
-    // that an option whose every value we inferred is ready to analyse. An
-    // inferred baseline is not a user's lever, and status is where that
-    // difference is reported.
-    if (
-      analysisOpt.status === "needs_user_mapping" &&
-      Object.keys(analysisOpt.interventions).length > 0
-    ) {
-      analysisOpt.status_reason =
-        "Values shown for this option were taken from each factor's current level, not set for this option. It still needs your input before analysis.";
-    }
+    // With the substitution withdrawn above, `analysisOpt.interventions` can no
+    // longer grow after `transformOptionToAnalysisReady` computed the status
+    // from it — so there is nothing to re-evaluate, and the two surfaces cannot
+    // disagree by construction rather than by a second rule kept in step by
+    // hand. That is the stronger guarantee: the set shown and the set analysed
+    // are the same set, not two sets that agree today.
   }
 
   // Task 7: Deduplicate blockers by (option_id, factor_id) pair
@@ -524,15 +533,14 @@ export function buildAnalysisReadyPayload(
     }
   }
 
-  if (fallbackCount > 0 || dedupedBlockers.length > 0) {
+  if (declinedFallbacks.length > 0 || dedupedBlockers.length > 0) {
     log.info({
-      event: "cee.analysis_ready.fallback_applied",
+      event: "cee.analysis_ready.fallback_declined",
       request_id: context.requestId,
-      fallback_count: fallbackCount,
+      declined_count: declinedFallbacks.length,
       blocker_count: dedupedBlockers.length,
-      // Task 9: Provenance source marker for data.value fallbacks
-      fallback_sources: fallbackSources,
-    }, `analysis-ready: resolved ${fallbackCount} intervention(s) via factor node fallback, ${dedupedBlockers.length} blocker(s)`);
+      declined_sources: declinedFallbacks,
+    }, `analysis-ready: declined ${declinedFallbacks.length} factor-level substitution(s) rather than invent an option's lever, ${dedupedBlockers.length} blocker(s)`);
   }
   // === End Task 2A+2B ===
 
@@ -793,16 +801,19 @@ export function buildAnalysisReadyPayload(
     optionsNeedingEncoding,
     optionsNeedingMapping,
     // Task 2A+2B observability
-    fallbackCount,
+    declinedFallbackCount: declinedFallbacks.length,
     blockerCount: dedupedBlockers.length,
   });
 
-  // F15: Attach fallback metadata for trace surfacing (only when fallbacks occurred)
-  if (fallbackCount > 0) {
+  // F15: Attach fallback metadata for trace surfacing. `fallback_count` is now
+  // always 0 by construction — no value is ever substituted — and the sources
+  // list records what was DECLINED, so the trace shows the refusal happening
+  // rather than falling silent about a path that no longer fires.
+  if (declinedFallbacks.length > 0) {
     // AnalysisReadyPayload uses .passthrough() — _fallback_meta is a runtime-only trace field
     (payload as Record<string, unknown>)._fallback_meta = {
-      fallback_count: fallbackCount,
-      fallback_sources: fallbackSources,
+      fallback_count: 0,
+      fallback_sources: declinedFallbacks,
     };
   }
 

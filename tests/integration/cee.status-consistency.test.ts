@@ -351,7 +351,15 @@ describe("CEE Status Consistency", () => {
       expect(analysisReady).toBeDefined();
       expect(analysisReady.options).toBeInstanceOf(Array);
       expect(analysisReady.goal_node_id).toBeDefined();
-      expect(["ready", "needs_user_mapping", "needs_encoding"]).toContain(analysisReady.status);
+      // `needs_user_input` is a first-class payload status (see AnalysisReadyStatusT)
+      // and became REACHABLE for this brief when analysis-ready stopped substituting
+      // a factor's current level for an option's unstated lever: the refusal emits
+      // blockers, and blockers set this status. Widening the PAYLOAD-level set keeps
+      // this a structural-validity check; the per-option set below is left narrow on
+      // purpose, because an OPTION never takes this status.
+      expect(["ready", "needs_user_mapping", "needs_encoding", "needs_user_input"]).toContain(
+        analysisReady.status,
+      );
 
       // Verify each option has valid structure
       for (const option of analysisReady.options) {

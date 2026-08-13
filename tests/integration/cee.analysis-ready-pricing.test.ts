@@ -174,7 +174,15 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
       expect(body.analysis_ready).toHaveProperty("goal_node_id");
 
       // Status must be a valid value
-      expect(["ready", "needs_user_mapping"]).toContain(body.analysis_ready.status);
+      // `needs_user_input` is a first-class payload status (see AnalysisReadyStatusT)
+      // and became REACHABLE for this brief when analysis-ready stopped substituting
+      // a factor's current level for an option's unstated lever: the refusal emits
+      // blockers, and blockers set this status. Widening the PAYLOAD-level set keeps
+      // this a structural-validity check; the per-option set below is left narrow on
+      // purpose, because an OPTION never takes this status.
+      expect(["ready", "needs_user_mapping", "needs_encoding", "needs_user_input"]).toContain(
+        body.analysis_ready.status,
+      );
 
       // Options must be an array
       expect(Array.isArray(body.analysis_ready.options)).toBe(true);
@@ -363,7 +371,15 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
 
       // Status is at payload level, not option level
       expect(body.analysis_ready.status).toBeDefined();
-      expect(["ready", "needs_user_mapping"]).toContain(body.analysis_ready.status);
+      // `needs_user_input` is a first-class payload status (see AnalysisReadyStatusT)
+      // and became REACHABLE for this brief when analysis-ready stopped substituting
+      // a factor's current level for an option's unstated lever: the refusal emits
+      // blockers, and blockers set this status. Widening the PAYLOAD-level set keeps
+      // this a structural-validity check; the per-option set below is left narrow on
+      // purpose, because an OPTION never takes this status.
+      expect(["ready", "needs_user_mapping", "needs_encoding", "needs_user_input"]).toContain(
+        body.analysis_ready.status,
+      );
 
       // If needs_user_mapping, should have user_questions
       if (body.analysis_ready.status === "needs_user_mapping") {

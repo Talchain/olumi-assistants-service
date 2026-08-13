@@ -255,8 +255,8 @@ describe("Task 7: Deduplicate blockers", () => {
 // Task 9: data.value provenance source marker
 // ============================================================================
 
-describe("Task 9: Provenance source marker for fallback interventions", () => {
-  it("observed_state.value fallback produces correct intervention value", () => {
+describe("Task 9: Provenance of the DECLINED factor-level substitution", () => {
+  it("observed_state.value is declined, not written, and the blocker names it", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -268,12 +268,18 @@ describe("Task 9: Provenance source marker for fallback interventions", () => {
     const options = [createV3Option("opt_a", "Opt A")];
     const result = buildAnalysisReadyPayload(options, "goal_1", graph);
 
-    expect(result.options[0].interventions["fac_1"]).toBe(42);
-    // No blockers for this factor (value was resolved)
-    expect(result.blockers).toBeUndefined();
+    // ⚠ CONTRACT REVERSED DELIBERATELY: 42 is the factor's current level, not a
+    // statement about what Opt A sets it to. The provenance this suite exists to
+    // track is now the provenance of a REFUSAL rather than of a substitution.
+    expect(result.options[0].interventions).not.toHaveProperty("fac_1");
+    const blocker = result.blockers?.find(
+      (b) => b.option_id === "opt_a" && b.factor_id === "fac_1",
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.message).toContain("42");
   });
 
-  it("data.value fallback produces correct intervention value", () => {
+  it("the data.value passthrough is declined the same way", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -285,7 +291,12 @@ describe("Task 9: Provenance source marker for fallback interventions", () => {
     const options = [createV3Option("opt_a", "Opt A")];
     const result = buildAnalysisReadyPayload(options, "goal_1", graph);
 
-    expect(result.options[0].interventions["fac_1"]).toBe(99);
+    expect(result.options[0].interventions).not.toHaveProperty("fac_1");
+    const blocker = result.blockers?.find(
+      (b) => b.option_id === "opt_a" && b.factor_id === "fac_1",
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.message).toContain("99");
   });
 });
 
