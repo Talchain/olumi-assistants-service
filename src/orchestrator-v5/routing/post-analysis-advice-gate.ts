@@ -72,6 +72,7 @@ import {
   quoteLabel,
   type RawRobustnessSignals,
 } from '../coaching/robustness-honesty.js';
+import type { DefaultedAssumptionsSignal } from '../coaching/pick-defaulted-assumptions.js';
 import {
   composeRobustnessVerdict,
   type RobustnessVerdict,
@@ -122,6 +123,10 @@ function robustnessVerdictFor(
     },
     rawRobustness ?? null,
     mode,
+    // The verdict collapses its stability axis to `unknown` when the engine
+    // reports defaulted values, so EVERY branch below that reads
+    // `stability_category` stands down without knowing this rule exists.
+    analysis.defaulted_assumptions ?? null,
   );
 }
 
@@ -166,6 +171,22 @@ export interface AdviceGateAnalysisFragileEdge {
 }
 
 export interface AdviceGateAnalysis {
+  /**
+   * The ENGINE's own defaulted-value verdict for THIS analysis
+   * (`enrichment.defaulted_assumptions`, read by
+   * `coaching/pick-defaulted-assumptions.ts` off the same `run_analysis` fact
+   * every other grounding layer uses).
+   *
+   * ⭐ IT RIDES THE ANALYSIS, NOT THE TURN, AND THAT IS WHY IT NEEDS NO
+   * THREADING. Whether the numbers rest on defaulted inputs is a property OF
+   * this analysis, so it travels with it into all five `robustnessVerdictFor`
+   * call sites without a parallel parameter on every composer signature — a
+   * parallel parameter is exactly how `rawRobustness` once reached one composer
+   * and not its twin (the S4 drift), and this axis must not repeat it.
+   *
+   * Absent/`null` ⇒ no evidence of defaulting ⇒ byte-identical behaviour.
+   */
+  readonly defaulted_assumptions?: DefaultedAssumptionsSignal | null;
   readonly status?: string;
   readonly leading_option: AdviceGateAnalysisOption | null;
   readonly runner_up?: AdviceGateAnalysisOption | null;

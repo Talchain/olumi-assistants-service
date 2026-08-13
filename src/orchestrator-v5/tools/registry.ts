@@ -254,6 +254,19 @@ export interface HandlerInvocation {
    */
   readonly rawRobustness?: import('../coaching/pick-raw-robustness.js').RawRobustnessSignals | null;
   /**
+   * The ENGINE's own defaulted-value disclosure (`enrichment.defaulted_
+   * assumptions`) selected by `pickLatestDefaultedAssumptions` off the SAME
+   * `run_analysis` fact `rawRobustness` above is read from, under the SAME
+   * same-run guard. Threaded so the CONVERSATIONAL recitation inherits the
+   * disclosure the ANALYSE turn already makes — before this existed the
+   * explanation composers had no field through which the fact that a number
+   * rests on defaulted inputs could reach them, and they asserted stability
+   * about it. Optional; `null` is the explicit "no evidence of defaulting".
+   */
+  readonly defaultedAssumptions?:
+    | import('../coaching/pick-defaulted-assumptions.js').DefaultedAssumptionsSignal
+    | null;
+  /**
    * Honest flip-threshold evidence (`enrichment.flip_thresholds` summarised)
    * selected by `pickLatestFlipSummary` off the same `run_analysis` fact the
    * freshness/projection layer chose. Threaded into the `what_would_flip`

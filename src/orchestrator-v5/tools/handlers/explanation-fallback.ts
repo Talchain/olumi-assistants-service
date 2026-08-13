@@ -48,6 +48,12 @@ import {
   resolveAgreedAlternativeWinner,
   type FlipSummary,
 } from '../../compose/flip-proposal.js';
+// The conversational layer inherits the ANALYSE turn's disclosure from the ONE
+// module that owns it — never a second copy of the words (CLAUDE.md trap 12).
+import {
+  buildDefaultedAssumptionsDisclosure,
+  type DefaultedAssumptionsSignal,
+} from '../../coaching/pick-defaulted-assumptions.js';
 
 export { formatSensitivityDirection };
 
@@ -163,6 +169,16 @@ export interface RobustnessVerdict {
   readonly margin_clause: string | null;
   readonly stability_clause: string | null;
   readonly stability_implies_flippability: boolean;
+  /**
+   * The ENGINE's own defaulted-value disclosure for this analysis, or `null`.
+   *
+   * ⭐ WHY IT RIDES THE VERDICT RATHER THAN EACH FALLBACK. Both post-analysis
+   * fallbacks narrate the SAME run, so the disclosure must be decided ONCE and
+   * in the same place as the stability verdict it suppresses — otherwise one
+   * composer can drop the caveat while the other keeps it, which is the exact
+   * S4 drift class this function was centralised to make unrepresentable.
+   */
+  readonly defaulted_disclosure: string | null;
 }
 
 /**
@@ -187,6 +203,7 @@ export function composeRobustnessVerdict(
   projection: RobustnessVerdictInput,
   rawRobustness: RawRobustnessSignals | null,
   mode: RobustnessVerdictMode,
+  defaultedAssumptions: DefaultedAssumptionsSignal | null = null,
 ): RobustnessVerdict {
   const leading = projection.leading_option;
   const runner = projection.runner_up;
@@ -216,13 +233,62 @@ export function composeRobustnessVerdict(
   // either the raw level OR the canonical band (older facts may carry only the
   // canonicalised verdict).
   const fragile = isRawFragile(rawRobustness) || band === CANONICAL_FRAGILE_BAND;
-  const stabilityCat: RobustnessStabilityCategory = fragile
+  const measuredStability: RobustnessStabilityCategory = fragile
     ? 'fragile'
     : band === 'stable' || band === 'highly_stable'
       ? 'stable'
       : band === 'moderate'
         ? 'moderate'
         : 'unknown';
+
+  // ── DEFAULTED VALUES COLLAPSE THE STABILITY AXIS TO `unknown` ───────────
+  //
+  // ⚠⚠ THE WORST LINE IN THE 13 Aug DEPLOYED WITNESS. On an ORDINARY CHAT TURN,
+  // with `analysis_ready.options[].status = needs_encoding` on the same payload,
+  // the flip fallback recited the numbers and then added:
+  //
+  //   "This result looks stable, so smaller changes are less likely to flip
+  //    the outcome on their own."
+  //
+  // A confidence claim, stacked on numbers the product itself calls
+  // placeholders. The ANALYSE turn discloses correctly
+  // (`coaching/scaffold-disclosure.ts`); the conversational recitation dropped
+  // the disclosure and then asserted stability over it.
+  //
+  // ⭐⭐ THE SUPPRESSION LANDS ON THE CATEGORY, NOT ON THE CLAUSE, AND THAT IS
+  // THE WHOLE POINT. `stability_clause` is only ONE of this verdict's readers.
+  // The free-text advice gate (`routing/post-analysis-advice-gate.ts`) reads
+  // `stability_category` and writes its OWN sentences from it — five call
+  // sites. Nulling the clause would have fixed the two fallbacks and left the
+  // gate asserting the same thing in its own words: a fix that updates two of
+  // three readers REPRODUCES the defect it closes. Collapsing the axis makes
+  // every reader stand down at once, and a reader added later inherits it
+  // without needing to know this rule exists (CLAUDE.md trap 12: derive, don't
+  // mirror; trap 21: one concept, several readers).
+  //
+  // ⭐ `unknown` IS THE TRUTHFUL VALUE, not a fail-safe fiction. This axis
+  // means "how steady is each option's OWN score under variation". Measured
+  // over defaulted inputs, that is genuinely not known — and `unknown` is
+  // already a member of the type, already handled by every consumer as
+  // "omit, no overclaim". Nothing new has to be taught to anybody.
+  //
+  // ⭐ MODE-BLIND AND DIRECTION-BLIND. Suppressing only the REASSURING arms
+  // would leave the FRAGILITY arms making the same class of claim in the other
+  // direction. The question is not whether the claim is comforting, it is
+  // whether the run supports it (CLAUDE.md trap 22b: one predicate must not be
+  // asked to police two opposite harms with one window).
+  //
+  // The MARGIN axis is deliberately untouched: it states each option's OWN win
+  // share, which is what the analysis returned. The recitation is QUALIFIED by
+  // the disclosure below, never withheld — withholding the standing result
+  // would trade a dishonest answer for no answer, which the ratified per-field
+  // egress ruling rejects.
+  const defaultedDisclosure =
+    defaultedAssumptions !== null && defaultedAssumptions.count > 0
+      ? buildDefaultedAssumptionsDisclosure(defaultedAssumptions)
+      : null;
+  const stabilityCat: RobustnessStabilityCategory =
+    defaultedDisclosure !== null ? 'unknown' : measuredStability;
 
   const headline = `${marginCat}:${stabilityCat}` as RobustnessVerdict['headline'];
   const stabilityPhrase = describeRobustnessBand(band);
@@ -325,13 +391,42 @@ export function composeRobustnessVerdict(
     // moderate, unknown, or indeterminate-stable → omit (no overclaim).
   }
 
+  // ⭐ AND THE SECOND HALF, WHICH THE CATEGORY COLLAPSE DOES NOT REACH — this
+  // is NOT belt-and-braces, it closes a DIFFERENT arm. In `flip` mode the
+  // near-tie clause is gated on `marginCat`, not on the stability axis, so it
+  // survives the collapse:
+  //
+  //   "The result is sensitive to small movements in the strongest drivers, so
+  //    the leading option could change without much shifting."
+  //
+  // That is a BEHAVIOURAL PREDICTION about how the result moves, on inputs the
+  // engine defaulted — the same unlicensed claim as the reassuring arm, merely
+  // pointing the other way. The margin clause already tells the user the
+  // options are effectively tied, which IS what the analysis returned; the
+  // extra sentence predicts what would happen next, which it does not support.
+  // Suppressing only the comforting direction is exactly the one-parameter-two-
+  // harms mistake (CLAUDE.md trap 22b), so both go.
+  //
+  // The `NO ARM ESCAPES` test sweeps the whole mode × margin × band matrix and
+  // is what proved the collapse alone was insufficient here.
+  if (defaultedDisclosure !== null) {
+    stability_clause = null;
+    stability_implies_flippability = false;
+  }
+
   return {
     headline,
     margin_category: marginCat,
     stability_category: stabilityCat,
     margin_clause,
     stability_clause,
+    // Follows the collapsed axis by construction: no arm sets this on
+    // `unknown`. Pinned by `suppresses stability_implies_flippability with the
+    // clause it describes` — the flag is that clause's own summary for
+    // downstream callers, so a `true` surviving a suppressed sentence would let
+    // a caller re-assert the finding the suppression just withdrew.
     stability_implies_flippability,
+    defaulted_disclosure: defaultedDisclosure,
   };
 }
 
@@ -385,6 +480,7 @@ export function composeExplainResultsFallback(
   projection: AnalysisProjectionSummary | undefined,
   validationBeatText?: string | null,
   rawRobustness?: RawRobustnessSignals | null,
+  defaultedAssumptions?: DefaultedAssumptionsSignal | null,
 ): string {
   if (!projection || !projection.leading_option) {
     // Defensive — the handler should not reach this branch without a
@@ -404,7 +500,12 @@ export function composeExplainResultsFallback(
   // (`invocation.rawRobustness`, prior-fact-sourced and same-run-guarded);
   // routed/request callers pass null and both composers fall back to the
   // margin-only verdict in lockstep.
-  const verdict = composeRobustnessVerdict(projection, rawRobustness ?? null, 'explain');
+  const verdict = composeRobustnessVerdict(
+    projection,
+    rawRobustness ?? null,
+    'explain',
+    defaultedAssumptions ?? null,
+  );
 
   // Staleness caveat is no longer composed here. The handler's
   // `applyStalenessPrefix` helper prepends it to the final assistant_text
@@ -456,6 +557,16 @@ export function composeExplainResultsFallback(
     sentences.push(validationBeatText);
   }
 
+  // ⭐ THE DISCLOSURE THE ANALYSE TURN ALREADY MAKES, INHERITED — not re-worded.
+  // Built by `coaching/pick-defaulted-assumptions.ts`, the single owner of this
+  // sentence, from the producer's own `enrichment.defaulted_assumptions`. It
+  // sits AFTER the result sentences and BEFORE the nudge so the recitation it
+  // qualifies is already on screen, matching where the analyse turn's scaffold
+  // suffix lands relative to its own headline.
+  if (verdict.defaulted_disclosure !== null) {
+    sentences.push(verdict.defaulted_disclosure);
+  }
+
   sentences.push('Would you like to explore what would change this result?');
 
   return sentences.join(' ');
@@ -491,6 +602,7 @@ export function composeWhatWouldFlipFallback(
   projection: AnalysisProjectionSummary | undefined,
   rawRobustness?: RawRobustnessSignals | null,
   flipSummary?: FlipSummary | null,
+  defaultedAssumptions?: DefaultedAssumptionsSignal | null,
 ): string {
   if (!projection || !projection.leading_option) {
     return 'The analysis has finished, but the sensitivity picture could not be summarised from the available data. Would you like to run the analysis again?';
@@ -504,7 +616,7 @@ export function composeWhatWouldFlipFallback(
   // near-tie (including the raw `near_tie.is_tie` override) OR on how the
   // margin verdict and stability verdict resolve together. `flip` mode selects
   // the "what could change it" voice.
-  const verdict = composeRobustnessVerdict(projection, raw, 'flip');
+  const verdict = composeRobustnessVerdict(projection, raw, 'flip', defaultedAssumptions ?? null);
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
@@ -626,6 +738,16 @@ export function composeWhatWouldFlipFallback(
     // Moderate / unknown / indeterminate-stable verdicts yield a null clause
     // and this branch simply does not fire — no overclaim.
     sentences.push(verdict.stability_clause);
+  }
+
+  // ⭐ THE DISCLOSURE THE ANALYSE TURN ALREADY MAKES, INHERITED — not re-worded.
+  // Built by `coaching/pick-defaulted-assumptions.ts`, the single owner of this
+  // sentence, from the producer's own `enrichment.defaulted_assumptions`. It
+  // sits AFTER the result sentences and BEFORE the nudge so the recitation it
+  // qualifies is already on screen, matching where the analyse turn's scaffold
+  // suffix lands relative to its own headline.
+  if (verdict.defaulted_disclosure !== null) {
+    sentences.push(verdict.defaulted_disclosure);
   }
 
   sentences.push('Which of those would you like to explore changing?');

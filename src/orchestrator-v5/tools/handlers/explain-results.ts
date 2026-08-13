@@ -193,6 +193,8 @@ export function createExplainResultsHandler(): HandlerFn {
         // prior-fact-sourced (turn-executor same-run guard); routed/request
         // paths pass null and both composers fall back to margin-only.
         invocation.rawRobustness ?? null,
+        // Same fact, same same-run guard as `rawRobustness` above.
+        invocation.defaultedAssumptions ?? null,
       );
     }
 
