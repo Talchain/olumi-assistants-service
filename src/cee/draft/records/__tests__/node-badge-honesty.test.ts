@@ -67,8 +67,30 @@ const RECORDS: DraftRecordSet = {
  * so the badge must be asserted on the kind the transform actually receives. A
  * fixture that skipped this would be testing a graph the product never sees.
  */
+/**
+ * ⭐⭐ THE BRIEF IS NOW PART OF THE FIXTURE, AND THAT IS THE R1 REMEDIATION.
+ *
+ * Every stated quote and every stated magnitude above appears here VERBATIM,
+ * because a `from_brief` badge is no longer earned by a record's SHAPE (label
+ * present, number present) — it is earned by the brief actually saying so. An
+ * external audit put "Revenue is 10 million pounds" into `stated_items` against
+ * a brief about commute time and watched it come out `from_brief`; shape was
+ * never the failing part, so a shape gate could never have caught it.
+ *
+ * ⚠ NOTE WHAT THIS MAKES THE FILE ABLE TO SEE. Before, this fixture would have
+ * badged a fabricated figure exactly as it badges a real one, and every
+ * assertion below would still have passed. The brief is what gives the two
+ * different answers — so it is load-bearing evidence, not scenery.
+ */
+const BRIEF = [
+  "We want to cut customer churn to 8% this year.",
+  "We can buy a new CRM, or keep the current system.",
+  "Today churn is currently 12% and support load is heavy.",
+  "We have a budget of £6,000.",
+].join(" ");
+
 function projectedAndNormalised(): ProjectedNode[] {
-  const g = projectRecordsToGraph(RECORDS).graph;
+  const g = projectRecordsToGraph(RECORDS, BRIEF).graph;
   return g.nodes.map((n) => ({ ...n, kind: NODE_KIND_MAP[n.kind.toLowerCase().trim()] ?? n.kind }) as ProjectedNode);
 }
 

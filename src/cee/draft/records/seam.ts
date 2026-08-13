@@ -130,7 +130,16 @@ export type DraftRecordsSeamResult =
  * understands. A function here that threw its own error type would create a
  * second failure vocabulary for the same user-visible event.
  */
-export function projectDraftRecords(rawJson: unknown): DraftRecordsSeamResult {
+export function projectDraftRecords(
+  rawJson: unknown,
+  /**
+   * ⭐ THE BRIEF, AS READ-ONLY EVIDENCE for the provenance claim — never a source
+   * of values. Threaded to `projectRecordsToGraph`, which binds each stated item
+   * against it. OPTIONAL and FAIL-CLOSED: a caller that omits it gets nodes that
+   * decline the `from_brief` badge rather than nodes that assume it.
+   */
+  brief?: string,
+): DraftRecordsSeamResult {
   // ⚠ GRAPH-SHAPED IS CHECKED FIRST, AND UNCONDITIONALLY.
   //
   // The obvious ordering — validate, and only ask "was it a graph?" when
@@ -194,7 +203,7 @@ export function projectDraftRecords(rawJson: unknown): DraftRecordsSeamResult {
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
     })),
   };
-  return { ok: true, records, projection: projectRecordsToGraph(records) };
+  return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
 }
 
 /**

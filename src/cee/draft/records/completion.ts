@@ -201,8 +201,185 @@ export function countBlockingAskItems(ask: CompletionAsk): number {
  * restatement agrees with itself whatever the adapter does. Naming it puts the
  * real decision under the mutants.
  */
-export function shouldKeepCompletion(before: CompletionAsk, after: CompletionAsk): boolean {
-  return countBlockingAskItems(after) <= countBlockingAskItems(before);
+/**
+ * ⭐⭐ THE IDENTITY OF AN ASK ITEM — what it is ABOUT, not how many there are.
+ *
+ * Built from the same two fields the ask's own de-duplicator uses (`kind` +
+ * `detail`), so an item's identity here and its uniqueness there cannot drift
+ * apart. `detail` is what names the entity — the option, the record, the
+ * reference — which is exactly the part a count throws away.
+ */
+export function askItemIdentity(item: CompletionAskItem): string {
+  return JSON.stringify([item.kind, item.detail]);
+}
+
+/**
+ * ⭐⭐ DID PASS 2 REGRESS ANY PROTECTED PASS-1 CONTENT?
+ *
+ * ── WHY A SEPARATE QUESTION FROM THE ASK COMPARISON ────────────────────────
+ * The ask measures VALIDITY — will the draft be blocked? This measures
+ * PRESERVATION — is the user's first-pass content still theirs? A completion can
+ * leave validity untouched (or improve it) while quietly rewriting pass 1, and
+ * an audit produced all three shapes: an intervention on a stated option
+ * overwritten; a stated figure removed from the graph entirely; a stated option's
+ * merged refinement reclassified back out, taking the option's intervention with
+ * it and leaving it disconnected. Two questions, and answering both with the ask
+ * count is how all three passed (trap 21).
+ *
+ * ── THE THREE INVARIANTS, WRITTEN AGAINST THE SPEC ─────────────────────────
+ * The property at the call site is *"the completion can only ever ADD"*. So the
+ * invariants are stated as append-only over pass 1, NOT as the negation of the
+ * three failures above — a guard written to the shape of the failure in hand is
+ * blind to the fourth shape (trap 13d):
+ *
+ *   (a) EXISTENCE — every node on the pass-1 graph is still on the pass-2 graph.
+ *   (b) NO OVERWRITE — every intervention pass 1 established still holds its
+ *       pass-1 value. New keys are free; changed ones are not.
+ *   (c) NO RECLASSIFICATION — every refinement pass 1 merged into a node is
+ *       still merged into it.
+ *
+ * Additions are unconstrained in all three. That is the whole asymmetry: this
+ * cannot refuse a completion for being richer, only for being destructive.
+ */
+export function completionRegressesProtectedContent(
+  before: RecordProjection,
+  after: RecordProjection,
+): readonly string[] {
+  const violations: string[] = [];
+  const afterById = new Map(after.graph.nodes.map((n) => [n.id, n]));
+
+  // ⭐⭐ A DISAPPEARANCE IS NOT AUTOMATICALLY A LOSS — AND THE FIRST VERSION OF
+  // THIS FUNCTION GOT THAT WRONG, WHICH IS WHY THIS NOTE EXISTS.
+  //
+  // Written as a flat "every pass-1 node must still be on the pass-2 graph", it
+  // reported three violations on `round7-completion-pass07` — a HISTORIC CAPTURE
+  // whose completion took blocking items 7 → 0. The nodes had not been lost: they
+  // had been MERGED into their stated options, which is the projector's own
+  // deliberate, disclosed, content-preserving operation (`merged_refinements`
+  // records exactly what was folded and into what). The guard would have thrown
+  // away one of the best completion passes on record, for doing its job.
+  //
+  // The property is not "nothing may disappear" — the projector legitimately
+  // merges and demotes — it is "nothing may disappear SILENTLY". So a node's
+  // absence is a violation only when nothing in the pass-2 projection accounts
+  // for it. That is the same distinction this codebase draws everywhere else:
+  // the harm was never the operation, it was the silence.
+  // ⭐⭐ ABSORBED, NOT MERELY MENTIONED — AND THE DIFFERENCE IS THE WHOLE GUARD.
+  //
+  // The first version of this set was built from `after.dropped`, i.e. "anything
+  // the projection said something about". That is too weak by exactly the case
+  // this function exists to catch: a pass-1 stated figure pruned as
+  // `unconnected_to_goal` IS in `dropped` — and it has still been DELETED. The
+  // completion invalidated the edge that held it to the goal, the figure left the
+  // user's graph, and a disclosure-shaped test would have called that accounted
+  // for and kept the pass.
+  //
+  // Absorption is the narrower, correct question: was this content FOLDED INTO A
+  // SURVIVING NODE? Only two operations do that, and both record it on the
+  // survivor's provenance — a merge writes `merged_refinements`, a demote writes
+  // `undeveloped_duplicates`. A prune writes neither, because nothing absorbed
+  // it. So the set is built from the ABSORPTION RECORDS alone, which are also the
+  // only entries that can name a survivor to point at.
+  const accountedFor = new Set<string>();
+  for (const prov of Object.values(after.provenance)) {
+    for (const label of prov.merged_refinements ?? []) accountedFor.add(label);
+    for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(label);
+  }
+
+  for (const node of before.graph.nodes) {
+    // ⚠ PROTECTED CONTENT IS THE USER'S AND THE MODEL'S — NOT THE PROJECTOR'S
+    // OWN SCAFFOLDING. The `decision` node ("Decision-to-option scaffold minted
+    // by the projector", `provenance_class: "projector_structural"`) is minted
+    // FRESH on every projection and its id is derived from the option set, so it
+    // legitimately changes id the moment an option is added — which a completion
+    // is supposed to do. Counting that as destroyed content made the guard fire
+    // on both historic captures for the one node neither pass had anything to do
+    // with. The three classes are distinguished for exactly this kind of
+    // question; a two-class reading of them is what the sidecar's own note warns
+    // about.
+    if (before.provenance[node.id]?.provenance_class === "projector_structural") continue;
+    const survivor = afterById.get(node.id);
+    if (!survivor) {
+      if (!accountedFor.has(node.label)) {
+        violations.push(`removed_undisclosed:${node.id}:${node.label}`);
+      }
+      continue;
+    }
+    const beforeInterventions = (node.data as { interventions?: Record<string, number> } | undefined)
+      ?.interventions;
+    if (beforeInterventions) {
+      const afterInterventions =
+        (survivor.data as { interventions?: Record<string, number> } | undefined)?.interventions ?? {};
+      for (const [factorId, value] of Object.entries(beforeInterventions)) {
+        if (!(factorId in afterInterventions)) {
+          violations.push(`intervention_removed:${node.id}:${factorId}`);
+        } else if (afterInterventions[factorId] !== value) {
+          violations.push(
+            `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
+          );
+        }
+      }
+    }
+    const beforeMerged = before.provenance[node.id]?.merged_refinements ?? [];
+    if (beforeMerged.length > 0) {
+      const afterMerged = new Set(after.provenance[node.id]?.merged_refinements ?? []);
+      for (const label of beforeMerged) {
+        if (!afterMerged.has(label)) violations.push(`refinement_reclassified:${node.id}:${label}`);
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * ⭐⭐ THE DECISION ITSELF — keep this completion pass, or throw it away?
+ *
+ * **KEEP IFF IT ADDS NO NEW BLOCKING CLASS *AND* REGRESSES NO PROTECTED PASS-1
+ * CONTENT.**
+ *
+ * ── WHY NON-WORSENING RATHER THAN STRICT IMPROVEMENT ───────────────────────
+ * The property the completion has to hold is stated at its own call site:
+ * *"the completion can only ever add; it can never be the reason a draft got
+ * worse"*. That is a NON-WORSENING property, so the test that enforces it is
+ * `<=`. Requiring strict improvement enforces a DIFFERENT property — "the
+ * completion must have fixed something" — which is not a safety property at
+ * all, and it is what threw away run 18's `edges 17→25` at an unchanged
+ * blocking count of 2→0… and run 14's, and run 10's.
+ *
+ * ── ⭐⭐ WHY A COUNT WAS NOT ENOUGH, AND THIS IS THE R1 REMEDIATION ──────────
+ * The previous version was `countBlockingAskItems(after) <= countBlockingAskItems(before)`.
+ * An audit walked straight through it: a completion took the blocking item from
+ * `hold` to `hire` — **1 → 1** — and the comparator, seeing only the count,
+ * called that unchanged. A blocking problem had not been fixed; a DIFFERENT
+ * option had been broken, and the arithmetic could not tell the two apart. This
+ * estate has a name for that shape: an assertion bound to a VALUE PREDICATE that
+ * another object satisfies, rather than to the OBJECT ITSELF (trap 19) — here
+ * raised from a test to the comparator that gates the merge.
+ *
+ * So the test is now on the SET of blocking identities: no identity may appear
+ * after that was not there before. A count can be held equal by a swap; a set
+ * cannot. Note this is still non-worsening, not strict improvement — resolving
+ * one blocking item and introducing none is a keep, and resolving none while
+ * introducing none is also a keep.
+ *
+ * ── WHY THE PROJECTIONS ARE A REQUIRED ARGUMENT ────────────────────────────
+ * Because the preservation question CANNOT be asked without them, and an
+ * optional parameter would let a call site skip it silently — defaulting the
+ * dangerous case to "fine", which is the fail-OPEN direction and the exact
+ * hand-maintained-mirror shape this file already refuses elsewhere. Required
+ * means the compiler asks every call site the question.
+ */
+export function shouldKeepCompletion(
+  before: CompletionAsk,
+  after: CompletionAsk,
+  projections: { readonly before: RecordProjection; readonly after: RecordProjection },
+): boolean {
+  const blockingBefore = new Set(before.items.filter(isBlockingAskItem).map(askItemIdentity));
+  for (const item of after.items) {
+    if (!isBlockingAskItem(item)) continue;
+    if (!blockingBefore.has(askItemIdentity(item))) return false;
+  }
+  return completionRegressesProtectedContent(projections.before, projections.after).length === 0;
 }
 
 /**

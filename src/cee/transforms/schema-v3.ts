@@ -45,6 +45,10 @@ import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
+// ⭐ THE SAME AUTHORITY THE PROJECTOR BINDS STATED ITEMS WITH. Imported, never
+// restated — `nodes[].provenance` and `options[].provenance.source` describe one
+// fact and must not be able to disagree about it (trap 12).
+import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from "../provenance/brief-binding.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 
 // ============================================================================
@@ -1004,6 +1008,34 @@ export function transformResponseToV3(
     if (opt.is_baseline !== undefined) {
       node.is_baseline = opt.is_baseline;
     }
+    // ⭐⭐ ROOT 4 — ONE AUTHORITY, TWO READERS.
+    //
+    // These two fields describe THE SAME FACT about THE SAME OPTION — where it
+    // came from — and until now each was decided independently:
+    //   • `nodes[].provenance` fell out of `extractionType`, which an option
+    //     node never carries, so every option read `ai_inferred`;
+    //   • `options[].provenance.source` was the HARDCODED literal
+    //     `"brief_extraction"` at both construction sites in
+    //     `intervention-extractor.ts`, with no branch at all.
+    // So a stated option came off the wire `ai_inferred` in `nodes[]` and
+    // `brief_extraction` in `options[]` — the response contradicting itself
+    // about the user's own words — and an option the model invented ("Launch
+    // through secret agents", absent from the brief) came off as
+    // `brief_extraction` because the literal cannot be anything else. One of
+    // those two answers was always wrong, whichever way the brief actually read.
+    //
+    // Two mirrors of one fact is this estate's dominant defect (trap 12). Both
+    // now derive HERE, from the brief bytes, through the same authority the
+    // projector binds stated items with — so they cannot disagree, and neither
+    // can claim the brief without it saying so.
+    const optionBinding = bindOptionLabelToBrief(node.label, context.brief);
+    const earned = bindingEarnsBriefClaim(optionBinding);
+    node.provenance = earned ? "from_brief" : "ai_inferred";
+    opt.provenance = {
+      ...(opt.provenance ?? {}),
+      source: earned ? "brief_extraction" : "cee_hypothesis",
+      ...(earned && typeof node.label === "string" ? { brief_quote: node.label } : {}),
+    };
   }
 
   const optionIdSummary = getOptionIdMismatchSummary(v3Graph, v3Options);

@@ -96,6 +96,8 @@ export {
   countBlockingAskItems,
   isBlockingAskItem,
   shouldKeepCompletion,
+  completionRegressesProtectedContent,
+  askItemIdentity,
   buildRecordsCompletionSchema,
   buildRecordsCompletionPrompt,
   mergeCompletionClaims,

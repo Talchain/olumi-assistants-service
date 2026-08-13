@@ -84,7 +84,7 @@ function replay(pass: BankedPass) {
      * A spec that re-computes the comparison agrees with itself whatever the
      * adapter does; this one fails when the shipped decision changes.
      */
-    v3Keeps: shouldKeepCompletion(askBefore, askAfter),
+    v3Keeps: shouldKeepCompletion(askBefore, askAfter, { before: projection, after: reprojected }),
     blockingBefore: countBlockingAskItems(askBefore),
     blockingAfter: countBlockingAskItems(askAfter),
   };
@@ -141,28 +141,68 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     const pass = banked("round7-completion-pass05-tie.json");
     const r = replay(pass);
 
+    // ⚠⚠ RE-MEASURED A THIRD TIME AT THE R1 REMEDIATION, AND THE NUMBERS MOVED
+    // AGAIN — recorded here rather than quietly re-baselined, exactly as round 11
+    // recorded its own move above. THE FIXTURE DATA IS UNTOUCHED; what changed is
+    // our behaviour, deliberately.
+    //
+    // Round 11's demote resolved this collision by WITHDRAWING the model's
+    // "Rewrite first, then copilot (sequenced)" — and that is the behaviour an
+    // external audit then demonstrated as a defect: the demote grouped on
+    // `buildInterventionSignature`, which sees ONLY interventions, so it withdrew
+    // an option that reached causal structure the survivor never touched. The two
+    // options were identical in the one dimension measured and distinct in the one
+    // that would decide between them.
+    //
+    // The projector now spares an option that adds distinct structure. The
+    // consequence is visible right here: the collision this fixture used to have
+    // hidden reaches the ask again, so the tie is gone and the completion is
+    // DISCARDED. That is the honest reading — the analysis genuinely cannot tell
+    // these two apart, and the previous 0–0 was a tie only because a real
+    // alternative had been deleted to produce it.
+    //
+    // ⚠ AND THE REASON THIS DOES NOT RISK A DRAFT FAILURE, derived at the bytes
+    // rather than assumed: `OPTIONS_IDENTICAL` is Bucket C, but the pipeline
+    // carries `options-identical-graceful-dedup.ts`, which drops AI-inferred
+    // duplicate options "instead of failing the draft". The worst downstream case
+    // is therefore the round-11 outcome, not a 500.
+    //
+    // THE TIE PROPERTY ITSELF IS NOT LEFT RESTING ON THIS FIXTURE — the `it`
+    // below pins it at a POSITIVE blocking count on a synthetic case, and that is
+    // now the load-bearing guard for `<=` versus `<`.
     expect(r.v2Keeps).toBe(false);                              // v2 discarded it
-    expect(r.blockingAfter).toBe(r.blockingBefore);              // …at a TIE
-    expect(r.blockingBefore).toBe(0);                            // now zero — see above
-    expect(r.v3Keeps).toBe(true);                               // v3 keeps it
+    expect(r.blockingBefore).toBe(0);
+    expect(r.blockingAfter).toBe(1);        // the collision is no longer hidden
+    expect(r.v3Keeps).toBe(false);          // …so the completion is discarded
 
-    // ⚠ AND THE COST, PINNED RATHER THAN OMITTED. Three of this completion's
-    // five claims elaborate the option that was withdrawn, so the merge adds no
-    // edges here any more (it added two before the demote existed). Every one of
-    // them is DISCLOSED — the model's work is visible to a reader, not lost —
-    // and the trade is a valid graph carrying the user's own three options
-    // instead of a 500 carrying none.
-    expect(r.reprojected.graph.edges.length).toBe(r.projection.graph.edges.length);
-    // Pinned to the EXACT measured count, not `> 0`: this is a banked capture,
-    // so the number is a fact about it. A loose bound would stay green if the
-    // demote started swallowing more of the completion than it does today.
-    const demotedEndpoints = r.reprojected.dropped.filter(
-      (d) => d.reason === "endpoint_demoted_duplicate",
+    // ⭐⭐ AND THIS IS THE ROOT 2(d) REGRESSION ASSERTION, on a REAL CAPTURE.
+    //
+    // The inverse of what stood here at round 11. The three claims elaborating
+    // "Rewrite first, then copilot (sequenced)" used to be swallowed with it —
+    // `endpoint_demoted_duplicate` ×4 and a merge that added no edges at all.
+    // The option now survives, so the model's elaboration of a genuinely distinct
+    // strategy reaches the graph instead of being deleted for resembling another
+    // option in the one dimension the signature measures.
+    //
+    // Bound by IDENTITY to the named option, never by a count another object
+    // could satisfy: the assertion is that THIS option is on THIS graph.
+    expect(r.reprojected.graph.edges.length).toBeGreaterThan(r.projection.graph.edges.length);
+    const sequenced = r.reprojected.graph.nodes.find(
+      (n) => n.label === "Rewrite first, then copilot (sequenced)",
     );
-    expect(demotedEndpoints.map((d) => d.claim_index).sort((a, b) => a - b)).toEqual([14, 30, 31, 32]);
-    const demote = r.reprojected.dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated");
-    expect(demote?.label).toBe("Rewrite first, then copilot (sequenced)");
-    expect(demote?.duplicate_of_label).toBe("finally do the platform rewrite");
+    expect(sequenced, "the distinct option must survive the duplicate pass").toBeDefined();
+    expect(sequenced!.kind).toBe("option");
+    // …and it is NOT withdrawn by either demote route.
+    expect(
+      r.reprojected.dropped.filter(
+        (d) =>
+          d.reason === "undeveloped_duplicate_of_stated" ||
+          d.reason === "undeveloped_duplicate_of_model",
+      ),
+    ).toEqual([]);
+    expect(
+      r.reprojected.dropped.filter((d) => d.reason === "endpoint_demoted_duplicate"),
+    ).toEqual([]);
   });
 
   it("the improvement v2 could not see is NON-BLOCKING disclosure growth, not blocking growth", () => {
@@ -232,7 +272,9 @@ describe("⭐⭐ the guard's PURPOSE survives — a completion that worsens a bl
       .toBeGreaterThan(projection.graph.nodes.filter((n) => n.kind === "option").length);
 
     expect(blockingAfter).toBeGreaterThan(blockingBefore);
-    expect(shouldKeepCompletion(askBefore, askAfter)).toBe(false); // DISCARD
+    expect(
+      shouldKeepCompletion(askBefore, askAfter, { before: projection, after: reprojected }),
+    ).toBe(false); // DISCARD
   });
 
   it("KEEPS a completion at a TIE on a POSITIVE blocking count", () => {
@@ -261,7 +303,9 @@ describe("⭐⭐ the guard's PURPOSE survives — a completion that worsens a bl
 
     expect(countBlockingAskItems(askAfter)).toBe(blockingBefore);          // the TIE
     expect(askAfter.items.length).toBeGreaterThan(askBefore.items.length); // v2 would discard
-    expect(shouldKeepCompletion(askBefore, askAfter)).toBe(true);          // v3 KEEPS
+    expect(
+      shouldKeepCompletion(askBefore, askAfter, { before: projection, after: reprojected }),
+    ).toBe(true);                                                          // v3 KEEPS
   });
 });
 

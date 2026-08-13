@@ -66,6 +66,14 @@ import { MAX_OPTIONS as MAX_PROJECTED_OPTIONS } from "../../../validators/graph-
 // EXPORTED for exactly this reuse. A local copy would drift from the rule it
 // claims to pre-empt, and this file's own history says the drift reads as green.
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+// ⭐ THE SINGLE BRIEF-BINDING AUTHORITY. Shared with the V3 response transform so
+// that a node's badge and an option's badge cannot disagree about one fact — they
+// contradicted each other on the wire before this (trap 12, two mirrors).
+import {
+  bindStatedItemToBrief,
+  bindingEarnsBriefClaim,
+  type BriefBinding,
+} from "../../provenance/brief-binding.js";
 import type {
   DraftInferenceClaim,
   DraftRecordSet,
@@ -182,6 +190,28 @@ export interface RecordProvenance {
    * the merge field would claim an absorption that never happened.
    */
   readonly undeveloped_duplicates?: readonly string[];
+  /**
+   * ⭐⭐ PRESENT IFF `stated` — DID THE BRIEF ACTUALLY SAY THIS?
+   *
+   * `provenance_class: "stated"` is a statement about WHERE THE MODEL PUT THIS
+   * RECORD, and it is true by construction: the projector reads it off its own
+   * loop position, so the model cannot forge it. That is the property R1 was
+   * built for and it holds.
+   *
+   * It is not the property the user reads off the badge. "Stated" is read as
+   * "the brief said this", and nothing in the pipeline was checking that — so
+   * unsupported content could enter `stated_items` and leave as `from_brief`
+   * without ever touching the model's (non-existent) provenance channel. The two
+   * questions are *"who put this here?"* and *"is it supported?"*, and they were
+   * being answered by one field (trap 21).
+   *
+   * This field answers the second one, derived from the brief bytes at
+   * projection time by `bindStatedItemToBrief`. `provenance_class` is left
+   * alone: it still means what it always meant, and the structural machinery
+   * that reads it (the duplication merge, the option budget) is untouched.
+   * The WIRE badge is what moves — only `verified` earns `from_brief`.
+   */
+  readonly brief_binding?: BriefBinding;
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -283,7 +313,25 @@ export interface DroppedRecordRef {
      * projector performed. Named apart for that reason (trap 21: two questions
      * under one name is how a disclosure vocabulary starts lying).
      */
-    | "endpoint_demoted_duplicate";
+    | "endpoint_demoted_duplicate"
+    /**
+     * ⭐ ROOT 2(a). A `constraint` carried a value but no `direction`, so no
+     * operator was asserted. The node keeps the user's words; the THRESHOLD is
+     * withheld until the direction is known. This is the ask, not a loss.
+     */
+    | "constraint_direction_unstated"
+    /**
+     * ⭐ ROOT 2(b). A `figure` was stated with `role:"target"`. It is on the
+     * graph as the user's own words, but it is NOT yet a goal threshold — so
+     * nothing downstream should read it as a level that has been ACHIEVED.
+     */
+    | "stated_target_not_represented_as_threshold"
+    /**
+     * ⭐ ROOT 2(c). Two or more parallel `causal_link` claims set the SAME
+     * option→factor pair to DIFFERENT levels. One was chosen canonically; the
+     * others are named here rather than silently overwritten.
+     */
+    | "parallel_intervention_conflict";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
@@ -760,6 +808,7 @@ interface OneProjection extends RecordProjection {
 function projectOnce(
   records: DraftRecordSet,
   demoted: ReadonlyMap<number, DemoteDecision>,
+  brief: string | undefined,
 ): OneProjection {
   const statedItems: readonly DraftStatedItem[] = records.stated_items ?? [];
   const claims: readonly DraftInferenceClaim[] = records.claims ?? [];
@@ -791,7 +840,24 @@ function projectOnce(
     const id = mintUnique(sha8(item.kind, quote), usedIds);
     statedIdByIndex.set(index, id);
 
-    const prov: RecordProvenance = { provenance_class: "stated", source_quote: quote };
+    // ⭐⭐ ROOT 1 — THE BADGE IS NOW EARNED, NOT ASSUMED.
+    //
+    // `provenance_class` still comes from the loop position, because that fact
+    // ("the model put this in `stated_items`") is what the loop position knows.
+    // What it never knew is whether the brief SAYS this, and that is the thing
+    // the user reads off the badge. Derived here, at the brief's bytes, by the
+    // one authority the response transform also uses.
+    const briefBinding = bindStatedItemToBrief({
+      quote: item.source_quote,
+      value: item.value,
+      unit: item.unit,
+      brief,
+    });
+    const prov: RecordProvenance = {
+      provenance_class: "stated",
+      source_quote: quote,
+      brief_binding: briefBinding,
+    };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
@@ -804,8 +870,34 @@ function projectOnce(
       provenance: prov,
     };
 
-    if (kind === "constraint" && typeof item.value === "number") {
-      const operator = directionToOperator(item.direction ?? "ceiling");
+    const statedDirection = item.direction;
+    if (kind === "constraint" && typeof item.value === "number" && statedDirection === undefined) {
+      // ⭐⭐ ROOT 2(a) — DO NOT GUESS A DIRECTION. ASK.
+      //
+      // `direction` is OPTIONAL in the grammar (`required: ["kind",
+      // "source_quote"]`), so the model may omit it — and this line used to read
+      // `item.direction ?? "ceiling"`, which turns EVERY unstated direction into
+      // `<=`. For "Cash must stay above 1000 pounds" that is not a missing
+      // detail, it is **the opposite constraint**, asserted with full
+      // confidence and no disclosure, while `analysis_ready` reports ready.
+      //
+      // There is no defensible default. A floor and a ceiling are not near-
+      // misses of one another; a 50/50 guess on a threshold the user gave us in
+      // words is the estate's ratified never-do (trap 22f — where direction
+      // cannot be determined, make the AMBIGUITY the product and ask, rather
+      // than pick a side and be silently wrong half the time).
+      //
+      // So the node keeps the user's own words and its place on the graph — no
+      // stated content is lost — but asserts NO threshold and NO operator, and
+      // says so. `enumerateCompletionAsk` turns this disclosure into a question.
+      dropped.push({
+        claim_index: -1,
+        claim_kind: "stated_item",
+        label: quote,
+        reason: "constraint_direction_unstated",
+      });
+    } else if (kind === "constraint" && typeof item.value === "number" && statedDirection !== undefined) {
+      const operator = directionToOperator(statedDirection);
       // PLoT reads the operator in BOTH places (graph.ts:176-178, 252-258).
       node.data = { operator };
       node.observed_state = {
@@ -841,7 +933,25 @@ function projectOnce(
         // can see, this line cannot manufacture a `from_brief` badge for a node that
         // has not earned one — the badge and the pipeline's own value accounting
         // come from ONE derivation and cannot drift apart (trap 12).
-        extractionType: "explicit",
+        // ⭐⭐ ROOT 1, THE GATE ITSELF — and the note above was TRUE AND
+        // INSUFFICIENT, which is why the audit got through it.
+        //
+        // Everything the old note says about 2.972 is correct: the badge is
+        // re-derived downstream and cannot be manufactured by a node that has no
+        // value. But 2.972's gate asks *"is there a label and a number?"* — a
+        // question about the record's SHAPE. It cannot ask whether the number is
+        // the user's, because it never sees the brief. So a fabricated figure,
+        // being perfectly well-shaped, sailed through it: an audit put
+        // "Revenue is 10 million pounds" against a brief about commute time and
+        // it emerged `from_brief`. And an exact quote carrying a CONTRADICTED
+        // value ("Churn is 10 percent", value 90) did too, because shape was
+        // never the failing part.
+        //
+        // The claim is now made only when the brief BEARS it. Absent or
+        // unverified, the key is simply not set, and the node falls to the safe
+        // `ai_inferred` default that every other node here already takes — the
+        // content is untouched, only the attribution is withdrawn.
+        ...(bindingEarnsBriefClaim(briefBinding) ? { extractionType: "explicit" as const } : {}),
       };
       // ⚠ FactorObservedState REFUSES any `metadata` key (graph.ts:225-233) —
       // a factor carrying constraint metadata matches NEITHER union branch and
@@ -849,12 +959,57 @@ function projectOnce(
       node.observed_state = { value: item.value, raw_value: item.value };
     }
 
-    // ⚠ `role` DOES NOT SET A CATEGORY EITHER — same reasoning as the claim
-    // branch below. `target`/`baseline` describe what the user was doing with the
-    // number; `controllable`/`observable`/`external` describe the node's position
-    // in the causal structure. They are two different questions, and answering
-    // one with the other is how a `figure` an option acts on ends up labelled
-    // `observable` and its edge rejected.
+    // ⚠ `role` DOES NOT SET A CATEGORY — `target`/`baseline` describe what the
+    // user was doing with the number; `controllable`/`observable`/`external`
+    // describe the node's position in the causal structure. They are two
+    // different questions, and answering one with the other is how a `figure` an
+    // option acts on ends up labelled `observable` and its edge rejected.
+    //
+    // ⭐⭐ ROOT 2(b) — BUT "NOT A CATEGORY" IS NOT "NOT ANYTHING", AND THAT SLIP
+    // IS THE DEFECT. The reasoning above is sound and it was used to justify
+    // reading `role` NOWHERE AT ALL. The grammar admits it, the seam carries it,
+    // and the projector dropped it on the floor: `role:"target"` and
+    // `role:"baseline"` produced BYTE-IDENTICAL projections, so a target the
+    // user asked us to reach became just another observed value — no threshold,
+    // no warning, and `analysis_ready` reporting ready over the top of it.
+    //
+    // A target and a current reading are opposite claims about the same number.
+    // Carrying the distinction costs nothing and makes the two projections
+    // differ; DISCLOSING it is what stops the silence.
+    // ⚠ ONLY ONTO AN EXISTING `data`, AND THIS IS NOT A STYLE CHOICE — the first
+    // version of this line wrote `{ ...(node.data ?? {}), role }`, which MINTS a
+    // `data` object on a node that had none. `NodeData` is a UNION whose branches
+    // are keyed on a required field each (`interventions` / `operator` / `value`),
+    // so `{ role }` alone matches NOTHING and the consumer rejects the whole
+    // draft — caught by `projector-consumer-contract`'s C-BUILD-1, which is
+    // exactly the assertion that suite exists to make. A node with no data keeps
+    // no data; the `target` disclosure below is what stops that being silent.
+    if (item.role !== undefined && node.data !== undefined) {
+      node.data = { ...node.data, role: item.role };
+    }
+    // ⚠ NOT ON A GOAL, AND THE FIRST VERSION OF THIS CONDITION GOT THAT WRONG.
+    // The harm is a target being represented as an OBSERVED VALUE — a number the
+    // user wants to REACH, silently modelled as a number that already HOLDS. A
+    // `goal` carrying `role:"target"` is not that: the goal IS the thing being
+    // aimed at, so the two agree and there is nothing to disclose. Firing there
+    // put a standing notice on ordinary, correct briefs — a predicate broader
+    // than the harm it serves, which is this estate's most-repeated review
+    // finding, committed here while fixing an instance of it.
+    if (item.role === "target" && kind !== "goal") {
+      // ⚠ BOUNDED DELIBERATELY. This records and discloses that a TARGET was
+      // stated and is NOT yet represented as a goal threshold. It does not
+      // synthesise `goal_threshold`: doing that honestly means unit, cap and
+      // frame semantics (`NodeV3` carries five `goal_threshold_*` fields) and a
+      // decision about which goal a free-standing target binds to. That is a
+      // separate piece of work, reported at the boundary rather than guessed at
+      // here — guessing is what root 2(a) is about.
+      dropped.push({
+        claim_index: -1,
+        claim_kind: "stated_item",
+        label: quote,
+        reason: "stated_target_not_represented_as_threshold",
+      });
+    }
 
     nodes.push(node);
   });
@@ -1350,14 +1505,62 @@ function projectOnce(
   {
     const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
     const interventionsByOption = new Map<string, Record<string, number>>();
+    // ⭐⭐ ROOT 2(c) — CANONICAL, NOT POSITIONAL.
+    //
+    // This was `bucket[edge.to] = setsTo`: an unconditional write, so when two
+    // `causal_link` claims set the same option→factor pair to different levels,
+    // the one LATER IN CLAIM ORDER silently won. Two record sets identical in
+    // every respect except the order of two equivalent claims therefore analysed
+    // to DIFFERENT numbers, with nothing dropped and nothing disclosed — the
+    // model's emission order, which carries no meaning, was deciding the answer.
+    //
+    // Candidates are now gathered first and resolved by a rule that reads only
+    // their CONTENT, so any permutation of the same claims yields the same
+    // projection. Where they disagree, the smallest magnitude wins: among
+    // contradictory claims about how far an option moves a factor, that is the
+    // least extravagant one, and over-claiming an option's effect is the harm
+    // that matters here. `edge.id` (a content hash) breaks an exact tie so the
+    // rule is total.
+    //
+    // ⚠ The choice is CANONICAL, not correct — nothing here can know which claim
+    // the user meant. So it is DISCLOSED rather than absorbed: the conflict and
+    // the discarded levels are named, which is the difference between a decision
+    // and a silent overwrite.
+    const candidatesByPair = new Map<string, { edgeId: string; setsTo: number }[]>();
     for (const edge of edges) {
       if (kindById.get(edge.from) !== "option") continue;
       if (kindById.get(edge.to) !== "factor") continue;
       const setsTo = setsToByEdgeId.get(edge.id);
       if (typeof setsTo !== "number" || !Number.isFinite(setsTo)) continue;
-      const bucket = interventionsByOption.get(edge.from) ?? {};
-      bucket[edge.to] = setsTo;
-      interventionsByOption.set(edge.from, bucket);
+      const key = `${edge.from} ${edge.to}`;
+      const list = candidatesByPair.get(key) ?? [];
+      list.push({ edgeId: edge.id, setsTo });
+      candidatesByPair.set(key, list);
+    }
+    for (const [key, candidates] of [...candidatesByPair.entries()].sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    )) {
+      const [optionId, factorId] = key.split(" ") as [string, string];
+      const ordered = [...candidates].sort(
+        (a, b) =>
+          a.setsTo - b.setsTo || (a.edgeId < b.edgeId ? -1 : a.edgeId > b.edgeId ? 1 : 0),
+      );
+      const chosen = ordered[0]!;
+      const rejected = ordered.slice(1).filter((c) => c.setsTo !== chosen.setsTo);
+      if (rejected.length > 0) {
+        dropped.push({
+          claim_index: -1,
+          claim_kind: "claim",
+          label: nodes.find((n) => n.id === optionId)?.label ?? optionId,
+          reason: "parallel_intervention_conflict",
+          intervention_signature: `${factorId}:${[chosen, ...rejected]
+            .map((c) => c.setsTo)
+            .join("|")}`,
+        });
+      }
+      const bucket = interventionsByOption.get(optionId) ?? {};
+      bucket[factorId] = chosen.setsTo;
+      interventionsByOption.set(optionId, bucket);
     }
     for (const node of nodes) {
       const built = interventionsByOption.get(node.id);
@@ -1603,6 +1806,43 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
     else groups.set(signature, [member]);
   }
 
+  // ⭐⭐ ROOT 2(d) — "UNDEVELOPED" HAS TO MEAN "ADDS NOTHING".
+  //
+  // The grouping key is `buildInterventionSignature`, and that is right: it is
+  // the VALIDATOR'S own predicate for `OPTIONS_IDENTICAL`, imported rather than
+  // restated. But an identical intervention signature means two options move the
+  // same factors to the same levels — it says NOTHING about the rest of their
+  // causal structure, and the demote was reading it as if it did.
+  //
+  // An audit produced the case that matters: "Launch nationally" and "Launch with
+  // an unlicensed pilot" set revenue identically, so they grouped — but the pilot
+  // ALSO ran an edge into a regulatory-exposure constraint that the national
+  // launch did not touch. It was withdrawn as an "undeveloped duplicate", taking
+  // the only representation of its risk with it. The two options were identical
+  // in the one dimension measured and opposite in the one that would have decided
+  // between them.
+  //
+  // So membership of the group is necessary and no longer sufficient: a candidate
+  // that reaches somewhere the survivor does not is DEVELOPED, whatever its
+  // intervention signature says, and stays on the graph. Note the direction of
+  // the change — it can only ever demote FEWER options, so it cannot resurrect
+  // the duplication this pass exists to remove; where the structures really are
+  // the same, the subset test is satisfied and the demote fires exactly as before.
+  const outgoingTargetsById = new Map<string, Set<string>>();
+  for (const edge of projection.graph.edges) {
+    const set = outgoingTargetsById.get(edge.from) ?? new Set<string>();
+    set.add(edge.to);
+    outgoingTargetsById.set(edge.from, set);
+  }
+  /** TRUE when `candidate` reaches at least one node `survivor` does not. */
+  const addsDistinctStructure = (candidateId: string, survivorId: string): boolean => {
+    const candidateTargets = outgoingTargetsById.get(candidateId);
+    if (!candidateTargets) return false;
+    const survivorTargets = outgoingTargetsById.get(survivorId) ?? new Set<string>();
+    for (const target of candidateTargets) if (!survivorTargets.has(target)) return true;
+    return false;
+  };
+
   const decisions: DemoteDecision[] = [];
   for (const [signature, members] of groups) {
     if (members.length < 2) continue;
@@ -1630,6 +1870,7 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
       // which this pass deliberately leaves for the user to resolve.
       const survivor = stated[0]!;
       for (const m of model) {
+        if (addsDistinctStructure(m.id, survivor.id)) continue;
         decisions.push({
           claimIndex: m.claimIndex!,
           label: m.label,
@@ -1648,6 +1889,7 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
       const ordered = [...model].sort((a, b) => a.claimIndex! - b.claimIndex!);
       const survivor = ordered[0]!;
       for (const m of ordered.slice(1)) {
+        if (addsDistinctStructure(m.id, survivor.id)) continue;
         decisions.push({
           claimIndex: m.claimIndex!,
           label: m.label,
@@ -1692,15 +1934,26 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
  * The two stages answer different questions (trap 21), and this one DISCLOSES
  * where the repair stage is deliberately silent.
  */
-export function projectRecordsToGraph(records: DraftRecordSet): RecordProjection {
+export function projectRecordsToGraph(
+  records: DraftRecordSet,
+  /**
+   * ⭐ THE BRIEF, AS READ-ONLY EVIDENCE — never a source of values.
+   *
+   * OPTIONAL, and its absence is FAIL-CLOSED rather than fail-open: with no
+   * brief in scope nothing can be tied to it, every stated item binds
+   * `unchecked`, and no node earns `from_brief`. A caller that cannot supply the
+   * brief gets honest under-claiming, never a badge it did not establish.
+   */
+  brief?: string,
+): RecordProjection {
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
-  let projection = projectOnce(records, demoted);
+  let projection = projectOnce(records, demoted, brief);
   for (let pass = 0; pass < claimCount; pass++) {
     const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
-    projection = projectOnce(records, demoted);
+    projection = projectOnce(records, demoted, brief);
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
