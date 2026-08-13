@@ -1,0 +1,188 @@
+/**
+ * V5 coaching — pick the ENGINE's own `enrichment.defaulted_assumptions`
+ * disclosure from the SAME run_analysis fact every other grounding layer reads.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS — A DISCLOSURE THE PRODUCER ALREADY SHIPS AND NOBODY READ
+ *
+ * ISL/PLoT emit a top-level `enrichment.defaulted_assumptions[]` on every
+ * analysis that ran on a value the user never supplied. Each entry carries a
+ * `factor_label`, a `source` (`"value_defaulted"`) and a user-facing `note`.
+ * The array is persisted BYTE-FOR-BYTE inside the `run_analysis` fact's
+ * `result.enrichment`, so it is available on every later turn.
+ *
+ * Measured on this tip (contrast-controlled sweep, CLAUDE.md trap 13e): the
+ * string `defaulted_assumptions` had exactly ONE non-test occurrence in `src/`
+ * and it was a COMMENT (`compose/withheld-claim-projection.ts:112`), while the
+ * contrast keys `evidence_gaps` and `flip_thresholds` returned 14 and 35 files
+ * respectively. The producer's disclosure was DARK: real absence of a reader,
+ * not instrument blindness.
+ *
+ * The cost of that was measured on the deployed build. With
+ * `analysis_ready.options[].status = needs_encoding` on the same payload, an
+ * ORDINARY CHAT TURN emitted:
+ *
+ *   "'…HubSpot next quarter' currently leads, with a probability of 96%.
+ *    '…migrate to Salesforce instead' is the most likely contender to overtake
+ *    it, with a probability of 2%. This result looks stable, so smaller
+ *    changes are less likely to flip the outcome on their own."
+ *
+ * The ANALYSE turn discloses its placeholders correctly (the scaffold
+ * disclosure, `coaching/scaffold-disclosure.ts`). The CONVERSATIONAL
+ * recitation dropped the disclosure and then added a STABILITY ASSERTION on
+ * top of the same numbers — a confidence claim about values the product itself
+ * calls placeholders.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY NOT THE SCAFFOLD CHANNEL
+ *
+ * `HandlerOutcome.__scaffolded_options` (the analyse turn's disclosure input)
+ * has ONE writer (`tools/handlers/run-analysis.ts`) and two SAME-TURN sinks
+ * (the configure chip and the decision-review prompt). It is never persisted,
+ * never projected into `ContextPackAnalysis`, and absent from
+ * `AnalysisProjectionSummary` — so a later conversational turn structurally
+ * cannot consult it. `defaulted_assumptions` is the signal that DOES survive,
+ * because it rides the persisted enrichment.
+ *
+ * ⚠ THE TWO ARE NOT THE SAME QUESTION AND ARE DELIBERATELY NOT UNIFIED
+ * (CLAUDE.md trap 21). `__scaffolded_options` answers "which OPTIONS did CEE
+ * scaffold on this turn?"; `defaulted_assumptions` answers "which FACTORS did
+ * the ENGINE compute on a defaulted value?". Different producers, different
+ * objects, different lifetimes. This module reads only the second and makes no
+ * claim about the first.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * SAME SELECTOR, NOT A SECOND ONE
+ *
+ * Deliberately built as the exact sibling of `pick-raw-robustness.ts`: it
+ * routes through the SAME `selectRunAnalysisFact`, so the defaulted-value
+ * verdict and the robustness verdict can never be read off two different runs.
+ * That drift class is why `pickLatestRawRobustness` was centralised, and the
+ * same reasoning applies unchanged here.
+ *
+ * Returns `null` when no successful run_analysis fact exists, when the fact
+ * carries no enrichment, or when the array is absent/empty/unusable — i.e.
+ * "no evidence of defaulting", which every caller treats as the pre-existing
+ * behaviour (fail-safe: it makes no new claim).
+ */
+
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+
+/**
+ * Maximum factor labels named in the disclosure sentence. Beyond this the
+ * sentence states the COUNT rather than a truncated list — a half-list reads
+ * as a complete one, which is the same under-disclosure the scaffold module's
+ * plural form exists to avoid.
+ */
+export const MAX_NAMED_DEFAULTED_FACTORS = 3;
+
+/**
+ * The engine's defaulted-value verdict for one analysis.
+ *
+ * `count` is the UNCAPPED number of defaulted assumptions; `named` is the
+ * capped, egress-safe label list. `count > named.length` is the signal to the
+ * copy builder that it must not present the list as exhaustive.
+ */
+export interface DefaultedAssumptionsSignal {
+  /** Uncapped number of `defaulted_assumptions` entries on the analysis. */
+  readonly count: number;
+  /** Up to {@link MAX_NAMED_DEFAULTED_FACTORS} sanitised factor labels. */
+  readonly named: readonly string[];
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Normalise a RAW `defaulted_assumptions` value into
+ * {@link DefaultedAssumptionsSignal}, or `null` when it carries no usable
+ * evidence.
+ *
+ * Shape-agnostic like {@link import('./pick-raw-robustness.js')}'s normaliser
+ * and for the same reason: the array is a passthrough field on an untyped
+ * enrichment seam (CLAUDE.md hazard 2 — the PLoT→CEE enrichment payload is
+ * `z.record`, so its shape is NOT enforced by the contract). Every entry is
+ * therefore read defensively.
+ *
+ * ⭐ COUNTED BY ENTRY, NAMED BY LABEL. An entry with no usable label still
+ * COUNTS — it is evidence that a value was defaulted, which is the claim the
+ * suppression rests on. Dropping it from the count because we cannot name it
+ * would let an unnameable label silently restore a stability assertion.
+ */
+export function readDefaultedAssumptions(
+  defaultedValue: unknown,
+): DefaultedAssumptionsSignal | null {
+  if (!Array.isArray(defaultedValue) || defaultedValue.length === 0) return null;
+
+  const named: string[] = [];
+  let count = 0;
+  for (const raw of defaultedValue) {
+    const entry = asObject(raw);
+    if (entry === null) continue;
+    count += 1;
+    if (named.length >= MAX_NAMED_DEFAULTED_FACTORS) continue;
+    const label = entry['factor_label'];
+    if (typeof label !== 'string') continue;
+    const clean = sanitiseLabel(label, '');
+    if (clean === null || clean.length === 0) continue;
+    named.push(clean);
+  }
+
+  if (count === 0) return null;
+  return { count, named: Object.freeze(named) };
+}
+
+export function pickLatestDefaultedAssumptions(
+  priorFacts: readonly HandlerFact[],
+): DefaultedAssumptionsSignal | null {
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (selected === null) return null;
+  const fact = selected.fact;
+  if (fact.fact_type !== 'run_analysis') return null;
+  const enrichment = asObject(fact.result.enrichment);
+  if (enrichment === null) return null;
+  return readDefaultedAssumptions(enrichment['defaulted_assumptions']);
+}
+
+/**
+ * THE SINGLE SOURCE of the conversational-layer defaulted-value disclosure.
+ *
+ * Deliberately ONE builder, in ONE module, for the same reason
+ * `coaching/scaffold-disclosure.ts` owns the analyse turn's sentence: a second
+ * copy of the words drifts, and a drifted disclosure is worse than none
+ * because it reads as oversight (CLAUDE.md trap 12).
+ *
+ * ⚠ THE VOCABULARY IS INHERITED, NOT INVENTED. "the comparison is illustrative
+ * until …" is the ratified scaffold-disclosure phrasing (P2-4, A1 execution
+ * ruling): placeholder values shift EVERY option's relative position, so the
+ * caveat names the WHOLE comparison, never just the option that carries the
+ * default. Scoping it narrower would under-disclose.
+ *
+ * ⚠ IT DESCRIBES WHAT THE PRODUCT DID, NEVER WHAT THE USER DID (the standing
+ * ruling). "The analysis used a default for X" is a statement about our own
+ * computation; "you did not set X" would be a statement about the user, and is
+ * also false where the drafter, not the user, owned the omission.
+ */
+export function buildDefaultedAssumptionsDisclosure(
+  signal: DefaultedAssumptionsSignal,
+): string {
+  const { count, named } = signal;
+  const subject =
+    named.length > 0 && count === named.length
+      ? named.length === 1
+        ? `'${named[0]}'`
+        : `${named.slice(0, -1).map((l) => `'${l}'`).join(', ')} and '${named[named.length - 1]}'`
+      : count === 1
+        ? 'one of the factors in your model'
+        : `${Math.min(count, 99)} of the factors in your model`;
+  const verb = count === 1 ? 'has' : 'have';
+  return (
+    `The analysis used a default value for ${subject}, which ${verb} no value set, `
+    + 'so the comparison is illustrative until those values are set.'
+  );
+}

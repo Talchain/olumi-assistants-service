@@ -361,6 +361,7 @@ import {
 } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
+import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import {
   pickLatestFlipClaimPosture,
   pickLatestFlipSummary,
@@ -6666,6 +6667,8 @@ export async function runTurnExecutor(
           // signal is available — composer falls back to margin_pp +
           // projected robustness_band.
           rawRobustness: pickLatestRawRobustness(context.prior_facts),
+          // Same fact, same selector — see the field's doc on HandlerInvocation.
+          defaultedAssumptions: pickLatestDefaultedAssumptions(context.prior_facts),
           // ROADMAP 2.278 — the same fact's flip evidence, so the gate's
           // fragility copy cannot claim the result could change when the
           // producer attested it cannot. Same canonical selector as the two
@@ -8301,6 +8304,14 @@ export async function runTurnExecutor(
           // back to the request projection's own band (consistent, no mix).
           rawRobustness: isExplanationHandler && analysisStateSource !== 'request'
             ? pickLatestRawRobustness(context.prior_facts)
+            : undefined,
+          // ⭐ THE SAME SAME-RUN GUARD, DELIBERATELY DUPLICATED RATHER THAN
+          // WIDENED. Pairing a request-sourced projection with prior-fact
+          // evidence would let the disclosure describe a DIFFERENT run than the
+          // numbers it qualifies — the identical hazard the line above exists
+          // for, so it gets the identical condition.
+          defaultedAssumptions: isExplanationHandler && analysisStateSource !== 'request'
+            ? pickLatestDefaultedAssumptions(context.prior_facts)
             : undefined,
           flipSummary: routedFlipSummaryFiltered,
           flipTargetOption,
@@ -11847,6 +11858,9 @@ export async function runTurnExecutor(
         const rawRobustness = usePriorFactEvidence
           ? pickLatestRawRobustness(context.prior_facts) ?? null
           : null;
+        const defaultedAssumptions = usePriorFactEvidence
+          ? pickLatestDefaultedAssumptions(context.prior_facts) ?? null
+          : null;
         if (forcedAnalyticalIntent === 'what_would_flip') {
           const flipSummary = usePriorFactEvidence
             ? pickLatestFlipSummary(context.prior_facts) ?? null
@@ -11864,12 +11878,14 @@ export async function runTurnExecutor(
             projection,
             rawRobustness,
             flipSummaryFiltered,
+            defaultedAssumptions,
           );
         } else {
           deterministicAnalyticalAnswer = composeExplainResultsFallback(
             projection,
             null,
             rawRobustness,
+            defaultedAssumptions,
           );
         }
       }

@@ -177,6 +177,10 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
               invocation.analysisProjection,
               invocation.rawRobustness ?? null,
               invocation.flipSummary ?? null,
+              // Same fact, same same-run guard as `rawRobustness` above: the
+              // recitation inherits the analyse turn's defaulted-value
+              // disclosure instead of asserting stability over it.
+              invocation.defaultedAssumptions ?? null,
             );
 
     // V5 state-trust: CEE no longer prefixes assistant_text with the

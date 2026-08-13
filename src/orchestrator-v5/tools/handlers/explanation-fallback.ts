@@ -48,6 +48,12 @@ import {
   resolveAgreedAlternativeWinner,
   type FlipSummary,
 } from '../../compose/flip-proposal.js';
+// The conversational layer inherits the ANALYSE turn's disclosure from the ONE
+// module that owns it — never a second copy of the words (CLAUDE.md trap 12).
+import {
+  buildDefaultedAssumptionsDisclosure,
+  type DefaultedAssumptionsSignal,
+} from '../../coaching/pick-defaulted-assumptions.js';
 
 export { formatSensitivityDirection };
 
@@ -163,6 +169,16 @@ export interface RobustnessVerdict {
   readonly margin_clause: string | null;
   readonly stability_clause: string | null;
   readonly stability_implies_flippability: boolean;
+  /**
+   * The ENGINE's own defaulted-value disclosure for this analysis, or `null`.
+   *
+   * ⭐ WHY IT RIDES THE VERDICT RATHER THAN EACH FALLBACK. Both post-analysis
+   * fallbacks narrate the SAME run, so the disclosure must be decided ONCE and
+   * in the same place as the stability verdict it suppresses — otherwise one
+   * composer can drop the caveat while the other keeps it, which is the exact
+   * S4 drift class this function was centralised to make unrepresentable.
+   */
+  readonly defaulted_disclosure: string | null;
 }
 
 /**
@@ -187,6 +203,7 @@ export function composeRobustnessVerdict(
   projection: RobustnessVerdictInput,
   rawRobustness: RawRobustnessSignals | null,
   mode: RobustnessVerdictMode,
+  defaultedAssumptions: DefaultedAssumptionsSignal | null = null,
 ): RobustnessVerdict {
   const leading = projection.leading_option;
   const runner = projection.runner_up;
@@ -325,6 +342,49 @@ export function composeRobustnessVerdict(
     // moderate, unknown, or indeterminate-stable → omit (no overclaim).
   }
 
+  // ── DEFAULTED VALUES SUPPRESS EVERY STABILITY ASSERTION ─────────────────
+  //
+  // ⚠⚠ THE WORST LINE IN THE 13 Aug DEPLOYED WITNESS. On an ORDINARY CHAT TURN,
+  // with `analysis_ready.options[].status = needs_encoding` on the same payload,
+  // the flip fallback emitted the two recitation sentences above AND THEN:
+  //
+  //   "This result looks stable, so smaller changes are less likely to flip
+  //    the outcome on their own."
+  //
+  // A confidence claim, stacked on numbers the product itself calls
+  // placeholders. The ANALYSE turn discloses correctly (scaffold-disclosure.ts);
+  // the conversational recitation dropped the disclosure and then added a
+  // stability assertion on top of it.
+  //
+  // ⭐ SUPPRESSION IS TOTAL AND MODE-BLIND, AND THAT IS DELIBERATE. Every
+  // `stability_clause` this function can emit — in BOTH modes, on every
+  // margin/stability pair — asserts something about how the result behaves
+  // under variation. That behaviour was measured on defaulted inputs, so NONE
+  // of them is licensed. Suppressing only the reassuring arms would leave the
+  // fragility arms making the same class of claim in the other direction; the
+  // question is not whether the claim is comforting, it is whether the run
+  // supports it (CLAUDE.md trap 22b: one predicate, two opposite harms).
+  //
+  // ⚠ `stability_implies_flippability` is suppressed WITH the clause it
+  // describes. It is that clause's own summary for downstream callers, so a
+  // `true` surviving a suppressed sentence would let a caller re-assert the
+  // flippability finding the suppression just withdrew (trap 21: two readers of
+  // one concept, only one updated — the defect this whole lane exists to close).
+  //
+  // The MARGIN clause is deliberately NOT suppressed: it states each option's
+  // OWN win share, which is what the analysis returned, and the recitation is
+  // qualified by the disclosure rather than withheld. Withholding the standing
+  // result on a defaulted run would trade a dishonest answer for no answer,
+  // which the ratified per-field egress ruling rejects.
+  const defaultedDisclosure =
+    defaultedAssumptions !== null && defaultedAssumptions.count > 0
+      ? buildDefaultedAssumptionsDisclosure(defaultedAssumptions)
+      : null;
+  if (defaultedDisclosure !== null) {
+    stability_clause = null;
+    stability_implies_flippability = false;
+  }
+
   return {
     headline,
     margin_category: marginCat,
@@ -332,6 +392,7 @@ export function composeRobustnessVerdict(
     margin_clause,
     stability_clause,
     stability_implies_flippability,
+    defaulted_disclosure: defaultedDisclosure,
   };
 }
 
@@ -385,6 +446,7 @@ export function composeExplainResultsFallback(
   projection: AnalysisProjectionSummary | undefined,
   validationBeatText?: string | null,
   rawRobustness?: RawRobustnessSignals | null,
+  defaultedAssumptions?: DefaultedAssumptionsSignal | null,
 ): string {
   if (!projection || !projection.leading_option) {
     // Defensive — the handler should not reach this branch without a
@@ -404,7 +466,12 @@ export function composeExplainResultsFallback(
   // (`invocation.rawRobustness`, prior-fact-sourced and same-run-guarded);
   // routed/request callers pass null and both composers fall back to the
   // margin-only verdict in lockstep.
-  const verdict = composeRobustnessVerdict(projection, rawRobustness ?? null, 'explain');
+  const verdict = composeRobustnessVerdict(
+    projection,
+    rawRobustness ?? null,
+    'explain',
+    defaultedAssumptions ?? null,
+  );
 
   // Staleness caveat is no longer composed here. The handler's
   // `applyStalenessPrefix` helper prepends it to the final assistant_text
@@ -456,6 +523,16 @@ export function composeExplainResultsFallback(
     sentences.push(validationBeatText);
   }
 
+  // ⭐ THE DISCLOSURE THE ANALYSE TURN ALREADY MAKES, INHERITED — not re-worded.
+  // Built by `coaching/pick-defaulted-assumptions.ts`, the single owner of this
+  // sentence, from the producer's own `enrichment.defaulted_assumptions`. It
+  // sits AFTER the result sentences and BEFORE the nudge so the recitation it
+  // qualifies is already on screen, matching where the analyse turn's scaffold
+  // suffix lands relative to its own headline.
+  if (verdict.defaulted_disclosure !== null) {
+    sentences.push(verdict.defaulted_disclosure);
+  }
+
   sentences.push('Would you like to explore what would change this result?');
 
   return sentences.join(' ');
@@ -491,6 +568,7 @@ export function composeWhatWouldFlipFallback(
   projection: AnalysisProjectionSummary | undefined,
   rawRobustness?: RawRobustnessSignals | null,
   flipSummary?: FlipSummary | null,
+  defaultedAssumptions?: DefaultedAssumptionsSignal | null,
 ): string {
   if (!projection || !projection.leading_option) {
     return 'The analysis has finished, but the sensitivity picture could not be summarised from the available data. Would you like to run the analysis again?';
@@ -504,7 +582,7 @@ export function composeWhatWouldFlipFallback(
   // near-tie (including the raw `near_tie.is_tie` override) OR on how the
   // margin verdict and stability verdict resolve together. `flip` mode selects
   // the "what could change it" voice.
-  const verdict = composeRobustnessVerdict(projection, raw, 'flip');
+  const verdict = composeRobustnessVerdict(projection, raw, 'flip', defaultedAssumptions ?? null);
 
   // Staleness caveat is no longer composed here — see the parallel note in
   // composeExplainResultsFallback. The handler's applyStalenessPrefix
@@ -626,6 +704,16 @@ export function composeWhatWouldFlipFallback(
     // Moderate / unknown / indeterminate-stable verdicts yield a null clause
     // and this branch simply does not fire — no overclaim.
     sentences.push(verdict.stability_clause);
+  }
+
+  // ⭐ THE DISCLOSURE THE ANALYSE TURN ALREADY MAKES, INHERITED — not re-worded.
+  // Built by `coaching/pick-defaulted-assumptions.ts`, the single owner of this
+  // sentence, from the producer's own `enrichment.defaulted_assumptions`. It
+  // sits AFTER the result sentences and BEFORE the nudge so the recitation it
+  // qualifies is already on screen, matching where the analyse turn's scaffold
+  // suffix lands relative to its own headline.
+  if (verdict.defaulted_disclosure !== null) {
+    sentences.push(verdict.defaulted_disclosure);
   }
 
   sentences.push('Which of those would you like to explore changing?');
