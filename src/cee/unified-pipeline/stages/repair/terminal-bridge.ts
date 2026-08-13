@@ -95,11 +95,11 @@ export interface TerminalBridgeResult {
 }
 
 function nodesOf(graph: GraphT): NodeT[] {
-  return ((graph as unknown as { nodes?: NodeT[] }).nodes ?? []) as NodeT[];
+  return (((graph as any).nodes ?? []) as NodeT[]);
 }
 
 function edgesOf(graph: GraphT): EdgeT[] {
-  return ((graph as unknown as { edges?: EdgeT[] }).edges ?? []) as EdgeT[];
+  return (((graph as any).edges ?? []) as EdgeT[]);
 }
 
 /**
@@ -206,7 +206,7 @@ export function fixTerminalBridge(
     // exactly the fields `nodeProvenanceDisplay` / `mayClaimFromBrief` read to
     // decide whether a node may claim `from_brief`. A value-free node with no
     // extraction type resolves to `ai_inferred`, which is the truth.
-  } as unknown as NodeT;
+  } as NodeT;
 
   const newEdges: EdgeT[] = [];
 
@@ -242,8 +242,8 @@ export function fixTerminalBridge(
     ),
   );
 
-  (graph as unknown as { nodes: NodeT[] }).nodes = [...nodes, bridgeNode];
-  (graph as unknown as { edges: EdgeT[] }).edges = [...edges, ...newEdges];
+  (graph as any).nodes = [...nodes, bridgeNode];
+  (graph as any).edges = [...edges, ...newEdges];
 
   // Stage 18 is "Outcome→Goal Wiring" (cee/corrections.ts STAGE_DEFINITIONS) —
   // the same stage `wireOutcomesToGoal` records under.
