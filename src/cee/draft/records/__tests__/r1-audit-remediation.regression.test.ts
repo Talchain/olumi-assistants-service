@@ -31,6 +31,7 @@ import {
   shouldKeepCompletion,
 } from "../completion.js";
 import { projectRecordsToGraph } from "../projector.js";
+import { bindOptionLabelToBrief } from "../../../provenance/brief-binding.js";
 import { projectDraftRecords } from "../seam.js";
 import { transformNodeToV3, transformResponseToV3 } from "../../../transforms/schema-v3.js";
 import { CEEGraphResponseV3 } from "../../../../schemas/cee-v3.js";
@@ -820,6 +821,57 @@ describe("ROOT 3 — the completion pass is genuinely append-only", () => {
       dropped: [],
     } as never;
     expect(completionRegressesProtectedContent(beforeRefinement, legitimatelyMerged)).toEqual([]);
+  });
+
+  /**
+   * ⚠ THE C1 RESIDUAL, PINNED (ROADMAP 2.1093) — a domain restriction is not a
+   * full identity binding, and the gap is reachable.
+   *
+   * The protected class that matters is closed: a `stated` node's deletion can
+   * never be excused. But an `ai_inferred` node's deletion CAN still be excused by
+   * an unrelated survivor recording the same label, because the absorption records
+   * carry labels and no ids. Asserting it here keeps it visible in the suite and
+   * REDs the day someone closes it properly.
+   */
+  it("OPEN (2.1093): an ai_inferred deletion is still excusable by a same-label coincidence", () => {
+    const other = { id: "n_other", kind: "option", label: "Improve onboarding" };
+    const before = {
+      graph: { nodes: [{ id: "n_model", kind: "option", label: "Ship faster" }, other], edges: [] },
+      provenance: {
+        n_model: { provenance_class: "ai_inferred", basis: [] },
+        n_other: { provenance_class: "stated", source_quote: "Improve onboarding" },
+      },
+      dropped: [],
+    } as never;
+    const after = {
+      graph: { nodes: [other], edges: [] },
+      provenance: {
+        // An UNRELATED survivor happens to record the same label.
+        n_other: {
+          provenance_class: "stated",
+          source_quote: "Improve onboarding",
+          merged_refinements: ["Ship faster"],
+        },
+      },
+      dropped: [],
+    } as never;
+    expect(
+      completionRegressesProtectedContent(before, after),
+      "residual: the coincidence still excuses a MODEL-authored deletion",
+    ).toEqual([]);
+  });
+
+  /**
+   * D4 — the specificity floor has a SECOND consumer, `bindOptionLabelToBrief`.
+   * A genuine two-character option label now reads `cee_hypothesis`. Decided
+   * deliberately (one floor for both callers, rather than two predicates under
+   * one name) and pinned here so the cost is visible rather than discovered.
+   */
+  it("D4: a two-character option label under-claims, and a real one does not", () => {
+    const brief = "Go or stay? We can Go now, or we can wait and see how the quarter lands.";
+    expect(brief).toContain("Go");
+    expect(bindOptionLabelToBrief("Go", brief)).toBe("unverified");
+    expect(bindOptionLabelToBrief("wait and see", brief)).toBe("verified");
   });
 
   /**

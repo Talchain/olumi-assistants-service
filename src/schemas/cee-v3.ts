@@ -580,12 +580,26 @@ export const CEEGraphResponseV3 = z.object({
    * indication why. The projector's honesty had improved; the product's had not
    * moved at all. This field is the carrier that closes that.
    *
-   * ⚠ EVERY ENTRY MUST ANCHOR TO A NODE THE USER CAN SEE. `node_id` is REQUIRED,
-   * and the transform drops any disclosure it cannot anchor rather than emitting
-   * one that points at nothing — a notice about an invisible entity is not a
-   * disclosure, it is noise the UI cannot render. Where the subject itself was
-   * withdrawn (a demoted duplicate), the anchor is the SURVIVING node it was
-   * folded into, which is the thing the user is actually looking at.
+   * ⚠⚠ `node_id` IS OPTIONAL, AND THE FIRST CUT OF THIS FIELD GOT THAT WRONG IN
+   * THE MOST EXPENSIVE WAY AVAILABLE. It required an anchor in `nodes[]` and
+   * dropped anything it could not anchor. Measured on both real banked B3
+   * captures: **the projector produced 56 disclosures, 1 reached the wire, and 55
+   * were discarded with no log, no counter and no field.**
+   *
+   * The reason is structural, not a bug in the matching. The dominant class —
+   * `unconnected_to_goal`, 51 of the 56 — describes a record that was
+   * **WITHDRAWN FROM THE GRAPH**. Its label can never appear in `nodes[]`,
+   * because not appearing in `nodes[]` is precisely what it is disclosing. So the
+   * anchoring rule silently deleted the disclosures a user most needs — *"you
+   * told me this and it is not in the model"* — and kept only the ones about
+   * things they could already see. A channel delivering 2% of its own volume,
+   * silently, is the guarantee-theatre class this estate exists to kill.
+   *
+   * ⭐ SO: `withdrawn` carries the fact the anchor cannot. `node_id` is the
+   * projector's OWN minted id, present whenever it knew one — it is an identity,
+   * not a promise that the node survived, and a consumer must check `withdrawn`
+   * before looking it up in `nodes[]`. NOTHING IS DROPPED: see
+   * `record_disclosures_omitted`.
    *
    * ⚠ THE TOP LEVEL OF THIS SCHEMA IS PLAIN `z.object` — undeclared fields are
    * STRIPPED, silently, with only a warn log. That is precisely why this must be
@@ -596,13 +610,28 @@ export const CEEGraphResponseV3 = z.object({
       z.object({
         /** The projector's own reason vocabulary — one string, not a sentence. */
         reason: z.string(),
-        /** The node this disclosure is ABOUT, guaranteed present in `nodes[]`. */
-        node_id: z.string(),
-        /** The user-facing label of that node, for rendering without a lookup. */
+        /** The user-facing label, which is the user's own words for stated items. */
         label: z.string(),
+        /**
+         * TRUE when the subject is NOT on the final graph — the "you gave me this
+         * and it is not in the model" case. Read this BEFORE resolving `node_id`.
+         */
+        withdrawn: z.boolean(),
+        /** The projector's minted id. Resolvable in `nodes[]` only when `withdrawn` is false. */
+        node_id: z.string().optional(),
       }),
     )
     .optional(),
+  /**
+   * ⭐ HOW MANY DISCLOSURES COULD NOT BE REPRESENTED AT ALL — normally absent.
+   *
+   * The rule this field enforces is "no silent drops, ever". If the transform
+   * ever meets an entry it cannot express (a malformed record with no reason or
+   * no label), the count surfaces here rather than the entry evaporating. A
+   * channel that quietly loses part of its payload is indistinguishable from one
+   * that had nothing to say, and that is exactly how 55 of 56 went missing.
+   */
+  record_disclosures_omitted: z.number().optional(),
   /** Draft warnings from the pipeline — CEEStructuralWarningV1 shape from structure detection.
    *  Fields: id (warning type), severity, affected_node_ids, affected_edge_ids, explanation, fix_hint. */
   draft_warnings: z.array(z.object({

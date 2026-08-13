@@ -219,6 +219,24 @@ export interface DroppedRecordRef {
   readonly claim_index: number;
   readonly claim_kind: string;
   readonly label: string;
+  /**
+   * ⭐⭐ THE MINTED ID OF THE THING THIS DISCLOSURE IS ABOUT — present whenever the
+   * projector knew it, which is every site that discloses a NODE.
+   *
+   * ⚠ IT IS NOT A PROMISE THAT THE NODE SURVIVED. For `unconnected_to_goal` the
+   * node is withdrawn from the graph in the same breath, and that is exactly the
+   * case where identity matters most: the consumer needs to say *"you told me
+   * this and it is not in the model"*, and it cannot resolve the subject by
+   * LABEL because the label is, by construction, no longer in `nodes[]`.
+   *
+   * Added because the response transform was resolving disclosures by matching
+   * labels against the final node list — first-wins, so two same-labelled nodes
+   * mis-anchored the notice to the wrong one, and 51 of 56 real disclosures
+   * (every `unconnected_to_goal`) matched nothing and were dropped in silence.
+   * An id the producer already holds is not something a consumer should be
+   * reconstructing from a string.
+   */
+  readonly node_id?: string;
   readonly reason:
     | "unparseable_ref"
     | "ref_out_of_range"
@@ -902,6 +920,7 @@ function projectOnce(
         claim_index: -1,
         claim_kind: "stated_item",
         label: quote,
+        node_id: id,
         reason: "constraint_direction_unstated",
       });
     } else if (kind === "constraint" && typeof item.value === "number" && statedDirection !== undefined) {
@@ -1031,6 +1050,7 @@ function projectOnce(
         claim_index: -1,
         claim_kind: "stated_item",
         label: quote,
+        node_id: id,
         reason: valueLandedSomewhere
           ? "stated_target_not_represented_as_threshold"
           : "stated_target_value_dropped",
@@ -1454,6 +1474,7 @@ function projectOnce(
           claim_index: -1,
           claim_kind: node.provenance?.provenance_class === "stated" ? "stated_item" : "claim",
           label: node.label,
+          node_id: node.id,
           reason: "unconnected_to_goal",
         });
         delete provenance[node.id];
@@ -1578,6 +1599,7 @@ function projectOnce(
           claim_index: -1,
           claim_kind: "claim",
           label: nodes.find((n) => n.id === optionId)?.label ?? optionId,
+          node_id: optionId,
           reason: "parallel_intervention_conflict",
           intervention_signature: `${factorId}:${[chosen, ...rejected]
             .map((c) => c.setsTo)

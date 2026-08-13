@@ -148,6 +148,27 @@ export function isQuoteStatedInBrief(
  * Chosen at 3 because the shortest legitimate stated quotes in this estate's own
  * fixtures are four characters (`hire`, `Hold`), so the floor clears real
  * content with a margin and the error direction is to DECLINE.
+ *
+ * ── ⭐⭐ D4: IT HAS A SECOND CONSUMER, AND THAT WAS NOT NAMED WHEN IT LANDED ──
+ * `bindOptionLabelToBrief` shares this floor, so a genuine two-character OPTION
+ * label the user wrote (`"Go"`) now reads `cee_hypothesis` rather than
+ * `brief_extraction`. That was an undocumented side effect of a change aimed at
+ * stated items, and it is decided here rather than left to be discovered:
+ *
+ * **KEEP ONE FLOOR, FOR BOTH.** Two reasons, and the second is the stronger:
+ *   1. the coincidence argument is identical — a two-character label proves
+ *      nothing by being contained in a brief, whichever caller asks;
+ *   2. two different floors behind one shared authority is two predicates under
+ *      one name (trap 21), and this file exists because that shape produced the
+ *      B1 defect. A second constant would be the beginning of the same story.
+ *
+ * ⚠ AND THE COST, NAMED RATHER THAN WAVED AWAY: for an option the badge decides
+ * `brief_extraction` vs `cee_hypothesis`, so under-claiming tells the user WE
+ * invented an alternative they wrote. That is a misattribution of authorship in
+ * the opposite direction, and it is only tolerable because a two-character option
+ * label is vanishingly rare in a real brief. If one is ever observed in a live
+ * capture, this constant is the thing to revisit — not by nudging it, but by
+ * moving to span binding, which removes the need for a floor at all.
  */
 const MIN_QUOTE_CHARS = 3;
 

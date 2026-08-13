@@ -331,6 +331,22 @@ export function completionRegressesProtectedContent(
    * label says, and only an `ai_inferred` node can be absorbed. That is a claim
    * about the producer's semantics rather than about string equality, so a
    * coincidence of labels can no longer buy an excuse.
+   *
+   * ── ⚠ THE RESIDUAL, ROWED RATHER THAN LEFT IMPLIED (ROADMAP 2.1093) ────────
+   * This is a DOMAIN RESTRICTION, not a full identity binding, and the difference
+   * is reachable: an `ai_inferred` node's deletion can still be excused by an
+   * unrelated survivor that happens to record the same label. The protected class
+   * that matters — the user's own stated content — is closed, and the residual is
+   * bounded to model-authored nodes, so the harm is "a model contribution vanished
+   * unremarked" rather than "the user's words vanished".
+   *
+   * ⚠ IT IS NOT CLOSED HERE BECAUSE THE DATA DOES NOT EXIST TO CLOSE IT: the
+   * absorption records (`merged_refinements`, `undeveloped_duplicates`) carry
+   * LABELS ONLY. A real identity binding needs the projector to record the
+   * ABSORBED NODE'S ID alongside the label, which changes a published provenance
+   * shape and its consumers — a separate change with its own review. Pinned by a
+   * test asserting exactly this residual, so it is visible in the suite rather
+   * than living in a comment nobody runs.
    */
   const wasAbsorbed = (nodeId: string, label: string): boolean => {
     if (before.provenance[nodeId]?.provenance_class === "stated") return false;

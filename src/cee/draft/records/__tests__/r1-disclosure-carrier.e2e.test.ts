@@ -32,6 +32,19 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { CEEGraphResponseV3 } from "../../../../schemas/cee-v3.js";
 import { transformResponseToV3 } from "../../../transforms/schema-v3.js";
 import { projectDraftRecords } from "../seam.js";
+import { projectRecordsToGraph } from "../projector.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** The REAL B3 brief the two banked captures were drafted from. */
+const B3_BRIEF = JSON.parse(
+  readFileSync(
+    join(HERE, "../../../context-integrity/__tests__/fixtures/b3-product-bet.cold-read.json"),
+    "utf8",
+  ),
+).brief_text as string;
 
 const h = vi.hoisted(() => ({ payload: "", completionPayload: JSON.stringify({ claims: [] }) }));
 
@@ -150,19 +163,35 @@ it("CONSUMER: they survive to the wire, anchored to a node the user can actually
   expect(direction, "the unstated-direction notice must reach the wire").toBeDefined();
   expect(direction!.label).toBe("Cash must stay above 1000 pounds");
 
-  // ⭐ THE ANCHOR IS THE LOAD-BEARING PART, asserted over EVERY entry rather than
-  // the named one: a disclosure pointing at a node that is not in `nodes[]`
-  // cannot be rendered beside anything and is not a disclosure at all.
+  // ⭐ EVERY ENTRY IS SELF-CONSISTENT, asserted over ALL of them rather than the
+  // named one: an anchored disclosure must resolve in `nodes[]`, and a withdrawn
+  // one must carry no anchor at all. The pair is the invariant — checking only
+  // the first would pass on a response that anchored everything to one node.
   const nodeIds = new Set(wire.nodes.map((n) => n.id));
   for (const d of disclosures) {
-    expect(nodeIds.has(d.node_id), `disclosure ${d.reason} anchors to a real node`).toBe(true);
+    if (d.withdrawn) {
+      expect(d.node_id, `withdrawn ${d.reason} must not claim an anchor`).toBeUndefined();
+    } else {
+      expect(nodeIds.has(d.node_id!), `anchored ${d.reason} resolves in nodes[]`).toBe(true);
+    }
   }
   // …and the anchor is the RIGHT node, bound by identity, not merely a real one.
   const constraintNode = wire.nodes.find((n) => n.label === "Cash must stay above 1000 pounds");
+  expect(direction!.withdrawn).toBe(false);
   expect(direction!.node_id).toBe(constraintNode!.id);
 });
 
-it("an unanchorable disclosure is DROPPED rather than emitted pointing at nothing", () => {
+/**
+ * ⭐⭐ D1 — A WITHDRAWN RECORD IS THE DISCLOSURE THAT MATTERS MOST, AND IT USED TO
+ * BE THE ONE THAT VANISHED.
+ *
+ * The first cut required an anchor in `nodes[]`. `unconnected_to_goal` — 51 of 56
+ * real disclosures — describes a record REMOVED from the graph, so its subject
+ * can never be in `nodes[]`: not being there is the entire content of the notice.
+ * The rule therefore deleted precisely the class that says *"you told me this and
+ * it is not in your model"* and kept the ones about things already on screen.
+ */
+it("a WITHDRAWN record still reaches the wire, flagged rather than deleted", () => {
   const seam = projectDraftRecords(RECORDS, BRIEF);
   expect(seam.ok).toBe(true);
   if (!seam.ok) return;
@@ -173,8 +202,15 @@ it("an unanchorable disclosure is DROPPED rather than emitted pointing at nothin
         graph: seam.projection.graph,
         record_disclosures: [
           ...seam.projection.dropped,
-          // Names an entity that is on no graph anywhere, and no survivor.
-          { claim_index: -1, claim_kind: "stated_item", label: "A node that does not exist", reason: "unconnected_to_goal" },
+          // A record the projector withdrew: it names a node id that is on no
+          // final graph, which is exactly the shape of every `unconnected_to_goal`.
+          {
+            claim_index: -1,
+            claim_kind: "stated_item",
+            label: "Headcount is 20",
+            node_id: "zz_withdrawn",
+            reason: "unconnected_to_goal",
+          },
         ],
       } as never,
       { brief: BRIEF },
@@ -182,7 +218,44 @@ it("an unanchorable disclosure is DROPPED rather than emitted pointing at nothin
   );
 
   const disclosures = wire.record_disclosures ?? [];
-  expect(disclosures.some((d) => d.label === "A node that does not exist")).toBe(false);
-  // The real ones are untouched — this is a filter, not a refusal to emit.
-  expect(disclosures.some((d) => d.reason === "constraint_direction_unstated")).toBe(true);
+  const withdrawn = disclosures.find((d) => d.label === "Headcount is 20");
+  expect(withdrawn, "a withdrawn record must NOT be silently dropped").toBeDefined();
+  expect(withdrawn!.withdrawn).toBe(true);
+  expect(withdrawn!.node_id).toBeUndefined();
+  // …and nothing was lost on the way: every input disclosure came out.
+  expect(disclosures.length).toBe(seam.projection.dropped.length + 1);
+  expect(wire.record_disclosures_omitted).toBeUndefined();
+});
+
+/**
+ * ⭐⭐ THE VOLUME TEST, ON REAL MODEL OUTPUT. This is the assertion that would
+ * have caught D1: the first design passed every unit test it had while delivering
+ * 1 of 56 on the real captures. A per-case test cannot see a systematic loss —
+ * only counting the whole channel can.
+ */
+it("VOLUME: every disclosure the projector produces reaches the wire, on both real B3 captures", () => {
+  let totalProduced = 0;
+  let totalEmitted = 0;
+  for (const name of ["round7-completion-pass05-tie.json", "round7-completion-pass08.json"]) {
+    const capture = JSON.parse(
+      readFileSync(join(HERE, "fixtures", name), "utf8"),
+    ) as { __PROVENANCE__: { brief: string }; records: unknown };
+    expect(capture.__PROVENANCE__.brief).toBe("B3");
+    const projection = projectRecordsToGraph(capture.records as never, B3_BRIEF);
+    // Non-vacuity: a capture that produced nothing could not detect a loss.
+    expect(projection.dropped.length).toBeGreaterThan(0);
+
+    const wire = CEEGraphResponseV3.parse(
+      transformResponseToV3(
+        { graph: projection.graph, record_disclosures: projection.dropped } as never,
+        { brief: B3_BRIEF },
+      ),
+    );
+    totalProduced += projection.dropped.length;
+    totalEmitted += (wire.record_disclosures ?? []).length;
+    expect(wire.record_disclosures_omitted).toBeUndefined();
+  }
+  // The measurement that condemned the first design read 56 produced / 1 emitted.
+  expect(totalProduced).toBeGreaterThan(50);
+  expect(totalEmitted, "every produced disclosure must reach the wire").toBe(totalProduced);
 });
