@@ -3,7 +3,51 @@
  *
  * Extracts and parses numeric values from text for intervention mapping.
  * Supports currencies, percentages, multipliers, and plain numbers.
+ *
+ * ⭐⭐ THE MAGNITUDE ALPHABET IS NOT SPELLED HERE (ROADMAP 2.1130, CLAUDE.md
+ * trap 12). Every magnitude key, the alternation that matches it and the
+ * lookup that resolves it come from `src/utils/magnitude-alphabet.ts`. Until
+ * 2.1130 this module carried a private `MULTIPLIERS` map AND spelled the
+ * alphabet inline five separate times as `([kKmMbB]|thousand|million|billion)`,
+ * and both copies were measurably wrong at `dbd012eb`, in OPPOSITE directions:
+ *
+ *   · SHORT LIST — `grand`, `t` and `trillion` are canonical and were absent,
+ *     so `parseNumericValue("£250 grand")` returned 250. That is the same
+ *     1,000x under-read ROADMAP 2.330 was opened to close, still live in the
+ *     very module the canonical alphabet's header names as the sibling it took
+ *     `thousand` and `mn` FROM.
+ *
+ *   · NO WORD BOUNDARY — the inline alternations had no `\b`, so an amount
+ *     followed by an ordinary word beginning with a magnitude letter was
+ *     INFLATED, at `confidence: "high"`:
+ *       "£20,000 migration cost" -> 20,000,000,000     (the 'm' of "migration")
+ *       "£20,000 board approval" -> 20,000,000,000,000 (the 'b' of "board")
+ *       "£100 base"              -> 100,000,000,000
+ *     The canonical module documents this exact defect (#787: the 't' of
+ *     "THIS year" scaling 6,000,000 to 6e18) and closes it with the `\b` inside
+ *     `magnitudeSuffixFragment`. Fabrication is the worse direction of the two,
+ *     and it was the one no guard was looking for.
+ *
+ * ⚠ WHY THE UNION GUARD COULD NOT SEE EITHER, so nobody re-derives comfort from
+ * it: `utils/__tests__/magnitude-alphabet.union.test.ts` Part A asserts
+ * canonical ⊇ sibling. A SHORT sibling satisfies that by construction, and a
+ * sibling whose REGEX disagrees with its own map is outside a key comparison
+ * altogether. With `MULTIPLIERS` now a pure re-export, Part A's two assertions
+ * about THIS module are tautologies — deliberately, and disclosed. The
+ * load-bearing guard is now behavioural and lives in
+ * `__tests__/numeric-parser-magnitude-authority.test.ts`: it sweeps
+ * `parseNumericValue` itself over every canonical key, and carries a
+ * hand-written corpus for the class no list can express (trap 12d).
  */
+
+import {
+  AMOUNT_DIGITS,
+  MAGNITUDE_MULTIPLIERS,
+  MAGNITUDE_SUFFIX_ANON,
+  magnitudeSuffixPattern,
+  parseAmountDigits,
+  resolveMagnitude,
+} from "../../utils/magnitude-alphabet.js";
 
 /**
  * Relative value kind for precise classification.
@@ -61,29 +105,28 @@ const CURRENCY_MAP: Record<string, string> = {
 export const CURRENCY_SYMBOL_TO_CODE: Readonly<Record<string, string>> = CURRENCY_MAP;
 
 /**
- * Multiplier suffixes.
+ * Multiplier suffixes — THE CANONICAL ALPHABET ITSELF, re-exported.
  *
- * ⚠ EXPORTED SOLELY SO THE CANONICAL ALPHABET'S UNION GUARD CAN READ IT
- * (ROADMAP 2.330). This is one of the sibling magnitude vocabularies that
- * `src/utils/magnitude-alphabet.ts` must be a SUPERSET of. A derived guard can
- * only compare lists it can import, so a private sibling is a sibling that
- * cannot be checked — which is how `grand` stayed out of the canonical list
- * while two other modules resolved it to ×1000. Nothing outside the union
- * guard should index this: new consumers take the canonical alphabet.
+ * ⚠ NO LONGER A HAND-WRITTEN SIBLING (ROADMAP 2.1130). This was a private map
+ * that had drifted three keys short of canonical (`grand`, `t`, `trillion`),
+ * silently reading each of them as x1. It is now the canonical map by
+ * reference, so this module cannot go short again and there is nothing to keep
+ * in sync.
+ *
+ * ⚠ THE EXPORT SURVIVES ONLY FOR THE UNION GUARD, AND IT IS NOW A TAUTOLOGY
+ * THERE — stated plainly so no later reader mistakes it for evidence.
+ * `utils/__tests__/magnitude-alphabet.union.test.ts` Part A asks "is every
+ * sibling key canonical?"; a re-export answers yes by identity. That guard has
+ * not been weakened (it was always blind in this direction — a SHORT sibling
+ * passed it too); it has simply run out of anything to say about this module.
+ * What replaces it is behavioural: `numeric-parser-magnitude-authority.test.ts`
+ * sweeps `parseNumericValue` over every canonical key, which is a claim about
+ * the STRINGS this module resolves rather than about a list it holds.
+ *
+ * Nothing outside that guard should index this: consumers take the canonical
+ * alphabet's `resolveMagnitude`, which case-folds.
  */
-export const MULTIPLIERS: Record<string, number> = {
-  k: 1_000,
-  K: 1_000,
-  m: 1_000_000,
-  M: 1_000_000,
-  b: 1_000_000_000,
-  B: 1_000_000_000,
-  bn: 1_000_000_000,
-  mn: 1_000_000,
-  thousand: 1_000,
-  million: 1_000_000,
-  billion: 1_000_000_000,
-};
+export const MULTIPLIERS: Readonly<Record<string, number>> = MAGNITUDE_MULTIPLIERS;
 
 /**
  * Time unit patterns.
@@ -172,16 +215,22 @@ function parseRelativeValue(text: string): ParsedValue | null {
 
   // Pattern: (increase|decrease) [target] by £50
   // The target noun is optional and can be 1-3 words
-  const relativeAbsolutePattern =
-    /\b(increase|decrease|reduce|raise|lower|cut|boost|grow)\s+(?:(?:the\s+)?(?:\w+(?:\s+\w+){0,2})\s+)?(?:by\s+)?([£$€¥₹])\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmMbB]|thousand|million|billion)?/i;
+  const relativeAbsolutePattern = new RegExp(
+    `\\b(?<verb>increase|decrease|reduce|raise|lower|cut|boost|grow)\\s+` +
+      `(?:(?:the\\s+)?(?:\\w+(?:\\s+\\w+){0,2})\\s+)?(?:by\\s+)?` +
+      `(?<currency>[£$€¥₹])\\s*(?<digits>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("mag"),
+    "i",
+  );
   const absoluteMatch = text.match(relativeAbsolutePattern);
 
   if (absoluteMatch) {
-    const direction = getRelativeDirection(absoluteMatch[1]);
-    const currencySymbol = absoluteMatch[2];
-    const numericPart = absoluteMatch[3].replace(/,/g, "");
-    const multiplier = absoluteMatch[4] ? MULTIPLIERS[absoluteMatch[4]] || 1 : 1;
-    const value = parseFloat(numericPart) * multiplier;
+    const g = absoluteMatch.groups ?? {};
+    const direction = getRelativeDirection(g.verb!);
+    const currencySymbol = g.currency!;
+    const digits = parseAmountDigits(g.digits);
+    if (digits === null) return null;
+    const value = digits * resolveMagnitude(g.mag);
     // For decrease, store as negative delta
     const signedDelta = direction === "decrease" ? -value : value;
 
@@ -267,17 +316,21 @@ function getRelativeDirection(keyword: string): "increase" | "decrease" {
  */
 function parseCurrencyValue(text: string): ParsedValue | null {
   // Pattern: £59, $100, €45, £10k, $2.5m
-  const currencyPattern =
-    /([£$€¥₹]|A\$|C\$|NZ\$|CHF|kr)\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmMbB]|thousand|million|billion)?(?:\s*(GBP|USD|EUR|JPY|INR|AUD|CAD|NZD|CHF|SEK))?/i;
+  const currencyPattern = new RegExp(
+    `(?<currency>[£$€¥₹]|A\\$|C\\$|NZ\\$|CHF|kr)\\s*(?<digits>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("mag") +
+      `(?:\\s*(?<code>GBP|USD|EUR|JPY|INR|AUD|CAD|NZD|CHF|SEK))?`,
+    "i",
+  );
   const match = text.match(currencyPattern);
 
   if (match) {
-    const currencySymbol = match[1];
-    const numericPart = match[2].replace(/,/g, "");
-    const multiplierKey = match[3];
-    const explicitUnit = match[4];
-    const multiplier = multiplierKey ? MULTIPLIERS[multiplierKey] || 1 : 1;
-    const value = parseFloat(numericPart) * multiplier;
+    const g = match.groups ?? {};
+    const currencySymbol = g.currency!;
+    const digits = parseAmountDigits(g.digits);
+    if (digits === null) return null;
+    const explicitUnit = g.code;
+    const value = digits * resolveMagnitude(g.mag);
 
     return {
       value,
@@ -289,15 +342,25 @@ function parseCurrencyValue(text: string): ParsedValue | null {
   }
 
   // Also try: 100 GBP, 50 USD format
-  const postfixPattern = /(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmMbB])?\s*(GBP|USD|EUR|JPY|INR|AUD|CAD|NZD|CHF|SEK)/i;
+  // ⚠ The magnitude here was `([kKmMbB])?` — a char class with no word forms
+  // at all, so "5 million GBP" parsed as NOTHING (the pattern needs the code to
+  // follow the digits, and "million" sat between them unmatched). The canonical
+  // fragment carries every spelling, so the postfix form now reads the same
+  // alphabet the prefix form does.
+  const postfixPattern = new RegExp(
+    `(?<digits>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("mag") +
+      `\\s*(?<code>GBP|USD|EUR|JPY|INR|AUD|CAD|NZD|CHF|SEK)`,
+    "i",
+  );
   const postfixMatch = text.match(postfixPattern);
 
   if (postfixMatch) {
-    const numericPart = postfixMatch[1].replace(/,/g, "");
-    const multiplierKey = postfixMatch[2];
-    const unit = postfixMatch[3].toUpperCase();
-    const multiplier = multiplierKey ? MULTIPLIERS[multiplierKey] || 1 : 1;
-    const value = parseFloat(numericPart) * multiplier;
+    const g = postfixMatch.groups ?? {};
+    const digits = parseAmountDigits(g.digits);
+    if (digits === null) return null;
+    const unit = g.code!.toUpperCase();
+    const value = digits * resolveMagnitude(g.mag);
 
     return {
       value,
@@ -391,15 +454,23 @@ function parseCountValue(text: string): ParsedValue | null {
  * Parse plain numbers like 50,000 or 100000.
  */
 function parsePlainNumber(text: string): ParsedValue | null {
-  // Pattern: plain number, possibly with commas
-  const numberPattern = /^(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmMbB]|thousand|million|billion)?$/;
+  // Pattern: plain number, possibly with commas.
+  // ⚠ The `i` flag is NEW and is part of the canonical contract, not a
+  // widening of intent: `MAGNITUDE_MULTIPLIERS` is documented as "matched
+  // case-INSENSITIVELY by every consumer", and `resolveMagnitude` case-folds.
+  // Without it this one spelling read "5 K" as 5 while every sibling pattern in
+  // the same file read it as 5,000 — a disagreement inside one module.
+  const numberPattern = new RegExp(
+    `^(?<digits>-?${AMOUNT_DIGITS})` + magnitudeSuffixPattern("mag") + `$`,
+    "i",
+  );
   const match = text.match(numberPattern);
 
   if (match) {
-    const numericPart = match[1].replace(/,/g, "");
-    const multiplierKey = match[2];
-    const multiplier = multiplierKey ? MULTIPLIERS[multiplierKey] || 1 : 1;
-    const value = parseFloat(numericPart) * multiplier;
+    const g = match.groups ?? {};
+    const digits = parseAmountDigits(g.digits);
+    if (digits === null) return null;
+    const value = digits * resolveMagnitude(g.mag);
 
     return {
       value,
@@ -519,10 +590,13 @@ export function extractAllNumericValues(text: string): ParsedValue[] {
     }
   }
 
-  // Also look for inline values that might not be split
+  // Also look for inline values that might not be split.
+  // `MAGNITUDE_SUFFIX_ANON` is the capture-group-free spelling of the same
+  // alphabet — required here because these patterns are consumed by
+  // `String.prototype.match` with /g, which returns whole matches only.
   const inlinePatterns = [
     // Currency values
-    /[£$€¥₹]\s*\d+(?:,\d{3})*(?:\.\d+)?\s*[kKmMbB]?/g,
+    new RegExp(`[£$€¥₹]\\s*${AMOUNT_DIGITS}${MAGNITUDE_SUFFIX_ANON}`, "gi"),
     // Percentages
     /\d+(?:\.\d+)?\s*%/g,
   ];
