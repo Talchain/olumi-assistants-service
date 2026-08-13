@@ -161,6 +161,40 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     }
   });
 
+  it("refuses a semantically-matched CATEGORICAL target instead of writing a placeholder", () => {
+    // The categorical limb is the sharper of the two: with no default encoding
+    // it writes `value: 0`, so a semantic mis-match does not merely pick the
+    // wrong factor — it pins the wrong factor to zero, which the analysis reads
+    // as a deliberate lever position. Measured at CEE `51704f12`: option
+    // "Adopt Vue" wrote an intervention onto a factor labelled "Technology
+    // Spend" via the categorical hint "technology".
+    const TECH_ID = "factor_technology_spend";
+    const nodes = [
+      { id: GOAL_ID, kind: "goal", label: "Annual profit" },
+      { id: TECH_ID, kind: "factor", label: "Technology Spend" },
+    ] as unknown as NodeV3T[];
+    const edges = [{ id: "e", from: TECH_ID, to: GOAL_ID }] as unknown as EdgeV3T[];
+
+    // Precondition pinned in-test: the mapping really is semantic.
+    const truth = matchInterventionToFactor("technology", nodes, edges, GOAL_ID);
+    expect(truth.node_id).toBe(TECH_ID);
+    expect(truth.match_type).toBe("semantic");
+
+    const option = extractInterventionsForOption(
+      "Adopt Vue",
+      undefined,
+      nodes,
+      edges,
+      GOAL_ID,
+      new Set<string>(),
+      [],
+      undefined,
+      "opt_a",
+    );
+    expect(Object.keys(option.interventions)).not.toContain(TECH_ID);
+    expect((option.unresolved_targets ?? []).some((t) => /technology/i.test(t))).toBe(true);
+  });
+
   it("CONTRAST CONTROL: an exact_id target still yields a real intervention", () => {
     // Proves the guard discriminates rather than blanket-refusing. Without this
     // the four cases above would all pass on a function that returns {} always
