@@ -270,10 +270,15 @@ describe('Lane 21 display-safe breadth', () => {
       { rank: '3', label: 'Offshore partner', win_probability: '5%' },
       // ROADMAP 2.54 (a): a zero-percent render now carries its honest
       // explanation inline rather than standing unexplained.
+      //
+      // ROADMAP 2.229 slice 3: and the render itself is now "<1%", not "0%".
+      // 0.001 is a live possibility — roughly one run in a thousand — and
+      // "0%" told the reader it could not happen. The note was already doing
+      // the honest work; the figure beside it was contradicting the note.
       {
         rank: '4',
         label: 'Tiered pricing',
-        win_probability: '0%',
+        win_probability: '<1%',
         win_probability_note: expect.stringContaining('came out best'),
       },
     ]);
@@ -716,8 +721,13 @@ describe('ROADMAP 2.54a near-zero win-probability note', () => {
       }),
     );
     const hybrid = out!.options![2]!;
-    // Display string unchanged — no number changes.
-    expect(hybrid.win_probability).toBe('0%');
+    // ROADMAP 2.229 slice 3 — this line used to read `toBe('0%')` under the
+    // comment "Display string unchanged — no number changes". The note this
+    // test exists to check says the option "came out best" in none of the
+    // sampled runs and that this is "not an error"; rendering the figure as
+    // a flat 0% made the sentence argue with its own number. 0.0001875 is
+    // small, not impossible.
+    expect(hybrid.win_probability).toBe('<1%');
     // The honest one-liner is present and states only what the analysis
     // data supports (argmax frequency across sampled runs).
     expect(hybrid.win_probability_note).toBeDefined();
@@ -753,6 +763,60 @@ describe('ROADMAP 2.54a near-zero win-probability note', () => {
     for (const option of out!.options!) {
       expect(option).not.toHaveProperty('win_probability_note');
     }
+  });
+
+  /**
+   * ROADMAP 2.229 slice 3 — TWO SEPARATELY-DEFINED THRESHOLDS THAT MUST AGREE.
+   *
+   * The honest note fires on `isNearZeroWinProbability`
+   * (`format-analysis-for-context.ts:418`, strict `< 0.005`). The "<1%" render
+   * fires inside `formatProbability` when whole-percent rounding would have
+   * produced "0%" on a non-zero value — i.e. also `< 0.005`. They agree today
+   * by arithmetic, not by construction, and nothing links them: move either
+   * one and you get a "<1%" with no explanation, or an unexplained bare "0%"
+   * back — silently, and green (CLAUDE.md trap 12, two mirrors of one rule).
+   *
+   * This pins the RELATIONSHIP rather than either constant, so a change to
+   * either side REDs here instead of drifting.
+   */
+  it('renders "<1%" on exactly the options that earn the honest note', () => {
+    const out = formatAnalysisForContext(
+      rawAnalysis({
+        options: [
+          { label: 'Big', probability: 0.9 },
+          { label: 'Small', probability: 0.05 },
+          { label: 'Boundary above', probability: 0.005 }, // rounds to "1%"
+          { label: 'Boundary below', probability: 0.0049 }, // rounds to "0%"
+          { label: 'Exactly zero', probability: 0 },
+        ],
+      }),
+    );
+    const options = out!.options!;
+    expect(options.length).toBe(5);
+
+    for (const option of options) {
+      const hasNote = Object.prototype.hasOwnProperty.call(
+        option,
+        'win_probability_note',
+      );
+      if (option.win_probability === '<1%') {
+        expect(hasNote, `"<1%" without a note: ${option.label}`).toBe(true);
+      }
+      if (hasNote) {
+        // The note may legitimately accompany an exact "0%" (a genuine
+        // zero), but never anything that reads as one percent or more.
+        expect(
+          ['<1%', '0%'],
+          `note attached to ${option.win_probability} (${option.label})`,
+        ).toContain(option.win_probability);
+      }
+    }
+
+    // Positive control: this fixture must actually EXERCISE both sides, or
+    // the loop above passes by iterating over nothing interesting (trap 13).
+    expect(options.map((o) => o.win_probability)).toContain('<1%');
+    expect(options.map((o) => o.win_probability)).toContain('0%');
+    expect(options.map((o) => o.win_probability)).toContain('1%');
   });
 
   it('covers the leading pair via the same shared option formatter', () => {
