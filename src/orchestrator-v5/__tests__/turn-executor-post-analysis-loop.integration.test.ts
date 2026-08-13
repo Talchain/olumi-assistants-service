@@ -37,6 +37,7 @@ import {
   makeBlankProjectionFreshFact,
 } from './coaching-fixtures.js';
 import { makeMessagePayload } from './fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 const mockState: {
   priorTurns: Array<Record<string, unknown>>;
@@ -81,6 +82,26 @@ function throwingRoutingAdapter() {
   };
 }
 
+
+/**
+ * ROADMAP 2.640 — a graph whose TOP readiness blocker is `too_few_options`
+ * (one option, so the "at least 2 options" branch fires first). PARTIAL_GRAPH
+ * has two options and its only open item is the goal threshold, which this row
+ * leaves deliberately unmapped.
+ */
+const BLOCKED_GRAPH = {
+  ...PARTIAL_GRAPH,
+  nodes: PARTIAL_GRAPH.nodes.filter((n) => n.id !== 'opt_status_quo'),
+  edges: PARTIAL_GRAPH.edges.filter((e) => e.from !== 'opt_status_quo'),
+};
+const BLOCKED_GRAPH_HASH = computeAnalysisAffectingGraphHash(BLOCKED_GRAPH as never)!;
+
+/** The same fresh fact, re-hashed for BLOCKED_GRAPH so freshness stays 'fresh'. */
+function blockedFreshFact(): Record<string, unknown> {
+  const fact = makeBlankProjectionFreshFact();
+  const result = fact.result as Record<string, unknown>;
+  return { ...fact, result: { ...result, graph_hash_at_run: BLOCKED_GRAPH_HASH } };
+}
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
@@ -128,6 +149,63 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
     expect(findSuccessClaimHit(text)).toBeNull();
     expect(findForbiddenPhraseHit(text)).toBeNull();
     expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
+  });
+
+  // =========================================================================
+  // ROADMAP 2.640 §3.4 — THE WIRING HOP, pinned through the REAL turn executor.
+  //
+  // The builder and the gate field are both unit-covered in
+  // `compose/__tests__/ui-directive-gate-remedy.test.ts`. What THIS test exists
+  // to catch is the hop between them and the user: a directive that is built
+  // and then never attached to the response is working code nobody can reach,
+  // and no unit test on either side can see that gap.
+  // =========================================================================
+  it('a blocked-model question ships the answer AND the section that fixes it', async () => {
+    // PARTIAL_GRAPH's only open item is a missing goal threshold, which this
+    // row deliberately leaves UNMAPPED (there is no goal section) — so it is
+    // the wrong fixture for proving the wiring, and using it would have shown
+    // a green "no directive" that proved nothing. BLOCKED_GRAPH drops an option
+    // so the TOP blocker is `too_few_options`, a mapped kind.
+    //
+    // The fact's hash is recomputed for THIS graph: the gate only fires on
+    // `freshness === 'fresh'`, and a stale hash would silently take the turn
+    // down a different path.
+    mockState.persistedGraph = BLOCKED_GRAPH;
+    mockState.priorFacts = [blockedFreshFact()];
+
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      mkPayload("What's blocking the analysis?"),
+      'req-gate-remedy',
+      { routingAdapter: adapter, graphState: BLOCKED_GRAPH as never },
+    );
+
+    // Precondition pinned IN-TEST (trap 13b): if the gate stopped matching this
+    // message, or stopped classifying it `readiness`, every assertion below
+    // would describe a state the product never reaches. Assert it rather than
+    // guarding on it — a guard would go vacuously green.
+    const ev = adviceEvent();
+    expect(ev, 'advice-gate telemetry should fire').toBeDefined();
+    expect(ev!.matched).toBe(true);
+    expect(ev!.advice_class).toBe('readiness');
+
+    const blocks =
+      (result.response as { blocks?: Array<Record<string, unknown>> }).blocks ?? [];
+    const directives = blocks.filter((b) => b.type === 'ui_directive');
+
+    // N=1 — one gesture on the turn, not zero and not two.
+    expect(directives).toHaveLength(1);
+    expect(directives[0].verb).toBe('open_section');
+    // Bind by identity to the gate authoring path, so a ladder directive
+    // arriving here by some other route could not satisfy this test.
+    expect(directives[0].source).toBe('gate');
+    expect(directives[0].ui_target).toMatchObject({ kind: 'model_section' });
+
+    // The gesture is ADDITIVE: the user is still told what is wrong, in words.
+    const text = (result.response as { assistant_text?: string }).assistant_text ?? '';
+    expect(text.length).toBeGreaterThan(0);
+    expect(findSuccessClaimHit(text)).toBeNull();
+    expect(findForbiddenPhraseHit(text)).toBeNull();
   });
 
   // (former "flag OFF → falls through data_unavailable_for_class" pin removed
