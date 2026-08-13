@@ -157,6 +157,13 @@ import {
 // leaf. `mayNameLeadingOptionForFact` is IMPORTED, not restated: the offer's
 // wire-reached telemetry must branch on the same predicate compose branches on.
 import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
+// Lane C — the grounded counter-case. NOTE it answers a DIFFERENT question
+// from `selectFragileEdge` above ("what should the team argue against?" vs
+// "what may we offer to adjust?") and is deliberately not unified with it —
+// see that module's header for why aligning them would be trap 21.
+import { selectGroundedCounterCase } from '../coaching/grounded-counter-case.js';
+// Lane C — the grounded sensitivity body (names the subject factor).
+import { selectGroundedSensitivityBody } from '../coaching/grounded-sensitivity-body.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
@@ -1825,12 +1832,35 @@ export function buildLensSurface(
   const actionLabel = judgementOffer?.actionLabel ?? offer?.actionLabel;
   const actionPrompt = judgementOffer?.actionPrompt ?? offer?.actionPrompt;
 
+  // Lane C — NAME THE FACTOR on the lens 40/45 real runs actually select.
+  //
+  // `sensitivity_flip_risk` declares no companion exercise, so this coaching
+  // block IS its whole surface — and its body is a constant that opens "This
+  // factor moves the result more than any other" on 38 of those 40 runs: a
+  // deictic with no antecedent. The subject's id is already threaded on
+  // `selection.subjectRef`; its producer-authored label sits in
+  // `factor_sensitivity`, the very field this lens grounds its claim in.
+  //
+  // ⚠ THIS RESOLVES A PRONOUN, IT ADDS NO CLAIM. The grounded body replaces the
+  // opening clause and carries the reviewed remainder through verbatim, so it
+  // asserts exactly what the constant asserted — no leading option, no
+  // magnitude, and no flip verb on the attested-no-flip codes. A refusal (copy
+  // drift, missing label, prose gate, body cap) falls back to `selection.body`,
+  // which is today's sentence — never a worse one.
+  const groundedSensitivity =
+    selection.lens === 'sensitivity_flip_risk'
+      ? selectGroundedSensitivityBody(selection.rationaleCode, selection.subjectRef?.id, enrichment)
+      : null;
+
   const candidate = {
     ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
     type: 'coaching' as const,
     coaching_kind: 'strengthen' as const,
     title: truncate(selection.title, TITLE_MAX),
-    body: truncate(judgementOffer?.body ?? offer?.body ?? selection.body, BODY_MAX),
+    body: truncate(
+      judgementOffer?.body ?? offer?.body ?? groundedSensitivity?.grounded?.body ?? selection.body,
+      BODY_MAX,
+    ),
     source: 'deterministic_signal' as const,
     target_refs: (judgementOffer?.targetRefs ?? offer?.targetRefs ?? []) as readonly TargetRef[],
     priority_rank: 15,
@@ -2102,9 +2132,25 @@ export function buildLensCompanionBlocks(
         fact.result.leading_option_id.length > 0
           ? fact.result.leading_option_id
           : null;
+      // Lane C — GROUND THE EXERCISE IN THIS RUN'S OWN MODEL.
+      //
+      // `CONSIDER_OPPOSITE_COUNTER_CASE` is fixed copy with no producer-content
+      // dependency: byte-identical on every decision this product has analysed.
+      // `selectGroundedCounterCase` names the relationship THIS run's
+      // robustness check found most sensitive, so two different decisions
+      // produce two different exercises.
+      //
+      // ⚠ THE FALLBACK IS LOAD-BEARING, NOT DEFENSIVE PADDING. The grounded
+      // sentence interpolates PRODUCER LABELS, so — unlike the fixed copy — it
+      // can genuinely trip the prose gate that `validateProseAndSchemaOrDrop`
+      // applies downstream, and that gate DROPS THE WHOLE BLOCK. The selector
+      // therefore asks the gates EARLY and refuses the GROUNDING when they
+      // bite (the lesson `coaching/fragile-edge-offer-text.ts` exists to
+      // encode). Grounding can fail; the exercise cannot vanish.
+      const groundedCounterCase = selectGroundedCounterCase(fact.result.enrichment);
       const block = buildDskExerciseBlock(
         'consider_opposite',
-        CONSIDER_OPPOSITE_COUNTER_CASE,
+        groundedCounterCase.grounded?.counterCase ?? CONSIDER_OPPOSITE_COUNTER_CASE,
         leadingOptionId,
         ctx,
         lookup,
