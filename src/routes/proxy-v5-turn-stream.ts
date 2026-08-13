@@ -73,17 +73,14 @@ import crypto from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { config } from "../config/index.js";
-import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
-import {
-  buildSignInRequiredError,
-  extractJwtCandidate,
-} from "../orchestrator/user-identity.js";
+import { log } from "../utils/telemetry.js";
 import {
   ALLOWED_REQUEST_HEADERS,
   buildCorsHeaders,
   isOriginAllowed,
   parseAllowedOrigins,
   resolveProxyAssistKey,
+  serialiseProxiedBodyWithoutClaimedIdentity,
 } from "./proxy-v5-turn.js";
 import { streamTurnAsStagedSse, STAGED_FRAME_CLASSES } from "./streamed-turn-sse.js";
 
@@ -151,23 +148,13 @@ export default async function proxyV5TurnStreamRoute(app: FastifyInstance): Prom
       });
     }
 
-    // ── 3. Flag-gated required-login front door ─────────────────────────────
-    // Identical posture to the buffered proxy: this is the browser-facing turn
-    // surface, so "this is a browser request" is structural truth here. Refused
-    // pre-stream for the same reason as the origin check.
-    if (
-      config.auth?.requireUserJwt === true &&
-      extractJwtCandidate(request.headers.authorization) === null
-    ) {
-      log.warn({ requestId }, "[proxy-v5-stream] Rejected: sign-in required (no user JWT presented)");
-      emit(TelemetryEvents.UserJwtRefused, {
-        request_id: requestId,
-        reason: "missing_token",
-        via_browser_proxy: true,
-      });
-      for (const [k, v] of Object.entries(cors)) reply.header(k, v);
-      return reply.code(401).send(buildSignInRequiredError("missing_token", requestId));
-    }
+    // ── 3. THE REQUIRED-LOGIN FRONT DOOR USED TO BE HERE ────────────────────
+    // Removed together with the buffered sibling's copy, and for the same
+    // reason — one identity policy for this surface, never two. The full
+    // rationale lives on the buffered route (step 2.5) rather than being
+    // restated here, because two copies of a security rationale drift exactly
+    // as fast as two copies of a security check.
+    // What makes admitting these callers safe is the strip at step 5.
 
     // ── 4. Internal request headers ─────────────────────────────────────────
     // Allowlisted forwarding (not verbatim, unlike the service sibling): this is
@@ -185,8 +172,11 @@ export default async function proxyV5TurnStreamRoute(app: FastifyInstance): Prom
     internalHeaders["accept"] = "application/json";
     internalHeaders["x-request-id"] = requestId;
 
-    const payload =
-      typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? {});
+    // ── 5. Body WITHOUT the caller-asserted identity extension ──────────────
+    // The property that makes step 3's removal safe. Shared helper, so the
+    // streamed and buffered rungs cannot diverge on who a caller is allowed
+    // to claim to be.
+    const payload = serialiseProxiedBodyWithoutClaimedIdentity(request.body ?? {});
 
     await streamTurnAsStagedSse({
       app,
