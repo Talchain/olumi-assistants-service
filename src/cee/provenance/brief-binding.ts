@@ -190,37 +190,36 @@ export function bindStatedItemToBrief(args: {
     // rebuilds the defect in a narrower shape. ONE predicate, ONE scope. The cost
     // is that a figure whose number sits in a neighbouring sentence now
     // under-claims — the safe direction, and visible as such.
-    if (!isVerifiableMagnitude(value)) return "unverified";
+    // ⚠⚠ C3 — THE NEGATIVE CLASS IS UN-VERIFIABLE, AND THERE IS DELIBERATELY NO
+    // GUARD HERE FOR IT. THIS ABSENCE IS THE DECISION; DO NOT "RESTORE" ONE.
+    //
+    // `stated-amounts.ts` carries no sign in its scan pattern and compares
+    // absolute magnitudes, so `magnitudesMatch(500000, -500000)` is false and
+    // EVERY negative value declines. Under ROADMAP 2.972 that predicate only
+    // downgraded and the gap was cheap; it now decides a user-facing badge, and
+    // the grammar admits negatives (`value: { type: "number" }`, unbounded), so
+    // "we are running a -£500k deficit" can never be attributed to the user.
+    //
+    // I first wrote an explicit `isVerifiableMagnitude(value)` branch here to make
+    // that decline a DECISION rather than a side effect. **A mutant proved it
+    // equivalent** — flipping it to `return true` left all 31 tests green, because
+    // the decline is produced downstream regardless. Two reasons to remove it
+    // rather than keep a branch no test can kill:
+    //   1. an unkillable branch is what a later tidy-up deletes without noticing,
+    //      and this file already argues that case elsewhere;
+    //   2. worse, it is a LANDMINE — the day `stated-amounts.ts` gains signed
+    //      support, this guard would silently keep blocking the class the fix just
+    //      enabled, and the fix would look broken.
+    //
+    // What pins the class instead is the OUTCOME: a KNOWN-DROPPED test asserting
+    // exactly this behaviour, with a positive twin proving the decline is about
+    // the SIGN. It REDs if the class grows AND if it is closed — and on the day it
+    // is closed, that RED is the instruction to delete the test.
     if (!isAmountStatedInBrief(value, unit ?? undefined, quote as string)) return "unverified";
   }
   return "verified";
 }
 
-/**
- * ⭐ IS THIS MAGNITUDE ONE THE SCANNER CAN EVEN SEE? — C3, made EXPLICIT.
- *
- * `stated-amounts.ts` carries no sign in its scan pattern and compares by
- * absolute magnitude, so `magnitudesMatch(500000, -500000)` is false and **every
- * negative value is un-verifiable by construction**. Under ROADMAP 2.972 that
- * predicate only ever DOWNGRADED, so the gap was cheap. It now decides a
- * user-facing badge, which changes what the gap costs: *"we are running a
- * -£500k deficit"* and *"operating margin is -4%"* are ordinary business-brief
- * phrasings, and the grammar admits them (`value: { type: "number" }`, unbounded).
- *
- * ⚠ THE BRANCH EXISTS SO THE DECLINE IS A DECISION RATHER THAN A SIDE EFFECT.
- * Without it a negative still declined — but silently, as a failed match
- * indistinguishable from a genuine mismatch, which is precisely how a whole
- * value class stays invisible (trap 13d: a predicate omitting a class its own
- * contract admits). Named here, pinned by a KNOWN-DROPPED test asserting exactly
- * this class, so it REDs if the class grows OR if it is closed.
- *
- * NOT fixed here on purpose: widening `stated-amounts.ts` to a signed form also
- * moves per-intervention provenance across the product, which is its own change
- * with its own measurement.
- */
-function isVerifiableMagnitude(value: number): boolean {
-  return value >= 0;
-}
 
 /**
  * The OPTION-label verdict, used at the response transform.
