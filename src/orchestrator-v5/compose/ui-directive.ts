@@ -38,8 +38,14 @@ import {
   UiDirectiveBlockSchema,
   type OlumiResponse,
   type UiDirectiveBlock,
+  type UiDirectiveModelSectionIdLiteral,
   type UiDirectiveVerbLiteral,
 } from '@talchain/schemas/boundary';
+
+// ROADMAP 2.640 — the remedy mapping's KEY SPACE is the readiness projection's
+// own item taxonomy, imported as a type so the mapping cannot drift from it
+// (see REMEDY_SECTION_BY_OPEN_ITEM_KIND: a new kind becomes a type error).
+import type { ReadinessOpenItem } from '../routing/readiness-summary.js';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -103,6 +109,28 @@ export function buildRecommendedOptionUiDirective(
  * deliberate.
  */
 const LADDER_SOURCE = 'ladder' as const;
+
+/**
+ * ROADMAP 2.640 / UI-DIRECTIVE-0.38-DESIGN §3.4 — the SECOND authoring path,
+ * and the first non-ladder producer this service has ever had.
+ *
+ * ⚠ The paragraph above says the stamp is "`ladder` — never `gate`, never
+ * `composer`". That was true of every directive CEE emitted until this row and
+ * is now true only of the LADDER builders. `gate` is emitted by exactly one
+ * function — `buildGateRemedySectionDirective` — and `composer` still has no
+ * producer. The enum value was reserved for this path when 0.39.0 shipped
+ * (`UiDirectiveGestureSource`: "`gate` — the advice-gate deterministic
+ * per-class mapping (§3.4)"), so this fills a designed, previously-unbuilt
+ * contract slot rather than widening the wire.
+ *
+ * Why the distinction is load-bearing rather than cosmetic: a ladder directive
+ * rides a HANDLER FACT (the user did something and the gesture follows the
+ * result), whereas a gate directive rides a QUESTION the user asked that CEE
+ * answered deterministically without a fact. A capture that cannot tell those
+ * apart cannot tell whether a gesture followed an action or an enquiry, and
+ * telemetry counts them separately for exactly that reason.
+ */
+const GATE_SOURCE = 'gate' as const;
 
 // ============================================================================
 // Wave-4 δ2 — the focus / open_inspector emit policy (ROADMAP 1.202), extended
@@ -177,7 +205,24 @@ type UiDirectiveSuppressReason =
    * reference, so there is nothing the assistant is demonstrably discussing to
    * point at. Fail-closed — never point at nothing.
    */
-  | 'no_discussed_entity';
+  | 'no_discussed_entity'
+  /**
+   * ROADMAP 2.640 / §3.4 — the readiness gate's TOP blocking item does not map
+   * to one of the five Model-tab section ids, so there is no surface to open.
+   *
+   * This is the fail-closed arm and it fires on REAL, COMMON inputs, not just
+   * on malformed ones: `goal_threshold_missing` has no section (the five ids
+   * are options/factors/relationships/risks/modelcard — there is no goal
+   * section), and `option_needs_mapping` is deliberately unmapped pending a
+   * derivation of where an option-to-factor connection is actually created.
+   *
+   * Opening the WRONG section is worse than opening none: the gesture is an
+   * implicit claim that the remedy lives there, and a user sent to a surface
+   * where they cannot act learns the assistant's gestures are unreliable. This
+   * suppression keeps the answer's PROSE (which already names the blocker) and
+   * declines only the gesture.
+   */
+  | 'remedy_surface_unmapped';
 
 function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
   emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
@@ -221,13 +266,17 @@ function directiveFromRef(verb: UiDirectiveVerbLiteral, ref: GraphNodeRef): UiDi
 function directiveFromUiTarget(
   verb: Extract<UiDirectiveVerbLiteral, 'open_panel' | 'open_section'>,
   uiTarget: NonNullable<UiDirectiveBlock['ui_target']>,
+  // Defaulted to the ladder so every EXISTING call site keeps its exact bytes
+  // (this parameter is additive; the row-5/row-6 builders below pass nothing).
+  // Only the gate-remedy builder overrides it.
+  source: typeof LADDER_SOURCE | typeof GATE_SOURCE = LADDER_SOURCE,
 ): UiDirectiveBlock | null {
   const candidate: UiDirectiveBlock = {
     type: 'ui_directive',
     verb,
     targets: [],
     ui_target: uiTarget,
-    source: LADDER_SOURCE,
+    source,
   };
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
@@ -472,6 +521,140 @@ function buildStructureContestedSectionDirective(
   });
   if (block === null) return suppressDirective(fact.fact_type, 'target_unresolved');
   return emitDirective(fact.fact_type, block);
+}
+
+// ============================================================================
+// ROADMAP 2.640 / UI-DIRECTIVE-0.38-DESIGN §3.4 — THE GATE-CLOSE REMEDY ROW.
+//
+// The capability, in one sentence: when a user asks why their model will not
+// run and CEE answers deterministically, the assistant also OPENS the section
+// where the blocker is fixed, instead of only describing it.
+//
+// This is not a ladder row. It rides no handler fact — it rides the
+// post-analysis advice gate's `readiness` class, which composes its answer from
+// `summariseReadiness` (routing/readiness-summary.ts) with zero LLM calls. The
+// gesture is therefore as deterministic as the prose it accompanies.
+//
+// ⚠ THE MAPPING IS DERIVED FROM BOTH PRODUCERS' BYTES, NOT FROM THIS LANE'S
+// READING (trap 13c: an expectation written from the author's model of a field
+// is a perfect score on the wrong exam). Each row below cites the producer
+// semantics on the CEE side AND the surface semantics on the UI side, and any
+// kind whose remedy surface could not be settled at the bytes is UNMAPPED
+// rather than guessed.
+// ============================================================================
+
+/**
+ * Telemetry's `fact_type` dimension is a free-form string on this event, and
+ * every existing emitter passes a real handler fact type. A gate directive has
+ * NO fact, so it passes this explicit sentinel rather than an empty string or a
+ * borrowed fact name — a dashboard that cannot separate gate gestures from
+ * fact-driven ones would silently merge two different populations.
+ */
+const GATE_REMEDY_FACT_TAG = 'advice_gate_readiness';
+
+/**
+ * `ReadinessOpenItem['kind']` → the Model-tab section id whose surface the
+ * remedy lives on, or `null` to emit no gesture.
+ *
+ * ⚠ TOTALITY IS DELIBERATE, AND IT IS THE POINT OF THE `null`s. This is a
+ * `Record` over the CLOSED kind union, so adding a fifth kind to
+ * `ReadinessOpenItem` is a TYPE ERROR here rather than a silent fall-through to
+ * "no gesture". A hand-maintained subset that quietly stopped covering a new
+ * kind is precisely the drift class this estate keeps paying for (trap 12); an
+ * exhaustive record cannot go short without the compiler saying so.
+ *
+ * Producer semantics (CEE) — routing/readiness-summary.ts:67–96, and the status
+ * enum's own doc comment at schemas/analysis-ready.ts:58–64.
+ * Surface semantics (UI) — the five section ids are rendered by
+ * ModelTabBody.tsx:780–845, one component per id.
+ */
+export const REMEDY_SECTION_BY_OPEN_ITEM_KIND: Record<
+  ReadinessOpenItem['kind'],
+  UiDirectiveModelSectionIdLiteral | null
+> = {
+  /**
+   * "you need at least 2 options before the analysis can compare them"
+   * (readiness-summary.ts:67–72). The remedy is to add an option, and options
+   * are rendered by `OptionsSection` — `makeSectionProps('options')`,
+   * ModelTabBody.tsx:785, fed `optionNodes={grouped.option}`.
+   */
+  too_few_options: 'options',
+
+  /**
+   * "X is connected to factors but has no numeric values set"
+   * (readiness-summary.ts:81–87), whose status the schema defines as "Has raw
+   * values (categorical/boolean) awaiting numeric encoding"
+   * (analysis-ready.ts:62). The values in question are the OPTION's
+   * interventions, and `OptionsSection`'s own header states it renders "one row
+   * per intervention: Factor label | baseline ... → target value (EDITABLE)"
+   * (OptionsSection.tsx:2–7). So the surface that opens is the surface the
+   * number is typed into.
+   */
+  option_needs_encoding: 'options',
+
+  /**
+   * ⛔ DELIBERATELY UNMAPPED — "X isn't connected to any factors yet"
+   * (readiness-summary.ts:75–80).
+   *
+   * The remedy is to CREATE an option-to-factor connection, and this lane could
+   * not settle at the bytes whether a user creates that in `RelationshipsSection`
+   * (which renders `edges={causalEdges}`, and is where ContestedSection.tsx:96
+   * and PreAnalysisPanel.tsx:2304 both send edge work) or in `OptionsSection`
+   * (which renders the intervention rows that ARE an option's factor links).
+   * The two are different surfaces and only one is right.
+   *
+   * A directive is an implicit claim that the remedy lives where it points, so
+   * an unsettled row emits nothing and the user still gets the prose. Rowed for
+   * derivation; mapping it is a one-line change once the surface is settled.
+   */
+  option_needs_mapping: null,
+
+  /**
+   * ⛔ DELIBERATELY UNMAPPED — "the goal node doesn't have a measurable success
+   * threshold set" (readiness-summary.ts:90–96).
+   *
+   * There is NO goal section: the contract's five ids are options, factors,
+   * relationships, risks, modelcard (schemas 0.39.0 `UiDirectiveModelSectionId`,
+   * blocks.d.ts:1857). This row is not a gap in the mapping — it is the honest
+   * answer that the remedy surface does not exist in the enum, and it is why
+   * the builder must be able to decline.
+   */
+  goal_threshold_missing: null,
+};
+
+/**
+ * ROADMAP 2.640 §3.4 row 1 — build the readiness gate's remedy gesture.
+ *
+ * `openItemKind` is the kind of the TOP blocking item, i.e. `open_items[0]`.
+ * "Top" is the PRODUCER's own ordering, not a re-ranking by this module:
+ * `summariseReadiness` pushes too-few-options first, then per-option items in
+ * option order, then the goal threshold (readiness-summary.ts:65–98). Choosing
+ * the first item is what makes the gesture agree with the FIRST thing the prose
+ * tells the user to fix; re-sorting here would let the sentence and the gesture
+ * disagree about which blocker matters most, which is the two-authorities
+ * defect (trap 21) waiting to happen.
+ *
+ * Returns `null` (telemetered) when the kind has no mapped surface, or when the
+ * built block fails strict boundary validation — never a partially-formed
+ * gesture. At most one directive is produced per call, and the gate path calls
+ * this at most once per turn (N=1 across the turn: a gate turn short-circuits
+ * before any ladder builder runs, because the ladder rides handler facts and a
+ * gate turn has none).
+ */
+export function buildGateRemedySectionDirective(
+  openItemKind: ReadinessOpenItem['kind'],
+): UiDirectiveBlock | null {
+  const sectionId = REMEDY_SECTION_BY_OPEN_ITEM_KIND[openItemKind];
+  if (sectionId === null) {
+    return suppressDirective(GATE_REMEDY_FACT_TAG, 'remedy_surface_unmapped');
+  }
+  const block = directiveFromUiTarget(
+    'open_section',
+    { kind: 'model_section', id: sectionId },
+    GATE_SOURCE,
+  );
+  if (block === null) return suppressDirective(GATE_REMEDY_FACT_TAG, 'target_unresolved');
+  return emitDirective(GATE_REMEDY_FACT_TAG, block);
 }
 
 /** §2.1 row 4 — focus on the first flip factor (precondition met). */

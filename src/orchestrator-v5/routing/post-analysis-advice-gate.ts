@@ -379,6 +379,21 @@ export interface AdviceGateMatched {
    *     behaviour).
    */
   readonly suggested_actions: readonly AdviceGateSuggestedAction[];
+  /**
+   * ROADMAP 2.640 §3.4 — the kind of the TOP open readiness item behind this
+   * answer, present ONLY on the `readiness` class and only when the readiness
+   * projection had enough data to produce one.
+   *
+   * ⚠ CEE-INTERNAL. This never reaches the wire: it is consumed by
+   * `buildGateRemedySectionDirective` (compose/ui-directive.ts) to decide which
+   * Model-tab section to open, and the DIRECTIVE is what ships. Deliberately
+   * the raw KIND rather than a resolved section id — the gate should not carry
+   * knowledge of the UI's surfaces, and keeping the mapping in one place stops
+   * the prose and the gesture acquiring two different opinions about which
+   * blocker is top (trap 21: two authorities answering slightly different
+   * questions under similar names).
+   */
+  readonly remedy_open_item_kind?: ReadinessOpenItem['kind'];
 }
 
 export interface AdviceGateUnmatched {
@@ -1158,6 +1173,28 @@ export function tryPostAnalysisAdviceGate(
   // influence here" — only a materially-influential driver may carry it.
   const topDriverLabel = nameableTopDrivers(analysis)[0]?.factor_label ?? null;
 
+  /**
+   * ROADMAP 2.640 §3.4 — THE SINGLE derivation of "which blocker is top",
+   * shared by both matched-result construction sites below.
+   *
+   * "Top" is the readiness projection's OWN ordering (`open_items[0]`), not a
+   * re-ranking here: `summariseReadiness` pushes too-few-options first, then
+   * per-option items in option order, then the goal threshold
+   * (readiness-summary.ts:65–98). The prose the user reads is composed from the
+   * same array in the same order, so the section that opens is the section for
+   * the first thing the sentence tells them to fix.
+   *
+   * Returns `undefined` for every non-readiness class and whenever the
+   * projection lacks the data — the gesture is additive to the answer and never
+   * a precondition for it.
+   */
+  const remedyOpenItemKind = ((): ReadinessOpenItem['kind'] | undefined => {
+    if (matchedClass !== 'readiness') return undefined;
+    if (!hasSufficientReadinessData(input.analysisReady)) return undefined;
+    const items = summariseReadiness(input.analysisReady!).open_items;
+    return items.length > 0 ? items[0].kind : undefined;
+  })();
+
   const composeInput: ComposeInput = {
     leadingLabel,
     topDriverLabel,
@@ -1177,6 +1214,12 @@ export function tryPostAnalysisAdviceGate(
     leading_option_label: leadingLabel,
     top_driver_label: topDriverLabel,
     suggested_actions: suggestedActionsForClass(matchedClass),
+    // Conditional spread, not `remedy_open_item_kind: x ?? undefined` — under
+    // exactOptionalPropertyTypes an explicit `undefined` is not the same as an
+    // absent key, and callers distinguish "no remedy item" by absence.
+    ...(remedyOpenItemKind !== undefined
+      ? { remedy_open_item_kind: remedyOpenItemKind }
+      : {}),
     copy_source,
     coaching_fields_used,
   };
@@ -1268,6 +1311,14 @@ function tryComposeRichSafeNowFallback(
     leading_option_label: '',
     top_driver_label: null,
     suggested_actions: suggestedActionsForClass(cls),
+    // ROADMAP 2.640 §3.4 — the rich safe-now path can also serve `readiness`,
+    // and it composes its prose from THIS `openItems` array
+    // (`composeRichSafeNowAnswer` above), so the gesture is derived from the
+    // same array the sentence is. Deriving it from a second source here is how
+    // the two would start disagreeing.
+    ...(cls === 'readiness' && openItems.length > 0
+      ? { remedy_open_item_kind: openItems[0].kind }
+      : {}),
     copy_source: 'canonical_rich',
     coaching_fields_used: fields,
   };
