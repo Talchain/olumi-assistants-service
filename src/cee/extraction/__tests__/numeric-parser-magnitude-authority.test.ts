@@ -175,6 +175,10 @@ const CORPUS: readonly (readonly [string, number])[] = [
   ["£50,000 per annum", 50_000],
   ["£50,000 a year", 50_000],
   ["20,000 GBP one-off", 20_000],
+  // The POSTFIX form carried `([kKmMbB])?` — a char class with no word spelling
+  // at all — so this parsed as nothing whatever before 2.1130.
+  ["5 million GBP", 5_000_000],
+  ["2.5m USD", 2_500_000],
   ["between £20,000 and £30,000", 20_000],
   ["£20,000 (one-off)", 20_000],
 ];
