@@ -7,7 +7,43 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.39.0.tgz`
+### `talchain-schemas-0.40.0.tgz`
+
+> **✔ BYTE-IDENTITY PROVEN BY INDEPENDENT REPRODUCTION, NOT BY COMPARING RECORDED HASHES.**
+> Packed from a fresh blobless clone of `olumi-schemas` with **`HEAD` asserted equal to
+> `09c82c9784b2f8220176945ce3ed692352842ae7`** (tag `v0.40.0`; `git rev-list -n1 v0.40.0`
+> re-derived, and `package.json.version == 0.40.0`) *before any read* — fetching a ref is
+> not checking it out — then `npm ci && npm run build && npm pack`
+> (node 20.19.5 / npm 10.8.2, the same toolchain the 0.39.0 entry records).
+>
+> sha256 `19d7fa78cf830fb0e8865830d5bee63870d69f631e48cc173c03b42b11b3f126` — 395,213 bytes.
+>
+> **✔ CROSS-REPO BYTE-IDENTITY, ESTABLISHED THE STRONG WAY.** PLoT had already vendored
+> 0.40.0 at its staging tip (`d39b4fa1`). Its `vendor/talchain-schemas-0.40.0.tgz` was
+> downloaded and hashed: **identical sha256 to the pack produced here from source.** So the
+> estate rule ("no two repos may hold DIFFERENT bytes under one version string") is satisfied
+> by *reproduction from the tagged source*, which is stronger than agreeing on a recorded
+> string — a manifest can be copied without the bytes being. Adding these bytes here yields
+> the same git blob PLoT holds.
+
+**What CEE adopts here: THREE things, and this is NOT a parity-only bump.** Unlike the 0.39.0
+entry above, this bump is taken *because* CEE consumes the new cars:
+
+| car | CEE consumption in this PR |
+|---|---|
+| `OBSERVED_STATE_SOURCE_LITERALS` / `KnownObservedStateSource` | **YES** — `src/schemas/cee-v3.ts` now DERIVES `ObservedStateV3.source` from this list instead of hand-mirroring 7 literals. The contract minted the list for exactly this purpose and says so. Widens the accepted set 7 → 12; `observed-state-source-derivation.test.ts` pins SET EQUALITY so drift REDs in both directions. |
+| `RoundParticipantRefSchema` | **YES** — the shape of `applied_from` (ingress claim) and `elicited_from` (server stamp). Ids only, `.strict()`; a display name is refused at parse, which is the PII rule made structural. |
+| `factor_value_edit.applied_from` | **YES** — CEE is the VERIFIER. `src/collab/apply-verification.ts` checks the claim against CEE's own collab store before any stamp. |
+| `observed_state.elicited_from` | **YES** — CEE is the only stamper. |
+
+> ⚠⚠ **READER-FIRST SEQUENCING IS LOAD-BEARING FOR THIS BUMP, AND IT IS THE ONLY WAY TO GET
+> IT WRONG.** Every member of the system-event union is `.strict()`. A UI that emits
+> `applied_from` against a CEE still pinned ≤0.39.0 does **not** get the field dropped — it gets
+> **the whole turn refused** (`unrecognized_keys ['applied_from'] at path ['event']`). So:
+> **CEE merges and DEPLOYS first; only then may the UI emitter ship.** The UI PR states the
+> same constraint from its side.
+
+### `talchain-schemas-0.39.0.tgz` (historical — no longer vendored)
 
 > **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE, AND — FOR THE FIRST TIME IN
 > THIS FILE'S HISTORY — VERIFIED AGAINST THE REGISTRY BYTES.** Packed from a fresh
