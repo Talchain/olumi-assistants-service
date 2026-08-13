@@ -317,3 +317,80 @@ export function computeStructuralReadiness(
     ...pickGoalThresholdTrio(goalNode),
   };
 }
+
+// ============================================================================
+// Refusal (ROADMAP 2.1091 / golden-journey EXT-2)
+// ============================================================================
+
+/**
+ * The status the readiness vocabulary already reserves for "something
+ * prevents this analysis". Its documented semantics live on
+ * `AnalysisReadyStatus` in `src/schemas/analysis-ready.ts` and it is already
+ * on the wire — `synthesiseFreshnessOnlyAnalysisReady` emits it for the
+ * transport-recovery carrier. Nothing new is minted here.
+ */
+export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
+
+/**
+ * Stamp a REFUSED analyse turn onto a structural readiness payload.
+ *
+ * WHY THIS EXISTS (witnessed on staging 2026-08-13, golden journey EXT-2):
+ * when the analyse handler refuses — the mixed-scale gate, the baseline-scale
+ * gate, the scale postcondition, or any other RECOVERABLE_HANDLER_CAUSE — the
+ * turn recovers as a graceful 200 carrying honest PROSE and nothing a machine
+ * can read. On the chip-click arm no `analysis_ready` shipped at all; on the
+ * routed arm the pre-dispatch structural payload shipped unrevised, so the
+ * wire said `status: 'ready'` about a run CEE had just declined to perform.
+ * Absent and confidently-wrong are the two halves of one defect: the refusal
+ * had no representation in the readiness vocabulary.
+ *
+ * ⚠ WHY THIS LIVES HERE AND NOWHERE ELSE (ROADMAP 2.1135). The readiness
+ * vocabulary already has TWO writers — `src/cee/transforms/option-status.ts`
+ * (which claims to be the single source of truth in its own header) and
+ * `computeStructuralReadiness` above (which is the one on the live V5 wire
+ * path). A refusal helper anywhere else would be a THIRD. It is deliberately
+ * a thin transform over this module's own output so the two concepts cannot
+ * drift apart.
+ *
+ * ⚠ WHAT IT DELIBERATELY DOES NOT TOUCH (ROADMAP 2.1134(a); the
+ * reconciliation the #940 lane refused). The PAYLOAD-level status and the
+ * PER-OPTION statuses answer different questions:
+ *
+ *   · `options[].status` — "do we have user-warranted values for this option?"
+ *   · payload `status`   — "did this turn's analyse attempt proceed?"
+ *
+ * Only the payload level is overwritten. Making them agree would trade a
+ * wrong-value defect for a missing-leader one (`isRecommendableOption` reads
+ * the per-option answer), and CLAUDE.md trap 21 is precisely about two
+ * authorities that look inconsistent while correctly answering two questions.
+ *
+ * The options array is CARRIED, not emptied. An empty blocked carrier would
+ * replace whatever readiness a consumer already holds with nothing — the
+ * product decision `FRESHNESS_ONLY_SYNTHESIS_REASONS` explicitly declines to
+ * take. Carrying the real, still-true per-option answers costs nothing and
+ * loses nothing.
+ *
+ * @param structural   Readiness for the graph this turn saw, or `undefined`
+ *                     when none could be computed (no goal node, no graph).
+ *                     Undefined yields the minimal typed carrier rather than
+ *                     an omission — "never absent" is the invariant.
+ * @param blockedReason Stable, SPECIFIC code. Callers derive it with
+ *                     `blockedReasonForHandlerFailure`, which cannot return
+ *                     an empty or generic value.
+ */
+export function applyAnalysisRefusal(
+  structural: AnalysisReadyPayload | undefined,
+  blockedReason: string,
+): AnalysisReadyPayload {
+  const base: AnalysisReadyPayload = structural ?? {
+    options: [],
+    goal_node_id: '',
+    status: ANALYSIS_READY_BLOCKED_STATUS,
+  };
+  return {
+    ...base,
+    status: ANALYSIS_READY_BLOCKED_STATUS,
+    blocked_reason: blockedReason,
+  };
+}
+

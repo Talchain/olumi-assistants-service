@@ -123,6 +123,22 @@ function recoveredOlumiResponse() {
   };
 }
 
+/**
+ * ROADMAP 2.1091 / golden-journey EXT-2 — the typed refusal the dispatcher
+ * now returns on `handler_recovered`. Shaped exactly as
+ * `applyAnalysisRefusal` builds it.
+ */
+function blockedReadiness(blockedReason: string) {
+  return {
+    options: [
+      { option_id: 'opt_a', label: 'Move to HubSpot', status: 'ready', interventions: { fac_1: 0.7 } },
+    ],
+    goal_node_id: 'goal_1',
+    status: 'blocked' as const,
+    blocked_reason: blockedReason,
+  };
+}
+
 function chipPayload(turnId: string) {
   return {
     kind: 'message' as const,
@@ -162,6 +178,7 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
       response: recoveredOlumiResponse(),
       commitPerformed: false,
       causeKind: 'options_not_configured',
+      analysisReady: blockedReadiness('options_not_configured'),
       graph: null,
     });
 
@@ -178,6 +195,55 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
     const parsed = JSON.parse(body) as { assistant_text?: string; suggested_actions?: unknown[] };
     expect(parsed.assistant_text && parsed.assistant_text.length).toBeGreaterThan(0);
     expect(Array.isArray(parsed.suggested_actions) && parsed.suggested_actions!.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * ROADMAP 2.1091 / golden-journey EXT-2 — THE WIRE-LEVEL PIN.
+   *
+   * The witnessed defect was a MISSING TOP-LEVEL KEY on the HTTP body, not a
+   * missing field on a dispatch result. The dispatcher-level suite
+   * (`chip-click-dispatch-blocked-readiness.test.ts`) proves the payload is
+   * produced; only this test proves it survives route-v2's outcome mapping
+   * and the finaliser and reaches the bytes a consumer parses.
+   *
+   * ⚠ `analysis_ready` is a TOP-LEVEL RESPONSE KEY. `analysis_result` is a
+   * BLOCK TYPE. They are different levels and this test asserts the former.
+   */
+  it('handler_recovered → the wire body carries a TYPED analysis_ready with a specific blocked_reason (EXT-2)', async () => {
+    dispatchChipClickRunAnalysisSpy.mockResolvedValueOnce({
+      outcome: 'handler_recovered' as const,
+      response: recoveredOlumiResponse(),
+      commitPerformed: false,
+      causeKind: 'analysis_not_ready',
+      analysisReady: blockedReadiness('mixed_scale_unresolved'),
+      graph: null,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: chipPayload('44444444-4444-4444-8444-444444444444'),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(res.body) as Record<string, unknown>;
+
+    // The witnessed failure was the absence of this key entirely.
+    expect(Object.keys(parsed)).toContain('analysis_ready');
+    const ar = parsed.analysis_ready as {
+      status?: string;
+      blocked_reason?: string;
+      options?: unknown[];
+      computed_at?: string;
+    };
+    expect(ar.status).toBe('blocked');
+    // Bound by IDENTITY to the reason the producer declared — not to "some
+    // non-empty string", which a generic fallback would also satisfy.
+    expect(ar.blocked_reason).toBe('mixed_scale_unresolved');
+    // Not the empty carrier: the real options ride along.
+    expect(Array.isArray(ar.options) && ar.options.length).toBe(1);
+    // The finaliser — and only the finaliser — stamps computed_at.
+    expect(typeof ar.computed_at).toBe('string');
   });
 
   it('handler_failure (fatal) → HTTP 500 unchanged (mapping stays outcome-gated)', async () => {

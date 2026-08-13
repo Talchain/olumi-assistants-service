@@ -2488,11 +2488,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // options_not_configured when an added option is not yet configured for
         // analysis): the dispatcher already composed a clean graceful body via
         // the shared composeRecoverableHandlerResponse machinery. Return a 200
-        // (NOT a 500), mirroring the TurnExecutor handler-recovery path. No
-        // analysis_ready is stamped — no analysis ran and the graph was not
-        // mutated, so the UI retains its prior store value (failure semantics).
+        // (NOT a 500), mirroring the TurnExecutor handler-recovery path.
+        //
+        // ⚠ THIS EXIT USED TO STAMP NOTHING, on the reasoning "no analysis ran
+        // and the graph was not mutated, so the UI retains its prior store
+        // value". ROADMAP 2.1091 / golden-journey EXT-2 measured the result on
+        // staging (2026-08-13): the post-add-option `run_analysis` chip shipped
+        // 200 with honest refusal prose and NO `analysis_ready` KEY — the run
+        // was neither admitted nor typed-blocked, so nothing machine-readable
+        // reached any consumer. The prior store value said READY; the model no
+        // longer was. The dispatcher now returns the typed refusal
+        // (`status: 'blocked'` + a specific `blocked_reason`) and it is stamped
+        // here, by the same finaliser that stamps the `ok` exit.
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
+            analysisReady: cc.analysisReady,
             graph: cc.graph,
             // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
             // the permission belongs to the fact this response DISPLAYS, not to

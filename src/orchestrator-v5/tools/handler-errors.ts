@@ -151,6 +151,35 @@ function normaliseDetails(raw: unknown): Readonly<HandlerFailureDetails> {
 }
 
 /**
+ * ROADMAP 2.1091 / golden-journey EXT-2 — the SPECIFIC, machine-readable
+ * reason a refused analyse turn reports on `analysis_ready.blocked_reason`.
+ *
+ * ONE derivation, two consumers (the chip-click dispatcher and TurnExecutor's
+ * recovery branch). Written here, beside the error it reads, rather than
+ * duplicated at each call site — a two-line expression copied twice is the
+ * hand-maintained mirror CLAUDE.md trap 12 is about, and the two analyse arms
+ * disagreeing on the reason code is exactly the drift this row exists to end.
+ *
+ * Precedence: the handler's own declared `details.reason_code` (the finest
+ * grain — `mixed_scale_unresolved` vs `baseline_scale_unresolved` vs
+ * `scale_postcondition_violated` all arrive under one `cause_kind`), else the
+ * typed `cause_kind` itself.
+ *
+ * CANNOT RETURN A GENERIC OR EMPTY VALUE: `cause_kind` is a non-empty string
+ * literal union enforced by the compiler, so the fallback is total and every
+ * result is specific by construction. There is deliberately no
+ * `'unknown'`/`'unspecified'` branch — "blocked for a reason nobody can act
+ * on" is the state this field was added to abolish.
+ */
+export function blockedReasonForHandlerFailure(
+  error: HandlerInvocationFailedError,
+): string {
+  const declared = error.details.reason_code;
+  if (typeof declared === 'string' && declared.trim().length > 0) return declared;
+  return error.cause_kind;
+}
+
+/**
  * Handler produced a `HandlerOutcome` whose fact failed its own Zod
  * schema. Indicates a handler-internal bug (the handler's result-
  * construction path produced a shape incompatible with its declared

@@ -76,7 +76,10 @@ import {
   readMayNameLeadingOptionVerdict,
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  applyAnalysisRefusal,
+  computeStructuralReadiness,
+} from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import {
@@ -93,6 +96,7 @@ import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
+  blockedReasonForHandlerFailure,
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from '../tools/handler-errors.js';
@@ -278,14 +282,26 @@ export type DispatchChipClickRunAnalysisResult =
       // analysis). The dispatcher composes a clean graceful body via the SAME
       // composeRecoverableHandlerResponse machinery the Sonnet path uses;
       // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
-      // `commitPerformed:false` — no analysis ran and no graph mutated, so
-      // `analysisReady` is omitted and the UI retains its prior store value,
-      // exactly as for the other failure outcomes.
+      // `commitPerformed:false` — no analysis ran and no graph mutated.
+      //
+      // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
+      // "no analysis ran, so the UI retains its prior store value". ROADMAP
+      // 2.1091 / golden-journey EXT-2 measured what that produces: the
+      // 2026-08-13 staging run's post-add-option `run_analysis` chip returned
+      // 200 with the honest mixed-scale refusal prose, `blocks: []`, and NO
+      // `analysis_ready` KEY AT ALL — neither admitted nor typed-blocked, so
+      // no consumer could act on the state. "Retains its prior value" was the
+      // wrong default: the prior value said the model was READY to analyse,
+      // and it no longer is. This outcome now carries the TYPED REFUSAL
+      // (`status: 'blocked'` + a specific `blocked_reason`) built by the live
+      // readiness writer. REQUIRED, not optional — omission must not compile,
+      // for the same reason `mayNameLeadingOption` was made required above:
+      // a new producer cannot silently re-open the gap.
       readonly outcome: 'handler_recovered';
       readonly response: OlumiResponse;
       readonly commitPerformed: false;
       readonly causeKind: string;
-      readonly analysisReady?: undefined;
+      readonly analysisReady: AnalysisReadyPayload;
       readonly graph: GraphV3T | null;
     }
   | {
@@ -313,7 +329,14 @@ export type DispatchChipClickRunAnalysisResult =
  * `fallback` template (cause on the recoverable list but no composer branch),
  * matching TurnExecutor's fail-loud-to-500 guard. The recoverable response
  * carries coaching text + a recovery chip; it never claims the option was
- * configured and never sets `analysis_ready`.
+ * configured and never writes `analysis_ready` onto the response body (the
+ * finaliser is still the sole stamping point).
+ *
+ * ROADMAP 2.1091: it DOES now return the typed refusal payload on the
+ * dispatch result, so route-v2 can hand it to the finaliser. The payload is
+ * built by the live readiness writer over the SAME `snapshotGraph` reference
+ * the handler operated on — no second persistence read, no TOCTOU window,
+ * identical to the `ok` outcome's derivation.
  */
 function tryComposeRecoverableChipOutcome(
   err: HandlerInvocationFailedError,
@@ -383,11 +406,36 @@ function tryComposeRecoverableChipOutcome(
     retryable: err.retryable,
   });
 
+  // ROADMAP 2.1091 / EXT-2 — the typed refusal. `graph` is the cached
+  // snapshot reference the handler itself ran against, so the carried
+  // per-option answers describe exactly the model the refusal is about.
+  // `computeStructuralReadiness` returns undefined when there is no goal node
+  // (or no graph at all, e.g. the test-injected-registry path); the refusal
+  // helper then yields the minimal typed carrier, because "never absent" is
+  // the invariant this row closes.
+  const blockedReason = blockedReasonForHandlerFailure(err);
+  const analysisReady = applyAnalysisRefusal(
+    graph ? computeStructuralReadiness(graph) : undefined,
+    blockedReason,
+  );
+  log.info(
+    {
+      event: 'v5.chip_click.analysis_ready_blocked',
+      request_id: requestId,
+      scenario_id: scenarioId,
+      cause_kind: err.cause_kind,
+      blocked_reason: blockedReason,
+      option_count: analysisReady.options.length,
+    },
+    'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
+  );
+
   return {
     outcome: 'handler_recovered',
     response: recovered.response,
     commitPerformed: false,
     causeKind: err.cause_kind,
+    analysisReady,
     graph,
   };
 }

@@ -79,7 +79,10 @@ import {
   collectValidEntityLabels,
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
-import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  applyAnalysisRefusal,
+  computeStructuralReadiness,
+} from '../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
@@ -229,6 +232,7 @@ import { deriveBriefTextSeed } from './session/derive-brief-seed.js';
 import { randomUUID } from 'node:crypto';
 import type { ProposalAction } from './routing/types.js';
 import {
+  blockedReasonForHandlerFailure,
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from './tools/handler-errors.js';
@@ -8666,6 +8670,30 @@ export async function runTurnExecutor(
             );
             return translateExecuteError(error);
           }
+
+          // ROADMAP 2.1091 / golden-journey EXT-2 — THE ROUTED HALF.
+          //
+          // `analysisReadyForTurn` was computed from the PRE-DISPATCH graph
+          // (line ~1917) for chip gating, and until now it reached the wire
+          // UNREVISED on this branch. So a refused analyse turn shipped
+          // `analysis_ready.status: 'ready'` — a claim that the run was
+          // admitted, on a turn where the handler had just declined to run it.
+          // That is the mirror of the chip-click arm's defect (which shipped
+          // nothing at all), and it is the more dangerous half: present-and-
+          // false beats absent for how confidently a consumer acts on it.
+          //
+          // The refusal is applied through the SAME live readiness writer the
+          // chip arm uses (`applyAnalysisRefusal`), with the SAME reason
+          // derivation (`blockedReasonForHandlerFailure`). One authority, two
+          // arms — CLAUDE.md trap 21 is exactly the case of two paths fixing
+          // one harm a day apart and re-opening it between them.
+          //
+          // Per-option statuses are untouched (ROADMAP 2.1134(a)): they answer
+          // "do we have user-warranted values?", not "did this run proceed?".
+          analysisReadyForTurn = applyAnalysisRefusal(
+            analysisReadyForTurn,
+            blockedReasonForHandlerFailure(error),
+          );
 
           response = recovered.response;
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: handler-recovery
