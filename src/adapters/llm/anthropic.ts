@@ -72,6 +72,7 @@ import {
   enumerateCompletionAsk,
   countBlockingAskItems,
   shouldKeepCompletion,
+  completionRegressesProtectedContent,
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
@@ -1974,7 +1975,11 @@ export async function draftGraphWithAnthropic(
     // `_llm_meta`, so it lands on the existing user-visible refusal and the
     // existing retry. It never substitutes an empty graph: an empty graph is a
     // lie that validates.
-    const seam = projectDraftRecords(rawJson);
+    // ⭐ THE BRIEF GOES IN AS EVIDENCE, NEVER AS A SOURCE OF VALUES. The projector
+    // binds each stated item against these bytes so a `from_brief` badge is EARNED
+    // rather than assumed — without it every stated item binds `unchecked` and the
+    // badge is declined (fail-closed).
+    const seam = projectDraftRecords(rawJson, args.brief);
     if (!seam.ok) {
       log.error({
         event: "cee.draft.records_projection_failed",
@@ -2063,7 +2068,7 @@ export async function draftGraphWithAnthropic(
             : ({ ok: false, reason: "no_new_claims" } as const);
         completionMeta.parsed = completionParsed !== undefined;
         if (merged.ok) {
-          const reprojected = projectRecordsToGraph(merged.records);
+          const reprojected = projectRecordsToGraph(merged.records, args.brief);
           // ⭐⭐ THE NON-INFERIORITY CHECK — THE BLOCKING CLASSES ONLY.
           //
           // ⚠ THIS IS THE THIRD SHAPE OF THIS LINE, AND THE FIRST DERIVED ONE.
@@ -2095,7 +2100,17 @@ export async function draftGraphWithAnthropic(
           const askAfter = enumerateCompletionAsk(merged.records, reprojected);
           const blockingBefore = countBlockingAskItems(completionAsk);
           const blockingAfter = countBlockingAskItems(askAfter);
-          const notWorse = shouldKeepCompletion(completionAsk, askAfter);
+          // ⭐ THE PROJECTIONS ARE PASSED BECAUSE THE PRESERVATION QUESTION NEEDS
+          // THEM. `activeProjection` is pass 1 — the content the completion is
+          // forbidden to overwrite, disconnect, reclassify or delete.
+          const preservationViolations = completionRegressesProtectedContent(
+            activeProjection,
+            reprojected,
+          );
+          const notWorse = shouldKeepCompletion(completionAsk, askAfter, {
+            before: activeProjection,
+            after: reprojected,
+          });
           completionMeta.ask_items_after = askAfter.items.length;
           completionMeta.blocking_before = blockingBefore;
           completionMeta.blocking_after = blockingAfter;
@@ -2105,6 +2120,14 @@ export async function draftGraphWithAnthropic(
           completionMeta.edges_before = activeProjection.graph.edges.length;
           completionMeta.edges_after = reprojected.graph.edges.length;
           completionMeta.kept = notWorse;
+          // Discarded-for-destructiveness is a DIFFERENT event from
+          // discarded-for-validity, and a single `kept:false` cannot tell them
+          // apart. Named so the reason is visible in telemetry rather than
+          // inferred from a boolean.
+          completionMeta.preservation_violations = preservationViolations.length;
+          if (preservationViolations.length > 0) {
+            completionMeta.preservation_violation_sample = preservationViolations.slice(0, 5);
+          }
           if (notWorse) {
             activeRecords = merged.records;
             activeProjection = reprojected;
@@ -2447,6 +2470,22 @@ export async function draftGraphWithAnthropic(
       // V1 → V3 transform with deep-equality preservation.
       ...((parsed as any).causal_claims ? { causal_claims: (parsed as any).causal_claims } : {}),
       ...((parsed as any).topology_plan ? { topology_plan: (parsed as any).topology_plan } : {}),
+      // ⭐⭐ THE R1 DISCLOSURE CHANNEL LEAVES THE ADAPTER HERE.
+      //
+      // `activeProjection.dropped` is the projector's record of everything it
+      // declined to assert — an unstated constraint direction, a target that is
+      // not a threshold, two contradictory intervention levels, a withdrawn
+      // duplicate. Until now it was built, LOGGED, and dropped on the floor: the
+      // very next statement replaced `rawJson` with the graph alone, so no reader
+      // downstream could ever see it and every one of those refusals was silent
+      // to the user.
+      //
+      // ⚠ Sourced from `activeProjection`, NOT `seam.projection` — the two differ
+      // whenever the completion pass was kept, and the disclosures the user needs
+      // are the ones describing the graph they actually receive.
+      ...(activeProjection.dropped.length > 0
+        ? { record_disclosures: activeProjection.dropped }
+        : {}),
       // Goal constraints passthrough: LLM-emitted constraints have richer metadata
       // (source_quote, confidence, provenance) than the regex extractor.
       ...((parsed as any).goal_constraints ? { goal_constraints: (parsed as any).goal_constraints } : {}),

@@ -84,7 +84,7 @@ function replay(pass: BankedPass) {
      * A spec that re-computes the comparison agrees with itself whatever the
      * adapter does; this one fails when the shipped decision changes.
      */
-    v3Keeps: shouldKeepCompletion(askBefore, askAfter),
+    v3Keeps: shouldKeepCompletion(askBefore, askAfter, { before: projection, after: reprojected }),
     blockingBefore: countBlockingAskItems(askBefore),
     blockingAfter: countBlockingAskItems(askAfter),
   };
@@ -141,6 +141,33 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     const pass = banked("round7-completion-pass05-tie.json");
     const r = replay(pass);
 
+    // ⚠⚠ THIS EXPECTATION WAS MOVED IN THE R1 REMEDIATION AND HAS BEEN MOVED
+    // BACK. THE EXCURSION IS RECORDED RATHER THAN ERASED, because it is the most
+    // useful thing in this file.
+    //
+    // Audit finding 6 is real: the demote groups on `buildInterventionSignature`,
+    // which sees only interventions, so it withdrew "Rewrite first, then copilot
+    // (sequenced)" — an option reaching structure the survivor never touched.
+    // The obvious fix, sparing such an option, was implemented and this
+    // expectation was changed to KEEP → DISCARD to accommodate it, with a comment
+    // asserting the change "does not risk a draft failure".
+    //
+    // ⭐ THAT REASSURANCE WAS REFUTED BY THIS FILE'S OWN FIXTURE. Executed
+    // end to end, the spare routes into `attemptOptionsIdenticalGracefulDedup`'s
+    // guard 3b — the label-distinctness floor, which a structurally distinct
+    // option trips BY CONSTRUCTION — the dedup returns null, and the bypass emits
+    // `CEE_GRAPH_INVALID`. And `round7-completion-pass05-tie.json`'s own
+    // `__PROVENANCE__` records exactly that:
+    //     "live_outcome": "FAIL 500 · CEE_GRAPH_INVALID via
+    //                      cee.options_identical.pre_repair_bypass"
+    // The banked capture recorded the very outcome the comment predicted could
+    // not happen. **Before moving a fixture's expectation, read its provenance
+    // block.** The reassurance quoted the dedup's SUCCESS-path log line and never
+    // reached the scope guards twenty lines above it.
+    //
+    // So the spare is reverted, finding 6 is rowed OPEN (ROADMAP 2.1092) with its
+    // fix located downstream in `buildInterventionSignature` / guard 3b, and this
+    // fixture returns to the behaviour its own capture supports.
     expect(r.v2Keeps).toBe(false);                              // v2 discarded it
     expect(r.blockingAfter).toBe(r.blockingBefore);              // …at a TIE
     expect(r.blockingBefore).toBe(0);                            // now zero — see above
@@ -151,7 +178,8 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     // edges here any more (it added two before the demote existed). Every one of
     // them is DISCLOSED — the model's work is visible to a reader, not lost —
     // and the trade is a valid graph carrying the user's own three options
-    // instead of a 500 carrying none.
+    // instead of a 500 carrying none. That last clause is now measured, not
+    // assumed: sparing the option produces exactly the 500 this fixture recorded.
     expect(r.reprojected.graph.edges.length).toBe(r.projection.graph.edges.length);
     // Pinned to the EXACT measured count, not `> 0`: this is a banked capture,
     // so the number is a fact about it. A loose bound would stay green if the
@@ -232,7 +260,9 @@ describe("⭐⭐ the guard's PURPOSE survives — a completion that worsens a bl
       .toBeGreaterThan(projection.graph.nodes.filter((n) => n.kind === "option").length);
 
     expect(blockingAfter).toBeGreaterThan(blockingBefore);
-    expect(shouldKeepCompletion(askBefore, askAfter)).toBe(false); // DISCARD
+    expect(
+      shouldKeepCompletion(askBefore, askAfter, { before: projection, after: reprojected }),
+    ).toBe(false); // DISCARD
   });
 
   it("KEEPS a completion at a TIE on a POSITIVE blocking count", () => {
@@ -261,7 +291,9 @@ describe("⭐⭐ the guard's PURPOSE survives — a completion that worsens a bl
 
     expect(countBlockingAskItems(askAfter)).toBe(blockingBefore);          // the TIE
     expect(askAfter.items.length).toBeGreaterThan(askBefore.items.length); // v2 would discard
-    expect(shouldKeepCompletion(askBefore, askAfter)).toBe(true);          // v3 KEEPS
+    expect(
+      shouldKeepCompletion(askBefore, askAfter, { before: projection, after: reprojected }),
+    ).toBe(true);                                                          // v3 KEEPS
   });
 });
 

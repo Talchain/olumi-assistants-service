@@ -34,6 +34,19 @@ export function capList<T>(value: unknown, max: number): { list?: T[]; truncated
 }
 
 export function applyResponseCaps(payload: any): { cappedPayload: any; limits: ResponseLimitsMeta } {
+  // ⚠ THIS SPREAD IS LOAD-BEARING FOR FIELDS THIS FILE HAS NEVER HEARD OF, AND
+  // THAT IS WHY IT IS COMMENTED RATHER THAN LEFT AS AN IDIOM.
+  //
+  // Everything not explicitly capped below survives ONLY because it is copied
+  // here. The R1 `record_disclosures` channel (adapter → parse → package →
+  // boundary → wire) crosses this function untouched and unnamed, so rebuilding
+  // `cappedPayload` from a known-key list — the obvious "tidy-up" — would delete
+  // it silently, with no type error: `payload` is `any`. Two other hops in that
+  // chain already rebuild from named keys and had to be patched by hand for
+  // exactly this reason.
+  //
+  // If you ever need to enumerate keys here, enumerate what you CAP and keep the
+  // spread for the rest.
   const cappedPayload = { ...payload };
 
   const bias = capList<any>(payload.bias_findings, CEE_BIAS_FINDINGS_MAX);

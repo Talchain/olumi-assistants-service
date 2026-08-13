@@ -45,6 +45,10 @@ import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
 import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
+// ⭐ THE SAME AUTHORITY THE PROJECTOR BINDS STATED ITEMS WITH. Imported, never
+// restated — `nodes[].provenance` and `options[].provenance.source` describe one
+// fact and must not be able to disagree about it (trap 12).
+import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from "../provenance/brief-binding.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 
 // ============================================================================
@@ -1004,6 +1008,34 @@ export function transformResponseToV3(
     if (opt.is_baseline !== undefined) {
       node.is_baseline = opt.is_baseline;
     }
+    // ⭐⭐ ROOT 4 — ONE AUTHORITY, TWO READERS.
+    //
+    // These two fields describe THE SAME FACT about THE SAME OPTION — where it
+    // came from — and until now each was decided independently:
+    //   • `nodes[].provenance` fell out of `extractionType`, which an option
+    //     node never carries, so every option read `ai_inferred`;
+    //   • `options[].provenance.source` was the HARDCODED literal
+    //     `"brief_extraction"` at both construction sites in
+    //     `intervention-extractor.ts`, with no branch at all.
+    // So a stated option came off the wire `ai_inferred` in `nodes[]` and
+    // `brief_extraction` in `options[]` — the response contradicting itself
+    // about the user's own words — and an option the model invented ("Launch
+    // through secret agents", absent from the brief) came off as
+    // `brief_extraction` because the literal cannot be anything else. One of
+    // those two answers was always wrong, whichever way the brief actually read.
+    //
+    // Two mirrors of one fact is this estate's dominant defect (trap 12). Both
+    // now derive HERE, from the brief bytes, through the same authority the
+    // projector binds stated items with — so they cannot disagree, and neither
+    // can claim the brief without it saying so.
+    const optionBinding = bindOptionLabelToBrief(node.label, context.brief);
+    const earned = bindingEarnsBriefClaim(optionBinding);
+    node.provenance = earned ? "from_brief" : "ai_inferred";
+    opt.provenance = {
+      ...(opt.provenance ?? {}),
+      source: earned ? "brief_extraction" : "cee_hypothesis",
+      ...(earned && typeof node.label === "string" ? { brief_quote: node.label } : {}),
+    };
   }
 
   const optionIdSummary = getOptionIdMismatchSummary(v3Graph, v3Options);
@@ -1209,6 +1241,84 @@ export function transformResponseToV3(
   (v3Response as { topology_plan?: unknown[] }).topology_plan = Array.isArray(v1TopologyPlan)
     ? [...v1TopologyPlan]
     : [];
+
+  // ⭐⭐ ROOT 4(b) — THE R1 DISCLOSURES REACH THE WIRE, ANCHORED TO REAL NODES.
+  //
+  // Everything the projector refused to assert was, until now, recorded in
+  // `projection.dropped[]` and read by NOTHING. A user saw a constraint with no
+  // threshold, a target that never became a goal, one of two contradictory
+  // intervention levels — each of them a deliberate, principled refusal, and each
+  // of them silent. Improving the projector's honesty without this carrier
+  // improves nothing the user experiences.
+  //
+  // ⚠⚠ NOTHING IS DROPPED HERE. THE FIRST VERSION DROPPED 55 OF 56 IN SILENCE.
+  //
+  // It required every disclosure to resolve to a node in `nodes[]` and discarded
+  // the rest. Measured on both real banked B3 captures: 56 produced, **1**
+  // emitted. The dominant class, `unconnected_to_goal` (51 of 56), is
+  // unanchorable BY CONSTRUCTION — the record was withdrawn from the graph, so
+  // its absence from `nodes[]` is the very thing it is reporting. The rule
+  // therefore deleted exactly the disclosures a user most needs — "you told me
+  // this and it is not in the model" — and kept only the ones about things the
+  // user could already see.
+  //
+  // ⭐ TWO CHANGES, AND BOTH MATTER:
+  //   1. RESOLVE BY ID, NOT BY LABEL. The projector mints the id and now carries
+  //      it (`DroppedRecordRef.node_id`). The old label lookup was FIRST-WINS, so
+  //      two same-labelled nodes anchored the notice to the wrong one.
+  //   2. WITHDRAWAL IS A FACT, NOT A FAILURE. `withdrawn` carries what the anchor
+  //      cannot; an absent subject is emitted with `withdrawn: true` rather than
+  //      thrown away.
+  //
+  // A demote still names the SURVIVOR (`duplicate_of`, an id the projector
+  // re-resolved at its fixed point), because that surviving option is the thing
+  // the user is looking at and the thing the loss is about.
+  const v1RecordDisclosures = (v1Response as { record_disclosures?: unknown }).record_disclosures;
+  if (Array.isArray(v1RecordDisclosures) && v1RecordDisclosures.length > 0) {
+    const finalNodeIds = new Set(v3Graph.nodes.map((n) => n.id));
+    const emitted: Array<{ reason: string; label: string; withdrawn: boolean; node_id?: string }> = [];
+    let omitted = 0;
+    for (const raw of v1RecordDisclosures) {
+      // ⚠ A NON-OBJECT ENTRY IS COUNTED, NOT THROWN — and this line exists because
+      // the first version threw. `null` reached `typeof d.reason` and raised, the
+      // throw escaped `transformResponseToV3` at `boundary.ts:37`, and ONE bad
+      // entry killed the WHOLE DRAFT. Unreachable from the current typed producer,
+      // but this is the one case the field's own doc promises to handle, and a
+      // landmine on a channel whose entire purpose is not losing things quietly.
+      if (!raw || typeof raw !== "object") {
+        omitted += 1;
+        continue;
+      }
+      const d = raw as { reason?: unknown; label?: unknown; node_id?: unknown; duplicate_of?: unknown };
+      // The ONLY other rejection: a record that cannot be rendered at all. It is
+      // COUNTED, never silently swallowed — a channel that quietly loses part of
+      // its payload reads exactly like one that had nothing to say.
+      if (typeof d.reason !== "string" || typeof d.label !== "string") {
+        omitted += 1;
+        continue;
+      }
+      const subjectId = typeof d.node_id === "string" ? d.node_id : undefined;
+      const survivorId = typeof d.duplicate_of === "string" ? d.duplicate_of : undefined;
+      const anchorId =
+        subjectId && finalNodeIds.has(subjectId)
+          ? subjectId
+          : survivorId && finalNodeIds.has(survivorId)
+            ? survivorId
+            : undefined;
+      emitted.push({
+        reason: d.reason,
+        label: d.label,
+        withdrawn: anchorId === undefined,
+        ...(anchorId ? { node_id: anchorId } : {}),
+      });
+    }
+    if (emitted.length > 0) {
+      (v3Response as { record_disclosures?: unknown[] }).record_disclosures = emitted;
+    }
+    if (omitted > 0) {
+      (v3Response as { record_disclosures_omitted?: number }).record_disclosures_omitted = omitted;
+    }
+  }
 
   // Carry rationales from V1 pipeline into V3 response.
   // Rationales are LLM-generated per-node reasoning from Stage 1 (parse).

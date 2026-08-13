@@ -92,6 +92,14 @@ export interface DraftGraphResult {
   causal_claims?: unknown;
   /** v0.11.0 schema amendment: LLM topology plan (string[]). */
   topology_plan?: unknown;
+  /**
+   * ⭐ R1 record-projection disclosures — what the projector REFUSED to assert.
+   * Carried adapter → parse → package → V3 boundary so a user is told when their
+   * brief was not fully represented. Untyped here for the same reason its
+   * neighbours are: this interface is the adapter's contract, and the shape is
+   * declared where it is validated (`CEEGraphResponseV3.record_disclosures`).
+   */
+  record_disclosures?: unknown;
   debug?: {
     influence_scores?: Array<{ node_id: string; score: number }>;
     [key: string]: unknown;

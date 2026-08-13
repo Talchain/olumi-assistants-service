@@ -474,7 +474,13 @@ describe("frame edge cases", () => {
         { claim_kind: "causal_link", label: "keep holds the cost", from_stated: 2, to_stated: 3, effect: "positive", sets_to: 50000 },
         { claim_kind: "causal_link", label: "cost bears on the goal", from_stated: 3, to_stated: 0, effect: "negative" },
       ],
-    });
+    },
+    // ⭐ THE BRIEF, because the `extractionType: "explicit"` claim asserted below
+    // is now EARNED against it rather than assumed from the record's shape. The
+    // quote and the £50,000 both appear here verbatim — that is what entitles
+    // this node to the badge, and without it the assertion would be pinning a
+    // claim the projector is no longer willing to make.
+    "We want higher sales productivity. We can switch or keep. Annual CRM cost is about £50,000.");
     const cost = idOf(g2, "Annual CRM cost is about £50,000");
     const node = g2.nodes.find((n) => n.id === cost)!;
     // The user's verbatim quote remains the label; the stated badge remains;

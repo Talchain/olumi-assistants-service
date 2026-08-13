@@ -821,6 +821,11 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   // v0.11.0 schema amendment: stash topology_plan for Stage 5 packaging
   // and Stage 6 V1 → V3 deep-equality preservation.
   ctx.topologyPlan = (draftResult as any).topology_plan;
+  // ⚠ THIS LINE IS LOAD-BEARING AND ITS ABSENCE WOULD BE SILENT. `draftResult` is
+  // destructured above and then dropped; a field not stashed here does not
+  // survive the stage, and `ctx.ceeResponse` is assigned from an `any`, so
+  // TypeScript cannot catch the loss. The R1 disclosures die here if this goes.
+  ctx.recordDisclosures = (draftResult as any).record_disclosures;
   // Goal constraints passthrough: LLM-emitted constraints merged with regex in Stage 4
   ctx.llmGoalConstraints = (draftResult as any).goal_constraints;
 

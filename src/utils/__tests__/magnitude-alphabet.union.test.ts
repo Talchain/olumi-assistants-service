@@ -406,6 +406,20 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     'orchestrator-v5/clarify-v2/rubric.ts':
       'recognition-only vocabulary (plural-spelled, so historically invisible to this scan) — ' +
       'detects THAT a magnitude was stated; never multiplies and never resolves a value',
+    // R1 REMEDIATION (roots 1 and 4) — BOTH INCIDENTAL, and the claim is stated
+    // narrowly on purpose, because the two entries below this one were once
+    // FALSE here and had to be caught in review. Verified at the bytes rather
+    // than asserted: each file contains EXACTLY ONE magnitude word, in a COMMENT,
+    // quoting the audit fixture "Revenue is 10 million pounds" — the fabricated
+    // figure whose `from_brief` badge these fixes withdraw. Neither file holds a
+    // magnitude list, and neither PARSES a magnitude: `brief-binding.ts`
+    // delegates every numeric question to `isAmountStatedInBrief`
+    // (`provenance/stated-amounts.ts`) precisely so it cannot become a fifth
+    // hand-written alphabet, and the projector reads no magnitude words at all.
+    "cee/provenance/brief-binding.ts":
+      "incidental — one comment occurrence; delegates all magnitude matching to isAmountStatedInBrief and spells no alphabet",
+    "cee/draft/records/projector.ts":
+      "incidental — one comment occurrence quoting the audit fixture; the file spells no alphabet and parses no magnitude words",
     "utils/magnitude-alphabet.ts": "the canonical alphabet itself",
     "cee/extraction/numeric-parser.ts": "sibling value lookup — compared in Part A",
     "cee/decision-review/shape-check.ts": "sibling value lookup — compared in Part A",
