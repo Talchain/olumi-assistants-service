@@ -22,11 +22,26 @@
  * would silently eat the field — `stages/parse.ts` DESTRUCTURES the adapter
  * result, and `stages/package.ts` rebuilds the payload as a fresh object literal
  * from named keys — and `ctx.ceeResponse` is assigned from an `any`, so
- * TypeScript cannot catch a drop. Both are patched and both are named in their
- * own stage, but **neither hop is exercised here**: the existing unified-pipeline
- * tests mock every stage, so there is no cheap harness for them. The rung this
- * evidence reaches is WIRE-WITNESSED at the two ends, not JOURNEY-WITNESSED; a
- * staging journey is what closes the middle.
+ * TypeScript cannot catch a drop. **Neither hop is exercised HERE.**
+ *
+ * ⚠⚠ AN EARLIER VERSION OF THIS NOTE CLAIMED THERE WAS NO CHEAP HARNESS FOR THEM,
+ * "because the existing unified-pipeline tests mock every stage". **That was
+ * false, and it was refuted by construction**: specs already execute
+ * `runStageParse` and `runStagePackage` for real. The two guards now live at
+ * `unified-pipeline/stages/__tests__/record-disclosures-{parse,package}-hop.test.ts`,
+ * and mutation proved they are load-bearing — deleting either hop leaves EVERY
+ * test in this file GREEN and REDs exactly one of theirs. A premise about what
+ * cannot be tested is a claim like any other; this one cost a review round.
+ *
+ * ⚠ AND THE HOP THAT IS STILL NOT COVERED, so the ladder is not overstated: the
+ * v5 turn payload rebuilds its graph block FIELD BY FIELD
+ * (`orchestrator/tools/draft-graph.ts`, closed `GraphPatchBlockData`, no spread),
+ * so on that path the count goes **56 → 0** downstream of everything here, while
+ * the volume assertion below stays green. ROADMAP 2.1094. The honest sentence is
+ * "reaches the CEE V3 wire" — never "reaches the user".
+ *
+ * RUNG: WIRE-WITNESSED at both ends PLUS both middle hops under mutation-proven
+ * guards. Not MOUNTED, not JOURNEY-WITNESSED.
  */
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { CEEGraphResponseV3 } from "../../../../schemas/cee-v3.js";
@@ -280,7 +295,49 @@ it("anchors by ID when two nodes share a label, not by first-label-wins", () => 
  * have caught D1: the first design passed every unit test it had while delivering
  * 1 of 56 on the real captures. A per-case test cannot see a systematic loss —
  * only counting the whole channel can.
+ *
+ * ⭐ WHY THE INVARIANT IS `emitted === produced` AND **NOT**
+ * `emitted + omitted === produced`. The weaker form balances the books, so a
+ * future change could re-badge a dropped disclosure as "omitted" and stay green —
+ * laundering a silent loss into a counted one and calling it accounted for. The
+ * counter exists to make an unrepresentable record VISIBLE, never to buy
+ * permission to drop it. So the test demands that everything the projector
+ * produced is EMITTED, and separately that `omitted` is absent; a rise in
+ * `omitted` REDs here rather than being absorbed.
+ *
+ * ⚠ AND WHAT THIS TEST CANNOT SEE, stated so it is not read as an end-to-end
+ * claim: it sits at the CEE V3 wire. The v5 turn payload rebuilds its graph block
+ * field by field, so on that path the count goes 56 → 0 downstream of here and
+ * this assertion stays green — the same class of blindness this test was written
+ * to kill, one hop further out (ROADMAP 2.1094).
  */
+/**
+ * ⚠ A MALFORMED ENTRY IS COUNTED, NOT THROWN. The first version raised on `null`
+ * (`typeof d.reason` on a non-object), and that throw escapes
+ * `transformResponseToV3` at `boundary.ts:37` — so ONE bad entry killed the whole
+ * draft. Unreachable from the typed producer, but it is the one case the field's
+ * own doc promises to handle.
+ */
+it("a malformed disclosure entry is COUNTED, and does not kill the draft", () => {
+  const seam = projectDraftRecords(RECORDS, BRIEF);
+  expect(seam.ok).toBe(true);
+  if (!seam.ok) return;
+
+  const wire = CEEGraphResponseV3.parse(
+    transformResponseToV3(
+      {
+        graph: seam.projection.graph,
+        record_disclosures: [null, undefined, 42, { reason: "x" }, ...seam.projection.dropped],
+      } as never,
+      { brief: BRIEF },
+    ),
+  );
+  // Four unrepresentable entries, counted rather than evaporating…
+  expect(wire.record_disclosures_omitted).toBe(4);
+  // …and every REAL disclosure still came through untouched beside them.
+  expect((wire.record_disclosures ?? []).length).toBe(seam.projection.dropped.length);
+});
+
 it("VOLUME: every disclosure the projector produces reaches the wire, on both real B3 captures", () => {
   let totalProduced = 0;
   let totalEmitted = 0;

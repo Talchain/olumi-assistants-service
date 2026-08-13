@@ -1279,8 +1279,18 @@ export function transformResponseToV3(
     const emitted: Array<{ reason: string; label: string; withdrawn: boolean; node_id?: string }> = [];
     let omitted = 0;
     for (const raw of v1RecordDisclosures) {
+      // ⚠ A NON-OBJECT ENTRY IS COUNTED, NOT THROWN — and this line exists because
+      // the first version threw. `null` reached `typeof d.reason` and raised, the
+      // throw escaped `transformResponseToV3` at `boundary.ts:37`, and ONE bad
+      // entry killed the WHOLE DRAFT. Unreachable from the current typed producer,
+      // but this is the one case the field's own doc promises to handle, and a
+      // landmine on a channel whose entire purpose is not losing things quietly.
+      if (!raw || typeof raw !== "object") {
+        omitted += 1;
+        continue;
+      }
       const d = raw as { reason?: unknown; label?: unknown; node_id?: unknown; duplicate_of?: unknown };
-      // The ONLY rejection: a record that cannot be rendered at all. It is
+      // The ONLY other rejection: a record that cannot be rendered at all. It is
       // COUNTED, never silently swallowed — a channel that quietly loses part of
       // its payload reads exactly like one that had nothing to say.
       if (typeof d.reason !== "string" || typeof d.label !== "string") {

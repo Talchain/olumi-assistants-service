@@ -626,10 +626,22 @@ export const CEEGraphResponseV3 = z.object({
    * ⭐ HOW MANY DISCLOSURES COULD NOT BE REPRESENTED AT ALL — normally absent.
    *
    * The rule this field enforces is "no silent drops, ever". If the transform
-   * ever meets an entry it cannot express (a malformed record with no reason or
-   * no label), the count surfaces here rather than the entry evaporating. A
-   * channel that quietly loses part of its payload is indistinguishable from one
-   * that had nothing to say, and that is exactly how 55 of 56 went missing.
+   * ever meets an entry it cannot express (a non-object, or a record with no
+   * reason or no label), the count surfaces here rather than the entry
+   * evaporating. A channel that quietly loses part of its payload is
+   * indistinguishable from one that had nothing to say, and that is exactly how
+   * 55 of 56 went missing.
+   *
+   * ⚠⚠ SCOPED TO ONE FUNCTION, AND THE DISTINCTION IS LOAD-BEARING.
+   * `omitted: 0` means **"the transform expressed everything it was handed"**. It
+   * does NOT mean "the user received everything", and it cannot: this counter is
+   * blind to every hop downstream of `transformResponseToV3`. A measured example
+   * is live today — the v5 turn payload rebuilds its graph block FIELD BY FIELD
+   * (`orchestrator/tools/draft-graph.ts`, a closed `GraphPatchBlockData`
+   * interface, no spread), so `record_disclosures` reaches the CEE V3 wire and
+   * then **56 → 0** on that path, while this counter still reads zero and the
+   * `emitted === produced` invariant upstream still passes.
+   * ROADMAP 2.1094. Say "reaches the CEE V3 wire", never "reaches the user".
    */
   record_disclosures_omitted: z.number().optional(),
   /** Draft warnings from the pipeline — CEEStructuralWarningV1 shape from structure detection.
