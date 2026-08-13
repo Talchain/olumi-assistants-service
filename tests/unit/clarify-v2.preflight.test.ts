@@ -750,7 +750,7 @@ describe("1.152(i) P3 — hedged proceed ('not sure — maybe just draft it?') i
 
   it("the hedged re-offer copy is the DIRECT yes/no (same as bare-ack), with the default-forward chip", () => {
     const response = composeClarifyV2ReofferResponse('hedged_proceed');
-    expect(response.assistant_text).toContain('shall I draft with sensible defaults');
+    expect(response.assistant_text).toContain('shall I draft the model now');
     expect(response.suggested_actions.map((a) => a.id)).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });
 

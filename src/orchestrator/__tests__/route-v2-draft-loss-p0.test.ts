@@ -242,11 +242,19 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
     hasPriorTurnsForRead = false;
     hasOtherAdmittedLiveTurnForRead = false;
 
+    // Track-1 intake fix (2026-08-13): the previous control brief ("…expand
+    // into Germany or double down on the UK next year") drifted to a
+    // SINGLE-GAP brief (goal-only missing — "double" satisfies quantities,
+    // "next year" timeframe), which now correctly drafts first with a
+    // deferred ask instead of blocking. The control's job is unchanged —
+    // prove the fresh-scenario refusal above discriminates on QUESTION
+    // SHAPE, not on scenario state — so it uses a ≥2-missing brief that
+    // still takes the blocking ask.
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: messagePayload(
-        'We are weighing whether to expand into Germany or double down on the UK next year.',
+        'We are weighing whether to expand into Germany or focus on the UK instead.',
       ),
     });
     expect(res.statusCode).toBe(200);

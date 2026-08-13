@@ -3573,6 +3573,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // failure returns null and this turn routes exactly as with the flag
     // off. See handlers/clarify-v2-dispatch.ts.
     let clarifyV2DraftBrief: string | null = null;
+    // TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b): the single-gap
+    // draft-first disclosure — composed by the clarify dispatch, appended to
+    // the draft response's assistant_text AFTER a successful draft commit
+    // (and only when a graph actually landed). The draft turn's STORED
+    // assistant_message is null by existing design (draft-graph-dispatch.ts
+    // commit comment: the narrative is built post-commit and reconstructable
+    // from the persisted graph), so this append introduces no new
+    // wire-vs-store divergence class.
+    let clarifyV2DeferredDisclosure: string | null = null;
     // Review fix A5 (17 Jul): an EMPTY canvas ({nodes:[],edges:[]}) passes
     // ingress as non-null but is 'no model' by this file's own predicate —
     // gate on POPULATION, not nullness, so clarify v2 engages for exactly
@@ -3621,6 +3630,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
       if (cv2 !== null && cv2.kind === 'draft') {
         clarifyV2DraftBrief = cv2.briefOverride;
+        clarifyV2DeferredDisclosure = cv2.deferredAsk?.disclosure ?? null;
       }
     }
     if (isDraftGraphShape || explicitGenerateDraft || clarifyV2DraftBrief !== null) {
@@ -3692,7 +3702,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);
         }
-        return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
+        // TRACK-1 INTAKE FIX: append the single-gap disclosure to the draft
+        // narrative — commit succeeded (the 500 branch returned above) and a
+        // graph is actually on the canvas (`dg.graph !== null`; a disclosure
+        // about a model that never landed would be a false statement). Ships
+        // through sendFinalised200's central egress sanitiser like the rest
+        // of the narrative. Deterministic template text — no graph labels.
+        const draftResponse =
+          clarifyV2DeferredDisclosure !== null && dg.graph !== null
+            ? {
+                ...dg.response,
+                assistant_text: `${dg.response.assistant_text.trimEnd()}\n\n${clarifyV2DeferredDisclosure}`,
+              }
+            : dg.response;
+        return sendFinalised200(reply, requestId, 'draft_graph', draftResponse, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
           // T1 claim safety — INHERITED from the turn-entry read. Never a literal:

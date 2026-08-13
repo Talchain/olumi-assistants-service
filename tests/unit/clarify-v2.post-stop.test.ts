@@ -414,7 +414,7 @@ describe('2.171 — "start over" routes to the existing new-draft path', () => {
     if (outcome === null || outcome.kind !== 'respond') {
       throw new Error(`expected respond, got ${outcome?.kind}`);
     }
-    expect(outcome.response.assistant_text).toContain('draft with sensible defaults');
+    expect(outcome.response.assistant_text).toContain('shall I draft the model now');
     const round = roundPendingOf(appends);
     expect(round).toBeDefined();
     const action = round!.action as {

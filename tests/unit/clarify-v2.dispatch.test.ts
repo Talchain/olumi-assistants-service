@@ -283,7 +283,7 @@ describe('clarify v2 dispatch — 1.152 design fixes (A1 / A4 / A9)', () => {
     if (outcome === null || outcome.kind !== 'respond') {
       throw new Error(`expected respond, got ${outcome?.kind}`);
     }
-    expect(outcome.response.assistant_text).toContain('shall I draft with sensible defaults');
+    expect(outcome.response.assistant_text).toContain('shall I draft the model now');
     const pendings = (appends[0]!.pending_actions ?? []) as PendingAction[];
     const roundPending = pendings.find((p) => p.action.kind === 'clarify_v2_round');
     expect(roundPending).toBeDefined();
@@ -338,7 +338,7 @@ describe('clarify v2 dispatch — 1.152 design fixes (A1 / A4 / A9)', () => {
     if (first.outcome === null || first.outcome.kind !== 'respond') {
       throw new Error(`expected respond, got ${first.outcome?.kind}`);
     }
-    expect(first.outcome.response.assistant_text).toContain('sensible defaults');
+    expect(first.outcome.response.assistant_text).toContain('shall I draft the model now');
     const chipIds = (
       (first.outcome.response.suggested_actions ?? []) as Array<{ id: string }>
     ).map((c) => c.id);

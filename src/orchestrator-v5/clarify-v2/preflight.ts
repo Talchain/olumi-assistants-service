@@ -122,8 +122,18 @@ export const CLARIFY_V2_CANDIDATE_CHIP_BUDGET = CLARIFY_V2_MAX_CHIPS - 1;
  * normal routing, where the live pending action claims it.
  */
 export const CLARIFY_V2_PROCEED_CHIP_ID = 'cv2_proceed_default';
-export const CLARIFY_V2_PROCEED_MESSAGE =
-  'Go ahead and draft the model with sensible defaults.';
+/**
+ * TRACK-1 INTAKE FIX (2026-08-13) — the chip stops claiming "sensible
+ * defaults". INTAKE-FUNNEL §3 measured the truth at the bytes: NO default
+ * values exist anywhere in the flow — the proceed resume drafts from the
+ * original brief verbatim (trim/cap only) and the drafter fills the gaps
+ * with its own assumptions. The old copy implied a defaults table that
+ * does not exist. The new message still matches the UNCHANGED
+ * CLARIFY_V2_PROCEED_PATTERN, and the pattern deliberately RETAINS the old
+ * "with sensible defaults" alternation so in-flight chips minted by the
+ * previous build keep resolving after deploy.
+ */
+export const CLARIFY_V2_PROCEED_MESSAGE = 'Go ahead and draft the model.';
 
 /**
  * Typed go-ahead detection for the resume path. STRONG confirmations
@@ -408,7 +418,15 @@ export type ClarifyV2ProceedReason =
   | 'all_missing_already_asked'
   | 'round_budget_exhausted'
   | 'user_proceed'
-  | 'explicit_generate';
+  | 'explicit_generate'
+  /**
+   * TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b): round 1 found
+   * EXACTLY ONE missing dimension on an otherwise draftable brief —
+   * proceed to the draft NOW and carry the one composed question as a
+   * NON-BLOCKING post-draft coaching ask, with the assumption disclosed
+   * as assistant-authored. Round-1 only; resume proceeds never mint it.
+   */
+  | 'single_gap_draft_first';
 
 /** Why a re-offer / decline fired (also the telemetry `cue` field). */
 export type ClarifyV2DeflectionCue =
@@ -430,6 +448,16 @@ export type ClarifyV2Decision =
       /** The brief the draft should run from. */
       readonly brief: string;
       readonly reason: ClarifyV2ProceedReason;
+      /**
+       * TRACK-1 INTAKE FIX: present EXACTLY when `reason` is
+       * `single_gap_draft_first` — the one composed question for the single
+       * missing dimension, deferred to ride the draft response as a
+       * non-blocking coaching ask (disclosure composed by
+       * `composeDraftFirstDisclosure`). Never persisted as a pending: after
+       * the draft a graph exists and the clarify flow is strictly pre-draft;
+       * the answer routes through the ordinary post-draft turn flow.
+       */
+      readonly deferredQuestion?: ClarifyQuestion;
     }
   | {
       readonly kind: 'ask';
@@ -555,6 +583,27 @@ export function decideClarifyV2Round1(
   const assessment = assessBriefCompleteness(workingBrief);
   if (assessment.complete) {
     return { kind: 'proceed', brief: workingBrief, reason: 'complete' };
+  }
+  // ── TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b) ──────────────────
+  // EXACTLY ONE missing dimension → draft FIRST and defer the question to a
+  // non-blocking post-draft coaching ask. The trigger is a COUNT over the
+  // existing detectors — deliberately not a new natural-language predicate
+  // (trap 22 does not attach to the routing change). Measured yield at the
+  // wire baseline: 7 of the 13 re-asked briefs (S4, S5, M3, M5, L1–L3)
+  // draft first-turn, and the defaults-walk evidence (BASELINE.md) says
+  // those drafts come out structurally usable. ≥2 missing keeps the
+  // blocking ask below unchanged — the thin-brief asks are the rubric
+  // doing its job (INTAKE-FUNNEL: S1–S4 asks are defensible coaching).
+  if (assessment.missing.length === 1) {
+    const [deferredQuestion] = composeClarifyQuestions(assessment.missing, 1);
+    if (deferredQuestion !== undefined) {
+      return {
+        kind: 'proceed',
+        brief: workingBrief,
+        reason: 'single_gap_draft_first',
+        deferredQuestion,
+      };
+    }
   }
   const questions = composeClarifyQuestions(
     assessment.missing,
@@ -831,6 +880,92 @@ export function decideClarifyV2Resume(
 }
 
 /**
+ * TRACK-1 INTAKE FIX — the draft-first disclosure (INTAKE-FUNNEL §5b,
+ * honesty constraint i). Composed at DECISION time (pure), appended by
+ * route-v2 to the draft response's `assistant_text` AFTER a successful
+ * draft commit, and only when a graph actually landed on the canvas.
+ *
+ * PROVENANCE IS THE LOAD-BEARING COPY: the drafted value for the missing
+ * dimension is the ASSISTANT's assumption and must never read as
+ * user-stated (the records grammar separates `stated_items` from model
+ * claims for exactly this reason; this sentence is the chat-surface
+ * counterpart). The per-dimension gap phrases are deterministic templates —
+ * no graph text is embedded, so the disclosure cannot leak node ids and
+ * needs no label resolution.
+ *
+ * Surface choice (recorded): `assistant_text` only, NO chips. The draft
+ * response carries its own post-draft chip row and the UI renders a
+ * bounded row — appending cv2 candidate chips here would silently evict
+ * whichever chips land last (the exact defect CLARIFY_V2_MAX_CHIPS was
+ * built to kill). The question is answerable by typing (normal post-draft
+ * turn flow) or directly on the canvas.
+ */
+/**
+ * ⭐⭐ THE COPY MAKES NO CLAIM ABOUT THE USER'S BRIEF (#928 round 4).
+ *
+ * **THE GOVERNING RULE: the product may describe what IT did; it may not tell
+ * the user what THEY said.** One of those we can always verify; the other we
+ * cannot. It generalises well beyond this module.
+ *
+ * ⚠ WHAT WAS HERE UNTIL ROUND 4, and why it had to go. The copy read *"your
+ * brief didn't state the goal…"*. The round-3 reviewer measured that sentence
+ * shipping ON THE WIRE against a brief reading *"Our goal is not just cost but
+ * speed."* — the product telling a user their brief omitted something their
+ * brief plainly contained.
+ *
+ * DRAFT-FIRST IS WHAT MADE IT SERIOUS, and this is the finding of the round.
+ * The rubric's tolerance for over-detection was licensed by one sentence in
+ * its own invariant: *"a false MISSING costs one question with a one-tap
+ * escape."* Draft-first REMOVES the question and the escape. So the cost model
+ * that licensed the tolerance is void, and the tolerance with it — a false
+ * MISSING now costs a false assertion about the user's own words, with no way
+ * to answer back.
+ *
+ * ⭐ THE EXIT IS NOT A BETTER DETECTOR. Four rounds of widening the denial
+ * predicate each closed one direction and opened the other (trap 22f: when
+ * rounds oscillate, the answer is to stop guessing). Because the sentence
+ * above claims only what THIS SERVICE DID, it is true when the dimension is
+ * genuinely missing AND when the detector over-detected — so over-detection
+ * stops being a TRUTH defect and becomes only a QUALITY-OF-ASSUMPTION defect.
+ * **The predicate now only has to be good enough, not correct**, which is what
+ * ends the oscillation rather than surviving one more round of it.
+ *
+ * ⚠ RESIDUAL, recorded rather than hidden: on the over-detection branch the
+ * DRAFTER still receives the whole brief, so the value in the graph may well
+ * have come from the user's own words rather than from us. "I've assumed" then
+ * UNDERSTATES our fidelity. That is a quality-of-assumption error in the safe
+ * direction — it under-claims about ourselves instead of over-claiming about
+ * the user — and it is the trade this round deliberately buys.
+ *
+ * Same doctrine as ROADMAP 2.972(c) with the instrument changed: there, a
+ * "your brief was light on detail" advisory was SUPPRESSED when it could not
+ * be established. Here the disclosure must still say something (disclosure is
+ * its whole job), so the claim is REPHRASED onto the only subject we can
+ * verify — ourselves — rather than withheld.
+ *
+ * The per-dimension phrases stay deterministic templates with no graph text
+ * embedded, so the disclosure cannot leak node ids and needs no label
+ * resolution. Pinned in BOTH branches by
+ * `tests/unit/clarify-v2.draft-first.test.ts`.
+ */
+const DRAFT_FIRST_GAP_COPY: Readonly<Record<ClarifyDimension, string>> = {
+  goal: "I've assumed the goal in this draft, and I haven't confirmed it with you",
+  options:
+    "I've assumed the alternatives in this draft, and I haven't confirmed them with you",
+  timeframe:
+    "I've assumed the horizon in this draft, and I haven't confirmed it with you",
+  quantities:
+    "I've assumed the figures in this draft, and I haven't confirmed them with you",
+};
+
+export function composeDraftFirstDisclosure(question: ClarifyQuestion): string {
+  return (
+    `One thing to check: ${DRAFT_FIRST_GAP_COPY[question.dimension]}. ` +
+    `${question.text} You can answer here, or change it directly on the canvas.`
+  );
+}
+
+/**
  * Compose the wire response for an ask decision.
  *
  * Copy contract:
@@ -882,14 +1017,17 @@ export function composeClarifyV2Response(
   const numbered = questions
     .map((q, i) => `${i + 1}. ${q.text} (${q.impact})`)
     .join(' ');
+  // TRACK-1 INTAKE FIX: honest escape-hatch copy — there are no stored
+  // defaults (INTAKE-FUNNEL §3); on "go ahead" the drafter fills the gaps
+  // with its own assumptions, all editable on the canvas.
   const tail =
     'Answer whichever matters most — tap an option below or type your own — ' +
-    "or say “go ahead” and I'll draft with sensible defaults.";
+    "or say “go ahead” and I'll draft now, filling any gaps with my own assumptions.";
   const assistantText = `${lead} ${numbered} ${tail}`;
 
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,
-    label: 'Use sensible defaults',
+    label: 'Draft it anyway',
     message: CLARIFY_V2_PROCEED_MESSAGE,
   };
   // 2.171: the choice is tappable. The start-over chip takes one candidate
@@ -1018,7 +1156,7 @@ export function composeClarifyV2ReofferResponse(
 ): OlumiResponse {
   const assistantText =
     cue === 'question_reply'
-      ? "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft with sensible defaults."
+      ? "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft now, filling any gaps with my own assumptions."
       : cue === 'mutation_intent'
         // ROADMAP 2.716 (INV-M). DISCLOSE, then offer both ways forward. The
         // message is NOT folded, so the copy must tell the user what became of
@@ -1026,11 +1164,11 @@ export function composeClarifyV2ReofferResponse(
         // "change the model" chip: there is no model on this state, and a chip
         // whose consent cannot resume is guarantee-theatre (the same rule that
         // keeps a proceed chip off the decline response).
-        ? "That reads like a change to the model, but I have not built the model yet — I am still asking about the decision itself, so I have left your message out of the brief rather than guess. Answer any of the questions above, or say 'go ahead' and I'll draft with sensible defaults; once it is on the canvas you can change any value on it."
-        : 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?';
+        ? "That reads like a change to the model, but I have not built the model yet — I am still asking about the decision itself, so I have left your message out of the brief rather than guess. Answer any of the questions above, or say 'go ahead' and I'll draft the model, filling any gaps with my own assumptions; once it is on the canvas you can change any value on it."
+        : 'Just to check — shall I draft the model now, filling any gaps with my own assumptions, or would you like to answer any of the questions above first?';
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,
-    label: 'Use sensible defaults',
+    label: 'Draft it anyway',
     message: CLARIFY_V2_PROCEED_MESSAGE,
   };
   return {

@@ -304,6 +304,85 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(body.assistant_text).toBe('Drafted the model.');
   });
 
+  // ── TRACK-1 INTAKE FIX (2026-08-13): draft-first on a single-gap brief ──
+  // Real wire captures (draft-reliability baseline 2026-08-12): S5 is
+  // goal-only-missing (single gap), S1 is goal+quantities (two gaps).
+  const SINGLE_GAP_BRIEF =
+    'Should we raise our subscription price by 10% next quarter, or hold it steady?';
+  const TWO_GAP_BRIEF =
+    'Should we hire a second support engineer this quarter, or wait until January?';
+  /**
+   * The provenance marker the disclosure must carry on the wire.
+   *
+   * ⚠ CHANGED at #928 round 4. This used to be the literal
+   * `'not something you told me'` — a CLAIM ABOUT THE USER'S WORDS, which is
+   * the thing round 4 removes (the product may describe what IT did; it may
+   * not tell the user what THEY said). A wire marker that pins the defect is
+   * a guard holding the defect in place.
+   */
+  const PROVENANCE_MARKER = "I've assumed";
+
+  it('DRAFT-FIRST: a single-gap brief drafts immediately and the wire carries the disclosed assistant-authored assumption', async () => {
+    dispatchDraftGraphMock.mockResolvedValue({
+      ...makeDraftMockResult(),
+      // A graph actually landed on the canvas — the disclosure's truth
+      // condition (route gate: dg.graph !== null).
+      graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Grow revenue' }], edges: [] },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(SINGLE_GAP_BRIEF),
+    });
+    expect(res.statusCode).toBe(200);
+    // The draft ran — no blocking clarify turn, no LLM routing call.
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(SINGLE_GAP_BRIEF);
+    // Non-blocking by construction: NO clarify turn committed, NO
+    // clarify_v2_round pending persisted (nothing to resume post-draft).
+    expect(appendMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    // The draft narrative ships, PLUS the disclosure: assumption named as
+    // the ASSISTANT's, carrying the goal question — never presented as
+    // something the user stated.
+    expect(body.assistant_text).toContain('Drafted the model.');
+    expect(body.assistant_text).toContain(PROVENANCE_MARKER);
+    expect(body.assistant_text).toContain('What outcome would make this decision a success?');
+    // No clarify chips ride the draft response (chip-row budget is the
+    // draft's own; the question is answerable by typing or on the canvas).
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+  });
+
+  it('DRAFT-FIRST truth gate: when no graph landed, the disclosure is withheld (a claim about a canvas model needs a canvas model)', async () => {
+    dispatchDraftGraphMock.mockResolvedValue(makeDraftMockResult()); // graph: null
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(SINGLE_GAP_BRIEF),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toContain(PROVENANCE_MARKER);
+  });
+
+  it('DRAFT-FIRST off-by-one control: a TWO-gap brief still gets the blocking ask, never a draft', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(TWO_GAP_BRIEF),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('?');
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+  });
+
   it('FLAG ON: explicit-generate RESPECTS the generate instruction and DRAFTS — even on a thin brief (clarifying over Generate is a dead-end class)', async () => {
     // First-message-drafts doctrine (a1/first-message-drafts, 19 Jul journey
     // probe): a user who pressed Generate (generate_model) has EXPLICITLY

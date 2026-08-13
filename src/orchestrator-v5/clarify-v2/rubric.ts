@@ -156,6 +156,29 @@ const CHOICE_LEAD =
  * not the trap-12 mirror class (there is no other source of truth it must be
  * kept in sync with); it is a precision floor that can only under-credit.
  */
+/**
+ * TRACK-1 INTAKE FIX (2026-08-13) — A FROM-X-TO-Y OPTIONS ARM AND ITS CLOSED
+ * `FROM_TO_CHANGE_VERBS` LIST WERE WRITTEN HERE AND DROPPED AT #928 ROUND 4.
+ *
+ * It was not defective: an outside-authored corpus scored all five of its
+ * cases correctly, including the announcement twin ("We will migrate from AWS
+ * to GCP in the autumn") and the range twin ("revenue grew from £2m to £4m").
+ * It was dropped because it BOUGHT NOTHING MEASURABLE while carrying the
+ * unbounded risk every natural-language regex carries: across all 16 real wire
+ * captures it changed **no routing decision** — the first-turn draft set is
+ * byte-identical without it (S5 M1 M3 L1 L2 L3 L5), and the single brief it
+ * moved (M4) went from `ask(2)` to `ask(3)`, i.e. asked either way.
+ *
+ * ⚠ IT WAS NOT FREE, and the honest price is recorded here rather than in a
+ * report nobody re-reads: in the reviewer's corpus it was the arm that fixed
+ * `O01` ("Should we move our billing stack from Stripe to Adyen this year?"),
+ * which returns to OVER-DETECT — one spurious question. That is affordable
+ * ONLY because #928 round 4 also stopped the disclosure asserting what the
+ * user's brief said, which is what makes an over-detection cheap again. The
+ * two changes are a pair; do not re-derive one without the other.
+ *
+ * Do not re-add this arm to "recover" M4. M4 asks either way.
+ */
 const CHOICE_ACTION_VERBS =
   'abandon|acquire|adopt|automate|begin|bring|build|buy|cancel|centralise|centralize|close|commission|consolidate|continue|contract|cut|defer|delay|develop|divest|do|double|drop|end|enter|exit|expand|extend|finance|fire|focus|fund|go|grow|halt|hire|hold|insource|integrate|invest|keep|launch|lease|licence|license|merge|migrate|modernise|modernize|move|offer|open|outsource|partner|patch|pause|pilot|pivot|procure|promote|prototype|raise|rebuild|recruit|reduce|refactor|rehire|reinvest|relaunch|renegotiate|renew|rent|replace|restructure|retain|rewrite|run|scale|sell|ship|spend|split|sponsor|standardise|standardize|start|stay|stop|subcontract|switch|take|test|train|trial|upgrade|use|wait';
 
@@ -210,6 +233,33 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // decision a success?" — the outcome half of ROADMAP 2.103. Anchored on
     // the modal so a bare "success is important" cannot fire.
     /\bsuccess\s+(?:would|will|should)\s+be\b/i,
+    // TRACK-1 INTAKE FIX (2026-08-13) — A GOAL ARM FOR THE PREDICATE-NOMINATIVE
+    // PRIZE CONSTRUCTION ("…is the main prize", wire brief M3) WAS WRITTEN HERE
+    // AND DROPPED BEFORE MERGE (#928 review round 2, REVIEW-928.md §B).
+    //
+    // It was guarded by a closed POSITIVE list and so could not over-credit on
+    // its own. It was dropped for the OPPOSITE reason: it was the only arm on
+    // which `isDeniedEvidence` could be defeated, and a defeated denial check
+    // on a GOAL arm is the severe failure — an invented objective with NO
+    // disclosure, on a brief that denied it. Eight measured phrasings defeated
+    // it, by two mechanisms the fail-closed predicate cannot see: denial tokens
+    // outside its alphabet ("Nobody thinks…", "I doubt…", "We disagree that…")
+    // and clause-orphaning of a LISTED token ("We are not sure whether speed or
+    // reliability is the main prize" — `or` is a clause boundary, so the `not`
+    // falls outside the window).
+    //
+    // ⭐ AND IT COSTS NOTHING, WHICH IS THE POINT: M3 still drafts first-turn.
+    // Without this arm M3 scores `missing = ["goal"]`, which the count
+    // predicate routes to DRAFT-FIRST *with an honest disclosure* rather than
+    // silently to `complete`. Same capability, better provenance. The
+    // first-turn draft set is byte-identical (S5, M1, M3, L1, L2, L3, L5).
+    //
+    // THE GENERAL LESSON, recorded because it is the lane's real finding: of
+    // the four detector widenings this lane proposed, three are now gone and
+    // the flips survived every removal. The capability never came from
+    // widening the regexes — it comes from DRAFT-FIRST-WITH-DISCLOSURE (the
+    // count predicate plus the honest assumption sentence). The regexes were
+    // the risky part. Do not re-add this arm to "recover" M3; M3 is not lost.
   ],
   options: [
     /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|(?:choice|choos(?:e|ing)|decid(?:e|ing)) between|option[s]? (?:are|would be|include))\b/i,
@@ -406,8 +456,181 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // A bare calendar-month deadline. "by the end of March" already matched
     // the `by (?:the )?end of` arm at the top; the bare "by March" did not.
     /\bby\s+(?:next\s+|early\s+|mid[- ]|late\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/i,
+    // TRACK-1 INTAKE FIX (2026-08-13) — TWO TIMEFRAME ARMS WERE WRITTEN HERE
+    // AND ABLATED BEFORE MERGE (#928 adversarial review, REVIEW-928.md §1).
+    // They admitted bare `for + word-form duration` (S4) and a bare calendar
+    // month behind in/until/before/during (M5) by EXCLUDING a closed list of
+    // past-tense verbs. That is a CLOSED NEGATIVE list over an UNBOUNDED
+    // domain (English past-tense verbs), so an unlisted verb scored
+    // timeframe-SATISFIED: "We trialled it for six months", "We leased this
+    // building for ten years", "We signed the lease in April", "The board met
+    // in October" — ordinary company history — all fired. An independent
+    // corpus measured 12 new false-satisfied strings and 5 of 6 realistic
+    // briefs routing wrongly; every twin in the author's own corpus used a
+    // verb already on the author's guard list, which is why a green suite and
+    // a full mutant kit certified it (trap 22).
+    //
+    // NOT REPLACED WITH A LONGER VERB LIST — that is round 2 of the CEE #888
+    // oscillation and trap 22f settles it. If timeframe recall is re-attempted,
+    // the structural form is a closed POSITIVE forward-context guard (require
+    // futurity/deliberation), the shape `CHOICE_LEAD` already provides for the
+    // options battery. The measured cost of shipping without them is 2 of 7
+    // first-turn flips (5 remain, target ≥5); the measured cost of shipping
+    // them was 12 silent invented horizons.
   ],
 };
+
+/**
+ * ⭐ MODULE INVARIANT — EVERY ARM FAILS CLOSED (ratified 2026-08-13, #928
+ * adversarial review; REVIEW-928.md §1).
+ *
+ * **An unlisted, ambiguous or NEGATED input scores the dimension MISSING (ask),
+ * never silently SATISFIED.** This is the operational form of the detector
+ * philosophy at the top of this file, and it is stated here separately because
+ * philosophy alone did not carry it: two arms shipped into review guarded by a
+ * closed NEGATIVE list (exclude these past-tense verbs) over an unbounded
+ * domain, which inverts the rule — an input the list did not anticipate scored
+ * SATISFIED. They were ablated. The options battery's serial-list arm states
+ * the correct discipline in its own comment and is the pattern to copy:
+ * enumerate what you ACCEPT, never what you reject.
+ *
+ * Consequences for anyone adding an arm here:
+ *   1. Guard with a CLOSED POSITIVE list (an accepted vocabulary / an accepted
+ *      construction). If the list is short, the arm under-credits — one
+ *      tap-able question. A closed NEGATIVE list cannot under-credit; it can
+ *      only over-credit, silently, on the inputs nobody thought of.
+ *   2. A negated or denied statement is NOT evidence for the dimension it
+ *      names. Enforced below by `isDeniedEvidence`, applied to every arm's
+ *      match — not by per-arm lookarounds (four rounds of those oscillated on
+ *      CEE #888; trap 22f).
+ *   3. The cost asymmetry is not symmetric and never was: a false MISSING
+ *      costs one question with a one-tap escape; a false SATISFIED silently
+ *      invents a value the user never gave — and since 2026-08-13 a
+ *      single-gap brief drafts immediately, so a false SATISFIED can turn a
+ *      DISCLOSED assumption into an INVENTED and SILENT one.
+ * The property is pinned for ALL dimensions in
+ * `tests/unit/clarify-v2.rubric-fail-closed.test.ts`.
+ */
+const DENIAL_TOKEN_PATTERN = /\b(?:not|never|neither|nor|hardly|barely)\b|\w+n['’]t\b/i;
+
+/**
+ * The ONE construction in which a bare `not` is not a denial: `or not` /
+ * `and/or not` restate the yes/no framing ("Should we renew the contract or
+ * not this quarter?"). This is not an epicycle invented here — the options
+ * battery's bare-`or` arm already carries the same `(?!not\b)` distinction and
+ * documents it ("X or not … restates the yes/no framing, it does not name a
+ * second alternative"), so the module has one meaning for this construction,
+ * not two (trap 21: two concepts under one name is how these seams rot).
+ */
+const YES_NO_RESTATEMENT_PATTERN = /\b(?:and\/)?or\s+not\b/gi;
+
+/**
+ * CLAUSE boundaries — sentence punctuation PLUS coordinating conjunctions.
+ *
+ * ⚠ THE SENTENCE WAS THE WRONG WINDOW AND IT WAS MEASURED, NOT GUESSED. A
+ * first cut scoped the denial to the whole sentence and re-opened the exact
+ * defect ROADMAP 2.103's journey fix closed: *"I care most about profit in 2
+ * years but I don't want to bet the company"* states a goal and then adds a
+ * CONSTRAINT — the `don't` governs the constraint clause, not the objective —
+ * yet a sentence-scoped rule scored goal MISSING and would have gone back to
+ * asking 5-of-5 fresh users for the goal they had just given.
+ *
+ * The boundary list is closed and POSITIVE, and it fails in the ASK direction
+ * by construction: an unlisted boundary makes the window WIDER, so the arm
+ * scores MISSING (one question), never silently satisfied. That is the module
+ * invariant applied to the guard's own guard.
+ */
+const CLAUSE_BOUNDARY_PATTERN =
+  // ⚠ DIGIT-SEPARATING PUNCTUATION IS NOT A BOUNDARY — TRUE OF THE COMMA AND,
+  // SINCE #928 ROUND 4, OF THE FULL STOP TOO. Both exceptions were MEASURED.
+  //
+  // The comma came first: a bare comma in the class split THOUSANDS SEPARATORS,
+  // so "The switch would not cost £20,000" became "…not cost £20" + "000", and
+  // the orphaned "000" — carrying no denial — satisfied quantities.
+  //
+  // ⚠⚠ THE DOT WAS LEFT UNGUARDED IN THE SAME EDIT, and an independent corpus
+  // found it (blocker B1): "We would not spend £1.5 million on this." split at
+  // the DECIMAL POINT and satisfied quantities on a magnitude the user had
+  // explicitly disowned. That is CEE #853's finding verbatim — *a window cut at
+  // the first [.!?], which is also the decimal point* — recurring here. The
+  // durable lesson is the one #853 already paid for: WHEN YOU GUARD ONE
+  // DIGIT-SEPARATING CHARACTER, GUARD THE WHOLE CLASS IN THE SAME EDIT; fixing
+  // the character in front of you leaves its sibling live and the suite green.
+  //
+  // A denied magnitude scoring SATISFIED is the fail-OPEN direction, i.e. the
+  // exact harm this predicate exists to prevent, introduced by the fix for a
+  // fail-CLOSED one. Both are now pinned by the property test's quantities
+  // cases, WITH their opposite-direction twins (a stated "£1.5 million" must
+  // still count, and a full stop must still end a sentence — a digit guard that
+  // swallowed the sentence boundary would let one denial mute a whole brief).
+  //
+  // ⭐ THE COMMA IS ALSO ASYMMETRIC IN POSITION, and that is handled in
+  // `containingClause`, not here. In the CONTRASTIVE class ("X is Y, not Z")
+  // the denial follows the comma; in the PARENTHETICAL class ("X is not,
+  // <aside>, Y") it precedes it. Round 3 made the comma a full boundary and
+  // bought four contrastive fixes for four parenthetical regressions — one
+  // severe error for each safe one. The comma is therefore a RIGHT boundary
+  // only: it may CLOSE a clause, never START one. Measured across an
+  // outside-authored 43-case corpus: five severe fail-opens closed
+  // (P02 P03 P04 N01 D02) for one safe over-detection (S03), with every case
+  // round 3 fixed (X01 X02 D03) still fixed. It cannot oscillate back onto the
+  // contrastive class BY CONSTRUCTION — a right-only rule cannot re-open a
+  // class that depends on the comma starting a clause.
+  /[!?;:\n]|(?:(?<!\d)[.,]|[.,](?!\d))|\s+(?:but|yet|although|though|however|whereas|while|because|since|so that|and|or)\s+/gi;
+
+/** The clause carrying `matchIndex` — the span a denial can govern. */
+function containingClause(text: string, matchIndex: number): string {
+  let start = 0;
+  let end = text.length;
+  const scanner = new RegExp(CLAUSE_BOUNDARY_PATTERN.source, 'gi');
+  for (let m = scanner.exec(text); m !== null; m = scanner.exec(text)) {
+    const boundaryEnd = m.index + m[0].length;
+    if (boundaryEnd <= matchIndex) {
+      // ⚠ A COMMA NEVER *STARTS* A CLAUSE — it may only CLOSE one. See the
+      // asymmetry note on CLAUSE_BOUNDARY_PATTERN above. Every other boundary
+      // (sentence punctuation, a coordinating conjunction) still opens a new
+      // clause here, so a denial cannot leak across a full stop.
+      if (m[0] !== ',') start = boundaryEnd;
+    } else if (m.index > matchIndex) {
+      end = m.index;
+      break;
+    }
+    if (m.index === scanner.lastIndex) scanner.lastIndex += 1; // zero-width guard
+  }
+  return text.slice(start, end);
+}
+
+/**
+ * Is this arm's evidence DENIED by the sentence that carries it?
+ *
+ * The reviewer's severe case: *"I do not think raw speed is the main prize"*
+ * fires the goal battery's prize arm on a sentence that DENIES that goal, and
+ * (with three other dimensions satisfied) reaches `complete` — so the product
+ * invents a goal with ZERO disclosure, on a brief that explicitly disowned it.
+ *
+ * Deliberately NOT a negation PARSER — it does not try to work out what the
+ * negation governs (the CEE #888 lesson: that predicate oscillates and cannot
+ * be settled by more rules). It asks a cruder, decidable question — *does the
+ * clause carrying this evidence contain a denial at all?* — and answers in the
+ * FAIL-CLOSED direction: if yes, this match is not evidence. A denial that
+ * governs something else in the same clause therefore costs one unnecessary
+ * question, which is the affordable error.
+ *
+ * Scoped to the CLAUSE containing the match start, never the whole brief and
+ * never the whole sentence: a denial in a neighbouring clause governs nothing
+ * here (measured — see `containingClause`), and whole-brief scoping would
+ * silence the battery on any brief that says "not" anywhere.
+ */
+function isDeniedEvidence(brief: string, match: RegExpExecArray): boolean {
+  // MASK the yes/no restatement FIRST, and mask it INDEX-PRESERVINGLY (equal
+  // length of spaces), because clause-splitting afterwards would otherwise cut
+  // `or not` in half and orphan the `not` into the next clause — measured on
+  // the pre-existing calibration pin "Should we renew the vendor contract or
+  // not this quarter?", where that orphaning wrongly denied a stated horizon.
+  // Same-length masking keeps every match index valid against the original.
+  const masked = brief.replace(YES_NO_RESTATEMENT_PATTERN, (m) => ' '.repeat(m.length));
+  return DENIAL_TOKEN_PATTERN.test(containingClause(masked, match.index));
+}
 
 export interface BriefCompleteness {
   /** Dimensions the brief already satisfies, in canonical order. */
@@ -426,9 +649,23 @@ export function assessBriefCompleteness(brief: string): BriefCompleteness {
   const satisfied: ClarifyDimension[] = [];
   const missingUnordered = new Set<ClarifyDimension>();
   for (const dimension of CLARIFY_V2_DIMENSIONS) {
-    const detected = CLARIFY_V2_DIMENSION_DETECTORS[dimension].some((re) =>
-      re.test(brief),
-    );
+    // FAIL-CLOSED (module invariant, 2026-08-13): an arm's match counts as
+    // evidence only when the sentence carrying it does not DENY it. A
+    // dimension whose every match sits inside a denial scores MISSING — the
+    // product asks rather than inventing a value the user disowned.
+    const detected = CLARIFY_V2_DIMENSION_DETECTORS[dimension].some((re) => {
+      // A FRESH global copy per call: the shared literals must never carry
+      // `lastIndex` state between invocations (a stateful regex would make
+      // this function non-deterministic, which its contract forbids). Every
+      // match is examined, not just the first — one undeniied occurrence is
+      // evidence, so a denial elsewhere in the brief cannot silence a
+      // statement that stands.
+      const scanner = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+      for (const match of brief.matchAll(scanner)) {
+        if (!isDeniedEvidence(brief, match as RegExpExecArray)) return true;
+      }
+      return false;
+    });
     if (detected) {
       satisfied.push(dimension);
     } else {
