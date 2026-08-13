@@ -157,6 +157,11 @@ import {
 // leaf. `mayNameLeadingOptionForFact` is IMPORTED, not restated: the offer's
 // wire-reached telemetry must branch on the same predicate compose branches on.
 import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
+// Lane C — the grounded counter-case. NOTE it answers a DIFFERENT question
+// from `selectFragileEdge` above ("what should the team argue against?" vs
+// "what may we offer to adjust?") and is deliberately not unified with it —
+// see that module's header for why aligning them would be trap 21.
+import { selectGroundedCounterCase } from '../coaching/grounded-counter-case.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
@@ -2102,9 +2107,25 @@ export function buildLensCompanionBlocks(
         fact.result.leading_option_id.length > 0
           ? fact.result.leading_option_id
           : null;
+      // Lane C — GROUND THE EXERCISE IN THIS RUN'S OWN MODEL.
+      //
+      // `CONSIDER_OPPOSITE_COUNTER_CASE` is fixed copy with no producer-content
+      // dependency: byte-identical on every decision this product has analysed.
+      // `selectGroundedCounterCase` names the relationship THIS run's
+      // robustness check found most sensitive, so two different decisions
+      // produce two different exercises.
+      //
+      // ⚠ THE FALLBACK IS LOAD-BEARING, NOT DEFENSIVE PADDING. The grounded
+      // sentence interpolates PRODUCER LABELS, so — unlike the fixed copy — it
+      // can genuinely trip the prose gate that `validateProseAndSchemaOrDrop`
+      // applies downstream, and that gate DROPS THE WHOLE BLOCK. The selector
+      // therefore asks the gates EARLY and refuses the GROUNDING when they
+      // bite (the lesson `coaching/fragile-edge-offer-text.ts` exists to
+      // encode). Grounding can fail; the exercise cannot vanish.
+      const groundedCounterCase = selectGroundedCounterCase(fact.result.enrichment);
       const block = buildDskExerciseBlock(
         'consider_opposite',
-        CONSIDER_OPPOSITE_COUNTER_CASE,
+        groundedCounterCase.grounded?.counterCase ?? CONSIDER_OPPOSITE_COUNTER_CASE,
         leadingOptionId,
         ctx,
         lookup,
