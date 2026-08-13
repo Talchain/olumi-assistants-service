@@ -479,15 +479,37 @@ export function buildAnalysisReadyPayload(
       }
     }
 
-    // Re-evaluate option status after fallback may have added interventions.
-    // The original status may have been "needs_user_mapping" because there were
-    // no interventions. Now that fallback recovered values, re-compute properly.
+    // ⛔ THE FALLBACK NO LONGER PROMOTES AN OPTION TO `ready`.
+    //
+    // This block used to flip the COPY's status to "ready" while public
+    // `options[]` — the object the team is shown — stayed `needs_user_mapping`.
+    // `chip-generator.ts:358` reads this status, so the product refused in the
+    // panel ("we have not set a value for this") and simultaneously offered an
+    // executable "Run the analysis" chip. Two surfaces, one payload, opposite
+    // claims.
+    //
+    // ⚠ WHY IT IS FIXED HERE rather than parked as pre-existing. The promotion
+    // can only fire on an option with ZERO real interventions — with one or
+    // more, `transformOptionToAnalysisReady` has already set a non-mapping
+    // status and this branch is unreachable. That population was near-empty
+    // before the prose fallback stopped authoring values from semantic guesses;
+    // the refusal in `intervention-extractor.ts` is what creates it. A defect
+    // that could not fire before a change and fires after it belongs to that
+    // change, whatever its age.
+    //
+    // The fallback VALUES are kept: they feed `intervention_details` and the
+    // display layer, and `run_analysis` never reads this payload (it reloads
+    // the persisted graph and rebuilds from the option nodes via
+    // `mergeInterventionSourceObjects`). What is withdrawn is only the CLAIM
+    // that an option whose every value we inferred is ready to analyse. An
+    // inferred baseline is not a user's lever, and status is where that
+    // difference is reported.
     if (
       analysisOpt.status === "needs_user_mapping" &&
       Object.keys(analysisOpt.interventions).length > 0
     ) {
-      analysisOpt.status = "ready";
-      analysisOpt.status_reason = "Resolved via factor node value fallback";
+      analysisOpt.status_reason =
+        "Values shown for this option were taken from each factor's current level, not set for this option. It still needs your input before analysis.";
     }
   }
 

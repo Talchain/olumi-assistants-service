@@ -292,6 +292,28 @@ function cleanTargetText(text: string): string {
   return text
     .replace(/^(the|a|an)\s+/i, "")
     .replace(/\s+(level|amount|value)$/i, "")
+    // ⭐ TRAILING PREPOSITIONS ARE A TOKENISER ARTEFACT, NOT PART OF THE NAME.
+    //
+    // Every target group above is `(\w+(?:\s+\w+)?)` — greedy over TWO words —
+    // so `increase price by 20%` captures `"price by"`, not `"price"`. With a
+    // one-word factor name that string can never reach the exact_id or
+    // exact_label limbs: `normalizeText("price by") === "price_by"` matches
+    // neither `factor_price` nor the label `"Price"`. It only ever landed via
+    // the semantic limb — which is exactly the limb the value path must now
+    // refuse. Measured on an independently-authored 82-case corpus: without
+    // this strip the refusal cost 34 previously-correct extractions to buy 18
+    // prevented-wrong ones; stripping restores all 34 and reopens none of the
+    // 18, because a real exact match never depended on the preposition.
+    //
+    // So the price of the refusal boundary was a TOKENISER DEFECT, not a
+    // property of the boundary. Fixed here rather than by widening the
+    // boundary, which would have re-admitted the guesses.
+    //
+    // Repeated until stable: `of the` and similar can leave a second trailing
+    // stop word behind the first. A target that is nothing BUT prepositions
+    // collapses to "" and is dropped by the `targetText &&` guard at the call
+    // site (and by SKIP_WORDS), which is the correct outcome.
+    .replace(/(\s+(by|to|at|of|from|for|with|in|on))+$/i, "")
     .trim();
 }
 
@@ -650,6 +672,12 @@ export function extractInterventionsForOption(
   const unresolvedTargets: string[] = [];
   const userQuestions: string[] = [];
   let hasNonNumericRaw = false;
+  // Several INTERVENTION_PATTERNS can match one phrase (`set price to 40` hits
+  // both the leading-verb rule and the bare `<target> to <N>` rule), so an
+  // undeduplicated refusal asked the user the same question twice about the
+  // same factor. Keyed on the FACTOR, not the target text, because two
+  // different target strings can resolve to one factor.
+  const refusedFactorIds = new Set<string>();
 
   for (const raw of allRaw) {
     const matchResult = matchInterventionToFactor(raw.target_text, nodes, edges, goalNodeId);
@@ -721,12 +749,31 @@ export function extractInterventionsForOption(
       }
 
       if (matchResult.match_type === "semantic") {
-        unresolvedTargets.push(raw.target_text);
-        userQuestions.push(
-          `Which factor does "${raw.target_text}" refer to? We matched it to ` +
-            `"${matchResult.matched_node?.label ?? matchResult.node_id}", but we are not confident enough ` +
-            `to set a value from that.`
-        );
+        // ⚠ THE COPY MAKES A CLAIM ABOUT US, AND BOTH EASY PHRASINGS ARE FALSE.
+        //
+        // (a) It must NOT quote the extracted target back as the user's words.
+        // `target_text` is a TOKENISER OUTPUT, not a phrase the user wrote —
+        // the greedy two-word target group produced "price by" from "Increase
+        // price by 20%". Telling someone what they said, using a string they
+        // did not write, is the defect three lanes closed today, arriving from
+        // the inside. The question names the FACTOR WE MATCHED — a fact we own
+        // — and never reconstructs the user's phrasing.
+        //
+        // (b) It must NOT say "not confident enough". Across the refusals this
+        // guard produces, matcher confidence runs high=47, medium=36, low=1 —
+        // we are usually VERY confident and are refusing on PRINCIPLE, because
+        // a meaning-only match is not a user's instruction however strong the
+        // similarity score. Reporting a policy as a confidence state claims a
+        // condition we are not in. Say the true thing.
+        if (!refusedFactorIds.has(matchResult.node_id!)) {
+          refusedFactorIds.add(matchResult.node_id!);
+          unresolvedTargets.push(raw.target_text);
+          userQuestions.push(
+            `Should this option change "${matchResult.matched_node?.label ?? matchResult.node_id}"? ` +
+              `We matched it by meaning rather than by name, and we do not set a value from a ` +
+              `meaning-only match — so please confirm the factor and the value.`
+          );
+        }
         continue; // Do not emit intervention
       }
 
@@ -853,18 +900,22 @@ export function extractInterventionsForOption(
         );
       }
     } else {
-      // No default encoding - mark as needing encoding
-      // Still create a placeholder intervention with value=0
-      interventions[factorId] = {
-        value: 0, // Placeholder - needs encoding
-        source: cat.source,
-        target_match: targetMatch,
-        value_confidence: "low",
-        reasoning: cat.original_segment,
-        raw_value: cat.raw_categorical_value,
-        value_type: cat.value_type,
-      };
-
+      // ⛔ NO ENCODING ⇒ NO INTERVENTION. This branch used to write
+      // `value: 0` as a "placeholder", reached here by an exact_id or
+      // exact_label match — so closing the semantic route left this door open
+      // to the SAME harm: a factor pinned to zero.
+      //
+      // Nothing downstream can tell a placeholder zero from a deliberate one.
+      // `mergeInterventionSourceObjects` admits any finite number, so the zero
+      // reaches the analysis loader and is evaluated as the lever position the
+      // user chose — and zero is not a neutral value: for a cost, a rate or a
+      // headcount it is the most extreme position available.
+      //
+      // The RAW value is still recorded above (`rawInterventions[factorId]`),
+      // which is the honest half — we know WHAT was said, we just have no
+      // number for it yet. That sets `hasNonNumericRaw`, so the option resolves
+      // to `needs_encoding` and the question below asks for the encoding.
+      // Nothing is lost except a fabricated number.
       userQuestions.push(
         `How should "${cat.raw_categorical_value}" be encoded numerically for "${cat.target_text}"?`
       );

@@ -102,16 +102,25 @@ describe("P1 CEE Verification", () => {
       const v3Response = transformResponseToV3(response);
       const option = v3Response.options.find((o) => o.label === "Increase price by 20%");
 
-      // If baseline is extracted and used, status should be "ready"
-      // and intervention should contain absolute value (120)
-      if (option?.status === "ready") {
-        const intervention = option.interventions["factor_price"];
-        expect(intervention).toBeDefined();
-        expect(intervention?.value).toBe(120); // 100 * 1.2 = 120
-      } else {
-        // If not resolved, should still be needs_user_mapping (acceptable)
-        expect(option?.status).toBe("needs_user_mapping");
-      }
+      // ⚠ THIS ASSERTION WAS BRANCHED (`if ready … else expect needs_user_mapping`)
+      // AND THE ELSE LIMB WAS A TAUTOLOGY. While `cleanTargetText` left the
+      // greedy target group's trailing preposition in place, "Increase price by
+      // 20%" yielded target_text "price by", which matches the factor "Price"
+      // neither by id nor by label — so the else limb ran and asserted only
+      // that an unresolved option is unresolved. A deliberate throw inside the
+      // if-limb stayed GREEN, at identical test counts: the case had stopped
+      // testing resolution at all.
+      //
+      // The preposition strip makes the outcome DETERMINATE, so the branch is
+      // gone and the real behaviour is pinned unconditionally.
+      expect(option?.status).toBe("ready");
+      const intervention = option?.interventions["factor_price"];
+      expect(intervention).toBeDefined();
+      expect(intervention?.value).toBe(120); // 100 * 1.2 = 120
+      // Bind the resolution to its EVIDENCE, not just its result: the value is
+      // 120 because the factor was matched by NAME and the baseline was read
+      // from it — not because a meaning-only guess happened to land.
+      expect(intervention?.target_match.match_type).toBe("exact_id");
     });
   });
 

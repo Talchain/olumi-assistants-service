@@ -43,6 +43,7 @@
 import { describe, it, expect } from "vitest";
 import { extractInterventionsForOption } from "../../src/cee/extraction/intervention-extractor.js";
 import { matchInterventionToFactor } from "../../src/cee/extraction/factor-matcher.js";
+import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
 import type { NodeV3T, EdgeV3T } from "../../src/schemas/cee-v3.js";
 
 const GOAL_ID = "goal_profit";
@@ -113,11 +114,20 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     );
 
     expect(option.status).toBe("needs_user_mapping");
-    // The extractor's own target text for this label is "price by" (its segment
-    // boundary), so match the target rather than asserting an exact spelling the
-    // extractor never produced.
     expect((option.unresolved_targets ?? []).some((t) => /price/i.test(t))).toBe(true);
-    expect((option.user_questions ?? []).join(" ")).toMatch(/price/i);
+
+    const asked = (option.user_questions ?? []).join(" ");
+    // The question must name the FACTOR WE MATCHED — a fact we own — and must
+    // NOT quote the extracted target back as the user's words: `target_text` is
+    // a tokeniser output, not a phrase the user wrote.
+    expect(asked).toMatch(/Churn Rate/);
+    // And it must not report a POLICY as a CONFIDENCE STATE. Across the
+    // refusals this guard produces the matcher is usually highly confident; we
+    // decline on principle, not from doubt.
+    expect(asked).not.toMatch(/not confident/i);
+    expect(asked).toMatch(/by meaning/i);
+    // Asked ONCE per factor: several patterns can match one phrase.
+    expect(option.user_questions?.filter((q) => /Churn Rate/.test(q)).length).toBe(1);
   });
 
   it("reports an edge-hinted match by its MEASURED type, never upgraded to exact_id", () => {
@@ -200,6 +210,108 @@ describe("prose fallback must not author a user lever from a semantic guess", ()
     );
     expect(Object.keys(option.interventions)).not.toContain(TECH_ID);
     expect((option.unresolved_targets ?? []).some((t) => /technology/i.test(t))).toBe(true);
+  });
+
+  it("the two surfaces agree: analysis_ready must not offer to run what the panel refused", () => {
+    // ⛔ THE DEFECT THIS CLOSES. The `observed_state` fallback in
+    // `analysis-ready.ts` fires ONLY on options with zero interventions, and
+    // the semantic refusal above is what creates that population. Before the
+    // fix the fallback flipped the analysis-ready COPY to `status: "ready"`
+    // while public `options[]` stayed `needs_user_mapping` — so the panel said
+    // "we have not set a value for this" and `chip-generator.ts:358`, reading
+    // that status, offered an executable "Run the analysis" at the same time.
+    //
+    // A defect that could not fire before a change and fires after it belongs
+    // to that change, whatever its age.
+    const body = transformResponseToV3(
+      {
+        graph: {
+          version: "1",
+          nodes: [
+            { id: "goal_profit", kind: "goal", label: "Annual profit" },
+            {
+              id: "factor_churn_rate",
+              kind: "factor",
+              label: "Churn Rate",
+              category: "controllable",
+              data: { value: 0.12, extractionType: "observed" },
+            },
+            // No `data.interventions`: the canonical projection stated no magnitude.
+            { id: "opt_a", kind: "option", label: "Cut price by 15%", body: "Cut price by 15%" },
+            { id: "opt_b", kind: "option", label: "Hold the current plan", body: "Hold the current plan" },
+          ],
+          edges: [
+            { from: "opt_a", to: "factor_churn_rate" },
+            { from: "opt_b", to: "factor_churn_rate" },
+            { from: "factor_churn_rate", to: "goal_profit" },
+          ],
+        },
+      } as never,
+      { brief: "Cut price by 15%" },
+    ) as unknown as {
+      options: Array<{ id: string; status: string }>;
+      analysis_ready?: { status: string; options: Array<{ id: string; status: string }> };
+    };
+
+    const publicById = new Map(body.options.map((o) => [o.id, o]));
+    const ready = body.analysis_ready;
+    expect(ready).toBeDefined();
+
+    // Non-vacuity: the fallback must actually have fired, or this test would
+    // pass on a payload where there was never anything to disagree about.
+    const opt = ready!.options.find((o) => o.id === "opt_a");
+    expect(opt).toBeDefined();
+    expect(publicById.get("opt_a")!.status).toBe("needs_user_mapping");
+
+    // The claim: no option may be advertised as ready when the object the team
+    // is shown says it still needs their input. Bound per option by IDENTITY.
+    for (const a of ready!.options) {
+      const shown = publicById.get(a.id);
+      expect(shown).toBeDefined();
+      if (shown!.status === "needs_user_mapping") {
+        expect(a.status).not.toBe("ready");
+      }
+    }
+    // ...and the payload-level status the chip reads must not say ready either.
+    expect(ready!.status).not.toBe("ready");
+  });
+
+  it("a one-word factor is still reached through '<verb> <factor> by <N>%'", () => {
+    // The refusal boundary is correct, but its price was a TOKENISER ARTEFACT:
+    // every target group is greedy over two words, so "Increase price by 20%"
+    // captured "price by", which matches the factor "Price" neither by id nor
+    // by label and could only ever land semantically — i.e. exactly the limb
+    // the value path must now refuse. Measured on an 82-case corpus, that cost
+    // 34 previously-correct extractions; stripping the trailing preposition
+    // restores all of them and reopens none of the 18 prevented-wrong ones.
+    const nodes = [
+      { id: "goal_rev", kind: "goal", label: "Revenue" },
+      {
+        id: "f_price",
+        kind: "factor",
+        label: "Price",
+        observed_state: { value: 100, source: "brief_extraction" },
+      },
+    ] as unknown as NodeV3T[];
+    const edges = [{ id: "e", from: "f_price", to: "goal_rev" }] as unknown as EdgeV3T[];
+
+    const option = extractInterventionsForOption(
+      "Increase price by 20%",
+      undefined,
+      nodes,
+      edges,
+      "goal_rev",
+      new Set<string>(),
+      [],
+      undefined,
+      "opt_a",
+    );
+
+    expect(Object.keys(option.interventions)).toContain("f_price");
+    // Matched BY NAME, not by meaning — that is what makes the value legitimate.
+    expect(option.interventions["f_price"].target_match.match_type).toBe("exact_label");
+    expect(option.interventions["f_price"].value).toBe(120); // 100 × 1.2
+    expect(option.status).toBe("ready");
   });
 
   it("CONTRAST CONTROL: an exact_id target still yields a real intervention", () => {
