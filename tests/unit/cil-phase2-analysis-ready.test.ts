@@ -96,7 +96,7 @@ function createV3Graph(
 // ============================================================================
 
 describe("Task 2A: Factor value fallback in analysis_ready", () => {
-  it("fills intervention from observed_state.value on controllable factor", () => {
+  it("declines to fill from observed_state.value, and reports the level it declined", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -120,17 +120,21 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
-    // Fallback should have filled the intervention from observed_state.value.
-    // With unit='GBP' the transform produces a meaningful display_value
-    // ("59 GBP") and upgrades the intervention to the rich form, so assert
-    // via the numeric projection.
-    expect(payload.options[0].interventions).toHaveProperty("fac_price");
-    const entry = payload.options[0].interventions["fac_price"];
-    const numeric = typeof entry === 'number' ? entry : (entry as { value: number }).value;
-    expect(numeric).toBe(59);
+    // ⚠ CONTRACT REVERSED DELIBERATELY. 59 is the factor's CURRENT level — what
+    // holds if nobody acts. Writing it as this option's intervention asserts
+    // "Option A sets price to 59", which nobody said.
+    expect(payload.options[0].interventions).not.toHaveProperty("fac_price");
+
+    // The refusal carries the level forward as CONTEXT rather than as an answer,
+    // so the user is better off than before, not merely blocked.
+    const blocker = payload.blockers?.find(
+      (b) => b.option_id === "opt_1" && b.factor_id === "fac_price",
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.message).toContain("59");
   });
 
-  it("fills intervention from data.value (V1 passthrough) when observed_state absent", () => {
+  it("declines to fill from the data.value passthrough when observed_state is absent", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -153,10 +157,15 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
-    expect(payload.options[0].interventions["fac_price"]).toBe(42);
+    expect(payload.options[0].interventions).not.toHaveProperty("fac_price");
+    const blocker = payload.blockers?.find(
+      (b) => b.option_id === "opt_1" && b.factor_id === "fac_price",
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.message).toContain("42");
   });
 
-  it("prefers observed_state.value over data.value when both exist", () => {
+  it("when both carriers exist, the DECLINED level is the one it would have used", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -178,7 +187,15 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
-    expect(payload.options[0].interventions["fac_price"]).toBe(100);
+    // Precedence still matters, but it now decides WHICH LEVEL WE REPORT rather
+    // than which value we invent: observed_state (100) outranks data.value (50).
+    expect(payload.options[0].interventions).not.toHaveProperty("fac_price");
+    const blocker = payload.blockers?.find(
+      (b) => b.option_id === "opt_1" && b.factor_id === "fac_price",
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.message).toContain("100");
+    expect(blocker!.message).not.toContain("50");
   });
 
   it("does NOT overwrite existing interventions via fallback", () => {
@@ -234,7 +251,7 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
     expect(payload.options[0].interventions).not.toHaveProperty("fac_ext");
   });
 
-  it("re-evaluates option status to ready after fallback fills interventions", () => {
+  it("declines to substitute a factor's current level for an option's lever, and says why", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -251,16 +268,35 @@ describe("Task 2A: Factor value fallback in analysis_ready", () => {
       ]
     );
 
-    // Option starts as needs_user_mapping with empty interventions
-    // V3 option status is "ready" (not "needs_user_mapping") — the analysis-ready
-    // transform computed needs_user_mapping because interventionCount === 0
+    // ⚠ CONTRACT REVERSED DELIBERATELY. This case previously asserted that the
+    // fallback FILLED `fac_price := 59` from `observed_state.value` and promoted
+    // the option to "ready".
+    //
+    // 59 is the factor's CURRENT level — what happens if nobody acts. Writing it
+    // as this option's intervention asserts "Option A sets price to 59", which
+    // nobody said. Two measured consequences: every option lacking a stated
+    // magnitude received the SAME number, so the analysis compared strategies
+    // that were numerically identical; and public `options[]` showed `{}` while
+    // this copy showed a value, so the set SHOWN and the set ANALYSED were
+    // different objects with different contents.
     const option = createV3Option("opt_1", "Option A", {});
 
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
-    // After fallback fills the intervention, option should be ready
-    expect(payload.options[0].status).toBe("ready");
-    expect(payload.options[0].interventions["fac_price"]).toBe(59);
+    // No invention: the option is left exactly as empty as it truly is.
+    expect(payload.options[0].interventions["fac_price"]).toBeUndefined();
+    expect(Object.keys(payload.options[0].interventions).length).toBe(0);
+    expect(payload.options[0].status).toBe("needs_user_mapping");
+
+    // The refusal is honest about WHY, and useful: it names the factor, reports
+    // the current level as context, and asks the question we could not answer.
+    const blocker = payload.blockers?.find(
+      (b) => b.option_id === "opt_1" && b.factor_id === "fac_price",
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.blocker_type).toBe("missing_value");
+    expect(blocker!.message).toContain("59");
+    expect(blocker!.suggested_action).toBe("add_value");
   });
 });
 
@@ -326,7 +362,7 @@ describe("Task 2B: Blockers scaffolding for qualitative briefs", () => {
     expect(payload.status).toBe("needs_user_input");
   });
 
-  it("emits no blockers when all controllable factors have values", () => {
+  it("a factor HAVING a current value does not excuse an option that never stated one", () => {
     const graph = createV3Graph(
       [
         { id: "goal_1", kind: "goal", label: "Goal" },
@@ -347,8 +383,17 @@ describe("Task 2B: Blockers scaffolding for qualitative briefs", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_1", graph);
 
-    expect(payload.blockers).toBeUndefined();
-    expect(payload.status).not.toBe("needs_user_input");
+    // ⚠ PREMISE REVERSED DELIBERATELY. This case previously read "all
+    // controllable factors have values ⇒ no blockers" — but the value in
+    // question belongs to the FACTOR, not to the option. `fac_price` knowing it
+    // is currently 59 says nothing about what Option A does to it, and the
+    // option→factor edge is the model's own assertion that Option A DOES move
+    // it. So the gap is real and is now reported rather than back-filled.
+    const blocker = payload.blockers?.find(
+      (b) => b.option_id === "opt_1" && b.factor_id === "fac_price",
+    );
+    expect(blocker).toBeDefined();
+    expect(payload.status).toBe("needs_user_input");
   });
 
   it("blocker validates against AnalysisBlocker schema", () => {

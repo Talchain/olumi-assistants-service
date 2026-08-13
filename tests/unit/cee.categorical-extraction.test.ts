@@ -134,14 +134,21 @@ describe("Categorical Extraction", () => {
         "goal_growth"
       );
 
-      // Should have interventions (placeholder values)
-      expect(Object.keys(result.interventions).length).toBeGreaterThan(0);
+      // ⚠ CONTRACT CHANGED DELIBERATELY: an un-encodable categorical value no
+      // longer fabricates a `value: 0` "placeholder" intervention. Nothing
+      // downstream could distinguish a placeholder zero from a deliberate one —
+      // `mergeInterventionSourceObjects` admits any finite number, so it reached
+      // the analysis loader as the lever position the user chose, and zero is
+      // not neutral for a cost, a rate or a headcount.
+      //
+      // The honest shape is: NO numeric intervention, the RAW value preserved,
+      // and `needs_encoding` — we know the factor and what was said, we just
+      // have no number for it yet.
+      expect(Object.keys(result.interventions).length).toBe(0);
 
-      // Should have raw_interventions
       expect(result.raw_interventions).toBeDefined();
-      expect(Object.keys(result.raw_interventions!).length).toBeGreaterThan(0);
+      expect(result.raw_interventions!["factor_region"]).toBe("UK");
 
-      // Status should be needs_encoding (has categorical values)
       expect(result.status).toBe("needs_encoding");
     });
 
@@ -169,15 +176,15 @@ describe("Categorical Extraction", () => {
         "goal_growth"
       );
 
-      // Find an intervention with raw_value
-      const interventionsWithRaw = Object.values(result.interventions).filter(
-        (i) => i.raw_value !== undefined
-      );
+      // The raw categorical value is carried on `raw_interventions`, keyed by
+      // the factor it was matched to — not smuggled onto a numeric intervention
+      // that had to invent a value to exist. Bound by factor IDENTITY.
+      expect(result.raw_interventions).toBeDefined();
+      expect(Object.keys(result.raw_interventions!)).toContain("factor_region");
+      expect(typeof result.raw_interventions!["factor_region"]).toBe("string");
 
-      expect(interventionsWithRaw.length).toBeGreaterThan(0);
-      const intervention = interventionsWithRaw[0];
-      expect(intervention.value_type).toBe("categorical");
-      expect(typeof intervention.raw_value).toBe("string");
+      // And no numeric intervention was fabricated to carry it.
+      expect(Object.keys(result.interventions).length).toBe(0);
     });
   });
 

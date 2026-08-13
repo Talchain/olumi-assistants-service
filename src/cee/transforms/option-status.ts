@@ -125,8 +125,19 @@ export function computeOptionStatus(input: StatusComputationInput): StatusComput
   const interventionCount = Object.keys(interventions).length;
   const { resolved, unresolved } = countInterventionsByResolution(interventions);
 
-  // Priority 1: No interventions at all
-  if (interventionCount === 0) {
+  // Priority 1: Nothing extracted at all.
+  //
+  // ⚠ `interventionCount === 0` IS NOT THE SAME QUESTION AS "we learned
+  // nothing". Since the categorical limb stopped writing a `value: 0`
+  // placeholder for an un-encodable value, an option can reach here having
+  // matched its factor EXACTLY and captured the raw value ("Adopt Vue"), with
+  // no numeric intervention only because no encoding exists yet. That is
+  // `needs_encoding` — we know the factor, we lack the number — and reporting
+  // it as `needs_user_mapping` tells the user we could not work out which
+  // factor they meant, which is false and sends them to re-do work we already
+  // did. `hasNonNumericRaw` is the evidence that we DID identify something, so
+  // it defers to Priority 4 rather than being pre-empted here.
+  if (interventionCount === 0 && !hasNonNumericRaw) {
     return {
       status: "needs_user_mapping",
       resolvedCount: 0,

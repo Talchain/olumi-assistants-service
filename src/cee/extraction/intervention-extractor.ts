@@ -292,6 +292,38 @@ function cleanTargetText(text: string): string {
   return text
     .replace(/^(the|a|an)\s+/i, "")
     .replace(/\s+(level|amount|value)$/i, "")
+    // ⭐ TRAILING PREPOSITIONS ARE A TOKENISER ARTEFACT, NOT PART OF THE NAME.
+    //
+    // Every target group above is `(\w+(?:\s+\w+)?)` — greedy over TWO words —
+    // so `increase price by 20%` captures `"price by"`, not `"price"`. With a
+    // one-word factor name that string can never reach the exact_id or
+    // exact_label limbs: `normalizeText("price by") === "price_by"` matches
+    // neither `factor_price` nor the label `"Price"`. It only ever landed via
+    // the semantic limb — which is exactly the limb the value path must now
+    // refuse.
+    //
+    // ⚠⚠ THE JUSTIFICATION THIS COMMENT ORIGINALLY CARRIED WAS WRONG, AND THE
+    // CORRECTION IS THE POINT. It claimed an 82-case corpus showed the strip
+    // recovering "34 previously-correct extractions" otherwise lost to the
+    // refusal. Re-measured against 355 REAL CAPTURED GRAPHS (1,182 records): a
+    // mutant removing this strip left 1,182 of 1,182 records IDENTICAL —
+    // 0 recovered, 0 cost — with a positive control proving this function is on
+    // the live path. The 34 was a property of a self-authored corpus and is
+    // INERT on real captures.
+    //
+    // The strip is kept because it is correct on its own terms and provably
+    // costless, not because it rescues anything: a trailing preposition is not
+    // part of a factor's name, and `normalizeText("price by") === "price_by"`
+    // matches neither `factor_price` nor the label "Price". But NOTHING in this
+    // PR's value rests on it. A corpus drawn from one head cannot see the class
+    // that head did not imagine — and, as here, it can equally MANUFACTURE a
+    // class that does not exist. Do not restore the old figure.
+    //
+    // Repeated until stable: `of the` and similar can leave a second trailing
+    // stop word behind the first. A target that is nothing BUT prepositions
+    // collapses to "" and is dropped by the `targetText &&` guard at the call
+    // site (and by SKIP_WORDS), which is the correct outcome.
+    .replace(/(\s+(by|to|at|of|from|for|with|in|on))+$/i, "")
     .trim();
 }
 
@@ -650,16 +682,64 @@ export function extractInterventionsForOption(
   const unresolvedTargets: string[] = [];
   const userQuestions: string[] = [];
   let hasNonNumericRaw = false;
+  // Several INTERVENTION_PATTERNS can match one phrase (`set price to 40` hits
+  // both the leading-verb rule and the bare `<target> to <N>` rule), so an
+  // undeduplicated refusal asked the user the same question twice about the
+  // same factor. Keyed on the FACTOR, not the target text, because two
+  // different target strings can resolve to one factor.
+  const refusedFactorIds = new Set<string>();
 
   for (const raw of allRaw) {
     const matchResult = matchInterventionToFactor(raw.target_text, nodes, edges, goalNodeId);
 
-    // Boost confidence if the matched factor is in the edge hints
+    // An edge hint says "this option and this factor are CONNECTED". A
+    // `match_type` says "the user's text NAMED this factor". They are two
+    // different questions, and this variable answers only the first — so it may
+    // suppress the path-to-goal question below, and nothing else.
+    //
+    // ⚠ It used to overwrite `match_type` with `exact_id` and `confidence` with
+    // `high`. That laundered a weak semantic guess into the strongest possible
+    // provenance claim, destroying the only evidence a downstream consumer had
+    // for distrusting the mapping — and it routed the value straight past
+    // `determineOptionStatus`'s resolved/unresolved rule, which counts ONLY
+    // exact_id and exact_label as resolved. Measured at CEE `51704f12`: "Cut
+    // price by 15%" against a graph whose only factor was "Churn Rate" emitted
+    // `churn := 0.102` stamped `match_type: exact_id, value_confidence: high,
+    // source: brief_extraction` (CLAUDE.md trap 21 — two questions under one
+    // field; trap 14 — an honest label overwritten by a false one).
+    //
+    // The confidence boost went with it: `matchInterventionToFactor` already
+    // returns "high" for BOTH exact limbs, so after the semantic refusal below
+    // the boost could never fire on a surviving branch. It is removed rather
+    // than left in — an unreachable guard is a branch no test can kill.
     const isHintedFactor = matchResult.node_id && hintedFactorIds.has(matchResult.node_id);
-    const effectiveConfidence = isHintedFactor && matchResult.confidence !== "high"
-      ? "high" as const  // Boost to high if hinted
-      : matchResult.confidence;
 
+    // ⭐ THE PROSE FALLBACK MAY NOT AUTHOR A USER LEVER FROM A GUESS.
+    //
+    // This whole block runs ONLY when the canonical record projection stated no
+    // magnitude for this option (`buildInterventionsFromV4Data` early-returns
+    // above whenever `v4Interventions` is non-empty, and `projector.ts` omits
+    // the key entirely for an option with no stated magnitude — "THE PROJECTOR
+    // INVENTS NOTHING HERE"). So every value emitted here is one the canonical
+    // layer had no warrant for, and the two paths are mutually exclusive: prose
+    // extraction can never recover a magnitude the canonical path would also
+    // have produced.
+    //
+    // `determineOptionStatus` already declares the rule — "Both exact_id AND
+    // exact_label matches count as resolved. Only semantic matches or unmatched
+    // targets block ready status" — but it applied it to STATUS while the VALUE
+    // path wrote the intervention regardless. The value now obeys the same rule.
+    // A semantic match becomes an unresolved target and a question, which is the
+    // honest shape: where the mapping cannot be determined, make the ambiguity
+    // the product rather than guessing (CLAUDE.md trap 22f).
+    // ⚠ THE GUARD SITS INSIDE, AFTER THE BASELINE CHECK, AND THE ORDER IS
+    // LOAD-BEARING. Placed before this block it also pre-empted the P1-CEE-1
+    // relative-without-baseline limb — which ALREADY refuses to emit a value
+    // and asks the better question ("What is the current Cost?"). The guard
+    // would have replaced a specific, useful question with a generic one while
+    // preventing no wrong value at all, and it broke
+    // `p1-cee-verification.test.ts`'s baseline-prompt case exactly there. A
+    // refusal belongs only where a value would OTHERWISE BE WRITTEN.
     if (matchResult.matched && matchResult.node_id && raw.value) {
       const baseline = matchResult.matched_node?.observed_state?.value;
       const hasBaseline = baseline !== undefined;
@@ -678,16 +758,48 @@ export function extractInterventionsForOption(
         continue; // Do not emit intervention
       }
 
+      if (matchResult.match_type === "semantic") {
+        // ⚠ THE COPY MAKES A CLAIM ABOUT US, AND BOTH EASY PHRASINGS ARE FALSE.
+        //
+        // (a) It must NOT quote the extracted target back as the user's words.
+        // `target_text` is a TOKENISER OUTPUT, not a phrase the user wrote —
+        // the greedy two-word target group produced "price by" from "Increase
+        // price by 20%". Telling someone what they said, using a string they
+        // did not write, is the defect three lanes closed today, arriving from
+        // the inside. The question names the FACTOR WE MATCHED — a fact we own
+        // — and never reconstructs the user's phrasing.
+        //
+        // (b) It must NOT say "not confident enough". Across the refusals this
+        // guard produces, matcher confidence runs high=47, medium=36, low=1 —
+        // we are usually VERY confident and are refusing on PRINCIPLE, because
+        // a meaning-only match is not a user's instruction however strong the
+        // similarity score. Reporting a policy as a confidence state claims a
+        // condition we are not in. Say the true thing.
+        if (!refusedFactorIds.has(matchResult.node_id!)) {
+          refusedFactorIds.add(matchResult.node_id!);
+          unresolvedTargets.push(raw.target_text);
+          userQuestions.push(
+            `Should this option change "${matchResult.matched_node?.label ?? matchResult.node_id}"? ` +
+              `We matched it by meaning rather than by name, and we do not set a value from a ` +
+              `meaning-only match — so please confirm the factor and the value.`
+          );
+        }
+        continue; // Do not emit intervention
+      }
+
       // Resolve relative values if we have observed_state
       let finalValue = raw.value.value;
       if (raw.value.isRelative && hasBaseline) {
         finalValue = resolveRelativeValue(raw.value, baseline);
       }
 
+      // The match type and confidence are reported AS MEASURED. Only exact_id
+      // and exact_label reach this line (semantic refused above), and
+      // `matchInterventionToFactor` returns "high" for both.
       const targetMatch: TargetMatchT = {
         node_id: matchResult.node_id,
-        match_type: isHintedFactor ? "exact_id" : matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-        confidence: effectiveConfidence,
+        match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+        confidence: matchResult.confidence,
       };
 
       interventions[matchResult.node_id] = {
@@ -699,12 +811,6 @@ export function extractInterventionsForOption(
         reasoning: raw.original_segment,
       };
 
-      // Generate question if low confidence or no path to goal (unless boosted by hint)
-      if (effectiveConfidence === "low") {
-        userQuestions.push(
-          `Is "${raw.target_text}" correctly mapped to the factor "${matchResult.matched_node?.label || matchResult.node_id}"?`
-        );
-      }
       if (!matchResult.has_path_to_goal && !isHintedFactor) {
         userQuestions.push(
           `The factor "${matchResult.matched_node?.label || matchResult.node_id}" doesn't have a path to the goal. Is this correct?`
@@ -748,8 +854,16 @@ export function extractInterventionsForOption(
 
     // P0 FIX: Only create intervention if we matched an EXISTING factor
     // Never invent factor IDs that don't exist in the graph
-    if (!matchResult.matched || !matchResult.node_id) {
-      // No match found - add to unresolved targets, don't create fake factor ID
+    //
+    // ⭐ EXTENDED: a SEMANTIC match is refused for the same reason the numeric
+    // limb above refuses one — it names a factor the user's text did not name,
+    // and this path only runs where the canonical projection stated nothing.
+    // The categorical limb is the sharper case of the two: when it finds no
+    // default encoding it writes `value: 0` as a placeholder, so a semantic
+    // mis-match here does not merely set the wrong factor — it sets the wrong
+    // factor to ZERO, which the analysis reads as a deliberate lever position.
+    if (!matchResult.matched || !matchResult.node_id || matchResult.match_type === "semantic") {
+      // No usable match - add to unresolved targets, don't create fake factor ID
       unresolvedTargets.push(cat.target_text);
       userQuestions.push(
         `Which factor should "${cat.raw_categorical_value}" (${cat.target_text}) apply to?`
@@ -796,18 +910,22 @@ export function extractInterventionsForOption(
         );
       }
     } else {
-      // No default encoding - mark as needing encoding
-      // Still create a placeholder intervention with value=0
-      interventions[factorId] = {
-        value: 0, // Placeholder - needs encoding
-        source: cat.source,
-        target_match: targetMatch,
-        value_confidence: "low",
-        reasoning: cat.original_segment,
-        raw_value: cat.raw_categorical_value,
-        value_type: cat.value_type,
-      };
-
+      // ⛔ NO ENCODING ⇒ NO INTERVENTION. This branch used to write
+      // `value: 0` as a "placeholder", reached here by an exact_id or
+      // exact_label match — so closing the semantic route left this door open
+      // to the SAME harm: a factor pinned to zero.
+      //
+      // Nothing downstream can tell a placeholder zero from a deliberate one.
+      // `mergeInterventionSourceObjects` admits any finite number, so the zero
+      // reaches the analysis loader and is evaluated as the lever position the
+      // user chose — and zero is not a neutral value: for a cost, a rate or a
+      // headcount it is the most extreme position available.
+      //
+      // The RAW value is still recorded above (`rawInterventions[factorId]`),
+      // which is the honest half — we know WHAT was said, we just have no
+      // number for it yet. That sets `hasNonNumericRaw`, so the option resolves
+      // to `needs_encoding` and the question below asks for the encoding.
+      // Nothing is lost except a fabricated number.
       userQuestions.push(
         `How should "${cat.raw_categorical_value}" be encoded numerically for "${cat.target_text}"?`
       );

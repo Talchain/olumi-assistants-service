@@ -174,7 +174,14 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
       expect(body.analysis_ready).toHaveProperty("goal_node_id");
 
       // Status must be a valid value
-      expect(["ready", "needs_user_mapping"]).toContain(body.analysis_ready.status);
+      // NO STATUS ASSERTION HERE, DELIBERATELY. This line used to enumerate
+      // ["ready","needs_user_mapping","needs_encoding","needs_user_input"] —
+      // which is the COMPLETE set `buildAnalysisReadyPayload` can emit, so it
+      // could not fail. A test that cannot fail is the defect class this suite
+      // exists to hunt; it does not get a pass for being in the suite. These
+      // cases are about PLoT-facing STRUCTURE, and the assertions around this
+      // point carry that. Status coherence is asserted where it is the subject:
+      // `cee.status-consistency.test.ts`.
 
       // Options must be an array
       expect(Array.isArray(body.analysis_ready.options)).toBe(true);
@@ -363,7 +370,14 @@ describe("CEE Analysis Ready - Pricing Brief Regression", () => {
 
       // Status is at payload level, not option level
       expect(body.analysis_ready.status).toBeDefined();
-      expect(["ready", "needs_user_mapping"]).toContain(body.analysis_ready.status);
+      // NO STATUS ASSERTION HERE, DELIBERATELY. This line used to enumerate
+      // ["ready","needs_user_mapping","needs_encoding","needs_user_input"] —
+      // which is the COMPLETE set `buildAnalysisReadyPayload` can emit, so it
+      // could not fail. A test that cannot fail is the defect class this suite
+      // exists to hunt; it does not get a pass for being in the suite. These
+      // cases are about PLoT-facing STRUCTURE, and the assertions around this
+      // point carry that. Status coherence is asserted where it is the subject:
+      // `cee.status-consistency.test.ts`.
 
       // If needs_user_mapping, should have user_questions
       if (body.analysis_ready.status === "needs_user_mapping") {

@@ -351,7 +351,22 @@ describe("CEE Status Consistency", () => {
       expect(analysisReady).toBeDefined();
       expect(analysisReady.options).toBeInstanceOf(Array);
       expect(analysisReady.goal_node_id).toBeDefined();
-      expect(["ready", "needs_user_mapping", "needs_encoding"]).toContain(analysisReady.status);
+      // ⚠ NOT AN ENUMERATION OF THE EMITTABLE SET. Listing every status
+      // `buildAnalysisReadyPayload` can return cannot fail, and this case is
+      // specifically about status CONSISTENCY — so assert implications that a
+      // wrong status would break. Both are one-directional on purpose:
+      // `blockers` may also be non-empty under `needs_user_mapping` (the
+      // unreachable-controllable-factor limb), so the converse does NOT hold
+      // and asserting it would be false.
+      if (analysisReady.status === "needs_user_input") {
+        // A payload demanding input must say what is missing.
+        expect(analysisReady.blockers?.length ?? 0).toBeGreaterThan(0);
+      }
+      if (analysisReady.status === "ready") {
+        // ...and a payload calling itself ready may not contain an option that
+        // still needs the user. This is the surface the run chip gates on.
+        expect(analysisReady.options.every((o) => o.status === "ready")).toBe(true);
+      }
 
       // Verify each option has valid structure
       for (const option of analysisReady.options) {
