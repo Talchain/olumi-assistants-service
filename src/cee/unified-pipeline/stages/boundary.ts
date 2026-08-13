@@ -16,6 +16,32 @@ import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
 import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
+
+/**
+ * Deterministic-sweep repair codes that become user-reviewable
+ * `analysis_ready.model_adjustments` rows.
+ *
+ * ⚠ THIS IS AN ALLOWLIST, SO ITS FAILURE MODE IS SILENCE. A repair code that
+ * nobody adds here is simply absent from `model_adjustments` — no error, no log,
+ * and the omission reads exactly like a deliberate exclusion. Exported so
+ * `boundary.test.ts` can assert every code the sweep can emit is classified
+ * either here or in that test's ADJUDICATED-EXCLUDED set, and RED when a new one
+ * appears unclassified.
+ *
+ * ── WHY THE TWO DEDUPLICATION CODES ARE DELIBERATELY *NOT* HERE ─────────────
+ * `DUPLICATE_CAUSAL_EDGE_SUPPRESSED` and `CONFLICTING_CAUSAL_DIRECTION` are
+ * adjudicated OUT, not overlooked. `ModelAdjustment.code` is a CLOSED enum in
+ * the shared contract and its only member that could carry them is
+ * `category_reclassified`, which they are not — neither one reclassifies a
+ * node's category. Filing them under a false code would be worse than the
+ * absence. They do still reach the user: they ride
+ * `trace.repair_summary.deterministic_repairs[]`, which the UI renders. Giving
+ * them a truthful `model_adjustments` code needs a new contract member in
+ * `@talchain/schemas`, which is a boundary change beyond this seam.
+ */
+export const REPAIR_CODE_TO_ADJUSTMENT: Record<string, "category_reclassified"> = {
+  UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
+};
 // The CONTRACT's own type, not a local restatement. `before` is declared here
 // and has never been populated on the deterministic-sweep path (S2).
 import type { ModelAdjustmentT } from "../../../schemas/analysis-ready.js";
@@ -100,13 +126,13 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     }
 
     // Append deterministic sweep reclassifications as model_adjustments.
-    // Only UNREACHABLE_FACTOR_RECLASSIFIED repairs are user-visible — other codes
-    // (NAN_VALUE, SIGN_MISMATCH, etc.) are mechanical fixes the user doesn't need to review.
-    // Expand REPAIR_CODE_TO_ADJUSTMENT intentionally when new user-visible repairs are added.
+    // Only UNREACHABLE_FACTOR_RECLASSIFIED repairs become model_adjustments — other
+    // codes (NAN_VALUE, SIGN_MISMATCH, etc.) are mechanical fixes the user doesn't
+    // need to review. See REPAIR_CODE_TO_ADJUSTMENT at module scope: it is an
+    // allowlist, so a new repair code lands OUTSIDE it by default and is invisible
+    // here unless someone remembers. That is trap 12's hand-maintained mirror, and
+    // `boundary.test.ts` now REDs on drift rather than assuming good.
     if (v3Body.analysis_ready) {
-      const REPAIR_CODE_TO_ADJUSTMENT: Record<string, "category_reclassified"> = {
-        UNREACHABLE_FACTOR_RECLASSIFIED: "category_reclassified",
-      };
 
       // ── THE PRESERVATION CONTRACT REACHES THE RECEIPT HERE (S2) ────────
       // `ModelAdjustment.before` is DECLARED in the shared contract
