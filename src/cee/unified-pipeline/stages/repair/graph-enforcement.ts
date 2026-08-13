@@ -39,6 +39,7 @@ import { detectEdgeFormat, patchEdgeNumeric } from "../../utils/edge-format.js";
 import { config } from "../../../../config/index.js";
 import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 import type { ValidatorPhase } from "../../../../validators/graph-validator.types.js";
+import { CANONICAL_EDGE } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 
@@ -467,6 +468,111 @@ export function fixBridgeChaining(
 }
 
 // ---------------------------------------------------------------------------
+// Structural-edge re-canonicalisation (ROADMAP 2.1099, R2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Coerce every `option→factor` edge to the canonical tuple, immediately before
+ * the gate reads it.
+ *
+ * WHY THIS IS NEEDED AT ALL — the mechanism, settled by execution 13 Aug 2026
+ * (not inferred; the ranked candidate in the diagnosis was a different hop and
+ * is refuted). `STRUCTURAL_EDGE_NOT_CANONICAL_ERROR` is Bucket A, "always
+ * auto-fix", and `fixStructuralEdgesNotCanonical` canonicalises at substep 1.
+ * But for `option→factor` it is VIOLATION-GATED: it only repairs edges a
+ * pre-sweep violation cites (only `decision→option` is proactive). The code is
+ * emitted by `validateSemantic`, which **returns early when the graph has no
+ * goal node** (`graph-validator.ts:816`, `if (goals.length === 0) return
+ * issues;`).
+ *
+ * So when the drafter omits the goal — the same omission R1 exists for —
+ * the pre-sweep validation emits ZERO citations, the sweep canonicalises
+ * nothing, `ensureGoalNode` mints the goal at substep 8, and the gate then
+ * validates a graph that finally HAS a goal and reports one error per
+ * option→factor edge. Measured on an S3-shaped fixture through the real
+ * `runStageRepair`: 7 of 7 structural edges survive uncanonicalised when the
+ * goal is absent, 0 of 7 when it is present. The same run reproduces the live
+ * multiset. One root cause — a missing goal node — produces BOTH halves of
+ * every measured failure.
+ *
+ * Sited here because this is the LAST thing that runs before the predicate, so
+ * no later step can defeat it, and because the value written is derived from the
+ * same `CANONICAL_EDGE` constant the validator reads — the two cannot drift.
+ * Idempotent, and it cannot make a valid graph invalid: the target IS the
+ * constant the validator demands.
+ *
+ * ⚠ It writes `strength_std` UNCONDITIONALLY, in every edge format. That is
+ * deliberate and is NOT what `canonicalStructuralEdge` does: under LEGACY,
+ * `patchEdgeNumeric` writes `weight`/`belief` and skips std ("LEGACY has no std
+ * equivalent"), while the validator reads `edge.strength_std` with NO fallback
+ * and requires exactly `0.01`. A format-aware repair therefore CANNOT satisfy
+ * this gate under LEGACY — it would loop forever on an unsatisfiable condition,
+ * and the sweep's own `isCanonical` pre-check omits std and so believes it
+ * succeeded. The rule is to write against the CONSUMER'S predicate, not against
+ * the constructor to hand.
+ */
+export function canonicaliseStructuralEdgesAtGate(
+  graph: GraphT,
+  requestId?: string,
+): { repairs: Repair[]; canonicalisedCount: number } {
+  const repairs: Repair[] = [];
+  const nodes = graph.nodes as NodeT[];
+  const edges = graph.edges as EdgeT[];
+
+  const nodeKindMap = new Map<string, string>();
+  for (const node of nodes) nodeKindMap.set(node.id, node.kind);
+
+  let canonicalisedCount = 0;
+
+  for (const edge of edges) {
+    if (nodeKindMap.get(edge.from) !== "option" || nodeKindMap.get(edge.to) !== "factor") continue;
+
+    // Read exactly as the validator reads (graph-validator.ts, the
+    // STRUCTURAL_EDGE_NOT_CANONICAL_ERROR block) — same fallbacks, same fields.
+    const e = edge as Record<string, unknown>;
+    const mean = edge.strength_mean ?? (e.weight as number | undefined);
+    const std = edge.strength_std;
+    const prob = edge.belief_exists ?? (e.belief as number | undefined);
+    const direction = edge.effect_direction;
+
+    if (
+      mean === CANONICAL_EDGE.mean &&
+      std === CANONICAL_EDGE.std &&
+      prob === CANONICAL_EDGE.prob &&
+      direction === CANONICAL_EDGE.direction
+    ) {
+      continue;
+    }
+
+    edge.strength_mean = CANONICAL_EDGE.mean;
+    edge.strength_std = CANONICAL_EDGE.std;
+    edge.belief_exists = CANONICAL_EDGE.prob;
+    edge.effect_direction = CANONICAL_EDGE.direction;
+    // Keep the LEGACY mirrors in step when the edge carries them, so a LEGACY
+    // consumer downstream does not read a stale pre-canonical number.
+    if (e.weight !== undefined) e.weight = CANONICAL_EDGE.mean;
+    if (e.belief !== undefined) e.belief = CANONICAL_EDGE.prob;
+
+    canonicalisedCount++;
+    repairs.push({
+      code: "STRUCTURAL_EDGE_NOT_CANONICAL_ERROR",
+      path: `edges[${edge.from}→${edge.to}]`,
+      action: `Re-canonicalised structural option→factor edge to mean=${CANONICAL_EDGE.mean}, std=${CANONICAL_EDGE.std}, existence=${CANONICAL_EDGE.prob}, direction="${CANONICAL_EDGE.direction}"`,
+    });
+  }
+
+  if (canonicalisedCount > 0) {
+    log.info({
+      event: "cee.enforcement.structural_edges_recanonicalised",
+      request_id: requestId,
+      count: canonicalisedCount,
+    }, `Enforcement: re-canonicalised ${canonicalisedCount} structural option→factor edge(s) before the gate`);
+  }
+
+  return { repairs, canonicalisedCount };
+}
+
+// ---------------------------------------------------------------------------
 // Orchestrator entry point
 // ---------------------------------------------------------------------------
 
@@ -498,11 +604,19 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   // then budget rescale (rescales causal inbound — bridge edges to goal are
   // excluded by isRescalableInbound, so order is technically independent for
   // budget sums — but bridge-first is the contractual order from the brief).
+  // R2 (ROADMAP 2.1099) FIRST: make the system's own stated contract true —
+  // "STRUCTURAL EDGES ARE NORMALISED AUTOMATICALLY" (prompts/defaults.ts),
+  // Bucket A "always auto-fix" — rather than relying on a substep-1 repair whose
+  // citation is suppressed whenever the drafted graph has no goal node. See
+  // `canonicaliseStructuralEdgesAtGate` for the measured mechanism.
+  const canonResult = canonicaliseStructuralEdgesAtGate(graph, requestId);
+
   const bridgeResult = fixBridgeChaining(graph, format, requestId);
   const budgetResult = applyBudgetRescale(graph, format, requestId);
 
-  // Append repairs deterministically: bridge before budget (matches call order).
-  const allRepairs = [...bridgeResult.repairs, ...budgetResult.repairs];
+  // Append repairs deterministically: canonicalise, then bridge, then budget
+  // (matches call order).
+  const allRepairs = [...canonResult.repairs, ...bridgeResult.repairs, ...budgetResult.repairs];
   if (allRepairs.length > 0) {
     ctx.deterministicRepairs = [
       ...(ctx.deterministicRepairs ?? []),
@@ -622,6 +736,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     ...(ctx.repairTrace ?? {}),
     deterministic_enforcement: {
       ran: true,
+      structural_edges_recanonicalised: canonResult.canonicalisedCount,
       bridge_chains_removed: bridgeResult.removedCount,
       bridge_goal_edges_added: bridgeResult.goalEdgesAdded,
       nodes_rescaled: budgetResult.nodesRescaled,
@@ -641,6 +756,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   const summaryPayload = {
     event: TelemetryEvents.CeeEnforcementCompleted,
     request_id: requestId,
+    structural_edges_recanonicalised: canonResult.canonicalisedCount,
     bridge_chains_removed: bridgeResult.removedCount,
     goal_edges_added: bridgeResult.goalEdgesAdded,
     nodes_rescaled: budgetResult.nodesRescaled,
