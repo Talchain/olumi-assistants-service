@@ -522,6 +522,13 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     // through from Stage 1 Parse to V3 boundary. Stage 6 V1 → V3 transform
     // preserves length + order + string contents exactly.
     ...(Array.isArray(ctx.topologyPlan) ? { topology_plan: ctx.topologyPlan } : {}),
+    // ⚠ SECOND SILENT-DROP POINT. This payload is a FRESH OBJECT LITERAL built
+    // from named ctx keys, so the R1 disclosures survive Stage 5 only by being
+    // named here. (`DraftGraphOutput` is `.passthrough()`, so they then survive
+    // the verification parse.)
+    ...(Array.isArray(ctx.recordDisclosures) && ctx.recordDisclosures.length > 0
+      ? { record_disclosures: ctx.recordDisclosures }
+      : {}),
   };
 
   // ── F6 (2026-07-24): coaching_status honesty — decide from VALIDATED counts ──

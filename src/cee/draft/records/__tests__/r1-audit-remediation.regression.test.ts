@@ -177,6 +177,148 @@ describe("ROOT 1 — a stated item earns `from_brief` only when the brief bears 
     expect(transformNodeToV3(node as never).provenance).toBe("ai_inferred");
   });
 
+  /**
+   * ⭐⭐ B1 — THE CROSS-SENTENCE LEAK. This is audit finding 2 surviving its own
+   * first fix, and it is the single most important case in this file.
+   *
+   * The first fix asked its two questions against TWO DIFFERENT SCOPES: is the
+   * quote in the BRIEF, and is the value in the BRIEF. It never asked whether the
+   * value was in THE QUOTE IT IS ATTACHED TO — so any number appearing anywhere
+   * else in the brief certified a sentence it had nothing to do with.
+   *
+   * A number-transposition across two figures is the most ordinary LLM slip
+   * available on a brief that mentions two sums, and it produced a node carrying
+   * the user's £74,000 sentence, holding 250,000, badged as their own words.
+   */
+  it("a value that appears ELSEWHERE in the brief does not certify this quote", () => {
+    const brief =
+      "Licences cost £74,000 a year. The rebuild quote was £250,000. We can renew or rebuild.";
+    const records = {
+      stated_items: [
+        { kind: "goal", source_quote: "Decide on the rebuild" },
+        { kind: "option", source_quote: "renew" },
+        { kind: "option", source_quote: "rebuild" },
+        // The QUOTE is exact and brief-borne. The VALUE belongs to the other sentence.
+        { kind: "figure", source_quote: "Licences cost £74,000 a year", value: 250000, unit: "GBP" },
+      ],
+      claims: [
+        { claim_kind: "causal_link", label: "Licence cost bears on the decision", from_stated: 3, to_stated: 0 },
+      ],
+    };
+    // Preconditions pinned in-test, so this cannot pass by the fixture quietly
+    // ceasing to be the case it was written for.
+    expect(brief).toContain("Licences cost £74,000 a year"); // the quote really is brief-borne
+    expect(brief).toContain("£250,000"); // …and the wrong value really is in the brief
+
+    const projection = project(records, brief);
+    const node = projection.graph.nodes.find((n) => n.label === "Licences cost £74,000 a year");
+    expect(projection.provenance[node!.id]?.brief_binding).toBe("unverified");
+    expect(transformNodeToV3(node as never).provenance).toBe("ai_inferred");
+  });
+
+  /**
+   * ⭐ THE OPPOSITE-DIRECTION TWIN for B1, on the SAME two-figure brief. Without
+   * it, "decline everything on a brief with two numbers" would pass the test
+   * above. The figure whose value sits in its OWN quote must still be earned.
+   */
+  it("…while a figure whose value IS in its own quote still earns the badge", () => {
+    const brief =
+      "Licences cost £74,000 a year. The rebuild quote was £250,000. We can renew or rebuild.";
+    const records = {
+      stated_items: [
+        { kind: "goal", source_quote: "Decide on the rebuild" },
+        { kind: "option", source_quote: "renew" },
+        { kind: "option", source_quote: "rebuild" },
+        { kind: "figure", source_quote: "Licences cost £74,000 a year", value: 74000, unit: "GBP" },
+      ],
+      claims: [
+        { claim_kind: "causal_link", label: "Licence cost bears on the decision", from_stated: 3, to_stated: 0 },
+      ],
+    };
+    const projection = project(records, brief);
+    const node = projection.graph.nodes.find((n) => n.label === "Licences cost £74,000 a year");
+    expect(projection.provenance[node!.id]?.brief_binding).toBe("verified");
+    expect(transformNodeToV3(node as never).provenance).toBe("from_brief");
+  });
+
+  /**
+   * C2 — containment had no floor between "empty" and "trivially contained", so a
+   * one-character `source_quote` read `verified`. The grammar puts no minimum on
+   * `source_quote`, so a degenerate emission reaches this.
+   */
+  it("a degenerate one-character quote does not verify", () => {
+    const brief = "We want to reduce churn. A new CRM is one option; keeping the current system is another.";
+    expect(brief.toLowerCase()).toContain("a"); // containment alone WOULD accept it
+    const projection = project(
+      {
+        stated_items: [
+          { kind: "goal", source_quote: "Decide on the CRM" },
+          { kind: "option", source_quote: "a" },
+          { kind: "option", source_quote: "keeping the current system" },
+        ],
+        claims: [],
+      },
+      brief,
+    );
+    const degenerate = projection.graph.nodes.find((n) => n.label === "a");
+    expect(projection.provenance[degenerate!.id]?.brief_binding).toBe("unverified");
+    // …and a real short quote on the same brief is unaffected — the floor clears
+    // genuine content rather than simply refusing short strings.
+    const real = projection.graph.nodes.find((n) => n.label === "keeping the current system");
+    expect(projection.provenance[real!.id]?.brief_binding).toBe("verified");
+  });
+
+  /**
+   * ⭐⭐ C3 — A KNOWN-DROPPED CLASS, PINNED EXACTLY.
+   *
+   * `stated-amounts.ts` carries no sign in its scan pattern and compares absolute
+   * magnitudes, so EVERY negative value is un-verifiable by construction. Under
+   * 2.972 that predicate only downgraded and the gap was cheap; it now decides a
+   * user-facing badge, and the grammar admits negatives (`value: { type:
+   * "number" }`, unbounded). "We are running a -£500k deficit" is ordinary
+   * business phrasing.
+   *
+   * The decline is now an explicit branch rather than a silent failed match. This
+   * test asserts EXACTLY the class, so it REDs if the class grows AND if it is
+   * closed — at which point it is the thing that says so.
+   */
+  it("KNOWN GAP: a negative value can never be verified, and declines explicitly", () => {
+    const brief = "Our operating margin is -4% this quarter. We can cut costs or raise prices.";
+    const records = {
+      stated_items: [
+        { kind: "goal", source_quote: "Return to profit" },
+        { kind: "option", source_quote: "cut costs" },
+        { kind: "option", source_quote: "raise prices" },
+        { kind: "figure", source_quote: "Our operating margin is -4%", value: -4, unit: "%" },
+      ],
+      claims: [
+        { claim_kind: "causal_link", label: "Margin bears on the goal", from_stated: 3, to_stated: 0 },
+      ],
+    };
+    // The quote half succeeds — it is ONLY the sign that cannot be verified.
+    expect(brief).toContain("Our operating margin is -4%");
+    const projection = project(records, brief);
+    const node = projection.graph.nodes.find((n) => n.label === "Our operating margin is -4%");
+    expect(projection.provenance[node!.id]?.brief_binding).toBe("unverified");
+    // …and the POSITIVE twin of the same magnitude verifies, proving the decline
+    // is about the SIGN and not about this brief, this unit, or this quote.
+    const positive = project(
+      {
+        ...records,
+        stated_items: records.stated_items.map((s) =>
+          s.source_quote === "Our operating margin is -4%"
+            ? { kind: "figure", source_quote: "Our operating margin is 4%", value: 4, unit: "%" }
+            : s,
+        ),
+      },
+      "Our operating margin is 4% this quarter. We can cut costs or raise prices.",
+    );
+    const positiveNode = positive.graph.nodes.find(
+      (n) => n.label === "Our operating margin is 4%",
+    );
+    expect(positive.provenance[positiveNode!.id]?.brief_binding).toBe("verified");
+  });
+
   it("with NO brief in scope the badge is declined rather than assumed (fail-closed)", () => {
     const records = {
       stated_items: [
@@ -293,6 +435,70 @@ describe("ROOT 2(b) — a stated target is not silently an observed value", () =
     expect(JSON.stringify(target.graph)).not.toBe(JSON.stringify(baseline.graph));
   });
 
+  /**
+   * ⭐⭐ THE CASE A NARROWING CARVED OUT — and the worst member of this family.
+   *
+   * The disclosure was first written to fire on every `role:"target"`, then
+   * narrowed with `&& kind !== "goal"` on the reasoning that a goal IS the thing
+   * aimed at. An adversarial review showed the narrowing had been fitted to two
+   * ARRAY-LENGTH assertions in fixtures containing a VALUELESS goal target — and
+   * that `projectOnce` has a value branch for `constraint` and for `factor` and
+   * NONE for `goal`. So a stated NUMERIC goal target lands with the number
+   * discarded entirely, and the narrowing removed the one notice that named it.
+   *
+   * Strictly worse than the figure case: there the number is present but modelled
+   * as a value that already holds; here it is nowhere at all.
+   */
+  it("a stated NUMERIC goal target is disclosed, not silently dropped", () => {
+    const brief = "We want to cut customer churn to 8% this year. Today churn is 12%. We can buy a new CRM or keep the current system.";
+    const projection = project(
+      {
+        stated_items: [
+          { kind: "goal", source_quote: "cut customer churn to 8%", value: 8, unit: "%", role: "target" },
+          { kind: "option", source_quote: "buy a new CRM" },
+          { kind: "option", source_quote: "keep the current system" },
+        ],
+        claims: [],
+      },
+      brief,
+    );
+    const goal = projection.graph.nodes.find((n) => n.label === "cut customer churn to 8%")!;
+    // The precondition that makes this a real finding: the number reached NOTHING.
+    expect(goal.observed_state, "the projector has no value branch for a goal").toBeUndefined();
+    expect((goal.data as { value?: number } | undefined)?.value).toBeUndefined();
+    // …so it must be named. Bound to the distinct reason for total loss.
+    expect(
+      projection.dropped.find((d) => d.reason === "stated_target_value_dropped")?.label,
+    ).toBe("cut customer churn to 8%");
+  });
+
+  /**
+   * ⭐ THE TWIN THAT STOPS THE PREDICATE WIDENING BACK OUT: a VALUELESS target
+   * has no number to lose, so it must raise NOTHING. This is the case the
+   * original over-broad version got wrong — a standing notice on ordinary,
+   * correct briefs.
+   */
+  it("a valueless goal target raises no notice — there is no number to lose", () => {
+    const projection = project(
+      {
+        stated_items: [
+          { kind: "goal", source_quote: "cut customer churn", role: "target" },
+          { kind: "option", source_quote: "buy a new CRM" },
+          { kind: "option", source_quote: "keep the current system" },
+        ],
+        claims: [],
+      },
+      "We want to cut customer churn. We can buy a new CRM or keep the current system.",
+    );
+    expect(
+      projection.dropped.filter(
+        (d) =>
+          d.reason === "stated_target_value_dropped" ||
+          d.reason === "stated_target_not_represented_as_threshold",
+      ),
+    ).toEqual([]);
+  });
+
   it("a stated TARGET is disclosed as not yet a goal threshold", () => {
     const target = project(withRole("target"));
     expect(
@@ -388,35 +594,59 @@ describe("ROOT 2(d) — a demote may not collapse genuinely distinct meaning", (
   };
 
   /**
-   * FINDING 6. The pilot and the national launch set revenue identically, so
-   * they grouped on `buildInterventionSignature` — which sees ONLY
-   * interventions. The pilot ALSO ran an edge into a regulatory-exposure
-   * constraint the national launch never touched, and was withdrawn anyway,
-   * taking the only representation of that risk with it.
+   * ⭐⭐ FINDING 6 IS **OPEN**, AND THIS TEST PINS THE OPEN DEFECT RATHER THAN
+   * PRETENDING IT IS CLOSED — ROADMAP 2.1092.
+   *
+   * The defect is real and reproduced here: the pilot and the national launch set
+   * revenue identically, so they group on `buildInterventionSignature` (which
+   * sees ONLY interventions). The pilot ALSO runs an edge into a
+   * regulatory-exposure constraint the national launch never touches, and it is
+   * withdrawn anyway — the only representation of that risk goes with it.
+   *
+   * ⚠ THE OBVIOUS FIX WAS BUILT, MEASURED, AND REVERTED. Sparing the option makes
+   * the product WORSE, executed end to end: the spared option still shares the
+   * intervention signature, `validateGraph` raises `OPTIONS_IDENTICAL`, and
+   * `attemptOptionsIdenticalGracefulDedup` DECLINES at guard 3b — the
+   * label-distinctness floor, which a structurally distinct option trips by
+   * construction — so `options-identical-bypass.ts` emits `CEE_GRAPH_INVALID`.
+   * A silent loss became a hard draft failure, and the spared option reached the
+   * wire in neither shape. The fix belongs downstream, in
+   * `buildInterventionSignature` or guard 3b; both are outside this file.
+   *
+   * **So this test asserts the CURRENT, LOSSY behaviour on purpose.** It exists
+   * to keep the loss visible and to RED the day someone closes finding 6 properly
+   * — at which point this test is the thing that tells them to come and delete
+   * it. A defect pinned in the suite is honest; a defect invisible to it is how
+   * this class survives a remediation (the same discipline as the KNOWN GAP test
+   * above).
    */
-  it("keeps an option whose causal structure reaches somewhere the survivor does not", () => {
+  it("OPEN (2.1092): still demotes an option carrying a distinct risk path — and the loss is disclosed", () => {
     const projection = project(input);
-    const pilot = projection.graph.nodes.find(
-      (n) => n.label === "Launch with an unlicensed pilot",
-    );
-    expect(pilot, "an option with a distinct risk path is not an undeveloped duplicate").toBeDefined();
     expect(
-      projection.dropped.filter((d) => d.reason === "undeveloped_duplicate_of_stated"),
-    ).toEqual([]);
-    // …and its distinct edge survives with it, which is the meaning at stake.
-    const exposure = projection.graph.nodes.find((n) => n.label === "Avoid regulatory exposure")!;
+      projection.graph.nodes.find((n) => n.label === "Launch with an unlicensed pilot"),
+      "finding 6 is OPEN: the distinct option is still withdrawn",
+    ).toBeUndefined();
+    // The loss is at least DISCLOSED — the demote and the endpoint it orphaned are
+    // both named, bound by identity to the option under test.
     expect(
-      projection.graph.edges.some((e) => e.from === pilot!.id && e.to === exposure.id),
-    ).toBe(true);
+      projection.dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated")?.label,
+    ).toBe("Launch with an unlicensed pilot");
+    // ⚠ BY MEMBERSHIP, NOT BY `.find()`. The demote orphans SEVERAL edges, so
+    // "the first one" is a value predicate another object satisfies (trap 19).
+    // The claim is about THE RISK EDGE specifically — the meaning that is lost.
+    const orphaned = projection.dropped
+      .filter((d) => d.reason === "endpoint_demoted_duplicate")
+      .map((d) => d.label);
+    expect(orphaned).toContain("Pilot creates regulatory exposure");
   });
 
   /**
-   * ⭐ THE TWIN, and it is the load-bearing half: the duplication pass must
-   * STILL fire where the duplicate really is undeveloped. Without this, "spare
-   * everything" would pass the test above and silently restore the option
-   * explosion the demote exists to prevent.
+   * ⭐ THE TWIN THAT MAKES THE ABOVE MEAN SOMETHING: the demote is not simply
+   * demoting everything. A structurally identical duplicate is withdrawn for the
+   * same reason, so the assertion above is about THIS option's distinct path
+   * rather than about the pass being indiscriminate.
    */
-  it("still demotes a duplicate that adds NO distinct structure", () => {
+  it("and demotes a duplicate that adds NO distinct structure, for the same reason", () => {
     const noDistinctPath = structuredClone(input);
     noDistinctPath.claims = noDistinctPath.claims.filter(
       (c) => c.label !== "Pilot creates regulatory exposure",
@@ -428,6 +658,13 @@ describe("ROOT 2(d) — a demote may not collapse genuinely distinct meaning", (
     expect(
       projection.dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated")?.label,
     ).toBe("Launch with an unlicensed pilot");
+    // …and with no risk edge in this variant, THAT edge is not among the orphans —
+    // the revenue edge still is, which is what makes the contrast meaningful.
+    const orphaned = projection.dropped
+      .filter((d) => d.reason === "endpoint_demoted_duplicate")
+      .map((d) => d.label);
+    expect(orphaned).not.toContain("Pilot creates regulatory exposure");
+    expect(orphaned).toContain("Pilot sets same revenue");
   });
 });
 
@@ -517,6 +754,72 @@ describe("ROOT 3 — the completion pass is genuinely append-only", () => {
     const after = projectRecordsToGraph(merged.records);
     const askAfter = enumerateCompletionAsk(merged.records, after);
     expect(shouldKeepCompletion(askBefore, askAfter, { before, after })).toBe(false);
+  });
+
+  /**
+   * ⭐⭐ C1 — THE ABSORPTION EXCUSE IS KEYED BY IDENTITY, NOT BY LABEL.
+   *
+   * The absorption set was built from bare label STRINGS, so a genuine deletion of
+   * protected pass-1 content was excused whenever ANY unrelated survivor's merge
+   * record happened to carry the same string. That is an assertion bound to a
+   * value predicate another object satisfies — trap 19, reproduced inside ROOT 3's
+   * own load-bearing guard, one function from the identity fix written to remove
+   * it.
+   *
+   * Built directly on projection shapes rather than through a record set, because
+   * the defect is in the guard's KEYING and this is the smallest input that
+   * exhibits it without depending on how the projector happens to merge today.
+   */
+  it("an UNRELATED survivor's same-label merge does not excuse a real deletion", () => {
+    const deleted = { id: "n_deleted", kind: "factor", label: "Churn is 10%" };
+    const other = { id: "n_other", kind: "option", label: "Improve onboarding" };
+    const before = {
+      graph: { nodes: [deleted, other], edges: [] },
+      provenance: {
+        n_deleted: { provenance_class: "stated", source_quote: "Churn is 10%" },
+        n_other: { provenance_class: "stated", source_quote: "Improve onboarding" },
+      },
+      dropped: [],
+    } as never;
+    // `n_deleted` is GONE, and a DIFFERENT node records absorbing its label.
+    const after = {
+      graph: { nodes: [other], edges: [] },
+      provenance: {
+        n_other: {
+          provenance_class: "stated",
+          source_quote: "Improve onboarding",
+          merged_refinements: ["Churn is 10%"],
+        },
+      },
+      dropped: [],
+    } as never;
+
+    const violations = completionRegressesProtectedContent(before, after);
+    expect(violations.some((v) => v.includes("n_deleted"))).toBe(true);
+
+    // ⭐ THE DISCRIMINATING TWIN: when the SAME node is genuinely absorbed by a
+    // survivor, the excuse holds and nothing is reported. Without this the fix
+    // could be "never excuse anything", which would throw away legitimate merges.
+    const legitimatelyMerged = {
+      graph: { nodes: [other], edges: [] },
+      provenance: {
+        n_other: {
+          provenance_class: "stated",
+          source_quote: "Improve onboarding",
+          merged_refinements: ["Churn is 10%"],
+        },
+      },
+      dropped: [],
+    } as never;
+    const beforeRefinement = {
+      graph: { nodes: [{ id: "n_ref", kind: "option", label: "Churn is 10%" }, other], edges: [] },
+      provenance: {
+        n_ref: { provenance_class: "ai_inferred", basis: [] },
+        n_other: { provenance_class: "stated", source_quote: "Improve onboarding" },
+      },
+      dropped: [],
+    } as never;
+    expect(completionRegressesProtectedContent(beforeRefinement, legitimatelyMerged)).toEqual([]);
   });
 
   /**

@@ -327,6 +327,14 @@ export interface DroppedRecordRef {
      */
     | "stated_target_not_represented_as_threshold"
     /**
+     * ⭐ ROOT 2(b), THE WORSE HALF. A stated `role:"target"` carried a number and
+     * that number reached the graph NOWHERE — `projectOnce` has no value branch
+     * for `goal`, so "cut churn to 8%" lands as a label with the 8 discarded.
+     * Distinct from the reason above, where the number is present but modelled as
+     * a value that already holds.
+     */
+    | "stated_target_value_dropped"
+    /**
      * ⭐ ROOT 2(c). Two or more parallel `causal_link` claims set the SAME
      * option→factor pair to DIFFERENT levels. One was chosen canonically; the
      * others are named here rather than silently overwritten.
@@ -987,27 +995,45 @@ function projectOnce(
     if (item.role !== undefined && node.data !== undefined) {
       node.data = { ...node.data, role: item.role };
     }
-    // ⚠ NOT ON A GOAL, AND THE FIRST VERSION OF THIS CONDITION GOT THAT WRONG.
-    // The harm is a target being represented as an OBSERVED VALUE — a number the
-    // user wants to REACH, silently modelled as a number that already HOLDS. A
-    // `goal` carrying `role:"target"` is not that: the goal IS the thing being
-    // aimed at, so the two agree and there is nothing to disclose. Firing there
-    // put a standing notice on ordinary, correct briefs — a predicate broader
-    // than the harm it serves, which is this estate's most-repeated review
-    // finding, committed here while fixing an instance of it.
-    if (item.role === "target" && kind !== "goal") {
-      // ⚠ BOUNDED DELIBERATELY. This records and discloses that a TARGET was
-      // stated and is NOT yet represented as a goal threshold. It does not
-      // synthesise `goal_threshold`: doing that honestly means unit, cap and
-      // frame semantics (`NodeV3` carries five `goal_threshold_*` fields) and a
-      // decision about which goal a free-standing target binds to. That is a
-      // separate piece of work, reported at the boundary rather than guessed at
-      // here — guessing is what root 2(a) is about.
+    // ⭐⭐ WHEN A STATED TARGET'S NUMBER FAILED TO BECOME A THRESHOLD.
+    //
+    // ⚠⚠ THIS CONDITION HAS BEEN WRONG IN BOTH DIRECTIONS, AND THE SECOND TIME
+    // IS THE INSTRUCTIVE ONE. It first fired on EVERY `role:"target"`, including
+    // a bare `goal` with no number, which put a standing notice on ordinary
+    // correct briefs. I then narrowed it with `&& kind !== "goal"` — and an
+    // adversarial review showed I had narrowed it to fit TWO ARRAY-LENGTH
+    // ASSERTIONS in fixtures that happened to contain a valueless goal target,
+    // not because the domain said so. Worse, `projectOnce` has a value branch for
+    // `constraint` and for `factor` and **NONE FOR `goal`** — so a stated numeric
+    // goal target ("cut churn to 8%", value 8) lands with no data, no
+    // observed_state and no threshold, and the narrowing removed the ONE notice
+    // that would have named it. I carved out the case that needed it most.
+    //
+    // ⭐ SO THE PREDICATE IS NOW DERIVED FROM THE NODE'S ACTUAL STATE, not from a
+    // list of kinds: fire when a target's NUMBER exists and did not end up
+    // expressed as a threshold. A valueless target has no number to lose and
+    // raises nothing; a `constraint` target that got its operator IS a threshold
+    // and raises nothing. Neither a kind list nor a test's array length decides
+    // it — the question "was this number represented?" is asked of the node.
+    const targetValueUnrepresented =
+      item.role === "target" &&
+      typeof item.value === "number" &&
+      (node.data as { operator?: string } | undefined)?.operator === undefined;
+    if (targetValueUnrepresented) {
+      // ⚠ TWO OUTCOMES, TWO NAMES (trap 21). They are different facts about the
+      // user's number and a single reason would blur them:
+      //  • the number reached the graph but as an OBSERVED value — modelled as
+      //    something that already HOLDS rather than something to REACH;
+      //  • the number reached the graph NOWHERE AT ALL (the `goal` case), which
+      //    is the strictly worse member of the same family.
+      const valueLandedSomewhere = node.observed_state !== undefined;
       dropped.push({
         claim_index: -1,
         claim_kind: "stated_item",
         label: quote,
-        reason: "stated_target_not_represented_as_threshold",
+        reason: valueLandedSomewhere
+          ? "stated_target_not_represented_as_threshold"
+          : "stated_target_value_dropped",
       });
     }
 
@@ -1806,43 +1832,55 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
     else groups.set(signature, [member]);
   }
 
-  // ⭐⭐ ROOT 2(d) — "UNDEVELOPED" HAS TO MEAN "ADDS NOTHING".
+  // ⚠⚠ ROADMAP 2.1092 — AUDIT FINDING 6 IS **OPEN**, AND THE FIX DOES NOT BELONG
+  // HERE. READ THIS BEFORE "FIXING" IT AGAIN.
   //
-  // The grouping key is `buildInterventionSignature`, and that is right: it is
-  // the VALIDATOR'S own predicate for `OPTIONS_IDENTICAL`, imported rather than
-  // restated. But an identical intervention signature means two options move the
-  // same factors to the same levels — it says NOTHING about the rest of their
-  // causal structure, and the demote was reading it as if it did.
+  // THE DEFECT IS REAL. The grouping key is `buildInterventionSignature` — the
+  // VALIDATOR'S own predicate for `OPTIONS_IDENTICAL`, imported rather than
+  // restated, which is right. But it sees ONLY interventions, so two options that
+  // move the same factors to the same levels group together no matter how
+  // differently they behave elsewhere. An audit produced the case: "Launch
+  // nationally" and "Launch with an unlicensed pilot" set revenue identically, so
+  // they grouped — but the pilot ALSO ran an edge into a regulatory-exposure
+  // constraint the national launch never touched. It was withdrawn as an
+  // "undeveloped duplicate", and the only representation of that risk went with
+  // it. Identical in the one dimension measured; opposite in the one that would
+  // have decided between them.
   //
-  // An audit produced the case that matters: "Launch nationally" and "Launch with
-  // an unlicensed pilot" set revenue identically, so they grouped — but the pilot
-  // ALSO ran an edge into a regulatory-exposure constraint that the national
-  // launch did not touch. It was withdrawn as an "undeveloped duplicate", taking
-  // the only representation of its risk with it. The two options were identical
-  // in the one dimension measured and opposite in the one that would have decided
-  // between them.
+  // ⚠ AND THE OBVIOUS FIX HERE — sparing a candidate that reaches somewhere the
+  // survivor does not — WAS IMPLEMENTED, MEASURED, AND REVERTED, because it makes
+  // things WORSE. Executed end to end by an independent review at that commit:
+  //   1. the projector spares the pilot;
+  //   2. both launch options still share one intervention signature;
+  //   3. `validateGraph` raises OPTIONS_IDENTICAL;
+  //   4. `attemptOptionsIdenticalGracefulDedup` returns **null** — it declines at
+  //      guard 3b, the label-distinctness floor
+  //      (`options-identical-graceful-dedup.ts:190-196`), and a spared option is
+  //      BY CONSTRUCTION structurally distinct and therefore differently
+  //      labelled, so the spare routes deterministically into the ONE guard that
+  //      refuses to dedup;
+  //   5. `options-identical-bypass.ts` emits `CEE_GRAPH_INVALID` — **the draft
+  //      fails**, where the merge base shipped a graph.
+  // A silent content loss became a hard draft failure, and the spared option
+  // reached the wire in NEITHER shape (where the collision arises in pass 2
+  // instead, `shouldKeepCompletion` discards the completion and the option never
+  // exists). Nothing was bought.
   //
-  // So membership of the group is necessary and no longer sufficient: a candidate
-  // that reaches somewhere the survivor does not is DEVELOPED, whatever its
-  // intervention signature says, and stays on the graph. Note the direction of
-  // the change — it can only ever demote FEWER options, so it cannot resurrect
-  // the duplication this pass exists to remove; where the structures really are
-  // the same, the subset test is satisfied and the demote fires exactly as before.
-  const outgoingTargetsById = new Map<string, Set<string>>();
-  for (const edge of projection.graph.edges) {
-    const set = outgoingTargetsById.get(edge.from) ?? new Set<string>();
-    set.add(edge.to);
-    outgoingTargetsById.set(edge.from, set);
-  }
-  /** TRUE when `candidate` reaches at least one node `survivor` does not. */
-  const addsDistinctStructure = (candidateId: string, survivorId: string): boolean => {
-    const candidateTargets = outgoingTargetsById.get(candidateId);
-    if (!candidateTargets) return false;
-    const survivorTargets = outgoingTargetsById.get(survivorId) ?? new Set<string>();
-    for (const target of candidateTargets) if (!survivorTargets.has(target)) return true;
-    return false;
-  };
-
+  // ⭐ THE EVIDENCE WAS INSIDE THE FIXTURE ALL ALONG, and this is the lesson worth
+  // keeping: `round7-completion-pass05-tie.json`'s own `__PROVENANCE__` records
+  // `live_outcome: "FAIL 500 · CEE_GRAPH_INVALID via
+  // cee.options_identical.pre_repair_bypass"`. The reassurance attached to the
+  // change ("this cannot produce a 500") was contradicted by the banked capture
+  // whose expectation was being moved. **Before moving a fixture's expectation,
+  // read its provenance block — a captured fixture often records the very outcome
+  // you are about to predict.**
+  //
+  // THE REAL FIX IS DOWNSTREAM, in whichever of these two owns the question:
+  // `buildInterventionSignature` (so structurally distinct options do not collide
+  // in the first place), or guard 3b (so a structurally distinct group is treated
+  // as a legitimate clarification rather than a fail-fast). Both live outside
+  // this file. Until one of them lands, this pass demotes as before — a known,
+  // rowed, DISCLOSED loss rather than an unknown draft failure.
   const decisions: DemoteDecision[] = [];
   for (const [signature, members] of groups) {
     if (members.length < 2) continue;
@@ -1870,7 +1908,6 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
       // which this pass deliberately leaves for the user to resolve.
       const survivor = stated[0]!;
       for (const m of model) {
-        if (addsDistinctStructure(m.id, survivor.id)) continue;
         decisions.push({
           claimIndex: m.claimIndex!,
           label: m.label,
@@ -1889,7 +1926,6 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
       const ordered = [...model].sort((a, b) => a.claimIndex! - b.claimIndex!);
       const survivor = ordered[0]!;
       for (const m of ordered.slice(1)) {
-        if (addsDistinctStructure(m.id, survivor.id)) continue;
         decisions.push({
           claimIndex: m.claimIndex!,
           label: m.label,

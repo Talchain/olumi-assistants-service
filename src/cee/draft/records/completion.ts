@@ -280,11 +280,66 @@ export function completionRegressesProtectedContent(
   // `undeveloped_duplicates`. A prune writes neither, because nothing absorbed
   // it. So the set is built from the ABSORPTION RECORDS alone, which are also the
   // only entries that can name a survivor to point at.
+  // ⚠⚠ C1 — KEYED BY IDENTITY, NOT BY LABEL, AND THE FIRST VERSION WAS THE VERY
+  // DEFECT THIS FILE FIXES ONE FUNCTION AWAY.
+  //
+  // The absorption set was built from bare LABEL STRINGS, and the excuse was
+  // `accountedFor.has(node.label)` — so a deletion of protected pass-1 content was
+  // silently excused whenever ANY UNRELATED survivor's merge record happened to
+  // carry the same string. Demonstrated by an adversarial review:
+  //
+  //     before: "Churn is 10%" + "Improve onboarding"
+  //     after : "Churn is 10%" DELETED; "Improve onboarding".merged_refinements
+  //             = ["Churn is 10%"]   ← an unrelated node absorbed the same label
+  //     ⇒ violations = []            ← the deletion excused
+  //
+  // That is an assertion bound to a VALUE PREDICATE ANOTHER OBJECT SATISFIES —
+  // trap 19, the exact shape `shouldKeepCompletion`'s identity binding below was
+  // written to remove, reproduced inside its own load-bearing guard.
+  //
+  // The absorption records name a LABEL, not an id, so identity is reconstructed
+  // from the pair that actually did the absorbing: a disappearance is excused only
+  // when a survivor that is ITSELF still on the graph records having absorbed this
+  // node's label AND that survivor is not the node in question. Keying by
+  // `(survivor_id, label)` ties the excuse to a specific, checkable event.
   const accountedFor = new Set<string>();
-  for (const prov of Object.values(after.provenance)) {
-    for (const label of prov.merged_refinements ?? []) accountedFor.add(label);
-    for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(label);
+  for (const [survivorId, prov] of Object.entries(after.provenance)) {
+    if (!afterById.has(survivorId)) continue; // an absorber that itself vanished excuses nothing
+    for (const label of prov.merged_refinements ?? []) accountedFor.add(`${survivorId}␟${label}`);
+    for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(`${survivorId}␟${label}`);
   }
+  /**
+   * ⚠⚠ AND KEYING BY `(survivor, label)` WAS STILL NOT ENOUGH — the first repair
+   * for C1 did not fix C1, and the test caught it.
+   *
+   * Tying the excuse to a specific surviving absorber stops a VANISHED absorber
+   * from excusing anything, which is a real improvement. But the reviewer's case
+   * survived it untouched: an unrelated survivor recording the same label still
+   * satisfied "some survivor absorbed this string", because the absorption records
+   * carry a LABEL and never the absorbed node's id. Binding to a slightly more
+   * specific value predicate is not binding by identity.
+   *
+   * ⭐ SO THE DISCRIMINATOR IS DERIVED FROM WHAT THE TWO OPERATIONS ACTUALLY
+   * ABSORB, which the provenance fields state exactly: `merged_refinements` holds
+   * *"labels of `option_refinement` claims merged into this STATED option"* and
+   * `undeveloped_duplicates` holds *"labels of MODEL options withdrawn"*. **Both
+   * consume MODEL-ORIGIN content only.** Neither can consume a node the user
+   * stated — there is no operation in this projector that folds a user's own
+   * figure into anything.
+   *
+   * Therefore: a `stated` node's disappearance is NEVER excusable, whatever any
+   * label says, and only an `ai_inferred` node can be absorbed. That is a claim
+   * about the producer's semantics rather than about string equality, so a
+   * coincidence of labels can no longer buy an excuse.
+   */
+  const wasAbsorbed = (nodeId: string, label: string): boolean => {
+    if (before.provenance[nodeId]?.provenance_class === "stated") return false;
+    for (const survivorId of afterById.keys()) {
+      if (survivorId === nodeId) continue;
+      if (accountedFor.has(`${survivorId}␟${label}`)) return true;
+    }
+    return false;
+  };
 
   for (const node of before.graph.nodes) {
     // ⚠ PROTECTED CONTENT IS THE USER'S AND THE MODEL'S — NOT THE PROJECTOR'S
@@ -300,7 +355,7 @@ export function completionRegressesProtectedContent(
     if (before.provenance[node.id]?.provenance_class === "projector_structural") continue;
     const survivor = afterById.get(node.id);
     if (!survivor) {
-      if (!accountedFor.has(node.label)) {
+      if (!wasAbsorbed(node.id, node.label)) {
         violations.push(`removed_undisclosed:${node.id}:${node.label}`);
       }
       continue;

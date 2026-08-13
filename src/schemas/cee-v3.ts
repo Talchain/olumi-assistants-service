@@ -568,6 +568,41 @@ export const CEEGraphResponseV3 = z.object({
    *  graph layout. Required at the canonical contract; preserved
    *  V1 → V3 with deep-equality (length + order + string contents). */
   topology_plan: z.array(z.string()).optional(),
+  /**
+   * ⭐⭐ WHAT THE PROJECTOR REFUSED TO ASSERT, AND WHY — the R1 disclosure channel.
+   *
+   * The record projector deliberately declines to invent: it will not guess a
+   * constraint's direction, it will not silently pick between two contradictory
+   * intervention levels, and it will not pretend a stated target became a goal
+   * threshold. Every one of those refusals was already recorded internally in
+   * `projection.dropped[]` — and **`projection.dropped[]` had no reader anywhere
+   * downstream**, so a user saw a graph quietly weaker than their brief with no
+   * indication why. The projector's honesty had improved; the product's had not
+   * moved at all. This field is the carrier that closes that.
+   *
+   * ⚠ EVERY ENTRY MUST ANCHOR TO A NODE THE USER CAN SEE. `node_id` is REQUIRED,
+   * and the transform drops any disclosure it cannot anchor rather than emitting
+   * one that points at nothing — a notice about an invisible entity is not a
+   * disclosure, it is noise the UI cannot render. Where the subject itself was
+   * withdrawn (a demoted duplicate), the anchor is the SURVIVING node it was
+   * folded into, which is the thing the user is actually looking at.
+   *
+   * ⚠ THE TOP LEVEL OF THIS SCHEMA IS PLAIN `z.object` — undeclared fields are
+   * STRIPPED, silently, with only a warn log. That is precisely why this must be
+   * declared here and not left to ride a passthrough.
+   */
+  record_disclosures: z
+    .array(
+      z.object({
+        /** The projector's own reason vocabulary — one string, not a sentence. */
+        reason: z.string(),
+        /** The node this disclosure is ABOUT, guaranteed present in `nodes[]`. */
+        node_id: z.string(),
+        /** The user-facing label of that node, for rendering without a lookup. */
+        label: z.string(),
+      }),
+    )
+    .optional(),
   /** Draft warnings from the pipeline — CEEStructuralWarningV1 shape from structure detection.
    *  Fields: id (warning type), severity, affected_node_ids, affected_edge_ids, explanation, fix_hint. */
   draft_warnings: z.array(z.object({

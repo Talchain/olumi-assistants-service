@@ -182,6 +182,10 @@ export interface StageContext {
    *  graph layout. Stashed at Stage 1 Parse, packaged at Stage 5, and
    *  carried V1 → V3 with deep-equality preservation at Stage 6. */
   topologyPlan?: unknown;
+  /** ⭐ R1 record-projection disclosures. Stashed at Stage 1 Parse (which
+   *  DESTRUCTURES the adapter result, so anything not named there is lost),
+   *  packaged at Stage 5, and carried V1 → V3 at Stage 6. */
+  recordDisclosures?: unknown;
   /** LLM-emitted goal constraints — merged with regex-extracted constraints in Stage 4 */
   llmGoalConstraints?: Array<Record<string, unknown>>;
   /** True if parse stage retried the LLM call due to default strength detection. */

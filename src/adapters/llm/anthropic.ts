@@ -2470,6 +2470,22 @@ export async function draftGraphWithAnthropic(
       // V1 → V3 transform with deep-equality preservation.
       ...((parsed as any).causal_claims ? { causal_claims: (parsed as any).causal_claims } : {}),
       ...((parsed as any).topology_plan ? { topology_plan: (parsed as any).topology_plan } : {}),
+      // ⭐⭐ THE R1 DISCLOSURE CHANNEL LEAVES THE ADAPTER HERE.
+      //
+      // `activeProjection.dropped` is the projector's record of everything it
+      // declined to assert — an unstated constraint direction, a target that is
+      // not a threshold, two contradictory intervention levels, a withdrawn
+      // duplicate. Until now it was built, LOGGED, and dropped on the floor: the
+      // very next statement replaced `rawJson` with the graph alone, so no reader
+      // downstream could ever see it and every one of those refusals was silent
+      // to the user.
+      //
+      // ⚠ Sourced from `activeProjection`, NOT `seam.projection` — the two differ
+      // whenever the completion pass was kept, and the disclosures the user needs
+      // are the ones describing the graph they actually receive.
+      ...(activeProjection.dropped.length > 0
+        ? { record_disclosures: activeProjection.dropped }
+        : {}),
       // Goal constraints passthrough: LLM-emitted constraints have richer metadata
       // (source_quote, confidence, provenance) than the regex extractor.
       ...((parsed as any).goal_constraints ? { goal_constraints: (parsed as any).goal_constraints } : {}),

@@ -276,7 +276,29 @@ describe("C-K1 control: the battery is running on something", () => {
     // channel now also carries withdrawals — one vocabulary for "the projector
     // did not place this", which is the point, but it means this assertion must
     // name the reasons it is about.
-    const refReasons = b.dropped.map((d) => d.reason).filter((r) => r !== "unconnected_to_goal");
+    // ⭐ THE FILTER IS AN ALLOW-LIST OF NON-REF NOTICES, NOT A `!== one_thing`.
+    //
+    // This assertion is about UNRESOLVABLE REFERENCES. The `dropped` channel is
+    // deliberately one vocabulary for "the projector did not place this", so it
+    // also carries connectivity withdrawals AND the R1 disclosure notices — and
+    // when `stated_target_value_dropped` was added, this line went red on a REAL
+    // banked record set, which is exactly what it should do: it means a real
+    // brief in this corpus states a numeric target whose value reaches the graph
+    // nowhere. That is a true finding about the data, not noise to be silenced.
+    //
+    // ⚠ SO THE FILTER IS WIDENED BY NAME, not by loosening the equality to a
+    // `toContain`. A membership check would keep passing if the two ref reasons
+    // ever stopped being emitted, which is the one thing this test exists to
+    // catch. Every non-ref reason is listed explicitly, so a NEW notice reason
+    // REDs here and forces this decision to be made again rather than absorbed.
+    const NON_REF_NOTICES = new Set([
+      "unconnected_to_goal",
+      "constraint_direction_unstated",
+      "stated_target_not_represented_as_threshold",
+      "stated_target_value_dropped",
+      "parallel_intervention_conflict",
+    ]);
+    const refReasons = b.dropped.map((d) => d.reason).filter((r) => !NON_REF_NOTICES.has(r));
     expect(refReasons.sort()).toEqual(["ref_out_of_range", "self_loop"]);
   });
 

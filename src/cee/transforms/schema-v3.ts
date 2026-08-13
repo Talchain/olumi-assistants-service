@@ -1242,6 +1242,49 @@ export function transformResponseToV3(
     ? [...v1TopologyPlan]
     : [];
 
+  // ⭐⭐ ROOT 4(b) — THE R1 DISCLOSURES REACH THE WIRE, ANCHORED TO REAL NODES.
+  //
+  // Everything the projector refused to assert was, until now, recorded in
+  // `projection.dropped[]` and read by NOTHING. A user saw a constraint with no
+  // threshold, a target that never became a goal, one of two contradictory
+  // intervention levels — each of them a deliberate, principled refusal, and each
+  // of them silent. Improving the projector's honesty without this carrier
+  // improves nothing the user experiences.
+  //
+  // ⚠ AN UNANCHORED DISCLOSURE IS DROPPED, DELIBERATELY. A notice naming an
+  // entity that is not in `nodes[]` cannot be rendered next to anything and
+  // cannot be acted on; it is noise wearing a disclosure's clothes. So every
+  // emitted entry carries a `node_id` REQUIRED by the schema and resolved here
+  // against the FINAL node list — not the projector's, which is several
+  // transforms upstream and may have lost nodes since.
+  //
+  // Resolution order, and the second branch is the point: prefer the subject
+  // itself; where the subject was WITHDRAWN (a demoted duplicate), anchor to the
+  // survivor it was folded into, because that surviving option is the thing the
+  // user is actually looking at and the thing the loss is about.
+  const v1RecordDisclosures = (v1Response as { record_disclosures?: unknown }).record_disclosures;
+  if (Array.isArray(v1RecordDisclosures) && v1RecordDisclosures.length > 0) {
+    const nodeIdByLabel = new Map<string, string>();
+    for (const n of v3Graph.nodes) {
+      if (typeof n.label === "string" && !nodeIdByLabel.has(n.label)) nodeIdByLabel.set(n.label, n.id);
+    }
+    const anchored: Array<{ reason: string; node_id: string; label: string }> = [];
+    for (const raw of v1RecordDisclosures) {
+      const d = raw as { reason?: unknown; label?: unknown; duplicate_of_label?: unknown };
+      if (typeof d.reason !== "string" || typeof d.label !== "string") continue;
+      const subjectId = nodeIdByLabel.get(d.label);
+      const survivorId =
+        typeof d.duplicate_of_label === "string" ? nodeIdByLabel.get(d.duplicate_of_label) : undefined;
+      const anchorId = subjectId ?? survivorId;
+      if (!anchorId) continue;
+      const anchorLabel = subjectId ? d.label : (d.duplicate_of_label as string);
+      anchored.push({ reason: d.reason, node_id: anchorId, label: anchorLabel });
+    }
+    if (anchored.length > 0) {
+      (v3Response as { record_disclosures?: unknown[] }).record_disclosures = anchored;
+    }
+  }
+
   // Carry rationales from V1 pipeline into V3 response.
   // Rationales are LLM-generated per-node reasoning from Stage 1 (parse).
   // Shape normalised to { target, why } — matches PlanAnnotationCheckpoint pattern.

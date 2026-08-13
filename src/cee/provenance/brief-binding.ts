@@ -21,20 +21,53 @@
  * wrote?** Nothing here consults the model's opinion, because the model's
  * opinion is exactly what the badge is supposed to be independent of.
  *
- * ── THE ASYMMETRY IS DELIBERATE, AND IT IS THE WHOLE SAFETY ARGUMENT ────────
+ * ── ⚠⚠ THE SAFETY ARGUMENT THAT WAS HERE WAS FALSE. READ THIS FIRST. ────────
  *
- * Containment is a conservative predicate and it errs in ONE direction:
+ * The first version of this file closed with: *"The predicate therefore cannot
+ * manufacture provenance, only decline to certify it."* **An adversarial review
+ * refuted that by execution, end to end, at the wire:**
+ *
+ *     brief : "Licences cost £74,000 a year. The rebuild quote was £250,000."
+ *     item  : quote "Licences cost £74,000 a year", value 250000, unit GBP
+ *     ⇒ verified ⇒ nodes[].provenance = "from_brief"
+ *
+ * A node **labelled with the user's own sentence about £74,000, carrying the
+ * value 250,000**, badged as the user's own words. That is audit finding 2 —
+ * an exact quote with a contradicted value — alive PAST ITS OWN FIX.
+ *
+ * The cause was structural, and it is worth naming precisely because the
+ * invariant was true as stated: the two halves were asked **against two
+ * different scopes**. The quote half asked "is this quote in the BRIEF?"; the
+ * value half asked "is this value in the BRIEF?". Neither ever asked *is this
+ * value in THE QUOTE IT IS ATTACHED TO* — so any number occurring anywhere else
+ * in the brief certified a sentence it had nothing to do with. A
+ * number-transposition across two figures is the most ordinary LLM slip there
+ * is on a brief that mentions two sums.
+ *
+ * ⭐ THE FIX IS ONE SCOPE, NOT A WIDER WINDOW. The value is now verified inside
+ * the QUOTE, which is itself already proven brief-borne. That is strictly
+ * stronger than the brief-scoped test and structurally cannot make a
+ * cross-sentence match. Two questions under one predicate, answered against two
+ * scopes, is trap 22b's shape; the repair is to collapse the scopes, not to tune
+ * a window between them.
+ *
+ * ── THE ASYMMETRY, RESTATED HONESTLY ───────────────────────────────────────
+ *
+ * Containment is conservative and errs toward DECLINING:
  *
  *  - A real quote the user wrote in different words (brief: "churn is 10%",
  *    quote: "Churn is 10 percent") reads UNVERIFIED. The node keeps its content
- *    and its label; it simply loses the `from_brief` badge and is shown as
- *    `ai_inferred`. That is a badge that understates — the honest direction.
- *  - For a FABRICATION to read VERIFIED, the fabricated text would have to
- *    appear literally in the brief — at which point it is not a fabrication.
+ *    and its label; it loses only the badge. That understates — the safe way.
+ *  - A fabricated SENTENCE must appear literally in the brief to verify, and a
+ *    fabricated NUMBER must now appear inside that sentence.
  *
- * The predicate therefore cannot manufacture provenance, only decline to
- * certify it. Written against the SPEC ("the quote occurs in the brief"), never
- * against the failure mode in hand (trap 13d).
+ * ⚠ WHAT IS STILL NOT CLAIMED, so this note cannot rot into the last one: a
+ * quote short enough to be contained by coincidence is weak evidence, and the
+ * floor below is a guard against degenerate emissions rather than a model of
+ * specificity. Containment is a MATCHING predicate; the class of defect it
+ * belongs to ends only when binding becomes VERIFIABLE — a character span into
+ * the brief, where the quote is `brief.slice(start, end)` by construction and no
+ * format-matching happens at all.
  *
  * ── WHY `unchecked` IS A THIRD STATE AND NOT A BOOLEAN ──────────────────────
  *
@@ -91,9 +124,32 @@ export function isQuoteStatedInBrief(
 ): boolean {
   if (typeof quote !== "string" || typeof briefText !== "string") return false;
   const needle = normaliseForContainment(quote);
-  if (needle.length === 0) return false;
+  if (needle.length < MIN_QUOTE_CHARS) return false;
   return normaliseForContainment(briefText).includes(needle);
 }
+
+/**
+ * ⭐ THE SPECIFICITY FLOOR — measured, not theoretical.
+ *
+ * The empty-quote guard was here from the start, and a review showed there was
+ * **nothing between "empty" and "trivially contained"**: a `source_quote` of
+ * `"a"` read `verified`, because a one-character string is contained in
+ * essentially any brief. The grammar puts no floor on `source_quote`, so a
+ * degenerate model emission reaches this.
+ *
+ * ⚠ THIS IS A FLOOR AGAINST DEGENERACY, NOT A SPECIFICITY MODEL, and the
+ * distinction is the honest part. A single common word ("the") clears three
+ * characters and would still be contained by coincidence — containment simply
+ * cannot tell evidence from coincidence at the short end, and no constant here
+ * will make it. What this stops is the degenerate case; what actually ends the
+ * class is span-based binding (see the header). Naming a constant's real reach
+ * is the alternative to discovering it in the next review.
+ *
+ * Chosen at 3 because the shortest legitimate stated quotes in this estate's own
+ * fixtures are four characters (`hire`, `Hold`), so the floor clears real
+ * content with a margin and the error direction is to DECLINE.
+ */
+const MIN_QUOTE_CHARS = 3;
 
 /**
  * ⭐ THE STATED-ITEM VERDICT — quote AND value, never one of the two.
@@ -120,9 +176,50 @@ export function bindStatedItemToBrief(args: {
   if (typeof brief !== "string" || brief.trim().length === 0) return "unchecked";
   if (!isQuoteStatedInBrief(quote, brief)) return "unverified";
   if (typeof value === "number" && Number.isFinite(value)) {
-    if (!isAmountStatedInBrief(value, unit ?? undefined, brief)) return "unverified";
+    // ⭐⭐ AGAINST THE QUOTE, NOT THE BRIEF — THIS IS THE B1 FIX.
+    //
+    // The quote has just been proven brief-borne, so scoping the magnitude test
+    // to it is strictly stronger than scoping it to the brief: everything the
+    // quote contains, the brief contains, and the converse is exactly the hole.
+    // Verifying against the brief let a number from ANOTHER SENTENCE certify
+    // this one (£250,000 certifying the user's £74,000 sentence).
+    //
+    // ⚠ AND DELIBERATELY NO FALL-BACK TO THE BRIEF for a quote that carries no
+    // digits, which was offered and is declined: a quote with no number in it is
+    // no evidence for a number, and re-admitting the brief as a second scope
+    // rebuilds the defect in a narrower shape. ONE predicate, ONE scope. The cost
+    // is that a figure whose number sits in a neighbouring sentence now
+    // under-claims — the safe direction, and visible as such.
+    if (!isVerifiableMagnitude(value)) return "unverified";
+    if (!isAmountStatedInBrief(value, unit ?? undefined, quote as string)) return "unverified";
   }
   return "verified";
+}
+
+/**
+ * ⭐ IS THIS MAGNITUDE ONE THE SCANNER CAN EVEN SEE? — C3, made EXPLICIT.
+ *
+ * `stated-amounts.ts` carries no sign in its scan pattern and compares by
+ * absolute magnitude, so `magnitudesMatch(500000, -500000)` is false and **every
+ * negative value is un-verifiable by construction**. Under ROADMAP 2.972 that
+ * predicate only ever DOWNGRADED, so the gap was cheap. It now decides a
+ * user-facing badge, which changes what the gap costs: *"we are running a
+ * -£500k deficit"* and *"operating margin is -4%"* are ordinary business-brief
+ * phrasings, and the grammar admits them (`value: { type: "number" }`, unbounded).
+ *
+ * ⚠ THE BRANCH EXISTS SO THE DECLINE IS A DECISION RATHER THAN A SIDE EFFECT.
+ * Without it a negative still declined — but silently, as a failed match
+ * indistinguishable from a genuine mismatch, which is precisely how a whole
+ * value class stays invisible (trap 13d: a predicate omitting a class its own
+ * contract admits). Named here, pinned by a KNOWN-DROPPED test asserting exactly
+ * this class, so it REDs if the class grows OR if it is closed.
+ *
+ * NOT fixed here on purpose: widening `stated-amounts.ts` to a signed form also
+ * moves per-intervention provenance across the product, which is its own change
+ * with its own measurement.
+ */
+function isVerifiableMagnitude(value: number): boolean {
+  return value >= 0;
 }
 
 /**
