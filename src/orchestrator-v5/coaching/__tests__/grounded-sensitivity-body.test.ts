@@ -1,0 +1,364 @@
+/**
+ * RED-first spec for the GROUNDED sensitivity body (Lane C).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THIS FIXES, MEASURED.
+ *
+ * `sensitivity_flip_risk` is the lens 40 of 45 real banked runs actually
+ * select. Its entire user-facing surface is one coaching block (it declares NO
+ * companion exercise — `phase3-blocks.ts`, the `return []` arm), whose body is
+ * a CONSTANT from `BODY_BY_RATIONALE` keyed by rationale code. Measured across
+ * the 45 captures: 1 distinct title, 2 distinct bodies.
+ *
+ * And the copy that reaches 38 of those 40 runs opens:
+ *
+ *     "THIS FACTOR moves the result more than any other."
+ *
+ * — a deictic with NO ANTECEDENT. The product points at a factor and never
+ * says which one, while `factor_sensitivity[].factor_label` carries the name on
+ * 40/40 of those same runs.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * ⭐ THE CLAIM BOUNDARY, AND IT IS THE WHOLE DESIGN. This module RESOLVES A
+ * PRONOUN. It adds no proposition: every grounded body asserts exactly what the
+ * constant asserted, with the referent made explicit. So there is no new claim
+ * to license — no leading option, no magnitude, and critically NO FLIP VERB on
+ * the `_NO_FLIP` codes, which are the ONLY two codes real traffic produces
+ * (`SENSITIVITY_ISOLATED_NO_FLIP` 38, `DOMINANT_DRIVER_NO_FLIP` 2). Those runs
+ * carry a positive producer attestation that nothing can move the winner; a
+ * grounded body that reintroduced "could flip" would be false on precisely the
+ * traffic it ships to.
+ */
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+
+import { BODY_BY_RATIONALE } from '../../compose/lens-selector.js';
+import { buildLensSurface } from '../../compose/phase3-blocks.js';
+import {
+  GROUNDED_SENSITIVITY_BODY_MAX,
+  selectGroundedSensitivityBody,
+} from '../grounded-sensitivity-body.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_DIR = join(HERE, '..', '..', 'compose', '__tests__', 'fixtures', 'dsk-walk');
+
+function liveEnrichment(name: 'session-a' | 'session-b2'): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(FIXTURE_DIR, `${name}.enrichment.json`), 'utf8'));
+}
+
+/** The subject factor id of a live capture's top-influence row. */
+function topFactorId(en: Record<string, unknown>): string {
+  const rows = en.factor_sensitivity as { factor_id: string }[];
+  return rows[0]!.factor_id;
+}
+function topFactorLabel(en: Record<string, unknown>): string {
+  const rows = en.factor_sensitivity as { factor_label: string }[];
+  return rows[0]!.factor_label;
+}
+
+describe('selectGroundedSensitivityBody — it names the factor', () => {
+  it('resolves the deictic on the code 38/40 of real runs use', () => {
+    const en = liveEnrichment('session-a');
+    const id = topFactorId(en);
+    const label = topFactorLabel(en);
+
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', id, en);
+
+    expect(r.refusalReason).toBeNull();
+    expect(r.grounded).not.toBeNull();
+    // Identity binding (trap 19): the producer's own label for the SUBJECT id,
+    // never "some factor whose influence is highest" — another row could
+    // satisfy a value predicate after a producer re-order.
+    expect(r.grounded!.factorId).toBe(id);
+    expect(r.grounded!.factorLabel).toBe(label);
+    expect(r.grounded!.body).toContain(label);
+
+    // ⭐ THE ANTECEDENT IS GONE, not merely supplemented. A body that appended
+    // the label while keeping "This factor" would pass a `toContain` check and
+    // still ship the unresolved deictic.
+    expect(r.grounded!.body.startsWith('This factor')).toBe(false);
+  });
+
+  it('⭐ ANTI-TEMPLATE: two different live runs yield different bodies', () => {
+    const a = liveEnrichment('session-a');
+    const b = liveEnrichment('session-b2');
+    const ra = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', topFactorId(a), a);
+    const rb = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', topFactorId(b), b);
+
+    expect(ra.grounded).not.toBeNull();
+    expect(rb.grounded).not.toBeNull();
+    expect(rb.grounded!.body).not.toBe(ra.grounded!.body);
+    expect(ra.grounded!.body).not.toContain(topFactorLabel(b));
+  });
+
+  it('grounds the other real-traffic code too', () => {
+    const en = liveEnrichment('session-a');
+    const r = selectGroundedSensitivityBody('DOMINANT_DRIVER_NO_FLIP', topFactorId(en), en);
+    expect(r.grounded).not.toBeNull();
+    expect(r.grounded!.body).toContain(topFactorLabel(en));
+    expect(r.grounded!.body.startsWith('One factor')).toBe(false);
+  });
+});
+
+describe('selectGroundedSensitivityBody — the claim boundary', () => {
+  /**
+   * The load-bearing honesty test. `_NO_FLIP` bodies exist because the run's own
+   * evidence proves no factor can move the WINNER. The grounded body must keep
+   * that framing intact — it may name the subject, never re-open the ranking.
+   */
+  it.each(['SENSITIVITY_ISOLATED_NO_FLIP', 'DOMINANT_DRIVER_NO_FLIP'] as const)(
+    '%s introduces no flip verb',
+    (code) => {
+      const en = liveEnrichment('session-a');
+      const r = selectGroundedSensitivityBody(code, topFactorId(en), en);
+      expect(r.grounded).not.toBeNull();
+      expect(r.grounded!.body).not.toMatch(/\bflip\b/i);
+    },
+  );
+
+  it('POSITIVE CONTROL: the flip-verb probe genuinely fires on a flip body', () => {
+    // Without this the assertion above could pass because the regex is inert.
+    expect(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED).toMatch(/\bflip\b/i);
+  });
+
+  it('adds no proposition — the grounded body preserves the constant\'s tail verbatim', () => {
+    const en = liveEnrichment('session-a');
+    const code = 'SENSITIVITY_ISOLATED_NO_FLIP';
+    const r = selectGroundedSensitivityBody(code, topFactorId(en), en);
+    // Everything after the substituted opening clause is the producer-reviewed
+    // sentence, byte-for-byte. This is what makes "resolves a pronoun, adds no
+    // claim" a checkable property rather than a stated intention.
+    const tail = BODY_BY_RATIONALE[code].slice('This factor moves the result more than any other.'.length);
+    expect(r.grounded!.body.endsWith(tail)).toBe(true);
+  });
+
+  it('names no option and no number', () => {
+    const en = liveEnrichment('session-a');
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', topFactorId(en), en);
+    expect(r.grounded!.body).not.toMatch(/\d/);
+  });
+});
+
+describe('selectGroundedSensitivityBody — the honest empties', () => {
+  it('refuses when the lens carried no subject factor', () => {
+    const en = liveEnrichment('session-a');
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', null, en);
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('no_subject_factor');
+  });
+
+  it('refuses when the subject id resolves to no labelled row', () => {
+    const en = liveEnrichment('session-a');
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_not_present', en);
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('no_factor_label');
+  });
+
+  it('refuses a rationale code that declares no grounded form', () => {
+    const en = liveEnrichment('session-a');
+    const r = selectGroundedSensitivityBody('CONFIDENCE_NEEDS_WORK', topFactorId(en), en);
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('no_grounded_form');
+  });
+
+  it('refuses an ungroundable label rather than shipping it', () => {
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_x', {
+      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'Margin above 0.78 threshold' }],
+    });
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('not_composable');
+  });
+
+  it('refuses a label long enough to breach the body cap', () => {
+    const r = selectGroundedSensitivityBody('SENSITIVITY_ISOLATED_NO_FLIP', 'fac_x', {
+      factor_sensitivity: [{ factor_id: 'fac_x', factor_label: 'L'.repeat(300) }],
+    });
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('not_composable');
+  });
+});
+
+describe('selectGroundedSensitivityBody — drift guard on the borrowed copy', () => {
+  /**
+   * ⚠ THE ANTI-MIRROR GUARD. The substitution is expressed as an EXPECTED
+   * OPENING CLAUSE plus its grounded replacement. If someone edits
+   * `BODY_BY_RATIONALE` — which lives in another module and is reviewed on its
+   * own terms — the expected clause stops matching and this module REFUSES
+   * (falling back to the constant) instead of silently grounding the wrong
+   * sentence or mangling a rewritten one.
+   *
+   * This test is the LOUD half: at rest, every declared code must still match
+   * its constant, so a copy edit turns this RED rather than turning the feature
+   * quietly off in production.
+   */
+  it('every declared substitution still matches its constant', () => {
+    const en = liveEnrichment('session-a');
+    const declared = [
+      'FLIP_RISK_ISOLATED',
+      'FLIP_RISK_CORRELATED',
+      'DOMINANT_DRIVER',
+      'SENSITIVITY_ISOLATED_NO_FLIP',
+      'DOMINANT_DRIVER_NO_FLIP',
+    ] as const;
+    for (const code of declared) {
+      const r = selectGroundedSensitivityBody(code, topFactorId(en), en);
+      expect(r.refusalReason, `${code} no longer matches its constant`).toBeNull();
+      expect(r.grounded, `${code} produced no grounded body`).not.toBeNull();
+    }
+  });
+
+  /**
+   * ⚠ A PRE-EXISTING DEFECT THIS LANE FOUND AND DID NOT PAPER OVER.
+   *
+   * `SENSITIVITY_CORRELATED_NO_FLIP`'s constant is **312 characters** — already
+   * ABOVE the 300-char `BODY_MAX`, so `phase3-blocks.ts` truncates it in
+   * production TODAY, mid-sentence. Grounding makes it longer still, so this
+   * module refuses it on the cap and the caller keeps the (truncated) constant:
+   * behaviour is byte-identical to today for that code.
+   *
+   * The refusal is PINNED here rather than routed around, because the tempting
+   * "fix" is to raise this module's cap — which would ship a body the block then
+   * truncates, moving the damage instead of removing it. The copy itself lives
+   * in `compose/lens-selector.ts` and is reviewed on its own terms; shortening
+   * it is a copy change for that owner, and it is reported, not smuggled.
+   *
+   * It never fired in the 45-capture census, so nothing user-visible turns on it.
+   * This test REDs if the constant is shortened — at which point the code can
+   * simply be added to the list above.
+   */
+  it('SENSITIVITY_CORRELATED_NO_FLIP refuses: its constant already exceeds BODY_MAX', () => {
+    const en = liveEnrichment('session-a');
+    expect(BODY_BY_RATIONALE.SENSITIVITY_CORRELATED_NO_FLIP.length).toBeGreaterThan(
+      GROUNDED_SENSITIVITY_BODY_MAX,
+    );
+    const r = selectGroundedSensitivityBody('SENSITIVITY_CORRELATED_NO_FLIP', topFactorId(en), en);
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('not_composable');
+  });
+
+  it('the cap is bounded below the block cap so truncation cannot eat the name', () => {
+    expect(GROUNDED_SENSITIVITY_BODY_MAX).toBeLessThanOrEqual(300);
+  });
+});
+
+// ============================================================================
+// ⭐ THE WIRING PROOF.
+//
+// Last round's lesson, applied before it could bite again: a unit-tested pure
+// module is worth nothing if the call site never reaches it, and every
+// pre-existing suite can stay green while the new branch is dead. So the
+// emitted BLOCK is asserted here, through the real `buildLensSurface`, on a
+// committed LIVE capture — not on a fixture this lane authored.
+// ============================================================================
+
+describe('wiring — the emitted coaching block names the factor', () => {
+  const CTX = {
+    created_at: '2026-08-13T00:00:00.000Z',
+    graph_hash_at_generation: 'gh_a1b2c3d4e5f60001',
+  };
+
+  function factFrom(en: Record<string, unknown>): RunAnalysisHandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: 'scen-test',
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis.',
+        graph_hash_at_run: CTX.graph_hash_at_generation,
+        enrichment: en,
+      },
+    } as unknown as RunAnalysisHandlerFact;
+  }
+
+  it('ARM 1 — a live capture selecting this lens ships the factor by name', () => {
+    const en = liveEnrichment('session-b2');
+    const surface = buildLensSurface(factFrom(en), CTX as never, null);
+
+    expect(surface).not.toBeNull();
+    expect(surface!.selection.lens).toBe('sensitivity_flip_risk');
+
+    // The subject the selector chose, resolved to the producer's own label.
+    const subjectId = surface!.selection.subjectRef!.id;
+    const row = (en.factor_sensitivity as { factor_id: string; factor_label: string }[]).find(
+      (r) => r.factor_id === subjectId,
+    )!;
+
+    // Identity-bound: the label of the SUBJECT the selector named.
+    expect(surface!.suggestion.body).toContain(row.factor_label);
+    // …and the unresolved deictic is gone.
+    expect(surface!.suggestion.body).not.toContain('a single factor that could tip');
+  });
+
+  it('ARM 2 — an enrichment with no labelled subject falls back to today\'s copy', () => {
+    // Same capture, labels stripped: the selector still fires (it reads
+    // flip_risk_category, not the label), so this isolates the GROUNDING.
+    const en = liveEnrichment('session-b2');
+    const stripped = {
+      ...en,
+      factor_sensitivity: (en.factor_sensitivity as Record<string, unknown>[]).map((r) => {
+        const { factor_label: _drop, ...rest } = r;
+        return rest;
+      }),
+    };
+    const surface = buildLensSurface(factFrom(stripped), CTX as never, null);
+
+    expect(surface).not.toBeNull();
+    expect(surface!.selection.lens).toBe('sensitivity_flip_risk');
+    // Degrades to the constant — never to a worse sentence, never to no card.
+    expect(surface!.suggestion.body).toBe(BODY_BY_RATIONALE[surface!.selection.rationaleCode]);
+  });
+});
+
+describe('drift guard — the RUNTIME refusal arm, exercised', () => {
+  /**
+   * ⭐ THIS TEST EXISTS BECAUSE A MUTANT SURVIVED.
+   *
+   * Deleting the `startsWith` check left all 18 tests green: at rest every
+   * declared opening matches, so the guard's refusal arm was unreachable and
+   * therefore unverified — the module claimed "fail-safe at runtime" on the
+   * strength of a branch nothing executed. Measured, not assumed.
+   *
+   * Injecting a DRIFTED copy bank exercises it: the constant no longer starts
+   * with the declared opening, so the module must refuse rather than ground a
+   * sentence it no longer recognises (or splice a clause onto the wrong tail).
+   */
+  it('refuses when the borrowed copy no longer starts with the declared opening', () => {
+    const en = liveEnrichment('session-a');
+    const drifted = {
+      ...BODY_BY_RATIONALE,
+      SENSITIVITY_ISOLATED_NO_FLIP: 'Someone rewrote this sentence entirely.',
+    };
+
+    const r = selectGroundedSensitivityBody(
+      'SENSITIVITY_ISOLATED_NO_FLIP',
+      topFactorId(en),
+      en,
+      drifted,
+    );
+
+    expect(r.grounded).toBeNull();
+    expect(r.refusalReason).toBe('copy_drifted');
+  });
+
+  it('POSITIVE CONTROL: the same call grounds against the undrifted bank', () => {
+    // Proves the refusal above is the DRIFT, not the injection mechanism —
+    // without this, a seam that always refused would look like a working guard.
+    const en = liveEnrichment('session-a');
+    const r = selectGroundedSensitivityBody(
+      'SENSITIVITY_ISOLATED_NO_FLIP',
+      topFactorId(en),
+      en,
+      BODY_BY_RATIONALE,
+    );
+    expect(r.refusalReason).toBeNull();
+    expect(r.grounded).not.toBeNull();
+  });
+});
