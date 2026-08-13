@@ -383,10 +383,29 @@ describe('MIXED CLAUSE — one entity bounded, another protected in the same mes
 // ⛔ NOT FIXED HERE, DELIBERATELY. An outright-protection lookahead repairs
 // every case below and then flips 7 genuine bounds back to the ORIGINAL lie —
 // two rounds, each closing one direction and opening the other (trap 22f). The
-// honest move is to PIN the gap, not to narrow it: this set is asserted
-// EXACTLY, so the suite stays green for the RIGHT reason and REDs if the class
-// GROWS (a new falsehood) or SHRINKS (someone fixed it, and this pin plus the
-// comment in protection-scope.ts must be retired together).
+// honest move is to PIN the gap, not to narrow it.
+//
+// ⭐ THE SHAPE OF THE CLASS, measured four ways. Use this, not the ten strings,
+// to decide whether a case you are looking at is in it:
+//
+//   It fires iff a BOUNDED_CLAUSE comparator sits within 24 characters BEFORE
+//   a digit, inside one comma-joined protective clause. A bare trailing
+//   number escapes.
+//
+// Confirmed: comparator-bearing 10/10 fire · the same ten with the comparator
+// stripped 0/10 · bare trailing numbers 0/2 (the contrast control below) ·
+// comparator more than 24 characters from the digit 0/2.
+//
+// ⚠⚠ WHAT THIS PIN CANNOT DO — READ BEFORE TRUSTING IT.
+// It iterates a HARDCODED corpus, so it catches RECLASSIFICATION OF THESE
+// MESSAGES in either direction and NOTHING ELSE. It does NOT catch a new
+// falsehood outside the list. Measured: re-adding bare `to` to BOUNDED_CLAUSE
+// leaves this suite 48/48 GREEN while newly misreporting three real
+// protections absent from the set ("… we set it to 3 last week" and two more).
+// An earlier version of this comment claimed the suite "REDs if the class
+// GROWS" — it cannot, and that was the same overstatement class as the
+// monotonicity claim this mechanism exists to record. A gap mechanism whose
+// comment overstates its reach is the defect it was built to prevent.
 
 /** Outright protections that carry an incidental number in the same
  *  comma-joined clause. Every one of these is CURRENTLY MISREPORTED as an

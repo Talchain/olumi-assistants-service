@@ -236,10 +236,23 @@ const PROTECTION_CUE = new RegExp(
  *   "Do not touch Customer churn, it is at 3% and that is fine"
  *
  * flags as bounded, and the product answers "I could not tell which" about a
- * sentence that is not ambiguous at all. Measured 8/10 on the hand-written
- * comma corpus below (10/10 on the reviewer's independent one); at the merge
- * base those same inputs produced a TRUE sentence. **So catching a
- * construction CAN install a falsehood, and widening this list is not free.**
+ * sentence that is not ambiguous at all. At the merge base those same inputs
+ * produced a TRUE sentence. **So catching a construction CAN install a
+ * falsehood, and widening this list is not free.**
+ *
+ * ⭐ THE EXACT SHAPE OF THE GAP, measured four ways — worth more than the ten
+ * example strings, because it tells you immediately whether a case in front of
+ * you is in the class:
+ *
+ *   **It fires iff a BOUNDED_CLAUSE comparator sits within 24 characters
+ *   BEFORE a digit, inside one comma-joined protective clause. A bare
+ *   trailing number escapes.**
+ *
+ * Confirmed by execution: comparator-bearing 10/10 fire · the SAME ten with
+ * the comparator stripped 0/10 · bare trailing numbers 0/2 · comparator
+ * present but MORE than 24 characters from the digit 0/2. (An apparent 8/10
+ * vs 10/10 disagreement between two corpora resolved as corpus composition,
+ * not divergence, on this same discriminator.)
  *
  * ⛔ DO NOT "FIX" THIS WITH A THIRD PREDICATE. An outright-protection
  * lookahead was measured: it repairs all 10 comma cases, keeps all 10 twins
@@ -248,8 +261,18 @@ const PROTECTION_CUE = new RegExp(
  * direction and opening the other. That is CLAUDE.md trap 22f, and the exit is
  * not a better rule. The gap is therefore PINNED, not narrowed: see
  * `COMMA_CLAUSE_KNOWN_DROPPED` in
- * `__tests__/edit-graph-protected-bounded-reading.test.ts`, which asserts
- * EXACTLY that set so the suite REDs if it grows OR shrinks.
+ * `__tests__/edit-graph-protected-bounded-reading.test.ts`.
+ *
+ * ⚠ AND KNOW WHAT THAT PIN CAN AND CANNOT DO. It asserts an EXACT set over a
+ * HARDCODED corpus, so it detects RECLASSIFICATION OF THOSE MESSAGES — in
+ * either direction — and NOTHING ELSE. It does **not** detect a new falsehood
+ * outside the list. Measured: re-adding bare `to` here leaves the suite
+ * **48/48 GREEN** while newly misreporting three real protections that are
+ * absent from the set ("… we set it to 3 last week" and two more). So before
+ * widening this alphabet, probe the corpus by hand; the suite will not stop
+ * you. (An earlier version of this note claimed the pin "REDs if the class
+ * grows", which the filter cannot deliver — the same overstatement class as
+ * the monotonicity claim above, in the mechanism written to fix it.)
  *
  * Bare `to` was dropped after measuring: redundant against `no more than` /
  * `at`, and it collides with ordinary prose ("do not touch X, we set it to 3
