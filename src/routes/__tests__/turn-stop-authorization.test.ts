@@ -172,6 +172,58 @@ describe("recordExplicitTurnStop — identity and scenario ownership", () => {
     }
   });
 
+  // ⭐ THE ATTACK THE PROXY-LEVEL IDENTITY STRIP EXISTS TO STOP.
+  //
+  // Note what separates this from the test directly above: that one sends NO
+  // identity, this one sends a FORGED one. The handler honours a body `user_id`
+  // by design in every non-`verified` mode — that is the documented service
+  // carve-out, pinned at "the OWNER of an owned scenario can stop their own
+  // admitted turn" — so the ONLY thing standing between a browser and a
+  // stranger's Stop is whether the proxy lets a browser supply that field.
+  //
+  // Before the front-door removal this rung was ALREADY reachable without a
+  // JWT (unlike the turn rung, `/proxy/v5/turn/stop` never had a front door),
+  // so this case was open and no test pointed at it. It is driven through the
+  // REAL route, because the strip lives in the route and a handler-level call
+  // would bypass the very thing under test.
+  it("a FORGED body user_id sent through the REAL proxy route does NOT authorize a Stop", async () => {
+    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    const app: FastifyInstance = Fastify({ logger: false });
+    await proxyV5TurnRoute(app);
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn/stop",
+        headers: { origin: STAGING_ORIGIN, "content-type": "application/json" },
+        // No credential of any kind — just the owner's UUID, asserted.
+        payload: { scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER },
+      });
+      // Same indistinguishable refusal as every other unauthorized Stop, and —
+      // the load-bearing half — NOTHING was written.
+      expect(res.statusCode).toBe(404);
+      expect(markTurnStopped).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  // POSITIVE CONTROL for the test above: the same forged body, sent to the
+  // HANDLER directly, still authorizes. Without this the test above could pass
+  // because the handler had stopped honouring body identity entirely — a
+  // different change with a different blast radius (it would break the
+  // documented service-caller carve-out). This pins that the strip is a
+  // PROXY-boundary policy, exactly as intended, and that the two paths differ.
+  it("POSITIVE CONTROL: the same forged body DOES authorize when sent straight to the handler (service seam unchanged)", async () => {
+    ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    const reply = await recordExplicitTurnStop(
+      req({ scenario_id: SCENARIO, turn_id: TURN, user_id: OWNER }),
+      "req-service-seam-carveout",
+    );
+    expect(reply.status).toBe(200);
+    expect(markTurnStopped).toHaveBeenCalled();
+  });
+
   // The ownership ORACLE being down must not open the door. Fail CLOSED, and
   // it matches the turn route: when the oracle is down no turn can be admitted
   // either, so no admissible turn loses its Stop.

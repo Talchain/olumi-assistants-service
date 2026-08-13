@@ -31,12 +31,8 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { config } from "../config/index.js";
-import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
+import { log } from "../utils/telemetry.js";
 import { ROUTE_TIMEOUT_MS, DRAFT_REQUEST_BUDGET_MS } from "../config/timeouts.js";
-import {
-  buildSignInRequiredError,
-  extractJwtCandidate,
-} from "../orchestrator/user-identity.js";
 import { recordExplicitTurnStop } from "./turn-stop.js";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +58,74 @@ export const ALLOWED_REQUEST_HEADERS = [
   // the injected x-olumi-assist-key is checked FIRST by the auth plugin.
   "authorization",
 ] as const;
+
+/**
+ * Serialise a browser-supplied turn body for the internal call, with the
+ * caller-asserted `user_id` identity extension REMOVED.
+ *
+ * ── WHY THIS EXISTS, AND WHY IT IS THE LOAD-BEARING PART ────────────────────
+ * This proxy admits unauthenticated visitors, so that a tester can open the
+ * staging URL and use the product without signing in. On its own, admitting
+ * them would be strictly WORSE than refusing them: `resolveUserIdentity`
+ * answers `service_legacy` for a JWT-less caller, and in every mode except
+ * `verified`, `authorizeScenarioOwnership` sets
+ * `effectiveUserId = claimedUserId` — the caller-supplied body `user_id`. So
+ * "anyone may send a turn" would have meant "anyone may send a turn AS ANYONE",
+ * which is exactly the hole the 2026-08-12 flip closed.
+ *
+ * Removing that field here is what keeps it closed. An anonymous caller can
+ * then only ever be anonymous, and `preflightEnsureScenario` does the rest: it
+ * REFUSES an anonymous caller on an owned scenario (IDOR fail-closed) and
+ * carves out unowned GUEST scenarios by design. Identity on this surface now
+ * comes from ONE place — a verified JWT — and from nowhere else.
+ *
+ * The strip is UNCONDITIONAL, not "when there is no JWT". In `verified` mode
+ * the JWT `sub` already overrides any body `user_id`, so this changes no
+ * behaviour for a signed-in caller; making it unconditional means the
+ * guarantee does not DEPEND on that override continuing to hold, and a future
+ * change to the override cannot silently reopen the seam.
+ *
+ * Scope, derived rather than assumed: `body.user_id` is the ONLY channel that
+ * can assert identity on the turn seam. `parseRequestExtensions`
+ * (orchestrator-v5/boundary/request-extensions.ts) reads that key and no other,
+ * and `x-user-id` — which this proxy DOES forward — has no reader anywhere in
+ * `src/` outside comments and the CORS/forwarding allowlists (swept with a
+ * contrast control: `authorization` returns nine readers).
+ *
+ * EXPORTED for the streamed sibling and used by all three browser rungs, so
+ * there is ONE identity policy for this surface rather than three. A second
+ * copy would be CLAUDE.md trap 12 with a security blast radius — and the
+ * asymmetry it would create is not hypothetical: the Stop rung never had the
+ * front door the other two did.
+ */
+export function serialiseProxiedBodyWithoutClaimedIdentity(body: unknown): string {
+  let value: unknown = body;
+
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      // Not JSON we can inspect — forward it verbatim, exactly as this route
+      // did before the strip existed. The internal route is the parser of
+      // record and will reject it. A body that does not parse also cannot
+      // carry a top-level `user_id` for the extension parser to read, so
+      // nothing escapes through here.
+      return body as string;
+    }
+  }
+
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return JSON.stringify(value ?? {});
+  }
+
+  // Copy-then-delete rather than destructuring: a `{ user_id: _unused, ...rest }`
+  // rest-pattern trips `@typescript-eslint/no-unused-vars`, and lint runs
+  // FIRST in the required check — a green test suite says nothing about a
+  // step that gates it.
+  const withoutIdentity: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  delete withoutIdentity.user_id;
+  return JSON.stringify(withoutIdentity);
+}
 
 /** Response headers safe to propagate back to the browser. */
 const SAFE_RESPONSE_HEADERS = [
@@ -235,31 +299,55 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
 
   // State the auth posture of this deployment out loud, at boot.
   //
-  // With CEE_REQUIRE_USER_JWT off, this route accepts turns that carry NO
-  // caller identity whatsoever. The origin allowlist above does not change
-  // that: Origin is a browser-only defence and any non-browser client can
-  // send whatever Origin it likes. Owned scenarios are still protected by the
-  // pre-flight ownership check (build-turn-context.ts), but GUEST scenarios
-  // (scenarios.user_id IS NULL) have no owner to check against, so anyone
-  // holding a guest scenario's UUID can read its conversation and append
-  // turns to it.
+  // ⚠ THIS WARNING USED TO BE GATED ON `requireUserJwt !== true`, and leaving
+  // it that way would have been a broken alarm of the worst kind: the removal
+  // of the front door makes "unauthenticated turns are ACCEPTED" true in BOTH
+  // postures, so a flag-gated warning would have fallen SILENT at the exact
+  // moment its sentence became unconditional. Its own negative-control test
+  // would have certified that silence. The condition moved; the disclosure
+  // must move with it.
   //
-  // This was reported twice by independent reviewers before anyone noticed,
-  // because nothing in the running system ever said it. A posture this open
-  // should be visible in the boot log of every environment that has it, so
-  // that turning it off is a decision someone makes rather than one that
-  // silently persists. Non-fatal by design: it is the accepted PoC posture,
-  // not a misconfiguration.
+  // This route accepts turns that carry NO caller identity. The origin
+  // allowlist above does not change that: Origin is a browser-only defence and
+  // any non-browser client can forge it. Owned scenarios are still protected
+  // by the pre-flight ownership check (build-turn-context.ts) — and, since the
+  // proxy strips the caller-asserted `user_id`, an anonymous caller cannot
+  // present themselves as an owner. But GUEST scenarios (user_id IS NULL) have
+  // no owner to check against, so anyone holding a guest scenario's UUID can
+  // read its conversation and append turns to it.
+  //
+  // The posture was reported twice by independent reviewers before anyone
+  // noticed, because nothing in the running system ever said it. Non-fatal by
+  // design: it is the accepted PoC posture, not a misconfiguration.
+  log.warn(
+    {
+      guest_turns_accepted: true,
+      require_user_jwt: config.auth?.requireUserJwt === true,
+      originCount: allowedOrigins.size,
+    },
+    "[proxy-v5] AUTH POSTURE: unauthenticated turns are ACCEPTED — this proxy admits a turn " +
+      "with no credential at all, by design, so a visitor can use the product without signing in. " +
+      "Origin is not authentication — a non-browser client can forge it. Guest scenarios " +
+      "(user_id IS NULL) are readable and writable by anyone holding the scenario UUID. " +
+      "Owned scenarios remain protected by the pre-flight ownership check, and the caller-asserted " +
+      "user_id is stripped from every browser body, so an anonymous caller cannot claim to be one.",
+  );
+
+  // The flag still discriminates — it just discriminates about something
+  // else now. With it OFF, a presented Bearer is never parsed, so a SIGNED-IN
+  // user is anonymous to the ownership check and is refused on their own
+  // scenario. That is a distinct, quieter failure than the one above and it
+  // needs its own line, or a deployment that silently breaks every signed-in
+  // user says nothing at boot about why.
   if (config.auth?.requireUserJwt !== true) {
     log.warn(
       {
         require_user_jwt: false,
         originCount: allowedOrigins.size,
       },
-      "[proxy-v5] AUTH POSTURE: unauthenticated turns are ACCEPTED (CEE_REQUIRE_USER_JWT is off). " +
-        "Origin is not authentication — a non-browser client can forge it. Guest scenarios " +
-        "(user_id IS NULL) are readable and writable by anyone holding the scenario UUID. " +
-        "Owned scenarios remain protected by the pre-flight ownership check.",
+      "[proxy-v5] AUTH POSTURE: user JWTs are NOT verified (CEE_REQUIRE_USER_JWT is off). " +
+        "A presented Bearer is never parsed, so a signed-in caller is anonymous to the ownership " +
+        "pre-flight and will be refused on their OWN scenario. Turn it on to recognise signed-in users.",
     );
   }
 
@@ -307,32 +395,33 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // 2.5. Flag-gated required-login front door (login 3.4 CEE-half,
-    // CEE_REQUIRE_USER_JWT default OFF — dormant today). This proxy is the
-    // browser-facing turn surface, so "this is a browser request" is
-    // structural truth HERE — no request-header trust involved. When the
-    // flag is on, a turn without a JWT-shaped Authorization header is
-    // refused with the same typed recoverable sign_in_required
-    // BoundaryError the internal route emits for invalid/expired tokens,
-    // so the UI sees one wire shape for "sign in required". Tokens that
-    // ARE present are verified downstream in the shared pre-flight
-    // (runPreFlight → resolveUserIdentity), which derives user identity
-    // from the verified `sub`. Direct key-authed service callers hitting
-    // /orchestrate/v2/turn are NOT affected by this check — their
-    // carve-out is documented in src/orchestrator/user-identity.ts.
-    if (config.auth?.requireUserJwt === true && extractJwtCandidate(request.headers.authorization) === null) {
-      log.warn({ requestId }, "[proxy-v5] Rejected: sign-in required (no user JWT presented)");
-      emit(TelemetryEvents.UserJwtRefused, {
-        request_id: requestId,
-        reason: "missing_token",
-        via_browser_proxy: true,
-      });
-      const cors = buildCorsHeaders(origin as string);
-      for (const [k, v] of Object.entries(cors)) {
-        reply.header(k, v);
-      }
-      return reply.code(401).send(buildSignInRequiredError("missing_token", requestId));
-    }
+    // 2.5. THE REQUIRED-LOGIN FRONT DOOR USED TO BE HERE. It is deliberately
+    // gone, and what replaced it is the body strip at step 5.
+    //
+    // It refused any turn whose `Authorization` header was not JWT-SHAPED when
+    // CEE_REQUIRE_USER_JWT was on. Note what it actually tested: the presence
+    // and shape of one header. It knew nothing about the scenario, its owner,
+    // or the body, and it ran before the body was parsed — so a guest never
+    // reached the ownership pre-flight that would have ADMITTED them, because
+    // a guest scenario has a NULL owner and `preflightEnsureScenario` carves
+    // that case out by design. The gate was refusing people the ownership
+    // model already had an answer for.
+    //
+    // Keeping it meant guest use and signed-in use were mutually exclusive by
+    // configuration: with the flag on a visitor got 401 `sign_in_required`,
+    // and with it off a signed-in user got 422 on their OWN scenario (the
+    // Bearer is never parsed in that posture, so they are anonymous to the
+    // ownership check) AND the forgeable body-`user_id` channel reopened.
+    // Removing this gate while STRIPPING that field serves both populations
+    // and leaves the forgery closed — which neither value of the flag could do.
+    //
+    // The flag itself is untouched and still governs what it should: whether a
+    // PRESENTED token is verified downstream (`resolveUserIdentity`), and
+    // therefore whether a signed-in user is recognised as themselves. An
+    // invalid or expired token is still refused there with the same typed
+    // recoverable `sign_in_required` BoundaryError, so the UI's one wire shape
+    // for "sign in required" still exists — it now means "your token is bad",
+    // never "you have no token".
 
     // 3. Build internal request headers
     const internalHeaders: Record<string, string> = {};
@@ -358,10 +447,12 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     // continues until ROUTE_TIMEOUT_MS kills it; this is acceptable because
     // CEE's own budgets (V5 DRAFT_REQUEST_BUDGET_MS / LLM timeouts) terminate
     // the LLM call independently.
-    const bodyString =
-      typeof request.body === "string"
-        ? request.body
-        : JSON.stringify(request.body);
+    // 5. Serialise the body WITHOUT the caller-asserted identity extension.
+    // This is what makes admitting unauthenticated callers safe — see the
+    // helper's own note. It is not an optimisation and it is not hygiene:
+    // delete it and this route grants any visitor the ability to act as any
+    // user they can name by UUID.
+    const bodyString = serialiseProxiedBodyWithoutClaimedIdentity(request.body);
 
     const injectPromise = app.inject({
       method: "POST",
@@ -577,6 +668,27 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     }
     for (const [k, v] of Object.entries(buildCorsHeaders(origin as string))) {
       reply.header(k, v);
+    }
+
+    // The SAME identity policy as the two turn rungs, and this one closes a
+    // channel that was open BEFORE the front door was removed.
+    //
+    // This rung never HAD the front door: it was added under 2.236 with origin
+    // + rate limit as its only ingress checks, on the reasoning that
+    // authorization belongs in the shared handler. That is right, and the
+    // handler does run the same ownership pre-flight — but the handler honours
+    // a body `user_id` as the identity whenever the mode is not `verified`
+    // (the documented service-caller carve-out). So a JWT-less browser caller
+    // could assert `user_id: <owner>` and stop a stranger's admitted turn,
+    // costing it its graph write — the exact harm 2.236 exists to prevent,
+    // reached through the one door that check does not cover. Measured at
+    // 219490ec: 200 and a fence row written.
+    //
+    // `recordExplicitTurnStop` reads `req.body`, so the claim is removed from
+    // the request itself rather than from a serialised copy. Direct service
+    // callers on the /orchestrate sibling are untouched and keep the carve-out.
+    if (request.body !== null && typeof request.body === "object") {
+      delete (request.body as Record<string, unknown>).user_id;
     }
 
     const result = await recordExplicitTurnStop(request, requestId);

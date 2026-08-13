@@ -446,7 +446,16 @@ describe("POST /proxy/v5/turn", () => {
       expect(res.statusCode).toBe(200);
     });
 
-    it("flag ON: a turn with NO Authorization gets the typed recoverable 401 sign_in_required (never forwarded)", async () => {
+    // ── GUEST ADMISSION (acceptance 1) ────────────────────────────────────
+    // These two tests replace the pair that pinned the front-door 401. The
+    // front door was a presence-and-shape check on `Authorization` ALONE: it
+    // knew nothing about the scenario or its owner, and it ran before the body
+    // was parsed, so a guest never reached the ownership pre-flight that would
+    // have admitted them (a guest scenario has a NULL owner — ALLOW, pinned by
+    // preflight-ensure-scenario-ownership.test.ts:75). Removing it is what lets
+    // an unauthenticated visitor use the product. What keeps that SAFE is the
+    // identity strip below, NOT this gate — see the strip suite.
+    it("GUEST (acceptance 1): flag ON, NO Authorization — the turn is FORWARDED, not refused", async () => {
       mockConfig.auth.requireUserJwt = true;
       let internalCalled = false;
 
@@ -464,35 +473,17 @@ describe("POST /proxy/v5/turn", () => {
         headers: {
           origin: STAGING_ORIGIN,
           "content-type": "application/json",
-          "x-user-id": "user-uuid-123",
-          "x-request-id": "req-jwt-required-1",
+          "x-request-id": "req-guest-admitted-1",
         },
         payload: SAMPLE_PAYLOAD,
       });
       mockConfig.auth.requireUserJwt = false;
 
-      expect(internalCalled).toBe(false);
-      expect(res.statusCode).toBe(401);
-      // Browser must be able to read the refusal
-      expect(res.headers["access-control-allow-origin"]).toBe(STAGING_ORIGIN);
-      const body = JSON.parse(res.body);
-      expect(body).toEqual({
-        error: "INGRESS_CONTRACT_VIOLATION",
-        boundary: "B1",
-        direction: "ingress",
-        validator: "user_jwt",
-        details: {
-          reason: "sign_in_required",
-          code: "sign_in_required",
-          recoverable: true,
-          auth_reason: "missing_token",
-        },
-        request_id: "req-jwt-required-1",
-        retryable: false,
-      });
+      expect(internalCalled).toBe(true);
+      expect(res.statusCode).toBe(200);
     });
 
-    it("flag ON: a non-JWT-shaped Bearer token is refused (no opaque-token smuggling)", async () => {
+    it("GUEST: flag ON, a non-JWT-shaped Bearer is forwarded too (no front door left to refuse it)", async () => {
       mockConfig.auth.requireUserJwt = true;
       let internalCalled = false;
 
@@ -516,9 +507,12 @@ describe("POST /proxy/v5/turn", () => {
       });
       mockConfig.auth.requireUserJwt = false;
 
-      expect(internalCalled).toBe(false);
-      expect(res.statusCode).toBe(401);
-      expect(JSON.parse(res.body).details.auth_reason).toBe("missing_token");
+      // An opaque token is not an identity claim the proxy can act on, and it
+      // is no longer an identity claim it REFUSES on either. `resolveUserIdentity`
+      // downstream sees no JWT candidate and the caller stays anonymous — which,
+      // with the body strip, is the only thing they can be.
+      expect(internalCalled).toBe(true);
+      expect(res.statusCode).toBe(200);
     });
 
     it("flag ON: a JWT-shaped Authorization is forwarded to the internal route for verification", async () => {
@@ -578,6 +572,137 @@ describe("POST /proxy/v5/turn", () => {
       expect(capturedAssistKey).toBe(TEST_ASSIST_KEY);
       expect(capturedAuthorization).toBe("Bearer test-only-forged-token.abc.def");
     });
+  });
+
+  // ---- Client-asserted identity is stripped from every browser body ----
+  //
+  // THIS IS THE SUITE THAT MAKES GUEST ADMISSION SAFE. With the front door
+  // removed, an anonymous caller reaches `resolveUserIdentity`, which (flag ON,
+  // no JWT) returns `service_legacy` — and in every mode EXCEPT `verified`,
+  // `authorizeScenarioOwnership` sets `effectiveUserId = claimedUserId`, the
+  // caller-supplied body `user_id`. So without the strip, "anyone may send a
+  // turn" would mean "anyone may send a turn AS ANYONE", which is strictly
+  // worse than the posture we started from.
+  //
+  // The body `user_id` extension is the ONLY channel that can assert identity
+  // here, derived rather than assumed: `parseRequestExtensions` reads
+  // `body.user_id` and nothing else, and `x-user-id` — which this proxy DOES
+  // forward — has no reader anywhere on the turn seam (swept with a contrast
+  // control: `authorization` returns 9 readers, `x-user-id` returns none
+  // outside comments and the CORS/forwarding allowlists).
+  describe("client-asserted identity stripped from the proxied body", () => {
+    const VICTIM_USER_ID = "3f7c1a92-5d84-4b0e-9c31-2a6f8e5d1b47";
+
+    it("ATTACK (acceptance 3): an anonymous caller's body user_id NEVER reaches the internal turn route", async () => {
+      mockConfig.auth.requireUserJwt = true;
+      let capturedBody: any;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedBody = req.body;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+        },
+        // The forgery: no credential of any kind, and an identity asserted in
+        // the one field the ownership pre-flight would otherwise honour.
+        payload: { ...SAMPLE_PAYLOAD, user_id: VICTIM_USER_ID },
+      });
+      mockConfig.auth.requireUserJwt = false;
+
+      expect(res.statusCode).toBe(200);
+      // Bound by IDENTITY of the field, not by a value predicate: the key must
+      // be absent, so `parseRequestExtensions` yields userId === null and the
+      // caller is anonymous to `preflightEnsureScenario` — which then REFUSES
+      // them on any owned scenario (pinned at
+      // preflight-ensure-scenario-ownership.test.ts:117) and admits them only
+      // on an unowned one (:75). That composition is acceptance arms 3 and 4.
+      expect(capturedBody).not.toHaveProperty("user_id");
+      expect(Object.keys(capturedBody)).not.toContain("user_id");
+    });
+
+    it("the strip removes ONLY the identity field — every other turn field survives intact", async () => {
+      // Without this, a mutant that discarded the whole body would satisfy the
+      // attack test above while destroying the product.
+      let capturedBody: any;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedBody = req.body;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+        },
+        payload: { ...SAMPLE_PAYLOAD, user_id: VICTIM_USER_ID, graph_state: { nodes: [] } },
+      });
+
+      expect(capturedBody).toEqual({
+        ...SAMPLE_PAYLOAD,
+        graph_state: { nodes: [] },
+      });
+    });
+
+    it("a SIGNED-IN caller's body user_id is stripped too — the browser is never an identity channel", async () => {
+      // Defence in depth rather than a behaviour change: in `verified` mode the
+      // JWT `sub` already overrides any body `user_id`. Stripping regardless
+      // means the guarantee does not DEPEND on that override still holding, so
+      // a future change to the override cannot silently reopen this seam.
+      mockConfig.auth.requireUserJwt = true;
+      let capturedBody: any;
+      let capturedAuthorization: string | undefined;
+
+      app = buildApp({
+        internalHandler: (req: any, reply: any) => {
+          capturedBody = req.body;
+          capturedAuthorization = req.headers["authorization"] as string;
+          return reply.code(200).send({ blocks: [] });
+        },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/proxy/v5/turn",
+        headers: {
+          origin: STAGING_ORIGIN,
+          "content-type": "application/json",
+          authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.forged-test-signature",
+        },
+        payload: { ...SAMPLE_PAYLOAD, user_id: VICTIM_USER_ID },
+      });
+      mockConfig.auth.requireUserJwt = false;
+
+      expect(res.statusCode).toBe(200);
+      expect(capturedBody).not.toHaveProperty("user_id");
+      // Acceptance 2's proxy half: the credential itself still crosses intact,
+      // so the downstream verifier can do its job.
+      expect(capturedAuthorization).toBe(
+        "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.forged-test-signature",
+      );
+    });
+
+    // The third browser rung, `/proxy/v5/turn/stop`, is stripped by the same
+    // helper and its attack case is pinned END-TO-END against the real
+    // ownership predicate in turn-stop-authorization.test.ts ("a FORGED body
+    // user_id sent through the REAL proxy route…"), which asserts the refusal
+    // and that nothing was written — a stronger binding than observing the
+    // body here.
   });
 
   // ---- Response header propagation ----
@@ -673,7 +798,7 @@ describe("POST /proxy/v5/turn", () => {
   // ---- Body passthrough ----
 
   describe("body passthrough", () => {
-    it("forwards request body to internal route unchanged", async () => {
+    it("forwards request body to internal route unchanged (apart from the identity extension)", async () => {
       let capturedBody: any;
 
       app = buildApp({
@@ -712,40 +837,70 @@ describe("POST /proxy/v5/turn", () => {
   // does not accept them stays quiet, so the warning keeps meaning something.
 
   describe("auth-posture disclosure at registration", () => {
-    it("warns at boot that unauthenticated turns are accepted when the JWT gate is off", async () => {
+    async function postureWarnings(): Promise<Array<[any, string]>> {
       const { log } = await import("../../utils/telemetry.js");
-      vi.mocked(log.warn).mockClear();
-      mockConfig.auth.requireUserJwt = false;
-
-      app = buildApp();
-      await app.ready();
-
-      const warned = vi
+      return vi
         .mocked(log.warn)
-        .mock.calls.filter((c) => String(c[1]).includes("AUTH POSTURE"));
-      expect(warned).toHaveLength(1);
-      // The message must name the actual exposure, not just the flag.
-      expect(String(warned[0][1])).toContain("Guest scenarios");
-      expect(String(warned[0][1])).toContain("Origin is not authentication");
-      expect(warned[0][0]).toMatchObject({ require_user_jwt: false });
+        .mock.calls.filter((c) => String(c[1]).includes("AUTH POSTURE")) as Array<[any, string]>;
+    }
+
+    it("ALWAYS warns that unauthenticated turns are accepted — in BOTH flag postures", async () => {
+      // This assertion changed shape with the front door's removal, and the
+      // reason matters more than the assertion. The guest-acceptance warning
+      // used to be gated on the flag being OFF. Now that a JWT-less turn is
+      // admitted either way, a flag-gated warning would go SILENT precisely
+      // when its sentence became unconditionally true — and the old negative
+      // control would have certified that silence as correct. A disclosure
+      // whose condition no longer matches what it discloses is a broken alarm.
+      const { log } = await import("../../utils/telemetry.js");
+
+      for (const flag of [false, true]) {
+        vi.mocked(log.warn).mockClear();
+        mockConfig.auth.requireUserJwt = flag;
+        app = buildApp();
+        await app.ready();
+        await app.close();
+
+        const guest = (await postureWarnings()).filter((c) =>
+          c[1].includes("unauthenticated turns are ACCEPTED"),
+        );
+        expect(guest, `flag=${flag} must still disclose guest acceptance`).toHaveLength(1);
+        // It must name the actual exposure, not just the flag.
+        expect(guest[0][1]).toContain("Guest scenarios");
+        expect(guest[0][1]).toContain("Origin is not authentication");
+        expect(guest[0][0]).toMatchObject({ guest_turns_accepted: true, require_user_jwt: flag });
+      }
+      mockConfig.auth.requireUserJwt = false;
     });
 
-    it("NEGATIVE CONTROL: stays silent when the JWT gate is on", async () => {
-      // Without this, the assertion above would pass against a route that
-      // warns unconditionally — which would be a warning that carries no
-      // information about the deployment it is describing.
+    it("DISCRIMINATION: the JWT-verification line appears only when the gate is OFF", async () => {
+      // The warning above is unconditional, so on its own it carries no
+      // information about the deployment. This is the line that still does:
+      // with the gate off, a presented Bearer is never parsed and every
+      // SIGNED-IN user is refused on their own scenario. Without this pair a
+      // route that warned unconditionally about everything would pass.
       const { log } = await import("../../utils/telemetry.js");
+
+      vi.mocked(log.warn).mockClear();
+      mockConfig.auth.requireUserJwt = false;
+      app = buildApp();
+      await app.ready();
+      await app.close();
+      const whenOff = (await postureWarnings()).filter((c) =>
+        c[1].includes("user JWTs are NOT verified"),
+      );
+      expect(whenOff).toHaveLength(1);
+      expect(whenOff[0][1]).toContain("refused on their OWN scenario");
+
       vi.mocked(log.warn).mockClear();
       mockConfig.auth.requireUserJwt = true;
-
       app = buildApp();
       await app.ready();
       mockConfig.auth.requireUserJwt = false;
-
-      const warned = vi
-        .mocked(log.warn)
-        .mock.calls.filter((c) => String(c[1]).includes("AUTH POSTURE"));
-      expect(warned).toHaveLength(0);
+      const whenOn = (await postureWarnings()).filter((c) =>
+        c[1].includes("user JWTs are NOT verified"),
+      );
+      expect(whenOn).toHaveLength(0);
     });
   });
 });
