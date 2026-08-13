@@ -654,11 +654,55 @@ export function extractInterventionsForOption(
   for (const raw of allRaw) {
     const matchResult = matchInterventionToFactor(raw.target_text, nodes, edges, goalNodeId);
 
-    // Boost confidence if the matched factor is in the edge hints
+    // An edge hint says "this option and this factor are CONNECTED". A
+    // `match_type` says "the user's text NAMED this factor". They are two
+    // different questions, and this variable answers only the first — so it may
+    // suppress the path-to-goal question below, and nothing else.
+    //
+    // ⚠ It used to overwrite `match_type` with `exact_id` and `confidence` with
+    // `high`. That laundered a weak semantic guess into the strongest possible
+    // provenance claim, destroying the only evidence a downstream consumer had
+    // for distrusting the mapping — and it routed the value straight past
+    // `determineOptionStatus`'s resolved/unresolved rule, which counts ONLY
+    // exact_id and exact_label as resolved. Measured at CEE `51704f12`: "Cut
+    // price by 15%" against a graph whose only factor was "Churn Rate" emitted
+    // `churn := 0.102` stamped `match_type: exact_id, value_confidence: high,
+    // source: brief_extraction` (CLAUDE.md trap 21 — two questions under one
+    // field; trap 14 — an honest label overwritten by a false one).
+    //
+    // The confidence boost went with it: `matchInterventionToFactor` already
+    // returns "high" for BOTH exact limbs, so after the semantic refusal below
+    // the boost could never fire on a surviving branch. It is removed rather
+    // than left in — an unreachable guard is a branch no test can kill.
     const isHintedFactor = matchResult.node_id && hintedFactorIds.has(matchResult.node_id);
-    const effectiveConfidence = isHintedFactor && matchResult.confidence !== "high"
-      ? "high" as const  // Boost to high if hinted
-      : matchResult.confidence;
+
+    // ⭐ THE PROSE FALLBACK MAY NOT AUTHOR A USER LEVER FROM A GUESS.
+    //
+    // This whole block runs ONLY when the canonical record projection stated no
+    // magnitude for this option (`buildInterventionsFromV4Data` early-returns
+    // above whenever `v4Interventions` is non-empty, and `projector.ts` omits
+    // the key entirely for an option with no stated magnitude — "THE PROJECTOR
+    // INVENTS NOTHING HERE"). So every value emitted here is one the canonical
+    // layer had no warrant for, and the two paths are mutually exclusive: prose
+    // extraction can never recover a magnitude the canonical path would also
+    // have produced.
+    //
+    // `determineOptionStatus` already declares the rule — "Both exact_id AND
+    // exact_label matches count as resolved. Only semantic matches or unmatched
+    // targets block ready status" — but it applied it to STATUS while the VALUE
+    // path wrote the intervention regardless. The value now obeys the same rule.
+    // A semantic match becomes an unresolved target and a question, which is the
+    // honest shape: where the mapping cannot be determined, make the ambiguity
+    // the product rather than guessing (CLAUDE.md trap 22f).
+    if (matchResult.matched && matchResult.match_type === "semantic") {
+      unresolvedTargets.push(raw.target_text);
+      userQuestions.push(
+        `Which factor does "${raw.target_text}" refer to? We matched it to ` +
+          `"${matchResult.matched_node?.label ?? matchResult.node_id}", but we are not confident enough ` +
+          `to set a value from that.`
+      );
+      continue; // Do not emit intervention
+    }
 
     if (matchResult.matched && matchResult.node_id && raw.value) {
       const baseline = matchResult.matched_node?.observed_state?.value;
@@ -684,10 +728,13 @@ export function extractInterventionsForOption(
         finalValue = resolveRelativeValue(raw.value, baseline);
       }
 
+      // The match type and confidence are reported AS MEASURED. Only exact_id
+      // and exact_label reach this line (semantic refused above), and
+      // `matchInterventionToFactor` returns "high" for both.
       const targetMatch: TargetMatchT = {
         node_id: matchResult.node_id,
-        match_type: isHintedFactor ? "exact_id" : matchResult.match_type as "exact_id" | "exact_label" | "semantic",
-        confidence: effectiveConfidence,
+        match_type: matchResult.match_type as "exact_id" | "exact_label" | "semantic",
+        confidence: matchResult.confidence,
       };
 
       interventions[matchResult.node_id] = {
@@ -699,12 +746,6 @@ export function extractInterventionsForOption(
         reasoning: raw.original_segment,
       };
 
-      // Generate question if low confidence or no path to goal (unless boosted by hint)
-      if (effectiveConfidence === "low") {
-        userQuestions.push(
-          `Is "${raw.target_text}" correctly mapped to the factor "${matchResult.matched_node?.label || matchResult.node_id}"?`
-        );
-      }
       if (!matchResult.has_path_to_goal && !isHintedFactor) {
         userQuestions.push(
           `The factor "${matchResult.matched_node?.label || matchResult.node_id}" doesn't have a path to the goal. Is this correct?`
@@ -748,8 +789,16 @@ export function extractInterventionsForOption(
 
     // P0 FIX: Only create intervention if we matched an EXISTING factor
     // Never invent factor IDs that don't exist in the graph
-    if (!matchResult.matched || !matchResult.node_id) {
-      // No match found - add to unresolved targets, don't create fake factor ID
+    //
+    // ⭐ EXTENDED: a SEMANTIC match is refused for the same reason the numeric
+    // limb above refuses one — it names a factor the user's text did not name,
+    // and this path only runs where the canonical projection stated nothing.
+    // The categorical limb is the sharper case of the two: when it finds no
+    // default encoding it writes `value: 0` as a placeholder, so a semantic
+    // mis-match here does not merely set the wrong factor — it sets the wrong
+    // factor to ZERO, which the analysis reads as a deliberate lever position.
+    if (!matchResult.matched || !matchResult.node_id || matchResult.match_type === "semantic") {
+      // No usable match - add to unresolved targets, don't create fake factor ID
       unresolvedTargets.push(cat.target_text);
       userQuestions.push(
         `Which factor should "${cat.raw_categorical_value}" (${cat.target_text}) apply to?`
