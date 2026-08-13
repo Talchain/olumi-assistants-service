@@ -197,8 +197,21 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
     const failure = thrown as HandlerInvocationFailedError;
     expect(failure.cause_kind).toBe('analysis_not_ready');
     const nextStep = (failure.details as { next_step?: string }).next_step ?? '';
-    expect(nextStep, 'the copy must name the factor the user can fix').toContain('Migration Cost');
-    expect(nextStep.toLowerCase(), 'the copy must say what to do: state the unit/scale').toMatch(/unit|scale/);
+    expect(nextStep, 'the copy must name the factor the block is about').toContain('Migration Cost');
+    // ⚠ REPLACED 2026-08-13 (row 2.1091). This read
+    // `.toMatch(/unit|scale/)` under the intent "the copy must say what to do:
+    // state the unit/scale". Two problems, and the second is why it is replaced
+    // rather than deleted: (1) the copy no longer asks for a unit — the ask was
+    // measured INERT (`FactorScaleInfo.unit` is read by no predicate here) and
+    // the product declined its own requested answer; (2) after the rewrite the
+    // old regex still PASSED, on the substring "rescale" — a test agreeing with
+    // a contract it was no longer checking (trap 19).
+    expect(nextStep.toLowerCase(), 'the copy must not ask for the inert `unit` field').not.toMatch(
+      /\bunits?\b/,
+    );
+    expect(nextStep, 'the copy must own the limit rather than blame the model').toContain(
+      'a limit in how I prepare the analysis, not a verdict on your model',
+    );
   });
 
   it("⭐ (a2, round 5) the scaffold's OWN neutral must not un-strand a user value — it routes to the ask", async () => {

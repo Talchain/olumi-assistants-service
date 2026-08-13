@@ -133,11 +133,32 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
     if (!parsed.success) return;
     const graph = parsed.data;
 
-    // The run path's own reader for the SAME observed_state candidate on the
-    // SAME factor scale evidence. rule 1 (raw_value_used) → the raw_value.
+    // The run path's own reader for the SAME observed_state on the SAME factor
+    // scale evidence.
+    //
+    // ⚠ REPAIRED 2026-08-13 (row 2.1090). This block used to hand-write the
+    // candidate as `{ value: 0.4, raw_value: 200 }` and assert `200` — i.e. a
+    // literal COPY of `buildNeutralFactorValues`' construction rule, in the one
+    // test whose own header promises "derived here, never hardcoded". When that
+    // rule changed (a capless factor's `raw_value` is a DISPLAY magnitude, not a
+    // level, and carrying it into a synthesised placeholder blocked the whole
+    // analysis) the copy drifted and this test failed — a hand-maintained mirror
+    // behaving exactly as CLAUDE.md trap 12 says it will.
+    //
+    // Now derived from the factor node, with the fixture's scale posture pinned
+    // IN-TEST so the reference cannot silently stop meaning what it says.
     const factorScale = buildFactorScaleMap(graph.nodes).get("fac_price");
-    const expected = resolveRawInterventionValue({ value: 0.4, raw_value: 200 }, factorScale);
-    expect(expected.value).toBe(200);
+    expect(
+      factorScale?.cap,
+      "fixture precondition: fac_price is CAPLESS — that is what makes its raw_value a display magnitude rather than a level",
+    ).toBeUndefined();
+    const fac = graph.nodes.find((n) => n.id === "fac_price")!;
+    const observed = fac.observed_state as { value: number; raw_value?: number };
+    expect(observed.raw_value, "fixture precondition: the factor does carry a raw_value to drop").toBe(200);
+    // Capless ⇒ the scaffold's candidate is the framed value ALONE ⇒ rule
+    // `no_cap` ⇒ the value itself crosses the wire.
+    const expected = resolveRawInterventionValue({ value: observed.value }, factorScale);
+    expect(expected.value).toBe(observed.value);
 
     const outcome = scaffoldUnconfiguredOptions({
       options,
