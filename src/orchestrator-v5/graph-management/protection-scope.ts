@@ -56,6 +56,14 @@ import { USER_PROTECTED_ENTITY } from './reason-codes.js';
 export interface ProtectedEntity {
   readonly nodeId: string;
   readonly label: string;
+  /**
+   * ⭐ A SECOND, SEPARATE QUESTION — see BOUNDED_CLAUSE. True when EVERY
+   * protective clause naming this entity ALSO states a numeric bound, which
+   * makes the "leave it as it is" reading unsafe to ASSERT back to the user.
+   * It does NOT affect whether the entity is protected: the demotion is
+   * unchanged. It governs only what the copy is entitled to claim.
+   */
+  readonly boundedReading: boolean;
 }
 
 export interface ProtectionDemotionResult {
@@ -70,12 +78,24 @@ export interface ProtectionDemotionResult {
    * still render-safety-filters them before they reach prose.
    */
   readonly demotedEntityLabels: readonly string[];
+  /**
+   * The SUBSET of `demotedEntityLabels` whose protective clause also stated a
+   * numeric bound, i.e. the entities about which the product may NOT assert
+   * "you asked for this to stay as it is". Deduped, first-hit order.
+   *
+   * ⚠ A SEPARATE LIST, NOT A NARROWER ONE (CLAUDE.md trap 22b): the hold and
+   * the sentence guard two OPPOSITE harms. Holding a legitimate edit costs one
+   * confirm tap; asserting a false reading of the user's own words is a lie.
+   * They cannot share a window, so they do not share a predicate.
+   */
+  readonly boundedReadingLabels: readonly string[];
 }
 
 const NO_DEMOTION = (verdicts: readonly RefereeVerdict[]): ProtectionDemotionResult => ({
   verdicts,
   demotedIndices: [],
   demotedEntityLabels: [],
+  boundedReadingLabels: [],
 });
 
 // ---------------------------------------------------------------------------
@@ -172,6 +192,99 @@ const PROTECTION_CUE = new RegExp(
     .join('|'),
   'i',
 );
+
+/**
+ * ⭐⭐ THE SECOND QUESTION — "IS THE PROTECTIVE READING SAFE TO ASSERT?"
+ *
+ * `PROTECTION_CUE` above answers *"did the user ask for this to be left as it
+ * is?"* and is deliberately BROAD, because its error costs one confirm tap.
+ * That breadth is correct for the HOLD and CATASTROPHIC for a SENTENCE: the
+ * gate used the same cue to tell the user what they had said, and on
+ *
+ *   "Keep Customer churn below 3%."
+ *
+ * answered *"You asked for 'Customer churn' to stay as it is"* — the exact
+ * opposite of the constraint the user wrote, in a sentence that then went on
+ * to describe the change. `keep` is a cue for BOTH *preserve this* and
+ * *bound this*, so one list was deciding two things whose errors point in
+ * opposite directions (CLAUDE.md trap 21).
+ *
+ * This predicate is the split. A clause that states a NUMERIC BOUND cannot
+ * also be asking for the thing to stay as it is: "stay as it is" and "hit
+ * this number" are incompatible readings. Where both appear we assert
+ * NEITHER, and the copy says what the product DID instead (trap 22f — make
+ * the ambiguity the product rather than guessing better).
+ *
+ * ⚠ STRUCTURAL, NOT LEXICAL, AND DELIBERATELY NOT `hasConstraintMutationSignal`.
+ * The mutation warrant's constraint list answers a THIRD question (*did the
+ * user authorise a write?*) whose fail-safe direction is INVERTED — a false
+ * positive there silently rewrites the model. Widening it to cover the
+ * phrasings here would trade a lie for a silent write. Measured head to head
+ * on a 29-case corpus before either was written: message-level
+ * `hasConstraintMutationSignal` 24/29, this clause-scoped test 29/29. The five
+ * it missed were "at least 1%", "Leave X below 3%", "to no more than 3%",
+ * "at 3%" and the mixed clause (message-level cannot discriminate per entity).
+ *
+ * ⚠⚠ THIS PREDICATE IS **NOT** SAFE IN ONE DIRECTION. An earlier version of
+ * this comment claimed it was monotone — "a construction it misses keeps
+ * today's copy; every construction it catches makes the product assert LESS,
+ * so an incomplete list can never manufacture a NEW falsehood". **That claim
+ * is FALSE and was refuted by execution.** `CLAUSE_BOUNDARY` deliberately does
+ * not split on bare commas (list protections must stay in one clause), so an
+ * OUTRIGHT protection absorbs an INCIDENTAL number:
+ *
+ *   "Do not touch Customer churn, it is at 3% and that is fine"
+ *
+ * flags as bounded, and the product answers "I could not tell which" about a
+ * sentence that is not ambiguous at all. At the merge base those same inputs
+ * produced a TRUE sentence. **So catching a construction CAN install a
+ * falsehood, and widening this list is not free.**
+ *
+ * ⭐ THE EXACT SHAPE OF THE GAP, measured four ways — worth more than the ten
+ * example strings, because it tells you immediately whether a case in front of
+ * you is in the class:
+ *
+ *   **It fires iff a BOUNDED_CLAUSE comparator sits within 24 characters
+ *   BEFORE a digit, inside one comma-joined protective clause. A bare
+ *   trailing number escapes.**
+ *
+ * Confirmed by execution: comparator-bearing 10/10 fire · the SAME ten with
+ * the comparator stripped 0/10 · bare trailing numbers 0/2 · comparator
+ * present but MORE than 24 characters from the digit 0/2. (An apparent 8/10
+ * vs 10/10 disagreement between two corpora resolved as corpus composition,
+ * not divergence, on this same discriminator.)
+ *
+ * ⛔ DO NOT "FIX" THIS WITH A THIRD PREDICATE. An outright-protection
+ * lookahead was measured: it repairs all 10 comma cases, keeps all 10 twins
+ * and leaves the suite green — and then flips 7 genuine bounds carrying an
+ * outright verb back to the ORIGINAL lie. Two rounds, each closing one
+ * direction and opening the other. That is CLAUDE.md trap 22f, and the exit is
+ * not a better rule. The gap is therefore PINNED, not narrowed: see
+ * `COMMA_CLAUSE_KNOWN_DROPPED` in
+ * `__tests__/edit-graph-protected-bounded-reading.test.ts`.
+ *
+ * ⚠ AND KNOW WHAT THAT PIN CAN AND CANNOT DO. It asserts an EXACT set over a
+ * HARDCODED corpus, so it detects RECLASSIFICATION OF THOSE MESSAGES — in
+ * either direction — and NOTHING ELSE. It does **not** detect a new falsehood
+ * outside the list. Measured: re-adding bare `to` here leaves the suite
+ * **48/48 GREEN** while newly misreporting three real protections that are
+ * absent from the set ("… we set it to 3 last week" and two more). So before
+ * widening this alphabet, probe the corpus by hand; the suite will not stop
+ * you. (An earlier version of this note claimed the pin "REDs if the class
+ * grows", which the filter cannot deliver — the same overstatement class as
+ * the monotonicity claim above, in the mechanism written to fix it.)
+ *
+ * Bare `to` was dropped after measuring: redundant against `no more than` /
+ * `at`, and it collides with ordinary prose ("do not touch X, we set it to 3
+ * last week").
+ */
+const BOUNDED_CLAUSE =
+  /\b(?:below|under|above|over|beneath|beyond|within|exceeds?|exceeding|surpass(?:es|ing)?|at\s+most|at\s+least|no\s+more\s+than|no\s+less\s+than|no\s+higher\s+than|no\s+lower\s+than|more\s+than|less\s+than|greater\s+than|lower\s+than|higher\s+than|up\s+to|at\s+or\s+(?:below|above)|at)\b[^.?!\n]{0,24}[-+]?[£$€]?\s?\d/i;
+
+/** True when this clause states a numeric bound (see BOUNDED_CLAUSE). */
+function clauseStatesBound(clause: string): boolean {
+  return BOUNDED_CLAUSE.test(clause);
+}
 
 /**
  * Clause boundaries: sentence enders (require trailing whitespace/end so
@@ -295,12 +408,20 @@ export function extractProtectedEntities(
       if (seen.has(node.id)) continue;
       const byLabel = mentionPattern(node.label);
       const byId = mentionPattern(node.id);
-      const hit = protectiveTexts.some(
+      const matched = protectiveTexts.filter(
         (t) => (byLabel !== null && byLabel.test(t)) || (byId !== null && byId.test(t)),
       );
-      if (hit) {
+      if (matched.length > 0) {
         seen.add(node.id);
-        out.push({ nodeId: node.id, label: node.label });
+        // The protective reading is safe to ASSERT unless EVERY clause that
+        // named this entity also stated a bound. One clause protecting it
+        // outright ("… and do not touch it") is a true claim we may still
+        // make, even alongside a bounded mention elsewhere in the message.
+        out.push({
+          nodeId: node.id,
+          label: node.label,
+          boundedReading: matched.every(clauseStatesBound),
+        });
       }
     }
     return out;
@@ -458,6 +579,15 @@ export const USER_PROTECTED_ENTITY_READABLE =
   'The request asked for this part of the model to stay as it is; held for explicit confirmation.';
 
 /**
+ * The same blocker, for an entity whose protective clause also stated a bound.
+ * It describes what the PRODUCT did and makes no claim about what the user
+ * said — the reading is genuinely undetermined, so neither reading is
+ * asserted. Reaches the wire via `publicReason.blocker_readable`.
+ */
+export const USER_PROTECTED_ENTITY_AMBIGUOUS_READABLE =
+  'Could not determine whether this part of the model was to change or be left alone; held for explicit confirmation.';
+
+/**
  * Demote every would_apply verdict whose envelope targets a protected
  * entity to held (USER_PROTECTED_ENTITY). All other verdicts pass through
  * untouched — structural holds, rejects, stales and the NON-protected
@@ -483,7 +613,9 @@ export function demoteProtectedEntityTargets(
     const out: RefereeVerdict[] = [];
     const demotedIndices: number[] = [];
     const demotedLabels: string[] = [];
+    const boundedLabels: string[] = [];
     const seenLabels = new Set<string>();
+    const seenBounded = new Set<string>();
     for (let i = 0; i < verdicts.length; i += 1) {
       const v = verdicts[i]!;
       const env = envelopes[i] ?? null;
@@ -500,21 +632,41 @@ export function demoteProtectedEntityTargets(
         continue;
       }
       demotedIndices.push(i);
+      // This op's own reading: bounded only if EVERY protected entity it hits
+      // is bounded. A single outright-protected target makes the protective
+      // readable true for this op.
+      const opIsBounded =
+        hits.length > 0 && hits.every((id) => byId.get(id)!.boundedReading);
       for (const id of hits) {
-        const label = byId.get(id)!.label;
+        const entity = byId.get(id)!;
+        const label = entity.label;
         if (!seenLabels.has(label)) {
           seenLabels.add(label);
           demotedLabels.push(label);
+        }
+        if (entity.boundedReading && !seenBounded.has(label)) {
+          seenBounded.add(label);
+          boundedLabels.push(label);
         }
       }
       out.push({
         ...v,
         verdict: 'held',
-        blocker: { code: USER_PROTECTED_ENTITY, readable: USER_PROTECTED_ENTITY_READABLE },
+        blocker: {
+          code: USER_PROTECTED_ENTITY,
+          readable: opIsBounded
+            ? USER_PROTECTED_ENTITY_AMBIGUOUS_READABLE
+            : USER_PROTECTED_ENTITY_READABLE,
+        },
       });
     }
     if (demotedIndices.length === 0) return NO_DEMOTION(verdicts);
-    return { verdicts: out, demotedIndices, demotedEntityLabels: demotedLabels };
+    return {
+      verdicts: out,
+      demotedIndices,
+      demotedEntityLabels: demotedLabels,
+      boundedReadingLabels: boundedLabels,
+    };
   } catch {
     return NO_DEMOTION(verdicts); // TOTALITY: never break the gate.
   }
