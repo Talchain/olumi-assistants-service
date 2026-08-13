@@ -107,6 +107,24 @@ interface SiblingValueLookup {
 
 const SIBLING_VALUE_LOOKUPS: readonly SiblingValueLookup[] = [
   {
+    // ⚠⚠ NO LONGER AN INDEPENDENT SIBLING, AND PART A IS THEREFORE A TAUTOLOGY
+    // FOR THIS ROW (ROADMAP 2.1130). `MULTIPLIERS` is now a pure re-export of
+    // MAGNITUDE_MULTIPLIERS, so "every key is canonical" and "every multiplier
+    // agrees" both hold by identity and can never fail. The row is KEPT rather
+    // than deleted so that re-introducing a private map here is immediately
+    // visible as a diff against this comment — but it must not be read as
+    // evidence about the module.
+    //
+    // ⭐ AND THE REASON IT STOPPED BEING EVIDENCE IS WORTH KEEPING: it never
+    // was, in the direction that mattered. Part A asserts canonical ⊇ sibling,
+    // so the map sitting here was THREE KEYS SHORT of canonical (`grand`, `t`,
+    // `trillion`) and passed every assertion in this file for as long as it
+    // existed — while `parseNumericValue("£250 grand")` returned 250. A guard
+    // pointed one way is silent about the other, and a SHORT list is the
+    // direction this one cannot see (trap 12d).
+    //
+    // The load-bearing guard for this module is behavioural and lives in
+    // `cee/extraction/__tests__/numeric-parser-magnitude-authority.test.ts`.
     module: "src/cee/extraction/numeric-parser.ts",
     symbol: "MULTIPLIERS",
     entries: Object.entries(NUMERIC_PARSER_MULTIPLIERS),
@@ -421,7 +439,10 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     "cee/draft/records/projector.ts":
       "incidental — one comment occurrence quoting the audit fixture; the file spells no alphabet and parses no magnitude words",
     "utils/magnitude-alphabet.ts": "the canonical alphabet itself",
-    "cee/extraction/numeric-parser.ts": "sibling value lookup — compared in Part A",
+    "cee/extraction/numeric-parser.ts":
+      "DERIVED from the canonical alphabet since ROADMAP 2.1130 — `MULTIPLIERS` is a re-export and every " +
+      "pattern is built from `magnitudeSuffixPattern`/`MAGNITUDE_SUFFIX_ANON`. Part A is a tautology for it; " +
+      "the real guard is behavioural (cee/extraction/__tests__/numeric-parser-magnitude-authority.test.ts)",
     "cee/decision-review/shape-check.ts": "sibling value lookup — compared in Part A",
     "orchestrator-v5/context/cqe/rules.ts": "sibling value lookup + vocabulary — compared in Parts A/B",
     "orchestrator-v5/context/cqe/word-numbers.ts": "sibling vocabulary — compared in Part A",
