@@ -382,6 +382,30 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // (ROADMAP 2.714).
     'cee/compound-goal/direction-gate.ts':
       'incidental — comment only; the file imports AMT/parseValue and spells no alphabet',
+    // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
+    // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a
+    // magnitude vocabulary (`hundreds?|thousands?|millions?|billions?`). It is
+    // admitted here on the same ground as `propose-handoff.ts` below: it is a
+    // RECOGNITION lexicon — it answers "did the brief state a magnitude at
+    // all?" and **never multiplies, never resolves a value**, so it cannot
+    // produce a wrong number. Its gap costs one tap-able clarifying question.
+    //
+    // ⚠⚠ AND HOW IT ARRIVED HERE IS A FINDING ABOUT THIS GUARD, recorded
+    // rather than quietly exploited. This file did NOT trip the scan before
+    // round 4 — measured at pristine HEAD: `false`. The battery's words are
+    // spelled PLURAL (`millions?`), and `MAGNITUDE_WORD` requires `\bmillion\b`,
+    // which a trailing `s` defeats. So a real magnitude vocabulary sat
+    // invisible to this guard indefinitely, and what finally exposed it was a
+    // PROSE COMMENT quoting "£1.5 million" — i.e. the guard fired for a reason
+    // unrelated to the lexicon it exists to find.
+    //
+    // That is trap 12d's second face exactly: a derived guard proves the copies
+    // AGREE, and can never prove the LIST IS COMPLETE. Widening `MAGNITUDE_WORD`
+    // to admit plurals is NOT done here — it would rescan the whole tree and is
+    // another lane's change, not a "while we're here" edit. Rowed for that lane.
+    'orchestrator-v5/clarify-v2/rubric.ts':
+      'recognition-only vocabulary (plural-spelled, so historically invisible to this scan) — ' +
+      'detects THAT a magnitude was stated; never multiplies and never resolves a value',
     "utils/magnitude-alphabet.ts": "the canonical alphabet itself",
     "cee/extraction/numeric-parser.ts": "sibling value lookup — compared in Part A",
     "cee/decision-review/shape-check.ts": "sibling value lookup — compared in Part A",

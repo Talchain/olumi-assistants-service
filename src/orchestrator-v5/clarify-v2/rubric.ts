@@ -157,17 +157,28 @@ const CHOICE_LEAD =
  * kept in sync with); it is a precision floor that can only under-credit.
  */
 /**
- * State-transition verbs for the from-X-to-Y options arm (Track-1 intake
- * fix). Deliberately CLOSED and SMALL: each verb must make "from X to Y"
- * read as two states of the same thing — i.e. a status-quo alternative and
- * a proposed one. Growth/measurement verbs (grew, rose, went) are excluded
- * on purpose: their from…to names a RANGE, not a choice set. Fails safe:
- * an unlisted verb scores options-MISSING (one tap-able question), never a
- * silent false "satisfied".
+ * TRACK-1 INTAKE FIX (2026-08-13) — A FROM-X-TO-Y OPTIONS ARM AND ITS CLOSED
+ * `FROM_TO_CHANGE_VERBS` LIST WERE WRITTEN HERE AND DROPPED AT #928 ROUND 4.
+ *
+ * It was not defective: an outside-authored corpus scored all five of its
+ * cases correctly, including the announcement twin ("We will migrate from AWS
+ * to GCP in the autumn") and the range twin ("revenue grew from £2m to £4m").
+ * It was dropped because it BOUGHT NOTHING MEASURABLE while carrying the
+ * unbounded risk every natural-language regex carries: across all 16 real wire
+ * captures it changed **no routing decision** — the first-turn draft set is
+ * byte-identical without it (S5 M1 M3 L1 L2 L3 L5), and the single brief it
+ * moved (M4) went from `ask(2)` to `ask(3)`, i.e. asked either way.
+ *
+ * ⚠ IT WAS NOT FREE, and the honest price is recorded here rather than in a
+ * report nobody re-reads: in the reviewer's corpus it was the arm that fixed
+ * `O01` ("Should we move our billing stack from Stripe to Adyen this year?"),
+ * which returns to OVER-DETECT — one spurious question. That is affordable
+ * ONLY because #928 round 4 also stopped the disclosure asserting what the
+ * user's brief said, which is what makes an over-detection cheap again. The
+ * two changes are a pair; do not re-derive one without the other.
+ *
+ * Do not re-add this arm to "recover" M4. M4 asks either way.
  */
-const FROM_TO_CHANGE_VERBS =
-  'switch(?:ing)?|mov(?:e|ing)|shift(?:ing)?|transition(?:ing)?|migrat(?:e|ing)|chang(?:e|ing)|convert(?:ing)?|go(?:ing)?|pivot(?:ing)?|upgrad(?:e|ing)|downgrad(?:e|ing)';
-
 const CHOICE_ACTION_VERBS =
   'abandon|acquire|adopt|automate|begin|bring|build|buy|cancel|centralise|centralize|close|commission|consolidate|continue|contract|cut|defer|delay|develop|divest|do|double|drop|end|enter|exit|expand|extend|finance|fire|focus|fund|go|grow|halt|hire|hold|insource|integrate|invest|keep|launch|lease|licence|license|merge|migrate|modernise|modernize|move|offer|open|outsource|partner|patch|pause|pilot|pivot|procure|promote|prototype|raise|rebuild|recruit|reduce|refactor|rehire|reinvest|relaunch|renegotiate|renew|rent|replace|restructure|retain|rewrite|run|scale|sell|ship|spend|split|sponsor|standardise|standardize|start|stay|stop|subcontract|switch|take|test|train|trial|upgrade|use|wait';
 
@@ -388,26 +399,6 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
         `,?\\s*(?:and|or)\\s+(?:${CHOICE_ACTION_VERBS})\\b`,
       'i',
     ),
-    // TRACK-1 INTAKE FIX (2026-08-13) — the FROM-X-TO-Y change construction
-    // under a deliberative lead, MEASURED as a detection miss on a real wire
-    // brief (INTAKE-FUNNEL §2.1, brief M4: "switch our 40-person engineering
-    // team from quarterly releases to continuous deployment" names both
-    // alternatives — status quo X and proposed Y — with no `or` anywhere).
-    //
-    // THREE anchors, same discipline as the serial-list arm above:
-    //   1. CHOICE_LEAD — deliberative only. "We WILL migrate from AWS to
-    //      GCP" is an announcement, not a choice (twin pinned).
-    //   2. a CHANGE VERB head — a closed list of state-transition verbs, so
-    //      "revenue grew from £2m to £4m" (a numeric range) and "went from
-    //      strength to strength" (an idiom) cannot fire. Closed and failing
-    //      SAFE: an unlisted verb scores options-MISSING, one tap-able
-    //      question — never a silent false "satisfied".
-    //   3. bounded same-sentence spans between verb → `from` → `to`, so an
-    //      unrelated later clause can supply neither preposition.
-    new RegExp(
-      `\\b${CHOICE_LEAD}\\s+(?:${FROM_TO_CHANGE_VERBS})\\b[^.!?;]{0,60}?\\bfrom\\b[^.!?;]{1,80}?\\bto\\b\\s+\\S`,
-      'i',
-    ),
   ],
   quantities: [
     // Digits, EXCEPT a bare calendar year (1900–2099): "this 2026" is a
@@ -550,14 +541,42 @@ const YES_NO_RESTATEMENT_PATTERN = /\b(?:and\/)?or\s+not\b/gi;
  * invariant applied to the guard's own guard.
  */
 const CLAUSE_BOUNDARY_PATTERN =
-  // ⚠ THE COMMA IS A BOUNDARY EXCEPT BETWEEN DIGITS, AND THAT EXCEPTION WAS
-  // MEASURED, NOT ANTICIPATED. A bare comma in the class splits THOUSANDS
-  // SEPARATORS: "The switch would not cost £20,000" became "…not cost £20" +
-  // "000", and the orphaned "000" — carrying no denial — satisfied quantities.
+  // ⚠ DIGIT-SEPARATING PUNCTUATION IS NOT A BOUNDARY — TRUE OF THE COMMA AND,
+  // SINCE #928 ROUND 4, OF THE FULL STOP TOO. Both exceptions were MEASURED.
+  //
+  // The comma came first: a bare comma in the class split THOUSANDS SEPARATORS,
+  // so "The switch would not cost £20,000" became "…not cost £20" + "000", and
+  // the orphaned "000" — carrying no denial — satisfied quantities.
+  //
+  // ⚠⚠ THE DOT WAS LEFT UNGUARDED IN THE SAME EDIT, and an independent corpus
+  // found it (blocker B1): "We would not spend £1.5 million on this." split at
+  // the DECIMAL POINT and satisfied quantities on a magnitude the user had
+  // explicitly disowned. That is CEE #853's finding verbatim — *a window cut at
+  // the first [.!?], which is also the decimal point* — recurring here. The
+  // durable lesson is the one #853 already paid for: WHEN YOU GUARD ONE
+  // DIGIT-SEPARATING CHARACTER, GUARD THE WHOLE CLASS IN THE SAME EDIT; fixing
+  // the character in front of you leaves its sibling live and the suite green.
+  //
   // A denied magnitude scoring SATISFIED is the fail-OPEN direction, i.e. the
   // exact harm this predicate exists to prevent, introduced by the fix for a
-  // fail-CLOSED one. Caught by the property test's own quantities cases.
-  /[.!?;:\n]|(?:(?<!\d),|,(?!\d))|\s+(?:but|yet|although|though|however|whereas|while|because|since|so that|and|or)\s+/gi;
+  // fail-CLOSED one. Both are now pinned by the property test's quantities
+  // cases, WITH their opposite-direction twins (a stated "£1.5 million" must
+  // still count, and a full stop must still end a sentence — a digit guard that
+  // swallowed the sentence boundary would let one denial mute a whole brief).
+  //
+  // ⭐ THE COMMA IS ALSO ASYMMETRIC IN POSITION, and that is handled in
+  // `containingClause`, not here. In the CONTRASTIVE class ("X is Y, not Z")
+  // the denial follows the comma; in the PARENTHETICAL class ("X is not,
+  // <aside>, Y") it precedes it. Round 3 made the comma a full boundary and
+  // bought four contrastive fixes for four parenthetical regressions — one
+  // severe error for each safe one. The comma is therefore a RIGHT boundary
+  // only: it may CLOSE a clause, never START one. Measured across an
+  // outside-authored 43-case corpus: five severe fail-opens closed
+  // (P02 P03 P04 N01 D02) for one safe over-detection (S03), with every case
+  // round 3 fixed (X01 X02 D03) still fixed. It cannot oscillate back onto the
+  // contrastive class BY CONSTRUCTION — a right-only rule cannot re-open a
+  // class that depends on the comma starting a clause.
+  /[!?;:\n]|(?:(?<!\d)[.,]|[.,](?!\d))|\s+(?:but|yet|although|though|however|whereas|while|because|since|so that|and|or)\s+/gi;
 
 /** The clause carrying `matchIndex` — the span a denial can govern. */
 function containingClause(text: string, matchIndex: number): string {
@@ -567,7 +586,11 @@ function containingClause(text: string, matchIndex: number): string {
   for (let m = scanner.exec(text); m !== null; m = scanner.exec(text)) {
     const boundaryEnd = m.index + m[0].length;
     if (boundaryEnd <= matchIndex) {
-      start = boundaryEnd;
+      // ⚠ A COMMA NEVER *STARTS* A CLAUSE — it may only CLOSE one. See the
+      // asymmetry note on CLAUSE_BOUNDARY_PATTERN above. Every other boundary
+      // (sentence punctuation, a coordinating conjunction) still opens a new
+      // clause here, so a denial cannot leak across a full stop.
+      if (m[0] !== ',') start = boundaryEnd;
     } else if (m.index > matchIndex) {
       end = m.index;
       break;

@@ -311,8 +311,16 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     'Should we raise our subscription price by 10% next quarter, or hold it steady?';
   const TWO_GAP_BRIEF =
     'Should we hire a second support engineer this quarter, or wait until January?';
-  /** The provenance marker the disclosure must carry on the wire. */
-  const PROVENANCE_MARKER = 'not something you told me';
+  /**
+   * The provenance marker the disclosure must carry on the wire.
+   *
+   * ⚠ CHANGED at #928 round 4. This used to be the literal
+   * `'not something you told me'` — a CLAIM ABOUT THE USER'S WORDS, which is
+   * the thing round 4 removes (the product may describe what IT did; it may
+   * not tell the user what THEY said). A wire marker that pins the defect is
+   * a guard holding the defect in place.
+   */
+  const PROVENANCE_MARKER = "I've assumed";
 
   it('DRAFT-FIRST: a single-gap brief drafts immediately and the wire carries the disclosed assistant-authored assumption', async () => {
     dispatchDraftGraphMock.mockResolvedValue({

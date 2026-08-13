@@ -900,14 +900,62 @@ export function decideClarifyV2Resume(
  * built to kill). The question is answerable by typing (normal post-draft
  * turn flow) or directly on the canvas.
  */
+/**
+ * ⭐⭐ THE COPY MAKES NO CLAIM ABOUT THE USER'S BRIEF (#928 round 4).
+ *
+ * **THE GOVERNING RULE: the product may describe what IT did; it may not tell
+ * the user what THEY said.** One of those we can always verify; the other we
+ * cannot. It generalises well beyond this module.
+ *
+ * ⚠ WHAT WAS HERE UNTIL ROUND 4, and why it had to go. The copy read *"your
+ * brief didn't state the goal…"*. The round-3 reviewer measured that sentence
+ * shipping ON THE WIRE against a brief reading *"Our goal is not just cost but
+ * speed."* — the product telling a user their brief omitted something their
+ * brief plainly contained.
+ *
+ * DRAFT-FIRST IS WHAT MADE IT SERIOUS, and this is the finding of the round.
+ * The rubric's tolerance for over-detection was licensed by one sentence in
+ * its own invariant: *"a false MISSING costs one question with a one-tap
+ * escape."* Draft-first REMOVES the question and the escape. So the cost model
+ * that licensed the tolerance is void, and the tolerance with it — a false
+ * MISSING now costs a false assertion about the user's own words, with no way
+ * to answer back.
+ *
+ * ⭐ THE EXIT IS NOT A BETTER DETECTOR. Four rounds of widening the denial
+ * predicate each closed one direction and opened the other (trap 22f: when
+ * rounds oscillate, the answer is to stop guessing). Because the sentence
+ * above claims only what THIS SERVICE DID, it is true when the dimension is
+ * genuinely missing AND when the detector over-detected — so over-detection
+ * stops being a TRUTH defect and becomes only a QUALITY-OF-ASSUMPTION defect.
+ * **The predicate now only has to be good enough, not correct**, which is what
+ * ends the oscillation rather than surviving one more round of it.
+ *
+ * ⚠ RESIDUAL, recorded rather than hidden: on the over-detection branch the
+ * DRAFTER still receives the whole brief, so the value in the graph may well
+ * have come from the user's own words rather than from us. "I've assumed" then
+ * UNDERSTATES our fidelity. That is a quality-of-assumption error in the safe
+ * direction — it under-claims about ourselves instead of over-claiming about
+ * the user — and it is the trade this round deliberately buys.
+ *
+ * Same doctrine as ROADMAP 2.972(c) with the instrument changed: there, a
+ * "your brief was light on detail" advisory was SUPPRESSED when it could not
+ * be established. Here the disclosure must still say something (disclosure is
+ * its whole job), so the claim is REPHRASED onto the only subject we can
+ * verify — ourselves — rather than withheld.
+ *
+ * The per-dimension phrases stay deterministic templates with no graph text
+ * embedded, so the disclosure cannot leak node ids and needs no label
+ * resolution. Pinned in BOTH branches by
+ * `tests/unit/clarify-v2.draft-first.test.ts`.
+ */
 const DRAFT_FIRST_GAP_COPY: Readonly<Record<ClarifyDimension, string>> = {
-  goal: "your brief didn't state the goal, so the goal in this draft is my assumption — not something you told me",
+  goal: "I've assumed the goal in this draft, and I haven't confirmed it with you",
   options:
-    "your brief didn't name the alternatives, so the options in this draft are my assumption — not something you told me",
+    "I've assumed the alternatives in this draft, and I haven't confirmed them with you",
   timeframe:
-    "your brief didn't state a timeframe, so the horizon in this draft is my assumption — not something you told me",
+    "I've assumed the horizon in this draft, and I haven't confirmed it with you",
   quantities:
-    "your brief didn't give any figures, so the values in this draft are my assumption — not something you told me",
+    "I've assumed the figures in this draft, and I haven't confirmed them with you",
 };
 
 export function composeDraftFirstDisclosure(question: ClarifyQuestion): string {

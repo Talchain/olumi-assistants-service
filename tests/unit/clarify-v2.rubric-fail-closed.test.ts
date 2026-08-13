@@ -15,16 +15,29 @@
  * So the property is asserted here for ALL FOUR dimensions, not for the
  * arms one lane happened to add.
  *
+ * ⚠ AND "ALL FOUR" WAS FALSE WHEN FIRST WRITTEN — corrected at #928 round 4
+ * (blocker B4). For `options` it was asserted for NEITHER case: both denied
+ * strings used constructions that `CHOICE_LEAD`'s adjacency requirement meant
+ * the arm never matched, so they were satisfied by NON-DETECTION rather than
+ * by the guard, and both passed identically on a build with `isDeniedEvidence`
+ * deleted. The sentence above is true now because the pair was replaced with
+ * two measured, discriminating strings — not because it was true then.
+ *
  * Two halves, and both must stay:
  *   1. THE PROPERTY — for every dimension, a denied statement of that
  *      dimension is not evidence for it. Generated from the dimension list,
  *      so a fifth dimension inherits the assertion automatically.
  *   2. THE KNOWN-BEHAVIOUR CORPUS — the reviewer's exact strings, pinned
- *      with their EXACT expected verdicts in BOTH directions (trap 22f's
- *      honest-gap discipline: the suite REDs if the set grows OR shrinks).
- *      This corpus came from OUTSIDE the author's head and is the
- *      load-bearing evidence for these arms (trap 22c) — it is not a
- *      fixture to keep current, and it may be appended to, never edited.
+ *      with their EXACT expected verdicts in BOTH directions. This corpus
+ *      came from OUTSIDE the author's head and is the load-bearing evidence
+ *      for these arms (trap 22c) — it is not a fixture to keep current, and
+ *      it may be appended to, never edited.
+ *      ⚠ WHAT PINNING BUYS, stated honestly at round 4: the suite REDs when
+ *      THESE ARRAYS ARE EDITED. It does NOT RED when a new defect class
+ *      appears in the code — see `RECORDED_FAIL_OPEN` below, which was 61/61
+ *      green at round 3 while an outside corpus measured fourteen fail-open
+ *      inputs. Pinning stops the RECORD drifting; only an outside corpus run
+ *      at review can tell you the record is short.
  */
 import { describe, it, expect } from 'vitest';
 
@@ -71,10 +84,33 @@ const DIMENSION_STATEMENTS: Readonly<
     ],
   },
   options: {
-    affirmed: 'Should we switch the team from quarterly releases to continuous deployment?',
+    // ⚠ SWAPPED AT #928 ROUND 4, and for the SAME reason the goal control was
+    // swapped at round 2: it rode an arm that is now DROPPED (the from-X-to-Y
+    // arm — it changed no routing decision across all 16 wire captures and was
+    // the PR's only remaining new natural-language regex). Leaving it here
+    // would have scored options MISSING, making every denial below pass
+    // vacuously — a property test whose positive control is a deleted arm
+    // tests nothing. Measured: with the arm dropped this string scores
+    // options=false, and the replacement below scores options=true.
+    affirmed: 'Should we rebuild the billing service or patch it?',
+    // ⚠ BOTH DENIED CASES REPLACED AT #928 ROUND 4 — blocker B4. The previous
+    // pair was VACUOUS, proven by mutation: with `isDeniedEvidence` deleted
+    // outright (mutant E-2) ten tests RED and NEITHER of them was an options
+    // case. Cause, derived at the bytes: `CHOICE_LEAD` requires ADJACENCY
+    // ((should|could|can|do|would|might) + (we|i)), so "can't" and "are not
+    // weighing" break it and the arm never matched at all — the assertions
+    // were satisfied by NON-DETECTION, not by the guard. That is trap 13b
+    // exactly: a guard agreeing with itself. The spec header claimed the
+    // property for "ALL FOUR dimensions" while for `options` it was asserted
+    // for neither case.
+    //
+    // The replacements are the reviewer's, MEASURED to be discriminating:
+    // both flip to FAIL-OPEN under the guard-kill mutant and are correct at
+    // pristine. The first reaches the bare-`or` arm, the second the `versus`
+    // arm — two different arms, so a single arm regressing cannot hide.
     denied: [
-      'We are not weighing whether to switch the team from quarterly releases to continuous deployment.',
-      "We can't move from per-seat licences to usage-based pricing.",
+      'We should not close the Bristol site or sell the Leeds site.',
+      'This is not a question of HubSpot versus Salesforce.',
     ],
   },
   timeframe: {
@@ -129,6 +165,66 @@ describe('INVARIANT — every dimension fails closed on a DENIED statement', () 
     // property of a deleted arm and failed for the wrong reason.
     const brief = 'Cost is not the main prize. The goal is to increase revenue.';
     expect(satisfied(brief, 'goal')).toBe(true);
+  });
+
+  it('B1 — a DECIMAL POINT is not a clause boundary (a denied decimal magnitude stays MISSING)', () => {
+    // #928 round 3 blocker B1. The comma was digit-guarded when this lane
+    // caught it splitting "£20,000"; the DOT was left in the boundary class
+    // with no guard at all, so "£1.5 million" split into "…would not spend £1"
+    // + "5 million" and the orphaned fragment — carrying no denial — satisfied
+    // quantities on a magnitude the user had explicitly disowned.
+    //
+    // This is CEE #853's finding verbatim (*a window cut at the first [.!?] —
+    // which is also the decimal point*), recurring in the module that ratifies
+    // the fail-closed invariant. The first string below is #853's, verbatim.
+    expect(satisfied('We would not spend £1.5 million on this.', 'quantities')).toBe(false);
+    expect(satisfied('The uplift would not be 12.5% on current margin.', 'quantities')).toBe(false);
+    expect(satisfied('Headcount will not grow by 2.5 FTE.', 'quantities')).toBe(false);
+  });
+
+  it('B2 — a PARENTHETICAL interruption does not let the denial escape (the comma closes clauses, never starts one)', () => {
+    // #928 round 3 blocker B2. Round 3 made the comma a full clause boundary
+    // to recover the CONTRASTIVE class ("X is Y, not Z", where the denial
+    // FOLLOWS the comma). That bought four contrastive fixes and opened four
+    // PARENTHETICAL regressions ("X is not, <aside>, Y", where the denial
+    // PRECEDES it) — one SEVERE error for each SAFE one, which by the module's
+    // own cost asymmetry is a net-negative trade.
+    //
+    // The two classes are asymmetric IN POSITION, so the remedy is asymmetric:
+    // a comma may CLOSE a clause, never START one. It cannot oscillate back
+    // onto the contrastive class by construction.
+    //
+    // These four strings are the reviewer's, measured — not variations
+    // invented here (trap 22c: for a predicate over natural language, the
+    // REVIEWER's corpus is the evidence, not the author's).
+    expect(satisfied('The switch would not, whatever finance told the board, cost £20,000.', 'quantities')).toBe(false);
+    expect(satisfied('This does not, at this stage of the programme, need to land by the end of this quarter.', 'timeframe')).toBe(false);
+    expect(satisfied("I don't think, given where the market is right now, the goal is to increase revenue.", 'goal')).toBe(false);
+    expect(satisfied('We would never, under any circumstances, spend £2 million on this.', 'quantities')).toBe(false);
+  });
+
+  it('B2 twins — the UNDENIED parenthetical still counts, and the contrastive class round 3 bought stays fixed', () => {
+    // The opposite-direction twins. The first is the parenthetical twin: same
+    // construction, no denial, must still be credited — a fix that silenced it
+    // would be the never-drafts harm arriving from the other side.
+    expect(satisfied('We will spend, after the board signs off, £20,000.', 'quantities')).toBe(true);
+    // …and everything round 3's comma boundary was ADDED to buy must survive,
+    // or this is an oscillation rather than a fix (trap 22b: re-measure the
+    // defect the earlier fix was written to close).
+    expect(satisfied('The objective is to grow revenue, not to cut costs.', 'goal')).toBe(true);
+    expect(satisfied('We must decide by March, not later.', 'timeframe')).toBe(true);
+    expect(satisfied('The budget is £20,000, not £50,000.', 'quantities')).toBe(true);
+  });
+
+  it('B1 twin — a STATED decimal magnitude still counts, and a full stop still ends a sentence', () => {
+    // The opposite-direction twins (trap 22b: every case gets its twin). The
+    // digit guard must not swallow the sentence boundary — if it did, ONE
+    // denial anywhere would mute the rest of the brief, which is the
+    // never-drafts harm arriving from the other side.
+    expect(satisfied('The switch would cost about £1.5 million.', 'quantities')).toBe(true);
+    expect(satisfied('The uplift would be 12.5% on current margin.', 'quantities')).toBe(true);
+    expect(satisfied('We are not sure yet. The budget is £20,000.', 'quantities')).toBe(true);
+    expect(satisfied('We will not rush this. We must decide by March.', 'timeframe')).toBe(true);
   });
 
   it('a thousands separator is not a clause boundary (a denied magnitude stays MISSING)', () => {
@@ -275,10 +371,34 @@ const REVIEWER_CORPUS: ReadonlyArray<{
  * objective silently). On the arms that remain, the residual cost is the
  * PRE-EXISTING behaviour of the shipped battery.
  *
- * The set is asserted EXACTLY: it REDs if it grows (a new fail-open class) or
- * shrinks (someone fixed one — then move the case and say so).
+ * ⭐⭐ WHAT THIS SET ACTUALLY GUARANTEES — READ THIS BEFORE TRUSTING IT.
+ * **It REDs when THIS HAND-WRITTEN ARRAY IS EDITED. It does NOT RED when a new
+ * fail-open class appears in the code.**
+ *
+ * The name was changed at #928 round 4 (from `KNOWN_FAIL_OPEN`) and this
+ * paragraph replaces the claim that used to sit here — *"it REDs if it grows
+ * (a new fail-open class)"* — which was **FALSE**, and falsest in the one
+ * place it mattered: the honest-gap mechanism itself. That is trap 12's
+ * hand-maintained mirror wearing the clothes of the instrument built to
+ * prevent it.
+ *
+ * PROVED, no mutant needed: at the round-3 tip this spec was **61/61 green**
+ * while the reviewer's independent 43-case corpus measured **FOURTEEN**
+ * fail-open inputs — five recorded here, nine invisible to it. The assertion
+ * cannot see a class that arrives from a CODE change or that nobody enumerated.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT FIXED WITH A NEW INSTRUMENT. A derived-corpus
+ * detector is exactly the kind of machinery this programme builds instead of
+ * shipping; an honestly-labelled limit is the deliverable. The load-bearing
+ * evidence about predicate breadth is an OUTSIDE-AUTHORED CORPUS run at review
+ * (trap 22c), not this array — this array only stops the recorded set drifting
+ * silently.
+ *
+ * The set is asserted EXACTLY: it REDs if the RECORDED SET is edited in either
+ * direction — grown (record the new case deliberately) or shrunk (someone
+ * fixed one; move the case out and record the measurement).
  */
-const KNOWN_FAIL_OPEN: ReadonlyArray<{ readonly brief: string; readonly dimension: ClarifyDimension; readonly mechanism: 'token_gap' | 'clause_orphan' }> = [
+const RECORDED_FAIL_OPEN: ReadonlyArray<{ readonly brief: string; readonly dimension: ClarifyDimension; readonly mechanism: 'token_gap' | 'clause_orphan' }> = [
   { brief: 'Nobody thinks the goal is to increase revenue.', dimension: 'goal', mechanism: 'token_gap' },
   { brief: 'I doubt the goal is to increase revenue.', dimension: 'goal', mechanism: 'token_gap' },
   { brief: 'We disagree that the goal is to increase revenue.', dimension: 'goal', mechanism: 'token_gap' },
@@ -322,20 +442,20 @@ describe('REVIEWER CORPUS (#928) — the exact known-behaviour set, both directi
 });
 
 describe('THE HONEST GAP — fail-open and over-detection, pinned as EXACT sets', () => {
-  it('the known fail-open set is exactly what is recorded (REDs if it grows OR shrinks)', () => {
-    expect(KNOWN_FAIL_OPEN.length).toBe(5);
-    expect(KNOWN_FAIL_OPEN.filter((c) => c.mechanism === 'token_gap').length).toBe(3);
-    expect(KNOWN_FAIL_OPEN.filter((c) => c.mechanism === 'clause_orphan').length).toBe(2);
+  it('the RECORDED fail-open set is exactly what is recorded (REDs when THIS ARRAY is edited — not when a new class appears)', () => {
+    expect(RECORDED_FAIL_OPEN.length).toBe(5);
+    expect(RECORDED_FAIL_OPEN.filter((c) => c.mechanism === 'token_gap').length).toBe(3);
+    expect(RECORDED_FAIL_OPEN.filter((c) => c.mechanism === 'clause_orphan').length).toBe(2);
   });
 
-  it.each(KNOWN_FAIL_OPEN.map((c) => [c.brief, c] as const))(
-    'KNOWN FAIL-OPEN (%s)',
+  it.each(RECORDED_FAIL_OPEN.map((c) => [c.brief, c] as const))(
+    'RECORDED FAIL-OPEN (%s)',
     (_brief, c) => {
       // Asserting the GAP, not the behaviour we want: if someone closes it,
       // this REDs and the set must be moved deliberately, with a measurement.
       expect(
         satisfied(c.brief, c.dimension),
-        `${c.mechanism}: this input no longer fails open — good; move it out of KNOWN_FAIL_OPEN and record the measurement`,
+        `${c.mechanism}: this input no longer fails open — good; move it out of RECORDED_FAIL_OPEN and record the measurement`,
       ).toBe(true);
     },
   );
@@ -346,6 +466,50 @@ describe('THE HONEST GAP — fail-open and over-detection, pinned as EXACT sets'
       expect(satisfied(c.brief, c.dimension)).toBe(false);
     },
   );
+
+  it('the from-X-to-Y options arm is GONE and cannot silently return', () => {
+    // #928 round 4. The arm was NOT defective — an outside-authored corpus
+    // scored all five of its cases correctly. It was dropped because it bought
+    // nothing measurable (no routing decision changed across all 16 wire
+    // captures; the first-turn draft set is byte-identical without it) while
+    // carrying the unbounded risk of any natural-language regex, and it was
+    // the PR's only remaining new one.
+    //
+    // Its own spec (`clarify-v2.rubric-widening.test.ts`, 7 tests) is DELETED
+    // with it rather than skipped — a skipped suite for deleted code is a
+    // mirror that goes stale, which is the rule this file's goal-prize and
+    // timeframe tombstones already established. These pins are what remains.
+    expect(
+      satisfied(
+        'Should we switch our 40-person engineering team from quarterly releases to continuous deployment?',
+        'options',
+      ),
+    ).toBe(false);
+    expect(
+      satisfied('Should we move from per-seat licences to usage-based pricing?', 'options'),
+    ).toBe(false);
+    // …and the twins the arm shipped with still hold against the REMAINING
+    // battery, which is the property that actually matters now: no other arm
+    // may credit these constructions either.
+    expect(
+      satisfied('Revenue grew from £2m to £4m. Should we hire another sales rep?', 'options'),
+    ).toBe(false);
+    expect(
+      satisfied('We will migrate from AWS to GCP in the coming rollout, whatever it costs us.', 'options'),
+    ).toBe(false);
+  });
+
+  it('the ROUTING capability the from-X-to-Y arm was added for is unaffected (M4 asks either way)', () => {
+    // The arm's stated justification was wire brief M4. It moved M4 from
+    // ask(3) to ask(2) — an ask either way, so no user-visible routing
+    // decision ever depended on it. Pinned as an OUTCOME metric (trap 23):
+    // what the user gets, not which arm fired.
+    const M4 =
+      'Should we switch our 40-person engineering team from quarterly releases to continuous deployment? Release overhead currently eats about two engineer-days per sprint, but several enterprise customers say they value predictable, well-documented quarterly release notes.';
+    const assessment = assessBriefCompleteness(M4);
+    expect(assessment.complete).toBe(false);
+    expect(assessment.missing.length).toBeGreaterThan(1); // → blocking ask, as before
+  });
 
   it('the goal-prize arm is GONE and cannot silently return', () => {
     // The arm's own sentence must not credit goal by ANY route. This is the

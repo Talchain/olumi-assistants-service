@@ -76,8 +76,15 @@ const wireBrief = (id: string): string => {
   return entry.brief;
 };
 
-/** The provenance marker every disclosure must carry (assistant-authored). */
-const PROVENANCE_MARKER = 'not something you told me';
+/**
+ * The provenance marker every disclosure must carry (assistant-authored).
+ *
+ * ⚠ CHANGED at #928 round 4. The old marker was the literal string
+ * `'not something you told me'` — which is itself A CLAIM ABOUT THE USER'S
+ * WORDS, i.e. the very thing round 4 removes. A marker that pins the defect
+ * is a guard holding the defect in place.
+ */
+const PROVENANCE_MARKER = "I've assumed";
 
 // ── The 15-brief outcome table (the acceptance table, pinned) ──────────────
 // 'complete'    → proceed silently, reason 'complete', NO deferred question.
@@ -202,7 +209,11 @@ describe('composeDraftFirstDisclosure — assistant provenance, dimension identi
     (dimension) => {
       const text = composeDraftFirstDisclosure(questionFor(dimension));
       expect(text).toContain(PROVENANCE_MARKER);
-      expect(text).toMatch(/my assumption/i);
+      // ⚠ `/my assumption/` was asserted here until #928 round 4. It is now
+      // covered by PROVENANCE_MARKER above; the copy states the assumption as
+      // an ACTION THE PRODUCT TOOK ("I've assumed…") rather than as a noun
+      // phrase sitting next to a claim about the user's brief.
+      expect(text).toMatch(/\bassumed\b/i);
       // The user must never be quoted as the source of the assumed value.
       expect(text).not.toMatch(/\byou (?:said|stated|told me that|asked for)\b/i);
     },
@@ -225,6 +236,136 @@ describe('composeDraftFirstDisclosure — assistant provenance, dimension identi
   it('offers the canvas as the way to change the assumption (a live surface, not a promise of new machinery)', () => {
     const text = composeDraftFirstDisclosure(questionFor('goal'));
     expect(text).toMatch(/canvas/i);
+  });
+});
+
+// ── B3 (#928 round 4): THE DISCLOSURE MAKES NO CLAIM ABOUT THE USER'S BRIEF ─
+/**
+ * ⭐ THE GOVERNING RULE (orchestrator ruling, #928 round 4):
+ * **the product may describe what IT did; it may not tell the user what THEY
+ * said.** One of those we can always verify; the other we cannot.
+ *
+ * Round 3's copy said *"your brief didn't state the goal"*. The round-3
+ * reviewer measured that sentence shipping, on the wire, on a brief reading
+ * *"Our goal is not just cost but speed."* — a false assertion about the
+ * user's own words. Draft-first is what made it serious: it removed both the
+ * clarifying question and the one-tap escape that used to make a false
+ * MISSING cost one question, so the error now costs a confident falsehood
+ * about the user with no way to answer back.
+ *
+ * THE EXIT IS NOT A BETTER DETECTOR. Four rounds of widening this predicate
+ * each fixed one direction and opened the other (trap 22f). Round 4 instead
+ * makes the predicate's accuracy STOP BEING A TRUTH-BEARING PROPERTY: the
+ * disclosure claims only what the product itself did, so over-detection
+ * degrades from a TRUTH defect to a QUALITY-OF-ASSUMPTION defect.
+ *
+ * THE PROOF OBLIGATION IS BOTH BRANCHES — the dimension genuinely missing,
+ * AND the detector over-detecting on a brief that plainly states it. The
+ * over-detection input is the reviewer's OWN measured `KNOWN_OVER_DETECTION`
+ * string, not one invented here: a self-authored input encodes the author's
+ * model of the detector rather than the detector (trap 16).
+ */
+describe('B3 — the disclosure is true in BOTH branches (it claims nothing about the brief)', () => {
+  /**
+   * Assertions about the USER'S OWN WORDS. Anything matching these is a claim
+   * we cannot verify and therefore must not make.
+   *
+   * ⚠ This list is a hand-written lexicon and CANNOT be complete — it catches
+   * the shapes we have actually shipped, not every shape English affords. It
+   * is honest about that limit rather than pretending to be a derived guard
+   * (trap 12d: deriving would prove the copies agree, never that the list is
+   * right). Its POSITIVE CONTROL below is what stops it being decorative.
+   */
+  const BRIEF_CLAIM_PATTERNS: readonly RegExp[] = [
+    /your brief/i,
+    /\byou (?:didn't|did not|never|haven't|have not)\b/i,
+    /\byou (?:said|stated|told|wrote|mentioned|gave|named|specified|provided)\b/i,
+    /something you told me/i,
+  ];
+
+  const claimsAboutTheBrief = (text: string): readonly string[] =>
+    BRIEF_CLAIM_PATTERNS.filter((re) => re.test(text)).map((re) => re.source);
+
+  const questionFor = (dimension: ClarifyDimension) => {
+    const [q] = composeClarifyQuestions([dimension], 1);
+    if (q === undefined) throw new Error('no question composed');
+    return q;
+  };
+
+  it('POSITIVE CONTROL — the guard can SEE a violation (round 3’s exact shipped copy)', () => {
+    // Without this, every absence assertion below could pass by testing
+    // nothing (trap 13). This is the literal round-3 string, measured on the
+    // wire by the reviewer; the guard must flag it.
+    const ROUND_3_COPY =
+      "One thing to check: your brief didn't state the goal, so the goal in this draft is my " +
+      'assumption — not something you told me. What outcome would make this decision a success?';
+    expect(claimsAboutTheBrief(ROUND_3_COPY).length).toBeGreaterThan(0);
+  });
+
+  it.each(['goal', 'options', 'timeframe', 'quantities'] as const)(
+    '%s: the emitted disclosure asserts nothing about what the user said',
+    (dimension) => {
+      const text = composeDraftFirstDisclosure(questionFor(dimension));
+      expect(
+        claimsAboutTheBrief(text),
+        `${dimension} disclosure tells the user what they said: ${text}`,
+      ).toEqual([]);
+    },
+  );
+
+  /**
+   * The two branches, both routed through the REAL decision function so the
+   * test binds to what a user would actually receive — not to the copy table.
+   */
+  const disclosureFor = (brief: string): string => {
+    const decision = decideClarifyV2Round1(brief);
+    if (decision.kind !== 'proceed') {
+      throw new Error(`expected proceed, got ${decision.kind}`);
+    }
+    if (decision.reason !== 'single_gap_draft_first') {
+      throw new Error(`expected single_gap_draft_first, got ${decision.reason}`);
+    }
+    if (decision.deferredQuestion === undefined) throw new Error('no deferred question');
+    return composeDraftFirstDisclosure(decision.deferredQuestion);
+  };
+
+  /**
+   * BRANCH B — THE OVER-DETECTION BRANCH. `KNOWN_OVER_DETECTION`'s exact
+   * string ("Our goal is not just cost but speed.") embedded in an otherwise
+   * complete brief, exactly as the reviewer measured it (REVIEW-928-R3 §6
+   * D-iv). The brief STATES the goal in plain English and the rubric scores
+   * goal MISSING — this is the input on which round 3's copy was false.
+   */
+  const OVER_DETECTED_BRIEF =
+    'Should we open a second warehouse in Manchester next year, or expand our existing site? ' +
+    'A new site would cost roughly £1.2 million up front. Our goal is not just cost but speed.';
+
+  it('the over-detection branch is REAL at this tip (the pin is not vacuous)', () => {
+    // If the rubric ever stops over-detecting here, this test must RED so the
+    // branch below cannot silently become a duplicate of the missing branch —
+    // a guard whose discriminating fixture is unpinned decays into agreeing
+    // with itself (trap 13b).
+    const decision = decideClarifyV2Round1(OVER_DETECTED_BRIEF);
+    expect(decision.kind).toBe('proceed');
+    if (decision.kind !== 'proceed') return;
+    expect(decision.reason).toBe('single_gap_draft_first');
+    expect(decision.deferredQuestion?.dimension).toBe('goal');
+  });
+
+  it('BOTH BRANCHES emit the SAME sentence, and it claims nothing about the brief', () => {
+    // Branch A — the goal is genuinely absent (real wire capture S5).
+    const genuinelyMissing = disclosureFor(wireBrief('S5'));
+    // Branch B — the goal is plainly STATED and the detector over-detected.
+    const overDetected = disclosureFor(OVER_DETECTED_BRIEF);
+
+    // Identical by construction, and pinned so it stays that way: the moment
+    // the copy branches on anything derived from the brief, it starts making
+    // a claim about the brief again.
+    expect(overDetected).toBe(genuinelyMissing);
+    expect(claimsAboutTheBrief(genuinelyMissing)).toEqual([]);
+    expect(claimsAboutTheBrief(overDetected)).toEqual([]);
+    // …and it still does its job: it names the value as the assistant's.
+    expect(genuinelyMissing).toContain(PROVENANCE_MARKER);
   });
 });
 
