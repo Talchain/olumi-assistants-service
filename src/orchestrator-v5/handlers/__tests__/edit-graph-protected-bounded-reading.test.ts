@@ -319,6 +319,19 @@ describe('boundedReading is per-entity and identity-bound', () => {
     expect(cost?.boundedReading).toBe(false);
   });
 
+  it('EVERY, not SOME: an entity protected outright in ONE clause keeps the true named copy even when another clause bounds it', () => {
+    // "Do not change X; keep X below 3%." — X is named in TWO protective
+    // clauses, one bounded and one not. The unbounded clause is an outright
+    // protection, so "you asked for X to stay as it is" is TRUE and may still
+    // be said. Pinning this closes the `every` -> `some` mutant, which
+    // otherwise survives: no other case in this corpus names one entity in
+    // two protective clauses of different kinds.
+    const MIXED_SAME_ENTITY = 'Do not change Customer churn; keep Customer churn below 3%.';
+    const found = extractProtectedEntities(MIXED_SAME_ENTITY, GRAPH);
+    expect(found.find((e) => e.nodeId === 'fac_churn')?.boundedReading).toBe(false);
+    expect(textFor(MIXED_SAME_ENTITY)).toMatch(/to stay as it is/i);
+  });
+
   it('a protection with no number is never flagged as bounded', () => {
     const found = extractProtectedEntities('Do not touch Customer churn.', GRAPH);
     expect(found.find((e) => e.nodeId === 'fac_churn')?.boundedReading).toBe(false);
