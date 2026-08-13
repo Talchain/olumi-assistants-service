@@ -987,9 +987,13 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
   // ⚠ THE HARM IS NOT MIS-WEIGHTING, WHICH IS WHAT IT LOOKS LIKE FROM HERE.
   // Derived at the consumer's bytes (`plot-lite-service` b9f6b5a7,
   // `src/integrations/isl/preflight.ts:334-344`, emitted at
-  // `src/routes/v2/run.ts:6804-6826`): PLoT fingerprints duplicate endpoints on
-  // `exists_probability`, `strength.mean`, `strength.std` and `label`. Identical
-  // duplicates it coalesces; DIVERGENT ones are a `DUPLICATE_EDGE_CONFLICT`
+  // `src/routes/v2/run.ts:6804-6826`): PLoT's `edgeFingerprint` keys on SEVEN
+  // fields — `from`, `to`, `edge_type`, `exists_probability`, `strength.mean`,
+  // `strength.std`, `label`. (⚠ Do not confuse that with the FOUR-field list at
+  // `preflight.ts:349-354`: that is `divergentFields`, which composes the
+  // blocker MESSAGE after a conflict is found. Different function, different
+  // question — an earlier draft of this comment conflated them.) Identical
+  // duplicates PLoT coalesces; DIVERGENT ones are a `DUPLICATE_EDGE_CONFLICT`
   // blocker — HTTP 422, `blocks_analysis: true`, ISL never called. And divergent
   // is the ORDINARY case here, because each limb inherits its own source edge's
   // numerics. So the unsuppressed shape did not tilt the maths; it stopped the
@@ -998,62 +1002,166 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
   //
   // SIGN IS PART OF THE KEY, deliberately. Two claims that agree on direction
   // are one relationship stated twice and collapse to one edge. Two that
-  // DISAGREE are not a duplicate at all — they are a genuine conflict, so they
-  // get their own code and stay visible. Suppressing them under the duplicate
-  // count would hide a disagreement a human needs to settle, and adding the
-  // opposite edge anyway would re-create the double-weighting this exists to
-  // remove.
+  // DISAGREE may be a genuine conflict — but only under the two gates below,
+  // because the naive form of that test narrates OUR artefact as the user's
+  // incoherence.
   //
-  // FIRST CLAIM WINS THE NUMERICS. Not a mean, not a max: every surviving value
-  // is one a source actually stated, and a merged average would be a number
-  // nobody asserted.
-  const signByEndpoints = new Map<string, string>();
-  const canonicalSign = (e: EdgeT): string =>
-    ((e as Record<string, unknown>).effect_direction as string | undefined) ?? "positive";
+  // ⚠⚠ GATE 1 — ONLY A *STATED, KNOWN* SIGN CAN DISAGREE WITH ANOTHER.
+  // `effect_direction` is OPTIONAL in the contract and admits `"unknown"`
+  // (`@talchain/schemas` 0.39.0 `graph.d.ts:519`). Three populations would
+  // otherwise be narrated as disagreements that nobody made:
+  //   - the outcome→goal limb mints `"positive"` as a HARDCODED LITERAL below,
+  //     whatever the source said, so its sign is ours and never a claim;
+  //   - an absent `effect_direction` would have the `?? "positive"` default
+  //     reported back as though it had been asserted; and
+  //   - `"unknown"` is the explicit absence of a directional claim.
+  // AN ABSENCE OF A CLAIM IS NOT A DISAGREEMENT.
+  //
+  // ⚠⚠ GATE 2 — THE TWO CLAIMS MUST SHARE A TARGET.
+  // The mediating outcome is resolved ONCE PER FACTOR (`resolvedOutcomeId`
+  // above), so `f→g1 positive` and `f→g2 negative` — "price helps revenue,
+  // hurts share", a perfectly coherent model — land on the SAME factor→outcome
+  // limb. Reporting that as a contradiction blames the user for our mediation
+  // artefact. Only claims about the same target can contradict each other.
+  //   ⚠ NOTE THE DEFECT THAT REMAINS, AND IS NOT THIS FUNCTION'S TO FIX: where
+  //   the signs genuinely differ across different targets, the shared limb
+  //   carries ONE sign, so the only path to the other goal comes out with the
+  //   wrong sign. That SIGN INVERSION is pre-existing — it follows from the
+  //   shared mediating outcome at `resolvedOutcomeId`, which predates this
+  //   suppression — and is rowed separately. Suppression neither causes nor
+  //   cures it; this note exists so the next reader does not mistake the
+  //   silence here for absence of the problem.
+  //
+  // ORDER-FREE RESOLUTION. Which claim's numerics survive is decided by a
+  // deterministic key over the SOURCE claim, never by position in `edges[]`.
+  // First-in-list would have made the output graph depend on input order — a
+  // property the pre-suppression code did not have, since it kept everything —
+  // and the same model must analyse the same way twice.
+  //
+  // THE SURVIVING NUMBERS ARE ALWAYS ONES A SOURCE STATED. Never a mean, never
+  // a max: a merged average would be a number nobody asserted.
+  interface CarriedLimb {
+    /** Sign as actually emitted on the surviving edge. */
+    readonly sign: string;
+    /** Sign the SOURCE claim stated — `undefined` when defaulted, minted or "unknown". */
+    readonly statedSign: string | undefined;
+    /** Target of the source claim; `undefined` for a pass-through edge. */
+    readonly target: string | undefined;
+    /** Deterministic tie-break key over the source claim; `undefined` = not replaceable. */
+    readonly sourceKey: string | undefined;
+    /** Index into `keptEdges`, so a better-ranked claim can replace in place. */
+    readonly index: number;
+  }
+
+  const carried = new Map<string, CarriedLimb>();
+
+  /** The sign a source ACTUALLY stated, or `undefined` if it stated none. */
+  const statedSign = (e: EdgeT): string | undefined => {
+    const raw = (e as Record<string, unknown>).effect_direction;
+    if (typeof raw !== "string" || raw === "unknown") return undefined;
+    return raw;
+  };
+  const emittedSign = (e: EdgeT): string => statedSign(e) ?? "positive";
+
+  /** JSON-encoded so an id containing the delimiter cannot collide. */
+  const claimKey = (from: string, to: string): string => JSON.stringify([from, to]);
+
+  /** Human-facing name for a node — NEVER a raw id, which is not user-facing copy. */
+  const displayName = (id: string): string => nodeLabelMap.get(id) ?? id;
 
   // Seed from the edges that pass through untouched. They survive this repair,
   // so their endpoints are already spoken for before the first split emits
-  // anything — and seeding up front is what makes the result independent of
-  // where the factor→goal edges happen to sit in the list.
+  // anything. `sourceKey: undefined` makes them unreplaceable: an edge the model
+  // already holds outranks any limb we would mint.
   for (const edge of edges) {
     if (nodeKindMap.get(edge.from) === "factor" && nodeKindMap.get(edge.to) === "goal") continue;
     const endpoints = `${edge.from}::${edge.to}`;
-    if (!signByEndpoints.has(endpoints)) signByEndpoints.set(endpoints, canonicalSign(edge));
+    if (!carried.has(endpoints)) {
+      carried.set(endpoints, {
+        sign: emittedSign(edge),
+        statedSign: statedSign(edge),
+        target: undefined,
+        sourceKey: undefined,
+        index: -1,
+      });
+    }
   }
 
   /**
    * Add one synthetic limb unless its endpoints are already carried. Returns a
-   * Repair when the limb was NOT added, so the caller records why — a
+   * Repair when the limb was NOT added, so the caller records what happened — a
    * suppression nobody can see is indistinguishable from a lost edge.
+   *
+   * `limbStatedSign` is the sign the SOURCE claim stated for THIS limb, which is
+   * not the same as the limb's own `effect_direction`: the outcome→goal limb is
+   * minted positive regardless, so it passes `undefined` and can never be
+   * narrated as a disagreement.
    */
-  const addLimb = (limb: EdgeT, sourcePath: string): Repair | undefined => {
+  const addLimb = (
+    limb: EdgeT,
+    source: { readonly target: string; readonly key: string; readonly statedSign: string | undefined },
+  ): Repair | undefined => {
     const endpoints = `${limb.from}::${limb.to}`;
-    const sign = canonicalSign(limb);
-    const existingSign = signByEndpoints.get(endpoints);
+    const from = displayName(limb.from);
+    const to = displayName(limb.to);
+    const incumbent = carried.get(endpoints);
 
-    if (existingSign === undefined) {
-      signByEndpoints.set(endpoints, sign);
+    if (incumbent === undefined) {
+      carried.set(endpoints, {
+        sign: emittedSign(limb),
+        statedSign: source.statedSign,
+        target: source.target,
+        sourceKey: source.key,
+        index: keptEdges.length,
+      });
       keptEdges.push(limb);
       return undefined;
     }
 
-    if (existingSign === sign) {
+    // Order-free: a claim that ranks earlier replaces the incumbent's numerics
+    // in place. Pass-through edges (`sourceKey === undefined`) are never
+    // replaced — the model already holds them.
+    if (
+      incumbent.sourceKey !== undefined &&
+      incumbent.index >= 0 &&
+      source.key < incumbent.sourceKey
+    ) {
+      keptEdges[incumbent.index] = limb;
+      carried.set(endpoints, {
+        sign: emittedSign(limb),
+        statedSign: source.statedSign,
+        target: source.target,
+        sourceKey: source.key,
+        index: incumbent.index,
+      });
+    }
+
+    // A contradiction requires BOTH gates: two STATED, KNOWN signs that differ,
+    // about the SAME target.
+    const genuineConflict =
+      source.statedSign !== undefined &&
+      incumbent.statedSign !== undefined &&
+      source.statedSign !== incumbent.statedSign &&
+      incumbent.target !== undefined &&
+      incumbent.target === source.target;
+
+    if (genuineConflict) {
       return {
-        code: "DUPLICATE_CAUSAL_EDGE_SUPPRESSED",
+        code: "CONFLICTING_CAUSAL_DIRECTION",
         path: `edges[${limb.from}→${limb.to}]`,
         action:
-          `Did not add a second ${limb.from}→${limb.to} edge for ${sourcePath}: ` +
-          `the same relationship, in the same direction, is already carried once. Kept the first claim's strength.`,
+          `Merged conflicting links between "${from}" and "${to}" into one, keeping the direction already ` +
+          `in the model. The drafted model connected them with opposite directions of effect, and only one ` +
+          `direction can be analysed.`,
       };
     }
 
     return {
-      code: "CONFLICTING_CAUSAL_DIRECTION",
+      code: "DUPLICATE_CAUSAL_EDGE_SUPPRESSED",
       path: `edges[${limb.from}→${limb.to}]`,
       action:
-        `${sourcePath} makes ${limb.from}→${limb.to} "${sign}" while an edge already present makes it ` +
-        `"${existingSign}". Kept the existing direction and did not add a contradicting parallel edge — ` +
-        `the two claims disagree and a human needs to settle which is right.`,
+        `Merged repeated links between "${from}" and "${to}" into one. The drafted model connected them ` +
+        `more than once, and a repeated connection stops the analysis running.`,
     };
   };
 
@@ -1085,12 +1193,18 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
 
       // Only create the outcome node once (multiple factor→goal edges from same factor)
       if (!nodeKindMap.has(outcomeId)) {
+        const outcomeLabel = `${factorLabel} Impact`;
         newNodes.push({
           id: outcomeId,
           kind: "outcome",
-          label: `${factorLabel} Impact`,
+          label: outcomeLabel,
         } as NodeT);
         nodeKindMap.set(outcomeId, "outcome");
+        // Register the label too: repair copy is USER-VISIBLE (the UI renders
+        // `deterministic_repairs[].action` unconditionally and does not run it
+        // through `sanitiseDetail`), so it must never fall back to a raw
+        // `out_fac_…_impact` id.
+        nodeLabelMap.set(outcomeId, outcomeLabel);
       }
 
       // factor→outcome: preserve original strength (causal relationship)
@@ -1098,13 +1212,18 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
       const origStd = edge.strength_std ?? 0.15;
       const origExist = edge.belief_exists ?? ((edge as Record<string, unknown>).belief as number | undefined) ?? 0.9;
 
-      const sourcePath = `edges[${edge.from}→${edge.to}]`;
+      // Both limbs come from THIS source claim, so they share its target and its
+      // tie-break key. Only the factor→outcome limb carries the source's stated
+      // direction; the outcome→goal limb below mints `"positive"` as a literal
+      // whatever the source said, so it passes `statedSign: undefined` and can
+      // never be narrated as a disagreement (GATE 1).
+      const claim = { target: edge.to, key: claimKey(edge.from, edge.to) };
 
       const factorLimb = addLimb(patchEdgeNumeric(
         { from: edge.from, to: outcomeId, effect_direction: edge.effect_direction ?? "positive", origin: "repair", provenance: { source: "synthetic", quote: "Split factor→goal into factor→outcome→goal" }, provenance_source: "synthetic" } as EdgeT,
         format,
         { mean: origMean, std: origStd, existence: origExist },
-      ), sourcePath);
+      ), { ...claim, statedSign: statedSign(edge) });
       if (factorLimb) repairs.push(factorLimb);
 
       // outcome→goal: moderate defaults
@@ -1112,7 +1231,7 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
         { from: outcomeId, to: edge.to, effect_direction: "positive", origin: "repair", provenance: { source: "synthetic", quote: "Split factor→goal into factor→outcome→goal" }, provenance_source: "synthetic" } as EdgeT,
         format,
         { mean: 0.5, std: 0.15, existence: 0.9 },
-      ), sourcePath);
+      ), { ...claim, statedSign: undefined });
       if (goalLimb) repairs.push(goalLimb);
 
       splitCount++;

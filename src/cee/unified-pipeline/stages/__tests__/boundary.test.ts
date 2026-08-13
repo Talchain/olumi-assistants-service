@@ -290,3 +290,90 @@ describe('runStageBoundary', () => {
     });
   });
 });
+
+// ===========================================================================
+// REPAIR_CODE_TO_ADJUSTMENT — fail loud on drift, never assume-good
+// ===========================================================================
+//
+// The allowlist's failure mode is SILENCE: a repair code nobody adds is absent
+// from `model_adjustments` with no error, and the omission is indistinguishable
+// from a deliberate exclusion. That is trap 12's hand-maintained mirror, and the
+// PR that added two new repair codes hit it immediately — both were dropped.
+//
+// This guard DERIVES the codes the deterministic sweep can emit from the sweep's
+// own source, so a new code cannot appear without being classified. It is not a
+// completeness proof (trap 12d: derivation catches drift between copies, never a
+// short list) — it proves only that every emitted code has been ADJUDICATED.
+describe('REPAIR_CODE_TO_ADJUSTMENT drift guard', () => {
+  // Codes deliberately NOT surfaced as model_adjustments, each with its reason.
+  // Adding a code here is a DECISION and should be reviewed as one.
+  const ADJUDICATED_EXCLUDED = new Set<string>([
+    // Mechanical numeric/structural fixes the user does not need to review.
+    'NAN_VALUE', 'SIGN_MISMATCH', 'CATEGORY_MISMATCH', 'INVALID_EDGE_REF',
+    'FORBIDDEN_EDGE_AUTO_FIXED', 'FACTOR_GOAL_EDGE_SPLIT', 'CYCLE_DETECTED',
+    'COMPLEXITY_CAP_PRUNE', 'GOAL_THRESHOLD_STRIPPED_NO_RAW',
+    'GOAL_THRESHOLD_POSSIBLY_INFERRED', 'STATUS_QUO_FACTOR_WIRED',
+    'STATUS_QUO_WIRED', 'STATUS_QUO_NO_TARGETS', 'STATUS_QUO_STILL_INVALID',
+    'DISCONNECTED_OBSERVABLE_PRUNED', 'UNREACHABLE_FACTOR_RETAINED',
+    'UNREACHABLE_FACTOR_WIRED_TO_GOAL', 'INVALID_INTERVENTION_REF',
+    'CONTROLLABLE_MISSING_DATA', 'OBSERVABLE_MISSING_DATA', 'EXTERNAL_HAS_DATA',
+    'OBSERVABLE_EXTRA_DATA', 'STRUCTURAL_EDGE_NOT_CANONICAL_ERROR',
+    'GOAL_HAS_OUTGOING', 'DECISION_HAS_INCOMING', 'INVALID_EDGE_TYPE',
+    'NODE_LIMIT_EXCEEDED', 'EDGE_LIMIT_EXCEEDED',
+    // `ModelAdjustment.code` is a CLOSED contract enum whose only candidate
+    // member is `category_reclassified`, which neither of these is. They reach
+    // the user via `deterministic_repairs[]` instead. See boundary.ts.
+    'DUPLICATE_CAUSAL_EDGE_SUPPRESSED', 'CONFLICTING_CAUSAL_DIRECTION',
+    // Not a Repair at all — a VALIDATION code the sweep raises as a violation
+    // (`violationCodes` / `remainingErrors`). It can never reach the repair
+    // allowlist, and is listed only because the derivation below deliberately
+    // over-collects; see the note there.
+    'NO_PATH_TO_GOAL',
+  ]);
+
+  it('classifies every repair code the sweep can emit', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const sweepPath = fileURLToPath(
+      new URL('../repair/deterministic-sweep.ts', import.meta.url),
+    );
+    const source = readFileSync(sweepPath, 'utf8');
+
+    // ⚠ DELIBERATELY A SUPERSET. This matches every `code: "..."` literal in the
+    // sweep, which includes VALIDATION codes as well as Repair codes. Narrowing
+    // it to Repair pushes would need to track object shape across a 2,000-line
+    // file and would fail SILENTLY when it drifted — and a guard that
+    // under-collects lets exactly the code nobody classified slip through, which
+    // is the whole defect. Over-collection costs one line in
+    // ADJUDICATED_EXCLUDED and errs toward asking the question.
+    const emitted = new Set(
+      [...source.matchAll(/\bcode:\s*"([A-Z0-9_]+)"/g)].map((m) => m[1]!),
+    );
+
+    // POSITIVE CONTROL — a derivation that silently matches nothing would make
+    // every assertion below vacuous, and would look exactly like a clean pass.
+    expect(emitted.size).toBeGreaterThan(10);
+    expect(emitted.has('FACTOR_GOAL_EDGE_SPLIT')).toBe(true);
+    // CONTRAST CONTROL — proves the regex discriminates rather than matching all.
+    expect(emitted.has('NOT_A_REAL_REPAIR_CODE')).toBe(false);
+
+    const { REPAIR_CODE_TO_ADJUSTMENT } = await import('../boundary.js');
+    const unclassified = [...emitted].filter(
+      (c) => !(c in REPAIR_CODE_TO_ADJUSTMENT) && !ADJUDICATED_EXCLUDED.has(c),
+    );
+
+    expect(
+      unclassified,
+      `Unclassified repair code(s): ${unclassified.join(', ')}. A new sweep repair ` +
+        'code is invisible in model_adjustments by default. Decide deliberately: add ' +
+        'it to REPAIR_CODE_TO_ADJUSTMENT (boundary.ts) or to ADJUDICATED_EXCLUDED here.',
+    ).toEqual([]);
+  });
+
+  it('still maps the one code that IS user-reviewable', async () => {
+    const { REPAIR_CODE_TO_ADJUSTMENT } = await import('../boundary.js');
+    expect(REPAIR_CODE_TO_ADJUSTMENT.UNREACHABLE_FACTOR_RECLASSIFIED).toBe(
+      'category_reclassified',
+    );
+  });
+});

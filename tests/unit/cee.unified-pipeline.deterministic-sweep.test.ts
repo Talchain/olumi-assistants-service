@@ -1689,7 +1689,15 @@ describe("fixFactorGoalEdges", () => {
       (e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact",
     );
     expect(facToOut).toHaveLength(1);
-    // First claim wins the numerics — a stated value, never an invented merge.
+
+    // ⚠ KNOWN, ACCEPTED LOSS — DO NOT READ THIS AS COMPLETENESS.
+    // The surviving limb carries ONE claim's numerics; the other claim's
+    // strength (0.3 here) is DISCARDED, and with three claims 0.9/0.5/0.1 only
+    // 0.9 survives. That is deliberate: every surviving number is one a source
+    // actually stated, and averaging would invent a number nobody asserted.
+    // But it IS a loss, it is not disclosed per-value, and the copy must never
+    // imply the model kept everything. Adjudicated and accepted; revisit if the
+    // product ever needs to show a distribution over competing claims.
     expect(facToOut[0].strength_mean).toBe(0.5);
 
     // Both goals still reached, one edge each.
@@ -1761,8 +1769,156 @@ describe("fixFactorGoalEdges", () => {
     const conflicts = result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION");
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0].path).toBe("edges[fac_cost→out_fac_cost_impact]");
-    expect(conflicts[0].action).toContain("negative");
-    expect(conflicts[0].action).toContain("positive");
+
+    // ⚠ BOUND BY IDENTITY, NOT BY SUBSTRING. `toContain("negative")` passed for
+    // any sentence mentioning the word anywhere — including one attributing the
+    // wrong direction to the wrong edge, which is exactly the defect this copy
+    // was rewritten to remove. The copy must name the NODES by label, describe
+    // what Olumi DID, and never quote a direction back at the user as theirs.
+    expect(conflicts[0].action).toBe(
+      'Merged conflicting links between "Cost" and "Cost Impact" into one, keeping the direction already ' +
+        "in the model. The drafted model connected them with opposite directions of effect, and only one " +
+        "direction can be analysed.",
+    );
+    // No raw node id may reach user-visible copy (the UI renders it unsanitised).
+    expect(conflicts[0].action).not.toContain("fac_cost");
+    expect(conflicts[0].action).not.toContain("out_fac_cost_impact");
+  });
+
+  // ===========================================================================
+  // GATE 1 — only a STATED, KNOWN sign can disagree. An absence is not a clash.
+  // ===========================================================================
+  it.each([
+    ["an ABSENT effect_direction (the ?? default is ours, not a claim)", undefined],
+    ["an explicit \"unknown\" (contract-admitted absence of a claim)", "unknown"],
+  ])("does NOT report a conflict against %s", (_label, dir) => {
+    const second: any = { from: "fac_cost", to: "goal_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8 };
+    if (dir !== undefined) second.effect_direction = dir;
+
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "negative" },
+        second,
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION")).toHaveLength(0);
+    // Still deduplicated — the limb is suppressed, just not narrated as a clash.
+    expect(
+      graph.edges.filter((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact"),
+    ).toHaveLength(1);
+    expect(
+      result.repairs.filter((r) => r.code === "DUPLICATE_CAUSAL_EDGE_SUPPRESSED").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("does NOT report a conflict for the minted outcome→goal limb, whose sign is ours", () => {
+    // Both source claims say "negative"; the outcome→goal limb is minted
+    // "positive" regardless. If the minted sign were treated as a claim, this
+    // graph would report a conflict nobody made.
+    const graph: any = {
+      nodes: [
+        { id: "fac_cost", kind: "factor", label: "Cost" },
+        { id: "goal_1", kind: "goal", label: "Goal 1" },
+      ],
+      edges: [
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "negative" },
+        { from: "fac_cost", to: "goal_1", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION")).toHaveLength(0);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_cost_impact" && e.to === "goal_1"),
+    ).toHaveLength(1);
+  });
+
+  // ===========================================================================
+  // GATE 2 — a coherent model must never be narrated as self-contradiction
+  // ===========================================================================
+  it("does NOT report a conflict when the claims have DIFFERENT targets", () => {
+    // "Price helps revenue, hurts share" — coherent. The two claims collide only
+    // because WE mediate them through one shared outcome node. Blaming the user
+    // for our mediation artefact is the defect this gate exists to prevent.
+    const graph: any = {
+      nodes: [
+        { id: "fac_price", kind: "factor", label: "Price" },
+        { id: "goal_revenue", kind: "goal", label: "Revenue" },
+        { id: "goal_share", kind: "goal", label: "Market Share" },
+      ],
+      edges: [
+        { from: "fac_price", to: "goal_revenue", strength_mean: 0.5, strength_std: 0.1, belief_exists: 0.9, effect_direction: "positive" },
+        { from: "fac_price", to: "goal_share", strength_mean: 0.4, strength_std: 0.1, belief_exists: 0.8, effect_direction: "negative" },
+      ],
+    };
+
+    const result = fixFactorGoalEdges(graph, "V1_FLAT");
+
+    expect(result.repairs.filter((r) => r.code === "CONFLICTING_CAUSAL_DIRECTION")).toHaveLength(0);
+    // Both goals still reached; the shared limb is carried once.
+    expect(
+      graph.edges.filter((e: any) => e.from === "fac_price" && e.to === "out_fac_price_impact"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_price_impact" && e.to === "goal_revenue"),
+    ).toHaveLength(1);
+    expect(
+      graph.edges.filter((e: any) => e.from === "out_fac_price_impact" && e.to === "goal_share"),
+    ).toHaveLength(1);
+    // ⚠ PRE-EXISTING SIGN INVERSION, ROWED SEPARATELY, NOT FIXED HERE.
+    // The shared limb carries ONE sign, so the only path to "Market Share" comes
+    // out positive although the source said negative. That follows from the
+    // per-factor shared mediating outcome, which predates this suppression.
+    // Pinned so the gap is visible in the suite rather than invisible to it.
+    expect(
+      graph.edges.find((e: any) => e.from === "fac_price" && e.to === "out_fac_price_impact")
+        .effect_direction,
+    ).toBe("positive");
+  });
+
+  // ===========================================================================
+  // Order-freedom — the same model must analyse the same way twice
+  // ===========================================================================
+  it("resolves the shared limb identically whichever order the claims arrive in", () => {
+    const build = (reversed: boolean): any => {
+      const a = { from: "fac_cost", to: "goal_1", strength_mean: 0.9, strength_std: 0.1, belief_exists: 0.99, effect_direction: "positive" };
+      const b = { from: "fac_cost", to: "goal_2", strength_mean: 0.1, strength_std: 0.4, belief_exists: 0.51, effect_direction: "positive" };
+      return {
+        nodes: [
+          { id: "fac_cost", kind: "factor", label: "Cost" },
+          { id: "goal_1", kind: "goal", label: "Goal 1" },
+          { id: "goal_2", kind: "goal", label: "Goal 2" },
+        ],
+        edges: reversed ? [b, a] : [a, b],
+      };
+    };
+
+    const forward = build(false);
+    const reverse = build(true);
+    fixFactorGoalEdges(forward, "V1_FLAT");
+    fixFactorGoalEdges(reverse, "V1_FLAT");
+
+    const limbOf = (g: any) =>
+      g.edges.find((e: any) => e.from === "fac_cost" && e.to === "out_fac_cost_impact");
+
+    // Same numerics either way — decided by a key over the source claim, never
+    // by position in edges[]. Before this, first-in-list won and the output
+    // graph depended on input order.
+    expect(limbOf(forward).strength_mean).toBe(limbOf(reverse).strength_mean);
+    expect(limbOf(forward).strength_std).toBe(limbOf(reverse).strength_std);
+    expect(limbOf(forward).belief_exists).toBe(limbOf(reverse).belief_exists);
+    // Bound to the actual winner, not merely to agreement: goal_1 sorts before
+    // goal_2, so the 0.9 claim survives in BOTH orders.
+    expect(limbOf(forward).strength_mean).toBe(0.9);
+    expect(limbOf(reverse).strength_mean).toBe(0.9);
   });
 
   it("does not add a second limb when the graph ALREADY carries that edge", () => {
