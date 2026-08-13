@@ -86,11 +86,9 @@ function clearStableProjection(): AnalysisProjectionSummary {
     runner_up: { label: "'migrate to Salesforce instead'", probability: 0.02 },
     margin_pp: 94,
     robustness_band: 'stable',
-    top_drivers: [
-      { factor_label: 'Seat price', sensitivity_value: 0.42, direction: 'increase' },
-    ],
+    top_drivers: [{ factor_label: 'Seat price', sensitivity_value: 0.42 }],
     fragile_edges: [],
-  } as AnalysisProjectionSummary;
+  };
 }
 
 /** The producer shape, copied from the real capture named in the header. */
