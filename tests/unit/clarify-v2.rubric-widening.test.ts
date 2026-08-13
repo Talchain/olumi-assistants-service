@@ -11,10 +11,11 @@
  * opposite-direction twin — a same-vocabulary sentence that must NOT satisfy
  * the dimension — shown failing in the same run.
  *
- * SCOPE (after the #928 review ablation): TWO arms remain — goal `is the …
- * prize` and options from-X-to-Y. Both are guarded by CLOSED POSITIVE lists
- * and fail safe; the two timeframe arms that were guarded by a closed
- * NEGATIVE list are gone (see the note below the goal block).
+ * SCOPE (after two rounds of #928 review): ONE arm remains — options
+ * from-X-to-Y, guarded by a CLOSED POSITIVE list, which fails safe. The two
+ * timeframe arms (closed NEGATIVE list) and the goal-prize arm (defeated the
+ * fail-closed denial check) are both gone; the notes below record why, and
+ * the flip set survived every removal.
  *
  * RED-first: at pristine (335a9380) every `widened:` positive fails
  * (dimension still missing) and every twin already passes; the twins are the
@@ -29,42 +30,16 @@ function satisfied(brief: string, dimension: 'goal' | 'options' | 'quantities' |
   return assessBriefCompleteness(brief).satisfied.includes(dimension);
 }
 
-describe('goal widening — predicate-nominative "…is the (main) prize" (measured miss: M3)', () => {
-  it('widened: M3 wire capture — "Faster delivery to northern customers is the main prize."', () => {
-    expect(
-      satisfied(
-        'Should we open a second warehouse in Manchester next year, or expand our existing site? Faster delivery to northern customers is the main prize.',
-        'goal',
-      ),
-    ).toBe(true);
-  });
-
-  it('widened: bare "…is the prize" without an adjective', () => {
-    expect(satisfied('Keeping the automotive contract is the prize. Do we bid low or walk away?', 'goal')).toBe(true);
-  });
-
-  it('widened: "…remains the biggest prize"', () => {
-    expect(
-      satisfied('Do we chase enterprise or SMB? Enterprise remains the biggest prize.', 'goal'),
-    ).toBe(true);
-  });
-
-  it('twin (opposite direction): a prize DRAW is not an objective — goal stays missing', () => {
-    expect(
-      satisfied('We run a prize draw for customers every quarter. Should we keep it or drop it?', 'goal'),
-    ).toBe(false);
-  });
-
-  it('twin (opposite direction): "First prize is…" (prize as subject) — goal stays missing', () => {
-    expect(
-      satisfied('First prize is a weekend in Paris. Should we sponsor the raffle or skip it?', 'goal'),
-    ).toBe(false);
-  });
-
-  it('twin (opposite direction): "the prize money" as a fact — goal stays missing', () => {
-    expect(satisfied('The prize money doubled. Should we enter the competition or sit it out?', 'goal')).toBe(false);
-  });
-});
+// ── THE GOAL-PRIZE ARM WAS ALSO DROPPED (#928 review round 2) ─────────────
+// It could not over-credit on its own (closed positive list), but it was the
+// one arm on which the fail-closed denial check could be defeated — 8 measured
+// phrasings, by token gaps ("Nobody thinks…") and clause-orphaning. On a GOAL
+// arm that means an invented objective with NO disclosure, which is the
+// round-1 blocker surviving under different wording. Dropping it closed all 8
+// AT ZERO COST: M3 still drafts first-turn, as `missing=["goal"]` routes to
+// DRAFT-FIRST with an honest disclosure instead of silently to `complete`.
+// Its tests live on as REGRESSION pins in clarify-v2.rubric-fail-closed.test.ts
+// ("the goal-prize arm is GONE and cannot silently return").
 
 // ── THE TWO TIMEFRAME ARMS WERE ABLATED BEFORE MERGE ──────────────────────
 // #928 adversarial review (REVIEW-928.md §1) measured them as FAIL-UNSAFE: a

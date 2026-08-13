@@ -38,6 +38,16 @@ import {
 const satisfied = (brief: string, dimension: ClarifyDimension): boolean =>
   assessBriefCompleteness(brief).satisfied.includes(dimension);
 
+/**
+ * Defensive lookup so a dimension with no statement pair fails on the NAMED
+ * alphabet assertion below instead of crashing COLLECTION with "Cannot read
+ * properties of undefined" (#928 round 2, item 4: the planted fifth dimension
+ * failed loudly but unhelpfully, because `it.each` evaluates before any test
+ * body runs). Loud AND legible beats loud alone.
+ */
+const statementsFor = (d: ClarifyDimension): { affirmed: string; denied: readonly string[] } =>
+  DIMENSION_STATEMENTS[d] ?? { affirmed: '', denied: [] };
+
 // ── 1. THE PROPERTY, over every dimension ─────────────────────────────────
 /**
  * A plain, UNDENIED statement of each dimension (the positive control: the
@@ -48,12 +58,16 @@ const DIMENSION_STATEMENTS: Readonly<
   Record<ClarifyDimension, { readonly affirmed: string; readonly denied: readonly string[] }>
 > = {
   goal: {
-    affirmed: 'Faster delivery to northern customers is the main prize.',
+    // ⚠ SWAPPED at #928 round 2: this control used to be the PRIZE sentence,
+    // whose arm is now DROPPED — leaving it here would have made every goal
+    // denial below pass vacuously (nothing fires, so nothing can fail open).
+    // A property test whose positive control is a deleted arm tests nothing.
+    affirmed: 'The goal is to increase revenue.',
     denied: [
-      'I do not think raw speed is the main prize.',
-      'Faster delivery is not the main prize.',
-      "Speed isn't the main prize here.",
-      'Raw speed was never the main prize.',
+      'I do not think the goal is to increase revenue.',
+      'The goal is not to increase revenue.',
+      "We aren't trying to increase revenue.",
+      'We never wanted to increase revenue.',
     ],
   },
   options: {
@@ -91,13 +105,15 @@ describe('INVARIANT — every dimension fails closed on a DENIED statement', () 
   it.each(CLARIFY_V2_DIMENSIONS.map((d) => [d] as const))(
     '%s: the AFFIRMED statement is satisfied (positive control — the denial assertions are not vacuous)',
     (dimension) => {
-      expect(satisfied(DIMENSION_STATEMENTS[dimension].affirmed, dimension)).toBe(true);
+      const affirmed = statementsFor(dimension).affirmed;
+      expect(affirmed, `${dimension}: no affirmed statement — see the alphabet assertion`).not.toBe('');
+      expect(satisfied(affirmed, dimension)).toBe(true);
     },
   );
 
   it.each(
     CLARIFY_V2_DIMENSIONS.flatMap((d) =>
-      DIMENSION_STATEMENTS[d].denied.map((s) => [d, s] as const),
+      statementsFor(d).denied.map((s) => [d, s] as const),
     ),
   )('%s: DENIED — "%s" scores MISSING, never satisfied', (dimension, brief) => {
     expect(satisfied(brief, dimension)).toBe(false);
@@ -108,9 +124,21 @@ describe('INVARIANT — every dimension fails closed on a DENIED statement', () 
     // that denies one thing and affirms another keeps the affirmation. This is
     // the assertion that stops the remedy over-correcting into the never-drafts
     // direction (the opposite harm — trap 22b).
-    const brief =
-      'Cost is not the main prize. Faster delivery to northern customers is the main prize.';
+    // ⚠ FIXTURE UPDATED at round 2: the second sentence used to be the PRIZE
+    // construction, whose arm is dropped — the pin would have asserted a
+    // property of a deleted arm and failed for the wrong reason.
+    const brief = 'Cost is not the main prize. The goal is to increase revenue.';
     expect(satisfied(brief, 'goal')).toBe(true);
+  });
+
+  it('a thousands separator is not a clause boundary (a denied magnitude stays MISSING)', () => {
+    // REGRESSION PIN, from a defect this lane introduced and its own property
+    // test caught: adding `,` to the boundary class split "£20,000" and the
+    // orphaned "000" satisfied quantities on a sentence that denied it.
+    expect(satisfied('The switch would not cost £20,000.', 'quantities')).toBe(false);
+    expect(satisfied("It won't cost £20,000.", 'quantities')).toBe(false);
+    // …while a stated magnitude beside a contrastive comma still counts.
+    expect(satisfied('The budget is £20,000, not £50,000.', 'quantities')).toBe(true);
   });
 
   it('a denial in a DIFFERENT sentence leaves other dimensions untouched', () => {
@@ -202,14 +230,79 @@ const REVIEWER_CORPUS: ReadonlyArray<{
   { brief: 'It must be live in six months.', dimension: 'timeframe', expected: true, note: 'ROADMAP 2.103 arm, must survive' },
   { brief: 'We have a six month window to decide.', dimension: 'timeframe', expected: true, note: 'horizon noun, must survive' },
   { brief: 'A decision is needed by March.', dimension: 'timeframe', expected: true, note: 'by + month, must survive' },
-  { brief: 'Faster delivery to northern customers is the main prize.', dimension: 'goal', expected: true, note: 'the widened goal arm, kept' },
+  // ⚠ RE-ADJUDICATED at #928 round 2. This was `expected: true` — the widened
+  // goal-prize arm. That arm is DROPPED (it was the only arm on which the
+  // fail-closed check could be defeated), so the sentence now correctly scores
+  // MISSING and M3 drafts first-turn WITH a disclosure instead of silently.
+  { brief: 'Faster delivery to northern customers is the main prize.', dimension: 'goal', expected: false, note: 'goal-prize arm DROPPED at round 2 — no longer credited' },
+  // ── ROUND-2 corpus: the 8 phrasings that defeated the fail-closed check ──
+  // All are the round-1 blocker surviving under different wording ("swap 'I do
+  // not think' for 'Nobody thinks'"). Dropping the arm closes all 8 at once —
+  // which is why the remedy was a deletion, not a longer token list.
+  { brief: 'Nobody here believes headcount is the key prize.', dimension: 'goal', expected: false, note: 'token gap: nobody' },
+  { brief: 'I doubt raw speed is the main prize.', dimension: 'goal', expected: false, note: 'token gap: doubt' },
+  { brief: 'No one thinks cost is the real prize.', dimension: 'goal', expected: false, note: 'token gap: no one' },
+  { brief: 'We disagree that margin is the main prize.', dimension: 'goal', expected: false, note: 'token gap: disagree that' },
+  { brief: 'It is unclear that growth is the biggest prize.', dimension: 'goal', expected: false, note: 'token gap: unclear that' },
+  { brief: 'We are not sure whether speed or reliability is the main prize.', dimension: 'goal', expected: false, note: 'clause-orphaning: listed token thrown away by the or-boundary' },
+  { brief: "I can't tell if cost or speed is the main prize.", dimension: 'goal', expected: false, note: 'clause-orphaning: listed token thrown away by the or-boundary' },
+  { brief: 'I do not think raw speed is the main prize.', dimension: 'goal', expected: false, note: 'the original round-1 severe case' },
+  // ── the contrastive "X, not Y" regressions the comma boundary closes ──
+  { brief: 'The objective is to grow revenue, not to cut costs.', dimension: 'goal', expected: true, note: 'comma boundary: contrastive statement of an objective' },
+  { brief: 'We are optimising for margin, not volume.', dimension: 'goal', expected: true, note: 'comma boundary' },
+  { brief: 'We must decide by March, not later.', dimension: 'timeframe', expected: true, note: 'comma boundary' },
+  { brief: 'We want to increase retention, not vanity signups.', dimension: 'goal', expected: true, note: 'comma boundary' },
+];
+
+/**
+ * ⭐ THE HONEST GAP (trap 22f). These are inputs on which the denial check
+ * still FAILS OPEN, pinned as an EXACT set rather than left invisible.
+ *
+ * Two mechanisms, both measured, and both **PRE-EXISTING — identical on the
+ * `origin/staging` build**, so this PR neither introduces nor widens them
+ * (measured three-way: pristine SAT, PR SAT). They are recorded because the
+ * module now RATIFIES a fail-closed invariant, and an invariant with an
+ * unrecorded exception set is the kind of claim this estate keeps paying for:
+ *   1. DENIAL-TOKEN GAPS — "Nobody thinks…", "I doubt…", "We disagree that…"
+ *      are denials the closed token alphabet does not contain.
+ *   2. CLAUSE-ORPHANING — a LISTED token separated from the match by an
+ *      `or`/`and` boundary falls outside the window.
+ *
+ * NOT fixed by adding tokens: the reviewer ran that variant in advance and
+ * measured it halving mechanism 1 while leaving mechanism 2 untouched — CEE
+ * #888 round 2, the sunk-cost round. The blocker was closed by removing the
+ * arm where these mattered (a GOAL arm, where a defeated denial invents an
+ * objective silently). On the arms that remain, the residual cost is the
+ * PRE-EXISTING behaviour of the shipped battery.
+ *
+ * The set is asserted EXACTLY: it REDs if it grows (a new fail-open class) or
+ * shrinks (someone fixed one — then move the case and say so).
+ */
+const KNOWN_FAIL_OPEN: ReadonlyArray<{ readonly brief: string; readonly dimension: ClarifyDimension; readonly mechanism: 'token_gap' | 'clause_orphan' }> = [
+  { brief: 'Nobody thinks the goal is to increase revenue.', dimension: 'goal', mechanism: 'token_gap' },
+  { brief: 'I doubt the goal is to increase revenue.', dimension: 'goal', mechanism: 'token_gap' },
+  { brief: 'We disagree that the goal is to increase revenue.', dimension: 'goal', mechanism: 'token_gap' },
+  { brief: 'We are not sure whether speed or reliability is the goal.', dimension: 'goal', mechanism: 'clause_orphan' },
+  { brief: "I can't tell whether cost or speed is the objective.", dimension: 'goal', mechanism: 'clause_orphan' },
+];
+
+/**
+ * The one contrastive construction the comma boundary does NOT recover
+ * ("not just X but Y" — the denial and the objective share a clause). A
+ * recall loss in the SAFE direction: one extra question. Pinned exactly so it
+ * cannot quietly grow into the 2.103 class again.
+ */
+const KNOWN_OVER_DETECTION: ReadonlyArray<{ readonly brief: string; readonly dimension: ClarifyDimension }> = [
+  { brief: 'Our goal is not just cost but speed.', dimension: 'goal' },
 ];
 
 describe('REVIEWER CORPUS (#928) — the exact known-behaviour set, both directions', () => {
   it('the corpus is intact and carries both directions (a gutted corpus reports green by testing nothing)', () => {
-    expect(REVIEWER_CORPUS.length).toBe(18);
-    expect(REVIEWER_CORPUS.filter((c) => c.expected === false).length).toBe(13);
-    expect(REVIEWER_CORPUS.filter((c) => c.expected === true).length).toBe(5);
+    // Counts re-adjudicated at #928 round 2 (arm dropped + round-2 corpus and
+    // the comma-boundary cases adopted). Exact, both directions.
+    expect(REVIEWER_CORPUS.length).toBe(30);
+    expect(REVIEWER_CORPUS.filter((c) => c.expected === false).length).toBe(22);
+    expect(REVIEWER_CORPUS.filter((c) => c.expected === true).length).toBe(8);
   });
 
   it.each(REVIEWER_CORPUS.map((c) => [c.brief, c] as const))('%s', (_brief, c) => {
@@ -225,5 +318,44 @@ describe('REVIEWER CORPUS (#928) — the exact known-behaviour set, both directi
     // ordinary blocking ask rather than drafting a model whose goal the user
     // explicitly disowned.
     expect([...assessment.missing].sort()).toEqual(['goal', 'timeframe']);
+  });
+});
+
+describe('THE HONEST GAP — fail-open and over-detection, pinned as EXACT sets', () => {
+  it('the known fail-open set is exactly what is recorded (REDs if it grows OR shrinks)', () => {
+    expect(KNOWN_FAIL_OPEN.length).toBe(5);
+    expect(KNOWN_FAIL_OPEN.filter((c) => c.mechanism === 'token_gap').length).toBe(3);
+    expect(KNOWN_FAIL_OPEN.filter((c) => c.mechanism === 'clause_orphan').length).toBe(2);
+  });
+
+  it.each(KNOWN_FAIL_OPEN.map((c) => [c.brief, c] as const))(
+    'KNOWN FAIL-OPEN (%s)',
+    (_brief, c) => {
+      // Asserting the GAP, not the behaviour we want: if someone closes it,
+      // this REDs and the set must be moved deliberately, with a measurement.
+      expect(
+        satisfied(c.brief, c.dimension),
+        `${c.mechanism}: this input no longer fails open — good; move it out of KNOWN_FAIL_OPEN and record the measurement`,
+      ).toBe(true);
+    },
+  );
+
+  it.each(KNOWN_OVER_DETECTION.map((c) => [c.brief, c] as const))(
+    'KNOWN OVER-DETECTION (%s)',
+    (_brief, c) => {
+      expect(satisfied(c.brief, c.dimension)).toBe(false);
+    },
+  );
+
+  it('the goal-prize arm is GONE and cannot silently return', () => {
+    // The arm's own sentence must not credit goal by ANY route. This is the
+    // deletion's pin: re-adding the literal turns this RED.
+    expect(satisfied('Faster delivery to northern customers is the main prize.', 'goal')).toBe(false);
+    expect(satisfied('Keeping the automotive contract is the prize.', 'goal')).toBe(false);
+    // …and the capability it was added for is UNAFFECTED: M3 still leaves
+    // exactly one dimension missing, so it drafts first-turn with a disclosure.
+    const M3 =
+      'Should we open a second warehouse in Manchester next year, or expand our existing site? A new site would cost roughly £1.2 million up front with £300,000 a year in running costs; expanding the current one is about £450,000. Faster delivery to northern customers is the main prize.';
+    expect(assessBriefCompleteness(M3).missing).toEqual(['goal']);
   });
 });

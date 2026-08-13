@@ -94,7 +94,7 @@ const EXPECTED_FIRST_TURN: ReadonlyArray<
   ['S5', 'draft_first', 'goal'],
   ['M1', 'complete'],
   ['M2', 'ask'],
-  ['M3', 'complete'], // goal now detected ("…is the main prize")
+  ['M3', 'draft_first', 'goal'], // prize arm DROPPED at review — drafts first-turn WITH a disclosure
   ['M4', 'ask'], // options now detected (from-X-to-Y); goal+timeframe still missing
   ['M5', 'ask'], // timeframe arm ABLATED at review (#928) — goal+timeframe missing
   ['L1', 'draft_first', 'goal'],

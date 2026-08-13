@@ -222,17 +222,33 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // decision a success?" — the outcome half of ROADMAP 2.103. Anchored on
     // the modal so a bare "success is important" cannot fire.
     /\bsuccess\s+(?:would|will|should)\s+be\b/i,
-    // TRACK-1 INTAKE FIX (2026-08-13) — the predicate-nominative PRIZE
-    // construction, MEASURED as a detection miss on a real wire brief
-    // (INTAKE-FUNNEL §2.1, brief M3: "Faster delivery to northern customers
-    // is the main prize" — an explicit objective statement no arm could see;
-    // the fourth instance of the same class the three corrections above
-    // record). Anchored on the copula + determiner ("is/are/remains the …
-    // prize") so prize-as-subject ("First prize is a weekend in Paris"),
-    // "a prize draw" and "the prize money" cannot fire — the opposite-
-    // direction twins are pinned in clarify-v2.rubric-widening.test.ts
-    // (trap 22b: every positive ships with its inverse).
-    /\b(?:is|are|remains)\s+the\s+(?:(?:main|real|big|biggest|key|top)\s+)?prize\b/i,
+    // TRACK-1 INTAKE FIX (2026-08-13) — A GOAL ARM FOR THE PREDICATE-NOMINATIVE
+    // PRIZE CONSTRUCTION ("…is the main prize", wire brief M3) WAS WRITTEN HERE
+    // AND DROPPED BEFORE MERGE (#928 review round 2, REVIEW-928.md §B).
+    //
+    // It was guarded by a closed POSITIVE list and so could not over-credit on
+    // its own. It was dropped for the OPPOSITE reason: it was the only arm on
+    // which `isDeniedEvidence` could be defeated, and a defeated denial check
+    // on a GOAL arm is the severe failure — an invented objective with NO
+    // disclosure, on a brief that denied it. Eight measured phrasings defeated
+    // it, by two mechanisms the fail-closed predicate cannot see: denial tokens
+    // outside its alphabet ("Nobody thinks…", "I doubt…", "We disagree that…")
+    // and clause-orphaning of a LISTED token ("We are not sure whether speed or
+    // reliability is the main prize" — `or` is a clause boundary, so the `not`
+    // falls outside the window).
+    //
+    // ⭐ AND IT COSTS NOTHING, WHICH IS THE POINT: M3 still drafts first-turn.
+    // Without this arm M3 scores `missing = ["goal"]`, which the count
+    // predicate routes to DRAFT-FIRST *with an honest disclosure* rather than
+    // silently to `complete`. Same capability, better provenance. The
+    // first-turn draft set is byte-identical (S5, M1, M3, L1, L2, L3, L5).
+    //
+    // THE GENERAL LESSON, recorded because it is the lane's real finding: of
+    // the four detector widenings this lane proposed, three are now gone and
+    // the flips survived every removal. The capability never came from
+    // widening the regexes — it comes from DRAFT-FIRST-WITH-DISCLOSURE (the
+    // count predicate plus the honest assumption sentence). The regexes were
+    // the risky part. Do not re-add this arm to "recover" M3; M3 is not lost.
   ],
   options: [
     /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|(?:choice|choos(?:e|ing)|decid(?:e|ing)) between|option[s]? (?:are|would be|include))\b/i,
@@ -534,7 +550,14 @@ const YES_NO_RESTATEMENT_PATTERN = /\b(?:and\/)?or\s+not\b/gi;
  * invariant applied to the guard's own guard.
  */
 const CLAUSE_BOUNDARY_PATTERN =
-  /[.!?;:\n]|\s+(?:but|yet|although|though|however|whereas|while|because|since|so that|and|or)\s+/gi;
+  // ⚠ THE COMMA IS A BOUNDARY EXCEPT BETWEEN DIGITS, AND THAT EXCEPTION WAS
+  // MEASURED, NOT ANTICIPATED. A bare comma in the class splits THOUSANDS
+  // SEPARATORS: "The switch would not cost £20,000" became "…not cost £20" +
+  // "000", and the orphaned "000" — carrying no denial — satisfied quantities.
+  // A denied magnitude scoring SATISFIED is the fail-OPEN direction, i.e. the
+  // exact harm this predicate exists to prevent, introduced by the fix for a
+  // fail-CLOSED one. Caught by the property test's own quantities cases.
+  /[.!?;:\n]|(?:(?<!\d),|,(?!\d))|\s+(?:but|yet|although|though|however|whereas|while|because|since|so that|and|or)\s+/gi;
 
 /** The clause carrying `matchIndex` — the span a denial can govern. */
 function containingClause(text: string, matchIndex: number): string {
