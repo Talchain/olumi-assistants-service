@@ -25,6 +25,10 @@ import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.
 import { isFactorData, isOptionData } from "./schema-v2.js";
 import { readIsBaseline } from "../baseline-identity.js";
 import {
+  deriveCorroboratingRawValue,
+  findUncorroboratedCapFactorIds,
+} from "./observed-state-cap-corroboration.js";
+import {
   extractOptionsFromNodes,
   toOptionsV3,
   getExtractionStatistics,
@@ -296,6 +300,36 @@ export function transformNodeToV3(
     const source: "brief_extraction" | "cee_inference" =
       node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
 
+    // ⭐ A WRITTEN `cap` MUST SHIP WITH THE `raw_value` THAT CORROBORATES IT.
+    //
+    // The model is taught to emit the triple (`data: {value: 0.6, raw_value:
+    // 30000, unit: "£", cap: 50000}` — defaults-v187.ts:548), but `raw_value`
+    // is an OPTIONAL grammar slot and drafts drop it. The pass-through below
+    // then emits `{value: 0.6, cap: 150000}` with no corroboration, and such a
+    // factor cannot PROVE its scale convention: `buildFactorScaleMap` grants
+    // `normalisedConvention` only on a self-consistent pair, so
+    // `resolveRawInterventionValue` returns `ambiguous_no_evidence` and
+    // refuses to denormalise. That refusal is CORRECT — PLoT divides
+    // intervention values by `observed_state.cap`, so 0.6 against cap 150,000
+    // reaches ISL as ~0.000004 — and it is deliberately NOT weakened.
+    //
+    // The cost lands on the analysable-option gate, which can only HOLD a
+    // status-quo option at factors whose observed values are provable: a
+    // status quo all of whose factors are unprovable is EXCLUDED rather than
+    // held, and below two options the whole run refuses.
+    //
+    // So the producer is fixed instead. Derivation is bounded to the domain the
+    // CONSUMER can actually accept as evidence (see
+    // `deriveCorroboratingRawValue`) and invents nothing outside it — an absent
+    // `raw_value` that keeps a factor honestly unprovable beats a fabricated one
+    // that launders the corruption the rule exists to stop.
+    const derivedRawValue = deriveCorroboratingRawValue(
+      node.data.value,
+      node.data.cap,
+      node.data.raw_value,
+      node.data.unit,
+    );
+
     v3Node.observed_state = {
       value: node.data.value,
       baseline: node.data.baseline,
@@ -303,6 +337,7 @@ export function transformNodeToV3(
       source,
       // Pass through factor metadata fields
       ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
+      ...(derivedRawValue !== undefined && { raw_value: derivedRawValue }),
       ...(node.data.cap !== undefined && { cap: node.data.cap }),
       ...(node.data.extractionType !== undefined && { extractionType: node.data.extractionType }),
       ...(node.data.factor_type !== undefined && { factor_type: node.data.factor_type }),
@@ -875,6 +910,37 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
       count: labelCleaningTrace.length,
       entries: labelCleaningTrace,
     }, `Stripped normalisation annotations from ${labelCleaningTrace.length} node label(s)`);
+  }
+
+  // ⭐ LOUD, NEVER ASSUME-GOOD: a factor shipping a `cap` its own observed state
+  // cannot PROVE. The write above corroborates every case it can do so
+  // truthfully; what reaches here is the residue it could NOT — a degenerate
+  // `cap <= 1`, a `%` factor whose divisor is not 100, or a `raw_value` that
+  // DISAGREES with `value * cap` (a wrong number a presence-only check would
+  // bless). Each leaves the factor `ambiguous_no_evidence` at the analysis seam,
+  // so its interventions cannot be denormalised and the analysable-option gate
+  // cannot hold a status quo at it.
+  //
+  // An alarm rather than a repair: outside the derivable domain there is no
+  // truthful raw value to write, and fabricating one would launder the exact
+  // 100,000x corruption the `ambiguous_no_evidence` rule exists to stop. This
+  // is the same RUNTIME, at-the-boundary shape as the prior-distribution drift
+  // alarm above — the value is passed through unchanged, never 400'd.
+  //
+  // ⚠ MEASURED SCOPE, STATED SO IT IS NOT MISREAD (trap 20): across five banked
+  // real capture corpora (71 factors with observed_state, 50 capped) this class
+  // has ZERO incidence, and the probe discriminates (a contrast control with an
+  // injected uncorroborated factor reports it). So this is DEFENCE IN DEPTH
+  // against a writer that does not exist today — the draft path's records
+  // projector deliberately stores no cap, and the graph grammar that let a model
+  // author one is retired — not a fix for an observed production failure.
+  const uncorroborated = findUncorroboratedCapFactorIds(v3Nodes);
+  if (uncorroborated.length > 0) {
+    log.error({
+      event: "cee.v3_transform.uncorroborated_cap",
+      factor_ids: uncorroborated,
+      count: uncorroborated.length,
+    }, `[V3] ${uncorroborated.length} factor(s) ship an observed_state cap with no corroborating raw_value (or one that disagrees with value x cap). Such a factor cannot prove its scale convention: resolveRawInterventionValue returns ambiguous_no_evidence, its interventions are never denormalised, and the analysable-option gate cannot hold a status quo at it. Ids only — no magnitudes are logged.`);
   }
 
   return {
