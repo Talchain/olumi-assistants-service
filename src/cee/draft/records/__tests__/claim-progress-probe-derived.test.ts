@@ -50,12 +50,33 @@ const HISTORIC_V3_GRAMMAR_SHA256 =
  * of those logs must be able to tell which grammar produced them, and re-pointing
  * the literal would silently merge two grammars into one evidence base.
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V4_GRAMMAR_SHA256 =
   "e7505d3feaea15fc437acbb36066784d186c744e524cb07de5606fdf2a050bbf";
 
+/**
+ * ⭐ v5, 2026-08-14. The grammar moved for the SECOND time, and for a reason the
+ * record must carry: `DRAFT_RECORD_CLAIM_KINDS` gained `risk` and `outcome`.
+ *
+ * Their absence was a live outage, not a tidiness matter — 5/5 draws on the
+ * pinned brief returned `riskCount: 0` and an outcome layer that was 100 %
+ * machine scaffolding (`olumi-docs/PHASE0-EVIDENCE-2026-07-28/
+ * analysis-outage-2026-08-14/`). This list IS the structured-output enum, so a
+ * kind missing from it is a thought the model cannot express.
+ *
+ * ⚠ v4's VALUE STAYS AND IS ASSERTED DISTINCT, exactly as v3's is. Every draft
+ * between 2026-08-12 and 2026-08-14 emitted `grammar_sha256:e7505d3f…`, and a
+ * reader of those logs must be able to tell which grammar produced them.
+ */
+const PINNED_GRAMMAR_SHA256 =
+  "f5fbf0194c975db06cacd1d1a370129caf2bf65c1ccc2134de10f984d2ffe1f7";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v4 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v5 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
+  });
+
+  it("is DISTINCT from the historic v4 grammar, so v4's runs stay attributable", () => {
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V4_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v3 grammar, so v3's runs stay attributable", () => {

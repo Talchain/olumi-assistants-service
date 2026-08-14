@@ -200,13 +200,22 @@ describe("mechanism 2 — the completion prompt carries the LEGAL VOCABULARY, de
    * The kind→phrase mapping is deliberately re-derived HERE, independently of
    * the module's own table, so the two have to agree.
    */
+  // ⚠ UPDATED 2026-08-14 WITH THE MODULE'S CLASSIFICATION, WHICH GENUINELY
+  // MOVED — this is not a test bent to fit a change. `outcome` was
+  // model-UNREACHABLE (`null`) because nothing could emit one; the grammar
+  // widening makes it a claim kind, so it becomes reachable and gains a phrase.
+  // `risk` gains its second source (a `risk` claim, alongside a `constraint` the
+  // user stated) and its phrase names both. The table stays an INDEPENDENT
+  // re-derivation: it is written from `grammar.ts` + `NODE_KIND_MAP` here, and
+  // the module's own table is written from the same two authorities there, so
+  // the assertion is still that two independent readings agree.
   const PHRASE: Record<string, string | null> = {
     option: "an option",
     factor: "a factor",
-    risk: "a constraint you recorded",
+    risk: "a risk (or a constraint you recorded)",
+    outcome: "an outcome",
     goal: "the goal",
     decision: null,
-    outcome: null,
   };
 
   it("represents every model-reachable ALLOWED_EDGES rule", () => {

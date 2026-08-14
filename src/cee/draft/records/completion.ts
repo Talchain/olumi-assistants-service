@@ -809,7 +809,21 @@ export function buildRecordsCompletionSchema(): Record<string, unknown> {
 const MODEL_REACHABLE_KIND_PHRASE: Readonly<Record<string, string>> = {
   option: "an option",
   factor: "a factor",
-  risk: "a constraint you recorded",
+  // ⭐ WIDENED 2026-08-14. A `risk` node now has TWO model-reachable sources —
+  // a `constraint` the user stated (which `NODE_KIND_MAP` normalises to `risk`)
+  // and, since the grammar widening, a `risk` CLAIM. The phrase names both,
+  // because the completion turn references records by index and needs to
+  // recognise either as the thing at the other end of the arrow.
+  risk: "a risk (or a constraint you recorded)",
+  // ⭐ MOVED 2026-08-14 out of `MODEL_UNREACHABLE_KIND_REASON`, where it carried
+  // the sentence *"never emitted by the model; the sweep mints it from a
+  // factor→goal edge"*. That was TRUE when written and is now FALSE — and while
+  // it stood, `renderLegalEdgeVocabulary` silently DROPPED both `factor →
+  // outcome` and `outcome → goal` from the legal list (an unphraseable kind is
+  // skipped), so a completion turn was never shown the shape that ends a chain
+  // honestly and could only reach the goal by the `factor → goal` shortcut the
+  // sweep then had to repair.
+  outcome: "an outcome",
   goal: "the goal",
 };
 
@@ -821,8 +835,6 @@ const MODEL_REACHABLE_KIND_PHRASE: Readonly<Record<string, string>> = {
 const MODEL_UNREACHABLE_KIND_REASON: Readonly<Record<string, string>> = {
   // The decision node is projector-structural and has no wire reference.
   decision: "projector-structural; the model has no way to name it",
-  // Never projected from a record: `fixFactorGoalEdges` mints it.
-  outcome: "never emitted by the model; the sweep mints it from a factor→goal edge",
 };
 
 /**

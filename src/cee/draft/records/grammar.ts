@@ -132,6 +132,11 @@ import { createHash } from "node:crypto";
  * land on and are OUT OF SCOPE for the DRAFTABLE subset — an omission
  * on the record, not a silent narrowing. They ship as explicit not-tracked
  * entries at the receipt surface (slice R2), never silently absent.
+ *
+ * ⚠ DELIBERATELY NOT WIDENED WITH `risk`/`outcome` when the CLAIM list was
+ * (2026-08-14). A user-stated hazard already reaches a `risk` node through
+ * `constraint` + `NODE_KIND_MAP`; see the note on `DRAFT_RECORD_CLAIM_KINDS`
+ * for the full derivation and the positive control that pins it.
  */
 export const DRAFT_RECORD_STATED_KINDS = ["goal", "option", "constraint", "figure"] as const;
 export type DraftRecordStatedKind = (typeof DRAFT_RECORD_STATED_KINDS)[number];
@@ -144,8 +149,56 @@ export type DraftRecordRole = (typeof DRAFT_RECORD_ROLES)[number];
 export const DRAFT_RECORD_DIRECTIONS = ["floor", "ceiling"] as const;
 export type DraftRecordDirection = (typeof DRAFT_RECORD_DIRECTIONS)[number];
 
-/** The inference-claim kinds. */
-export const DRAFT_RECORD_CLAIM_KINDS = ["factor", "causal_link", "option_refinement", "prior"] as const;
+/**
+ * The inference-claim kinds — what the MODEL adds.
+ *
+ * ── ⭐⭐ `risk` AND `outcome` ARE HERE BECAUSE THEIR ABSENCE WAS A LIVE OUTAGE ──
+ * The R1 cutover shipped this list with four members. `risk` and `outcome` were
+ * not "removed" — this file was NEW at `9f94e81b` (verified: `A` in that
+ * commit's name-status) and its DRAFTABLE subset simply never admitted them. The
+ * effect was the same and it was total, because this list IS the Anthropic
+ * structured-output enum: a model reasoning about a hazard had no field in which
+ * to say so.
+ *
+ * MEASURED on the deployed build `dbd012e`, 5/5 draws on the pinned brief
+ * (`olumi-docs/PHASE0-EVIDENCE-2026-07-28/analysis-outage-2026-08-14/`):
+ *   · `riskCount: 0` — every time;
+ *   · every outcome on every graph was minted by `fixFactorGoalEdges`, i.e.
+ *     100 % of the outcome layer was machine scaffolding.
+ * The flattening is visible in the model's own words in the banked capture
+ * `__tests__/fixtures/live-emission-round11-set12.json`, which carries a FACTOR
+ * claim labelled "Engineering Attrition Risk".
+ *
+ * The served graph prompt (system block 1) has asked for "≥1 outcome and ≥1
+ * risk" throughout. The grammar is what catches up.
+ *
+ * ── WHY THE *STATED* LIST IS NOT WIDENED TO MATCH ─────────────────────────
+ * Derived, not assumed. `normaliseDraftResponse` runs immediately after
+ * projection and `NODE_KIND_MAP` maps `constraint → risk`, so a hazard the USER
+ * states ALREADY reaches a risk node through the existing `constraint` stated
+ * kind (pinned as a positive control in
+ * `__tests__/risk-outcome-expressible.test.ts`). Adding `risk` there would buy
+ * no reachable capability, cost grammar bytes, and invite the model to file
+ * genuinely thresholded constraints as bare risks — losing the floor/ceiling
+ * machinery `direction` exists for. And no user "states an outcome": they state
+ * a goal, and an outcome is by definition something inferred. So the widening is
+ * exactly the CLAIM axis, which is where the loss was.
+ *
+ * ── COST, MEASURED AGAINST THE BUDGET THAT ACTUALLY BINDS ─────────────────
+ * Two enum members add ~17 serialised bytes and NO object schema, NO optional
+ * parameter and NO union — so the compiled-grammar-size boundary (the
+ * unpublished constraint that silently degrades a draft to prompt-only JSON) is
+ * untouched. Asserted by `records-grammar-budget.test.ts` and again by the
+ * expressibility suite.
+ */
+export const DRAFT_RECORD_CLAIM_KINDS = [
+  "factor",
+  "causal_link",
+  "option_refinement",
+  "prior",
+  "risk",
+  "outcome",
+] as const;
 export type DraftRecordClaimKind = (typeof DRAFT_RECORD_CLAIM_KINDS)[number];
 
 /**

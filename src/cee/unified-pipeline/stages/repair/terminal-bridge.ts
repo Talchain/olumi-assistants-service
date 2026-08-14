@@ -70,6 +70,9 @@
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { neutralCausalEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
+// ⭐ THE ONE SCAFFOLDING-BADGE AUTHORITY, shared with the projector and the
+// deterministic sweep. Three mint sites, one constructor.
+import { scaffoldingProvenance } from "../../../draft/records/projector.js";
 
 /** Id of the synthetic bridge node. Stable so tests can bind by IDENTITY, not by a predicate. */
 export const SYNTHETIC_BRIDGE_NODE_ID = "out_synthetic_bridge";
@@ -235,6 +238,18 @@ export function fixTerminalBridge(
     kind: "outcome",
     label: SYNTHETIC_BRIDGE_LABEL,
     body: SYNTHETIC_BRIDGE_BODY,
+    // ⭐ THE MACHINE-READABLE MARKER, added 2026-08-14 alongside the two sweep
+    // mint sites. The label and body already tell a HUMAN this node is ours;
+    // this is the half a MEASUREMENT can read, so "what share of this outcome
+    // layer is scaffolding?" is answerable without a label predicate (which
+    // would also match an outcome a model legitimately named "… Impact").
+    //
+    // ⚠ It does NOT weaken the note below. `provenance_class` is not a field
+    // `nodeProvenanceDisplay` or `mayClaimFromBrief` read, and
+    // `scaffoldingProvenance` sets `source: "synthetic"`, which
+    // `mapToV3ProvenanceSource`'s substring matcher routes nowhere near
+    // `from_brief` / `user_set`.
+    provenance: scaffoldingProvenance("Synthetic bridge to goal (draft had no outcome node)"),
     // DELIBERATELY ABSENT: `extractionType`, `observed_state`, `data`. Those are
     // exactly the fields `nodeProvenanceDisplay` / `mayClaimFromBrief` read to
     // decide whether a node may claim `from_brief`. A value-free node with no
