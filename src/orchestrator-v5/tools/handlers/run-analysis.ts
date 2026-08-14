@@ -96,7 +96,13 @@ import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { AnalysisNotReadyError } from './analysis-ready-core.js';
-import { scaffoldUnconfiguredOptions } from './scaffold-unconfigured-options.js';
+import {
+  gateAnalysableOptions,
+  PLOT_MIN_COMPARISON_OPTIONS,
+  type ExcludedOptionRecord,
+} from './analysable-option-gate.js';
+// NOTE the path: `orchestrator-v5/context/`, NOT `orchestrator-v5/coaching/context/`.
+import { sanitiseLabel } from '../../context/enrichment-graph-labels.js';
 import {
   buildFactorScaleMap,
   projectRequestInterventionsToWireScale,
@@ -107,7 +113,7 @@ import {
 } from '../plot-intervention-scale.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import {
-  buildScaffoldDisclosureForPartition,
+  buildAnalysisSubmissionDisclosure,
   partitionScaffoldedByAnalysisPresence,
 } from '../../coaching/scaffold-disclosure.js';
 import {
@@ -367,39 +373,89 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
-    // --- 2.55. D-ask-1 scaffold (ROADMAP 2.11 P0-1) ------------------------
-    // Paul-ratified backstop: an option added WITHOUT configuration gets
-    // scaffolded, DISCLOSED placeholder interventions so the analysis keeps
-    // running instead of one unconfigured option 422-blocking everything at
-    // the PLoT preflight. Fires only in the mixed state (≥1 configured AND
-    // ≥1 unconfigured); never overwrites a configured option or an option
-    // with persisted intervention intent; purely an outbound-projection
-    // change (the persisted graph, and therefore graph_hash_at_run /
-    // freshness, is untouched). Disclosure rides the summary suffix below +
-    // the __scaffolded_options outcome channel (receipt chip + telemetry).
-    const scaffoldOutcome = scaffoldUnconfiguredOptions({
+    // --- 2.55. Analysable-option gate (no-rank ruling, 2026-08-14) ---------
+    // Paul's ruling: an unanalysable/placeholder option must NOT be included in
+    // comparative ranking or probabilities. It stays visible as a proposed /
+    // unanalysed alternative with a clear reason and an action to resolve it.
+    //
+    // So an option with no interventions is EXCLUDED from this submission
+    // entirely — nothing is minted for it, so it cannot reach
+    // `option_comparison[]` or `decision_brief.options[]`. The ONE exception is
+    // the status quo (`is_baseline`), for which "hold every factor where it is"
+    // is not a placeholder but the complete and correct specification of "no
+    // change"; that option is HELD and submitted.
+    //
+    // Supersedes the scaffold-and-rank consequence of D-ask-1 (ROADMAP 2.11
+    // P0-1). The scaffold's anti-422 job survives, discharged by exclusion.
+    // Never overwrites a configured option or an option with persisted
+    // intervention intent; purely an outbound-projection change (the persisted
+    // graph, and therefore graph_hash_at_run / freshness, is untouched).
+    const gate = gateAnalysableOptions({
       options: snapshot.options,
       graph: snapshot.graph,
       rawPersistedGraph: snapshot.rawPersistedGraph,
       // P1-1 (one scale convention): the egress scale net is UNCONDITIONAL
       // since 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED
-      // deleted) — the scaffold routes its neutral candidates through the
-      // same always-on RAW-scale projection as the configured siblings.
-      // (`scaleNetEnabled` survives as a pure-function parameter of the
-      // scaffold, pinned true at this, its only production call site.)
+      // deleted) — the gate routes its hold candidates through the same
+      // always-on RAW-scale projection as the configured siblings.
+      // (`scaleNetEnabled` survives as a pure-function parameter, pinned true
+      // at this, its only production call site.)
       scaleNetEnabled: true,
     });
-    if (scaffoldOutcome.scaffolded.length > 0) {
+    if (gate.held.length > 0 || gate.excluded.length > 0) {
       emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {
         request_id: invocation.requestId,
         scenario_id: args.scenario_id,
         // Redacted: ids + counts only — no labels, no magnitudes.
-        scaffolded_option_ids: scaffoldOutcome.scaffolded.map((s) => s.option_id),
-        scaffolded_factor_counts: scaffoldOutcome.scaffolded.map(
-          (s) => s.factor_ids.length,
-        ),
+        scaffolded_option_ids: gate.held.map((s) => s.option_id),
+        scaffolded_factor_counts: gate.held.map((s) => s.factor_ids.length),
+        excluded_option_ids: gate.excluded.map((s) => s.option_id),
         option_count: snapshot.options.length,
       });
+    }
+
+    // --- 2.56. Too few analysable options to compare -----------------------
+    // Exclusion can leave a submission PLoT will refuse: its `/v2/run` Ajv
+    // request schema declares `options` with `minItems: 2`, and
+    // `decision-brief.ts::buildBandedHeadline` returns null below two options
+    // ("no comparative claim without a comparison"). So we refuse FIRST, and
+    // say why in terms the user can act on — rather than let a 400 surface as
+    // an engine fault, or ship a "comparison" of one whose win probability is
+    // 1.0 by construction.
+    //
+    // Gated on `gate.excluded.length > 0` DELIBERATELY: a scenario that always
+    // had a single configured option is a pre-existing shape, not this lane's
+    // to alter. Its twin is pinned so the distinction cannot drift.
+    //
+    // `analysis_not_ready` is already in RECOVERABLE_HANDLER_CAUSES and its
+    // composer renders `details.next_step` VERBATIM — so this needs no new
+    // cause kind and no War-Room gate.
+    if (gate.excluded.length > 0 && gate.options.length < PLOT_MIN_COMPARISON_OPTIONS) {
+      const excludedLabel = firstUsableExcludedLabel(gate.excluded);
+      throw new HandlerInvocationFailedError(
+        'Excluding unanalysable options leaves too few to compare',
+        {
+          cause_kind: 'analysis_not_ready',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+            reason_code: 'insufficient_analysable_options',
+            next_step:
+              excludedLabel !== null
+                ? `I've left out the options that don't have any values set yet, and that leaves ` +
+                  `only one option — which isn't a comparison, so I've stopped rather than show ` +
+                  `you a result that just means "it was the only one". Tell me what ` +
+                  `'${excludedLabel}' changes and I'll write it into the model, then ask me to ` +
+                  `run the analysis again.`
+                : `I've left out the options that don't have any values set yet, and that leaves ` +
+                  `only one option — which isn't a comparison, so I've stopped rather than show ` +
+                  `you a result that just means "it was the only one". Tell me what your other ` +
+                  `options change and I'll write them into the model, then ask me to run the ` +
+                  `analysis again.`,
+          },
+        },
+      );
     }
 
     // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
@@ -431,23 +487,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // OBJECTS; the wire numbers exist only from here on.
     const graphNodesForScale = (graphForAnalysis as { nodes?: unknown })?.nodes;
     const factorScaleById = buildFactorScaleMap(graphNodesForScale);
-    const scaffoldedOptions = scaffoldOutcome.options as ReadonlyArray<Record<string, unknown>>;
-    const rawObjectsPerOption = scaffoldedOptions.map((opt) =>
+    const submittedOptions = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const rawObjectsPerOption = submittedOptions.map((opt) =>
       opt.interventions !== null && typeof opt.interventions === 'object'
         ? (opt.interventions as Record<string, unknown>)
         : {},
     );
-    // ROUND 5 — provenance for the scale decision. `scaffoldOutcome.scaffolded`
-    // already records exactly which factor ids CEE placeholder-filled on which
-    // option, so nothing new has to be derived or remembered: the marker is read
-    // off the scaffold's own disclosure record. A synthesised value must not
-    // establish the scale reference frame for a value the user authored.
+    // ROUND 5 — provenance for the scale decision. `gate.held` already records
+    // exactly which factor ids CEE supplied on which option, so nothing new has
+    // to be derived or remembered: the marker is read off the gate's own
+    // disclosure record. A CEE-supplied value must not establish the scale
+    // reference frame for a value the user authored.
     const scaffoldedFactorIdsByOptionId = new Map<string, ReadonlySet<string>>();
-    for (const record of scaffoldOutcome.scaffolded) {
+    for (const record of gate.held) {
       scaffoldedFactorIdsByOptionId.set(record.option_id, new Set(record.factor_ids));
     }
     const EMPTY_SYNTHESISED: ReadonlySet<string> = new Set<string>();
-    const synthesisedByOption = scaffoldedOptions.map((opt) => {
+    const synthesisedByOption = submittedOptions.map((opt) => {
       const optionId =
         typeof opt.option_id === 'string' && opt.option_id.length > 0
           ? opt.option_id
@@ -625,15 +681,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // shape. We only forward fields PLoT accepts. The options carry the
     // request-projected wire numbers; NOTHING may transform them between here
     // and `plotClient.run` (that gap was the round-3 defect).
-    const finalWireOptions = scaffoldedOptions.map((opt, index) => ({
+    const finalWireOptions = submittedOptions.map((opt, index) => ({
       ...opt,
       interventions: requestProjection.perOption[index] ?? {},
     }));
     const plotPayload: Record<string, unknown> = {
       graph: graphForAnalysis,
-      // D-ask-1 (2.11 P0-1): scaffolded projection — identical to
-      // snapshot.options unless the scaffold filled placeholder
-      // interventions for an unconfigured option (disclosed below).
+      // No-rank ruling (2026-08-14): the GATED submission set — identical to
+      // snapshot.options unless the gate held the status quo at its observed
+      // position, or EXCLUDED an option with no values set (disclosed below).
+      // An excluded option is absent here, which is what makes "no rank, no
+      // probability" true by construction rather than by suppression.
       options: finalWireOptions,
       goal_node_id: snapshot.goal_node_id,
       request_id: invocation.requestId,
@@ -1521,17 +1579,26 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // what actually came back, so any downstream filter — dedup today, a
     // status gate or a future rule tomorrow — is disclosed automatically
     // instead of being mirrored here (trap-12).
-    const scaffoldPresence = partitionScaffoldedByAnalysisPresence(
-      scaffoldOutcome.scaffolded,
+    //
+    // ⚠ ONLY THE HELD RECORDS GO THROUGH THIS PARTITION. It DERIVES omission
+    // from the returned `option_comparison[]`, and its fail-safe classifies
+    // every record as `analysed` when no option identity came back. That is
+    // right for a DERIVED verdict — but for a never-submitted option it would
+    // ship a disclosure about an option nothing was minted for. Exclusion is a
+    // fact CEE knows at submission time, so it is passed to the composer
+    // directly (trap 21: a fail-safe correct for a derived verdict is the wrong
+    // one for a known verdict).
+    const heldPresence = partitionScaffoldedByAnalysisPresence(
+      gate.held,
       analysedOptionIds,
     );
-    if (scaffoldPresence.omitted.length > 0) {
+    if (heldPresence.omitted.length > 0) {
       emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {
         request_id: invocation.requestId,
         scenario_id: args.scenario_id,
         // Redacted: ids + counts only — no labels, no magnitudes.
-        scaffolded_option_ids: scaffoldPresence.omitted.map((s) => s.option_id),
-        scaffolded_factor_counts: scaffoldPresence.omitted.map((s) => s.factor_ids.length),
+        scaffolded_option_ids: heldPresence.omitted.map((s) => s.option_id),
+        scaffolded_factor_counts: heldPresence.omitted.map((s) => s.factor_ids.length),
         option_count: snapshot.options.length,
         outcome: 'omitted_from_comparison',
       });
@@ -1551,8 +1618,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       analysedOptionIds,
     );
     const scaffoldDisclosure =
-      scaffoldOutcome.scaffolded.length > 0
-        ? buildScaffoldDisclosureForPartition(scaffoldPresence, dedupKeptLabelFor)
+      gate.held.length > 0 || gate.excluded.length > 0
+        ? buildAnalysisSubmissionDisclosure(heldPresence, gate.excluded, dedupKeptLabelFor)
         : '';
     // T1 disclosure. The VERDICT is passed whole: which sentence is honest
     // depends on which state the producer evidence selected, and that pairing
@@ -1712,14 +1779,22 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       handler_facts: [parsed.data],
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
-      // D-ask-1 (2.11 P0-1): internal channel (never the wire envelope
-      // directly) — the turn-executor / chip-click dispatch thread this to
-      // the chip generator so the success turn offers the configure chip.
-      // Stamped with the derived `in_comparison` verdict so the
-      // decision-review prompt disclosure inherits it without a second
-      // channel (see partitionScaffoldedByAnalysisPresence).
-      ...(scaffoldOutcome.scaffolded.length > 0
-        ? { __scaffolded_options: scaffoldPresence.stamped }
+      // Internal channel (never the wire envelope directly) — the
+      // turn-executor / chip-click dispatch thread this to the chip generator
+      // and to the decision-review enricher. Stamped with the derived
+      // `in_comparison` verdict so the DR prompt disclosure inherits it
+      // without a second channel (see partitionScaffoldedByAnalysisPresence).
+      //
+      // ⚠ SINCE THE NO-RANK RULING THIS CHANNEL CARRIES ONLY STATUS-QUO HOLDS.
+      // Excluded options deliberately do NOT ride it: they carry no
+      // `value_defaulted` and no `factor_ids`, because nothing was minted for
+      // them. Their disclosure is the summary suffix above, which names them
+      // and gives the configure route.
+      // The configure chip's source (see chip-generator): the options a
+      // configure step actually repairs.
+      ...(gate.excluded.length > 0 ? { __excluded_options: gate.excluded } : {}),
+      ...(gate.held.length > 0
+        ? { __scaffolded_options: heldPresence.stamped }
         : {}),
       // ROADMAP 2.804 — `__leading_option_claim_withheld` USED TO BE SET HERE
       // and is deliberately gone. It carried THIS RUN's verdict to the STEP-5
@@ -2265,6 +2340,30 @@ function extractOptionId(record: Record<string, unknown>): string | null {
  * composer payload; a null value still produces a coherent (if generic)
  * user-facing message.
  */
+/**
+ * The first EXCLUDED option that can be safely named to the user, or null when
+ * none can be — in which case the caller ships its generic twin.
+ *
+ * Guarded by `sanitiseLabel` (the same guard every other user-facing label
+ * crosses): an empty label, a label that is just the option id, an ID-shaped
+ * label or a UUID is NOT a name a user recognises, and putting one in a
+ * next-step would prescribe a step against a token they have never seen.
+ *
+ * Exported for the spec that pins the named/generic pair — the generic branch
+ * is unreachable from the labelled fixtures, so without a direct test it would
+ * be a branch nothing exercises.
+ */
+export function firstUsableExcludedLabel(
+  excluded: readonly ExcludedOptionRecord[],
+): string | null {
+  for (const record of excluded) {
+    if (record.label === null) continue;
+    const clean = sanitiseLabel(record.label, record.option_id);
+    if (clean !== null) return clean;
+  }
+  return null;
+}
+
 function firstOptionLabel(
   options: ReadonlyArray<Record<string, unknown>>,
 ): string | null {

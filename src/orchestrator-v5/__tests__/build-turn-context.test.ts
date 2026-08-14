@@ -252,13 +252,62 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
     const snapshot = await loadScenarioSnapshotForRunAnalysis(BASE.scenario_id, 'req-snap-1', store);
 
     expect(snapshot.goal_node_id).toBe('goal_1');
+    // ⭐ `is_baseline` IS CARRIED THROUGH THE MERGE (no-rank ruling, 2026-08-14).
+    // It was computed by `computeStructuralReadiness` and then DROPPED by
+    // `mergeOptionInterventionObjects`, which is why the PLoT submission seam
+    // could not tell the status quo from an option the user simply had not
+    // configured — and why an unconfigured option was being substituted with
+    // "do nothing" and then RANKED.
+    //
+    // This assertion is the ONLY thing binding the carry to its PRODUCER. Every
+    // gate spec sets `is_baseline` directly on a snapshot fixture, so deleting
+    // the spread would leave all of them green while the status-quo arm
+    // silently vanished from every real comparison (trap 16: a fixture you
+    // wrote yourself is not evidence about the producer). Note the explicit
+    // `false` on BOTH options: the readiness helper distinguishes "detected as
+    // not the baseline" from "detection did not run", and that distinction is
+    // load-bearing — the gate treats a MISSING verdict as "exclude", not "hold".
     expect(snapshot.options).toEqual([
-      { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 } },
-      { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 } },
+      { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 }, is_baseline: false },
+      { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 }, is_baseline: false },
     ]);
     // Lane 28 — no brief persisted → the snapshot carries none (the PLoT leg
     // will then attach nothing, so PLoT's `no_brief` skip stays honest).
     expect(snapshot.briefText).toBeUndefined();
+  });
+
+  it('⭐ DISCRIMINATING TWIN: a TRUE is_baseline verdict is carried too, from the node flag', async () => {
+    // The pin above asserts `false` is carried on both options. On its own that
+    // is satisfied by a merge that hardcodes `false` — which would silently
+    // exclude every real status quo. This is the other half: the option the
+    // readiness helper marks as the baseline must arrive at the snapshot
+    // carrying `true`, and its sibling must still carry `false`.
+    const graph = {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'opt_change', kind: 'option', label: 'Hire Tech Lead', interventions: { fac_x: 1 } },
+        { id: 'opt_sq', kind: 'option', label: 'Stay As We Are', is_baseline: true, interventions: { fac_x: 0.5 } },
+        { id: 'fac_x', kind: 'factor', label: 'X', category: 'controllable', observed_state: { value: 1, extractionType: 'explicit', factor_type: 'other' } },
+      ],
+      edges: [
+        { from: 'opt_change', to: 'fac_x', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_sq', to: 'fac_x', strength: { mean: 0.5, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'fac_x', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      ],
+    };
+    const store = createNoopSessionStore({ loadGraphResult: graph });
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(BASE.scenario_id, 'req-snap-baseline', store);
+
+    const byId = new Map(
+      (snapshot.options as Array<{ option_id: string; is_baseline?: boolean }>).map((o) => [
+        o.option_id,
+        o.is_baseline,
+      ]),
+    );
+    // Bound by IDENTITY, not by "the one that is true" — a predicate the other
+    // option could satisfy if the verdict landed on the wrong row.
+    expect(byId.get('opt_sq')).toBe(true);
+    expect(byId.get('opt_change')).toBe(false);
   });
 
   it('Lane 28: carries the persisted brief_text on the snapshot (same round trip as the graph)', async () => {

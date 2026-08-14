@@ -450,6 +450,25 @@ export interface HandlerOutcome {
     import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
   >;
   /**
+   * No-rank ruling (2026-08-14) — options run_analysis left OUT of the PLoT
+   * submission entirely, because they have no values set and are not the
+   * status quo. Nothing was minted for them, so they carry no `factor_ids` and
+   * no `value_defaulted`: they are {@link OmittedOptionRecord}s, not
+   * {@link ScaffoldedOptionRecord}s, and a field invented to let them share a
+   * type would be a lie the type then launders.
+   *
+   * ⭐ A SECOND CHANNEL EXISTS BECAUSE THE TWO ANSWER DIFFERENT QUESTIONS
+   * (trap 21). `__scaffolded_options` answers *"which options did CEE supply
+   * values for?"* — since the ruling, only the held status quo, for which a
+   * configure step is FUTILE. This one answers *"which options would a
+   * configure step actually help?"*. Merging them would put a "Configure the
+   * status quo" chip in front of a user who has nothing to configure, next to
+   * a disclosure that deliberately prescribes nothing.
+   */
+  readonly __excluded_options?: ReadonlyArray<
+    import('../coaching/scaffold-disclosure.js').OmittedOptionRecord
+  >;
+  /**
    * ROADMAP 2.918 — set ONLY by `add_constraint`, on the exact
    * mintable-and-baseline-less cell (the #868 `mintEligible` conjunction with
    * no stated level to mint): the receipt asked for the target's current

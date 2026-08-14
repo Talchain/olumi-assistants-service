@@ -555,7 +555,7 @@ export function projectRequestInterventionsToWireScale(
   factorScaleById: ReadonlyMap<string, FactorScaleInfo>,
   /**
    * Per option index, the factor ids whose intervention CEE SYNTHESISED rather
-   * than the user authoring it — today, `scaffoldUnconfiguredOptions`' neutral
+   * than the user authoring it — today, `gateAnalysableOptions`' neutral
    * placeholders. Omitted / empty means "every value is the user's", which is
    * what every non-scaffolded request is.
    *
@@ -598,7 +598,7 @@ export function projectRequestInterventionsToWireScale(
   // Encoded codes are never magnitudes: stranded regardless (Finding B).
   //
   // ROUND 5 — WHOSE VALUES DEFINE THAT FRAME. The exemption above is sound only
-  // for a value set the USER authored. `scaffoldUnconfiguredOptions` fills an
+  // for a value set the USER authored. `gateAnalysableOptions` fills an
   // unconfigured option from each factor's observed_state, so a no-cap factor
   // gains CEE's own raw neutral (12) beside the user's unit-scale 0.5 — and a
   // provenance-blind exemption let that placeholder establish the frame, i.e.
@@ -749,7 +749,7 @@ export function projectRequestInterventionsToWireScale(
  *     on such a factor is CONSISTENT with its own scale. COMPUTES.
  *
  * Provenance is load-bearing exactly as in the round-5 exemption above: a
- * value CEE synthesised (`scaffoldUnconfiguredOptions`' placeholders, marked
+ * value CEE synthesised (`gateAnalysableOptions`' placeholders, marked
  * per option in `synthesisedByOption`) is not evidence about the user's
  * scale, so only USER-AUTHORED out-of-unit interventions grant coherence.
  *

@@ -435,12 +435,19 @@ export const CEEGraphReadinessResponseV1Schema = z
     can_run_analysis: z.boolean(),
     blocker_reason: z.string().optional(),
     // F4 (readiness↔run gate): pre-run projection of what run_analysis would
-    // scaffold. `will_scaffold_options` is true iff run_analysis would scaffold
-    // ≥1 unconfigured option (disclosed placeholders) for this graph state — so
-    // the pre-run panel need not read `can_run_analysis === false` as a hard
+    // do with an unconfigured option. `will_scaffold_options` is true iff
+    // run_analysis would PROCEED even though not every option is configured —
+    // so the pre-run panel need not read `can_run_analysis === false` as a hard
     // block when the run would in fact proceed. Computed by the SAME predicate
-    // the run path uses (scaffold-unconfigured-options.computeScaffoldPlan), so
-    // the two gates cannot drift.
+    // the run path uses (analysable-option-gate.computeScaffoldPlan), so the
+    // two gates cannot drift.
+    //
+    // ⚠ THE FIELD NAME NO LONGER DESCRIBES THE MECHANISM, DELIBERATELY. Since
+    // the 2026-08-14 no-rank ruling an unconfigured option is EXCLUDED from the
+    // submission rather than filled with placeholders (only the status quo is
+    // held). This is a PUBLISHED field with live UI readers, and the QUESTION
+    // it answers is unchanged, so the name is retained until the UI half of a
+    // rename ships in the same wave.
     scaffold_plan: z
       .object({
         will_scaffold_options: z.boolean(),

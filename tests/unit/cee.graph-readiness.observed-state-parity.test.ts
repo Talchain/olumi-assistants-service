@@ -8,7 +8,7 @@
  * REJECTED a factor observed_state — its `observed_state` was constraint-shaped
  * (required `metadata.operator`). Readiness therefore never received the
  * provenance the run path reads (`buildNeutralFactorValues`, the observed_state
- * rung of scaffold-unconfigured-options.ts).
+ * rung of analysable-option-gate.ts).
  *
  * STEP 1 widened `Node.observed_state` to a union that ALSO accepts the factor
  * shape `{ value, raw_value? }`. These tests prove:
@@ -27,9 +27,9 @@ import { describe, it, expect } from "vitest";
 
 import { Graph } from "../../src/schemas/graph.js";
 import {
-  scaffoldUnconfiguredOptions,
+  gateAnalysableOptions,
   computeScaffoldPlan,
-} from "../../src/orchestrator-v5/tools/handlers/scaffold-unconfigured-options.js";
+} from "../../src/orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import {
   buildFactorScaleMap,
   resolveRawInterventionValue,
@@ -126,8 +126,17 @@ describe("F4 #1b schema — factor observed_state parses (additive), constraint 
 
 describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state with the run-path neutral value", () => {
   const options = [configured("opt_a", { fac_price: 0.9 }), unconfigured("opt_b")];
+  // ⚠ RE-POINTED BY THE NO-RANK RULING (2026-08-14). CEE no longer supplies
+  // values for an arbitrary unconfigured option — it EXCLUDES it. The one path
+  // that still resolves an `observed_state` candidate is the STATUS-QUO HOLD,
+  // so the EXACT-PARITY property this file exists to pin is now measured
+  // there. Same option, same graph, same resolver; only the flag differs.
+  const baselineOptions = [
+    configured("opt_a", { fac_price: 0.9 }),
+    { ...unconfigured("opt_b"), is_baseline: true },
+  ];
 
-  it("scaffolds opt_b and its neutral value EQUALS the run-path resolver's observed_state value (derived, not hardcoded)", () => {
+  it("HOLDS the status-quo opt_b, and its held value EQUALS the run-path resolver's observed_state value (derived, not hardcoded)", () => {
     const parsed = Graph.safeParse(makeObservedStateRequestGraph());
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
@@ -160,14 +169,14 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
     const expected = resolveRawInterventionValue({ value: observed.value }, factorScale);
     expect(expected.value).toBe(observed.value);
 
-    const outcome = scaffoldUnconfiguredOptions({
-      options,
+    const outcome = gateAnalysableOptions({
+      options: baselineOptions,
       graph,
       rawPersistedGraph: graph,
       scaleNetEnabled: true,
     });
 
-    expect(outcome.scaffolded.map((s) => s.option_id)).toEqual(["opt_b"]);
+    expect(outcome.held.map((s) => s.option_id)).toEqual(["opt_b"]);
     const scaffoldedOptB = outcome.options.find(
       (o) => (o as { option_id?: string }).option_id === "opt_b",
     ) as { interventions: Record<string, unknown> };
@@ -181,13 +190,26 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
 
     // The advertised plan (what /graph-readiness returns) agrees.
     const plan = computeScaffoldPlan({
-      options,
+      options: baselineOptions,
       graph,
       rawPersistedGraph: graph,
       scaleNetEnabled: true,
     });
     expect(plan.will_scaffold_options).toBe(true);
     expect(plan.option_count).toBe(1);
+
+    // ⭐ DISCRIMINATING TWIN: byte-identical but for the flag. Without it, the
+    // parity assertions above are equally satisfied by a gate that resolves an
+    // observed_state candidate for ANY unconfigured option — which is exactly
+    // the behaviour the ruling forbids.
+    const unflagged = gateAnalysableOptions({
+      options,
+      graph,
+      rawPersistedGraph: graph,
+      scaleNetEnabled: true,
+    });
+    expect(unflagged.held).toEqual([]);
+    expect(unflagged.excluded.map((s) => s.option_id)).toEqual(["opt_b"]);
   });
 
   it("genuinely-unrunnable graph (factor has NO observed_state and NO prior) → will_scaffold_options=false", () => {
@@ -205,7 +227,13 @@ describe("F4 #1b EXACT parity — run predicate scaffolds off observed_state wit
       scaleNetEnabled: true,
     });
     expect(plan.will_scaffold_options).toBe(false);
-    expect(plan.option_count).toBe(0);
+    // ⚠ `option_count` is now 1, not 0, and the difference is the honest one:
+    // the gate SAW opt_b and excluded it. Reporting 0 would say "nothing
+    // special will happen" about a run that is dropping one of the user's
+    // options. `will_scaffold_options` stays false because exclusion leaves a
+    // single option, which is not a comparison and which the run refuses.
+    expect(plan.option_count).toBe(1);
+    expect(plan.scaffolded_option_ids).toEqual(["opt_b"]);
   });
 
   it("#612 over-report closure intact: a CONFIGURED opt_b (numeric interventions) is never scaffolded", () => {

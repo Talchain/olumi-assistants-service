@@ -99,7 +99,7 @@ const makeReader = (snapshot: RunAnalysisScenarioSnapshot): ScenarioReader =>
  *    user-authored intervention, so the request projection itself is fully
  *    coherent (`mixedUnresolved: false`) and the ONLY blocking evidence is
  *    the computed `caplessRawBaselineIds`.
- *  - The single option is configured, so `scaffoldUnconfiguredOptions`
+ *  - The single option is configured, so `gateAnalysableOptions`
  *    returns untouched (`unconfigured.length === 0`) — no synthesised values
  *    muddy the provenance.
  */

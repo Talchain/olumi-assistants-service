@@ -626,7 +626,7 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
   it('⭐ M20c (round 5): a CEE-SYNTHESISED value must not establish the scale frame for a user value', () => {
     // THE RULING: a value CEE manufactured is not evidence about the user's request.
     //
-    // `scaffoldUnconfiguredOptions` fills an unconfigured option from each factor's
+    // `gateAnalysableOptions` fills an unconfigured option from each factor's
     // observed_state, so a no-cap factor gains CEE's own raw neutral (12) beside the
     // user's unit-scale 0.5. That placeholder then satisfied the same-factor
     // exemption — CEE manufacturing the evidence that exempted the user's value from

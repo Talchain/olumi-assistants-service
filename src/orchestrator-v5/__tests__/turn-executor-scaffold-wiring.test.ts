@@ -129,11 +129,18 @@ function makeScaffoldingSnapshot(): RunAnalysisScenarioSnapshot {
       { id: 'g', kind: 'goal', label: 'Goal' },
       { id: 'fac_m', kind: 'factor', label: 'Marketing', observed_state: { value: 0.4 } },
       { id: 'opt_a', kind: 'option', label: 'Option A' },
+      // ⚠ ADDED BY THE NO-RANK RULING (2026-08-14). `opt_new` is now EXCLUDED
+      // rather than filled, so with only two options the run would refuse
+      // ("one option is not a comparison") and this file could no longer
+      // exercise its actual subject: the SUCCESS-turn chip + disclosure
+      // threading. A second configured option restores a real comparison.
+      { id: 'opt_b', kind: 'option', label: 'Option B' },
       { id: 'opt_new', kind: 'option', label: 'New Option' },
     ],
     edges: [
       { from: 'opt_new', to: 'fac_m' },
       { from: 'opt_a', to: 'fac_m' },
+      { from: 'opt_b', to: 'fac_m' },
       { from: 'fac_m', to: 'g' },
     ],
   };
@@ -141,6 +148,7 @@ function makeScaffoldingSnapshot(): RunAnalysisScenarioSnapshot {
     graph,
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'Option A', interventions: { fac_m: 1 } },
+      { id: 'opt_b', option_id: 'opt_b', label: 'Option B', interventions: { fac_m: 0.5 } },
       { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
     ],
     goal_node_id: 'g',
@@ -183,7 +191,7 @@ afterEach(() => {
 });
 
 describe('turn-executor — D-ask-1 scaffold live wiring (M4, routed execute path)', () => {
-  it('a scaffolded run offers the CONFIGURE chip FIRST and the disclosure survives to assistant_text (real handler, real chips, real egress)', async () => {
+  it('a run that EXCLUDED an option offers the CONFIGURE chip FIRST and the disclosure survives to assistant_text (real handler, real chips, real egress)', async () => {
     const registry = createRegistry({
       plotClient: makeMockPlotClient(),
       scenarioReader: async () => makeScaffoldingSnapshot(),
@@ -206,11 +214,18 @@ describe('turn-executor — D-ask-1 scaffold live wiring (M4, routed execute pat
     });
     // Disclosure end-to-end: composed through the registry forwarder (the
     // egress allowlist), not silently replaced by the locked template.
-    expect(response.assistant_text).toMatch(/Placeholder values were used for 'New Option'/);
-    expect(response.assistant_text).toMatch(/the whole comparison is illustrative/);
+    // ⭐ THE CHIP IS THE LOAD-BEARING ASSERTION HERE. Its source moved with the
+    // ruling: it is now built from the options the run LEFT OUT, not from the
+    // status quo it held — for a held status quo "Help me configure X" is a
+    // futile step, offered directly beneath a disclosure that deliberately
+    // prescribes nothing. This spec is what stops that regression.
+    expect(response.assistant_text).toContain(
+      "'New Option' was left out of this comparison because it has no values set.",
+    );
+    expect(response.assistant_text).not.toMatch(/Placeholder values were used/);
   });
 
-  it('threads scaffoldedOptions into the decision_review enricher input (P1-2, routed call site)', async () => {
+  it('threads the CEE-supplied-value records into the decision_review enricher input (P1-2, routed call site)', async () => {
     process.env[AWAIT_DR_ENV] = 'true';
     _resetConfigCache();
 
@@ -229,22 +244,13 @@ describe('turn-executor — D-ask-1 scaffold live wiring (M4, routed execute pat
     const enricherInput = enrichMock.mock.calls[0][0] as {
       scaffoldedOptions?: readonly ScaffoldedOptionRecord[];
     };
-    expect(enricherInput.scaffoldedOptions).toBeDefined();
-    // 2026-07-25: the record now also carries the DERIVED `in_comparison`
-    // verdict — `true` here because this mock PLoT client returns a record
-    // for `opt_new`, so the arm genuinely reached the comparison. The strict
-    // toEqual is kept (a silently-added field is the drift class this
-    // assertion exists to catch); the expectation is updated at source
-    // rather than relaxed to toMatchObject.
-    expect(enricherInput.scaffoldedOptions).toEqual([
-      {
-        option_id: 'opt_new',
-        label: 'New Option',
-        factor_ids: ['fac_m'],
-        value_defaulted: true,
-        in_comparison: true,
-      },
-    ]);
+    // ⚠ RE-POINTED: `opt_new` is EXCLUDED now, and an excluded option rides the
+    // separate `__excluded_options` channel — it carries no `factor_ids` and no
+    // `value_defaulted`, because nothing was minted for it. This channel is for
+    // options CEE supplied values for, so on this fixture it is correctly
+    // ABSENT, and the DR is not told an option has placeholder numbers when it
+    // has no numbers at all.
+    expect(enricherInput.scaffoldedOptions).toBeUndefined();
     // Discriminating control: the stamp is DERIVED, not a constant. The same
     // wiring with an engine that dropped the arm must stamp `false` — pinned
     // in run-analysis-scaffold-unconfigured.test.ts against the golden

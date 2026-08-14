@@ -19,7 +19,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
-import type { ScaffoldedOptionRecord } from '../../coaching/scaffold-disclosure.js';
+import type { OmittedOptionRecord, ScaffoldedOptionRecord } from '../../coaching/scaffold-disclosure.js';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { _resetConfigCache } from '../../../config/index.js';
@@ -156,7 +156,16 @@ const SCAFFOLD_RECORDS: readonly ScaffoldedOptionRecord[] = [
   },
 ];
 
-/** Handler outcome for a SCAFFOLDED success run (as the real handler emits). */
+/**
+ * The options the run LEFT OUT — identity and label only, because nothing was
+ * minted for them. This, not the held status quo, is the configure chip's
+ * source since the no-rank ruling.
+ */
+const EXCLUDED_RECORDS: readonly OmittedOptionRecord[] = [
+  { option_id: 'opt_new', label: 'New Option' },
+];
+
+/** Handler outcome for a success run that held the status quo AND excluded an option. */
 function scaffoldedHandlerOk() {
   return {
     assistant_text: 'Ran analysis on your current scenario.',
@@ -176,6 +185,12 @@ function scaffoldedHandlerOk() {
     ],
     llm_calls_used: 0,
     __scaffolded_options: SCAFFOLD_RECORDS,
+    // ⚠ THE SECOND CHANNEL, ADDED BY THE NO-RANK RULING (2026-08-14). The run
+    // HELD the status quo (above) AND EXCLUDED an option with no values set.
+    // The configure chip is built from THIS one, because a held status quo has
+    // nothing to configure. Both are emitted here because the real handler
+    // emits both on a run that did each.
+    __excluded_options: EXCLUDED_RECORDS,
   };
 }
 
@@ -201,7 +216,7 @@ describe('chip-click-dispatch — D-ask-1 scaffold live wiring (M4)', () => {
     _resetConfigCache();
   });
 
-  it('a scaffolded run offers the CONFIGURE chip FIRST on the real dispatch path (real generateChips, no injection)', async () => {
+  it('a run that EXCLUDED an option offers the CONFIGURE chip FIRST on the real dispatch path (real generateChips, no injection)', async () => {
     const out = await dispatchChipClickRunAnalysis({
       payload: payload(),
       requestId: 'req-cc-scaffold-chip',
@@ -234,8 +249,12 @@ describe('chip-click-dispatch — D-ask-1 scaffold live wiring (M4)', () => {
     expect(enricherInput.scaffoldedOptions).toEqual(SCAFFOLD_RECORDS);
   });
 
-  it('non-scaffolded run: no configure chip, no scaffoldedOptions on the enricher input (byte-identical wiring)', async () => {
-    const { __scaffolded_options: _omit, ...plain } = scaffoldedHandlerOk();
+  it('untouched run: no configure chip, no scaffoldedOptions on the enricher input (byte-identical wiring)', async () => {
+    // BOTH channels must be stripped. Dropping only `__scaffolded_options`
+    // would leave `__excluded_options` behind and the configure chip would
+    // still fire — which is the point: the chip's source is the EXCLUDED
+    // channel now, so the "nothing happened" control has to speak to it.
+    const { __scaffolded_options: _omit, __excluded_options: _omit2, ...plain } = scaffoldedHandlerOk();
     handlerFnMock.mockResolvedValue(plain);
     process.env[AWAIT_DR_ENV] = 'true';
     _resetConfigCache();
@@ -251,5 +270,24 @@ describe('chip-click-dispatch — D-ask-1 scaffold live wiring (M4)', () => {
     ).toBe(false);
     expect(enrichRunAnalysisMock).toHaveBeenCalledTimes(1);
     expect('scaffoldedOptions' in (enrichRunAnalysisMock.mock.calls[0][0] as object)).toBe(false);
+    expect('excludedOptions' in (enrichRunAnalysisMock.mock.calls[0][0] as object)).toBe(false);
+  });
+
+  it('⭐ a run that ONLY held the status quo offers NO configure chip', () => {
+    // The discriminating twin of the first spec: same dispatch path, same
+    // handler, only the excluded channel removed. A held status quo needs no
+    // repair, so prescribing one would be a futile step — the same defect the
+    // baseline-hold disclosure deliberately avoids.
+    const { __excluded_options: _omit, ...heldOnly } = scaffoldedHandlerOk();
+    handlerFnMock.mockResolvedValue(heldOnly);
+    return dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-cc-held-only',
+    }).then((out) => {
+      if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+      expect(
+        out.response.suggested_actions.some((c) => c.id === 'chip_prompt_configure_option'),
+      ).toBe(false);
+    });
   });
 });

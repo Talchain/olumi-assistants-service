@@ -3,7 +3,7 @@
  *
  * Round 3 asserted coherence inside the snapshot LOADER, and two things defeated it:
  *
- *  (a) TOCTOU: `scaffoldUnconfiguredOptions` runs AFTER the loader's projection and
+ *  (a) TOCTOU: `gateAnalysableOptions` runs AFTER the loader's projection and
  *      adds neutral interventions through its own per-value resolver — so the loader
  *      attests `demoted:true, allWithinUnitInterval:true, mixedUnresolved:false` and
  *      the scaffold then pushes a raw-scale neutral (e.g. 35000) into the wire.
@@ -25,6 +25,28 @@
  * review chip), naming the factors and asking for their units.
  *
  * RED-first: every test in the "round 4" block fails at head e649a871.
+ */
+
+/**
+ * ⚠ RE-POINTED BY THE NO-RANK RULING (Paul, 2026-08-14), and the re-point is a
+ * claim about REACHABILITY, not a convenience.
+ *
+ * Since the ruling, an unconfigured option is EXCLUDED from the submission
+ * rather than filled with CEE-chosen values. The ONE remaining path on which
+ * CEE supplies values at all is the STATUS-QUO HOLD. So the corruption class
+ * these tests pin — a CEE-supplied value re-mixing the request's scale after
+ * the coherence attestation — is now reachable ONLY through the hold, and the
+ * fixture option is therefore flagged `is_baseline` and RENAMED to what it now
+ * is ("No change (status quo)").
+ *
+ * It is renamed rather than merely flagged deliberately: a fixture labelled
+ * "Added later" carrying `is_baseline: true` would be a fixture LIE — the same
+ * lie a bulk `is_baseline` patch introduced elsewhere in this wave and had to
+ * revert ("Partner with a specialist consultancy" is not a status quo). The
+ * fixture must BE what it asserts.
+ *
+ * No banked capture was edited to achieve this (trap 14b): the shapes changed
+ * here are locally-authored fixtures.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -123,7 +145,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
     const graph = graphWith(
       [
         { id: 'opt_a', kind: 'option', label: 'Committed', interventions: { f_cd: { value: 0.72 }, f_amb: { value: 0.3 } } },
-        { id: 'opt_b', kind: 'option', label: 'Added later' },
+        { id: 'opt_b', kind: 'option', label: 'No change (status quo)', is_baseline: true },
       ],
       [
         { from: 'opt_a', to: 'f_cd' },
@@ -138,7 +160,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
       goal_node_id: 'g',
       options: [
         { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_cd: { value: 0.72 }, f_amb: { value: 0.3 } } },
-        { id: 'opt_b', option_id: 'opt_b', label: 'Added later', interventions: {} },
+        { id: 'opt_b', option_id: 'opt_b', label: 'No change (status quo)', interventions: {}, is_baseline: true },
       ],
     };
     const { client, run } = makeCapturingPlotClient();
@@ -229,7 +251,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
     const graph = graphWith(
       [
         { id: 'opt_a', kind: 'option', label: 'Committed', interventions: { f_cd: { value: 0.72 }, f_nc: { value: 0.5 } } },
-        { id: 'opt_b', kind: 'option', label: 'Added later' },
+        { id: 'opt_b', kind: 'option', label: 'No change (status quo)', is_baseline: true },
       ],
       [
         { from: 'opt_a', to: 'f_cd' },
@@ -245,7 +267,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
       goal_node_id: 'g',
       options: [
         { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_cd: { value: 0.72 }, f_nc: { value: 0.5 } } },
-        { id: 'opt_b', option_id: 'opt_b', label: 'Added later', interventions: {} },
+        { id: 'opt_b', option_id: 'opt_b', label: 'No change (status quo)', interventions: {}, is_baseline: true },
       ],
     };
     const { client, run } = makeCapturingPlotClient();

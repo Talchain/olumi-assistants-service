@@ -417,6 +417,19 @@ export interface RunAnalysisScenarioSnapshot {
      * loader's coherence attestation).
      */
     readonly interventions: Record<string, unknown>;
+    /**
+     * The status-quo verdict as settled by `computeStructuralReadiness`
+     * (CEE-2): explicit node flag → label heuristic → explicit `false`.
+     * Carried through the merge (it used to be dropped) so the PLoT
+     * submission gate can distinguish the status quo — for which "hold every
+     * factor where it is" IS the complete and correct specification — from an
+     * option the user has not configured, for which the same values would be
+     * a placeholder standing in for an unknown position.
+     *
+     * `undefined` means the detection did not run, and is deliberately NOT
+     * treated as `false` by any consumer that can instead say less.
+     */
+    readonly is_baseline?: boolean;
   }>;
   readonly goal_node_id: string;
   /**
@@ -1937,7 +1950,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // ROUND 4: the loader performs NO scale projection — it merges and preserves
   // the ORIGINAL intervention objects. The single, final, request-level
   // projection (and its egress diagnostic) lives in `run_analysis`, AFTER
-  // `scaffoldUnconfiguredOptions`, immediately before the payload is built —
+  // `gateAnalysableOptions`, immediately before the payload is built —
   // because a projection attested here was mutated downstream by the scaffold
   // (the round-3 TOCTOU). Read-only: the persisted graph is never mutated.
   const options = mergeOptionInterventionObjects(parsedGraph.data.nodes, readiness.options);
@@ -1969,7 +1982,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
  * intervention values to the wire scale. It returns the ORIGINAL merged
  * intervention OBJECTS per option (same precedence + membership as readiness,
  * via `mergeInterventionSourceObjects`), and the ONE request-level projection
- * happens in `run_analysis` AFTER `scaffoldUnconfiguredOptions` — because a
+ * happens in `run_analysis` AFTER `gateAnalysableOptions` — because a
  * projection attested here was mutated downstream by the scaffold (the round-3
  * TOCTOU: the loader attested `allWithinUnitInterval:true` and the scaffold
  * then pushed a raw-scale neutral into the wire, corrupting the configured
@@ -1977,8 +1990,19 @@ export async function loadScenarioSnapshotForRunAnalysis(
  */
 function mergeOptionInterventionObjects(
   nodes: GraphV3T['nodes'],
-  options: ReadonlyArray<{ option_id: string; label: string; interventions: Record<string, unknown> }>,
-): Array<{ id: string; option_id: string; label: string; interventions: Record<string, unknown> }> {
+  options: ReadonlyArray<{
+    option_id: string;
+    label: string;
+    interventions: Record<string, unknown>;
+    is_baseline?: boolean;
+  }>,
+): Array<{
+  id: string;
+  option_id: string;
+  label: string;
+  interventions: Record<string, unknown>;
+  is_baseline?: boolean;
+}> {
   const optionNodesById = new Map<string, Record<string, unknown>>();
   for (const node of nodes) {
     if (node.kind === 'option' && typeof node.id === 'string') {
@@ -1993,6 +2017,17 @@ function mergeOptionInterventionObjects(
       option_id: option.option_id,
       label: option.label,
       interventions: rawObjects,
+      // The status-quo verdict is settled ONCE, by
+      // `computeStructuralReadiness` (explicit node flag → label heuristic →
+      // `false` for the rest). It was DROPPED here, which is why the PLoT
+      // submission seam could not tell the status quo from an option the user
+      // simply has not configured — and why an unconfigured non-baseline
+      // option was being scaffolded into "do nothing" and then RANKED.
+      // Carried, never re-derived: a second authority on one question is the
+      // defect class CLAUDE.md traps 12 and 21 exist to name.
+      // Omitted when absent so `undefined` ("detection did not run") stays
+      // distinguishable from `false` ("detected as not the baseline").
+      ...(option.is_baseline !== undefined ? { is_baseline: option.is_baseline } : {}),
     };
   });
 }
