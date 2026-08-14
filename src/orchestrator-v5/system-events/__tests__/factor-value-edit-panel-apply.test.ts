@@ -127,6 +127,9 @@ function beliefEvent(participant_id: string, value: number): ElicitationEventRow
     kind: 'belief_submitted',
     target: { kind: 'factor', id: TARGET_ID },
     belief: { value, expression_raw: null, confidence: null },
+    // An ANSWER row carries no evidence. Written out rather than defaulted so a
+    // fixture cannot drift into representing a row the DB's CHECK forbids.
+    evidence: null,
     provenance: {
       authored_by: participant_id,
       method: 'elicited_nl',

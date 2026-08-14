@@ -151,6 +151,38 @@ export const DISSENT_SURVIVES_APPLY =
  * hand-maintained list is the CORRECT instrument, because its job is to
  * disagree with the thing it checks.
  */
+/**
+ * ⭐⭐ THE EXACT PHRASES IN WHICH A FORBIDDEN WORD APPEARS LEGITIMATELY, BECAUSE
+ * IT IS BEING DENIED. This list exists because the first version of the guard
+ * was WRONG, and the way it was wrong is worth keeping:
+ *
+ *   "They are kept as they were given and are not combined."
+ *
+ * contains the substring `combined`, and a naive absence check flagged the one
+ * sentence in the module that most explicitly PROMISES not to combine anything.
+ * A perfect instrument against a wrong oracle (CLAUDE.md 13c): the guard was
+ * sensitive, and what it was sensitive to was not what it claimed to measure.
+ *
+ * ⚠ THE FIX IS NOT A NEGATION-AWARE REGEX. Four rounds of exactly that on a
+ * natural-language predicate is documented in CLAUDE.md 22f as unwinnable —
+ * every rule fixes one direction and reopens the other. This copy is FINITE and
+ * CODE-OWNED, so the honest instrument is an EXACT sanctioned set: strip these
+ * phrases, then require the forbidden words to be absent from what remains.
+ *
+ * The suite asserts this set EXACTLY — every entry must occur in some emitted
+ * string, so an entry that stops being needed goes RED rather than silently
+ * widening the hole it was carved for. Adding a phrase here is a conscious act
+ * that says "this word appears, and it appears inside a denial".
+ */
+export const SANCTIONED_NEGATIONS: readonly string[] = ['are not combined'];
+
+/** Remove the sanctioned denials before checking for resolution language. */
+export function stripSanctionedNegations(text: string): string {
+  let out = text.toLowerCase();
+  for (const phrase of SANCTIONED_NEGATIONS) out = out.split(phrase).join(' ');
+  return out;
+}
+
 export const FORBIDDEN_RESOLUTION_WORDS: readonly string[] = [
   'average',
   'mean',
