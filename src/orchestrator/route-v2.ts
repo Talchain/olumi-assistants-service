@@ -2530,7 +2530,30 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             retryable: cc.retryable,
             requestId,
             stage: ingress.stage,
-            preStageExtras: { cause_kind: cc.causeKind, action_type: chipActionType },
+            // P0 (analysis-500 diagnosis §8 FIX B, 2026-08-14) — STOP DISCARDING
+            // THE DIAGNOSTIC.
+            //
+            // This spread used to be `{ cause_kind, action_type }` and nothing
+            // else, while the handler had ALREADY assembled PLoT's status,
+            // critique codes and parse outcome into `err.details`. The cost was
+            // measured, not theoretical: all three banked 500s came back
+            // byte-identical at 1126 B, two entirely different PLoT dispositions
+            // were indistinguishable on the wire, and settling which one fired
+            // needed Render log access (DIAGNOSIS §3 "THE OBSERVABILITY DEFECT",
+            // §7.1). It cost a whole diagnosis a day.
+            //
+            // `cc.diagnostics` is an ALLOWLISTED, shape-checked projection built
+            // in `chip-click-dispatch.ts` — never the raw `details`, which carry
+            // PLoT prose interpolating the user's own option labels.
+            //
+            // Order matters: diagnostics are spread FIRST so `cause_kind` and
+            // `action_type` remain the authoritative last word on their own keys
+            // and cannot be shadowed by a handler detail of the same name.
+            preStageExtras: {
+              ...(cc.diagnostics ?? {}),
+              cause_kind: cc.causeKind,
+              action_type: chipActionType,
+            },
           });
           // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
           return reply.code(500).send(boundaryError);

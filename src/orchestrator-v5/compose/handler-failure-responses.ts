@@ -207,6 +207,35 @@ export function composeHandlerFailureBody(
     // default, produces `template_id: 'fallback'`, and both the TurnExecutor
     // and the chip path deliberately fail it loud back to a 500.
     case 'analysis_engine_busy':
+      // P0 (analysis-500 diagnosis §8 FIX A, 2026-08-14) — SAME DISPOSITION, TWO
+      // DIFFERENT CAUSES, AND ONLY ONE OF THEM IS CONCURRENCY (trap 21).
+      //
+      // The copy above was written for a downstream **429** — a concurrency
+      // limiter — so "several analyses are running at once" is TRUE there. It is
+      // FALSE for a **503**: PLoT refuses on admission state
+      // (`ANALYSIS_ENGINE_ADMISSION_UNAVAILABLE`, an unreadable ISL `/health`
+      // advertisement) or on an open circuit breaker, and DIAGNOSIS §5.2
+      // measured `A_hiring-3` failing with NOTHING concurrent. Reusing the 429
+      // sentence would invent a cause, which is the fabrication class this
+      // programme treats as a trust defect.
+      //
+      // The cause_kind is deliberately SHARED (recoverable, retry chip, one
+      // telemetry tag, no new wiring — the brief's "mint nothing"); only the
+      // sentence and the template_id split, keyed on the status the handler
+      // already carries. What both must keep saying is the load-bearing half:
+      // the user's model is fine and a retry shortly is expected to work.
+      if (details.downstream_http_status === 503) {
+        return {
+          body: {
+            assistant_text:
+              "The analysis engine isn't accepting new analyses at the moment. "
+              + 'Nothing is wrong with your model. Try again in a few seconds.',
+            suggested_actions: [retryActionChip()],
+          },
+          template_id: 'analysis_engine_unavailable',
+          chip_type: 'action',
+        };
+      }
       return {
         body: {
           assistant_text:
@@ -455,6 +484,28 @@ const PLOT_FAILURE_CODE_COPY: Readonly<Record<string, PlotCodeCopy>> = {
     chip_type: 'action',
   },
 };
+
+/**
+ * P0 (analysis-500 diagnosis / `TRIGGER-SETTLED-LANE-F2.md`) — does CEE hold
+ * specific copy for this PLoT failure code?
+ *
+ * **DERIVED from `PLOT_FAILURE_CODE_COPY`, never a second hand-kept list**
+ * (trap 12: a mirror a human must remember to sync WILL drift, and the drift
+ * reads green). `run-analysis.ts` uses this to decide whether a blocked refusal
+ * ships with specific copy or with the generic copy plus a
+ * `plot_blocker_code_known: false` tripwire — so a code added to the table
+ * automatically stops tripping the wire, with nothing else to update.
+ *
+ * ⚠ This answers "do we have COPY for it?" and NOT "is this code known to
+ * PLoT?" — two different questions, deliberately not merged under one name
+ * (trap 21). PLoT owns ~50 codes across `BLOCKER_CODES` +
+ * `INLINE_CRITIQUE_CODES`; this table holds copy for a handful. A `false` here
+ * means "CEE has no specific sentence for this", never "PLoT sent something
+ * invalid".
+ */
+export function isKnownPlotFailureCode(code: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PLOT_FAILURE_CODE_COPY, code);
+}
 
 /**
  * Compose the code-keyed body when `details.plot_primary_code` names a known

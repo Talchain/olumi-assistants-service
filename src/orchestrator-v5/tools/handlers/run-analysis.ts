@@ -87,6 +87,10 @@ import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
 import { hasReducedSamplesDisclosure } from '../../compose/claim-safety-cage.js';
+// P0 (analysis-500 diagnosis §8 FIX A) — DERIVED from the composer's copy table,
+// so a code added there stops tripping the unknown-code wire with nothing else
+// to update (trap 12: derive, never mirror).
+import { isKnownPlotFailureCode } from '../../compose/handler-failure-responses.js';
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
@@ -817,6 +821,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                 .map((c) => (typeof c?.message === 'string' ? c.message : null))
                 .filter((m): m is string => m !== null)
             : [];
+          // P0 (analysis-500 diagnosis §4) — the CODES, scanned across every
+          // critique for the same reason the messages are: PLoT does not
+          // guarantee ordering, and the live 429 capture put
+          // `NORMALIZATION_WARNING` first (see run-analysis-downstream-busy).
+          const critiqueCodes = critiqueCodesOf(v2Err);
           const statusReason =
             typeof v2Err.status_reason === 'string' ? v2Err.status_reason : null;
           const analysisStatus =
@@ -837,13 +846,50 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             );
           });
           const isMissingIntervention = missingInterventionCritique !== undefined;
-          if (isPreflight && isMissingIntervention) {
+          // P0 (analysis-500 diagnosis §4, 2026-08-14) — MATCH THE CODE, NOT
+          // ONLY THE PROSE. The two gates above depend entirely on English
+          // sentences owned by ANOTHER SERVICE: `analysis_status ===
+          // 'preflight_validation_failed'` is never emitted at all (PLoT
+          // hard-codes `'blocked'` — `run.ts:1651`; DIAGNOSIS §9 premise 5), so
+          // `isPreflight` survives only on the `status_reason` substring, and
+          // the critique gate substring-matches a second sentence. A PLoT reword
+          // silently converts this honest refusal into a 500 with no signal
+          // anywhere.
+          //
+          // `EMPTY_INTERVENTIONS` is the canonical `BLOCKER_CODES` member for
+          // this blocker (PLoT `types/engine-v3.ts:817`, emitted at
+          // `preflight-v2.ts:189-191`) and is preflight-exclusive, so the code's
+          // presence IS the preflight signal — no prose gate is needed with it.
+          //
+          // ⚠ BOTH GATES ARE KEPT, and that is deliberate (trap 12d): deriving a
+          // guard from a code list MOVES the risk onto the list, it does not
+          // remove it. The code path survives a PLoT copy edit; the prose path
+          // survives a PLoT code RENAME. Neither is load-bearing alone, and each
+          // has its own pin.
+          const hasEmptyInterventionsCode = critiqueCodes.includes('EMPTY_INTERVENTIONS');
+          if (hasEmptyInterventionsCode || (isPreflight && isMissingIntervention)) {
             // Extract the option label from the matching critique. PLoT
             // emits single-quoted labels in the message: "Option 'Foo Bar'
             // does not specify ...". Match conservatively; if extraction
             // fails, surface as the generic options_not_configured (no
             // label branch in the composer handles that cleanly).
-            const labelMatch = missingInterventionCritique.match(/Option '([^']+)'/);
+            //
+            // P0: when only the CODE matched (a PLoT reword), there is no
+            // prose-matched critique to read the label from — take the message
+            // belonging to the EMPTY_INTERVENTIONS critique instead. Bound by
+            // IDENTITY (the critique's own code), never by position or by a
+            // predicate another critique could satisfy (trap 19). Without this
+            // the reword path would recover honestly but lose the option name,
+            // silently degrading a specific chip into the generic one.
+            const labelSource =
+              missingInterventionCritique ??
+              (Array.isArray(v2Err.critiques)
+                ? v2Err.critiques.find(
+                    (c) => c?.code === 'EMPTY_INTERVENTIONS' && typeof c?.message === 'string',
+                  )?.message
+                : undefined) ??
+              '';
+            const labelMatch = labelSource.match(/Option '([^']+)'/);
             const extractedLabel =
               labelMatch && labelMatch[1] && labelMatch[1].trim().length > 0
                 ? labelMatch[1].trim()
@@ -864,6 +910,192 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             );
           }
         }
+        // ====================================================================
+        // P0 (analysis-500 diagnosis §8 FIX A, 2026-08-14) — A TYPED, BLAME-FREE
+        // DOWNSTREAM REFUSAL IS NOT `INTERNAL_ERROR`.
+        //
+        // Regression Shield arm A `run-2`: 3 of 12 first-use analyse turns
+        // returned HTTP 500 `plot_error`. The seam is byte-verified (§3): the
+        // plot-client's typed-failure carve-out fires only on `response.ok`, so
+        // every non-422 non-2xx arrives with `v2RunError` unset, and
+        // `isTypedFailedEnvelope` additionally excludes 422 — so a 422 `blocked`
+        // and a 503 both fell to `plot_error` → `handler_failure` → 500.
+        //
+        // ⚠⚠ TWO DISPOSITIONS, TWO DIFFERENT USER QUESTIONS — SEPARATE BRANCHES,
+        // SEPARATE COPY, SEPARATE PINS (trap 21). This is not tidiness. The
+        // 429-vs-display-scope pair (#709/#737) recreated a harm precisely
+        // because two authorities answering different questions were reconciled
+        // under one predicate:
+        //
+        //   503 → "can the engine take an analysis right now?"  NO, and it is
+        //         nothing to do with this model. Blame-free, retryable.
+        //   422 → "can the engine answer THIS model?"  NO, and here is what to
+        //         change. An honest verdict ABOUT the model, not a retry promise.
+        //
+        // Telling a 422-blocked user to "try again shortly" would be a lie, and
+        // telling a 503 user to edit their graph would blame them for an
+        // infrastructure state — PLoT's own comment makes exactly that point
+        // when explaining why admission refusal is 503 and not 422
+        // (`compute-admission.ts:745-753`).
+        //
+        // ⚠ WHAT IS DELIBERATELY *NOT* RECOVERED (trap 22b — closing a gap must
+        // not invent the mirror lie). DIAGNOSIS §7.1 could not establish which
+        // disposition caused the three banked 500s, so this fix must be correct
+        // for BOTH — and it must not become "every failure is retryable":
+        //   - a PLoT 200 `failed` envelope stays `analysis_failed` (fatal);
+        //   - a 422 with NO typed envelope stays `plot_error` (fatal) — an
+        //     unparseable body is not a typed refusal, whatever its status;
+        //   - a 422 whose envelope claims `failed` rather than `blocked` stays
+        //     fatal — `blocked` is the only 422 disposition PLoT documents as an
+        //     honest verdict (`run.ts:1651`);
+        //   - a PLoT 500/502 stays `plot_error` (fatal).
+        // Each of those has its own pin in
+        // `__tests__/run-analysis-typed-refusal-not-500.test.ts`.
+        // ====================================================================
+
+        // ARM 1 — PLoT 422 `blocked`: PLoT has DECIDED it cannot answer this
+        // model. That is not a CEE fault and not an internal error; it is the
+        // engine's honest verdict, and `analysis_blocked` is the cause that
+        // already says exactly that (`handler-errors.ts:42`, on
+        // `RECOVERABLE_HANDLER_CAUSES`, with its own composer branch AND the
+        // `plot_primary_code` copy table already keyed for it). Gated on PLoT's
+        // DECLARED envelope status, not on the status code alone, so an untyped
+        // or off-contract 422 keeps the fatal mapping.
+        //
+        // ⭐⭐ THIS IS THE MEASURED ARM. Settled at the Render logs, 14 Aug 2026
+        // (`TRIGGER-SETTLED-LANE-F2.md`): all THREE banked 500s were
+        // `PLoT run 422 — V2RunError`, `analysis_status: 'blocked'`,
+        // `code: 'DUPLICATE_EDGE_CONFLICT'` — never the 503 the diagnosis
+        // favoured. The 503 arm below is the speculative half; this one fires on
+        // real users, 3 of 12 first-use analyse turns.
+        //
+        // ⚠⚠ WHY THE DISPOSITION IS KEYED ON `analysis_status`, NOT ON A
+        // BLOCKER-CODE ALLOWLIST — measured, not preferred. The obvious design
+        // is to enumerate PLoT's `BLOCKER_CODES` (`types/engine-v3.ts:811-838`,
+        // 26 entries) and decide each. **`DUPLICATE_EDGE_CONFLICT` IS NOT IN
+        // `BLOCKER_CODES`.** It lives in `INLINE_CRITIQUE_CODES` (`:884`,
+        // commented *"Registered late (both already emitted via
+        // buildBlockedResponse)"*), as do `GRAPH_TOO_COMPLEX` and
+        // `MIXED_RANGE_DERIVATION`. So an allowlist derived from the canonical
+        // blocker list would have OMITTED THE CODE THAT CAUSED ALL THREE 500s,
+        // and this P0 would have shipped its own fix and survived. There is no
+        // single list in PLoT enumerating "codes that can accompany a 422
+        // blocked": the true set is `BLOCKER_CODES` ∪ an unmarked subset of
+        // `INLINE_CRITIQUE_CODES`, recoverable only by reading all ~20
+        // `reply.status(422)` sites — the textbook hand-maintained mirror
+        // (trap 12), whose drift always reads green.
+        //
+        // What IS structural, and therefore safe to key on: every one of those
+        // sites goes through `buildBlockedResponse`, which hard-codes
+        // `analysis_status: 'blocked'` (`run.ts:1651`). That is the producer's
+        // declared semantics (trap 13c), so it is what the predicate reads.
+        //
+        // DIRECTION OF FAILURE, which is the whole argument: this list's failure
+        // mode is a slightly-too-generic honest refusal. An allowlist's failure
+        // mode is a 500 — the P0 itself. Two lists, opposite blast radii.
+        const blockedCritiqueCodes = critiqueCodesOf(v2Err);
+        if (runError.status === 422 && v2Err?.analysis_status === 'blocked') {
+          // EXPLICIT DISPOSITION 1 of 3 — codes that mean OUR SIDE BROKE, not
+          // "your model is unanswerable". A 422 carrying one of these is
+          // off-contract (PLoT's internal catch returns 200 `failed`, not 422 —
+          // DIAGNOSIS §9 premise 2), and dressing genuine breakage as a model
+          // verdict would blame the user for our failure — the same
+          // misattribution PLoT itself refuses to commit when it chooses 503
+          // over 422 for admission failure (`compute-admission.ts:745-751`).
+          // These stay FATAL and visible.
+          const fatalCode = blockedCritiqueCodes.find((c) => PLOT_BLOCKED_FATAL_CODES.has(c));
+          if (fatalCode === undefined) {
+            // EXPLICIT DISPOSITION 2 of 3 — every other blocked code is an
+            // honest verdict about the model. Known codes get specific copy from
+            // the existing `PLOT_FAILURE_CODE_COPY` table; unknown codes get the
+            // generic blocked copy AND a loud tripwire.
+            //
+            // EXPLICIT DISPOSITION 3 of 3 — UNKNOWN CODES FAIL VISIBLE, and
+            // "visible" means visible in telemetry and on the wire, not "500 for
+            // the user". A 500 on a verdict PLoT deliberately typed is precisely
+            // the confident wrongness being fixed here, and it would re-open this
+            // P0 for the next code PLoT adds. So the honest refusal ships and
+            // `plot_blocker_code_known: false` marks it — the same tripwire
+            // pattern as `downstream_http_status_parsed: false` below, which
+            // exists for the same reason (a cross-service coupling that can stop
+            // working silently).
+            const knownCode = blockedCritiqueCodes.find((c) => isKnownPlotFailureCode(c));
+            if (knownCode === undefined) {
+              log.warn(
+                {
+                  request_id: invocation.requestId,
+                  plot_critique_codes: blockedCritiqueCodes,
+                  plot_status_reason: v2Err.status_reason,
+                },
+                'PLoT blocked the analysis with no code CEE has copy for — honest generic refusal shipped; add copy for this code',
+              );
+            }
+            throw new HandlerInvocationFailedError(
+              `PLoT blocked the analysis: ${runError.message}`,
+              {
+                cause_kind: 'analysis_blocked',
+                // The MODEL must change first; a bare re-run reproduces the
+                // verdict byte for byte. The composer's chip for this cause is a
+                // text prompt, never a retry action — the two agree deliberately,
+                // and that agreement is what stops this becoming the mirror lie
+                // ("everything is retryable") the 503 arm is careful not to be.
+                retryable: false,
+                details: {
+                  ...errorDetailsBase,
+                  ...extractPlotFailureDetails(v2Err),
+                  downstream_http_status: 422,
+                  plot_blocker_code_known: knownCode !== undefined,
+                },
+                cause: runError,
+              },
+            );
+          }
+          // Fell through deliberately: a fatal code keeps the existing
+          // `plot_error` mapping below, and carries WHY it stayed fatal.
+          log.error(
+            {
+              request_id: invocation.requestId,
+              plot_error_code: fatalCode,
+              plot_critique_codes: blockedCritiqueCodes,
+            },
+            'PLoT sent a 422 blocked carrying an internal-failure code — kept FATAL, not dressed as a model verdict',
+          );
+        }
+
+        // ARM 2 — PLoT 503: capacity/infrastructure state, blame-free and
+        // self-healing. Two carriers, both real, both derived at PLoT
+        // `a5345a5e`: `ANALYSIS_ENGINE_ADMISSION_UNAVAILABLE`
+        // (`compute-admission.ts:798` — a typed blocked body sent with 503) and
+        // `BREAKER_OPEN` (`errors.ts:100` — an `error.v1` envelope with no
+        // `analysis_status`). CEE cannot tell them apart by envelope shape and
+        // does not need to: the product truth is identical, and
+        // `downstreamErrorCode` carries which one fired for telemetry.
+        //
+        // Keyed on the STATUS, not on the envelope — the admission 503's body
+        // carries `retryable: false` (PLoT `run.ts:1653`, contradicting its own
+        // documented rationale at `compute-admission.ts:749`; DIAGNOSIS §5
+        // records it as a PLoT defect to row). Reading that field here would
+        // reinstate the 500 on the very disposition this branch exists for, so
+        // the recoverability decision deliberately does not consult it.
+        if (runError.status === 503) {
+          throw new HandlerInvocationFailedError(
+            `PLoT analysis engine unavailable: ${runError.message}`,
+            {
+              cause_kind: 'analysis_engine_busy',
+              retryable: true,
+              details: {
+                ...errorDetailsBase,
+                ...extractPlotFailureDetails(v2Err),
+                downstream_http_status: 503,
+                ...(runError.downstreamErrorCode !== undefined
+                  ? { plot_error_code: runError.downstreamErrorCode }
+                  : {}),
+              },
+              cause: runError,
+            },
+          );
+        }
+
         // Dual-carry (seam item 3): when the PLoTError carries the typed
         // failure envelope, lift the critique codes into details so the
         // composer can key honest copy off them. A failed(200) envelope
@@ -918,6 +1150,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           typeof v2Err?.status_reason === 'string' &&
           v2Err.status_reason.length > 0 &&
           parsedStatus === null;
+        // P0 (analysis-500 diagnosis §3 THE OBSERVABILITY DEFECT) — a FATAL PLoT
+        // failure must be ATTRIBUTABLE. Lane F could not name the disposition
+        // because the surviving 500s carried no PLoT status at all; it took
+        // Render log access to settle what the wire should have said.
+        //
+        // `parsedStatus` wins when present: it is the status PLoT read off ISL,
+        // which is the more specific fact, and the existing pins depend on it
+        // (a 200 typed-failed envelope naming HTTP 500 must keep reporting 500,
+        // never PLoT's own 200). Only when no ISL status was parsed does PLoT's
+        // OWN transport status fill the field — and never for a 200, where
+        // "downstream status 200" would be a meaningless value crowding out the
+        // `downstream_http_status_parsed: false` tripwire.
+        const plotTransportStatus =
+          parsedStatus === null && runError.status !== 200 ? runError.status : null;
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
           {
@@ -927,6 +1173,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
               ...errorDetailsBase,
               ...extractPlotFailureDetails(v2Err),
               ...(parsedStatus !== null ? { downstream_http_status: parsedStatus } : {}),
+              ...(plotTransportStatus !== null
+                ? { downstream_http_status: plotTransportStatus }
+                : {}),
+              ...(runError.downstreamErrorCode !== undefined
+                ? { plot_error_code: runError.downstreamErrorCode }
+                : {}),
               ...(unreadableStatusReason ? { downstream_http_status_parsed: false } : {}),
             },
             cause: runError,
@@ -1527,6 +1779,50 @@ function readAnalysisStatus(response: V2RunResponseEnvelope): string | null {
  * direction. Should PLoT gain a structured status field, prefer it and delete
  * this.
  */
+/**
+ * P0 (analysis-500 diagnosis §8 FIX A / `TRIGGER-SETTLED-LANE-F2.md`) — the
+ * codes on a PLoT 422 `blocked` that mean **PLoT or ISL broke**, as opposed to
+ * "this model cannot be answered".
+ *
+ * These keep the FATAL `plot_error` mapping and stay a visible 500. Dressing our
+ * own breakage as a verdict about the user's model would blame them for our
+ * failure — the exact misattribution PLoT refuses to commit when it returns 503
+ * rather than 422 for an admission failure (`compute-admission.ts:745-751`).
+ *
+ * ⚠ THIS IS A HAND-MAINTAINED LIST AND ITS FAILURE MODE IS THE SAFE ONE, which
+ * is the only reason it is acceptable here (trap 12). If PLoT adds an
+ * internal-failure code and this set omits it, the result is an honest but
+ * too-generic refusal — a degraded 200. The inverse design (an ALLOWLIST of
+ * recoverable blocker codes) fails to a 500, i.e. straight back into this P0,
+ * and would already have omitted `DUPLICATE_EDGE_CONFLICT`. Same mirror, opposite
+ * blast radius; pick the direction that cannot recreate the defect.
+ *
+ * Off-contract by construction: PLoT's outermost catch returns **200** with
+ * `analysis_status: 'failed'` (`run.ts:8783-8811`; DIAGNOSIS §9 premise 2), so
+ * none of these SHOULD reach a 422. The set exists for the day one does.
+ */
+const PLOT_BLOCKED_FATAL_CODES: ReadonlySet<string> = new Set([
+  'PLOT_INTERNAL_ERROR',
+  'ISL_CALL_FAILED',
+  'ISL_EMPTY_RESULTS',
+]);
+
+/**
+ * Every critique code on a typed PLoT envelope, in wire order.
+ *
+ * Scanned across ALL critiques, never just the first: PLoT does not guarantee
+ * ordering, and the live 429 capture put `NORMALIZATION_WARNING` first (see
+ * `run-analysis-downstream-busy.test.ts`). A first-only read would have missed
+ * the discriminating code on that very shape.
+ */
+function critiqueCodesOf(v2Err: V2RunError | undefined): string[] {
+  return Array.isArray(v2Err?.critiques)
+    ? v2Err.critiques
+        .map((c) => (typeof c?.code === 'string' ? c.code : null))
+        .filter((c): c is string => c !== null && c.length > 0)
+    : [];
+}
+
 const PLOT_DOWNSTREAM_HTTP_STATUS_RE = /\(HTTP\s+(\d{3})\)/;
 
 function readDownstreamHttpStatus(v2Err: V2RunError | undefined): number | null {

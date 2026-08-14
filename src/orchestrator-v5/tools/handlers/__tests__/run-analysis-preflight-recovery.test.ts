@@ -292,10 +292,28 @@ describe('run_analysis — PLoT preflight-intervention 422 recoverable path', ()
   });
 
   // ── Test 5 — unrelated PLoT errors still follow existing path ──────
-  it('Test 5: PLoT 503 (5xx) → still cause_kind=plot_error (unchanged path)', async () => {
+  //
+  // ⚠ FIXTURE CHANGED 503 → 502, EXPECTATION UNCHANGED (P0 analysis-500 lane,
+  // 2026-08-14). This test's PURPOSE is "an unrelated PLoT transport error is not
+  // absorbed by the preflight-recovery carve-out", and that purpose is intact.
+  //
+  // But 503 was the wrong status to express it with. A 503 is not an unrelated
+  // error: it is the one status PLoT uses for
+  // `ANALYSIS_ENGINE_ADMISSION_UNAVAILABLE` and `BREAKER_OPEN`, both blame-free
+  // and self-healing — *"503 is retryable, and the next request self-heals as
+  // soon as a refresh succeeds"* (PLoT `compute-admission.ts:749-753`). So this
+  // assertion was guarding the 500 half of the analysis-500 P0: it made "an
+  // engine that is temporarily unavailable answers INTERNAL_ERROR" a pinned
+  // behaviour. 503 now recovers to `analysis_engine_busy`
+  // (`run-analysis-typed-refusal-not-500.test.ts` arm 1).
+  //
+  // 502 carries no typed PLoT meaning, so it expresses the intended claim — a
+  // genuinely unknown transport failure stays fatal and visible — without
+  // pinning a defect. Corrected at source, never absorbed into a baseline.
+  it('Test 5: PLoT 502 (unknown 5xx) → still cause_kind=plot_error (unchanged path)', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClientRejecting(() =>
-        new PLoTError('503 Service Unavailable', 503, 'run', 100),
+        new PLoTError('502 Bad Gateway', 502, 'run', 100),
       ),
       scenarioReader: makeScenarioReader(),
     });

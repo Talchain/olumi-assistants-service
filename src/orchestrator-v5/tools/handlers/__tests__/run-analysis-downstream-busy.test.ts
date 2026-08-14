@@ -231,6 +231,13 @@ describe('run_analysis — a downstream 429 is BUSY, not a fatal INTERNAL_ERROR'
     });
 
     expect(caught.cause_kind).not.toBe('analysis_engine_busy');
+    // ⚠ ASSERTION STRENGTHENED (P0 analysis-500 lane, 2026-08-14). This test's
+    // name has always claimed "stays analysis_blocked" while asserting only the
+    // NEGATIVE — and at the time it was written the actual cause was
+    // `plot_error`, so the name was aspirational and nothing pinned it. The
+    // assertion now matches the name. (Trap 13b: a guard is not evidence for the
+    // claim in its title unless it asserts that claim.)
+    expect(caught.cause_kind).toBe('analysis_blocked');
   });
 
   it('PLoT itself answering 429 (transport, no envelope) → analysis_engine_busy', async () => {
@@ -245,9 +252,23 @@ describe('run_analysis — a downstream 429 is BUSY, not a fatal INTERNAL_ERROR'
     expect(caught.details.downstream_http_status).toBe(429);
   });
 
-  it('a non-429 transport failure without an envelope still maps to plot_error (unchanged)', async () => {
+  it('a non-429, non-503 transport failure without an envelope still maps to plot_error', async () => {
+    // ⚠ FIXTURE CHANGED 503 → 502 (P0 analysis-500 lane, 2026-08-14), and the
+    // change is the POINT, not an accommodation.
+    //
+    // This test used a 503 to stand for "some other transport failure". A 503 is
+    // not a neutral example: it is the one status PLoT uses for
+    // `ANALYSIS_ENGINE_ADMISSION_UNAVAILABLE` and `BREAKER_OPEN`, both blame-free
+    // and self-healing — PLoT's own comment says so
+    // (`compute-admission.ts:749-753`). So this assertion was PINNING the 500
+    // half of the defect the analysis-500 diagnosis found: it made "a retryable
+    // engine-unavailability answers INTERNAL_ERROR" a guarded behaviour.
+    // 503 now recovers (`run-analysis-typed-refusal-not-500.test.ts` arm 1).
+    //
+    // 502 keeps this test's real intent — a genuinely unknown non-2xx stays fatal
+    // and visible — with a status that carries no typed PLoT meaning.
     const caught = await invokeAndCatch(
-      () => new PLoTError('PLoT run returned 503', 503, 'run', 12, 'req-id'),
+      () => new PLoTError('PLoT run returned 502', 502, 'run', 12, 'req-id'),
     );
 
     expect(caught.cause_kind).toBe('plot_error');

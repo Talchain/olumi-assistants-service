@@ -9,9 +9,14 @@
  * so the composer could never surface honest, code-keyed copy.
  *
  * Pins:
- *  - 422 blocked with critique codes → `plot_error` (unchanged cause — the
- *    422→recoverable reroute is War-Room-gated) WITH plot_critique_codes /
- *    plot_primary_code / plot_user_message / plot_status_reason on details;
+ *  - 422 blocked with critique codes → `analysis_blocked` WITH
+ *    plot_critique_codes / plot_primary_code / plot_user_message /
+ *    plot_status_reason on details. (⚠ WAS `plot_error`, "the 422→recoverable
+ *    reroute is War-Room-gated". Changed by the P0 analysis-500 lane, 14 Aug
+ *    2026: that mapping is what returned HTTP 500 for PLoT's own typed verdict,
+ *    measured at 3/12 first-use analyse turns — see
+ *    `TRIGGER-SETTLED-LANE-F2.md`. The dual-carry this file exists to pin is
+ *    unchanged.)
  *  - typed failed(200) envelope (carried via PLoTError.v2RunError by the
  *    plot-client carve-out) → `analysis_failed` (unifies "PLoT said failed"
  *    with the parsed-envelope path; both fatal, no recoverability change)
@@ -149,11 +154,28 @@ async function invokeAndCatch(plotError: () => Error): Promise<HandlerInvocation
 }
 
 describe('run_analysis — PLoT typed failure codes dual-carried into details', () => {
-  it('422 blocked with GRAPH_TOO_COMPLEX → plot_error with code keys on details', async () => {
+  it('422 blocked with GRAPH_TOO_COMPLEX → analysis_blocked with code keys on details', async () => {
     const caught = await invokeAndCatch(make422BlockedError);
 
     expect(caught.name).toBe('HandlerInvocationFailedError');
-    expect(caught.cause_kind).toBe('plot_error');
+    // ⚠ EXPECTATION CHANGED `plot_error` → `analysis_blocked` (P0 analysis-500
+    // lane, 2026-08-14), and the change is the FIX, not an accommodation.
+    //
+    // This assertion pinned the defect. `plot_error` is not on
+    // `RECOVERABLE_HANDLER_CAUSES`, so this test guaranteed that a PLoT 422
+    // `blocked` — the engine's own typed verdict that it cannot answer a model —
+    // reached the user as HTTP 500 INTERNAL_ERROR. Measured cost: 3 of 12
+    // first-use analyse turns on staging (`TRIGGER-SETTLED-LANE-F2.md`).
+    //
+    // The original rationale was *"the 422→recoverable reroute is
+    // War-Room-gated"*, and that gate was a reasonable caution when nothing had
+    // measured the class. It has now been measured, at the Render logs, on real
+    // users: all three banked 500s were exactly this shape.
+    //
+    // Everything this test actually exists for — the dual-carry of PLoT's codes
+    // into `details` — is unchanged and still asserted below. Only the
+    // disposition moved, and with it the recoverability that decides 200 vs 500.
+    expect(caught.cause_kind).toBe('analysis_blocked');
     expect(caught.details.plot_primary_code).toBe('GRAPH_TOO_COMPLEX');
     expect(caught.details.plot_critique_codes).toEqual(['GRAPH_TOO_COMPLEX']);
     expect(caught.details.plot_user_message).toBe('Your model is too complex to analyse. Simplify it.');
