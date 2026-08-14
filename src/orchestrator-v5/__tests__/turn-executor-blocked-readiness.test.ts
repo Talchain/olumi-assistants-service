@@ -312,6 +312,89 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the routed analyse arm must not repor
   });
 
   /**
+   * ⭐ R1 (routed arm) — the refusal must be ANALYSE-shaped, or the UI's
+   * present-but-invalid path clears ten fields including the user's
+   * goalConstraints / draftCoaching / preAnalysisSensitivity and the
+   * sessionStorage keys. `composeRecoverableHandlerResponse` stamps the stage
+   * from the REQUEST, and an analyse turn can legitimately arrive at
+   * `stage: 'frame'` — measured on the witnessed run, where both the
+   * successful analysis and the refusal came back `stage_indicator: 'frame'`.
+   */
+  it('R1: the routed refusal is ANALYSE-shaped even when the request stage is `frame`', async () => {
+    const framePayload = makeMessagePayload({
+      turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      scenario_id: SCENARIO_ID,
+      message: 'run the analysis',
+      turn_class: 'frame',
+      stage: 'frame',
+    });
+    // PRECONDITION PINNED IN-TEST — the request really is frame-staged.
+    expect(framePayload.stage).toBe('frame');
+
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
+    );
+    const result = await runTurnExecutor(framePayload, 'req-ext2-routed-r1', {
+      routingAdapter,
+      handlerRegistry: mixedScaleRegistry(),
+      graphState: READY_GRAPH,
+    });
+
+    expect(result.response.stage_indicator).toBe('analyse');
+    expect(result.response.blocks.some((b) => b.type === 'analysis_result')).toBe(false);
+  });
+
+  /**
+   * ⭐ R1 OPPOSITE-DIRECTION TWIN — the stage override is scoped to the
+   * ANALYSE handler exactly as the readiness marking is. A non-analyse
+   * recovery must keep the REQUEST's own stage; claiming `'analyse'` on a
+   * failed constraint edit would be the same class of falsehood D1 removed,
+   * one field along.
+   */
+  it('R1 TWIN: a NON-analyse recovery keeps the request stage — the override is scoped, not global', async () => {
+    const framePayload = makeMessagePayload({
+      turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      scenario_id: SCENARIO_ID,
+      message: "We can't spend more than £50,000 on the Annual CRM Licence Cost.",
+      turn_class: 'frame',
+      stage: 'frame',
+    });
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_ADD_CONSTRAINT, 'Adding a limit…'),
+    );
+    const result = await runTurnExecutor(framePayload, 'req-ext2-routed-r1-twin', {
+      routingAdapter,
+      handlerRegistry: nonAnalyseRecoverableRegistry(),
+      graphState: READY_GRAPH,
+    });
+
+    expect(nonAnalyseHandlerInvoked).toBe(true);
+    expect(result.response.stage_indicator).toBe('frame');
+  });
+
+  /**
+   * ⭐ R2/R3 (routed arm) — same SPEC invariant as the chip arm: a refusal
+   * turn's freshness is in {stale, unknown} with a real reason. Never `none`
+   * (clears a previously-good fact → orphaned-result banner), never `fresh`
+   * (clears the local-edits dirty overlay).
+   */
+  it('R2/R3: the routed refusal freshness is in {stale, unknown} with a reason', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
+    );
+    const result = await runTurnExecutor(BASE_PAYLOAD, 'req-ext2-routed-r2', {
+      routingAdapter,
+      handlerRegistry: mixedScaleRegistry(),
+      graphState: READY_GRAPH,
+    });
+
+    expect(result.freshness).toBeDefined();
+    expect(['stale', 'unknown']).toContain(result.freshness!.freshness);
+    expect(typeof result.freshness!.reason).toBe('string');
+    expect(result.freshness!.reason.length).toBeGreaterThan(0);
+  });
+
+  /**
    * ⭐ D1 — THE OPPOSITE-DIRECTION TWIN, and it is the reason this file exists
    * in its current form.
    *

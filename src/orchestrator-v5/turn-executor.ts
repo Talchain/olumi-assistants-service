@@ -83,6 +83,10 @@ import {
   buildAnalysisRefusalReadiness,
   computeStructuralReadiness,
 } from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  ANALYSE_STAGE_INDICATOR,
+  clampRefusalFreshness,
+} from './compose/analysis-ready-emit.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
@@ -8703,13 +8707,34 @@ export async function runTurnExecutor(
           // The explain-family handlers (`explain_results`, `what_would_flip`,
           // `explain_from_structure`) READ an analysis rather than run one, so
           // their failures are deliberately out of scope too.
+          let analyseShapedRecoveryResponse: OlumiResponse | null = null;
           if (proposedHandlerId === ANALYSE_HANDLER_ID) {
             analysisReadyForTurn = buildAnalysisRefusalReadiness(
               blockedReasonForHandlerFailure(error),
             );
+            // R1 — THE REFUSAL MUST BE ANALYSE-SHAPED. `composeRecoverable-
+            // HandlerResponse` stamps `stage_indicator` from the REQUEST's
+            // stage, and an analyse turn can legitimately arrive at
+            // `stage: 'frame'` (measured: the deployed Run-analysis chip does
+            // exactly that). A turn that is not `'analyse'` AND carries no
+            // `analysis_result` block takes the UI's present-but-invalid path,
+            // which CLEARS ten fields including the user's goalConstraints,
+            // draftCoaching and preAnalysisSensitivity, plus the
+            // sessionStorage keys. A refusal has no `analysis_result` by
+            // definition, so shipping the honest readiness block on a
+            // frame-shaped turn would have DESTROYED USER STATE. Applied ONLY
+            // inside the analyse-handler gate, so a non-analyse recovery keeps
+            // the request's own stage.
+            analyseShapedRecoveryResponse = {
+              ...recovered.response,
+              stage_indicator: ANALYSE_STAGE_INDICATOR,
+            };
+            // R2/R3 — clamp the verdict this carrier may report to
+            // {stale, unknown}. See `clampRefusalFreshness`.
+            if (freshness !== null) freshness = clampRefusalFreshness(freshness);
           }
 
-          response = recovered.response;
+          response = analyseShapedRecoveryResponse ?? recovered.response;
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: handler-recovery
           // coaching copy is FUNCTIONAL (a recovery family), composed by a
           // dedicated builder (not the `composeAnswer` chokepoint). Capture it so

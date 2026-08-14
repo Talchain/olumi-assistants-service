@@ -144,6 +144,9 @@ function blockedReadiness(blockedReason: string) {
 /** ROADMAP 2.1085 (root 2.1041) D2 — the derivation the dispatcher now returns alongside it. */
 function staleFreshness() {
   return {
+    // R2/R3: a refusal turn may only report `stale` or `unknown`. The
+    // dispatcher clamps before returning; this mock reflects the clamped
+    // shape the route actually receives.
     freshness: 'stale' as const,
     reason: 'graph_hash_mismatch',
     selected_fact_index: 0,
@@ -280,6 +283,10 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
     expect(ar.current_graph_hash).toBe('bbbb444455556666');
     // computed_at comes from the SELECTED FACT, not wire-emit time.
     expect(ar.computed_at).toBe('2026-08-13T19:07:44.000Z');
+    // R2/R3 at the WIRE — the forbidden verdicts must never reach a consumer.
+    expect(['stale', 'unknown']).toContain(ar.freshness);
+    expect(ar.freshness).not.toBe('none');
+    expect(ar.freshness).not.toBe('fresh');
   });
 
   it('handler_failure (fatal) → HTTP 500 unchanged (mapping stays outcome-gated)', async () => {

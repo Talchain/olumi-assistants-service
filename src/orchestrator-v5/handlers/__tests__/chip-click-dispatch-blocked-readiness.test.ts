@@ -43,6 +43,8 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-causes.js';
 import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { clampRefusalFreshness } from '../../compose/analysis-ready-emit.js';
+import { deriveAnalysisFreshness, enforceInvariants } from '../../context/freshness.js';
 import { ANALYSE_HANDLER_ID } from '../../tools/handler-errors.js';
 import { DETERMINISTIC_CHIP_ACTION_TYPES } from '../chip-click-dispatch.js';
 import {
@@ -387,9 +389,13 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
 
     if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
     expect(out.freshness).toBeDefined();
-    // Bound by IDENTITY to the honest verdict for this fixture (no prior
-    // run_analysis fact), not merely "some verdict is present".
-    expect(out.freshness!.freshness).toBe('none');
+    // Bound by IDENTITY to the honest verdict for this fixture, not merely
+    // "some verdict is present". This fixture has no prior run_analysis fact,
+    // so the raw derivation is `none` — which R2 forbids on a refusal turn
+    // (it clears a previously-good fact). The clamp maps it to `unknown` while
+    // PRESERVING the precise, true reason rather than replacing it with a
+    // general one.
+    expect(out.freshness!.freshness).toBe('unknown');
     expect(out.freshness!.reason).toBe('no_successful_run_analysis_fact');
     // And it is a REAL derivation against the snapshot, not a stub: the
     // current graph hash is populated from the raw persisted graph.
@@ -438,6 +444,142 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
     expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
     expect(ar.options).toEqual([]);
     expect(ar.goal_node_id).toBe('');
+  });
+
+  /**
+   * ⭐ R1 — THE REFUSAL MUST BE ANALYSE-SHAPED, AND THIS IS THE MOST SERIOUS
+   * OF THE ROUND-3 FINDINGS.
+   *
+   * A deployed-UI trace measured that a turn which is `stage_indicator !==
+   * 'analyse'` AND carries no `analysis_result` block takes the UI's
+   * present-but-invalid path, CLEARING ten fields that otherwise survive such
+   * a turn — including the user's `goalConstraints`, `draftCoaching` and
+   * `preAnalysisSensitivity` — plus the sessionStorage keys.
+   *
+   * ⚠ THIS WAS LIVE-REACHABLE ON THE WITNESSED RUN, and worse than assumed.
+   * In `20260813T190744Z-fresh-extended-7f2445`, BOTH T3 (a SUCCESSFUL
+   * analysis) and T5B (the refusal) came back `stage_indicator: 'frame'`,
+   * because the deployed Run-analysis chip sends `stage: 'frame'`. T3 was
+   * harmless only because it carried an `analysis_result` block. A refusal
+   * carries none — so shipping the honest readiness block on the request's
+   * own stage would have DESTROYED USER STATE.
+   */
+  it('R1: the refusal response is ANALYSE-shaped even when the request stage is `frame`', async () => {
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    // The witnessed request shape: a run_analysis chip click at stage `frame`.
+    const framePayload = makeMessagePayload({
+      scenario_id: SCENARIO_ID,
+      turn_id: TURN_ID,
+      stage: 'frame',
+      message: 'Run analysis',
+      turn_class: 'frame',
+      source: 'chip_click',
+      chip: { action_type: 'run_analysis' },
+    });
+    // PRECONDITION PINNED IN-TEST (CLAUDE.md trap 13b): the request really is
+    // frame-staged, so a passing assertion below is the code's doing and not
+    // the fixture quietly already being 'analyse'.
+    expect(framePayload.stage).toBe('frame');
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: framePayload,
+      requestId: 'req-ext2-r1',
+    });
+
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+    expect(out.response.stage_indicator).toBe('analyse');
+    // And the other half of the UI's condition is genuinely absent, which is
+    // WHY the stage has to carry the weight.
+    expect(out.response.blocks.some((b) => b.type === 'analysis_result')).toBe(false);
+  });
+
+  /**
+   * ⭐ R2/R3 — the refusal carrier's freshness verdict, as a SPEC invariant
+   * over every verdict the derivation can produce, not just the arm in hand.
+   *
+   *   · `none`  is forbidden — it clears a previously-good analysis fact,
+   *     putting an orphaned-result banner over results that are still valid.
+   *   · `fresh` is forbidden — it clears the local-edits dirty overlay, so the
+   *     strip claims "reflects the current model" over edits CEE never saw.
+   *
+   * Both forbidden verdicts are MEASURED reachable from `deriveAnalysisFreshness`
+   * below rather than assumed, and the clamp is asserted to convert each.
+   */
+  it('R2/R3: refusal-turn freshness is always in {stale, unknown} WITH a reason — never none, never fresh', async () => {
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-r2',
+    });
+
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+    expect(out.freshness).toBeDefined();
+    expect(['stale', 'unknown']).toContain(out.freshness!.freshness);
+    expect(typeof out.freshness!.reason).toBe('string');
+    expect(out.freshness!.reason.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The clamp itself, over every input the derivation can produce. Written
+   * against the SPEC (the permitted range) rather than against the one arm
+   * this lane came in on — CLAUDE.md trap 13d.
+   *
+   * ⚠ The `fresh` case also proves the SUBTLE half: a verdict-only clamp is
+   * not enough. `checkHardInvariants` invariant 2 ("identical-hash ⇒ fresh")
+   * COERCES a non-fresh verdict back to `fresh` while both hashes are present
+   * and equal, and invariant 3 forbids `unknown` whenever both are present. So
+   * the clamp must also drop `graph_hash_at_run` — the carrier then asserts no
+   * comparison, which is exactly the claim. Asserted here, and asserted to
+   * SURVIVE a re-run of `enforceInvariants`.
+   */
+  it('R2/R3 CLAMP: every verdict the derivation can produce maps into {stale, unknown} and survives enforceInvariants', () => {
+    const base = {
+      selected_fact_index: 0,
+      computed_at: '2026-08-13T19:07:44.000Z',
+    };
+
+    // MEASURED, not assumed: `fresh` really is producible.
+    const freshIn = deriveAnalysisFreshness(
+      [{ fact_type: 'run_analysis', fact_version: 1, noop: false,
+         result: { scenario_id: SCENARIO_ID, graph_hash_at_run: 'HHHH', computed_at: base.computed_at,
+                   leading_option_id: 'opt_hubspot', win_probabilities: {}, summary: '', enrichment: {} } },
+      ] as never,
+      'HHHH',
+    );
+    expect(freshIn.freshness).toBe('fresh');
+
+    const freshOut = clampRefusalFreshness(freshIn);
+    expect(freshOut.freshness).toBe('unknown');
+    expect(freshOut.reason).toBe('analysis_refused_currency_unverified');
+    expect(freshOut.graph_hash_at_run).toBeNull();
+    expect(freshOut.current_graph_hash).toBe('HHHH');
+    // The clamp is not silently reverted by the module's own invariants.
+    expect(enforceInvariants(freshOut).freshness).toBe('unknown');
+
+    // MEASURED: `none` really is producible (no prior fact).
+    const noneIn = deriveAnalysisFreshness([], 'HHHH');
+    expect(noneIn.freshness).toBe('none');
+    const noneOut = clampRefusalFreshness(noneIn);
+    expect(noneOut.freshness).toBe('unknown');
+    // A precise true reason is preserved rather than replaced by a general one.
+    expect(noneOut.reason).toBe('no_successful_run_analysis_fact');
+    expect(enforceInvariants(noneOut).freshness).toBe('unknown');
+
+    // `stale` passes through untouched — honest, permitted, and the signal the
+    // rerun affordance is gated on.
+    const staleIn = deriveAnalysisFreshness(
+      [{ fact_type: 'run_analysis', fact_version: 1, noop: false,
+         result: { scenario_id: SCENARIO_ID, graph_hash_at_run: 'AAAA', computed_at: base.computed_at,
+                   leading_option_id: 'opt_hubspot', win_probabilities: {}, summary: '', enrichment: {} } },
+      ] as never,
+      'BBBB',
+    );
+    expect(staleIn.freshness).toBe('stale');
+    expect(clampRefusalFreshness(staleIn)).toEqual(staleIn);
   });
 
   /**

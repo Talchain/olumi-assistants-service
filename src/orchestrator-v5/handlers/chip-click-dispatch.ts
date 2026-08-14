@@ -69,6 +69,8 @@ import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import { clampRefusalFreshness } from '../compose/analysis-ready-emit.js';
+import { ANALYSE_STAGE_INDICATOR } from '../compose/analysis-ready-emit.js';
 // T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
 // neither derives the verdict nor re-implements the read (CLAUDE.md trap #12);
 // it calls the one function turn-executor's two read points call.
@@ -420,7 +422,27 @@ function tryComposeRecoverableChipOutcome(
   // body comes from the shared per-cause composer), but the signature requires
   // it; pass the canonical validation registry the Sonnet path uses.
   const recoveryCtx: ComposeContext = { handlerRegistry: HANDLER_VALIDATION_REGISTRY };
-  const recovered = composeRecoverableHandlerResponse(err, recoveryCtx, stage);
+  // ⚠ ROADMAP 2.1085 (root 2.1041) R1 — THE REFUSAL MUST BE ANALYSE-SHAPED.
+  //
+  // `composeRecoverableHandlerResponse` stamps `stage_indicator` from the
+  // REQUEST's stage, and the UI's "Run analysis" chip sends `stage: 'frame'`.
+  // Measured on the witnessed run (`20260813T190744Z-fresh-extended-7f2445`):
+  // BOTH T3 (a successful analysis) and T5B (the refusal) came back
+  // `stage_indicator: 'frame'`. T3 was harmless only because it carried an
+  // `analysis_result` block; the refusal carries none. A deployed-UI trace
+  // showed that combination — `stage_indicator !== 'analyse'` AND no
+  // `analysis_result` — takes the present-but-invalid path, which CLEARS ten
+  // fields that otherwise survive such a turn, including the user's
+  // `goalConstraints`, `draftCoaching` and `preAnalysisSensitivity`, plus the
+  // sessionStorage keys. So shipping the honest readiness block on a
+  // frame-shaped turn would have DESTROYED USER STATE.
+  //
+  // This dispatch path handles exactly one action (`run_analysis`), so every
+  // recovery reaching here IS an analyse turn and `'analyse'` is the honest
+  // stage — not a workaround. Scoped here rather than inside the shared
+  // composer, which also serves non-analyse handlers on the routed path.
+  const recovered = composeRecoverableHandlerResponse(err, recoveryCtx, ANALYSE_STAGE_INDICATOR);
+  void stage;
 
   // Impossible-state guard — the cause is on the recoverable list but the
   // composer has no per-cause branch (template_id === 'fallback'). That is a
@@ -469,6 +491,10 @@ function tryComposeRecoverableChipOutcome(
   // used only for label resolution downstream, exactly as before.
   const blockedReason = blockedReasonForHandlerFailure(err);
   const analysisReady = buildAnalysisRefusalReadiness(blockedReason);
+  // ROADMAP 2.1085 (root 2.1041) R2/R3 — clamp the verdict this carrier may
+  // report. See `clampRefusalFreshness` for why `fresh`/`none` are forbidden
+  // on a refusal turn and why the hash PAIR (not just the verdict) is broken.
+  const refusalFreshness = freshness ? clampRefusalFreshness(freshness) : undefined;
   log.info(
     {
       event: 'v5.chip_click.analysis_ready_blocked',
@@ -477,9 +503,11 @@ function tryComposeRecoverableChipOutcome(
       cause_kind: err.cause_kind,
       blocked_reason: blockedReason,
       // forbidden-exempt: freshness VERDICT enum (fresh|stale|unknown|none) in a LOG line — honest null when the snapshot could not be loaded and no derivation exists, not a science-value fallback. Same shape and same reason as route-v2.ts's `analysis_ready_freshness` and turn-executor.ts:6334/6542/12084.
-      freshness: freshness?.freshness ?? null,
+      freshness: refusalFreshness?.freshness ?? null,
       // forbidden-exempt: freshness REASON code in a LOG line — honest null when no derivation exists; a telemetry string, never a science value.
-      freshness_reason: freshness?.reason ?? null,
+      freshness_reason: refusalFreshness?.reason ?? null,
+      // forbidden-exempt: the PRE-clamp verdict in a LOG line — kept so the clamp is observable in production rather than silently rewriting a verdict; honest null when no derivation exists.
+      freshness_before_clamp: freshness?.freshness ?? null,
     },
     'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
   );
@@ -490,14 +518,14 @@ function tryComposeRecoverableChipOutcome(
     commitPerformed: false,
     causeKind: err.cause_kind,
     analysisReady,
-    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR analysis against
-    // the CURRENT graph. This turn ran nothing, so the verdict is derived from
-    // the prior fact chain only; it is honest and it is the same verdict the
-    // `ok` exit would carry for those facts. Without it the finaliser stamps a
-    // freshness-free block and the deployed UI (analysisFreshness.ts) replaces
-    // a correct verdict with 'unknown' — the refusal turn would DEGRADE the
-    // freshness strip as a side effect of telling the truth about readiness.
-    freshness,
+    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR
+    // analysis against the CURRENT graph. This turn ran nothing, so the
+    // verdict is derived from the prior fact chain only. Without it the
+    // finaliser stamps a freshness-free block and the deployed UI
+    // (analysisFreshness.ts) replaces a correct verdict with 'unknown' — the
+    // refusal turn would DEGRADE the freshness strip as a side effect of
+    // telling the truth about readiness. R2/R3: clamped to {stale, unknown}.
+    freshness: refusalFreshness,
     graph,
   };
 }
