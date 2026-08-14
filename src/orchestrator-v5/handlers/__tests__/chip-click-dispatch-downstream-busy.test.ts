@@ -181,7 +181,7 @@ describe('chip-click run_analysis — downstream 429 recovers as BUSY (200), not
     expect(out.response.suggested_actions?.[0]?.action_type).toBe('run_analysis');
     // No analysis ran and no graph mutated.
     expect(out.commitPerformed).toBe(false);
-    // ⚠ CONTRACT CHANGED — ROADMAP 2.1091 / golden-journey EXT-2. Was
+    // ⚠ CONTRACT CHANGED — ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2. Was
     // `toBeUndefined()`. A busy engine is still a REFUSED analyse turn, and it
     // took the same silent exit as the mixed-scale refusal: 200, honest prose,
     // no machine-readable state. It now reports the typed refusal, named by

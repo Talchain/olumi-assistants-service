@@ -1,5 +1,5 @@
 /**
- * ROADMAP 2.1091 / golden-journey EXT-2 — the ROUTED half of "every analyse
+ * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — the ROUTED half of "every analyse
  * path emits a typed readiness state".
  *
  * The chip-click half shipped NOTHING (see
@@ -239,7 +239,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('EXT-2 / 2.1091 — the routed analyse arm must not report READY on a refused run', () => {
+describe('EXT-2 / 2.1085 (root 2.1041) — the routed analyse arm must not report READY on a refused run', () => {
   it('RED-R1: a mixed-scale refusal is typed BLOCKED with a specific reason (pristine: ships `ready`)', async () => {
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
@@ -318,7 +318,7 @@ describe('EXT-2 / 2.1091 — the routed analyse arm must not report READY on a r
    * TurnExecutor's recoverable-handler catch is GENERIC across every
    * registered handler. `d1-shared/error-boundary.ts` maps four D1 error codes
    * onto RECOVERABLE_HANDLER_CAUSES, so `set_factor_value`, `add_constraint`
-   * and `adjust_edge_strength` all reach it. The first version of the 2.1091
+   * and `adjust_edge_strength` all reach it. The first version of the 2.1085 (root 2.1041)
    * fix gated on `isRecoverableHandlerCause` ALONE and never consulted
    * `proposedHandlerId` — so a failed FACTOR EDIT emitted
    * `analysis_ready.status: 'blocked'` with

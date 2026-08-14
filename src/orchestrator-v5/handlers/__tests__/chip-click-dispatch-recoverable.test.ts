@@ -207,7 +207,7 @@ describe('chip-click run_analysis — recoverable-cause escape (cause gating)', 
     expect(out.response.blocks).toEqual([]);
     expect(out.response.suggested_actions.length).toBeGreaterThan(0);
 
-    // ⚠ CONTRACT CHANGED — ROADMAP 2.1091 / golden-journey EXT-2. This
+    // ⚠ CONTRACT CHANGED — ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2. This
     // assertion read `expect(out.analysisReady).toBeUndefined()` and it was
     // PINNING THE DEFECT: on staging (2026-08-13) the post-add-option analyse
     // chip therefore shipped a 200 with no `analysis_ready` key at all, so the

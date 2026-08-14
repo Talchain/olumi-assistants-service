@@ -590,7 +590,7 @@ export interface GraphPatchBlockData {
     goal_node_id: string;
     status: string;
     /**
-     * ROADMAP 2.1091 / golden-journey EXT-2 — WHY this turn's analysis was
+     * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — WHY this turn's analysis was
      * refused, as a stable machine-readable code. Present if and only if
      * `status === 'blocked'`; written ONLY by `buildAnalysisRefusalReadiness` in
      * `src/orchestrator/tools/analysis-ready-helper.ts` (the live readiness

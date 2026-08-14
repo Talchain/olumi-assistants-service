@@ -264,7 +264,7 @@ export const AnalysisReadyPayload = z.object({
   /** Status: ready, needs_user_mapping, needs_encoding, or needs_user_input */
   status: AnalysisReadyStatus,
   /**
-   * ROADMAP 2.1091 / golden-journey EXT-2 — stable machine-readable code for
+   * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — stable machine-readable code for
    * WHY this turn's analysis was refused. Present iff `status === 'blocked'`.
    * See the contract note on `GraphPatchBlockData.analysis_ready` in
    * src/orchestrator/types.ts; written only by `buildAnalysisRefusalReadiness`.

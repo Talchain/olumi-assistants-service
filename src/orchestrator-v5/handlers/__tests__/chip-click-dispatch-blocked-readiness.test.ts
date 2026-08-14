@@ -1,5 +1,5 @@
 /**
- * ROADMAP 2.1091 / golden-journey EXT-2 — EVERY ANALYSE PATH EMITS A TYPED
+ * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — EVERY ANALYSE PATH EMITS A TYPED
  * READINESS STATE.
  *
  * WITNESSED DEFECT (staging, 2026-08-13, golden-journey run
@@ -235,7 +235,7 @@ function handlerOk() {
   };
 }
 
-describe('EXT-2 / 2.1091 — the mixed-scale analyse arm emits a typed readiness state', () => {
+describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a typed readiness state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     enrichRunAnalysisMock.mockImplementation(
@@ -367,7 +367,7 @@ describe('EXT-2 / 2.1091 — the mixed-scale analyse arm emits a typed readiness
   });
 
   /**
-   * ROADMAP 2.1091 D2 — a refusal turn must not DEGRADE the freshness strip
+   * ROADMAP 2.1085 (root 2.1041) D2 — a refusal turn must not DEGRADE the freshness strip
    * as a side effect of reporting readiness honestly.
    *
    * `attachComputedAt` stamps the freshness wire fields only when the
@@ -441,7 +441,7 @@ describe('EXT-2 / 2.1091 — the mixed-scale analyse arm emits a typed readiness
   });
 
   /**
-   * ROADMAP 2.1091 D1 — the two arms must agree on WHEN a refusal is an
+   * ROADMAP 2.1085 (root 2.1041) D1 — the two arms must agree on WHEN a refusal is an
    * ANALYSIS refusal, not merely on how to describe one.
    *
    * DERIVED, not mirrored (CLAUDE.md trap 12): the routed arm gates on

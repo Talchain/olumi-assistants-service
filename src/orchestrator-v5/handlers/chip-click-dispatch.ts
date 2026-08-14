@@ -287,7 +287,7 @@ export type DispatchChipClickRunAnalysisResult =
       //
       // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
       // "no analysis ran, so the UI retains its prior store value". ROADMAP
-      // 2.1091 / golden-journey EXT-2 measured what that produces: the
+      // 2.1085 (root 2.1041) / golden-journey EXT-2 measured what that produces: the
       // 2026-08-13 staging run's post-add-option `run_analysis` chip returned
       // 200 with the honest mixed-scale refusal prose, `blocks: []`, and NO
       // `analysis_ready` KEY AT ALL — neither admitted nor typed-blocked, so
@@ -304,7 +304,7 @@ export type DispatchChipClickRunAnalysisResult =
       readonly causeKind: string;
       readonly analysisReady: AnalysisReadyPayload;
       /**
-       * ROADMAP 2.1091 D2 — the freshness derivation for the PRIOR analysis
+       * ROADMAP 2.1085 (root 2.1041) D2 — the freshness derivation for the PRIOR analysis
        * against the CURRENT graph. Required for the same reason
        * `analysisReady` is: `attachComputedAt` stamps freshness fields only
        * when a derivation is supplied, and the deployed UI treats their
@@ -345,14 +345,14 @@ export type DispatchChipClickRunAnalysisResult =
  * configured and never writes `analysis_ready` onto the response body (the
  * finaliser is still the sole stamping point).
  *
- * ROADMAP 2.1091: it DOES now return the typed refusal payload on the
+ * ROADMAP 2.1085 (root 2.1041): it DOES now return the typed refusal payload on the
  * dispatch result, so route-v2 can hand it to the finaliser — plus the
  * freshness derivation, without which `attachComputedAt` stamps a block
  * carrying no freshness fields and the deployed UI overwrites a correct
  * verdict with "Cannot confirm whether this analysis is current".
  */
 /**
- * ROADMAP 2.1091 D2 — the ONE freshness derivation for this dispatch path.
+ * ROADMAP 2.1085 (root 2.1041) D2 — the ONE freshness derivation for this dispatch path.
  *
  * Extracted so the `ok` exit and the `handler_recovered` exit cannot drift on
  * how the verdict is computed. They differ only in WHICH facts they pass: the
@@ -463,7 +463,7 @@ function tryComposeRecoverableChipOutcome(
     retryable: err.retryable,
   });
 
-  // ROADMAP 2.1091 / EXT-2 — the typed refusal: a PRESENT-but-empty carrier.
+  // ROADMAP 2.1085 (root 2.1041) / EXT-2 — the typed refusal: a PRESENT-but-empty carrier.
   // It deliberately carries no options (see `buildAnalysisRefusalReadiness`
   // for why carrying the real ones ships a false UI surface), so `graph` is
   // used only for label resolution downstream, exactly as before.
@@ -490,7 +490,7 @@ function tryComposeRecoverableChipOutcome(
     commitPerformed: false,
     causeKind: err.cause_kind,
     analysisReady,
-    // ROADMAP 2.1091 D2 — the freshness verdict for the PRIOR analysis against
+    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR analysis against
     // the CURRENT graph. This turn ran nothing, so the verdict is derived from
     // the prior fact chain only; it is honest and it is the same verdict the
     // `ok` exit would carry for those facts. Without it the finaliser stamps a
@@ -699,7 +699,7 @@ export async function dispatchChipClickRunAnalysis(
           requestId,
           payload.scenario_id,
           turnAbort.signal.aborted,
-          // ROADMAP 2.1091 D2 — PRIOR facts only: this turn refused and
+          // ROADMAP 2.1085 (root 2.1041) D2 — PRIOR facts only: this turn refused and
           // produced none. Same derivation function the `ok` exit uses.
           cachedSnapshot ? deriveChipClickFreshness(cachedSnapshot, context.prior_facts) : undefined,
         );

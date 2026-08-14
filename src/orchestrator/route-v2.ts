@@ -2492,7 +2492,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         //
         // ⚠ THIS EXIT USED TO STAMP NOTHING, on the reasoning "no analysis ran
         // and the graph was not mutated, so the UI retains its prior store
-        // value". ROADMAP 2.1091 / golden-journey EXT-2 measured the result on
+        // value". ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 measured the result on
         // staging (2026-08-13): the post-add-option `run_analysis` chip shipped
         // 200 with honest refusal prose and NO `analysis_ready` KEY — the run
         // was neither admitted nor typed-blocked, so nothing machine-readable
@@ -2503,7 +2503,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
             analysisReady: cc.analysisReady,
-            // ROADMAP 2.1091 D2 — threaded exactly as the `ok` exit below
+            // ROADMAP 2.1085 (root 2.1041) D2 — threaded exactly as the `ok` exit below
             // does. Omitting it made `attachComputedAt` stamp a block with no
             // freshness fields, and the deployed UI reads their absence as
             // "cannot confirm whether this analysis is current" — a refusal

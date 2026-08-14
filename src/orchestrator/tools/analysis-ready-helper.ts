@@ -319,7 +319,18 @@ export function computeStructuralReadiness(
 }
 
 // ============================================================================
-// Refusal (ROADMAP 2.1091 / golden-journey EXT-2)
+// Refusal (ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2)
+//
+// ⚠ CITATION NOTE, so this is not "corrected" back. Every comment in this
+// change set originally cited **2.1091**. That is the DETERMINISTIC ADVICE
+// GATE row and carries no mixed-scale content. The mixed-scale family is
+// **2.1085** (analysis-seam mixed-scale guard), root **2.1041**
+// (zero-baseline convention). Row 2.1134(b) records the correction, made
+// 14 Aug — it had itself carried the wrong id until then, which is how the
+// mis-citation propagated into this lane's brief and from there into ~29
+// comments. `run-analysis.ts`'s own "THE COPY (row 2.1091…)" header is the
+// same mis-citation, still uncorrected and deliberately left alone here
+// (out of this change's scope — rowed, not silently edited).
 // ============================================================================
 
 /**

@@ -8672,7 +8672,7 @@ export async function runTurnExecutor(
             return translateExecuteError(error);
           }
 
-          // ROADMAP 2.1091 / golden-journey EXT-2 — THE ROUTED HALF.
+          // ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — THE ROUTED HALF.
           //
           // `analysisReadyForTurn` was computed from the PRE-DISPATCH graph
           // (line ~1917) for chip gating, and until now it reached the wire

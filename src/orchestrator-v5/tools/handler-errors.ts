@@ -151,13 +151,13 @@ function normaliseDetails(raw: unknown): Readonly<HandlerFailureDetails> {
 }
 
 /**
- * ROADMAP 2.1091 / golden-journey EXT-2 — the handler whose failure IS an
+ * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — the handler whose failure IS an
  * analysis refusal.
  *
  * ⚠ THIS CONSTANT EXISTS BECAUSE ITS ABSENCE SHIPPED A DEFECT. TurnExecutor's
  * recoverable-handler catch is GENERIC across every registered handler, and
  * `d1-shared/error-boundary.ts` maps four D1 error codes onto recoverable
- * causes. A first version of the 2.1091 fix gated only on
+ * causes. A first version of the 2.1085 (root 2.1041) fix gated only on
  * `isRecoverableHandlerCause`, so a failed `set_factor_value` /
  * `add_constraint` / `adjust_edge_strength` emitted
  * `analysis_ready.status: 'blocked'` — the product claiming the ANALYSIS was
@@ -173,7 +173,7 @@ function normaliseDetails(raw: unknown): Readonly<HandlerFailureDetails> {
 export const ANALYSE_HANDLER_ID = 'run_analysis';
 
 /**
- * ROADMAP 2.1091 / golden-journey EXT-2 — the SPECIFIC, machine-readable
+ * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — the SPECIFIC, machine-readable
  * reason a refused analyse turn reports on `analysis_ready.blocked_reason`.
  *
  * ONE derivation, two consumers (the chip-click dispatcher and TurnExecutor's

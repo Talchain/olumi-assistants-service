@@ -124,7 +124,7 @@ function recoveredOlumiResponse() {
 }
 
 /**
- * ROADMAP 2.1091 / golden-journey EXT-2 — the typed refusal the dispatcher
+ * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — the typed refusal the dispatcher
  * now returns on `handler_recovered`. Shaped exactly as
  * `buildAnalysisRefusalReadiness` builds it.
  */
@@ -141,7 +141,7 @@ function blockedReadiness(blockedReason: string) {
   };
 }
 
-/** ROADMAP 2.1091 D2 — the derivation the dispatcher now returns alongside it. */
+/** ROADMAP 2.1085 (root 2.1041) D2 — the derivation the dispatcher now returns alongside it. */
 function staleFreshness() {
   return {
     freshness: 'stale' as const,
@@ -213,7 +213,7 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
   });
 
   /**
-   * ROADMAP 2.1091 / golden-journey EXT-2 — THE WIRE-LEVEL PIN.
+   * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — THE WIRE-LEVEL PIN.
    *
    * The witnessed defect was a MISSING TOP-LEVEL KEY on the HTTP body, not a
    * missing field on a dispatch result. The dispatcher-level suite
@@ -270,7 +270,7 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
     // The finaliser — and only the finaliser — stamps computed_at.
     expect(typeof ar.computed_at).toBe('string');
 
-    // ROADMAP 2.1091 D2 — the freshness fields must reach the wire. Without
+    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness fields must reach the wire. Without
     // them the deployed UI replaces a correct verdict with "cannot confirm
     // whether this analysis is current", so a refusal turn would degrade the
     // freshness strip as a side effect of reporting readiness honestly.
