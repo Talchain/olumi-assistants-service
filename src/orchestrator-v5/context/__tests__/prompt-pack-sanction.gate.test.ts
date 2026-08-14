@@ -216,7 +216,15 @@ const ANALYSIS = {
     { option_id: 'opt_local', option_label: 'Hire locally', win_probability: 0.62 },
     { option_id: 'opt_offshore', option_label: 'Offshore partner', win_probability: 0.38 },
   ],
-  top_drivers: [{ factor_label: 'Engineer salary in the local market', sensitivity_value: 0.4 }],
+  // The REAL upstream `DriverSummary` shape: `{factor_id, factor_label,
+  // sensitivity, direction}`. This fixture previously used `sensitivity_value`,
+  // which `projectTopDrivers` filters out via `isFiniteSensitivity(d.sensitivity)`
+  // — so the pack carried `top_drivers: []` and this gate had never once seen
+  // the field populated. Corrected; the gate stays green, so nothing was being
+  // masked today, but it was one field away from being unable to see a leak.
+  top_drivers: [
+    { factor_id: 'factor_salary', factor_label: 'Engineer salary in the local market', sensitivity: 0.4, direction: 'positive' },
+  ],
   robustness_level: 'moderate',
   fragile_edge_count: 1,
   margin: 0.24,

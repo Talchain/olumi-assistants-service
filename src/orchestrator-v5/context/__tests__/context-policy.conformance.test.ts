@@ -123,6 +123,21 @@ function assembleAnchorPack(overrideBrief: string | null = ANCHOR_BRIEF): Contex
       blocked: false,
       actionable_blocker_count: 0,
     } as never,
+    // ⭐ THE THIRD CONDITIONAL MODEL-FACING SECTION — selection-aware answering
+    // (hop 4). Added for exactly the reason the two above were: WITHOUT IT THIS
+    // ANCHOR CANNOT SEE THE `focus` POLICY ROW AT ALL. Measured, not assumed —
+    // deleting the coach_converse `focus` row left this whole file GREEN,
+    // because an unpopulated section is absent from `observed` and an
+    // undeclared-but-absent section is trivially conformant. A policy row that
+    // no fixture exercises is a row that can be deleted without a red: the
+    // hand-maintained-mirror defect (trap 12) reappearing inside the anchor
+    // written to prevent it.
+    selection: {
+      requested_ids: ['opt_hire_local'],
+      elements: [{ id: 'opt_hire_local', kind: 'option', label: 'Hire locally' }],
+      unresolved_ids: [],
+      graph_read: 'ok_present',
+    } as never,
   });
 }
 

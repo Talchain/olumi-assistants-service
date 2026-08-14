@@ -51,7 +51,7 @@ import {
   FOCUS_MAX_ELEMENTS,
   FOCUS_LABEL_MAX_CHARS,
   FOCUS_DESCRIPTION_MAX_CHARS,
-  buildAnalysisLabelIndex,
+  buildAnalysisIdentityIndex,
   type ContextPack,
 } from '../context-pack-assembler.js';
 import { ContextPackSchema } from '../context-pack-schema.js';
@@ -133,7 +133,7 @@ const DISPLAY = formatAnalysisForContext(
  * fixture, never hand-written, so it cannot encode a shape the producer does
  * not emit.
  */
-const LABEL_INDEX = buildAnalysisLabelIndex(ANALYSIS);
+const LABEL_INDEX = buildAnalysisIdentityIndex(ANALYSIS);
 
 function selectionFor(ids: readonly string[]): TurnSelection {
   const resolved = resolveTurnSelection(ids, GRAPH, 'ok_present');
@@ -488,8 +488,11 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
     // `factor_id` exist on the assembler's input and are GONE from
     // `ContextPack.analysis`. If a future change carried them through, this
     // goes red and the join can be simplified.
-    expect(LABEL_INDEX.get(OPTION_ID)).toBe(OPTION_LABEL);
-    expect(LABEL_INDEX.get(FACTOR_ID)).toBe(FACTOR_LABEL);
+    expect(LABEL_INDEX.byId.get(OPTION_ID)).toEqual({ label: OPTION_LABEL, kind: 'option' });
+    expect(LABEL_INDEX.byId.get(FACTOR_ID)).toEqual({ label: FACTOR_LABEL, kind: 'factor' });
+    // The uncapped uniqueness counts — the authority guard 1 consults.
+    expect(LABEL_INDEX.idsPerLabel.get(OPTION_LABEL)).toBe(1);
+    expect(LABEL_INDEX.idsPerLabel.get(FACTOR_LABEL)).toBe(1);
     const packAnalysis = assembleContextPack({
       payload: makeMessagePayload({ scenario_id: 'scen-ids', message: 'why?' }),
       priorTurns: [],
@@ -511,5 +514,180 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
     const focus = projectFocus(selectionFor(['goal_rev']), DISPLAY, LABEL_INDEX)!;
     expect(focus.elements[0]!.analysis_link).toBe('not_in_analysis');
     expect('analysis' in focus.elements[0]!).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F1 — THE JOIN'S HEADLINE GUARANTEE, REFUTED BY EXECUTION AND NOW PINNED
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐⭐ THE DEFECT THESE TESTS EXIST FOR, AND THE REASON THE FIRST ROUND MISSED IT.
+ *
+ * The shipped join claimed *"nothing is ever guessed into a different node"*.
+ * That was FALSE, in two independent ways, and an independent review refuted it
+ * by execution — not by reading.
+ *
+ * ROOT CAUSE (one sentence): hop 2's ambiguity guard ran over the DISPLAY lists
+ * **after** cap/trim, while hop 1's id index was built from the **uncapped**
+ * upstream — so the two authorities disagreed about whether a label was unique,
+ * and the guard was asking the wrong one.
+ *
+ *   CLASS A — CROSS-KIND COINCIDENCE (no trimming required). An option and a
+ *   factor share a label. Each display list has exactly ONE match, so no list
+ *   is `many` and the guard stays silent — while the option quietly collects
+ *   the FACTOR's influence figure. The per-list check cannot see a collision
+ *   spread ACROSS lists, and the merged id→label index recorded no kind.
+ *
+ *   CLASS B — WITHIN-KIND COLLISION + A CAP. Two options share a label and the
+ *   cap (`MAX_PROJECTED_OPTIONS`) drops one. Exactly one survivor remains in
+ *   display, so the guard sees `one` and links the SURVIVOR's figure to the
+ *   DROPPED option — a different node's number, presented as this node's.
+ *   Also reachable via the driver cap and the display budget tail-trim.
+ *
+ * ⚠ AND THE LESSON ABOUT THE FIRST ROUND'S OWN GUARD: my original ambiguity
+ * test constructed TWO SURVIVORS IN ONE LIST — the single case the shipped code
+ * handled. It was a guard watching one door, and it passed while both doors
+ * stood open. Every case below is therefore TWINNED: both directions of the
+ * cross-kind pair, and both the dropped and the surviving side of the capped
+ * pair, each with a positive control proving the guard still LINKS when the
+ * label genuinely identifies one node.
+ */
+describe('F1 — the analysis join never attaches another node’s figures', () => {
+  // ── CLASS A fixtures: an option and a factor sharing one label ───────────
+  const SHARED = 'Shared Name';
+  const GRAPH_A = {
+    nodes: [
+      { id: 'opt_x', kind: 'option', label: SHARED },
+      { id: 'fac_x', kind: 'factor', label: SHARED },
+      { id: 'opt_other', kind: 'option', label: 'Other Option' },
+      { id: 'fac_other', kind: 'factor', label: 'Other Factor' },
+      { id: 'goal_a', kind: 'goal', label: 'Some goal' },
+    ],
+    edges: [{ from: 'fac_x', to: 'goal_a', strength: { mean: 0.4, std: 0.1 } }],
+  };
+  const ANALYSIS_A = {
+    winner: { option_id: 'opt_x', option_label: SHARED, win_probability: 0.62 },
+    options: [
+      { option_id: 'opt_x', option_label: SHARED, win_probability: 0.62 },
+      { option_id: 'opt_other', option_label: 'Other Option', win_probability: 0.38 },
+    ],
+    top_drivers: [
+      { factor_id: 'fac_x', factor_label: SHARED, sensitivity: 0.42, direction: 'positive' },
+      { factor_id: 'fac_other', factor_label: 'Other Factor', sensitivity: 0.2, direction: 'positive' },
+    ],
+    robustness_level: 'moderate', fragile_edge_count: 0, margin: 0.24, margin_pp: 24,
+    analysis_status: 'computed',
+  } as unknown as Parameters<typeof assembleContextPack>[0]['analysis'];
+
+  function displayFor(analysis: Parameters<typeof assembleContextPack>[0]['analysis'], graph: unknown) {
+    return formatAnalysisForContext(
+      assembleContextPack({
+        payload: makeMessagePayload({ scenario_id: 'scen-f1', message: 'why?' }),
+        priorTurns: [], priorFacts: [], analysis, graph: graph as never,
+      }).analysis,
+    );
+  }
+  function focusFor(
+    ids: readonly string[],
+    analysis: Parameters<typeof assembleContextPack>[0]['analysis'],
+    graph: unknown,
+  ) {
+    const selection = resolveTurnSelection(ids, graph, 'ok_present');
+    if (selection === null) throw new Error('fixture: no selection');
+    const focus = projectFocus(selection, displayFor(analysis, graph), buildAnalysisIdentityIndex(analysis));
+    if (focus === null) throw new Error('fixture: no focus');
+    return focus;
+  }
+
+  describe('CLASS A — a cross-kind label coincidence', () => {
+    it('POSITIVE CONTROL — the instrument links normally when labels are distinct', () => {
+      // Without this the refusals below could pass because nothing ever links.
+      const el = focusFor(['opt_other'], ANALYSIS_A, GRAPH_A).elements[0]!;
+      expect(el.analysis_link).toBe('linked');
+      expect(el.analysis!.win_probability).toBe('38%');
+    });
+
+    it('selecting the OPTION must not collect the FACTOR’s influence', () => {
+      const el = focusFor(['opt_x'], ANALYSIS_A, GRAPH_A).elements[0]!;
+      // The refuted behaviour attached BOTH the option's win probability AND
+      // the factor's influence phrase to the option.
+      expect(el.analysis?.influence).toBeUndefined();
+      expect(el.analysis_link).toBe('ambiguous_label');
+      expect('analysis' in el).toBe(false);
+    });
+
+    it('TWIN — selecting the FACTOR must not collect the OPTION’s win probability', () => {
+      const el = focusFor(['fac_x'], ANALYSIS_A, GRAPH_A).elements[0]!;
+      expect(el.analysis?.win_probability).toBeUndefined();
+      expect(el.analysis_link).toBe('ambiguous_label');
+      expect('analysis' in el).toBe(false);
+    });
+  });
+
+  // ── CLASS B fixtures: a within-kind collision the cap hides ──────────────
+  const COLLIDE = 'Collide';
+  /** 13 options — one more than MAX_PROJECTED_OPTIONS — ranks 1 and 13 sharing a label. */
+  function manyOptions(collide: boolean) {
+    const opts = [
+      { option_id: 'opt_1', option_label: collide ? COLLIDE : 'Rank one', win_probability: 0.62 },
+      ...Array.from({ length: 11 }, (_, i) => ({
+        option_id: `opt_mid_${i}`,
+        option_label: `Middle ${i}`,
+        win_probability: 0.5 - i * 0.01,
+      })),
+      { option_id: 'opt_13', option_label: collide ? COLLIDE : 'Rank thirteen', win_probability: 0.01 },
+    ];
+    return {
+      winner: { option_id: 'opt_1', option_label: opts[0]!.option_label, win_probability: 0.62 },
+      options: opts,
+      top_drivers: [],
+      robustness_level: 'moderate', fragile_edge_count: 0, margin: 0.24, margin_pp: 24,
+      analysis_status: 'computed',
+    } as unknown as Parameters<typeof assembleContextPack>[0]['analysis'];
+  }
+  function manyGraph(collide: boolean) {
+    const a = manyOptions(collide) as unknown as { options: { option_id: string; option_label: string }[] };
+    return {
+      nodes: [
+        ...a.options.map((o) => ({ id: o.option_id, kind: 'option', label: o.option_label })),
+        { id: 'goal_b', kind: 'goal', label: 'Some goal' },
+      ],
+      edges: [],
+    };
+  }
+
+  describe('CLASS B — a within-kind collision the cap hides', () => {
+    it('INSTRUMENT — the cap really does drop the 13th option from the display list', () => {
+      // The defect is only reachable because the display list is SHORTER than
+      // the upstream one. If this stops being true the tests below go vacuous.
+      const display = displayFor(manyOptions(false), manyGraph(false));
+      expect(display!.options!.length).toBeLessThan(13);
+      expect(display!.options!.some((o) => o.label === 'Rank thirteen')).toBe(false);
+    });
+
+    it('POSITIVE CONTROL — with distinct labels the dropped option reports not_in_analysis, not a wrong link', () => {
+      const el = focusFor(['opt_13'], manyOptions(false), manyGraph(false)).elements[0]!;
+      expect(el.analysis_link).toBe('not_in_analysis');
+      expect('analysis' in el).toBe(false);
+    });
+
+    it('selecting the DROPPED option must not inherit the SURVIVOR’s win probability', () => {
+      const el = focusFor(['opt_13'], manyOptions(true), manyGraph(true)).elements[0]!;
+      // The refuted behaviour reported 62% — the survivor's figure — for an
+      // option whose true probability is 1%.
+      expect(el.analysis?.win_probability).not.toBe('62%');
+      expect(el.analysis_link).toBe('ambiguous_label');
+      expect('analysis' in el).toBe(false);
+    });
+
+    it('TWIN — selecting the SURVIVING option must ALSO refuse (two ids claim that label)', () => {
+      // Both sides refuse: with two upstream claimants the display entry cannot
+      // be attributed to either one, so linking the survivor would be the same
+      // unfounded claim in the other direction.
+      const el = focusFor(['opt_1'], manyOptions(true), manyGraph(true)).elements[0]!;
+      expect(el.analysis_link).toBe('ambiguous_label');
+      expect('analysis' in el).toBe(false);
+    });
   });
 });
