@@ -71,11 +71,11 @@ function loadBankedEmission(): DraftRecordSet {
 
 /** The stated items that carry a magnitude, paired with their verbatim quote. */
 function statedMagnitudes(set: DraftRecordSet): Array<{ quote: string; value: number; unit?: string }> {
-  return (set.stated_items as ReadonlyArray<Record<string, unknown>>)
-    .filter((s) => typeof s.value === "number")
+  return set.stated_items
+    .filter((s): s is typeof s & { value: number } => typeof s.value === "number")
     .map((s) => ({
-      quote: String(s.source_quote ?? ""),
-      value: s.value as number,
+      quote: s.source_quote,
+      value: s.value,
       ...(typeof s.unit === "string" ? { unit: s.unit } : {}),
     }));
 }
@@ -107,7 +107,7 @@ describe("M1a — a withdrawn stated figure keeps its magnitude on the disclosur
     // frame-relative `value` far below it. A disclosure that emitted the level
     // would be a NEW lie — a number the user never wrote, attributed to them.
     const set = loadBankedEmission();
-    const projection = projectRecordsToGraph(set, { brief: undefined });
+    const projection = projectRecordsToGraph(set, undefined);
     const quote = "up to £7.2m a year if attach were 100%";
     const disclosure = projection.dropped.find(
       (d) => d.reason === "unconnected_to_goal" && d.label === quote,
@@ -226,7 +226,7 @@ describe("M1a — the magnitude reaches the CEE V3 wire, not just `projection.dr
     // producer-side fix that is not declared here dies at validation with only a
     // warn log. This drives the real transform and then the real parse.
     const set = loadBankedEmission();
-    const projection = projectRecordsToGraph(set, { brief: undefined });
+    const projection = projectRecordsToGraph(set, undefined);
 
     const wire = CEEGraphResponseV3.parse(
       transformResponseToV3(
