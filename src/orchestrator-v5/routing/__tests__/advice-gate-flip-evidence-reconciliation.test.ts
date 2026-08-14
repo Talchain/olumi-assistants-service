@@ -29,6 +29,7 @@ import {
 } from '../post-analysis-advice-gate.js';
 
 import { assertsFlippability } from '../../__tests__/support/flip-claim-matcher.support.js';
+import { ATTESTED_NO_FLIP_SENTENCE } from '../../tools/handlers/explanation-fallback.js';
 
 const FRAGILE_ANALYSIS: AdviceGateAnalysis = {
   status: 'success' as const,
@@ -162,5 +163,117 @@ describe('A3 — the FOURTH surface: no answer may deny and assert flippability 
         run(message, NEAR_TIE_ANALYSIS),
       );
     }
+  });
+});
+
+// =========================================================================
+// ROADMAP 2.278 continued (14 Aug 2026) — THE FIFTH SURFACE:
+// `what_would_flip_free_text`.
+//
+// Everything above sweeps composers that WRONGLY ASSERT flippability. This
+// block closes the mirror-image defect on the one class whose question IS the
+// flip question: `composeWhatWouldFlip` was the only class `composeForClass`
+// did not hand `flipClaimPosture`, so on a POSITIVE producer attestation it
+// said nothing about flip behaviour at all.
+//
+// ⭐ NOT A THEORY — WITNESSED ON THE DEPLOYED BUILD (CEE 41156fc, 14 Aug).
+// `p1-conversation-derivation-2026-08-14/raw/run-1/step-Q2_WHAT_WOULD_CHANGE.json`:
+// "What would have to change for another option to win?" → 0 LLM calls, zero
+// flip content, on a run whose three `flip_thresholds` rows were ALL
+// `flip_reason: "structurally_invariant"` / `no_flip_in_range: true`. The SAME
+// run's chip-click path and a near-synonym question routed to the LLM both
+// stated the attestation. One question, three paths, one silent.
+// =========================================================================
+describe('2.278 fifth surface — what_would_flip_free_text states the attestation', () => {
+  const attested = { flipClaimPosture: 'attested_no_flip' as const };
+
+  // The wording actually asked on the wire, plus the canonical short form.
+  const FLIP_QUESTIONS: ReadonlyArray<readonly [string, string]> = [
+    ['the witnessed wire phrasing', 'What would have to change for another option to win?'],
+    ['the canonical short form', 'What would flip this?'],
+  ];
+
+  // ── POSITIVE CONTROL (trap 13): the probe must be able to see the sentence's
+  // ABSENCE and its PRESENCE. Without the absence arm, the presence assertion
+  // below could pass on copy that always carried it; without the presence arm,
+  // a broken probe would report a clean absence forever.
+  describe('positive control — the probe discriminates', () => {
+    for (const [label, message] of FLIP_QUESTIONS) {
+      it(`${label}: with NO posture threaded the attestation is absent`, () => {
+        expect(run(message, FRAGILE_ANALYSIS)).not.toContain(ATTESTED_NO_FLIP_SENTENCE);
+      });
+    }
+
+    it('the shared constant is non-empty (a blank would make every arm vacuous)', () => {
+      expect(ATTESTED_NO_FLIP_SENTENCE.length).toBeGreaterThan(40);
+    });
+  });
+
+  // ── RED-first: this is the behaviour that did not exist.
+  describe('RED-first — the attestation is stated', () => {
+    for (const [label, message] of FLIP_QUESTIONS) {
+      it(`${label}: attested_no_flip → the answer states it`, () => {
+        // Bound to the IMPORTED constant, never a retyped string: a hand-typed
+        // copy here would be the mirror this change exists to remove, and it
+        // would keep passing after the owner's copy was edited (trap 12).
+        expect(run(message, FRAGILE_ANALYSIS, attested)).toContain(ATTESTED_NO_FLIP_SENTENCE);
+      });
+    }
+
+    it('near-tie analysis also states it', () => {
+      expect(run('What would flip this?', NEAR_TIE_ANALYSIS, attested)).toContain(
+        ATTESTED_NO_FLIP_SENTENCE,
+      );
+    });
+
+    it('and the answer still does not ASSERT flippability (2.278 A3 property)', () => {
+      // The sentence is a DENIAL that contains the claim's own words; the
+      // shared matcher must read it as such. If this fails, the copy is
+      // outside `NEGATED_CLAIM_FORMS` and the answer now contradicts itself.
+      expect(assertsFlippability(run('What would flip this?', FRAGILE_ANALYSIS, attested))).toBe(
+        false,
+      );
+    });
+  });
+
+  // ── BACKWARD COMPATIBILITY: absent/ambiguous evidence ⇒ byte-identical.
+  // This is `readFlipClaimPosture`'s stated conservatism, held at this surface.
+  describe('POSITIVE CONTROL — non-attested postures are byte-identical', () => {
+    for (const [label, message] of FLIP_QUESTIONS) {
+      it.each([
+        ['explicitly permitted', { flipClaimPosture: 'permitted' as const }],
+        ['undefined (no evidence threaded)', {}],
+      ])(`${label}, %s → unchanged`, (_posture, extra) => {
+        expect(run(message, FRAGILE_ANALYSIS, extra)).toBe(run(message, FRAGILE_ANALYSIS));
+      });
+    }
+  });
+
+  // ── TRAP 21 — TWO CHANNELS, DIFFERENT QUESTIONS, FAIL-SAFE PRECEDENCE.
+  // `deriveFlipStatus` reads `decision_review.flip_thresholds`; the posture is
+  // derived from `enrichment.flip_thresholds[]`. Where they disagree the answer
+  // must NOT deny flippability while naming a threshold to inspect — that is
+  // precisely the self-contradiction A3 forbids. A named threshold wins.
+  describe('trap 21 — a named threshold silences the attestation', () => {
+    const REVIEW_WITH_FLIP: Record<string, unknown> = Object.freeze({
+      flip_thresholds: Object.freeze([Object.freeze({ factor_label: 'Adoption Rate' })]),
+    });
+
+    it('flip_found + attested → threshold named, attestation withheld', () => {
+      const text = run('What would flip this?', FRAGILE_ANALYSIS, {
+        ...attested,
+        decisionReview: REVIEW_WITH_FLIP,
+      });
+      expect(text).toContain('One threshold signal to inspect is');
+      expect(text).not.toContain(ATTESTED_NO_FLIP_SENTENCE);
+    });
+
+    it('DISCRIMINATOR: the same posture with NO named threshold DOES state it', () => {
+      // Pins the precondition in-test (trap 13b): proves the arm above was
+      // silenced by the THRESHOLD and not by a posture that never fired.
+      const text = run('What would flip this?', FRAGILE_ANALYSIS, attested);
+      expect(text).not.toContain('One threshold signal to inspect is');
+      expect(text).toContain(ATTESTED_NO_FLIP_SENTENCE);
+    });
   });
 });
