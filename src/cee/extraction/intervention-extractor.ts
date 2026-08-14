@@ -19,7 +19,10 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
-import { isAmountStatedInBrief } from "../provenance/stated-amounts.js";
+import {
+  classifyAmountAgainstBrief,
+  resolveMagnitudeScale,
+} from "../provenance/stated-amounts.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import {
   computeOptionStatus,
@@ -580,9 +583,36 @@ function buildInterventionsFromV4Data(
     // see `denormalisedMagnitude`. The direction of the change is still
     // one-way: it can only ever restore a claim the model already made about
     // a magnitude the user really did state.
-    const unit = factor?.observed_state?.unit;
-    const cap = factor?.observed_state?.cap;
-    const statedInBrief = isAmountStatedInBrief(value, unit, briefText, cap);
+    // ⚠ F2 (Codex, 2026-08-13) — THE CAP IS ONLY ONE OF THREE DENOMINATORS, AND
+    // PASSING IT ALONE MADE THE PRODUCT CALL THE USER'S OWN NUMBER "INFERRED".
+    //
+    // The fix above was correct about capped factors and silently wrong about
+    // capless FRAMED ones, which is the shape the records projector writes for
+    // every magnitude-scaled baseline (`{value: raw/frame, raw_value: raw}`,
+    // projector.ts:1667 — the frame is deliberately NOT persisted). With no
+    // `cap`, `denormalisedMagnitude` returns null and the `?? value` fallback
+    // compared the NORMALISED LEVEL against the brief's RAW magnitudes:
+    // measured at pristine on the brief "Plan A sets the support headcount to
+    // 80 … currently 40", `isAmountStatedInBrief(0.8, …)` is FALSE while
+    // `isAmountStatedInBrief(80, …)` is true. So the user's own "80" was
+    // stamped `cee_hypothesis` / low / "this amount is not stated in the
+    // brief" — a false claim about words the user typed, rendered by the UI as
+    // "inferred" with a warning.
+    //
+    // `resolveMagnitudeScale` asks the factor's WHOLE `observed_state` which of
+    // the producers' conventions it is in, recovering a capless frame through
+    // the estate's single authority (`recoverScaleFrame`) rather than minting a
+    // second one. The verdict is THREE-STATE because the honest answer
+    // sometimes is "we cannot tell": where the record settles no denominator
+    // (a zero baseline, no `raw_value`), a non-match proves nothing, and
+    // claiming the amount is absent from the brief would be the same false
+    // claim in a different case. Confidence stays low either way — only the
+    // sentence changes, and only from a falsehood to an admission.
+    const observedState = factor?.observed_state;
+    const unit = observedState?.unit;
+    const scale = resolveMagnitudeScale(observedState);
+    const verdict = classifyAmountAgainstBrief(value, unit, briefText, scale);
+    const statedInBrief = verdict === "stated";
 
     interventions[factorId] = {
       value,
@@ -594,9 +624,12 @@ function buildInterventionsFromV4Data(
         confidence: "high", // Direct from V4 prompt = high confidence
       },
       value_confidence: statedInBrief ? "high" : "low",
-      reasoning: statedInBrief
-        ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
-        : "Model-chosen intervention level; this amount is not stated in the brief",
+      reasoning:
+        verdict === "stated"
+          ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+          : verdict === "not_stated"
+            ? "Model-chosen intervention level; this amount is not stated in the brief"
+            : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
     };
   }
 
