@@ -103,6 +103,12 @@ function recordsWithChain(authorBridge: boolean): DraftRecordSet {
     claims.push({ claim_kind: "outcome", label: "Feature Delivery Rate", basis: [0] });
     claims.push({ claim_kind: "causal_link", label: "throughput drives delivery", from_claim: 0, to_claim: 3, effect: "positive" });
     claims.push({ claim_kind: "causal_link", label: "delivery reaches the goal", from_claim: 3, to_stated: 0, effect: "positive" });
+    // ⭐ AND THE REDUNDANT SHORTCUT, DELIBERATELY. Without it this variant emits
+    // no `factor → goal` edge at all, so `fixFactorGoalEdges` never runs and the
+    // assertion below would hold for a reason that has nothing to do with the
+    // gap gate — proven by a mutant: removing the gate left this test GREEN.
+    // With the shortcut present the variant exercises the gate end to end.
+    claims.push({ claim_kind: "causal_link", label: "throughput also bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" });
   } else {
     // The shape the starved grammar forced: a factor pointed straight at the goal.
     claims.push({ claim_kind: "causal_link", label: "throughput reaches the goal", from_claim: 0, to_stated: 0, effect: "positive" });
@@ -128,6 +134,10 @@ describe("INV-R2/R3 — the scaffolding mint fires on a gap and only on a gap", 
     // The independent contrast reading agrees: no `out_<factor>_impact` id exists.
     expect(result.semantics.impactPatternOutcomeIds).toEqual([]);
     expect(result.semantics.scaffoldedOutcomeShare).toBe(0);
+    // PRECONDITION — the gate really was exercised. Without this the assertions
+    // above would also pass on a graph that never had a `factor → goal` edge to
+    // suppress, which is a test agreeing with itself (trap 13b).
+    expect(result.repairs.map((r) => r.code)).toContain("FACTOR_GOAL_SHORTCUT_REDUNDANT");
   });
 
   it("INV-R3: a GENUINELY GAPPED set still gets the safety net, and it is MARKED", async () => {
