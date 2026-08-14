@@ -135,7 +135,13 @@ const APPLYABLE_ROUND_STATUSES: ReadonlySet<RoundStatus> = new Set<RoundStatus>(
  *   (e) the applied value IS the server-recorded participant belief
  *       — (c) and (e) resolve together from one folded read, because "did this
  *       person answer THIS factor?" and "what did they say?" are answered by
- *       the same row.
+ *       the same row;
+ *   (f) the CITED EVIDENCE, when the claim carries one, exists, is an
+ *       `evidence_attached` row, is on THAT round and is about THAT target.
+ *       Reuses the read (c)/(e) already made. Its three failures share ONE
+ *       refusal code, unlike (a)-(e), because differentiating them would make
+ *       the refusal an enumeration oracle over the round's event ids (F-4).
+ *       ⚠ NO author-equality check — see the block at the check itself.
  */
 export async function verifyAppliedFrom(
   store: CollabStore,
