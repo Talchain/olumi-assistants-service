@@ -547,10 +547,33 @@ export function enumerateCompletionAsk(
           validatorCode: null,
         });
         break;
+      // ⭐⭐ THE COPY NAMES THE RULE THAT FIRED, AND THE OLD SENTENCE WAS FALSE.
+      //
+      // It read: `a link from a <from_kind> to a <to_kind> is not a shape this
+      // model can hold`. For the one edge rule that is **measurably untrue** —
+      // `factor → factor` IS a shape this model holds, and the banked live
+      // emission proves it in the same replay that produces this ask: claims[19]
+      // (`Engineering Capacity Consumed → Engineering Attrition Risk`) is a
+      // factor→factor link and it survives onto the graph. What is refused is not
+      // the SHAPE but the TARGET — a factor an option already sets is
+      // `controllable` (`inferFactorCategories`, `graph-validator.ts:83-134`) and
+      // `ALLOWED_EDGES` admits `factor → factor` only into `observable`/`external`.
+      //
+      // The cost of the false version is not cosmetic. This text is what the
+      // completion turn is shown, so telling the model that factor→factor is
+      // unholdable teaches it away from a LEGAL and load-bearing shape — the
+      // rational repair for a model told this is to stop drawing them at all.
+      // A disclosure that over-generalises a refusal degrades the next draft.
+      //
+      // `refusal_rule` is read from the producer rather than inferred from the
+      // kind pair, so this stays true if the gate's internals move (trap 12).
       case "ref_kind_illegal":
         push({
           kind: "illegal_shape",
-          detail: `"${d.label}" — a link from a ${d.from_kind} to a ${d.to_kind} is not a shape this model can hold`,
+          detail:
+            d.refusal_rule === "option_controlled_target"
+              ? `"${d.label}" — this points into a factor an option already sets, so it cannot also be driven by another factor; point it at what that factor AFFECTS instead`
+              : `"${d.label}" — a link from a ${d.from_kind} to a ${d.to_kind} is not a shape this model can hold`,
           // NON-BLOCKING BY CONSTRUCTION, same reason: the projector's kind gate
           // refused this edge AT EMISSION. It is disclosed, not carried.
           validatorCode: null,
@@ -592,6 +615,26 @@ export function enumerateCompletionAsk(
       // with them: that link resolved perfectly well and the projector withdrew
       // what it pointed at. The coaching question — "what would make these two
       // different?" — belongs to the USER, not to a second model turn.
+      // ⭐ `disconnected_by_shape_gate` IS SILENT HERE **DELIBERATELY**, and for a
+      // different reason than its neighbours — listed explicitly so the silence is
+      // a decision rather than a `default` (this file's own standard).
+      //
+      // It is not silent because asking would pressure the model to invent (the
+      // `unconnected_to_goal` argument): the model already drew this link and
+      // needs no pressure. It is silent because **the ask already exists one level
+      // up**. The very link whose refusal caused this withdrawal was disclosed as
+      // `ref_kind_illegal` above and IS asked about, as `illegal_shape`, naming
+      // the rule and the repair. Adding a node-level item would ask the same
+      // question twice about the same defect — and since the completion is
+      // append-only (round 9 / D4), a second ask is a second chance to re-add a
+      // link the projector has just refused on purpose.
+      //
+      // ⚠ The consequence is a PROPERTY worth stating: every
+      // `disconnected_by_shape_gate` disclosure has a matching `ref_kind_illegal`
+      // ask by construction, because the counterfactual predicate that mints it
+      // can only fire when a refused link exists on the node's path to the goal.
+      // If that ever stops being true, the record becomes silent in BOTH places.
+      case "disconnected_by_shape_gate":
       case "unconnected_to_goal":
       case "undeveloped_duplicate_of_stated":
       case "undeveloped_duplicate_of_model":
