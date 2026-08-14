@@ -38,6 +38,28 @@
  * mixed_scale_unresolved`.
  */
 
+/**
+ * ⚠ RE-POINTED BY THE NO-RANK RULING (Paul, 2026-08-14), and the re-point is a
+ * claim about REACHABILITY, not a convenience.
+ *
+ * Since the ruling, an unconfigured option is EXCLUDED from the submission
+ * rather than filled with CEE-chosen values. The ONE remaining path on which
+ * CEE supplies values at all is the STATUS-QUO HOLD. So the corruption class
+ * these tests pin — a CEE-supplied value re-mixing the request's scale after
+ * the coherence attestation — is now reachable ONLY through the hold, and the
+ * fixture option is therefore flagged `is_baseline` and RENAMED to what it now
+ * is ("No change (status quo)").
+ *
+ * It is renamed rather than merely flagged deliberately: a fixture labelled
+ * "Added later" carrying `is_baseline: true` would be a fixture LIE — the same
+ * lie a bulk `is_baseline` patch introduced elsewhere in this wave and had to
+ * revert ("Partner with a specialist consultancy" is not a status quo). The
+ * fixture must BE what it asserts.
+ *
+ * No banked capture was edited to achieve this (trap 14b): the shapes changed
+ * here are locally-authored fixtures.
+ */
+
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -298,7 +320,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
         // CAPLESS money factor — the deployed drafter's own shape for "£600,000".
         { id: 'f_capless', kind: 'factor', label: 'Compliance Investment', observed_state: { value: 0.6, raw_value: 600000 } },
         { id: 'opt_a', kind: 'option', label: 'Committed', interventions: { f_capped: { value: 0.72, raw_value: 72000 } } },
-        { id: 'opt_b', kind: 'option', label: 'Added later', interventions: {} },
+        { id: 'opt_b', kind: 'option', label: 'No change (status quo)', interventions: {}, is_baseline: true },
       ],
       edges: [
         { from: 'opt_a', to: 'f_capped' },
@@ -310,7 +332,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
     const outcome = gateAnalysableOptions({
       options: [
         { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_capped: { value: 0.72, raw_value: 72000 } } },
-        { id: 'opt_b', option_id: 'opt_b', label: 'Added later', interventions: {} },
+        { id: 'opt_b', option_id: 'opt_b', label: 'No change (status quo)', interventions: {}, is_baseline: true },
       ],
       graph,
       rawPersistedGraph: graph,
@@ -321,7 +343,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
     // Precondition, pinned in-test (trap 13b): the scaffold actually fired on
     // the option we are about to inspect. Without this the assertions below
     // could pass on an empty map.
-    expect(outcome.scaffolded.map((s) => s.option_id)).toEqual(['opt_b']);
+    expect(outcome.held.map((s) => s.option_id)).toEqual(['opt_b']);
     const scaffoldedInterventions = (outcome.options[1] as { interventions: Record<string, unknown> })
       .interventions;
 
@@ -363,7 +385,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
         { id: 'g', kind: 'goal', label: 'Goal' },
         capped,
         { id: 'opt_a', kind: 'option', label: 'Committed', interventions: { f_cap: { value: 0.72, raw_value: 72000 } } },
-        { id: 'opt_b', kind: 'option', label: 'Added later', interventions: {} },
+        { id: 'opt_b', kind: 'option', label: 'No change (status quo)', interventions: {}, is_baseline: true },
       ],
       edges: [
         { from: 'f_cap', to: 'g' },
@@ -377,7 +399,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
       goal_node_id: 'g',
       options: [
         { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_cap: { value: 0.72, raw_value: 72000 } } },
-        { id: 'opt_b', option_id: 'opt_b', label: 'Added later', interventions: {} },
+        { id: 'opt_b', option_id: 'opt_b', label: 'No change (status quo)', interventions: {}, is_baseline: true },
       ],
     } as unknown as RunAnalysisScenarioSnapshot;
 

@@ -230,15 +230,33 @@ const SCAFFOLDABLE_OPTIONS = [
 ];
 
 describe('readiness premise — #747 still holds (guarded, not relied on by the copy)', () => {
-  it('computeScaffoldPlan reports will_scaffold_options for the #747 shape', () => {
+  it('the plan still SEES the #747 option, and now reports the run will NOT proceed', () => {
+    // ⚠ RE-PINNED BY THE NO-RANK RULING (2026-08-14). This premise guard is the
+    // reason the guard exists: the #747 shape's OUTCOME changed, and the copy
+    // above must be proven not to depend on it.
+    //
+    // 'Partner with a specialist consultancy' is NOT a status quo, so it is now
+    // EXCLUDED rather than filled with values CEE chose. That leaves ONE
+    // analysable option, which is not a comparison, so `run-analysis.ts` §2.56
+    // refuses — and the plan must say so, or the pre-run panel would promise a
+    // run the handler declines (F4 in reverse).
+    //
+    // ⭐ A BULK `is_baseline` PATCH WAS APPLIED HERE IN AN EARLIER PASS AND WAS
+    // REVERTED. Flagging this option as the baseline would have made the guard
+    // green by making the FIXTURE LIE — "Partner with a specialist consultancy"
+    // is a proposal, not "no change". The honest repair is to re-pin the
+    // expectation, not to re-label the world.
     const plan = computeScaffoldPlan({
       options: SCAFFOLDABLE_OPTIONS,
       graph: SCAFFOLDABLE_GRAPH,
       rawPersistedGraph: SCAFFOLDABLE_GRAPH,
       scaleNetEnabled: true,
     });
-    expect(plan.will_scaffold_options).toBe(true);
+    // The option is SEEN — this is not "nothing happened".
+    expect(plan.option_count).toBe(1);
     expect(plan.scaffolded_option_ids).toContain('opt_b');
+    // …and the honest advertised answer is that the run will not proceed.
+    expect(plan.will_scaffold_options).toBe(false);
   });
 });
 

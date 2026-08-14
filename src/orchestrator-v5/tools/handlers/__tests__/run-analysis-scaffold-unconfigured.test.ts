@@ -10,6 +10,20 @@
  * block pins the paths the scaffold must NOT touch — those are GREEN before
  * AND after (regression pins, not RED pins).
  *
+ * ⚠⚠ RE-POINTED BY THE NO-RANK RULING (Paul, 2026-08-14). An unconfigured
+ * option is now EXCLUDED from the submission rather than filled with values
+ * CEE chose, so the SCAFFOLD MECHANICS these tests pin survive on exactly one
+ * path: the STATUS-QUO HOLD, for which "hold every factor where it is" is not
+ * a placeholder but the complete and correct specification of "no change".
+ *
+ * The inline `interventions: {}` fixtures below are therefore flagged
+ * `is_baseline: true` — EXCEPT the two in the all-unconfigured guard test,
+ * where the point is precisely that the pre-PLoT guard owns the shape before
+ * the gate ever runs. Specs that pinned DELETED behaviour (the prior-range
+ * midpoint rung) became deletion twins; the disclosure specs moved from the
+ * placeholder sentence to the no-change sentence, and assert the placeholder
+ * sentence is GONE.
+ *
  * The mock PLoT client mirrors the REAL preflight contract this backstop
  * exists for (verified in the 2.11 diagnosis, scenario A): any option with
  * zero interventions → HTTP 422 with `analysis_status:
@@ -226,7 +240,10 @@ function snapshotWithUnconfiguredOption(): RunAnalysisScenarioSnapshot {
     options: [
       CONFIGURED_A,
       CONFIGURED_B,
-      { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
+      // Flagged as the status quo: since the no-rank ruling this is the ONLY
+      // shape on which CEE supplies values at all, so it is the shape these
+      // mechanics specs must drive.
+      { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {}, is_baseline: true },
     ],
   });
 }
@@ -287,7 +304,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     expect(sentNew.interventions).toEqual({ fac_price: 100 });
   });
 
-  it('neutral-value precedence: observed value rung, then prior range midpoint; no-provenance factors are skipped', async () => {
+  it('DELETION TWIN: with the midpoint rung gone, observed-provenance-free targets leave the status quo EXCLUDED (contrast control included)', async () => {
     const graph = makeGraph(
       [{ id: 'opt_new', kind: 'option', label: 'New Option' }],
       [
@@ -306,31 +323,60 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
           options: [
             CONFIGURED_A,
             CONFIGURED_B,
-            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
+            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {}, is_baseline: true },
           ],
         }),
       ),
     });
-    await handler(makeInvocation());
+    const outcome = await handler(makeInvocation());
 
     const sentOptions = (run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
       option_id: string;
       interventions: Record<string, number>;
     }>;
-    const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
-    // RE-PINNED 2026-07-20 (O-7 wave 2 — the egress scale net is
-    // unconditional, so the wire convention is RAW user-scale):
-    expect(sentNew.interventions).toEqual({
-      // fac_volume ABSENT — observed_state { value: 0.4, cap: 5000 } with no
-      // raw_value cannot PROVE the normalised convention, so it is SKIPPED
-      // on the raw wire (the P1-1 (B) evidence gate: PLoT divides by cap, so
-      // an unproven 0.4 would slam the factor to ~0.00008).
-      fac_range: 20, // capless prior midpoint passes through — PLoT cannot double-normalise it
-      // fac_dead absent: no value provenance → never invented
+    // opt_new's three targets are: fac_volume (cap-bearing, [0,1], no
+    // raw_value → `ambiguous_no_evidence`), fac_range (PRIOR ONLY — the rung
+    // that used to yield 20 IS DELETED) and fac_dead (no provenance at all).
+    // Nothing is holdable, so even the status quo is excluded: we do not
+    // invent "no change" any more than we invent an option.
+    expect(sentOptions.map((o) => o.option_id)).toEqual(['opt_a', 'opt_b']);
+    expect(outcome.assistant_text).toContain("'New Option' was left out of this comparison");
+
+    // ⭐ CONTRAST CONTROL, SAME SWEEP (trap 13e): the identical fixture whose
+    // baseline points at a factor WITH observed provenance must be HELD.
+    // Without it, the assertion above is equally satisfied by a gate that
+    // never holds anything — a blind instrument cannot fake a discrimination
+    // it is not making.
+    const holdableGraph = makeGraph(
+      [{ id: 'opt_new', kind: 'option', label: 'New Option' }],
+      [{ from: 'opt_new', to: 'fac_price' }],
+    );
+    const contrast = makePreflightPlotClient();
+    const contrastHandler = createRunAnalysisHandler({
+      plotClient: contrast.client,
+      scenarioReader: makeReader(
+        makeSnapshot({
+          graph: holdableGraph,
+          rawPersistedGraph: holdableGraph,
+          options: [
+            CONFIGURED_A,
+            CONFIGURED_B,
+            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {}, is_baseline: true },
+          ],
+        }),
+      ),
+    });
+    await contrastHandler(makeInvocation());
+    const contrastSent = (contrast.run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
+      option_id: string;
+      interventions: Record<string, number>;
+    }>;
+    expect(contrastSent.find((o) => o.option_id === 'opt_new')!.interventions).toEqual({
+      fac_price: 100,
     });
   });
 
-  it('an option with NO factor edges scaffolds on the configured siblings’ comparison basis', async () => {
+  it('a status quo with NO factor edges is held on the configured siblings’ comparison basis', async () => {
     const graph = makeGraph([{ id: 'opt_iso', kind: 'option', label: 'Isolated Option' }]);
     const { client, run } = makePreflightPlotClient();
     const handler = createRunAnalysisHandler({
@@ -342,7 +388,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
           options: [
             CONFIGURED_A,
             CONFIGURED_B,
-            { id: 'opt_iso', option_id: 'opt_iso', label: 'Isolated Option', interventions: {} },
+            { id: 'opt_iso', option_id: 'opt_iso', label: 'Isolated Option', interventions: {}, is_baseline: true },
           ],
         }),
       ),
@@ -367,7 +413,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
   // turns THESE red (mutation-check target).
   // -------------------------------------------------------------------------
 
-  it('DISCLOSURE: summary + assistant_text say the option’s values are placeholders and point at the configure route', async () => {
+  it('DISCLOSURE: summary + assistant_text say the status quo was analysed as NO CHANGE — never as a placeholder', async () => {
     // The arm SURVIVED to the comparison, so "placeholder values were used"
     // is true and is what must ship. (Before 2026-07-25 this test used the
     // plain mirror, whose golden fixture returns only opt_a/opt_b — so it
@@ -387,12 +433,19 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     // analysis_result block source (fact.result.summary — the block copies
     // it verbatim in compose.ts buildAnalysisResultBlock).
     for (const text of [outcome.assistant_text, fact.result.summary]) {
-      expect(text).toMatch(/Placeholder values were used for 'New Option'/);
-      expect(text).toMatch(/until you configure it/);
-      // Configure-route pointer derives from configure-option-chip-text
-      // (#487's single copy source): the advised exemplar must carry the
-      // deterministic routing prefix.
-      expect(text).toContain("say 'Help me configure New Option.'");
+      expect(text).toContain(
+        "'New Option' was analysed as no change — the factors it compares against were held at the values your model records today.",
+      );
+      // ⭐ The superseded copy must be GONE, not merely joined. It was false
+      // twice over for a held status quo: nothing was defaulted from a guess,
+      // and the comparison is NOT "illustrative until you configure it" — it
+      // is sound, because "no change" is fully specified by definition.
+      expect(text).not.toMatch(/Placeholder values were used/);
+      expect(text).not.toMatch(/illustrative/);
+      // …and no advised-action exemplar: there is nothing here for the user
+      // to fix, and a disclosure prescribing a futile step is worse than one
+      // that simply reports.
+      expect(text).not.toMatch(/Help me configure/);
     }
   });
 
@@ -414,7 +467,10 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     expect(typeof forwarder).toBe('function');
     const forwarded = (forwarder as (o: unknown) => string)(outcome);
     expect(forwarded).toBe(outcome.assistant_text);
-    expect(forwarded).toMatch(/Placeholder values were used/);
+    // A copy branch that ships while the egress silently swallows the summary
+    // carrying it is exactly the defect the grammar UNION exists to prevent —
+    // so the NEW sentence gets the same pin the old one had.
+    expect(forwarded).toMatch(/was analysed as no change/);
   });
 
   // -------------------------------------------------------------------------
@@ -561,7 +617,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     });
   });
 
-  it('does NOT scaffold an option the user configured with (unencodable) raw intent — that stays on the honest configure path', async () => {
+  it('does NOT write over an option the user configured with (unencodable) raw intent — it is EXCLUDED and disclosed', async () => {
     // opt_raw carries data.interventions raw intent in the RAW persisted
     // graph (the canvas-autosave shape GraphV3 projection drops). The user
     // DID configure it — scaffolding placeholders over their intent would
@@ -579,7 +635,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
       ],
       [{ from: 'opt_raw', to: 'fac_price' }],
     );
-    const { client } = makePreflightPlotClient();
+    const { client, run } = makePreflightPlotClient();
     const handler = createRunAnalysisHandler({
       plotClient: client,
       scenarioReader: makeReader(
@@ -589,16 +645,30 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
           options: [
             CONFIGURED_A,
             CONFIGURED_B,
-            { id: 'opt_raw', option_id: 'opt_raw', label: 'Raw Intent Option', interventions: {} },
+            // Flagged BASELINE deliberately: it proves user intent beats even
+            // the status-quo hold exception. Without the flag the option
+            // would be excluded for merely not being the baseline, and the
+            // spec would say nothing about intent at all.
+            { id: 'opt_raw', option_id: 'opt_raw', label: 'Raw Intent Option', interventions: {}, is_baseline: true },
           ],
         }),
       ),
     });
 
-    await expect(handler(makeInvocation())).rejects.toMatchObject({
-      name: 'HandlerInvocationFailedError',
-      cause_kind: 'options_not_configured',
-    });
+    // ⚠ THE OUTCOME CHANGED WITH THE RULING, AND IT CHANGED FOR THE BETTER.
+    // Pre-ruling, this option stayed on the wire unconfigured and PLoT's
+    // preflight 422'd, so ONE option with unencodable intent failed the WHOLE
+    // analysis. Now it is excluded and NAMED, the other two options are
+    // compared, and the user is told what to fix. Intent is still never
+    // written over — that part is unchanged.
+    const outcome = await handler(makeInvocation());
+    const sent = (run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
+      option_id: string;
+    }>;
+    expect(sent.map((o) => o.option_id)).toEqual(['opt_a', 'opt_b']);
+    expect(outcome.assistant_text).toContain(
+      "'Raw Intent Option' was left out of this comparison",
+    );
   });
 
   it('no unconfigured options → summary is byte-identical to today (no suffix, no scaffold record)', async () => {
@@ -670,24 +740,31 @@ describe('run_analysis D-ask-1 scaffold — P1-1 scale-net-ON convention parity'
           options: [
             RAW_CONFIGURED_A,
             RAW_CONFIGURED_B,
-            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
+            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {}, is_baseline: true },
           ],
         }),
       ),
     });
-    await expect(handler(makeInvocation())).rejects.toThrow(
-      /missing interventions|options_not_configured/,
-    );
-    // The wire attempt (which PLoT's preflight then 422s) carries opt_new
-    // UNSCAFFOLDED — the ambiguous cap-bearing factor is skipped AND no
-    // sibling-basis values are fabricated for an option whose own edges the
-    // basis doesn't cover.
+    await handler(makeInvocation());
+
     const sentOptions = (run.mock.calls[0][0] as Record<string, unknown>).options as Array<{
       option_id: string;
       interventions?: Record<string, number>;
     }>;
-    const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
-    expect(Object.keys(sentNew.interventions ?? {})).toHaveLength(0);
+    // The ambiguous 0.4 reaches NO submitted option — not opt_new (excluded,
+    // because its only target is unholdable) and not a sibling. Asserted over
+    // the WHOLE submission rather than over one option, because "0.4 is not on
+    // opt_new" would still be satisfied if it had leaked somewhere else.
+    for (const option of sentOptions) {
+      expect(Object.values(option.interventions ?? {})).not.toContain(0.4);
+    }
+    expect(sentOptions.map((o) => o.option_id)).toEqual(['opt_a', 'opt_b']);
+    // POSITIVE CONTROL: the sibling that legitimately intervenes on the SAME
+    // factor still sends its own RAW 2500. Without this, the absence above is
+    // equally consistent with fac_volume having been dropped everywhere.
+    expect(sentOptions.find((o) => o.option_id === 'opt_b')!.interventions).toEqual({
+      fac_volume: 2500,
+    });
   });
 
   it('net-ON rungs route through the sibling projection: raw_value wins; a capless value passes through; proven convention denormalises', async () => {
@@ -722,7 +799,7 @@ describe('run_analysis D-ask-1 scaffold — P1-1 scale-net-ON convention parity'
           options: [
             RAW_CONFIGURED_A,
             RAW_CONFIGURED_B,
-            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {} },
+            { id: 'opt_new', option_id: 'opt_new', label: 'New Option', interventions: {}, is_baseline: true },
           ],
         }),
       ),
@@ -734,7 +811,11 @@ describe('run_analysis D-ask-1 scaffold — P1-1 scale-net-ON convention parity'
       interventions: Record<string, number>;
     }>;
     const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
-    expect(sentNew.interventions).toEqual({ fac_conv: 2000, fac_range: 20 });
+    // `fac_range: 20` IS GONE: the prior-range midpoint rung was deleted with
+    // the ruling. A centre-of-range guess answers "where might this factor
+    // sit?"; the status quo is a claim about where it DOES sit, so the rung
+    // has no honest caller left.
+    expect(sentNew.interventions).toEqual({ fac_conv: 2000 });
   });
 });
 
