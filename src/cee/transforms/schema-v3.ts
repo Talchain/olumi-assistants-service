@@ -47,6 +47,7 @@ import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLI
 import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
+import { assertsBriefExtraction } from "../factor-extraction/brief-extraction-claim.js";
 import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // ⭐ THE SAME AUTHORITY THE PROJECTOR BINDS STATED ITEMS WITH. Imported, never
@@ -523,6 +524,72 @@ export function transformNodeToV3(
     }
   } else {
     v3Node.provenance = claimedProvenance;
+  }
+
+  // ⭐⭐ ROW 2.1207 — THE CLAIM HAD A **THIRD** CARRIER, AND NOTHING WITHDREW IT.
+  //
+  // The block directly above withdraws a false brief claim from TWO fields, and
+  // its own comment names the reason: *"or the wire still carries the claim one
+  // field to the left of the one we corrected."* There is a third field, and it
+  // is the one a user actually reads.
+  //
+  // MEASURED (closing witness 14 Aug, `captures-run/captures/P3/
+  // committed-graph.json`, node `19d5a529`) against a brief stating £120,000:
+  //
+  //     provenance:          "ai_inferred"                      ← honest
+  //     extractionType:      "inferred"                         ← honest
+  //     uncertainty_drivers: ["Extracted from brief — confirm value"]  ← FALSE
+  //     display_value:       "£0.2 to £0.6"
+  //
+  // The two structural fields told the truth and the human-readable sentence
+  // told the user their number had been extracted from their brief. That string
+  // is CEE-authored and passed straight through — the closing witness's own copy
+  // sweep confirmed it is not a UI literal (`GRAPH-CARRIER-READER-DERIVATION.md`
+  // :139-153, with contrast controls). So the lie was ours, and of the three
+  // carriers on the NODE it was the only one written in English.
+  //
+  // ⚠ CORRECTED AT REVIEW: an earlier draft of this sentence said "the only
+  // carrier written in English" without the node qualifier, and that was an
+  // overclaim — there is a FOURTH carrier, on EDGE `provenance.quote`, which
+  // this withdrawal does not reach (separately rowed). A count is a claim about
+  // a scope; state the scope or the count is wrong.
+  //
+  // ── THE INVARIANT, AGAINST THE SPEC RATHER THAN THE WITNESSED CASE ────────
+  // `provenance` IS this response's answer to "did this come from the brief".
+  // A prose driver asserting brief extraction is a SECOND carrier of that same
+  // fact, and two carriers of one fact must not be able to disagree (trap 12).
+  // So the marker survives exactly when the authority says `from_brief`, and is
+  // dropped otherwise — no parsing of the display string, no second predicate
+  // over the brief, no new magnitude alphabet.
+  //
+  // Note the direction: the VALUE is untouched and only the CLAIM is withdrawn.
+  // Where the number cannot be made faithful, the honest move is to stop
+  // attributing it to the user — not to invent one that matches.
+  //
+  // ⚠ THE PREDICATE AND THE PRODUCERS SHARE ONE CONSTANT (`brief-extraction-
+  // claim.ts`). They used to spell the literal independently, which is trap 12
+  // with a user-facing lie as the failure mode: reword the producer — an em-dash
+  // to a hyphen, a capital to a lower case — and this guard silently stops
+  // matching while every test spelling the old literal stays green.
+  //
+  // ⚠ AND IT IS NOT THE ONLY CARRIER. The claim also rides EDGE
+  // `provenance.quote` (`enricher.ts:457/:1145` → wire at `schema-v3.ts:811-814`),
+  // which this node-level withdrawal does not reach. Separately rowed, and
+  // mitigated by those edges carrying an honest `source: "hypothesis"` beside
+  // the claim — but the earlier version of this comment called `uncertainty_
+  // drivers` "the only carrier written in English", and that was wrong.
+  if (v3Node.provenance !== "from_brief" && Array.isArray(v3Node.uncertainty_drivers)) {
+    const kept = v3Node.uncertainty_drivers.filter((d) => !assertsBriefExtraction(d));
+    if (kept.length !== v3Node.uncertainty_drivers.length) {
+      // An empty list is dropped rather than shipped: `uncertainty_drivers: []`
+      // reads as "we looked and found none", which is a different and equally
+      // unearned claim from "we are not telling you anything here".
+      if (kept.length > 0) {
+        v3Node.uncertainty_drivers = kept;
+      } else {
+        delete (v3Node as { uncertainty_drivers?: unknown }).uncertainty_drivers;
+      }
+    }
   }
 
   return v3Node;
@@ -1103,6 +1170,157 @@ export function transformResponseToV3(
       source: earned ? "brief_extraction" : "cee_hypothesis",
       ...(earned && typeof node.label === "string" ? { brief_quote: node.label } : {}),
     };
+  }
+
+  // ⭐⭐ ROW 2.1205 — THE BADGE WAS REACHABLE FOR EXACTLY ONE NODE KIND.
+  //
+  // ── MEASURED, ON BANKED CAPTURES ─────────────────────────────────────────
+  // 201 nodes across four capture runs and six briefs (closing witness 14 Aug,
+  // `driver/captures-<run>/captures/<arm>/committed-graph.json`):
+  //
+  //     option/from_brief    20   ← every from_brief in the corpus
+  //     option/ai_inferred   38       risk/ai_inferred     37
+  //     goal/ai_inferred     16       outcome/ai_inferred  26
+  //     factor/ai_inferred   48       decision/ai_inferred 16
+  //
+  // **47 of the 201 carry a label that is VERBATIM brief text and read
+  // `ai_inferred`** — 16/16 goals among them, including the user's own sentence
+  // *"Our aim is to raise our average seat price"*. A user reading the canvas is
+  // told Olumi wrote their goal.
+  //
+  // ── WHY: TWO DERIVATIONS OF ONE FACT, AND ONLY ONE WAS EXTENDED ──────────
+  // The loop above (root 4) derives provenance from the brief bytes for OPTIONS.
+  // Every other kind falls out of `extractionType` in `transformNodeToV3`, and
+  // `extractionType` is a FACTOR-ONLY field — its own comment says so:
+  // *"Decisions/options/goals fall through to the ai_inferred default."* So the
+  // badge was not failing for these kinds; it was unreachable by construction.
+  //
+  // ── ONE AUTHORITY, MORE READERS — NOT A WIDER PREDICATE ──────────────────
+  // This calls the SAME `bindOptionLabelToBrief` on the SAME brief bytes with
+  // the SAME containment and the SAME specificity floor. Nothing about the
+  // predicate moves; only the set of callers does. Widening the predicate is the
+  // direction that CERTIFIES content the user did not write, and
+  // `brief-binding.ts` exists because of that class — so it stays untouched.
+  //
+  // ⚠ FACTORS ARE DELIBERATELY EXCLUDED, AND THE EXCLUSION IS THE CAREFUL PART.
+  // A factor is VALUE-BEARING, and a label test certifies nothing about a
+  // number. `bindStatedItemToBrief` checks a figure's value INSIDE its own quote
+  // precisely because an exact quote carrying a contradicted value ("Churn is 10
+  // percent", value 90) is the external audit's finding 2. Badging a factor on
+  // its label alone would re-admit that class through the side door. Factors
+  // keep their value-aware path (`mayClaimFromBrief`, ROADMAP 2.972) —
+  // `Annual Support Cost` and `Seat Price` are verbatim brief text in the corpus
+  // above and deliberately do NOT flip here.
+  //
+  // ⚠ AND A VALUE-BEARING NODE OF ANY KIND DECLINES, derived from the node
+  // rather than assumed from its kind, so a goal that acquires a threshold or an
+  // outcome that acquires a prior cannot quietly start claiming the user's
+  // authorship for a number they never gave. Fail-closed, and it fails closed on
+  // a fact about the node, not on a list someone must remember to update.
+  //
+  // ⚠⚠ WHAT THIS DOES **NOT** DO, and the row was written from that case.
+  // DOM-3 witnessed the user's stated risk surfacing as `Revenue Lost During
+  // Cutover` — a title-cased PARAPHRASE of *"losing revenue during the
+  // cutover"*. Containment cannot tie a paraphrase to brief bytes and nothing
+  // here tries: a fuzzy match that manufactured the badge would be fabricated
+  // provenance, the same sin in the other direction. That node keeps
+  // `ai_inferred`, and a KNOWN-DROPPED test pins it so the gap is visible in the
+  // suite rather than invisible to it. What DOES change is that a hazard the
+  // user states reaches a correctly-badged risk node at all: the grammar carries
+  // it through the `constraint` stated channel, where the projector labels the
+  // node with the user's own quote (`projector.ts:1614`) and `NODE_KIND_MAP`
+  // maps `constraint → risk`. Before this loop that path could not earn the
+  // badge either.
+  const LABEL_BOUND_KINDS: ReadonlySet<string> = new Set([
+    "goal",
+    "risk",
+    "outcome",
+    "decision",
+  ]);
+  for (const node of v3NodesTyped) {
+    if (!LABEL_BOUND_KINDS.has(node.kind)) continue;
+    // ⚠ THE FIELD NAMES HERE WERE WRONG ON THE FIRST WRITE, AND A TEST CAUGHT
+    // IT — worth recording, because the guard was PRESENT and CORRECT and
+    // pointed at bytes that do not exist (trap 22: verify what a guard actually
+    // RECEIVES, not that it is there). The first version tested `target_value`
+    // and `threshold`; the V3 node's goal threshold is `goal_threshold` /
+    // `goal_threshold_raw` (`schemas/cee-v3.ts:155-178`), so a thresholded goal
+    // sailed straight past it and earned the badge. Derived at the schema, then
+    // re-measured.
+    //
+    // ⚠ AND READ THROUGH THE DECLARED TYPE, NOT THROUGH A DOUBLE CAST. The
+    // first version reached these fields via `node as unknown as Record<string,
+    // unknown>` and CI's forbidden-boundary ratchet caught it (`as_unknown_as`,
+    // 59 exact) — correctly: every one of these fields is DECLARED on `NodeV3T`
+    // (`schemas/cee-v3.ts`), so the cast bought nothing and erased the very
+    // types that would have caught the wrong field names above.
+    //
+    // ⚠⚠ `intercept` ADDED AT REVIEW, AND THE MISS IS THE INSTRUCTIVE PART.
+    // It is declared (`cee-v3.ts:193`), model-emittable, and forwarded to the
+    // wire at `:380-385` — a label-verbatim node carrying ONLY a model-authored
+    // intercept would have earned the badge for a number the user never gave.
+    // This list is a HAND-MAINTAINED MIRROR of "which node fields carry a
+    // value" (trap 12), and no amount of comment makes it not one — the schema
+    // marks no field as value-bearing, so it cannot be derived. What CAN be
+    // derived is the schema's KEY SET, so a completeness twin pins it and REDs
+    // when a new node field lands, forcing the question "is this value-bearing?"
+    // rather than letting the next `intercept` arrive silently.
+    const carriesValue =
+      node.observed_state !== undefined ||
+      node.prior !== undefined ||
+      node.display_value !== undefined ||
+      typeof node.intercept === "number" ||
+      typeof node.goal_threshold === "number" ||
+      typeof node.goal_threshold_raw === "number";
+    if (carriesValue) continue;
+
+    // ⭐⭐ ELIGIBILITY — A SINGLE WORD IS NOT EVIDENCE OF AUTHORSHIP.
+    //
+    // ── MEASURED AT REVIEW, IN THE FABRICATION DIRECTION ─────────────────────
+    // Through the full `transformResponseToV3` on an ordinary brief —
+    // *"…This is a big decision for us. We worry about churn, want growth, and
+    // need more revenue."* — the scaffold node labelled **`Decision`** and the
+    // model's own one-word nodes **`Churn`**, **`Growth`** and **`Revenue`** all
+    // came back **`from_brief`**. Four fabricated authorship claims on one draw,
+    // in exactly the class this loop exists to close.
+    //
+    // ── WHY MY OWN CORPUS COULD NOT SEE IT ──────────────────────────────────
+    // None of the six banked briefs contains the word "decision", so the 16/16
+    // banked `Decision` nodes never matched. **A corpus drawn from captures is
+    // still a corpus with a shape** (trap 22) — it bounded what the product HAD
+    // emitted, not what the predicate WOULD accept.
+    //
+    // ── WHY THE FLOOR DID NOT CATCH IT, AND WHY IT IS NOT MOVED ─────────────
+    // `MIN_QUOTE_CHARS = 3` (`brief-binding.ts`) is a DEGENERACY floor, and its
+    // own doc says so: *"A single common word ('the') clears three characters
+    // and would still be contained by coincidence."* It was calibrated for
+    // OPTION labels, which are phrases by construction. This loop pointed the
+    // same predicate at kinds where a single-token label is the NORM.
+    //
+    // So the repair is an ELIGIBILITY condition HERE, at the caller, not a
+    // second floor inside the shared authority. D4 ruled ONE floor for both
+    // callers precisely because two floors behind one name is two predicates
+    // under one name (trap 21) — that ruling stands untouched, `bindOptionLabel
+    // ToBrief` is unchanged, and root-4's option behaviour cannot move.
+    //
+    // ── THE TWO HARMS, AND THEY ARE NOT SYMMETRIC (trap 22b) ────────────────
+    //   • accept a single token → we tell the user they wrote a node the model
+    //     coined, because one of its words appears somewhere in their brief.
+    //     A LIE about authorship.
+    //   • decline one → a genuine one-word label ("Churn" the user really did
+    //     name) loses its badge and keeps everything else. AN UNDER-CLAIM.
+    // ⚠ Named rather than waved away: a hyphenated label (`Time-to-Target`) is
+    // one whitespace token and declines despite being specific. That is the safe
+    // direction, and the class ends the same way the floor's does — with span
+    // binding into the brief, where no token counting is needed at all.
+    const tokenCount =
+      typeof node.label === "string" ? node.label.trim().split(/\s+/).filter(Boolean).length : 0;
+    if (tokenCount < 2) continue;
+
+    const binding = bindOptionLabelToBrief(node.label, context.brief);
+    if (bindingEarnsBriefClaim(binding)) {
+      node.provenance = "from_brief";
+    }
   }
 
   // ⭐⭐ REPHRASE ABSORPTION — an obvious restatement of the user's own option may

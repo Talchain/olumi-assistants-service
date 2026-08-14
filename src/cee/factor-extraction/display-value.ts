@@ -293,6 +293,58 @@ export function synthesiseRangeDisplayValue(
     if (minIsDomainEdge && maxIsDomainEdge) return undefined;
   }
 
+  // ⭐⭐ ROW 2.1207 — A CURRENCY SIGN IS A CLAIM ABOUT SCALE, AND IT WAS BEING
+  // MADE ABOUT NORMALISED BOUNDS.
+  //
+  // MEASURED on deployed staging (closing witness 14 Aug, capture
+  // `captures-run/captures/P3/committed-graph.json`, node `19d5a529`): against a
+  // brief stating **£120,000**, `Annual Support Cost` shipped
+  //
+  //     prior: { range_min: 0.21, range_max: 0.63 }  →  display_value "£0.2 to £0.6"
+  //
+  // — a normalised 0–1 prior wearing a pound sign, six orders of magnitude out,
+  // on a node that also claimed the number came from the brief.
+  //
+  // ── THE ASYMMETRY WAS INSIDE THIS FUNCTION, IN ITS OWN WORDS ──────────────
+  // `formatBound` below says of the percent branch: *"range_min/range_max are
+  // normalised (0–1) values; multiply by 100 for display."* So the module
+  // already knows what scale a prior bound is on — and compensated for it on
+  // ONE of the two scaled units. Currency got the raw number with a symbol
+  // glued to the front.
+  //
+  // ── AND THE GUARD ABOVE ASSERTS THE OPPOSITE AS FACT ──────────────────────
+  // *"Real-world units (currency, time, counts) are untouched — a 0..1 range
+  // there is a genuine quantity."* The capture refutes exactly that sentence.
+  // It is true of time and counts, where a prior is authored on the real scale;
+  // it is false of currency, which the pipeline NORMALISES (`computeNormalisationCap`,
+  // `raw_value`, `cap`) precisely because currency magnitudes are unbounded.
+  //
+  // ── WHAT IS CLAIMED, AND WHAT IS NOT ──────────────────────────────────────
+  // Currency-scale evidence is a bound OUTSIDE the normalised magnitude domain.
+  // Inside it, this function cannot tell a normalised prior from a genuine
+  // sub-unit price, and it does not guess: it declines to render, which is the
+  // behaviour the domain-edge guard directly above already ships for the
+  // sibling case (DGAI #342(2)). The caller omits `display_value` and the node
+  // reads as "no value set yet" — the honest state.
+  //
+  // Two opposite harms, and they are not symmetric (trap 22b):
+  //   • rendering it  → a LIE about a number the user never wrote;
+  //   • declining it  → a genuine sub-£1 range loses its display, a DEGRADATION,
+  //     and one bounded by the fact that a real currency quantity that has been
+  //     normalised carries `raw_value`/`cap` and reaches `synthesiseDisplayValue`
+  //     (the point-estimate path), which gates its currency prefix on `raw_value`
+  //     for this very reason. This branch only ever sees the un-raw case.
+  //
+  // ⚠ MAGNITUDE, NOT SIGN. The schema admits a negative bound (`z.number()`,
+  // unbounded), and a predicate written as `<= 1` would pass `-0.4` straight
+  // through to `£-0.4` — the sign-asymmetry that cost CEE #891 a 100,000x
+  // suppression. The test is on |value|.
+  if (isCurrencyUnit(unit)) {
+    const withinNormalisedDomain =
+      (!hasMin || Math.abs(rangeMin!) <= 1) && (!hasMax || Math.abs(rangeMax!) <= 1);
+    if (withinNormalisedDomain) return undefined;
+  }
+
   /**
    * Format a single bound using the same logic as synthesiseDisplayValue
    * (currency prefix, % multiply, time unit, plain number).
