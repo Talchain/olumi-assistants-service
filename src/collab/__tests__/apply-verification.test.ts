@@ -116,6 +116,10 @@ function beliefEvent(args: {
             expression_raw: args.expression_raw ?? null,
             confidence: null,
           },
+    // An ANSWER row carries no evidence, and this factory only builds answers.
+    // Evidence rows are built by their own factory in the evidence suite, so a
+    // test here cannot accidentally construct a row the DB's CHECK forbids.
+    evidence: null,
     provenance: {
       authored_by: args.participant_id,
       method: 'elicited_nl',
