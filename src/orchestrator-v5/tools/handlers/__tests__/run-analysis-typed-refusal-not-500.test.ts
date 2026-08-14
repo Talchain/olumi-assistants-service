@@ -290,6 +290,17 @@ describe('run_analysis — a PLoT 503 is ENGINE-UNAVAILABLE, not INTERNAL_ERROR'
     // Both must still say the true, load-bearing thing: the model is fine.
     expect(busy429.body.assistant_text).toContain('Nothing is wrong with your model');
     expect(unavailable503.body.assistant_text).toContain('Nothing is wrong with your model');
+
+    // ⚠ ADDED after a SURVIVING MUTANT (fast-follow): reverting "shortly" to "in
+    // a few seconds" left every assertion here green, so the copy fix was
+    // unguarded. Pinned as a CLAIM, not as prose — the 503 arm must not promise a
+    // seconds-scale window, because PLoT's breaker cooldown defaults to **30s**
+    // (`circuitBreaker.ts:39`, derived at `a5345a5e`). Any honest wording passes;
+    // only the over-promise fails. The 429 twin keeps the phrase and is asserted
+    // to keep it, so this is a DISCRIMINATION between the two arms rather than a
+    // blanket ban on the words.
+    expect(unavailable503.body.assistant_text).not.toContain('few seconds');
+    expect(busy429.body.assistant_text).toContain('few seconds');
     // Both offer a retry — the DISPOSITION is shared, only the cause differs.
     expect(unavailable503.chip_type).toBe('action');
     expect(busy429.chip_type).toBe('action');
