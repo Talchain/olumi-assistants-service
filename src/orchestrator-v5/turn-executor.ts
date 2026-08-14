@@ -365,6 +365,7 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
+import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import {
   pickLatestFlipClaimPosture,
   pickLatestFlipSummary,
@@ -11068,6 +11069,68 @@ export async function runTurnExecutor(
   }
 
   /**
+   * F6 — THE DEFAULTED-VALUE EGRESS INVARIANT. The FOURTH finaliser guard, and
+   * deliberately the LAST to run.
+   *
+   * ⭐ WHY IT MUST BE LAST. The three guards above all perform WHOLE-TEXT
+   * SUBSTITUTION — they can replace the answer with a leader-free rewrite, a
+   * neutral fallback, or a structural decline. A disclosure appended before any
+   * of them would simply be thrown away by the substitution, silently, with the
+   * telemetry still reporting that it had been added. Running last means this
+   * layer qualifies the text that actually ships.
+   *
+   * ⭐ WHY IT IS SAFE TO RUN AFTER THE FORBIDDEN-PHRASE GUARD, which is the
+   * ordering question that matters. That guard's own substitution constants
+   * make no analysis claim and carry no probability figure, so
+   * `isAnalysisBearing` returns false for them and this layer stands down by
+   * construction rather than by special-casing. The sentence this layer can add
+   * is a single reviewed constant built by the one owner of those words, so it
+   * cannot reintroduce a forbidden phrase or a leader claim.
+   *
+   * ⚠ IT READS THE SIGNAL OFF `context.prior_facts`, NOT off a threaded
+   * parameter, and that is the point. Whether the numbers rest on defaulted
+   * inputs is a property OF THE ANALYSIS, not of this turn — so every exit
+   * inherits the rule without a parallel argument on 44 return sites, and a
+   * dispatch path added tomorrow is covered the day it is written. A threaded
+   * parameter is exactly how the disclosure reached two composers and not the
+   * generic router in the first place.
+   */
+  function enforceDefaultedValueDisclosureGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+
+    const defaulted = pickLatestDefaultedAssumptions(context.prior_facts);
+    if (defaulted === null) return;
+
+    const applied = applyDefaultedValueEgress(assistantText, defaulted);
+    if (!applied.changed) return;
+
+    emit(TelemetryEvents.V5DefaultedValueEgressApplied, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      dispatch_path: dispatchPath,
+      defaulted_count: defaulted.count,
+      disclosure_added: applied.disclosureAdded,
+      suppressed_count: applied.suppressed.length,
+      duplicates_removed: applied.duplicatesRemoved,
+    });
+
+    response = {
+      ...response,
+      assistant_text: applied.text,
+    };
+    // Same classification-carry as the forbidden-phrase guard: this layer
+    // QUALIFIES an answer rather than replacing it, so a turn that was
+    // functional stays functional and a substantive answer stays substantive.
+    if (functionalAnswerText === assistantText) {
+      functionalAnswerText = applied.text;
+    }
+  }
+
+  /**
    * ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD finaliser-level guard.
    *
    * ═══════════════════════════════════════════════════════════════════════════
@@ -11474,6 +11537,11 @@ export async function runTurnExecutor(
     // claim with no committed mutation. Commit-anchored, precision-first, not
     // flag-gated. See `enforceStructuralSuccessClaimGuard`.
     enforceStructuralSuccessClaimGuard('turn_executor_finalise');
+    // F6 — LAST, after every whole-text substitution above, so the disclosure
+    // qualifies the text that actually ships rather than one a later guard
+    // discards. See `enforceDefaultedValueDisclosureGuard` for the ordering
+    // argument and for why it reads `context.prior_facts` directly.
+    enforceDefaultedValueDisclosureGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and

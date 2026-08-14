@@ -2192,6 +2192,27 @@ export const TelemetryEvents = {
   // user retains a recovery affordance.
   V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
 
+  // F6 — the defaulted-value egress invariant fired on an analysis-bearing
+  // conversational answer over a run whose engine reported defaulted values.
+  // Payload: { request_id, scenario_id, dispatch_path, defaulted_count,
+  //            disclosure_added, suppressed_count, duplicates_removed }.
+  //
+  // ⭐ WHAT THIS IS FOR, AND WHY IT IS NOT AN ALARM. The deterministic
+  // composers already emit the disclosure themselves, so a healthy turn on a
+  // defaulted run reports `disclosure_added: false` — this layer found the
+  // sentence already there and appended nothing. A rising
+  // `disclosure_added: true` rate is therefore NOT an error rate: it measures
+  // how much traffic is reaching the user through the GENERIC ROUTER, i.e.
+  // through the path the deterministic composers never see. That is the number
+  // worth watching, because it is the one that was silently 100% of the harm
+  // while the whole disclosure machinery sat dark.
+  //
+  // `suppressed_count > 0` is the sharper signal: an answer asserted stability
+  // over defaulted inputs and this layer stood it down. On the deterministic
+  // paths that should be structurally impossible (the axis is collapsed
+  // upstream), so a non-zero count there means a composer regressed.
+  V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
+
   // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
   // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
   // so any new PLoT field is covered automatically. Payload:
