@@ -280,6 +280,25 @@ export type DispatchChipClickRunAnalysisResult =
       readonly retryable: boolean;
       readonly analysisReady?: undefined;
       readonly graph: GraphV3T | null;
+      /**
+       * P0 (analysis-500 diagnosis §8 FIX B, 2026-08-14) — THE DIAGNOSTIC THE
+       * WIRE USED TO DISCARD.
+       *
+       * The handler assembles PLoT's status and critique codes into
+       * `HandlerInvocationFailedError.details`; `route-v2.ts:2533` then built the
+       * 500's `preStageExtras` from `{ cause_kind, action_type }` alone and
+       * dropped the rest. Consequence, measured: the three banked 500 bodies were
+       * byte-identical at 1126 B, two entirely different PLoT dispositions
+       * produced the same bytes, and **naming the trigger required Render log
+       * access** (DIAGNOSIS §3, §7.1). This field closes that: the next
+       * occurrence is diagnosable from the response body.
+       *
+       * ALLOWLISTED, not the whole `details` object — see
+       * `WIRE_SAFE_FAILURE_DETAIL_KEYS`. `details` also carries PLoT-authored
+       * prose that interpolates the user's own option labels, and an error body
+       * is a channel that reaches logs and clients.
+       */
+      readonly diagnostics?: Readonly<Record<string, unknown>>;
     }
   | {
       // V5 C5 — recoverable handler cause (RECOVERABLE_HANDLER_CAUSES, e.g.
@@ -328,6 +347,87 @@ export type DispatchChipClickRunAnalysisResult =
       readonly analysisReady?: undefined;
       readonly graph: GraphV3T | null;
     };
+
+/**
+ * P0 (analysis-500 diagnosis §8 FIX B, 2026-08-14) — the keys of
+ * `HandlerFailureDetails` that may travel on a wire error body.
+ *
+ * ⚠⚠ AN ALLOWLIST, NEVER A DENYLIST, AND THE DIRECTION IS THE SAFETY PROPERTY.
+ * `HandlerFailureDetails` has an index signature (`handler-errors.ts:93`), so any
+ * handler can add any key at any time. A denylist would silently pass each new
+ * one; this allowlist silently drops it. Dropping a useful diagnostic is a
+ * nuisance; publishing user content into an error channel is a defect.
+ *
+ * WHAT IS DELIBERATELY EXCLUDED, and why each one:
+ *   - `plot_status_reason`, `plot_user_message` — PLoT-AUTHORED PROSE. The
+ *     `run-analysis` composer already documents that `plot_user_message` "must
+ *     never be rendered" because no prose-safety gate exists on that path; an
+ *     error body is no safer than a rendered one.
+ *   - `first_option_label`, `missing_item_label`, `specific_issue`, `next_step` —
+ *     USER CONTENT verbatim or near-verbatim. PLoT's own blocker messages
+ *     interpolate option labels (`Option 'Hire two seniors' does not specify …`,
+ *     `preflight-v2.ts:191`), which is exactly how a person's business plan ends
+ *     up in a log aggregator.
+ *   - `scenario_id` — an identifier the caller already holds; no diagnostic gain.
+ *
+ * Everything admitted is machine-readable and bounded: enum-shaped codes,
+ * numeric statuses, booleans, and timing integers. `plot_critique_codes` is
+ * additionally shape-filtered at read time, because it is an array whose element
+ * shape is PLoT's to change.
+ */
+const WIRE_SAFE_FAILURE_DETAIL_KEYS: readonly string[] = [
+  'handler_id',
+  'downstream_http_status',
+  'downstream_http_status_parsed',
+  'plot_error_code',
+  'plot_primary_code',
+  'plot_critique_codes',
+  'plot_analysis_status',
+  'plot_blocker_code_known',
+  'plot_preflight_recovery',
+  'analysis_status',
+  'reason_code',
+  'plot_request_ms',
+  'handler_total_ms',
+  'plot_slow_likely',
+];
+
+/** Enum-shaped token — the only string shape a code field may carry. */
+const WIRE_SAFE_CODE_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
+/**
+ * Project the allowlisted, shape-checked subset of a handler failure's details
+ * for the wire.
+ *
+ * String values must be enum-shaped: a `plot_primary_code` that arrived as a
+ * sentence is dropped rather than truncated, because a truncated sentence on an
+ * error body still leaks and additionally reads as a code. Returns `undefined`
+ * when nothing survived, so the response body gains no empty object.
+ */
+function pickWireSafeFailureDetails(
+  details: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const key of WIRE_SAFE_FAILURE_DETAIL_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(details, key)) continue;
+    const value = details[key];
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = value;
+      continue;
+    }
+    if (typeof value === 'string' && WIRE_SAFE_CODE_RE.test(value)) {
+      out[key] = value;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const codes = value.filter(
+        (v): v is string => typeof v === 'string' && WIRE_SAFE_CODE_RE.test(v),
+      );
+      if (codes.length > 0) out[key] = codes;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /**
  * V5 C5 — chip-click recoverable-cause escape repair.
@@ -751,6 +851,8 @@ export async function dispatchChipClickRunAnalysis(
           causeKind: err.cause_kind,
           retryable: err.retryable,
           graph: snapshotGraph,
+          // P0 FIX B — carry the diagnostic the wire used to discard.
+          diagnostics: pickWireSafeFailureDetails(err.details),
         };
       }
       if (err instanceof HandlerResultInvalidError) {

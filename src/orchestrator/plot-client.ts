@@ -141,6 +141,31 @@ export class PLoTError extends Error {
    */
   v2RunError?: V2RunError;
 
+  /**
+   * P0 (analysis-500 diagnosis §3, 2026-08-14) — the BOUNDED failure code from a
+   * non-2xx PLoT response, so a fatal or recoverable classification downstream is
+   * ATTRIBUTABLE to a specific PLoT disposition.
+   *
+   * ⚠ THIS EXISTS BECAUSE ITS ABSENCE COST A WHOLE DIAGNOSIS. Two distinct PLoT
+   * 503s — `ANALYSIS_ENGINE_ADMISSION_UNAVAILABLE` (`compute-admission.ts:798`,
+   * a typed blocked body) and `BREAKER_OPEN` (`errors.ts:100`, an `error.v1`
+   * envelope) — reached CEE byte-identically, because the non-422 branch below
+   * read only `message` and `retryable`. DIAGNOSIS §7.1 could not name which one
+   * fired, and that is the single reason the trigger is still unsettled.
+   *
+   * `v2RunError` is deliberately NOT set here: attaching a typed envelope to a
+   * non-422 status would change what `isTypedFailedEnvelope` sees in
+   * `run-analysis.ts`, i.e. a classification change smuggled in as an
+   * observability one. The code alone is carried, and only the code.
+   *
+   * SHAPE-GUARDED (`PLOT_ERROR_CODE_RE`) so this channel can only ever carry an
+   * enum-shaped token. It flows into wire error bodies and log fields, and PLoT
+   * critique MESSAGES interpolate user content (option labels — e.g. `Option
+   * 'Hire two seniors' …`), so a channel that accepted free prose here would be
+   * a user-content leak into error telemetry.
+   */
+  downstreamErrorCode?: string;
+
   constructor(
     message: string,
     public readonly status: number,
@@ -215,6 +240,38 @@ export interface V2RunError {
  * surface honest, code-keyed copy. Returns null for anything else — bodies
  * with no analysis_status keep the PLOT_RESPONSE_MALFORMED classification.
  */
+/**
+ * P0 (analysis-500 diagnosis §3) — the ONLY shape this channel admits.
+ *
+ * An enum-shaped SCREAMING_SNAKE token, length-capped. Anything else is
+ * discarded rather than truncated: a partially-matched prose fragment on an
+ * error channel is worse than no value, because it reads as a code.
+ */
+const PLOT_ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+/**
+ * Read PLoT's bounded failure code from a non-2xx body, from either carrier —
+ * the `error.v1` top-level `code`, or the first critique's `code` when PLoT sent
+ * a typed blocked body with a non-422 status (the admission-503 shape).
+ *
+ * Returns `null` for every shape that is not an enum-shaped token, INCLUDING a
+ * long or lower-case string. This function is the prose-leak gate for the
+ * `downstreamErrorCode` channel — see the field's JSDoc for why that matters.
+ */
+function readBoundedPlotErrorCode(raw: unknown): string | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const rec = raw as Record<string, unknown>;
+  const direct = rec.code;
+  if (typeof direct === 'string' && PLOT_ERROR_CODE_RE.test(direct)) return direct;
+  const critiques = Array.isArray(rec.critiques) ? rec.critiques : [];
+  for (const critique of critiques) {
+    if (critique === null || typeof critique !== 'object') continue;
+    const code = (critique as Record<string, unknown>).code;
+    if (typeof code === 'string' && PLOT_ERROR_CODE_RE.test(code)) return code;
+  }
+  return null;
+}
+
 function extractTypedFailureEnvelope(raw: unknown): V2RunError | null {
   if (raw === null || typeof raw !== 'object') return null;
   const rec = raw as Record<string, unknown>;
@@ -869,13 +926,28 @@ class PLoTClientImpl implements PLoTClient {
       const body = await this.safeJson(response);
       const errV1 = body as { message?: string; retryable?: boolean } | null;
       const errMsg = errV1?.message ?? `PLoT run returned ${response.status}`;
+      // P0 (analysis-500 diagnosis §3) — carry the bounded failure code. Two
+      // carriers exist and BOTH are real, derived at PLoT `a5345a5e`:
+      //   - `error.v1` top-level `code` (`errors.ts:52`) — e.g. `BREAKER_OPEN`;
+      //   - a `buildBlockedResponse` sent with a NON-422 status, whose code
+      //     lives on the first critique (`run.ts:6061` +
+      //     `compute-admission.ts:719`) — `ANALYSIS_ENGINE_ADMISSION_UNAVAILABLE`.
+      // Reading only the first would have left exactly one of the two 503
+      // dispositions unnameable, which is the defect being fixed.
+      const downstreamErrorCode = readBoundedPlotErrorCode(body);
 
       log.error(
-        { status: response.status, elapsed_ms: elapsedMs, request_id: requestId },
+        {
+          status: response.status,
+          elapsed_ms: elapsedMs,
+          request_id: requestId,
+          ...(downstreamErrorCode !== null ? { plot_error_code: downstreamErrorCode } : {}),
+        },
         "PLoT run failed",
       );
 
       const plotErr = new PLoTError(errMsg, response.status, 'run', elapsedMs, requestId);
+      if (downstreamErrorCode !== null) plotErr.downstreamErrorCode = downstreamErrorCode;
       // Override recoverable based on retryable field from error.v1 envelope when available
       if (typeof errV1?.retryable === 'boolean') {
         const orchErr = plotErr.toOrchestratorError();
