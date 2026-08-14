@@ -580,9 +580,22 @@ function buildInterventionsFromV4Data(
     // already in scope. Passing it asks the predicate about the magnitude the
     // encoding denotes (`level × cap`) rather than about the lever level, and
     // the de-normalisation itself delegates to the estate's shared inverse —
-    // see `denormalisedMagnitude`. The direction of the change is still
-    // one-way: it can only ever restore a claim the model already made about
-    // a magnitude the user really did state.
+    // see `denormalisedMagnitude`.
+    //
+    // ⚠ WHAT THIS PREDICATE ACTUALLY GUARANTEES (corrected at the review of
+    // #944; the previous sentence here claimed it "can only ever restore a
+    // claim about a magnitude the user really did state", which is STRONGER
+    // THAN THE CODE). The scan is over the WHOLE brief and is not bound to the
+    // factor the intervention targets. So a model-INVENTED level earns
+    // `brief_extraction` / high whenever its de-normalised magnitude appears
+    // ANYWHERE in the brief: measured, level 0.5 on a `{0.4, 40}` factor is
+    // stamped "stated" against the sentence "we serve 50 customers", which is
+    // about a different quantity entirely. UNIT-KIND COMPATIBILITY GUARDS THIS
+    // (a currency level needs a currency statement in the same currency, a
+    // percent needs a percent); FACTOR-LABEL BINDING DOES NOT EXIST. This is
+    // #873's pre-existing design, widened by necessity when the frame path
+    // made the predicate able to fire at all on capless factors. The residual
+    // is rowed separately — it is NOT closed here.
     // ⚠ F2 (Codex, 2026-08-13) — THE CAP IS ONLY ONE OF THREE DENOMINATORS, AND
     // PASSING IT ALONE MADE THE PRODUCT CALL THE USER'S OWN NUMBER "INFERRED".
     //

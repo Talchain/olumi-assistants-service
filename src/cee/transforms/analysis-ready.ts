@@ -313,22 +313,33 @@ function buildInterventionDetail(
   const unit = os?.unit;
   const factorType = factorNode?.factor_type ?? os?.factor_type;
 
-  // The magnitude THIS option's level denotes, or null when the record settles
-  // no denominator (zero baseline, no `raw_value`, no `observed_state`). Null
-  // means the receipt omits `raw_value` rather than borrowing the factor's —
-  // visible absence over confident wrongness.
-  const ownRawValue = magnitudeUnderScale(
-    normalisedValue,
-    unit,
-    resolveMagnitudeScale(os),
-  );
-
   // Is this option sitting AT the factor's observed state? Only then does a
   // factor-scoped display string ("£200k") truthfully describe the option's
   // intervention. This is what keeps the baseline/status-quo option rendering
   // exactly as before while a genuinely different lever stops borrowing it.
   const sitsAtObservedState =
     typeof os?.value === "number" && os.value === normalisedValue;
+
+  // The magnitude THIS option's level denotes, or null when the record settles
+  // no denominator (zero baseline, no `raw_value`, no `observed_state`). Null
+  // means the receipt omits `raw_value` rather than borrowing the factor's —
+  // visible absence over confident wrongness.
+  //
+  // ⚠ FLOAT DIRT AT THE BASELINE (review of #944). The frame is RECOVERED as
+  // `raw / value`, so re-deriving the baseline as `value × (raw / value)` is a
+  // round-trip through binary floating point and does NOT always return the
+  // input: a factor observed at 29 with frame 100 yields
+  // `raw_value: 28.999999999999996` where the pre-fix receipt carried an exact
+  // 29. It fails for ~2.3% of producer-domain pairs and lands precisely on the
+  // STATUS-QUO option, i.e. the one case where the honest answer is already
+  // recorded verbatim. So where this option sits at the observed state, the
+  // recorded `raw_value` is returned DIRECTLY — no arithmetic to be dirty.
+  // (The pre-existing `{0.5, 5}` fixtures round-trip exactly, which is why the
+  // first version of this suite could not see it — trap 22, again.)
+  const ownRawValue =
+    sitsAtObservedState && typeof os?.raw_value === "number"
+      ? os.raw_value
+      : magnitudeUnderScale(normalisedValue, unit, resolveMagnitudeScale(os));
 
   const ownFields = {
     normalised_value: normalisedValue,

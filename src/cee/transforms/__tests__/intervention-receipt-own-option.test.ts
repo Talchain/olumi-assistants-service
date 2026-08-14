@@ -161,6 +161,37 @@ describe("F3 — a factor-scoped display string is only used where it is TRUE", 
     expect(detailOf(payload, "opt_status_quo").raw_value).toBe(40);
   });
 
+  it("returns the baseline's RECORDED raw_value exactly — no float dirt from the frame round-trip", () => {
+    // ⚠ REGRESSION FOUND AT REVIEW. The frame is recovered as `raw / value`, so
+    // re-deriving the baseline as `value × (raw / value)` round-trips through
+    // binary floating point. Proven in isolation: for `{0.29, 29}` the frame
+    // recovers as EXACTLY 100, and 0.29 × 100 === 28.999999999999996 !== 29.
+    // The pre-fix receipt carried an exact 29, so the first version of this fix
+    // made the status-quo option's receipt WORSE — and only there, which is the
+    // one place the honest answer is already recorded verbatim.
+    //
+    // The pre-existing `{0.5, 5}` fixtures round-trip exactly, which is why
+    // neither the old corpus nor the first version of THIS suite could see it
+    // (trap 22 — a corpus that omits the value class cannot certify the code
+    // over that class).
+    const factor = makeFactor("fac_support_headcount", "Support headcount", {
+      observed_state: { value: 0.29, raw_value: 29, unit: "people" },
+    });
+    const payload = buildAnalysisReadyPayload(
+      [makeOption("opt_status_quo", "Keep as is", "fac_support_headcount", 0.29)],
+      "goal_1",
+      makeGraph([factor]),
+    );
+
+    const detail = detailOf(payload, "opt_status_quo");
+    // PRECONDITION PINNED IN-TEST: the naive derivation really is dirty here,
+    // so a green result is the short-circuit's doing and not a lucky fixture.
+    expect(0.29 * (29 / 0.29)).not.toBe(29);
+
+    expect(detail.raw_value).toBe(29);
+    expect(detail.display_value).toBe("29 people");
+  });
+
   it("keeps a per-INTERVENTION display_value verbatim — it is already the option's own", () => {
     const factor = makeFactor("fac_support_headcount", "Support headcount", {
       observed_state: FRAMED_HEADCOUNT,
@@ -196,6 +227,31 @@ describe("F3 — where the scale is unrecoverable the receipt OMITS rather than 
   it("omits raw_value when the factor records no observed_state at all", () => {
     const payload = threeOptionsOnOneFactor({});
     expect(detailOf(payload, "opt_plan_a").raw_value).toBeUndefined();
+  });
+
+  it("PINS THE CONTRACT: a scale-less factor's display_value is NOT lent to an option elsewhere", () => {
+    // The deliberate behaviour change of this PR, pinned so a later tidy-up
+    // cannot move it unobserved. A factor carrying `display_value: "Tier 2"`
+    // and NO `observed_state` gives an option at level 0.8 a display of "0.8"
+    // and no `raw_value` — where the pre-fix receipt said "Tier 2".
+    //
+    // Correct by the spec: "Tier 2" describes the factor's own state, nothing
+    // records what level it sits at, so there is no evidence this option is at
+    // it. Degrading to the option's own level is the honest answer; borrowing
+    // a categorical label the option may not be in is the wrong one. Recorded
+    // as a CONTRACT, not as an accident.
+    const factor = makeFactor("fac_tier", "Support tier", { display_value: "Tier 2" });
+    const payload = buildAnalysisReadyPayload(
+      [makeOption("opt_plan_a", "Plan A", "fac_tier", 0.8)],
+      "goal_1",
+      makeGraph([factor]),
+    );
+
+    const detail = detailOf(payload, "opt_plan_a", "fac_tier");
+    expect(detail.display_value).toBe("0.8");
+    expect(detail.display_value).not.toBe("Tier 2");
+    expect(detail.raw_value).toBeUndefined();
+    expect(detail.normalised_value).toBe(0.8);
   });
 
   it("REGRESSION GUARD: the qualitative-band fallback still fires (it is the option's own level, not a borrow)", () => {
