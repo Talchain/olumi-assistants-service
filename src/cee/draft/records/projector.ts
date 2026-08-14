@@ -293,6 +293,31 @@ export interface DroppedRecordRef {
    * reconstructing from a string.
    */
   readonly node_id?: string;
+  /**
+   * ⭐⭐ THE MAGNITUDE THE USER STATED, CARRIED THROUGH THE WITHDRAWAL THAT
+   * REMOVES ITS NODE — present only on `unconnected_to_goal`, only for a record
+   * whose `provenance_class` is `stated`, and only when the projector holds a
+   * finite number for it.
+   *
+   * WHY. The disclosure already carried the user's WORDS (`label` is their
+   * verbatim quote) and threw away their NUMBER. So "you told me this and it is
+   * not in your model" reached the wire without the one thing that makes the
+   * sentence worth reading, and every downstream surface would have had to
+   * re-parse the quote to recover it. Measured on the banked live emission: 12
+   * of 12 stated magnitudes were destroyed exactly here.
+   *
+   * ⚠ IT IS THE STATED MAGNITUDE (`data.raw_value`), NEVER THE NORMALISED LEVEL
+   * (`data.value`). The level is frame-relative — £7.2m is carried as `0.72` on
+   * a £10m frame — and a disclosure emitting `0.72` would be a NEW fabrication:
+   * a number the user never wrote, attributed to them, on the one channel whose
+   * entire job is telling them the truth about what was lost.
+   *
+   * ABSENT rather than `undefined` when there is no stated magnitude, so every
+   * other disclosure this projector emits is byte-identical to before.
+   */
+  readonly value?: number;
+  /** The unit the user stated, alongside `value`. Same conditions, same source. */
+  readonly unit?: string;
   readonly reason:
     | "unparseable_ref"
     | "ref_out_of_range"
@@ -914,6 +939,68 @@ export function nextNiceNumberAbove(x: number): number {
  * exactly as it does today, so a refusal is never a regression — only a
  * withheld improvement, which is the correct direction for an ambiguous case.
  */
+/**
+ * The magnitude a STATED record carries, for the connectivity disclosure.
+ *
+ * ── THE SOURCE IS THE CARRIER THIS PROJECTOR DECLARES AS "THE USER'S OWN
+ *    MAGNITUDE", NEVER THE ONE THAT HAPPENS TO HOLD IT TODAY (trap 13d) ─────
+ * The obvious read — `data.value` — is right at this instant and wrong as a
+ * SPEC. At the moment the prune runs, the frame pass has not executed, so
+ * `data.value` still holds the user's number; twenty lines later it becomes a
+ * FRAME-RELATIVE LEVEL (`{value: baseline / frame, raw_value: baseline}`), and a
+ * disclosure sourced from it would begin quietly reporting `0.72` for £7.2m the
+ * day anyone reorders the passes. So this reads the carriers whose CONTRACT is
+ * "the raw user magnitude, KEPT, never overwritten with the level":
+ *
+ *   figure  → `observed_state.raw_value`          (set to `item.value` at mint)
+ *   constraint → `observed_state.metadata.original_value`  (named for this job)
+ *
+ * The unit follows the same rule and the same split — the projector's own note
+ * says "Unit lives on `data`, never here" for factors, while a constraint's unit
+ * rides `observed_state.metadata` because `FactorObservedState` refuses a
+ * `metadata` key.
+ *
+ * Returns an EMPTY OBJECT when there is nothing the user stated, so the spread
+ * at the call site adds no keys and every other disclosure stays byte-identical.
+ * A non-finite number is treated as absent rather than emitted as `null`/`NaN`:
+ * a disclosure is a sentence shown to a person, and "you told us NaN" is worse
+ * than saying nothing.
+ *
+ * ⚠ EXPORTED FOR ONE REASON, AND IT IS NOT CONVENIENCE. The `provenance_class`
+ * guard is **currently unobservable through `projectRecordsToGraph`**: no
+ * non-stated node holds `observed_state.raw_value` at the moment the prune runs
+ * (a claim factor gets `{value}` only, and the frame pass that writes `raw_value`
+ * executes AFTERWARDS), so a mutant deleting the guard survives every end-to-end
+ * fixture. Measured, not assumed — the mutant kit found this by surviving.
+ *
+ * That makes the guard a defence that becomes load-bearing the instant the pass
+ * order changes, and an unobservable guard is one a tidy-up deletes without a red
+ * anywhere (trap 13b). So it is exercised DIRECTLY instead of being asserted
+ * equivalent: `stated-magnitude-survives-withdrawal.test.ts` hands it a
+ * model-derived node carrying a magnitude and pins that it discloses nothing.
+ */
+export function statedMagnitudeOf(node: ProjectedNode): { value?: number; unit?: string } {
+  if (node.provenance?.provenance_class !== "stated") return {};
+
+  const observed = node.observed_state as
+    | { raw_value?: unknown; metadata?: { original_value?: unknown; unit?: unknown } }
+    | null
+    | undefined;
+  const data = node.data as { unit?: unknown } | null | undefined;
+
+  const candidates = [observed?.raw_value, observed?.metadata?.original_value];
+  const raw = candidates.find((c) => typeof c === "number" && Number.isFinite(c));
+  if (typeof raw !== "number") return {};
+
+  const unit = [data?.unit, observed?.metadata?.unit].find(
+    (u) => typeof u === "string" && u.length > 0,
+  );
+  return {
+    value: raw,
+    ...(typeof unit === "string" ? { unit } : {}),
+  };
+}
+
 export function goalValueIsATarget(role: DraftRecordRole | undefined): boolean {
   return role === undefined || role === "target";
 }
@@ -1716,6 +1803,9 @@ function projectOnce(
           label: node.label,
           node_id: node.id,
           reason: "unconnected_to_goal",
+          // The user's own number survives the withdrawal of its node. See the
+          // contract note on `DroppedRecordRef.value`.
+          ...statedMagnitudeOf(node),
         });
         delete provenance[node.id];
       }

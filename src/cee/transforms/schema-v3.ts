@@ -1276,7 +1276,14 @@ export function transformResponseToV3(
   const v1RecordDisclosures = (v1Response as { record_disclosures?: unknown }).record_disclosures;
   if (Array.isArray(v1RecordDisclosures) && v1RecordDisclosures.length > 0) {
     const finalNodeIds = new Set(v3Graph.nodes.map((n) => n.id));
-    const emitted: Array<{ reason: string; label: string; withdrawn: boolean; node_id?: string }> = [];
+    const emitted: Array<{
+      reason: string;
+      label: string;
+      withdrawn: boolean;
+      node_id?: string;
+      value?: number;
+      unit?: string;
+    }> = [];
     let omitted = 0;
     for (const raw of v1RecordDisclosures) {
       // ⚠ A NON-OBJECT ENTRY IS COUNTED, NOT THROWN — and this line exists because
@@ -1289,7 +1296,14 @@ export function transformResponseToV3(
         omitted += 1;
         continue;
       }
-      const d = raw as { reason?: unknown; label?: unknown; node_id?: unknown; duplicate_of?: unknown };
+      const d = raw as {
+        reason?: unknown;
+        label?: unknown;
+        node_id?: unknown;
+        duplicate_of?: unknown;
+        value?: unknown;
+        unit?: unknown;
+      };
       // The ONLY other rejection: a record that cannot be rendered at all. It is
       // COUNTED, never silently swallowed — a channel that quietly loses part of
       // its payload reads exactly like one that had nothing to say.
@@ -1305,11 +1319,23 @@ export function transformResponseToV3(
           : survivorId && finalNodeIds.has(survivorId)
             ? survivorId
             : undefined;
+      // ⭐ THE USER'S OWN MAGNITUDE RIDES THE DISCLOSURE, WHEN THE PROJECTOR HELD
+      // ONE. Without it, "you told me this and it is not in your model" reaches
+      // the wire carrying the user's words and not their number — and the number
+      // is the reason the sentence is worth reading. Guarded rather than spread
+      // so a malformed producer cannot smuggle a non-numeric value onto a channel
+      // whose entire purpose is telling the truth about what was lost; an absent
+      // magnitude stays an ABSENT KEY, so every disclosure that had none before is
+      // byte-identical.
+      const statedValue = typeof d.value === "number" && Number.isFinite(d.value) ? d.value : undefined;
+      const statedUnit = typeof d.unit === "string" && d.unit.length > 0 ? d.unit : undefined;
       emitted.push({
         reason: d.reason,
         label: d.label,
         withdrawn: anchorId === undefined,
         ...(anchorId ? { node_id: anchorId } : {}),
+        ...(statedValue !== undefined ? { value: statedValue } : {}),
+        ...(statedUnit !== undefined ? { unit: statedUnit } : {}),
       });
     }
     if (emitted.length > 0) {

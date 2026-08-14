@@ -598,11 +598,21 @@ describe("assertSeamCarriesEveryGrammarField — derived, and it did not exist b
 describe("fixed-input replay — the banked live emission is unharmed", () => {
   it("still replays, and still loses its stated figures to M1a (scope, stated honestly)", async () => {
     // ⚠ This assertion is a FACT ABOUT THE REMAINING DEFECT, deliberately pinned
-    // so the scope of this lane cannot be misread as "money carriage is fixed".
+    // so the scope of that lane could not be misread as "money carriage is fixed".
     // M1a — the connectivity prune — is untouched, and 12 of 12 stated values in
     // this real emission are still withdrawn with it. If a later lane exempts
     // stated figures from the prune, THIS TEST MUST GO RED and be rewritten,
     // which is the point: the gap is visible in the suite rather than invisible.
+    //
+    // ⭐ UPDATED 14 Aug, and the pin is deliberately KEPT AS IT STANDS. The M1a
+    // lane did NOT exempt these records — it measured that an exemption fails
+    // (the sweep re-prunes 11 of 12 silently; see
+    // `m1a-frombrief-lane-2026-08-14/01-M1a-SHAPE-PROBE-lane-G-premise-REFUTED.md`)
+    // and instead made the withdrawal carry the user's MAGNITUDE, so the number
+    // survives on the disclosure that reports its node's absence. The withdrawal
+    // is therefore still real and this assertion is still true; what changed is
+    // that it is no longer silent. `stated-magnitude-survives-withdrawal.test.ts`
+    // pins the other half.
     const result = await replayRecordSet(loadBankedEmission(), { brief: undefined });
     expect(result.ok).toBe(true);
     if (!result.ok) return;

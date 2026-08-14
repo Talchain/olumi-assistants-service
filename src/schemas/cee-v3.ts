@@ -643,6 +643,23 @@ export const CEEGraphResponseV3 = z.object({
         withdrawn: z.boolean(),
         /** The projector's minted id. Resolvable in `nodes[]` only when `withdrawn` is false. */
         node_id: z.string().optional(),
+        /**
+         * ⭐ THE MAGNITUDE THE USER STATED, when the withdrawn record carried one.
+         *
+         * Present on `unconnected_to_goal` disclosures about STATED records — the
+         * class this channel exists for. Measured on the banked live emission: 12
+         * of 12 stated magnitudes were destroyed by the withdrawal that produced
+         * these very disclosures, so the notice reached the wire with the user's
+         * words and without their number.
+         *
+         * ⚠ IT IS THE STATED MAGNITUDE, NEVER A NORMALISED LEVEL. £7.2m is
+         * disclosed as `7200000`, not as the `0.72` the graph computes on. A
+         * consumer may render it verbatim beside `label` (which is the user's own
+         * quote) without rescaling anything.
+         */
+        value: z.number().optional(),
+        /** The unit the user stated, alongside `value` (e.g. `"£"`, `"%"`). */
+        unit: z.string().optional(),
       }),
     )
     .optional(),
