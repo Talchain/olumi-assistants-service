@@ -123,6 +123,39 @@ function recoveredOlumiResponse() {
   };
 }
 
+/**
+ * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — the typed refusal the dispatcher
+ * now returns on `handler_recovered`. Shaped exactly as
+ * `buildAnalysisRefusalReadiness` builds it.
+ */
+function blockedReadiness(blockedReason: string) {
+  return {
+    // PRESENT-but-empty: both keys are REQUIRED at the boundary, and carrying
+    // real option rows on a refusal was measured flipping the deployed
+    // DecisionOverviewCard into a false "needs_input" state. See
+    // `buildAnalysisRefusalReadiness`.
+    options: [] as unknown[],
+    goal_node_id: '',
+    status: 'blocked' as const,
+    blocked_reason: blockedReason,
+  };
+}
+
+/** ROADMAP 2.1085 (root 2.1041) D2 — the derivation the dispatcher now returns alongside it. */
+function staleFreshness() {
+  return {
+    // R2/R3: a refusal turn may only report `stale` or `unknown`. The
+    // dispatcher clamps before returning; this mock reflects the clamped
+    // shape the route actually receives.
+    freshness: 'stale' as const,
+    reason: 'graph_hash_mismatch',
+    selected_fact_index: 0,
+    graph_hash_at_run: 'aaaa111122223333',
+    current_graph_hash: 'bbbb444455556666',
+    computed_at: '2026-08-13T19:07:44.000Z',
+  };
+}
+
 function chipPayload(turnId: string) {
   return {
     kind: 'message' as const,
@@ -162,6 +195,8 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
       response: recoveredOlumiResponse(),
       commitPerformed: false,
       causeKind: 'options_not_configured',
+      analysisReady: blockedReadiness('options_not_configured'),
+      freshness: staleFreshness(),
       graph: null,
     });
 
@@ -178,6 +213,80 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
     const parsed = JSON.parse(body) as { assistant_text?: string; suggested_actions?: unknown[] };
     expect(parsed.assistant_text && parsed.assistant_text.length).toBeGreaterThan(0);
     expect(Array.isArray(parsed.suggested_actions) && parsed.suggested_actions!.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — THE WIRE-LEVEL PIN.
+   *
+   * The witnessed defect was a MISSING TOP-LEVEL KEY on the HTTP body, not a
+   * missing field on a dispatch result. The dispatcher-level suite
+   * (`chip-click-dispatch-blocked-readiness.test.ts`) proves the payload is
+   * produced; only this test proves it survives route-v2's outcome mapping
+   * and the finaliser and reaches the bytes a consumer parses.
+   *
+   * ⚠ `analysis_ready` is a TOP-LEVEL RESPONSE KEY. `analysis_result` is a
+   * BLOCK TYPE. They are different levels and this test asserts the former.
+   */
+  it('handler_recovered → the wire body carries a TYPED analysis_ready with a specific blocked_reason (EXT-2)', async () => {
+    dispatchChipClickRunAnalysisSpy.mockResolvedValueOnce({
+      outcome: 'handler_recovered' as const,
+      response: recoveredOlumiResponse(),
+      commitPerformed: false,
+      causeKind: 'analysis_not_ready',
+      analysisReady: blockedReadiness('mixed_scale_unresolved'),
+      freshness: staleFreshness(),
+      graph: null,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: chipPayload('44444444-4444-4444-8444-444444444444'),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(res.body) as Record<string, unknown>;
+
+    // The witnessed failure was the absence of this key entirely.
+    expect(Object.keys(parsed)).toContain('analysis_ready');
+    const ar = parsed.analysis_ready as {
+      status?: string;
+      blocked_reason?: string;
+      options?: unknown[];
+      goal_node_id?: string;
+      computed_at?: string;
+      freshness?: string;
+      freshness_reason?: string;
+      graph_hash_at_run?: string;
+      current_graph_hash?: string;
+    };
+    expect(ar.status).toBe('blocked');
+    // Bound by IDENTITY to the reason the producer declared — not to "some
+    // non-empty string", which a generic fallback would also satisfy.
+    expect(ar.blocked_reason).toBe('mixed_scale_unresolved');
+    // PRESENT-but-empty carrier. Both keys must survive to the wire: they are
+    // REQUIRED at the boundary and dropping either destroys the turn.
+    expect(Object.keys(ar)).toContain('options');
+    expect(Object.keys(ar)).toContain('goal_node_id');
+    expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
+    // The finaliser — and only the finaliser — stamps computed_at.
+    expect(typeof ar.computed_at).toBe('string');
+
+    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness fields must reach the wire. Without
+    // them the deployed UI replaces a correct verdict with "cannot confirm
+    // whether this analysis is current", so a refusal turn would degrade the
+    // freshness strip as a side effect of reporting readiness honestly.
+    expect(ar.freshness).toBe('stale');
+    expect(ar.freshness_reason).toBe('graph_hash_mismatch');
+    expect(ar.graph_hash_at_run).toBe('aaaa111122223333');
+    expect(ar.current_graph_hash).toBe('bbbb444455556666');
+    // computed_at comes from the SELECTED FACT, not wire-emit time.
+    expect(ar.computed_at).toBe('2026-08-13T19:07:44.000Z');
+    // R2/R3 at the WIRE — the forbidden verdicts must never reach a consumer.
+    expect(['stale', 'unknown']).toContain(ar.freshness);
+    expect(ar.freshness).not.toBe('none');
+    expect(ar.freshness).not.toBe('fresh');
   });
 
   it('handler_failure (fatal) → HTTP 500 unchanged (mapping stays outcome-gated)', async () => {

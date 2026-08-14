@@ -61,6 +61,75 @@ export function synthesiseFreshnessOnlyAnalysisReady(): AnalysisReadyPayload {
 }
 
 /**
+ * ROADMAP 2.1085 (root 2.1041) R1 — the stage a REFUSAL turn must declare.
+ *
+ * A deployed-UI trace measured that a turn which is `stage_indicator !==
+ * 'analyse'` AND carries no `analysis_result` block takes the UI's
+ * present-but-invalid path, CLEARING ten fields that otherwise survive —
+ * including the user's `goalConstraints`, `draftCoaching` and
+ * `preAnalysisSensitivity` — plus the sessionStorage keys. An analyse refusal
+ * has no `analysis_result` by definition, so it MUST declare `'analyse'` or
+ * shipping the honest readiness block destroys user state.
+ *
+ * This is not a workaround: a refused analysis IS an analyse-stage turn. The
+ * request's own stage cannot be trusted for it — the deployed "Run analysis"
+ * chip sends `stage: 'frame'`, measured on the witnessed run.
+ */
+export const ANALYSE_STAGE_INDICATOR = 'analyse' as const;
+
+/**
+ * ROADMAP 2.1085 (root 2.1041) R2/R3 — the freshness verdict a REFUSAL turn
+ * is allowed to ship on `analysis_ready`.
+ *
+ * THE SPEC: on a turn where CEE refused to analyse, the carrier's freshness
+ * must be `stale` or `unknown`, always with a real reason. Never `fresh`,
+ * never `none`. Both forbidden verdicts are honest ABOUT THE FACT CHAIN and
+ * harmful ON THIS TURN, and a deployed-UI trace measured both harms:
+ *
+ *   · `fresh` → clears the local-edits dirty overlay, so the strip claims
+ *     "Analysis reflects the current model" over edits CEE has never seen.
+ *   · `none`  → clears a previously-good analysis fact, producing an
+ *     orphaned-result banner over results that are still valid.
+ *
+ * ⚠ THE HASH PAIR MUST BE BROKEN, NOT JUST THE VERDICT — and this is the
+ * subtle half. `checkHardInvariants` invariant 2 states "identical-hash ⇒
+ * fresh, by construction" and COERCES any non-`fresh` verdict back to `fresh`
+ * when both hashes are present and equal; invariant 3 forbids `unknown`
+ * whenever both hashes are present at all. So a verdict-only clamp would
+ * either be silently reverted by the next `enforceInvariants` call or would
+ * ship a derivation that violates the module's own stated invariants. We
+ * therefore drop `graph_hash_at_run` to `null` on the clamped verdicts: the
+ * carrier then ASSERTS NO COMPARISON, which is exactly the claim being made.
+ * `current_graph_hash` is preserved — it is the current graph's hash and is
+ * true regardless — so route-v2's authoritative top-level `graph_hash` stamp
+ * is unaffected.
+ *
+ * `stale` and an already-`unknown` verdict pass through untouched: both are
+ * honest, both are permitted, and `stale` is the signal the rerun affordance
+ * is gated on.
+ */
+export function clampRefusalFreshness(
+  derivation: FreshnessDerivation,
+): FreshnessDerivation {
+  if (derivation.freshness === 'stale' || derivation.freshness === 'unknown') {
+    return derivation;
+  }
+  return {
+    ...derivation,
+    freshness: 'unknown',
+    // `none` already carries the specific, true reason (there is no
+    // successful run_analysis fact) — keep it rather than replacing a precise
+    // reason with a general one. `fresh` gets the refusal-specific reason,
+    // because "the hashes matched" is exactly what we are declining to assert.
+    reason:
+      derivation.reason === 'no_successful_run_analysis_fact'
+        ? 'no_successful_run_analysis_fact'
+        : 'analysis_refused_currency_unverified',
+    graph_hash_at_run: null,
+  };
+}
+
+/**
  * Attach computed_at and (optional) freshness fields to the payload
  * immediately before it ships on the wire. Returns a shallow copy so
  * caller-held references stay timestamp-free.

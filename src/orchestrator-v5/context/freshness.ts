@@ -78,7 +78,19 @@ export type FreshnessReason =
   /** Dispatcher attempted derivation and failed (session-store error,
    *  bad graph parse, etc.). Honours the "always emit freshness"
    *  contract instead of dropping the wire fields silently. */
-  | 'derivation_failed';
+  | 'derivation_failed'
+  /** ROADMAP 2.1085 (root 2.1041) R2/R3 — THIS TURN REFUSED TO ANALYSE, so
+   *  CEE will not vouch for the currency of whatever the user can see. Set by
+   *  `clampRefusalFreshness` when the underlying derivation said `fresh` or
+   *  `none`, both of which are honest ABOUT THE FACT CHAIN and harmful ON A
+   *  REFUSAL TURN: `fresh` clears the local-edits dirty overlay (claiming the
+   *  displayed analysis reflects a model CEE has never seen), and `none`
+   *  clears a previously-good analysis fact (an orphaned-result banner over
+   *  valid results). Withholding is the fail-closed direction and it is the
+   *  vocabulary's own meaning for `unknown`: freshness could not be derived.
+   *  The turn that WOULD have established currency is precisely the one that
+   *  just refused. */
+  | 'analysis_refused_currency_unverified';
 
 /**
  * Verdict + provenance. `computed_at` is the selected fact's run-time

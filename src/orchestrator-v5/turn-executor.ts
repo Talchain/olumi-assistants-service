@@ -79,7 +79,14 @@ import {
   collectValidEntityLabels,
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
-import { computeStructuralReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildAnalysisRefusalReadiness,
+  computeStructuralReadiness,
+} from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  ANALYSE_STAGE_INDICATOR,
+  clampRefusalFreshness,
+} from './compose/analysis-ready-emit.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 import { composeHandlerFailure } from './compose/handler-failure-responses.js';
@@ -229,6 +236,8 @@ import { deriveBriefTextSeed } from './session/derive-brief-seed.js';
 import { randomUUID } from 'node:crypto';
 import type { ProposalAction } from './routing/types.js';
 import {
+  ANALYSE_HANDLER_ID,
+  blockedReasonForHandlerFailure,
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from './tools/handler-errors.js';
@@ -8667,7 +8676,65 @@ export async function runTurnExecutor(
             return translateExecuteError(error);
           }
 
-          response = recovered.response;
+          // ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — THE ROUTED HALF.
+          //
+          // `analysisReadyForTurn` was computed from the PRE-DISPATCH graph
+          // (line ~1917) for chip gating, and until now it reached the wire
+          // UNREVISED on this branch. So a refused analyse turn shipped
+          // `analysis_ready.status: 'ready'` — a claim that the run was
+          // admitted, on a turn where the handler had just declined to run it.
+          // That is the mirror of the chip-click arm's defect (which shipped
+          // nothing at all), and it is the more dangerous half: present-and-
+          // false beats absent for how confidently a consumer acts on it.
+          //
+          // ⚠⚠ SCOPED TO THE ANALYSE HANDLER, AND THAT IS A CORRECTION. The
+          // first version of this hunk gated on `isRecoverableHandlerCause`
+          // ALONE and never consulted `proposedHandlerId`. This catch is
+          // GENERIC: `d1-shared/error-boundary.ts` maps four D1 error codes
+          // onto recoverable causes, so a failed `set_factor_value`,
+          // `add_constraint` or `adjust_edge_strength` — none of which run an
+          // analysis — reached this line. A failed CONSTRAINT EDIT therefore
+          // emitted `analysis_ready.status: 'blocked'` with
+          // `blocked_reason: 'parameter_invalid_at_execute'`: a false claim
+          // that the ANALYSIS is blocked, manufactured by the very change
+          // meant to stop the product lying about analysis state. Reproduced
+          // by an adversarial review against a base-vs-head contrast.
+          //
+          // The gate is now the analyse handler by IDENTITY, which is also
+          // exactly the chip arm's scope (`DETERMINISTIC_CHIP_ACTION_TYPES`
+          // has one member, `run_analysis`) — so the two arms agree on WHEN a
+          // refusal is an analysis refusal, not merely on how to describe one.
+          // The explain-family handlers (`explain_results`, `what_would_flip`,
+          // `explain_from_structure`) READ an analysis rather than run one, so
+          // their failures are deliberately out of scope too.
+          let analyseShapedRecoveryResponse: OlumiResponse | null = null;
+          if (proposedHandlerId === ANALYSE_HANDLER_ID) {
+            analysisReadyForTurn = buildAnalysisRefusalReadiness(
+              blockedReasonForHandlerFailure(error),
+            );
+            // R1 — THE REFUSAL MUST BE ANALYSE-SHAPED. `composeRecoverable-
+            // HandlerResponse` stamps `stage_indicator` from the REQUEST's
+            // stage, and an analyse turn can legitimately arrive at
+            // `stage: 'frame'` (measured: the deployed Run-analysis chip does
+            // exactly that). A turn that is not `'analyse'` AND carries no
+            // `analysis_result` block takes the UI's present-but-invalid path,
+            // which CLEARS ten fields including the user's goalConstraints,
+            // draftCoaching and preAnalysisSensitivity, plus the
+            // sessionStorage keys. A refusal has no `analysis_result` by
+            // definition, so shipping the honest readiness block on a
+            // frame-shaped turn would have DESTROYED USER STATE. Applied ONLY
+            // inside the analyse-handler gate, so a non-analyse recovery keeps
+            // the request's own stage.
+            analyseShapedRecoveryResponse = {
+              ...recovered.response,
+              stage_indicator: ANALYSE_STAGE_INDICATOR,
+            };
+            // R2/R3 — clamp the verdict this carrier may report to
+            // {stale, unknown}. See `clampRefusalFreshness`.
+            if (freshness !== null) freshness = clampRefusalFreshness(freshness);
+          }
+
+          response = analyseShapedRecoveryResponse ?? recovered.response;
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: handler-recovery
           // coaching copy is FUNCTIONAL (a recovery family), composed by a
           // dedicated builder (not the `composeAnswer` chokepoint). Capture it so

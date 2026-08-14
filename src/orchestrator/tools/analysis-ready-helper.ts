@@ -317,3 +317,94 @@ export function computeStructuralReadiness(
     ...pickGoalThresholdTrio(goalNode),
   };
 }
+
+// ============================================================================
+// Refusal (ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2)
+//
+// ⚠ CITATION NOTE, so this is not "corrected" back. Every comment in this
+// change set originally cited **2.1091**. That is the DETERMINISTIC ADVICE
+// GATE row and carries no mixed-scale content. The mixed-scale family is
+// **2.1085** (analysis-seam mixed-scale guard), root **2.1041**
+// (zero-baseline convention). Row 2.1134(b) records the correction, made
+// 14 Aug — it had itself carried the wrong id until then, which is how the
+// mis-citation propagated into this lane's brief and from there into ~29
+// comments. `run-analysis.ts`'s own "THE COPY (row 2.1091…)" header is the
+// same mis-citation, still uncorrected and deliberately left alone here
+// (out of this change's scope — rowed, not silently edited).
+// ============================================================================
+
+/**
+ * The status the readiness vocabulary already reserves for "something
+ * prevents this analysis". Its documented semantics live on
+ * `AnalysisReadyStatus` in `src/schemas/analysis-ready.ts` and it is already
+ * on the wire — `synthesiseFreshnessOnlyAnalysisReady` emits it for the
+ * transport-recovery carrier. Nothing new is minted here.
+ */
+export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
+
+/**
+ * Build the typed readiness state for a REFUSED analyse turn.
+ *
+ * WHY THIS EXISTS (witnessed on staging 2026-08-13, golden journey EXT-2):
+ * when the analyse handler refuses — the mixed-scale gate, the baseline-scale
+ * gate, the scale postcondition, or any other RECOVERABLE_HANDLER_CAUSE — the
+ * turn recovers as a graceful 200 carrying honest PROSE and nothing a machine
+ * can read. On the chip-click arm no `analysis_ready` shipped at all; on the
+ * routed arm the pre-dispatch structural payload shipped unrevised, so the
+ * wire said `status: 'ready'` about a run CEE had just declined to perform.
+ * Absent and confidently-wrong are the two halves of one defect: the refusal
+ * had no representation in the readiness vocabulary.
+ *
+ * ⚠ WHY THIS LIVES HERE AND NOWHERE ELSE (ROADMAP 2.1135). The readiness
+ * vocabulary already has TWO writers — `src/cee/transforms/option-status.ts`
+ * (which claims to be the single source of truth in its own header) and
+ * `computeStructuralReadiness` above (which is the one on the live V5 wire
+ * path). A refusal helper anywhere else would be a THIRD. It is deliberately
+ * the same module so the two concepts cannot drift apart.
+ *
+ * ⚠⚠ THE SHAPE IS A PRESENT-BUT-EMPTY CARRIER, AND THAT IS A CORRECTION.
+ * The first version of this helper CARRIED the real structural options onto
+ * the refusal, reasoning that an empty block would discard consumer state.
+ * An adversarial review measured what that does on the DEPLOYED UI: real
+ * options flip `DecisionOverviewCard` from `unassessed` to `needs_input`,
+ * which auto-expands "Olumi needs a little more from you" — with no
+ * `user_questions` — mis-describing a SCALE refusal as a framing gap, and the
+ * payload is then echoed back to CEE and persisted to sessionStorage.
+ * Shipping a new false surface in order to deliver an honest wire field is
+ * the wrong trade. This is the shape `synthesiseFreshnessOnlyAnalysisReady`
+ * already puts on the wire and the UI already handles.
+ *
+ * ⚠ ROADMAP 2.1134(a), DERIVED AT THE REGISTER BYTES rather than paraphrased,
+ * because the first version cited it for something it does not say. The row
+ * withdraws a claimed defect between `analysis_ready.options[].status` (CEE:
+ * "do we have user-warranted values?") and `enrichment.option_comparison[]
+ * .status` (ISL/PLoT: "did this arm compute?"), and its ruling is *"Name them
+ * apart; do not reconcile"* — forcing agreement would have broken
+ * `isRecommendableOption`. It says NOTHING about refusal turns and does NOT
+ * require options to be carried on one. A refusal turn produces no
+ * `option_comparison` and names no leader, so there is nothing to reconcile
+ * and `isRecommendableOption` has nothing to read. The row's genuine
+ * requirement survives here as a stronger property: this function writes NO
+ * per-option status at all.
+ *
+ * ⚠ `options` and `goal_node_id` are PRESENT-but-empty, never dropped. Both
+ * are REQUIRED at the boundary (`@talchain/schemas` `OlumiResponseSchema`
+ * declares `options: z.array(z.unknown())` and `goal_node_id: z.string()`),
+ * so omitting either fails egress validation and destroys the whole turn.
+ * Pinned by a test.
+ *
+ * @param blockedReason Stable, SPECIFIC code. Callers derive it with
+ *                     `blockedReasonForHandlerFailure`, which cannot return
+ *                     an empty or generic value.
+ */
+export function buildAnalysisRefusalReadiness(
+  blockedReason: string,
+): AnalysisReadyPayload {
+  return {
+    options: [],
+    goal_node_id: '',
+    status: ANALYSIS_READY_BLOCKED_STATUS,
+    blocked_reason: blockedReason,
+  };
+}
+

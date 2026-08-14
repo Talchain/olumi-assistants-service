@@ -589,6 +589,27 @@ export interface GraphPatchBlockData {
     }>;
     goal_node_id: string;
     status: string;
+    /**
+     * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — WHY this turn's analysis was
+     * refused, as a stable machine-readable code. Present if and only if
+     * `status === 'blocked'`; written ONLY by `buildAnalysisRefusalReadiness` in
+     * `src/orchestrator/tools/analysis-ready-helper.ts` (the live readiness
+     * writer — see ROADMAP 2.1135 on the twin that is NOT on the wire path).
+     *
+     * The value is the producing handler's own `details.reason_code` when it
+     * declared one (e.g. `mixed_scale_unresolved`, `baseline_scale_unresolved`,
+     * `scale_postcondition_violated`), else its typed `cause_kind`. Both are
+     * specific by construction; there is no generic fallback, because a
+     * refusal a consumer cannot distinguish is the defect this field exists
+     * to close.
+     *
+     * Additive + passthrough-safe: `analysis_ready` is `.passthrough()` at the
+     * CEE schema (`src/schemas/analysis-ready.ts`) and at the boundary
+     * (`@talchain/schemas` 0.39.0 `OlumiResponseSchema`, whose `status` is a
+     * bare `z.string()`), so this crosses the wire with no shared-schema
+     * change.
+     */
+    blocked_reason?: string;
     blockers?: unknown[];
     model_adjustments?: unknown[];
     goal_threshold?: number;

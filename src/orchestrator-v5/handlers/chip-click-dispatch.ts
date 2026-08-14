@@ -67,7 +67,10 @@ import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  type FreshnessDerivation,
 } from '../context/freshness.js';
+import { clampRefusalFreshness } from '../compose/analysis-ready-emit.js';
+import { ANALYSE_STAGE_INDICATOR } from '../compose/analysis-ready-emit.js';
 // T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
 // neither derives the verdict nor re-implements the read (CLAUDE.md trap #12);
 // it calls the one function turn-executor's two read points call.
@@ -76,7 +79,10 @@ import {
   readMayNameLeadingOptionVerdict,
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildAnalysisRefusalReadiness,
+  computeStructuralReadiness,
+} from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import {
@@ -93,6 +99,7 @@ import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
+  blockedReasonForHandlerFailure,
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
 } from '../tools/handler-errors.js';
@@ -278,14 +285,38 @@ export type DispatchChipClickRunAnalysisResult =
       // analysis). The dispatcher composes a clean graceful body via the SAME
       // composeRecoverableHandlerResponse machinery the Sonnet path uses;
       // route-v2 maps this to a 200 (NOT the handler_failure → 500 path).
-      // `commitPerformed:false` — no analysis ran and no graph mutated, so
-      // `analysisReady` is omitted and the UI retains its prior store value,
-      // exactly as for the other failure outcomes.
+      // `commitPerformed:false` — no analysis ran and no graph mutated.
+      //
+      // ⚠ `analysisReady` USED TO BE `?: undefined` HERE, on the reasoning
+      // "no analysis ran, so the UI retains its prior store value". ROADMAP
+      // 2.1085 (root 2.1041) / golden-journey EXT-2 measured what that produces: the
+      // 2026-08-13 staging run's post-add-option `run_analysis` chip returned
+      // 200 with the honest mixed-scale refusal prose, `blocks: []`, and NO
+      // `analysis_ready` KEY AT ALL — neither admitted nor typed-blocked, so
+      // no consumer could act on the state. "Retains its prior value" was the
+      // wrong default: the prior value said the model was READY to analyse,
+      // and it no longer is. This outcome now carries the TYPED REFUSAL
+      // (`status: 'blocked'` + a specific `blocked_reason`) built by the live
+      // readiness writer. REQUIRED, not optional — omission must not compile,
+      // for the same reason `mayNameLeadingOption` was made required above:
+      // a new producer cannot silently re-open the gap.
       readonly outcome: 'handler_recovered';
       readonly response: OlumiResponse;
       readonly commitPerformed: false;
       readonly causeKind: string;
-      readonly analysisReady?: undefined;
+      readonly analysisReady: AnalysisReadyPayload;
+      /**
+       * ROADMAP 2.1085 (root 2.1041) D2 — the freshness derivation for the PRIOR analysis
+       * against the CURRENT graph. Required for the same reason
+       * `analysisReady` is: `attachComputedAt` stamps freshness fields only
+       * when a derivation is supplied, and the deployed UI treats their
+       * absence as "cannot confirm whether this analysis is current". A
+       * refusal turn must not degrade the freshness strip as a side effect of
+       * reporting readiness honestly. `undefined` only where the snapshot
+       * could not be loaded (the same condition that leaves the `ok` exit's
+       * freshness underivable).
+       */
+      readonly freshness: FreshnessDerivation | undefined;
       readonly graph: GraphV3T | null;
     }
   | {
@@ -313,8 +344,58 @@ export type DispatchChipClickRunAnalysisResult =
  * `fallback` template (cause on the recoverable list but no composer branch),
  * matching TurnExecutor's fail-loud-to-500 guard. The recoverable response
  * carries coaching text + a recovery chip; it never claims the option was
- * configured and never sets `analysis_ready`.
+ * configured and never writes `analysis_ready` onto the response body (the
+ * finaliser is still the sole stamping point).
+ *
+ * ROADMAP 2.1085 (root 2.1041): it DOES now return the typed refusal payload on the
+ * dispatch result, so route-v2 can hand it to the finaliser — plus the
+ * freshness derivation, without which `attachComputedAt` stamps a block
+ * carrying no freshness fields and the deployed UI overwrites a correct
+ * verdict with "Cannot confirm whether this analysis is current".
  */
+/**
+ * ROADMAP 2.1085 (root 2.1041) D2 — the ONE freshness derivation for this dispatch path.
+ *
+ * Extracted so the `ok` exit and the `handler_recovered` exit cannot drift on
+ * how the verdict is computed. They differ only in WHICH facts they pass: the
+ * `ok` exit passes the post-dispatch chain (including the fact this turn just
+ * produced, which is what makes a rerun report `fresh`); the recovered exit
+ * passes the prior chain alone, because a refused turn produced no fact.
+ *
+ * Hash from the RAW persisted graph (parsed via GraphStateIngressSchema, the
+ * same parser turn-executor uses on follow-up explain turns). `snapshot.graph`
+ * is V3-parsed and `snapshot.options` is the PLoT projection — neither matches
+ * what turn-executor sees, so hashing either would surface false-stale. See
+ * run-analysis.ts §3.5 for the canonical explanation.
+ */
+function deriveChipClickFreshness(
+  cachedSnapshot: RunAnalysisScenarioSnapshot | null,
+  facts: readonly HandlerFact[],
+): FreshnessDerivation {
+  let currentGraphHash: string | null = null;
+  if (
+    cachedSnapshot?.rawPersistedGraph !== undefined &&
+    cachedSnapshot?.rawPersistedGraph !== null
+  ) {
+    const parsedForHash = GraphStateIngressSchema.safeParse(
+      cachedSnapshot.rawPersistedGraph,
+    );
+    if (parsedForHash.success) {
+      currentGraphHash = computeAnalysisAffectingGraphHash(parsedForHash.data);
+    }
+  }
+  return deriveAnalysisFreshness(
+    facts,
+    currentGraphHash,
+    // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): read
+    // option IDs from the RAW persisted graph (covers the unparseable case
+    // the hash skips). undefined when off → byte-identical.
+    config.cee.optionIdentityFreshnessGuard
+      ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
+      : undefined,
+  );
+}
+
 function tryComposeRecoverableChipOutcome(
   err: HandlerInvocationFailedError,
   graph: GraphV3T | null,
@@ -322,6 +403,7 @@ function tryComposeRecoverableChipOutcome(
   requestId: string,
   scenarioId: string,
   aborted: boolean,
+  freshness: FreshnessDerivation | undefined,
 ): Extract<DispatchChipClickRunAnalysisResult, { outcome: 'handler_recovered' }> | null {
   // Budget-abort precedence (parity with TurnExecutor's
   // `turnAbort.signal.aborted && isRecoverableHandlerCause(...)` short-circuit):
@@ -340,7 +422,27 @@ function tryComposeRecoverableChipOutcome(
   // body comes from the shared per-cause composer), but the signature requires
   // it; pass the canonical validation registry the Sonnet path uses.
   const recoveryCtx: ComposeContext = { handlerRegistry: HANDLER_VALIDATION_REGISTRY };
-  const recovered = composeRecoverableHandlerResponse(err, recoveryCtx, stage);
+  // ⚠ ROADMAP 2.1085 (root 2.1041) R1 — THE REFUSAL MUST BE ANALYSE-SHAPED.
+  //
+  // `composeRecoverableHandlerResponse` stamps `stage_indicator` from the
+  // REQUEST's stage, and the UI's "Run analysis" chip sends `stage: 'frame'`.
+  // Measured on the witnessed run (`20260813T190744Z-fresh-extended-7f2445`):
+  // BOTH T3 (a successful analysis) and T5B (the refusal) came back
+  // `stage_indicator: 'frame'`. T3 was harmless only because it carried an
+  // `analysis_result` block; the refusal carries none. A deployed-UI trace
+  // showed that combination — `stage_indicator !== 'analyse'` AND no
+  // `analysis_result` — takes the present-but-invalid path, which CLEARS ten
+  // fields that otherwise survive such a turn, including the user's
+  // `goalConstraints`, `draftCoaching` and `preAnalysisSensitivity`, plus the
+  // sessionStorage keys. So shipping the honest readiness block on a
+  // frame-shaped turn would have DESTROYED USER STATE.
+  //
+  // This dispatch path handles exactly one action (`run_analysis`), so every
+  // recovery reaching here IS an analyse turn and `'analyse'` is the honest
+  // stage — not a workaround. Scoped here rather than inside the shared
+  // composer, which also serves non-analyse handlers on the routed path.
+  const recovered = composeRecoverableHandlerResponse(err, recoveryCtx, ANALYSE_STAGE_INDICATOR);
+  void stage;
 
   // Impossible-state guard — the cause is on the recoverable list but the
   // composer has no per-cause branch (template_id === 'fallback'). That is a
@@ -383,11 +485,47 @@ function tryComposeRecoverableChipOutcome(
     retryable: err.retryable,
   });
 
+  // ROADMAP 2.1085 (root 2.1041) / EXT-2 — the typed refusal: a PRESENT-but-empty carrier.
+  // It deliberately carries no options (see `buildAnalysisRefusalReadiness`
+  // for why carrying the real ones ships a false UI surface), so `graph` is
+  // used only for label resolution downstream, exactly as before.
+  const blockedReason = blockedReasonForHandlerFailure(err);
+  const analysisReady = buildAnalysisRefusalReadiness(blockedReason);
+  // ROADMAP 2.1085 (root 2.1041) R2/R3 — clamp the verdict this carrier may
+  // report. See `clampRefusalFreshness` for why `fresh`/`none` are forbidden
+  // on a refusal turn and why the hash PAIR (not just the verdict) is broken.
+  const refusalFreshness = freshness ? clampRefusalFreshness(freshness) : undefined;
+  log.info(
+    {
+      event: 'v5.chip_click.analysis_ready_blocked',
+      request_id: requestId,
+      scenario_id: scenarioId,
+      cause_kind: err.cause_kind,
+      blocked_reason: blockedReason,
+      // forbidden-exempt: freshness VERDICT enum (fresh|stale|unknown|none) in a LOG line — honest null when the snapshot could not be loaded and no derivation exists, not a science-value fallback. Same shape and same reason as route-v2.ts's `analysis_ready_freshness` and turn-executor.ts:6334/6542/12084.
+      freshness: refusalFreshness?.freshness ?? null,
+      // forbidden-exempt: freshness REASON code in a LOG line — honest null when no derivation exists; a telemetry string, never a science value.
+      freshness_reason: refusalFreshness?.reason ?? null,
+      // forbidden-exempt: the PRE-clamp verdict in a LOG line — kept so the clamp is observable in production rather than silently rewriting a verdict; honest null when no derivation exists.
+      freshness_before_clamp: freshness?.freshness ?? null,
+    },
+    'V5 chip_click run_analysis refused — emitting a typed blocked readiness state',
+  );
+
   return {
     outcome: 'handler_recovered',
     response: recovered.response,
     commitPerformed: false,
     causeKind: err.cause_kind,
+    analysisReady,
+    // ROADMAP 2.1085 (root 2.1041) D2 — the freshness verdict for the PRIOR
+    // analysis against the CURRENT graph. This turn ran nothing, so the
+    // verdict is derived from the prior fact chain only. Without it the
+    // finaliser stamps a freshness-free block and the deployed UI
+    // (analysisFreshness.ts) replaces a correct verdict with 'unknown' — the
+    // refusal turn would DEGRADE the freshness strip as a side effect of
+    // telling the truth about readiness. R2/R3: clamped to {stale, unknown}.
+    freshness: refusalFreshness,
     graph,
   };
 }
@@ -589,6 +727,9 @@ export async function dispatchChipClickRunAnalysis(
           requestId,
           payload.scenario_id,
           turnAbort.signal.aborted,
+          // ROADMAP 2.1085 (root 2.1041) D2 — PRIOR facts only: this turn refused and
+          // produced none. Same derivation function the `ok` exit uses.
+          cachedSnapshot ? deriveChipClickFreshness(cachedSnapshot, context.prior_facts) : undefined,
         );
         if (recovered) return recovered;
         log.warn(
@@ -927,34 +1068,7 @@ export async function dispatchChipClickRunAnalysis(
         ...enrichedFacts,
         ...context.prior_facts,
       ];
-      // Hash from the RAW persisted graph (parsed via GraphStateIngressSchema,
-      // the same parser turn-executor uses on follow-up explain turns).
-      // snapshot.graph is V3-parsed and snapshot.options is the PLoT-
-      // projection — neither matches what turn-executor sees, so hashing
-      // either would surface false-stale. See run-analysis.ts §3.5 for
-      // the canonical explanation.
-      let currentGraphHash: string | null = null;
-      if (
-        cachedSnapshot?.rawPersistedGraph !== undefined &&
-        cachedSnapshot?.rawPersistedGraph !== null
-      ) {
-        const parsedForHash = GraphStateIngressSchema.safeParse(
-          cachedSnapshot.rawPersistedGraph,
-        );
-        if (parsedForHash.success) {
-          currentGraphHash = computeAnalysisAffectingGraphHash(parsedForHash.data);
-        }
-      }
-      const freshness = deriveAnalysisFreshness(
-        postDispatchFacts,
-        currentGraphHash,
-        // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): read
-        // option IDs from the RAW persisted graph (covers the unparseable case
-        // the hash skips). undefined when off → byte-identical.
-        config.cee.optionIdentityFreshnessGuard
-          ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
-          : undefined,
-      );
+      const freshness = deriveChipClickFreshness(cachedSnapshot, postDispatchFacts);
       emitFreshnessTelemetry(
         freshness,
         {
