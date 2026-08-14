@@ -303,6 +303,24 @@ export interface ComposeToolCallInput {
    * safe: an unthreaded call site loses lens diversity, never correctness.
    */
   readonly priorTurnFactsForLensHistory?: readonly HandlerFact[];
+
+  /**
+   * §2.1 row 4 — the factor id this turn's `what_would_flip` proposal targets
+   * ("Test <factor> at <N>"), as selected by `selectFlipProposal` in the turn
+   * executor and surfaced by `buildFlipProposalEmit`.
+   *
+   * Threaded rather than re-derived on purpose. Compose COULD read
+   * `enrichment.flip_thresholds[0]` itself, and it would frequently name a
+   * DIFFERENT factor: the proposal selection skips entries that cannot render
+   * a safe "Test X at N" value. The gesture must point at the factor the chip
+   * beside it names, so there is one derivation and two read points — the rule
+   * ROADMAP 2.211 already applies to `selectLens`.
+   *
+   * Omitted ⇒ row 4 fails closed (`no_flip_proposal`) and the turn keeps its
+   * pre-change behaviour exactly. An unthreaded caller loses a gesture; it
+   * never gains a wrong one.
+   */
+  readonly flipFocusFactorId?: string;
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -319,6 +337,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.persistedGraph,
     input.persistedGraphHash,
     input.priorTurnFactsForLensHistory,
+    input.flipFocusFactorId,
   );
 
   return {
@@ -379,6 +398,7 @@ function buildBlocksFromFacts(
   persistedGraph?: unknown,
   persistedGraphHash?: string | null,
   priorTurnFactsForLensHistory?: readonly HandlerFact[],
+  flipFocusFactorId?: string,
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -427,6 +447,8 @@ function buildBlocksFromFacts(
       previousAnalysisLens,
       persistedGraph,
       judgementSignals,
+      // Row 4 only; every other row ignores it (see the builder's header).
+      flipFocusFactorId,
     );
     if (directive !== null) {
       blocks.push(directive);
@@ -552,9 +574,18 @@ function buildBlocksFromFacts(
       }
     } else if (fact.fact_type === 'what_would_flip') {
       // Wave-4 δ2 (ROADMAP 1.202) row 4 — a what_would_flip turn (precondition
-      // met) points the UI at the first flip factor with `focus`. Resolved from
-      // the turn-start persisted graph; fail-closed on unmet precondition / no
-      // flip factor / unresolved id. N=1 latch.
+      // met) points the UI at the factor THIS TURN'S OWN `set_factor_value`
+      // proposal offers to change, with `focus`. Resolved from the turn-start
+      // persisted graph; fail-closed on unmet precondition / no proposal on this
+      // turn / unresolved id. N=1 latch.
+      //
+      // ⚠ `EMPTY_FRESH_BLOCKS` is correct here and is NOT the reason this row
+      // used to be dead: row 4 has no lens surface for the row-2 σ gate to
+      // consult, and it does not scan blocks at all — it binds to the threaded
+      // proposal id. The gap was that the id was never threaded, so BOTH this
+      // row and the row-7 tail (which scans a block list this branch never
+      // fills) suppressed, and the turn gestured at nothing. Measured
+      // end-to-end 14 Aug 2026; see the builder's header in ui-directive.ts.
       if (!uiDirectiveEmitted) {
         tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
       }

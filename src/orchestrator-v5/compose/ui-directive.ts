@@ -185,7 +185,21 @@ type UiDirectiveSuppressReason =
   | 'target_unresolved'
   | 'lens_subject_unresolved'
   | 'precondition_unmet'
-  | 'no_flip_factor'
+  /**
+   * §2.1 row 4: the flip turn emitted no `set_factor_value` proposal, so there
+   * is no factor the product offered to change and nothing honest to point at.
+   *
+   * ⚠ REPLACES `no_flip_factor`, WHICH WAS A STANDING FALSE NEGATIVE (retired
+   * 14 Aug 2026). That tag was raised from a read of the deprecated legacy
+   * `flip_scenarios` field, which no producer writes, so it fired on EVERY real
+   * flip turn — including the many that DID emit a proposal. Telemetry
+   * therefore reported the flip gesture as permanently unavailable, which is
+   * exactly the shape that makes a live capability look dead in the numbers.
+   * The rename is deliberate: any dashboard or query still keyed to
+   * `no_flip_factor` should go silent rather than quietly inherit a tag whose
+   * meaning has changed. This one is TRUE when it fires.
+   */
+  | 'no_flip_proposal'
   /**
    * §2.1 row 6 (Lane 2, P3): explain_from_structure fired but the persisted
    * graph carries no contested edge (or is absent/malformed — fail-closed
@@ -657,19 +671,53 @@ export function buildGateRemedySectionDirective(
   return emitDirective(GATE_REMEDY_FACT_TAG, block);
 }
 
-/** §2.1 row 4 — focus on the first flip factor (precondition met). */
+/**
+ * §2.1 row 4 — focus the factor the turn's own `set_factor_value` proposal
+ * offers to change ("Test <factor> at <N>").
+ *
+ * ⭐ WHY THE PROPOSAL IS THE AUTHORITY (measured, 14 Aug 2026). This row used
+ * to read `fact.result.flip_scenarios?.[0]?.factor_id`. `flip_scenarios` is a
+ * DEPRECATED LEGACY field — `WhatWouldFlipResultSchema` still admits it
+ * (optional) at schemas 0.40.0, so this was never a contract gap, but the
+ * schema's own comment says "new code populates only the no-op fields" and
+ * NEITHER producer (`tools/handlers/what-would-flip.ts:95`, `:223`) writes it.
+ * So the read was always `undefined` and this row suppressed `no_flip_factor`
+ * on EVERY real flip turn. Row 7 could not cover for it either: the flip branch
+ * pushes no blocks (`compose.ts:553-560`, `EMPTY_FRESH_BLOCKS`) and the
+ * lifecycle rebuild runs after row 7 by a deliberate ruling, so its scan found
+ * no dispatchable ref and suppressed `no_discussed_entity`. **A flip turn
+ * gestured at nothing at all** — verified end-to-end on both dispatch routes.
+ *
+ * `flipFocusFactorId` is the factor `selectFlipProposal` ACTUALLY chose for
+ * this turn's chip (`compose/flip-proposal.ts`), threaded down from the turn
+ * executor. Binding here rather than re-reading `flip_thresholds` is the whole
+ * point: that selection SKIPS entries which cannot render a safe proposal, so
+ * `flip_thresholds[0]` is frequently NOT the proposed factor. One derivation,
+ * two read points — sentence, chip and gesture provably agree, instead of two
+ * authorities that can disagree (trap 21).
+ *
+ * ⚠ THE ALTERNATIVE NOT TAKEN, and why. Populating `flip_scenarios` on the fact
+ * would also work and needs no threading. It is rejected deliberately: it
+ * resurrects a field the contract marks legacy, and it would re-derive the flip
+ * factor independently of the chip — reintroducing the exact disagreement this
+ * binding exists to prevent. If that field is ever revived for another reason,
+ * this row should still bind to the proposal.
+ *
+ * Fail-closed on every path: unmet precondition, no proposal on this turn, or
+ * an id the graph lookup cannot resolve to a factor.
+ */
 function buildFlipFocusDirective(
   fact: Extract<HandlerFact, { fact_type: 'what_would_flip' }>,
   lookup: GraphNodeLookup,
+  flipFocusFactorId?: string,
 ): UiDirectiveBlock | null {
   if (fact.result.precondition_unmet) {
     return suppressDirective('what_would_flip', 'precondition_unmet');
   }
-  const factorId = fact.result.flip_scenarios?.[0]?.factor_id;
-  if (typeof factorId !== 'string' || factorId.length === 0) {
-    return suppressDirective('what_would_flip', 'no_flip_factor');
+  if (typeof flipFocusFactorId !== 'string' || flipFocusFactorId.length === 0) {
+    return suppressDirective('what_would_flip', 'no_flip_proposal');
   }
-  const ref = lookup.get(factorId);
+  const ref = lookup.get(flipFocusFactorId);
   if (ref === undefined || ref.kind !== 'factor') {
     return suppressDirective('what_would_flip', 'target_unresolved');
   }
@@ -865,6 +913,12 @@ export function buildFocusInspectorDirective(
   // cannot disagree with the card about which lens won (the trap-12/16 rule
   // this file already states for `previousAnalysisLens`).
   judgementSignals?: JudgementSignals,
+  // §2.1 row 4 — the factor this turn's own flip proposal targets, as chosen by
+  // `selectFlipProposal` in the turn executor. Consumed ONLY by the
+  // `what_would_flip` row; every other row ignores it. Absent ⇒ that row fails
+  // closed (`no_flip_proposal`), so an unthreaded call site loses the gesture,
+  // never points at the wrong node.
+  flipFocusFactorId?: string,
 ): UiDirectiveBlock | null {
   switch (fact.fact_type) {
     case 'run_analysis':
@@ -873,7 +927,7 @@ export function buildFocusInspectorDirective(
     case 'adjust_edge_strength':
       return buildMutationInspectorDirective(fact, lookup);
     case 'what_would_flip':
-      return buildFlipFocusDirective(fact, lookup);
+      return buildFlipFocusDirective(fact, lookup, flipFocusFactorId);
     case 'explain_results':
       return buildExplainResultsPanelDirective(fact);
     case 'explain_from_structure':

@@ -7377,6 +7377,11 @@ export async function runTurnExecutor(
     // V5 P0.2 — a flip-threshold proposal's pending action, emitted on a
     // what_would_flip turn and merged into the committed pending_actions.
     let flipProposalPending: PendingAction | undefined;
+    // §2.1 row 4 — the factor id that SAME proposal targets, handed to compose
+    // so the turn's `focus` gesture and the "Test <factor> at <N>" chip name the
+    // same factor. Undefined on every non-flip turn and on a flip turn that
+    // emitted no proposal ⇒ the row fails closed, never guesses.
+    let flipFocusFactorId: string | undefined;
 
     // ==================================================================
     // STEPS 2–4: execute-intent path (VALIDATE → EXECUTE → CONFIRM)
@@ -9357,6 +9362,11 @@ export async function runTurnExecutor(
         });
         if (flipEmit.status === 'emitted') {
           flipProposalPending = flipEmit.pending;
+          // §2.1 row 4 — the factor this proposal targets, handed to compose so
+          // the turn's `focus` gesture points at the SAME factor the chip names.
+          // Set only on a successful emit: when no proposal exists there is
+          // nothing the product offered to change, and the row fails closed.
+          flipFocusFactorId = flipEmit.factor_id;
           // Protect the proposal chip at the front; dedupe by id; cap at 3.
           const deduped: SuggestedAction[] = [];
           const seenChipIds = new Set<string>();
@@ -9484,6 +9494,11 @@ export async function runTurnExecutor(
         // fails closed to pre-fix behaviour instead of resolving stale
         // labels. No new hashing here.
         persistedGraphHash: currentAnalysisGraphHashForTurn,
+        // §2.1 row 4 — bind the flip turn's `focus` gesture to the factor the
+        // turn's own proposal offers to change. Assigned just above, at the
+        // single site that selects it, so compose never re-derives "the flip
+        // factor" and cannot disagree with the chip the user is reading.
+        flipFocusFactorId,
         // ROADMAP 2.211 — the PRIOR fact array (this turn's facts EXCLUDED), for
         // the no-immediate-repeat lens tie-break only. Deliberately NOT
         // `unifiedFactsForPostHandler`, which is what `lifecycle.priorFacts`
