@@ -1157,12 +1157,20 @@ export function transformResponseToV3(
   for (const node of v3NodesTyped) {
     if (!LABEL_BOUND_KINDS.has(node.kind)) continue;
     const anyNode = node as unknown as Record<string, unknown>;
+    // ⚠ THE FIELD NAMES HERE WERE WRONG ON THE FIRST WRITE, AND A TEST CAUGHT
+    // IT — worth recording, because the guard was PRESENT and CORRECT and
+    // pointed at bytes that do not exist (trap 22: verify what a guard actually
+    // RECEIVES, not that it is there). The first version tested `target_value`
+    // and `threshold`; the V3 node's goal threshold is `goal_threshold` /
+    // `goal_threshold_raw` (`schemas/cee-v3.ts:155-178`), so a thresholded goal
+    // sailed straight past it and earned the badge. Derived at the schema, then
+    // re-measured.
     const carriesValue =
       anyNode.observed_state !== undefined ||
       anyNode.prior !== undefined ||
       anyNode.display_value !== undefined ||
-      typeof anyNode.target_value === "number" ||
-      typeof anyNode.threshold === "number";
+      typeof anyNode.goal_threshold === "number" ||
+      typeof anyNode.goal_threshold_raw === "number";
     if (carriesValue) continue;
     const binding = bindOptionLabelToBrief(node.label, context.brief);
     if (bindingEarnsBriefClaim(binding)) {

@@ -277,6 +277,84 @@ describe("row 2.1205 — DOM-3's hazard: the stated channel is badged, the parap
   });
 });
 
+describe("row 2.1205 — a VALUE-BEARING node declines the badge, whatever its kind", () => {
+  /**
+   * The kind list says WHICH nodes may be badged from their label; this guard
+   * says WHEN, and it is derived from the node rather than assumed from its
+   * kind. Without it, a goal that acquires a threshold or an outcome that
+   * acquires a prior would start claiming the user's authorship for a number
+   * the user never gave — the audit's finding-2 class arriving through a kind
+   * nobody was watching.
+   *
+   * Both nodes below carry a label that IS verbatim brief text, so the ONLY
+   * thing standing between them and a `from_brief` badge is the value guard.
+   */
+  function valueBearingReplay(): V1DraftGraphResponse {
+    return {
+      graph: {
+        nodes: [
+          { id: "dec", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "hold our seat price at £42" },
+          { id: "opt_b", kind: "option", label: "raise it to £49 per seat" },
+          { id: "fac", kind: "factor", label: "Seat Price", category: "controllable" },
+          // Verbatim brief text, but carrying a prior.
+          {
+            id: "out_valued",
+            kind: "outcome",
+            label: "Monthly Recurring Revenue",
+            prior: { distribution: "uniform", range_min: 0.2, range_max: 0.8 },
+          },
+          // Verbatim brief text, but carrying a threshold.
+          {
+            id: "goal_valued",
+            kind: "goal",
+            label: "Our aim is to raise our average seat price",
+            goal_threshold_raw: 59,
+            goal_threshold: 0.59,
+          },
+        ],
+        edges: [
+          { from: "dec", to: "opt_a", weight: 1, belief: 1 },
+          { from: "dec", to: "opt_b", weight: 1, belief: 1 },
+          { from: "opt_a", to: "fac", weight: 1, belief: 1 },
+          { from: "opt_b", to: "fac", weight: 1, belief: 1 },
+          { from: "fac", to: "out_valued", weight: 0.8, belief: 0.9 },
+          { from: "out_valued", to: "goal_valued", weight: 1, belief: 1 },
+        ],
+        meta: { roots: ["dec"], leaves: ["goal_valued"], source: "assistant" },
+      },
+      quality: { overall: 8, structure: 8, coverage: 8, structural_proxy: 8 },
+      trace: { request_id: "replay-value-bearing", correlation_id: "replay" },
+    } as unknown as V1DraftGraphResponse;
+  }
+
+  const valued = provenanceByLabel(valueBearingReplay(), BRIEF_PRICING);
+
+  it("PRECONDITION — the two value-bearing nodes are present", () => {
+    expect(valued.get("Monthly Recurring Revenue")?.kind).toBe("outcome");
+    expect(valued.get("Our aim is to raise our average seat price")?.kind).toBe("goal");
+  });
+
+  it("an OUTCOME carrying a prior is not badged from its label", () => {
+    expect(valued.get("Monthly Recurring Revenue")?.provenance).toBe("ai_inferred");
+  });
+
+  it("a GOAL carrying a threshold is not badged from its label", () => {
+    expect(valued.get("Our aim is to raise our average seat price")?.provenance).toBe(
+      "ai_inferred",
+    );
+  });
+
+  // ⭐ THE DISCRIMINATING HALF. Identical labels, identical brief, identical
+  // kinds — the ONLY difference is the value. Without this pair the two
+  // assertions above could pass because the badge never worked at all.
+  it("DISCRIMINATOR — the same labels WITHOUT a value do earn the badge", () => {
+    const bare = provenanceByLabel(pricingReplay(), BRIEF_PRICING);
+    expect(bare.get("Monthly Recurring Revenue")?.provenance).toBe("from_brief");
+    expect(bare.get("Our aim is to raise our average seat price")?.provenance).toBe("from_brief");
+  });
+});
+
 describe("row 2.1205 — the badge is declined when there is no brief to check against", () => {
   // `unchecked` and `unverified` are different facts and both decline the badge
   // (`brief-binding.ts`). A transform with no brief must never certify.
