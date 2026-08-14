@@ -216,6 +216,35 @@
                               "ratio",
                               "raw_count"
                             ]
+                          },
+                          "elicited_from": {
+                            "type": "object",
+                            "properties": {
+                              "round_id": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                              },
+                              "participant_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "owner"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "assistant"
+                                  },
+                                  {
+                                    "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/observed_state/properties/elicited_from/properties/round_id"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "round_id",
+                              "participant_id"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -489,6 +518,10 @@
                       "type": "string",
                       "const": "value",
                       "description": "Which `observed_state` field was edited. The ONLY accepted value is \"value\", and ABSENCE IS THE SAME as passing it — so a client may omit it entirely. It exists to make the edited field EXPLICIT on the wire, not to offer a choice: a future field (e.g. \"baseline\") requires widening this literal to a union in a versioned release, which is deliberately louder than accepting an arbitrary string here and leaving each consumer to decide what to do with it."
+                    },
+                    "applied_from": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/observed_state/properties/elicited_from",
+                      "description": "Present iff this edit applies a named participant's panel answer (\"Use this value\" on a reveal row). ABSENCE IS DISTINCT: it means an ordinary inspector/panel-free edit, never \"attribution lost\". When present, CEE MUST verify the claim against its own collab store before stamping any provenance, and MUST refuse the edit loudly on any mismatch — the wire never carries a provenance claim the server could not verify for itself."
                     }
                   },
                   "required": [

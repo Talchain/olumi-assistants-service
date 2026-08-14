@@ -73,6 +73,7 @@
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import type {
   HandlerFact,
   V5ActionType,
@@ -138,6 +139,27 @@ export type { ScenarioReader, RunAnalysisScenarioSnapshot };
  * Sonnet did emit is dropped at compose time. Default `''` so existing
  * run_analysis test fixtures don't have to populate it.
  */
+/**
+ * A VERIFIED provenance stamp for one value write (0.40.0, the panel-apply
+ * evidence loop). Ids only — a display name must never be persisted into
+ * `scenarios.graph`, because that would put PII beyond the reach of the R-2
+ * redaction routine, which only knows how to detach a name from the
+ * `elicitation_participants` row. The label is resolved AT RENDER from round
+ * data, so redaction reaches every surface for free.
+ *
+ * `source` is the `observed_state.source` literal to stamp instead of the
+ * default `USER_EDIT_SOURCE`. It is typed against the shared contract's
+ * vocabulary rather than left a free string, so an unknown literal cannot be
+ * introduced here and then fail CEE's own `ObservedStateV3` parse downstream.
+ */
+export interface AppliedValueProvenance {
+  readonly source: KnownObservedStateSourceLiteral;
+  readonly elicited_from: {
+    readonly round_id: string;
+    readonly participant_id: string;
+  };
+}
+
 export interface HandlerInvocation {
   // EnrichedTurnContext extends the wire-level TurnContext with CEE-internal
   // fields (`prior_turns`, `prior_facts`) that handlers may read. The wire
@@ -164,6 +186,31 @@ export interface HandlerInvocation {
    * explain_results, what_would_flip) can read the resolved target entity.
    */
   readonly proposal?: ProposalAction;
+  /**
+   * 0.40.0 — the VERIFIED panel attribution for this write, threaded from
+   * `system-events/factor-value-edit.ts` and read by `set_factor_value` alone.
+   *
+   * Present ONLY when `verifyAppliedFrom` has already checked the client's
+   * `applied_from` claim against CEE's own collab store (round on this
+   * scenario · participant on that round · that participant's latest belief
+   * for this target · round closed · value equals the server's record). Its
+   * presence is therefore a SERVER FACT, never a client assertion — which is
+   * the whole of INV-F at this seam.
+   *
+   * ⚠ WHY THIS RIDES THE INVOCATION RATHER THAN THE PROPOSAL. The stamp has to
+   * happen where `observed_state` is written, and that is inside
+   * `set_factor_value` — the single writer both the natural-language lane and
+   * the inspector lane share. `factor-value-edit.ts` says in its own header
+   * that it must contain no `node.observed_state = …`, and it is right: two
+   * writers is how the two lanes stop agreeing by construction. So the
+   * provenance is threaded IN rather than stamped alongside, exactly as
+   * `analysisReady` and the answer-text verdict already are.
+   *
+   * Absent on every other path, and absence means "an ordinary edit" — the
+   * handler's existing `USER_EDIT_SOURCE` behaviour is byte-unchanged. It is
+   * NOT "attribution lost".
+   */
+  readonly appliedProvenance?: AppliedValueProvenance;
   /**
    * Structural readiness payload for the current scenario. Carries the
    * authoritative `options[]` and `goal_node_id` per

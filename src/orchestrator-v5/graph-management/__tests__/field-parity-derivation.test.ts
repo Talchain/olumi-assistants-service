@@ -79,7 +79,7 @@ const FIELD_SCREEN_CODES = new Set<string>([FIELD_NOT_ALLOWED, PIPELINE_OWNED_FI
 // ---------------------------------------------------------------------------
 
 describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this repo derives from', () => {
-  it('the INSTALLED package version is 0.39.0 (read off the resolved install, not the declaration)', () => {
+  it('the INSTALLED package version is 0.40.0 (read off the resolved install, not the declaration)', () => {
     // The package's own `exports` map exposes neither ./package.json nor a CJS
     // condition, so this reads the manifest of the INSTALLED module in
     // node_modules — what `pnpm install` actually produced, never what
@@ -90,7 +90,7 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
       readFileSync(join(repoRoot, 'node_modules', '@talchain', 'schemas', 'package.json'), 'utf8'),
     ) as { name: string; version: string };
     expect(pkg.name).toBe('@talchain/schemas');
-    expect(pkg.version).toBe('0.39.0');
+    expect(pkg.version).toBe('0.40.0');
   });
 
   it('the DECLARED pin and the installed version agree (a stale vendor tarball fails loud)', () => {
@@ -98,7 +98,7 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
       readFileSync(join(repoRoot, 'package.json'), 'utf8'),
     ) as { dependencies?: Record<string, string> };
     expect(manifest.dependencies?.['@talchain/schemas']).toBe(
-      'file:./vendor/talchain-schemas-0.39.0.tgz',
+      'file:./vendor/talchain-schemas-0.40.0.tgz',
     );
   });
 

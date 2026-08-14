@@ -109,6 +109,15 @@ export async function assembleOpenPacket(
 /**
  * Fold the append-only log to the latest event per (participant, target).
  *
+ * ⚠ EXPORTED 0.40.0, AND THE EXPORT IS LOAD-BEARING. `apply-verification.ts`
+ * resolves "which answer did this participant actually give for this target?"
+ * by calling THIS function, not by re-implementing the fold. The two questions
+ * must be answered identically or the product lies: the reveal would show one
+ * number while the server verified a different one, and the owner would click
+ * "Use Grace's 0.85" and have the apply refused (or, worse, silently verified
+ * against a superseded revision). One definition, two readers — a second copy
+ * here is CLAUDE.md trap 12 with a user-visible failure mode.
+ *
  * Append-only means a revision does not overwrite: BOTH rows survive, and the
  * pair is the record of what changed someone's mind. The reveal shows the
  * latest, and the counting unit is DISTINCT PARTICIPANTS — one person who
@@ -119,7 +128,7 @@ export async function assembleOpenPacket(
  * deliberately NOT the ordering key — two appends inside the same millisecond
  * would be a coin toss, and this must be deterministic.
  */
-function foldLatestPerParticipant(
+export function foldLatestPerParticipant(
   events: readonly ElicitationEventRow[],
   targetId: string,
 ): ElicitationEventRow[] {

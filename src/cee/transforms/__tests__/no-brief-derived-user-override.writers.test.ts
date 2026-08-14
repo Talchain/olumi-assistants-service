@@ -61,6 +61,27 @@ const REVIEWED: Readonly<Record<string, string>> = {
     "comment only — the `_brief` parameter doc recording why no integrity check may read the brief",
   "cee/unified-pipeline/stages/boundary.ts":
     "comment only — the stage comment recording that the removed 2.714 check stamped brief text this way",
+  // ── 0.40.0, the panel-apply slice. Reviewed 14 Aug 2026 against this guard's
+  // ── one truth condition: "did the value arrive through an operation the user
+  // ── consented to?"
+  //
+  // THE STAMP SITE. It writes USER_EDIT_SOURCE for an inspector/chat value edit
+  // — a structured operation the user performed, so the stamp is TRUE — and now
+  // carries the literal in prose as well. The 0.40.0 change makes it stamp LESS
+  // often, not more: when the server has verified that the number is a named
+  // colleague's panel answer, it stamps `panel_elicited` + `elicited_from`
+  // instead. That is this guard's own principle applied one case further out —
+  // the old behaviour claimed "you told us this number" about a value the owner
+  // had merely retyped from someone else's answer, which is the same class of
+  // untruth 2.714 was reverted for, one seam downstream.
+  "orchestrator-v5/tools/handlers/set-factor-value.ts":
+    "the stamp site — user_override for a user-consented structured edit; stamps panel_elicited instead when CEE has VERIFIED the value is a named participant's panel answer",
+  // Comment only. Contains no write of any kind: it is a pure verifier that
+  // reads the collab store and either returns a server-owned value or refuses.
+  // The literal appears in its header, explaining the attribution untruth the
+  // module exists to close.
+  "collab/apply-verification.ts":
+    "comment only — the module header naming the user_override untruth it closes; the module performs no write",
 };
 
 /**

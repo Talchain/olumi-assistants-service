@@ -52,6 +52,18 @@ export const COLLAB_REFUSAL_CODES = [
   'collab_guest_scenario',
   'collab_not_a_participant',
   'collab_payload_invalid',
+  /* ── 0.40.0: the APPLY path (`factor_value_edit.applied_from`) ───────────
+   * Each code is a DIFFERENT question, deliberately not collapsed into one
+   * `collab_apply_invalid`: the owner needs to know whether they picked a
+   * round that has not closed, a person who never answered this factor, or a
+   * number that no longer matches what that person said. F-4's
+   * existence-oracle concern does not reach here — these are not token-path
+   * refusals; the caller is already authorised to mutate this scenario and is
+   * being told why THEIR OWN round cannot be applied. */
+  'collab_apply_scenario_mismatch',
+  'collab_apply_round_not_applyable',
+  'collab_apply_no_stated_value',
+  'collab_apply_value_mismatch',
 ] as const;
 
 export type CollabRefusalCode = (typeof COLLAB_REFUSAL_CODES)[number];

@@ -191,6 +191,25 @@ interface ObservedSnapshot {
   readonly raw_value?: number;
   readonly unit?: string;
   readonly cap?: number;
+  /**
+   * 0.40.0 — the provenance stamp, carried on the `after` side ONLY.
+   *
+   * ⚠ WITHOUT THIS THE ATTRIBUTION IS INVISIBLE UNTIL A RELOAD, which would make
+   * "visible consequence" a claim the product could not honour on the turn that
+   * produced it. The `graph_patch` block's `after` is what the UI applicator
+   * spreads into `node.data.observedState`; a snapshot that stops at
+   * value/raw_value/unit/cap leaves the canvas pill reading whatever it read
+   * before, so an owner who just applied Grace's number would still see "AI
+   * estimate" until they refreshed. Both hops were probed at the 0.40.0 bytes
+   * before this was widened: `SetFactorValueHandlerFactSchema` and the boundary
+   * `GraphPatchBlockSchema` both accept these keys inside `after` (each with a
+   * minimal-`after` control, so the pass is not vacuous).
+   *
+   * `before` never carries them — it is a snapshot of what was there, and the
+   * pre-edit provenance is not what this event is reporting.
+   */
+  readonly source?: string;
+  readonly elicited_from?: { readonly round_id: string; readonly participant_id: string };
 }
 
 function snapshotObservedState(node: GraphV3T['nodes'][number]): ObservedSnapshot {
@@ -220,6 +239,11 @@ export function createSetFactorValueHandler(): HandlerFn {
         },
       );
     }
+
+    // The verified panel attribution for this write, if any. Read once here so
+    // the stamp site below reads as a single expression; `undefined` on every
+    // path except a verified panel apply.
+    const appliedProvenance = invocation.appliedProvenance;
 
     const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
     if (!rawGraph) {
@@ -373,6 +397,20 @@ export function createSetFactorValueHandler(): HandlerFn {
     const after: ObservedSnapshot = {
       value: normalised.value,
       raw_value: normalised.raw_value,
+      // The SAME provenance the merged node is stamped with below, so the wire
+      // patch and the persisted graph cannot disagree about who owns the number.
+      //
+      // CONDITIONAL, so the ORDINARY edit path's `after` stays byte-identical:
+      // the UI already stamps `user_override` locally for its own edits, so
+      // adding it here would change an existing payload for no gain. Only a
+      // verified panel apply — which the UI CANNOT stamp for itself, because it
+      // is a server fact — widens the snapshot.
+      ...(appliedProvenance !== undefined
+        ? {
+            source: appliedProvenance.source,
+            elicited_from: appliedProvenance.elicited_from,
+          }
+        : {}),
       ...(parsed.unit !== undefined
         ? { unit: parsed.unit }
         : before.unit !== undefined
@@ -418,8 +456,53 @@ export function createSetFactorValueHandler(): HandlerFn {
         // node.provenance from extractionType), so `observed_state.source` is
         // the carrier that actually reaches the UI's isReviewedByUser rungs.
         // Overrides any producer stamp deliberately: this write IS the user's.
-        source: USER_EDIT_SOURCE,
+        //
+        // ⭐ 0.40.0 — UNLESS THE SERVER HAS VERIFIED THAT IT IS SOMEBODY ELSE'S.
+        // `appliedProvenance` is present only after `verifyAppliedFrom` has
+        // checked an `applied_from` claim against CEE's own collab store, so
+        // this branch stamps a fact the server established, never one the
+        // client asserted. It exists because the alternative — the owner
+        // retyping a colleague's revealed number — stamps `user_override` and
+        // renders as "User edited", i.e. the product relabels Grace's
+        // expertise as the owner's own work. Absence keeps today's behaviour
+        // byte-for-byte; absence means "an ordinary edit", never "attribution
+        // lost".
+        source: appliedProvenance?.source ?? USER_EDIT_SOURCE,
+        // Ids only. A display name here would sit inside `scenarios.graph`,
+        // beyond the reach of the R-2 redaction routine; the label is resolved
+        // at render from round data instead.
+        ...(appliedProvenance !== undefined
+          ? { elicited_from: appliedProvenance.elicited_from }
+          : {}),
       };
+
+      // ⭐⭐ AND THE ABSENT BRANCH MUST *CLEAR* IT, NOT MERELY DECLINE TO SET IT.
+      //
+      // `merged` SPREADS the prior `observed_state`, so a node that already
+      // carries `elicited_from` keeps it unless this deletes it. Without this
+      // line the sequence "apply Grace's 0.85, then retype 0.5 by hand" leaves
+      // `{ source: 'user_override', elicited_from: { participant_id: <Grace> } }`
+      // — the owner's own typed number, still carrying Grace's identity. The
+      // contract explicitly sanctions consumers keying identity off
+      // `elicited_from` ("a consumer may key display off either, but only
+      // `elicited_from` carries the identity"), so this is not a cosmetic
+      // leftover: it attributes to a named colleague a number she never gave.
+      //
+      // That is the MIRROR of the untruth this whole slice exists to end, and
+      // shipping it inside the fix would have been worse than the original —
+      // the original mislabelled a colleague's number as the owner's, this
+      // mislabels the owner's number as a colleague's, and only this one
+      // invents a quote.
+      //
+      // `delete` rather than `elicited_from: undefined`: the key must be ABSENT,
+      // because absence is the contract's declared semantics ("absent means this
+      // value was not applied from a panel round"), and a present-but-undefined
+      // key survives structuredClone and object spreads while reading as present
+      // to `in` and `Object.keys`.
+      if (appliedProvenance === undefined) {
+        delete (merged as { elicited_from?: unknown }).elicited_from;
+      }
+
       node.observed_state = merged;
 
       // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value

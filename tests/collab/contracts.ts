@@ -131,6 +131,16 @@ export const COLLAB_REFUSAL_CODES = [
   "collab_guest_scenario", //  mint attempted on scenarios.user_id IS NULL (G1; MV001 kinship)
   "collab_not_a_participant", // token valid for a different round/scenario (service grain)
   "collab_payload_invalid", // contract validation failed, incl. client-supplied provenance (INV-D, N-P2)
+  // ── 0.40.0 apply path (`factor_value_edit.applied_from`) ──────────────────
+  // Added here CONSCIOUSLY and in the same diff as `src/collab/types.ts`, per
+  // this file's own header rule ("structurally compatible BY DESIGN, and a
+  // divergence is a conscious rename that must appear in the same diff").
+  // Without this, `isCollabRefusal` below would not recognise an apply refusal
+  // as a refusal at all — it would read as an unexpected throw.
+  "collab_apply_scenario_mismatch", // applied_from names a round on another scenario, or none (binding a)
+  "collab_apply_round_not_applyable", // round has not reached a revealable state (binding d)
+  "collab_apply_no_stated_value", // that participant gave no number for that target (bindings c+e)
+  "collab_apply_value_mismatch", // claimed value != the server's recorded belief (binding e, INV-F)
 ] as const;
 export type CollabRefusalCode = (typeof COLLAB_REFUSAL_CODES)[number];
 
