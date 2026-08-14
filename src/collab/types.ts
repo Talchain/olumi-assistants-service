@@ -136,14 +136,47 @@ export type ElicitationEventKind =
  * non-answer kind later is safe for the same reason; adding an answer kind
  * without listing it here is not, which is why this lives beside the union.
  */
-export const ELICITATION_ANSWER_KINDS: readonly ElicitationEventKind[] = [
-  'belief_submitted',
-  'belief_revised',
-  'declined',
-];
+/**
+ * ⭐⭐ EXHAUSTIVE BY TYPE, AND THAT IS THE WHOLE POINT OF THE SHAPE.
+ *
+ * This was a three-element ARRAY, which meant adding a kind to
+ * `ElicitationEventKind` compiled cleanly and silently classified the new kind
+ * as NOT-an-answer. That default is right for evidence and wrong for anything
+ * that IS a stated position — and the failure mode is the silent one described
+ * above: a real answer that the fold skips, so the reveal blanks a number the
+ * participant gave and `verifyAppliedFrom` refuses a legitimate apply.
+ *
+ * A `Record` keyed by the union cannot be under-filled: a new kind is a MISSING
+ * PROPERTY and `tsc` REDs at the declaration until someone answers the question
+ * "is this an answer?" out loud. The classification stops being a list someone
+ * must remember to update — CLAUDE.md trap 12, closed structurally rather than
+ * by a comment asking for care.
+ */
+const ANSWER_FAMILY: Readonly<Record<ElicitationEventKind, boolean>> = {
+  belief_submitted: true,
+  belief_revised: true,
+  // A refusal to give a number IS a stated position: it is what lets an
+  // owner-panellist close the round without anchoring on the others.
+  declined: true,
+  // Not accepted by `elicitation-append` at all, but classified here because
+  // the union admits it and this table must be total.
+  clarification_requested: false,
+  // Attaching evidence is not answering: a participant who uploads a link and
+  // leaves still owes an answer.
+  evidence_attached: false,
+};
+
+/**
+ * The answer kinds, DERIVED from the table above rather than re-listed beside
+ * it. Two hand-maintained copies of one classification is the defect this
+ * change exists to remove, so there is exactly one place to edit.
+ */
+export const ELICITATION_ANSWER_KINDS: readonly ElicitationEventKind[] = (
+  Object.keys(ANSWER_FAMILY) as ElicitationEventKind[]
+).filter((kind) => ANSWER_FAMILY[kind]);
 
 export function isAnswerKind(kind: ElicitationEventKind): boolean {
-  return ELICITATION_ANSWER_KINDS.includes(kind);
+  return ANSWER_FAMILY[kind];
 }
 
 export type ElicitationTargetKind = 'factor' | 'edge';

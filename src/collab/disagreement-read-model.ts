@@ -43,6 +43,7 @@
 import {
   divergenceHeadline,
   interrogationQuestion,
+  POSITIONS_NOT_COMBINED,
   STANCE_PHRASE,
   type DisagreementFacts,
   type DivergenceShape,
@@ -135,6 +136,18 @@ export interface DisagreementTarget {
 export interface DisagreementView {
   round_id: string;
   graph_version_ref: string;
+  /**
+   * ⭐ THE STANDING SENTENCE ABOUT WHAT THIS SURFACE IS, served rather than left
+   * to each client to word.
+   *
+   * It is on the wire for the same reason `headline` and `question` are: the
+   * copy guard in `disagreement-copy.ts` proves, over every string that module
+   * can emit, that none of them averages, ranks or names a winner — and a
+   * sentence composed in a browser bundle sits outside that proof entirely. The
+   * UI had in fact hand-written its own version of this one, so the guarantee
+   * had a hole in exactly the shape the guard was built to prevent.
+   */
+  standing_note: string;
   per_target: DisagreementTarget[];
 }
 
@@ -290,6 +303,8 @@ export async function assembleDisagreementView(
   return {
     round_id: reveal.round_id,
     graph_version_ref: reveal.graph_version_ref,
+    // Served, not composed by the caller — see the field's doc comment.
+    standing_note: POSITIONS_NOT_COMBINED,
     per_target,
   };
 }
