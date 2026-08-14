@@ -177,25 +177,114 @@ export interface AnalysisReadyContext {
 // ============================================================================
 
 /**
- * Keywords whose presence (at a word boundary) in an option label indicates
- * the status-quo / do-nothing option. Checked case-insensitively.
+ * ⭐⭐ TIERED 2026-08-14 AFTER A MEASURED, DETERMINISTIC INVERSION. This list was
+ * ONE flat set of eleven entries and the detector took the first match by array
+ * index, so on the deployed build `41156fc` it flagged the CHANGE option as the
+ * status quo on 3 of 3 `B_crm` draws:
  *
- * Order matters: earlier entries are higher confidence. The first match across
- * all options wins if no LLM-provided `is_baseline` flag is set.
+ *     is_baseline: true   "replace our current CRM with HubSpot next quarter"
+ *     is_baseline: absent "keep what we have"        ← the ACTUAL status quo
+ *
+ * `"current"` matched inside *"replace our **current** CRM"* at index 0 and won
+ * before *"**keep** what we have"* was ever tested. `is_baseline` tells the
+ * analysis which option is the COMPARISON BASE, so an inverted flag corrupts
+ * every comparison the user then reads.
+ *
+ * ── WHY TIERING AND NOT A BETTER FLAT LIST (trap 22f) ───────────────────────
+ * The bare tokens below differ from the idioms in KIND, not in confidence. A
+ * change option must NAME the thing it is changing, so it contains
+ * "current"/"existing" as naturally as a status-quo option does — the token
+ * carries no discriminating power at all, in either direction. No reordering
+ * fixes that, and reordering is the "one more rule" this estate has burned four
+ * rounds on. The idioms are different: they are whole phrases asserting that
+ * NOTHING is done, and a change option cannot contain one without contradicting
+ * itself.
+ *
+ * ⚠ THE ASYMMETRY THAT SETS THE THRESHOLD (trap 22b). A missed baseline is a
+ * DISCLOSED GAP — the flag is absent, the analysis says so, nothing is asserted.
+ * A wrong baseline is a LIE that silently rebases every comparison. Not
+ * symmetric harms, so not a symmetric predicate: an ambiguous label yields NO
+ * baseline rather than a guessed one.
  */
-export const BASELINE_KEYWORDS = [
+export const BASELINE_IDIOMS = [
   "status quo",
   "do nothing",
   "no change",
   "as-is",
   "as is",
   "baseline",
+  // Multiword continuations. Whole phrases ONLY — the bare verbs "keep",
+  // "stay" and "remain" live in the ambiguous set below, and it is exactly the
+  // difference between "keep what we have" (a status quo) and "keep the rollout
+  // on schedule" (a change) that the whole phrase captures and the bare token
+  // cannot. "keep what we have" is the label that was measured LOSING to
+  // "replace our current CRM"; it is here so that case resolves correctly rather
+  // than merely stopping being wrong.
+  "keep what we have",
+  "keep things as they are",
+  "keep what we've got",
+  "leave things as they are",
+  "leave it as it is",
+  "carry on as we are",
+  "stay as we are",
+  "stay put",
+  "remain as-is",
+  "remain as is",
+  // ⭐⭐ CONTINUATION COLLOCATIONS — added because the first cut of this tiering
+  // CLOSED THE LIE AND OPENED A GAP, which is the trade trap 22b exists to stop
+  // anyone making silently. Demoting the bare tokens correctly refused
+  // "replace our current CRM", and it also lost "Maintain current strategy" and
+  // "Keep existing process" — labels that ARE the status quo and that the repo's
+  // own suite already pinned as detected.
+  //
+  // ⚠ AND THE FORM MATTERS MORE THAN THE MEMBERS. The obvious repair was a
+  // PARSER — "a continuation verb governing a current-state token" — and it was
+  // RUN BEFORE BEING COMMISSIONED (trap 22f(b)) against a corpus including
+  // adversarial cases written outside the original design. It scored 2 of 7
+  // WRONG: "stop maintaining the current system" and "migrate off our existing
+  // platform, keeping current integrations" both matched, i.e. it reopened the
+  // inversion in a new place. It was rejected rather than patched, because
+  // patching an oscillating predicate is the sunk cost this estate has paid four
+  // times.
+  //
+  // These are therefore CONTIGUOUS PHRASES, matched exactly as every idiom above
+  // is — not a verb-object relation. That is why they are narrow enough to be
+  // safe: "keeping current integrations" does not contain "keep current", and
+  // "maintaining the current system" does not contain "maintain current". The
+  // phrase form scored 14 of 14 on the same corpus, including both cases the
+  // parser failed. Pinned in `value-carriage-and-baseline.test.ts`, both
+  // directions.
+  "maintain current",
+  "maintain existing",
+  "keep current",
+  "keep existing",
+  "retain current",
+  "retain existing",
+  "continue as we are",
+  "continue with current",
+];
+
+/**
+ * Tokens that merely REFERENCE the current state. Retained as a named, exported
+ * set — NOT as detection input — because their exclusion is a DECISION with
+ * measured evidence behind it, and a deleted list would leave the next reader to
+ * rediscover why "current" is not baseline evidence. Asserted to be excluded by
+ * `analysis-ready.baseline-tiering` rather than left as a comment.
+ */
+export const AMBIGUOUS_CURRENT_STATE_TOKENS = [
   "current",
   "existing",
   "stay",
   "remain",
   "keep",
 ];
+
+/**
+ * @deprecated The flat union that produced the inversion above. Kept ONLY so a
+ * stale importer fails loudly at review rather than silently reverting to
+ * first-match-wins behaviour; nothing in the detection path reads it.
+ */
+export const BASELINE_KEYWORDS = [...BASELINE_IDIOMS, ...AMBIGUOUS_CURRENT_STATE_TOKENS];
 
 /**
  * Detect which option, if any, represents the status-quo baseline.
@@ -216,7 +305,7 @@ export const BASELINE_KEYWORDS = [
  */
 export function labelMatchesBaseline(label: string): boolean {
   const lower = label.toLowerCase();
-  for (const kw of BASELINE_KEYWORDS) {
+  for (const kw of BASELINE_IDIOMS) {
     const escaped = kw.replace(/[-\s]/g, "[\\s\\-]");
     const re = new RegExp(`(?<![a-z0-9\\-])${escaped}(?![a-z0-9\\-])`, "i");
     if (re.test(lower)) return true;
@@ -235,11 +324,24 @@ function detectBaselineOptionIndex(options: OptionV3T[]): number | null {
     if (readIsBaseline({ is_baseline: options[i].is_baseline }) === true) return i;
   }
 
-  // Priority 2: label keyword match
+  // Priority 2: a baseline IDIOM, and only when exactly ONE option carries one.
+  //
+  // ⚠ UNIQUENESS IS PART OF THE PREDICATE, NOT A TIDY-UP. First-match-by-index
+  // over a set that several options can satisfy is not a detection, it is an
+  // arbitrary pick wearing a detection's name — which is precisely how
+  // "replace our current CRM" beat "keep what we have". Two options both
+  // asserting they change nothing is a degenerate draft, and there is no basis
+  // for preferring either; returning null says so instead of flipping a coin.
+  const idiomatic: number[] = [];
   for (let i = 0; i < options.length; i++) {
-    if (labelMatchesBaseline(options[i].label)) return i;
+    if (labelMatchesBaseline(options[i].label)) idiomatic.push(i);
   }
+  if (idiomatic.length === 1) return idiomatic[0]!;
 
+  // No idiom, or several — no baseline is claimed. The flag is then absent
+  // rather than wrong, and priority 1 above is the honest channel for the model
+  // to say what a label cannot: the records grammar carries `is_baseline`
+  // (grammar design note 5) precisely so this guess is no longer load-bearing.
   return null;
 }
 

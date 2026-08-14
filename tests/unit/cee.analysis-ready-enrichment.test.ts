@@ -144,14 +144,39 @@ describe("is_baseline detection", () => {
     expect(payload.options[1].is_baseline).toBeUndefined();
   });
 
-  it("first match wins when multiple labels match keyword", () => {
+  // ⚠⚠ DELIBERATELY REVERSED 2026-08-14. This test previously asserted
+  // "first match wins when multiple labels match keyword" — and that arbitrary
+  // pick is the mechanism that shipped an INVERTED baseline on the deployed
+  // build `41156fc`:
+  //
+  //     is_baseline: true   "replace our current CRM with HubSpot next quarter"
+  //     is_baseline: absent "keep what we have"      ← the ACTUAL status quo
+  //
+  // 3 of 3 `B_crm` draws, because the flat keyword list held the bare token
+  // "current" and index 0 won before "keep what we have" was ever tested.
+  // First-match-by-index over a set several options can satisfy is not a
+  // detection; it is a coin flip wearing a detection's name.
+  //
+  // `is_baseline` tells the analysis which option is the COMPARISON BASE, so a
+  // wrong baseline silently rebases every comparison the user reads, while a
+  // missing one is a disclosed gap. Not symmetric harms, so not a symmetric
+  // predicate (trap 22b): where two options both claim to change nothing, NO
+  // baseline is claimed. The honest channel for resolving it is the model's own
+  // `is_baseline` flag, which the records grammar now carries (grammar design
+  // note 5) and which priority 1 reads — see the test directly above, which
+  // still passes and shows the flag overriding every label reading.
+  it("several idiomatic matches ⇒ NO baseline, rather than an arbitrary first pick", () => {
     const options = [
       makeOption("opt_a", "Keep existing"),
       makeOption("opt_b", "Maintain current setup"),
     ];
     const payload = buildAnalysisReadyPayload(options, "goal_1", makeGraph());
-    expect(payload.options[0].is_baseline).toBe(true);
+    expect(payload.options[0].is_baseline).toBeUndefined();
     expect(payload.options[1].is_baseline).toBeUndefined();
+    // …and each label IS individually a baseline idiom, so this is a uniqueness
+    // refusal and not a tiering regression that stopped seeing them at all.
+    expect(labelMatchesBaseline("Keep existing")).toBe(true);
+    expect(labelMatchesBaseline("Maintain current setup")).toBe(true);
   });
 
   it("matches 'baseline' keyword", () => {

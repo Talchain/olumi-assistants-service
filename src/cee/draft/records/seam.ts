@@ -60,6 +60,8 @@ const StatedItemWire = z.object({
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
+  // `option` only — grammar design note 5.
+  is_baseline: z.boolean().optional(),
 }).passthrough();
 
 const InferenceClaimWire = z.object({
@@ -86,6 +88,8 @@ const InferenceClaimWire = z.object({
   // `assertSeamCarriesEveryGrammarField` below now makes the next such omission
   // a red rather than a dark capability.
   sets_to: z.number().optional(),
+  // `option_refinement` only — grammar design note 5.
+  is_baseline: z.boolean().optional(),
 }).passthrough();
 
 export const DraftRecordSetWire = z.object({
@@ -187,6 +191,7 @@ export function projectDraftRecords(
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
+      ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
     })),
     claims: parsed.data.claims.map((claim) => ({
       claim_kind: claim.claim_kind,
@@ -201,6 +206,7 @@ export function projectDraftRecords(
       ...(claim.category !== undefined ? { category: claim.category } : {}),
       ...(claim.value !== undefined ? { value: claim.value } : {}),
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
+      ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };
   return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
