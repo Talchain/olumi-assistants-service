@@ -14,8 +14,15 @@
  * `schema-v3.ts` already withdraws a false brief claim from `provenance` and
  * `extractionType` (ROADMAP 2.972), with a comment naming exactly why — *"or the
  * wire still carries the claim one field to the left of the one we corrected."*
- * It missed the third carrier, which is the only one written in English and the
- * only one a user reads.
+ * It missed the third carrier on the NODE — the only one of those three written
+ * in English, and the one a user reads.
+ *
+ * ⚠ CORRECTED AT REVIEW: an earlier draft said "the only carrier written in
+ * English", full stop. That was an overclaim — a FOURTH carrier rides EDGE
+ * `provenance.quote` (`enricher.ts:457/:1145` → wire at `schema-v3.ts:811-814`)
+ * and this node-level withdrawal does not reach it. Separately rowed; mitigated
+ * by those edges carrying an honest `source: "hypothesis"` beside the claim.
+ * A count is a claim about a SCOPE — state the scope or the count is wrong.
  *
  * ── THE INVARIANT IS THE AGREEMENT, NOT THE WITNESSED STRING (trap 13d) ────
  * `provenance` is the response's authority on "did this come from the brief".
@@ -27,6 +34,12 @@ import { describe, expect, it } from "vitest";
 
 import { transformResponseToV3 } from "../../src/cee/transforms/index.js";
 import type { V1DraftGraphResponse } from "../../src/cee/transforms/index.js";
+import {
+  BRIEF_EXTRACTION_CLAIM_PREFIX,
+  BRIEF_EXTRACTION_CONFIRM_DRIVER,
+  assertsBriefExtraction,
+  briefExtractionQuote,
+} from "../../src/cee/factor-extraction/brief-extraction-claim.js";
 
 const BRIEF_PRICING =
   "Should we hold our seat price at £42, raise it to £49 per seat, or raise it to £59 per seat? " +
@@ -134,5 +147,60 @@ describe("row 2.1207 — the brief-extraction claim is withdrawn with the badge"
 
   it("TWIN — the normalised prior is no longer rendered as a currency value", () => {
     expect(String(supportCost.display_value ?? "")).not.toMatch(/[£$€¥₹]/);
+  });
+});
+
+describe("row 2.1207 — F4: producers and guard share ONE constant", () => {
+  /**
+   * The claim had four producer sites and one consumer, every one spelling the
+   * literal by hand — and the consumer is a guard that must RECOGNISE what the
+   * producers write. Two hand-maintained spellings of one string, where one
+   * recognises the other, is trap 12 with a user-facing lie as the failure mode:
+   * reword the producer (em-dash → hyphen, capital → lower case) and the
+   * withdrawal silently stops matching while every test spelling the old literal
+   * stays green.
+   */
+  it("the driver the ENRICHER emits is recognised by the guard — by construction", () => {
+    expect(assertsBriefExtraction(BRIEF_EXTRACTION_CONFIRM_DRIVER)).toBe(true);
+  });
+
+  it("the edge-quote form is built from the same prefix", () => {
+    expect(briefExtractionQuote('churn is 4%')).toBe(
+      `${BRIEF_EXTRACTION_CLAIM_PREFIX}: "churn is 4%"`,
+    );
+    expect(assertsBriefExtraction(briefExtractionQuote("anything"))).toBe(true);
+  });
+
+  /**
+   * Recognition is case-INSENSITIVE and the direction of that choice is the
+   * point: failing to recognise a claim leaves a LIE on the wire, recognising
+   * one variant too many only withdraws a driver line. Recognise generously,
+   * withdraw safely.
+   */
+  it.each([
+    ["extracted from brief — confirm value"],
+    ["EXTRACTED FROM BRIEF — confirm value"],
+    ["  Extracted from brief — confirm value"],
+  ])("a case/whitespace variant %s is still recognised", (variant) => {
+    expect(assertsBriefExtraction(variant)).toBe(true);
+  });
+
+  // OPPOSITE DIRECTION — a guard that recognised everything would satisfy every
+  // assertion above while deleting honest content.
+  it.each([
+    ["Support contracts renew annually"],
+    ["Extracted"],
+    ["Derived from the brief"],
+    [""],
+    [null],
+    [42],
+  ])("TWIN — %s does NOT assert brief extraction", (value) => {
+    expect(assertsBriefExtraction(value)).toBe(false);
+  });
+
+  // ⭐ THE DRIFT PIN. Producers build from the prefix, so this fails the moment
+  // someone changes the user-facing wording without updating the guard's anchor.
+  it("the enricher's driver literally starts with the shared prefix", () => {
+    expect(BRIEF_EXTRACTION_CONFIRM_DRIVER.startsWith(BRIEF_EXTRACTION_CLAIM_PREFIX)).toBe(true);
   });
 });

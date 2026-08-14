@@ -43,6 +43,7 @@ import { DEFAULT_STRENGTH_MEAN, EDGE_STRENGTH_LOW_THRESHOLD, EDGE_STRENGTH_NEGLI
 import { CIL_WARNING_CODES, DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { classifyEdgeByKind } from "../utils/structural-edge-classifier.js";
 import { synthesiseDisplayValue, synthesiseRangeDisplayValue } from "../factor-extraction/display-value.js";
+import { assertsBriefExtraction } from "../factor-extraction/brief-extraction-claim.js";
 import { nodeProvenanceDisplay, edgeProvenanceDisplay } from "./provenance-display.js";
 import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // ⭐ THE SAME AUTHORITY THE PROJECTOR BINDS STATED ITEMS WITH. Imported, never
@@ -509,8 +510,14 @@ export function transformNodeToV3(
   // told the user their number had been extracted from their brief. That string
   // is CEE-authored and passed straight through — the closing witness's own copy
   // sweep confirmed it is not a UI literal (`GRAPH-CARRIER-READER-DERIVATION.md`
-  // :139-153, with contrast controls). So the lie was ours, and it was the only
-  // one of the three carriers written in English.
+  // :139-153, with contrast controls). So the lie was ours, and of the three
+  // carriers on the NODE it was the only one written in English.
+  //
+  // ⚠ CORRECTED AT REVIEW: an earlier draft of this sentence said "the only
+  // carrier written in English" without the node qualifier, and that was an
+  // overclaim — there is a FOURTH carrier, on EDGE `provenance.quote`, which
+  // this withdrawal does not reach (separately rowed). A count is a claim about
+  // a scope; state the scope or the count is wrong.
   //
   // ── THE INVARIANT, AGAINST THE SPEC RATHER THAN THE WITNESSED CASE ────────
   // `provenance` IS this response's answer to "did this come from the brief".
@@ -523,11 +530,21 @@ export function transformNodeToV3(
   // Note the direction: the VALUE is untouched and only the CLAIM is withdrawn.
   // Where the number cannot be made faithful, the honest move is to stop
   // attributing it to the user — not to invent one that matches.
-  const BRIEF_EXTRACTION_CLAIM = "Extracted from brief";
+  //
+  // ⚠ THE PREDICATE AND THE PRODUCERS SHARE ONE CONSTANT (`brief-extraction-
+  // claim.ts`). They used to spell the literal independently, which is trap 12
+  // with a user-facing lie as the failure mode: reword the producer — an em-dash
+  // to a hyphen, a capital to a lower case — and this guard silently stops
+  // matching while every test spelling the old literal stays green.
+  //
+  // ⚠ AND IT IS NOT THE ONLY CARRIER. The claim also rides EDGE
+  // `provenance.quote` (`enricher.ts:457/:1145` → wire at `schema-v3.ts:811-814`),
+  // which this node-level withdrawal does not reach. Separately rowed, and
+  // mitigated by those edges carrying an honest `source: "hypothesis"` beside
+  // the claim — but the earlier version of this comment called `uncertainty_
+  // drivers` "the only carrier written in English", and that was wrong.
   if (v3Node.provenance !== "from_brief" && Array.isArray(v3Node.uncertainty_drivers)) {
-    const kept = v3Node.uncertainty_drivers.filter(
-      (d) => !(typeof d === "string" && d.startsWith(BRIEF_EXTRACTION_CLAIM)),
-    );
+    const kept = v3Node.uncertainty_drivers.filter((d) => !assertsBriefExtraction(d));
     if (kept.length !== v3Node.uncertainty_drivers.length) {
       // An empty list is dropped rather than shipped: `uncertainty_drivers: []`
       // reads as "we looked and found none", which is a different and equally
@@ -1171,13 +1188,69 @@ export function transformResponseToV3(
     // 59 exact) — correctly: every one of these fields is DECLARED on `NodeV3T`
     // (`schemas/cee-v3.ts`), so the cast bought nothing and erased the very
     // types that would have caught the wrong field names above.
+    //
+    // ⚠⚠ `intercept` ADDED AT REVIEW, AND THE MISS IS THE INSTRUCTIVE PART.
+    // It is declared (`cee-v3.ts:193`), model-emittable, and forwarded to the
+    // wire at `:380-385` — a label-verbatim node carrying ONLY a model-authored
+    // intercept would have earned the badge for a number the user never gave.
+    // This list is a HAND-MAINTAINED MIRROR of "which node fields carry a
+    // value" (trap 12), and no amount of comment makes it not one — the schema
+    // marks no field as value-bearing, so it cannot be derived. What CAN be
+    // derived is the schema's KEY SET, so a completeness twin pins it and REDs
+    // when a new node field lands, forcing the question "is this value-bearing?"
+    // rather than letting the next `intercept` arrive silently.
     const carriesValue =
       node.observed_state !== undefined ||
       node.prior !== undefined ||
       node.display_value !== undefined ||
+      typeof node.intercept === "number" ||
       typeof node.goal_threshold === "number" ||
       typeof node.goal_threshold_raw === "number";
     if (carriesValue) continue;
+
+    // ⭐⭐ ELIGIBILITY — A SINGLE WORD IS NOT EVIDENCE OF AUTHORSHIP.
+    //
+    // ── MEASURED AT REVIEW, IN THE FABRICATION DIRECTION ─────────────────────
+    // Through the full `transformResponseToV3` on an ordinary brief —
+    // *"…This is a big decision for us. We worry about churn, want growth, and
+    // need more revenue."* — the scaffold node labelled **`Decision`** and the
+    // model's own one-word nodes **`Churn`**, **`Growth`** and **`Revenue`** all
+    // came back **`from_brief`**. Four fabricated authorship claims on one draw,
+    // in exactly the class this loop exists to close.
+    //
+    // ── WHY MY OWN CORPUS COULD NOT SEE IT ──────────────────────────────────
+    // None of the six banked briefs contains the word "decision", so the 16/16
+    // banked `Decision` nodes never matched. **A corpus drawn from captures is
+    // still a corpus with a shape** (trap 22) — it bounded what the product HAD
+    // emitted, not what the predicate WOULD accept.
+    //
+    // ── WHY THE FLOOR DID NOT CATCH IT, AND WHY IT IS NOT MOVED ─────────────
+    // `MIN_QUOTE_CHARS = 3` (`brief-binding.ts`) is a DEGENERACY floor, and its
+    // own doc says so: *"A single common word ('the') clears three characters
+    // and would still be contained by coincidence."* It was calibrated for
+    // OPTION labels, which are phrases by construction. This loop pointed the
+    // same predicate at kinds where a single-token label is the NORM.
+    //
+    // So the repair is an ELIGIBILITY condition HERE, at the caller, not a
+    // second floor inside the shared authority. D4 ruled ONE floor for both
+    // callers precisely because two floors behind one name is two predicates
+    // under one name (trap 21) — that ruling stands untouched, `bindOptionLabel
+    // ToBrief` is unchanged, and root-4's option behaviour cannot move.
+    //
+    // ── THE TWO HARMS, AND THEY ARE NOT SYMMETRIC (trap 22b) ────────────────
+    //   • accept a single token → we tell the user they wrote a node the model
+    //     coined, because one of its words appears somewhere in their brief.
+    //     A LIE about authorship.
+    //   • decline one → a genuine one-word label ("Churn" the user really did
+    //     name) loses its badge and keeps everything else. AN UNDER-CLAIM.
+    // ⚠ Named rather than waved away: a hyphenated label (`Time-to-Target`) is
+    // one whitespace token and declines despite being specific. That is the safe
+    // direction, and the class ends the same way the floor's does — with span
+    // binding into the brief, where no token counting is needed at all.
+    const tokenCount =
+      typeof node.label === "string" ? node.label.trim().split(/\s+/).filter(Boolean).length : 0;
+    if (tokenCount < 2) continue;
+
     const binding = bindOptionLabelToBrief(node.label, context.brief);
     if (bindingEarnsBriefClaim(binding)) {
       node.provenance = "from_brief";

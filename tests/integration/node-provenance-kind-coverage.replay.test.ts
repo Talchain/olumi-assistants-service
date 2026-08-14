@@ -52,6 +52,7 @@ import { describe, expect, it } from "vitest";
 
 import { transformResponseToV3 } from "../../src/cee/transforms/index.js";
 import type { V1DraftGraphResponse } from "../../src/cee/transforms/index.js";
+import { NodeV3 } from "../../src/schemas/cee-v3.js";
 
 /** Verbatim from the closing witness's own driver (`driver/briefs.mjs:78-82`). */
 const BRIEF_PRICING =
@@ -352,6 +353,190 @@ describe("row 2.1205 — a VALUE-BEARING node declines the badge, whatever its k
     const bare = provenanceByLabel(pricingReplay(), BRIEF_PRICING);
     expect(bare.get("Monthly Recurring Revenue")?.provenance).toBe("from_brief");
     expect(bare.get("Our aim is to raise our average seat price")?.provenance).toBe("from_brief");
+  });
+});
+
+describe("row 2.1205 — F1: a single word is not evidence of authorship", () => {
+  /**
+   * ⭐⭐ THE FABRICATION-DIRECTION DEFECT, FOUND AT REVIEW AND MEASURED THROUGH
+   * THE FULL TRANSFORM.
+   *
+   * On an ordinary brief the scaffold node labelled `Decision` and the model's
+   * own one-word nodes `Churn`, `Growth` and `Revenue` all came back
+   * **`from_brief`** — four fabricated authorship claims on one draw, in exactly
+   * the class this loop exists to close.
+   *
+   * `MIN_QUOTE_CHARS = 3` is a DEGENERACY floor and says so itself: *"A single
+   * common word ('the') clears three characters and would still be contained by
+   * coincidence."* It was calibrated for OPTION labels, which are phrases by
+   * construction; this loop pointed it at kinds where a single-token label is
+   * the norm (16/16 banked decision nodes are labelled exactly `Decision`).
+   *
+   * ⚠ WHY THE BANKED CORPUS MISSED IT: none of the six briefs contains the word
+   * "decision". A corpus drawn from captures is still a corpus with a shape — it
+   * bounds what the product HAS emitted, not what the predicate WOULD accept.
+   */
+  const F1_BRIEF =
+    "Should we hire two engineers or hold headcount? This is a big decision for us. " +
+    "We worry about churn, want growth, and need more revenue.";
+
+  function singleTokenReplay(): V1DraftGraphResponse {
+    return {
+      graph: {
+        nodes: [
+          { id: "dec", kind: "decision", label: "Decision" },
+          { id: "o1", kind: "option", label: "hire two engineers" },
+          { id: "o2", kind: "option", label: "hold headcount" },
+          { id: "r1", kind: "risk", label: "Churn" },
+          { id: "out1", kind: "outcome", label: "Growth" },
+          { id: "out2", kind: "outcome", label: "Revenue" },
+          { id: "f1", kind: "factor", label: "Headcount", category: "controllable" },
+          { id: "g", kind: "goal", label: "want growth" },
+        ],
+        edges: [
+          { from: "dec", to: "o1", weight: 1, belief: 1 },
+          { from: "dec", to: "o2", weight: 1, belief: 1 },
+          { from: "o1", to: "f1", weight: 1, belief: 1 },
+          { from: "o2", to: "f1", weight: 1, belief: 1 },
+          { from: "f1", to: "out1", weight: 0.8, belief: 0.9 },
+          { from: "f1", to: "out2", weight: 0.8, belief: 0.9 },
+          { from: "f1", to: "r1", weight: 0.5, belief: 0.8 },
+          { from: "out1", to: "g", weight: 1, belief: 1 },
+        ],
+        meta: { roots: ["dec"], leaves: ["g"], source: "assistant" },
+      },
+      quality: { overall: 8, structure: 8, coverage: 8, structural_proxy: 8 },
+      trace: { request_id: "replay-f1-single-token", correlation_id: "replay" },
+    } as unknown as V1DraftGraphResponse;
+  }
+
+  const f1 = provenanceByLabel(singleTokenReplay(), F1_BRIEF);
+
+  // PRECONDITION — the brief really does contain every one of these words, so a
+  // pass below is the ELIGIBILITY guard's doing and not a fixture that stopped
+  // reproducing the case (trap 13b).
+  it.each([["decision"], ["churn"], ["growth"], ["revenue"]])(
+    "PRECONDITION — the brief contains the word %s, so containment WOULD match",
+    (word) => {
+      expect(F1_BRIEF.toLowerCase()).toContain(word);
+    },
+  );
+
+  it.each([
+    ["Decision", "decision"],
+    ["Churn", "risk"],
+    ["Growth", "outcome"],
+    ["Revenue", "outcome"],
+  ])("⭐ the single-token label %s (%s) does NOT earn from_brief", (label, kind) => {
+    const node = f1.get(label);
+    expect(node?.kind).toBe(kind);
+    expect(node?.provenance).toBe("ai_inferred");
+  });
+
+  // ⭐ THE DISCRIMINATING TWIN. Without it, the four assertions above could pass
+  // because the badge stopped working altogether rather than because a single
+  // token is ineligible.
+  it("TWIN — a MULTI-WORD verbatim label on the same brief still earns from_brief", () => {
+    const goal = f1.get("want growth");
+    expect(goal?.kind).toBe("goal");
+    expect(goal?.provenance).toBe("from_brief");
+  });
+
+  // ⭐ ROOT-4 CONTROL AT THE ELIGIBILITY SEAM. The fix is caller-side, so option
+  // provenance must be untouched — including options that are themselves short.
+  it.each([["hire two engineers"], ["hold headcount"]])(
+    "CONTROL — the option %s is unaffected by the eligibility condition",
+    (label) => {
+      expect(f1.get(label)?.provenance).toBe("from_brief");
+    },
+  );
+});
+
+describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is pinned", () => {
+  /**
+   * `intercept` (`cee-v3.ts:193`) is model-emittable and forwarded to the wire,
+   * and the first version of the value guard omitted it — so a label-verbatim
+   * node carrying ONLY a model-authored intercept earned the badge for a number
+   * the user never gave.
+   *
+   * ⚠ THE GUARD IS A HAND-MAINTAINED MIRROR AND CANNOT BE DERIVED: the schema
+   * marks no field as "value-bearing". What CAN be derived is the schema's KEY
+   * SET, so the completeness twin below REDs the day a new node field lands —
+   * turning a silent omission into a forced decision.
+   */
+  function interceptReplay(): V1DraftGraphResponse {
+    return {
+      graph: {
+        nodes: [
+          { id: "dec", kind: "decision", label: "Decision" },
+          { id: "opt_a", kind: "option", label: "hold our seat price at £42" },
+          { id: "opt_b", kind: "option", label: "raise it to £49 per seat" },
+          { id: "fac", kind: "factor", label: "Seat Price", category: "controllable" },
+          // Verbatim brief text, carrying ONLY a model-authored intercept.
+          { id: "out_i", kind: "outcome", label: "Monthly Recurring Revenue", intercept: 0.42 },
+          { id: "goal", kind: "goal", label: "Our aim is to raise our average seat price" },
+        ],
+        edges: [
+          { from: "dec", to: "opt_a", weight: 1, belief: 1 },
+          { from: "dec", to: "opt_b", weight: 1, belief: 1 },
+          { from: "opt_a", to: "fac", weight: 1, belief: 1 },
+          { from: "opt_b", to: "fac", weight: 1, belief: 1 },
+          { from: "fac", to: "out_i", weight: 0.8, belief: 0.9 },
+          { from: "out_i", to: "goal", weight: 1, belief: 1 },
+        ],
+        meta: { roots: ["dec"], leaves: ["goal"], source: "assistant" },
+      },
+      quality: { overall: 8, structure: 8, coverage: 8, structural_proxy: 8 },
+      trace: { request_id: "replay-intercept", correlation_id: "replay" },
+    } as unknown as V1DraftGraphResponse;
+  }
+
+  it("an OUTCOME carrying only a model-authored intercept is not badged", () => {
+    const withIntercept = provenanceByLabel(interceptReplay(), BRIEF_PRICING);
+    expect(withIntercept.get("Monthly Recurring Revenue")?.provenance).toBe("ai_inferred");
+  });
+
+  it("DISCRIMINATOR — the same label WITHOUT an intercept does earn the badge", () => {
+    const bare = provenanceByLabel(pricingReplay(), BRIEF_PRICING);
+    expect(bare.get("Monthly Recurring Revenue")?.provenance).toBe("from_brief");
+  });
+
+  /**
+   * ⭐ COMPLETENESS TWIN — derived from the schema, not mirrored from it.
+   *
+   * A derived guard proves AGREEMENT and can never prove COMPLETENESS
+   * (trap 12d), and this list is exactly the short-list case. Pinning the
+   * schema's key set means a new node field cannot arrive without someone
+   * answering "is it value-bearing?" — which is the question `intercept` got to
+   * skip.
+   *
+   * On RED: add the new key here, and add it to `carriesValue` in
+   * `schema-v3.ts` IF it can carry a model-authored value.
+   */
+  it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
+    expect(Object.keys(NodeV3.shape).sort()).toEqual([
+      "category",
+      "description",
+      "display_value",
+      "encoding_map",
+      "extractionType",
+      "factor_type",
+      "goal_threshold",
+      "goal_threshold_cap",
+      "goal_threshold_frame",
+      "goal_threshold_raw",
+      "goal_threshold_unit",
+      "id",
+      "intercept",
+      "interventions",
+      "is_baseline",
+      "kind",
+      "label",
+      "observed_state",
+      "prior",
+      "provenance",
+      "uncertainty_drivers",
+    ]);
   });
 });
 

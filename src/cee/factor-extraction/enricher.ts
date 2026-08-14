@@ -11,6 +11,10 @@
 
 import type { GraphT, NodeT, EdgeT, FactorDataT, NodeDataT } from "../../schemas/graph.js";
 import {
+  BRIEF_EXTRACTION_CONFIRM_DRIVER,
+  briefExtractionQuote,
+} from "./brief-extraction-claim.js";
+import {
   extractFactors,
   extractFactorsOrchestrated,
   generateFactorId,
@@ -450,7 +454,7 @@ export function enrichGraphWithFactors(
         defaulted: true,
         provenance: {
           source: "hypothesis",
-          quote: `Extracted from brief: "${factor.matchedText}"`,
+          quote: briefExtractionQuote(factor.matchedText),
         },
         provenance_source: "hypothesis",
       };
@@ -1012,7 +1016,7 @@ export async function enrichGraphWithFactorsAsync(
               ? { min: factor.rangeMin, max: factor.rangeMax }
               : undefined,
             factor_type: inferredFactorType,
-            uncertainty_drivers: ["Extracted from brief — confirm value"],
+            uncertainty_drivers: [BRIEF_EXTRACTION_CONFIRM_DRIVER],
             // Synthesise display_value when the LLM hasn't provided one (CEE-1 fallback)
             display_value: synthesiseDisplayValue({
               value: normalizedValue,
@@ -1112,7 +1116,7 @@ export async function enrichGraphWithFactorsAsync(
         : undefined,
       // V3 fields for injected factors
       factor_type: newFactorType,
-      uncertainty_drivers: ["Extracted from brief — confirm value"],
+      uncertainty_drivers: [BRIEF_EXTRACTION_CONFIRM_DRIVER],
       // Synthesise display_value when the LLM hasn't provided one (CEE-1 fallback)
       display_value: synthesiseDisplayValue({
         value: normalizedValue,
@@ -1138,7 +1142,7 @@ export async function enrichGraphWithFactorsAsync(
           defaulted: true,
           provenance: {
             source: "hypothesis",
-            quote: `Extracted from brief: "${factor.matchedText}"`,
+            quote: briefExtractionQuote(factor.matchedText),
           },
           provenance_source: "hypothesis",
         }
