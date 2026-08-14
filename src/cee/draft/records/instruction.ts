@@ -145,6 +145,16 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
 - \`figure\` — a quantity the user stated
 Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
 user did not state, and do not round or rescale one they did.
+On a \`goal\` carrying a number, set \`role\` to \`target\` when the number is what
+the user wants to REACH, and \`baseline\` when it is where they are NOW. That one
+word decides whether the number is registered as the success threshold, so an
+unstated \`role\` on a current reading is read as a target and inverts the goal.
+On an \`option\` that is the status quo — doing nothing, continuing as-is,
+deferring without action, or keeping the current course — set
+\`is_baseline: true\`, whatever its wording. Set \`is_baseline: false\` on the
+others. Users write this option themselves more often than not ("keep what we
+have", "hold price and push volume instead"), and it must be flagged even when
+the brief only lists named alternatives.
 
 **claims** — one entry for each thing YOU are adding that the user did not say.
 Use \`claim_kind\`:

@@ -60,6 +60,8 @@ const StatedItemWire = z.object({
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
+  // `option` only — grammar design note 5.
+  is_baseline: z.boolean().optional(),
 }).passthrough();
 
 const InferenceClaimWire = z.object({
@@ -83,9 +85,28 @@ const InferenceClaimWire = z.object({
   // the analysis could only compare bare labels. Every interventions test calls
   // `projectRecordsToGraph` DIRECTLY and so could not see it (trap 3b/19: the
   // guard was bound to the projector, the live path runs through the seam).
-  // `assertSeamCarriesEveryGrammarField` below now makes the next such omission
-  // a red rather than a dark capability.
+  // ⚠⚠ AND THE GUARD THIS COMMENT PROMISED DID NOT EXIST. It said
+  // "`assertSeamCarriesEveryGrammarField` below now makes the next such omission
+  // a red rather than a dark capability" — swept with a contrast control on
+  // 2026-08-14, that symbol occurred ONCE in the entire repo: in this sentence.
+  // `draftClaimSchemaKeys()`, which `grammar.ts` calls "the completeness source
+  // for `seam.ts`'s field-by-field rebuild", had no test consumer at all. So the
+  // estate held a sentence about a derived guard instead of the guard, in the one
+  // place written to stop a silent drop — and a mutant confirmed the cost: with
+  // `is_baseline` deleted from the rebuild below, every projector test stayed
+  // green, exactly as they did for `sets_to`.
+  //
+  // The guard is now REAL and behavioural, in
+  // `__tests__/value-carriage-and-baseline.test.ts`
+  // ("assertSeamCarriesEveryGrammarField — derived, and it did not exist
+  // before"): it builds a record populated from the grammar's OWN JSON Schema,
+  // pushes it through this function, and asserts the carried key set EQUALS
+  // `draftStatedItemSchemaKeys()` / `draftClaimSchemaKeys()`. A field added to the
+  // grammar is therefore covered without anyone updating a mirror — and deleting
+  // any line from the rebuild below is a red.
   sets_to: z.number().optional(),
+  // `option_refinement` only — grammar design note 5.
+  is_baseline: z.boolean().optional(),
 }).passthrough();
 
 export const DraftRecordSetWire = z.object({
@@ -187,6 +208,7 @@ export function projectDraftRecords(
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
+      ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
     })),
     claims: parsed.data.claims.map((claim) => ({
       claim_kind: claim.claim_kind,
@@ -201,6 +223,7 @@ export function projectDraftRecords(
       ...(claim.category !== undefined ? { category: claim.category } : {}),
       ...(claim.value !== undefined ? { value: claim.value } : {}),
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
+      ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };
   return { ok: true, records, projection: projectRecordsToGraph(records, brief) };

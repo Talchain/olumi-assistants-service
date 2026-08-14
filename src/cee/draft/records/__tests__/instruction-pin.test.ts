@@ -133,15 +133,50 @@ const HISTORIC_V5_INSTRUCTION_BYTES = 4688;
  * shape half changed in v4 only, and the connect half in v3/v4/v5 — because a
  * new claim KIND has to be both declared (shape) and connected (connect).
  */
-const PREREGISTERED_V6_INSTRUCTION_SHA256 =
+const HISTORIC_V6_INSTRUCTION_SHA256 =
   "b4916b58954b30838a5ca37a770fd796371b17400a1002131defba6bd7a69162";
-const PREREGISTERED_V6_INSTRUCTION_BYTES = 6021;
+const HISTORIC_V6_INSTRUCTION_BYTES = 6021;
+
+/**
+ * ⭐ v7 — 2026-08-14, the instruction half of the `is_baseline` widening.
+ *
+ * Two sentences were added to the SHAPE half, and both close a measured silence
+ * rather than restating the served prompt for tidiness:
+ *
+ *  · `is_baseline` on a status-quo option. The served `draft_graph` v195 has
+ *    mandated this at `:282-283` ("mandatory on ANY option representing the
+ *    status quo … whatever its label or id") while THIS block — the one sitting
+ *    nearest the output shape — named options 21 times and status quo ZERO. The
+ *    grammar had no field for it either, so the mandate addressed a shape the
+ *    model could not emit. The field now exists (grammar design note 5) and this
+ *    is where it is taught.
+ *  · `role` on a numeric `goal`. The projector registers a stated goal target as
+ *    `goal_threshold_*` only when the number is a TARGET, and refuses when the
+ *    model marks it `baseline`, because registering a current level as the
+ *    success threshold inverts the objective. That refusal is only reachable if
+ *    the model knows the distinction is load-bearing, so it is stated here.
+ *
+ * ⚠ STATUS: UNMEASURED AGAINST A LIVE DRAW at the time of pinning, said plainly
+ * because this comment is what a future session finds first. The bytes were
+ * written against three authorities AT THEIR BYTES — the served v195's Status Quo
+ * section, `grammar.ts`'s widened schemas, and the `Node` schema's
+ * `goal_threshold_*` contract — and against ZERO live results. What the model
+ * actually emits under the widened schema is the post-merge deploy witness's job
+ * (`scripts/records-pinned-brief-acceptance.ts`); no claim about it is made here.
+ *
+ * ⚠ v6 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED, exactly as v4's and v5's
+ * are not. Every draft served between 2026-08-14's grammar widening and this one
+ * received those bytes.
+ */
+const PREREGISTERED_V7_INSTRUCTION_SHA256 =
+  "37f271b2377bc1f8a84c8b822af1a626aea22832ca767cfa8f897076f8c69af8";
+const PREREGISTERED_V7_INSTRUCTION_BYTES = 6748;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v6 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V6_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v7 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V7_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V6_INSTRUCTION_BYTES,
+      PREREGISTERED_V7_INSTRUCTION_BYTES,
     );
   });
 
@@ -186,6 +221,18 @@ describe("the draft records instruction is the measured artefact", () => {
     expect(DRAFT_RECORDS_INSTRUCTION.startsWith(DRAFT_RECORDS_SHAPE_INSTRUCTION)).toBe(true);
   });
 
+  it("is DISTINCT from the historic v6 instruction, so v6's runs stay attributable", () => {
+    // Not decoration. Every draft served between the 2026-08-14 grammar widening
+    // and the `is_baseline` widening received exactly those bytes, and a reader of
+    // those logs must be able to tell which instruction produced them. Asserting
+    // distinctness is also what makes an accidental REVERT loud: a re-pointed pin
+    // and a reverted artefact are indistinguishable from a single equality check.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V6_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V6_INSTRUCTION_BYTES,
+    );
+  });
+
   it("keeps the shape half independently pinned, so a reference-syntax edit is legible as one", () => {
     // The two halves were measured separately: the shape half alone produced
     // ZERO option-origin causal links over 44 links / 9 runs; adding the connect
@@ -199,10 +246,22 @@ describe("the draft records instruction is the measured artefact", () => {
     // teaches it lives in the shape half. Recorded explicitly because "the shape
     // half is unchanged" was true for two versions running and is exactly the
     // kind of inherited sentence that survives past the change that falsified it.
+    //
+    // ⚠⚠ AND IT MOVED AGAIN IN v7 — the second consecutive version to touch it,
+    // which the v4 note above could not have anticipated. Both v7 sentences
+    // (`is_baseline` on a status-quo option, `role` on a numeric goal) are
+    // SHAPE-half statements: each tells the model what to PUT IN A FIELD, not how
+    // to connect two records. The connect half is byte-identical to v6, and that
+    // asymmetry is the point of pinning the halves apart — this edit is legible
+    // as a shape-only change without reading the diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "8964de6b75f45814bdbf0af7f8439e27a7a6ed75022368cca927d9105c225a4d",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(3100);
+    // HISTORIC — v6's shape half. Asserted DISTINCT so v6's runs stay attributable.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "575509cbc8570c1bd4fb8d31f9ce8b83f3d5508f28f37a5f11417a1f6dd30a3e",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(2373);
     // HISTORIC — v4/v5's shared shape half. Asserted DISTINCT: it stood
     // unchanged for two versions, which is exactly the kind of "unchanged" a
     // reader inherits past the change that ended it.

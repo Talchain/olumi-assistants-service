@@ -67,16 +67,32 @@ const HISTORIC_V4_GRAMMAR_SHA256 =
  * between 2026-08-12 and 2026-08-14 emitted `grammar_sha256:e7505d3f…`, and a
  * reader of those logs must be able to tell which grammar produced them.
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V5_GRAMMAR_SHA256 =
   "f5fbf0194c975db06cacd1d1a370129caf2bf65c1ccc2134de10f984d2ffe1f7";
 
+/**
+ * ⭐ v6 — 2026-08-14, the `is_baseline` widening. Two optional booleans, one on
+ * `stated_items[]` and one on `claims[]` (grammar design note 5), closing a field
+ * the served prompt has mandated since v195 and the records path could not emit.
+ *
+ * COST against the budget that actually binds: +66 serialised bytes (1198 →
+ * 1264), NO new object schema and NO union, so the compiled-grammar-size
+ * boundary — the UNPUBLISHED constraint that silently degrades a draft to
+ * prompt-only JSON on a 400 — is untouched.
+ *
+ * ⚠ v5's VALUE STAYS AND IS ASSERTED DISTINCT, exactly as v3's and v4's are.
+ */
+const PINNED_GRAMMAR_SHA256 =
+  "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v5 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v6 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
   });
 
-  it("is DISTINCT from the historic v4 grammar, so v4's runs stay attributable", () => {
+  it("is DISTINCT from the historic v4 and v5 grammars, so their runs stay attributable", () => {
     expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V4_GRAMMAR_SHA256);
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V5_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v3 grammar, so v3's runs stay attributable", () => {

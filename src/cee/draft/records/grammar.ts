@@ -113,6 +113,37 @@
  *    Discriminators (`kind`, `source_quote`, `claim_kind`, `label`) stay
  *    REQUIRED so the projector's switch is never undefined.
  *
+ * 5. ⭐⭐ `is_baseline` EXISTS BECAUSE THE SERVED PROMPT MANDATES A FLAG THIS
+ *    GRAMMAR COULD NOT EXPRESS (2026-08-14). The served `draft_graph` v195
+ *    (content_hash `152998b447819c2e`, byte-matched to `/admin/prompts/status`)
+ *    says at `:282-283`: *"Set `is_baseline: true` on Status Quo; all others
+ *    `is_baseline: false`"* and *"mandatory on ANY option representing the status
+ *    quo … whatever its label or id"*. The records path had **zero**
+ *    `is_baseline` anywhere — grammar, projector and instruction alike (measured
+ *    with contrast controls: `option` → 28 in this file). So the mandate was
+ *    addressed to a shape the model had no field in which to emit, and the flag
+ *    was DETERMINISTICALLY destroyed at generation. Same mechanism as the
+ *    `risk`/`outcome` outage above: an enforced structured-output grammar does
+ *    not degrade an inexpressible fact, it deletes it.
+ *
+ *    ⚠ AND THE HARM IT REPLACES IS NOT MERELY AN ABSENCE. With no honest
+ *    channel, the downstream consumer GUESSED from labels, and the guess was
+ *    inverted on every measured draw: `analysis-ready.ts`'s keyword list holds
+ *    the bare tokens `current` and `keep` and takes the first match by array
+ *    index, so *"replace our **current** CRM with HubSpot"* was flagged the
+ *    status quo and *"**keep** what we have"* was not (B_crm, 3/3). The flag
+ *    drives which option the analysis treats as the comparison base, so an
+ *    inverted one corrupts every comparison the user reads. **This field is what
+ *    lets that consumer stop guessing** — the two changes ship together, because
+ *    tightening the guess without providing the channel would only trade a wrong
+ *    baseline for no baseline.
+ *
+ *    COST against the budget that actually binds: two optional booleans, ~50
+ *    serialised bytes, NO new object schema and NO union — so the compiled-
+ *    grammar-size boundary is untouched. Measured before the change at 1198 /
+ *    3400 bytes and 14 / 24 optional params; asserted by
+ *    `records-grammar-budget.test.ts`.
+ *
  * 4. `direction` IS `floor` | `ceiling` — THE USER'S LANGUAGE, NEVER THE WIRE
  *    OPERATOR. CEE #888 burned four rounds on a floor/ceiling predicate. The
  *    projector performs the single mapping to `ConstraintOperator`
@@ -326,6 +357,15 @@ export interface DraftStatedItem {
   role?: DraftRecordRole;
   /** `constraint` only. */
   direction?: DraftRecordDirection;
+  /**
+   * `option` only — see design note 5.
+   *
+   * The USER's own status-quo option. Measured: users write it themselves far
+   * more often than the framing assumes — "keep what we have" (B_crm, 3/3 draws)
+   * and "hold price and push volume instead" (C_pricing, 3/3). Both were the real
+   * baseline and neither could say so.
+   */
+  is_baseline?: boolean;
 }
 
 /** What the model adds — the honesty half. `id` absent by design. */
@@ -370,6 +410,16 @@ export interface DraftInferenceClaim {
    * slot is cheap (13 free against Anthropic's 24) and the conflation is not.
    */
   sets_to?: number;
+  /**
+   * `option_refinement` only — see design note 5. The MODEL's added status quo.
+   *
+   * Named identically to the stated-item field on purpose: it is the SAME
+   * question ("is this option the baseline?") asked of the two places an option
+   * can come from, so ONE projector branch reads both. That is deliberate reuse,
+   * not the twins defect — the twins defect is two DIFFERENT questions sharing a
+   * name (trap 21); this is one question sharing a name.
+   */
+  is_baseline?: boolean;
 }
 
 export interface DraftRecordSet {
@@ -406,6 +456,8 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
             direction: { type: "string", enum: [...DRAFT_RECORD_DIRECTIONS] },
+            // Design note 5. `option` only; the projector ignores it elsewhere.
+            is_baseline: { type: "boolean" },
           },
           required: ["kind", "source_quote"],
           additionalProperties: false,
@@ -454,6 +506,8 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       // Option→factor intervention level. See the interface note: named apart
       // from `strength` on purpose.
       sets_to: { type: "number" },
+      // Design note 5. `option_refinement` only; ignored on other claim kinds.
+      is_baseline: { type: "boolean" },
     },
     required: [DRAFT_RECORD_CLAIM_DISCRIMINATOR, "label"],
     additionalProperties: false,

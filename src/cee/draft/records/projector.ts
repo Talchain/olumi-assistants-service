@@ -74,8 +74,18 @@ import {
   bindingEarnsBriefClaim,
   type BriefBinding,
 } from "../../provenance/brief-binding.js";
+// ⭐ THE GOAL-THRESHOLD CAP AUTHORITY, CONSUMED RATHER THAN RE-DERIVED.
+// `resolveGoalThresholdCap` is the declared single source of truth for turning a
+// raw goal target into a normalisation denominator, and it exists BECAUSE the two
+// pre-existing registration paths (chat `add_constraint`, draft factor-extraction
+// enricher) once diverged and scored the same target up to ~5x apart
+// (`utils/goal-threshold-cap.ts:20-26`). The records projector is a THIRD
+// registration path; minting its own cap arithmetic here would recreate exactly
+// the divergence that module was extracted to end (trap 12).
+import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import type {
   DraftInferenceClaim,
+  DraftRecordRole,
   DraftRecordSet,
   DraftStatedItem,
 } from "./grammar.js";
@@ -459,6 +469,38 @@ export interface ProjectedNode {
   data?: Record<string, unknown>;
   observed_state?: Record<string, unknown>;
   provenance?: RecordProvenance;
+  /**
+   * ⭐ NODE-LEVEL, NOT `data` — derived at `src/schemas/graph.ts`, where these
+   * four live on the `Node` object itself (`:305-319`) and NOT in the `NodeData`
+   * union. Writing them into `data` would match no union branch and reject the
+   * whole draft, which is the wound `role` already took (`:1091-1098`).
+   *
+   * They travel as ONE set, minted at ONE site, or not at all — see the goal
+   * branch in `projectOnce`. `goal_baseline` is deliberately NEVER minted here.
+   */
+  goal_threshold?: number;
+  goal_threshold_raw?: number;
+  goal_threshold_unit?: string;
+  goal_threshold_cap?: number;
+  /**
+   * Typed FROM the constant rather than as the literal `"level"`, so the field
+   * cannot drift from `GoalThresholdFrame` if a later contract release widens or
+   * renames the enum (trap 12 — a hand-written literal here would be a mirror of
+   * the schema).
+   */
+  goal_threshold_frame?: typeof CEE_GOAL_THRESHOLD_FRAME;
+  /**
+   * `option` nodes only. NODE-LEVEL for the same union reason: `OptionData`
+   * REQUIRES `interventions` (`graph.ts:163-165`), so `data = {is_baseline}` on an
+   * option with no interventions matches nothing and 400s the draft.
+   *
+   * Node level is not a workaround — it is an established read path:
+   * `normalisation.ts:510-514` explicitly PRESERVES node-level `is_baseline` on
+   * option nodes and nulls it elsewhere, and `schema-v3.ts:965-983` resolves it
+   * through `readIsBaseline` (`cee/baseline-identity.ts:53-60`, the declared
+   * single source of truth) into `OptionV3T.is_baseline`.
+   */
+  is_baseline?: boolean;
 }
 
 export interface ProjectedEdge {
@@ -852,6 +894,31 @@ export function nextNiceNumberAbove(x: number): number {
 }
 
 /**
+ * ⭐ MAY A STATED `goal`'s NUMBER BE REGISTERED AS THE SUCCESS TARGET?
+ *
+ * A `goal` stated kind already means "the objective the user cares about", so a
+ * number on it is a target by the producer's own declared semantics — that is
+ * what `kind: "goal"` SAYS, and the instruction never asks the model to file a
+ * current reading as a goal. So `target` and an unstated role both register.
+ *
+ * ⚠ `baseline` IS THE ONE EXPLICIT SIGNAL THAT THE NUMBER IS NOT A TARGET, and it
+ * is refused rather than reinterpreted. `role: "baseline"` on a goal says "this
+ * is where we are now", and registering a current level as the success threshold
+ * would INVERT the user's objective — the same class of harm as the
+ * floor/ceiling inversion `direction` exists to prevent, where a 50/50 guess on a
+ * threshold the user gave us in words is the estate's ratified never-do
+ * (trap 22f). `context` and `constraint` are refused for the weaker reason that
+ * neither asserts a target and neither has a defensible reading as one.
+ *
+ * Refusing costs nothing the user had before: the number stays in the label
+ * exactly as it does today, so a refusal is never a regression — only a
+ * withheld improvement, which is the correct direction for an ambiguous case.
+ */
+export function goalValueIsATarget(role: DraftRecordRole | undefined): boolean {
+  return role === undefined || role === "target";
+}
+
+/**
  * The per-factor frame, or `undefined` when none is needed (already unit
  * interval) or none truthfully exists (a negative magnitude).
  */
@@ -1069,8 +1136,76 @@ function projectOnce(
       // a factor carrying constraint metadata matches NEITHER union branch and
       // 400s. Unit lives on `data`, never here.
       node.observed_state = { value: item.value, raw_value: item.value };
+    } else if (kind === "goal" && typeof item.value === "number" && goalValueIsATarget(item.role)) {
+      // ⭐⭐ ROOT 3 — THE MISSING GOAL VALUE BRANCH. The comment 40 lines below
+      // has named this gap since the R1 cutover: "`projectOnce` has a value
+      // branch for `constraint` and for `factor` and NONE FOR `goal`". This is
+      // that branch.
+      //
+      // MEASURED on the deployed build `41156fc`, all three C_pricing draws: the
+      // user wrote "our target for next year is £3,000,000", the model
+      // transcribed it correctly as a stated `goal` with `value: 3000000`, and
+      // the graph carried `data: null, observed_state: null` — the £3m surviving
+      // only as PROSE INSIDE THE LABEL. Digits inside a label are not a
+      // registered target: nothing downstream can score against them, so the
+      // product held the user's own success criterion as decoration.
+      //
+      // ⚠ WHY THIS BRANCH IS SAFE WHERE THE STATED-FIGURE FIX IS NOT. A stated
+      // `figure` that reaches the graph must also reach the GOAL or the
+      // connectivity prune withdraws it (`:1563`) — which is why the 12 stated
+      // magnitudes in the banked emission all die there, and why repairing that
+      // needs a validator exemption this lane does not own. A `goal` node has no
+      // such exposure: it IS the terminus every other node must reach.
+      //
+      // ── THE FIVE FIELDS TRAVEL TOGETHER OR NOT AT ALL ──────────────────────
+      // raw · cap · normalised · frame · unit, minted at THIS ONE SITE from ONE
+      // derivation. ISL computes `delta_threshold = goal_threshold - baseline`,
+      // and a threshold scored against a different denominator than its baseline
+      // "does not fail — it silently returns a WRONG probability"
+      // (`graph.ts:325-330`). So the cap is never derived separately from the
+      // value it divides.
+      const cap = resolveGoalThresholdCap(undefined, item.value, item.unit, undefined);
+      node.goal_threshold_raw = item.value;
+      if (item.unit !== undefined) node.goal_threshold_unit = item.unit;
+      if (cap !== null) {
+        node.goal_threshold_cap = cap;
+        node.goal_threshold = item.value / cap;
+        // A CODE CONSTANT, never derived from model output — `'level'` is true by
+        // construction of the `raw / cap` arithmetic one line above.
+        node.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
+      }
+      // ⚠⚠ `goal_baseline` IS DELIBERATELY NEVER MINTED HERE, and the omission is
+      // the honest branch, not a gap. The contract is explicit: it is
+      // "EXTRACTION ONLY. Present only when the user STATED a current level in
+      // the same breath as the target. Never inferred, never defaulted from the
+      // target, never derived" (`graph.ts:332-336`).
+      //
+      // The C_pricing brief DOES state one ("Annual recurring revenue is
+      // currently £2,400,000") — but it arrives as a SEPARATE stated `figure`
+      // record, and pairing it with this goal would require inferring that the
+      // two records describe the same metric. That inference is precisely the
+      // fabrication class this lane was dispatched to remove: a number the user
+      // gave about one thing, silently asserted as the baseline of another. An
+      // absent baseline makes ISL refuse with `missing_goal_baseline` and render
+      // no probability, which the contract itself calls honest; a guessed one
+      // yields a confident wrong probability. Not symmetric harms, so not a
+      // symmetric default (trap 22b).
     }
 
+    // ⭐⭐ THE USER'S OWN STATUS QUO, CARRIED. `is_baseline` was structurally
+    // inexpressible before the grammar widening (measured: ZERO occurrences in
+    // the whole records path, against a same-sweep contrast of `option` → 28), so
+    // the served prompt's mandate — v195:282-283, "mandatory on ANY option
+    // representing the status quo, whatever its label or id" — was addressed to a
+    // shape the model had no field for.
+    //
+    // Written at NODE level, never into `data`: see the `ProjectedNode` note. An
+    // explicit `false` is carried as faithfully as a `true`, because "the model
+    // considered this and said no" and "the model never spoke" are different
+    // facts and the consumer distinguishes them (`analysis-ready-helper.ts:276`).
+    if (kind === "option" && typeof item.is_baseline === "boolean") {
+      node.is_baseline = item.is_baseline;
+    }
     // ⚠ `role` DOES NOT SET A CATEGORY — `target`/`baseline` describe what the
     // user was doing with the number; `controllable`/`observable`/`external`
     // describe the node's position in the causal structure. They are two
@@ -1281,6 +1416,18 @@ function projectOnce(
           const parentNode = nodes.find((n) => n.id === parentId);
           if (parentNode) parentNode.provenance = provenance[parentId];
         }
+        // A merged refinement mints no node, so its `is_baseline` would be lost
+        // with it — the same silent-drop shape as `sets_to` at the seam. It lands
+        // on the parent instead, but NEVER over an explicit stated flag: the user
+        // saying "this is my status quo" outranks the model's reading of the
+        // user's own option. Absent a stated flag, the model's is the only
+        // reading available and withholding it would lose real information.
+        if (typeof claim.is_baseline === "boolean") {
+          const parentNode = nodes.find((n) => n.id === parentId);
+          if (parentNode && parentNode.kind === "option" && parentNode.is_baseline === undefined) {
+            parentNode.is_baseline = claim.is_baseline;
+          }
+        }
         dropped.push({
           claim_index: index,
           claim_kind: claim.claim_kind,
@@ -1309,6 +1456,14 @@ function projectOnce(
     provenance[id] = prov;
 
     const node: ProjectedNode = { id, kind: nodeKind, label, provenance: prov };
+    // The MODEL's added status quo — the half the served prompt asks for most
+    // insistently (v195:278 closes v187's "forced choice" escape hatch, so a
+    // brief that merely lists named alternatives no longer excuses omitting it).
+    // Same field name as the stated-item flag because it is the same question
+    // asked of the other place an option can come from — see grammar note 5.
+    if (nodeKind === "option" && typeof claim.is_baseline === "boolean") {
+      node.is_baseline = claim.is_baseline;
+    }
     if (nodeKind === "factor") {
       // ⚠ THE MODEL'S DECLARED `category` IS DELIBERATELY NOT PROPAGATED.
       //
