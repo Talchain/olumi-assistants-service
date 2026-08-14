@@ -142,6 +142,48 @@ export const DISSENT_SURVIVES_APPLY =
   'Applying one of these to your model does not remove the others. They stay recorded here, attributed, exactly as they were given.';
 
 /**
+ * The standing sentence about what the disagreement surface IS.
+ *
+ * ⚠⚠ NOT A DUPLICATE OF `DISSENT_SURVIVES_APPLY`, AND THE DISTINCTION IS THE
+ * REASON BOTH EXIST. They answer two different questions and the estate has
+ * already merged two such pairs by mistake (CLAUDE.md trap 21):
+ *
+ *   • `DISSENT_SURVIVES_APPLY` answers "what happens to the other positions
+ *     when I apply one?" — it is a promise about a MUTATION, and it is only
+ *     true of a surface that offers one.
+ *   • this constant answers "what am I looking at — have these been averaged?"
+ *     — a claim about the DISPLAY, true on every journey including a
+ *     participant's, who has no apply affordance at all.
+ *
+ * Putting the apply promise on a participant's screen would advertise a
+ * mechanism they cannot reach, which is the review-doctrine failure of a
+ * guarantee that is dark at one end.
+ *
+ * ⭐ It lives HERE rather than in the UI because `DisagreementBody`'s own header
+ * states the rule that every sentence of reasoning copy comes from this module
+ * — and the UI had hand-written this one anyway, outside the guard below. It
+ * contains the word "combined", which is FORBIDDEN, and it is legitimate only
+ * because it is being DENIED — so the sanctioned-negation set is what makes it
+ * admissible, and the suite proves that entry is still earning its place.
+ */
+export const POSITIONS_NOT_COMBINED =
+  'These are the positions as they were given, with the reasons each person stated. They are shown side by side and are not combined into a single number.';
+
+/**
+ * Every standing (non-derived) sentence this module publishes.
+ *
+ * ⚠ THIS EXISTS SO THE GUARD CANNOT GO SHORT. The suite's `everyString()` used
+ * to hand-list `DISSENT_SURVIVES_APPLY` beside a derived grid, so a constant
+ * added here would have been checked by NOTHING while the suite stayed green —
+ * a hand-maintained mirror inside the instrument that exists to catch drift
+ * (CLAUDE.md trap 12). Adding a constant to this array is now the only step.
+ */
+export const STANDING_SENTENCES: readonly string[] = [
+  DISSENT_SURVIVES_APPLY,
+  POSITIONS_NOT_COMBINED,
+];
+
+/**
  * Words that would mean this surface had resolved the disagreement for the
  * team. Asserted ABSENT across every string the module can emit.
  *

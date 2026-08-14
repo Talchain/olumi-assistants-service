@@ -30,7 +30,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DISSENT_SURVIVES_APPLY,
   FORBIDDEN_RESOLUTION_WORDS,
+  POSITIONS_NOT_COMBINED,
   SANCTIONED_NEGATIONS,
+  STANDING_SENTENCES,
   divergenceHeadline,
   interrogationQuestion,
   stripSanctionedNegations,
@@ -46,6 +48,8 @@ import { appendParticipantEvent, validateEventPayload } from '../elicitation-app
 import { assembleOpenPacket, assembleRevealView } from '../packet-read-model.js';
 import { verifyAppliedFrom } from '../apply-verification.js';
 import {
+  ELICITATION_ANSWER_KINDS,
+  isAnswerKind,
   isCollabRefusal,
   type CollabParticipant,
   type CollabRound,
@@ -773,7 +777,12 @@ describe('the interrogation copy never resolves the disagreement', () => {
   }
 
   const everyString = (): string[] => {
-    const out: string[] = [DISSENT_SURVIVES_APPLY];
+    // ⭐ DERIVED FROM THE MODULE, not re-listed here. This was
+    // `[DISSENT_SURVIVES_APPLY]`, so a standing sentence added beside it was
+    // checked by nothing while this suite stayed green — the mirror defect,
+    // inside the guard (CLAUDE.md trap 12). `STANDING_SENTENCES` is the one
+    // place a new constant is registered, and it is the module's own list.
+    const out: string[] = [...STANDING_SENTENCES];
     for (const shape of shapes) {
       for (const facts of factGrid) {
         out.push(divergenceHeadline(shape, facts));
@@ -916,5 +925,185 @@ describe('summariseDisagreementForPrompt', () => {
   it('omits targets nobody answered', async () => {
     const text = await build();
     expect(text).not.toContain(ALIGNED_LABEL);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5. OWNERSHIP. Until this suite existed, any signed-in user who held a
+ *    round_id could read that round's beliefs.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('the reveal projection is bound to the round OWNER', () => {
+  const OWNER = 'owner-user';
+  const STRANGER = 'some-other-signed-in-user';
+
+  const storeWithAnswers = (o: Partial<CollabRound> = {}): CollabStore =>
+    makeStore({
+      round: round(o),
+      events: [
+        answer({ participant_id: GRACE_ID, value: GRACE_VALUE, expression_raw: 'Cohort held.' }),
+        answer({ participant_id: ADA_ID, value: ADA_VALUE, expression_raw: 'Churn bites.' }),
+      ],
+    });
+
+  /**
+   * ⭐ THE DISCRIMINATING PAIR. Either half alone proves nothing: a projection
+   * that refused EVERYONE would satisfy the refusal test, and the pristine
+   * (defective) code satisfies the admission test. Only both together bind the
+   * behaviour to the identity of the caller rather than to "something threw".
+   */
+  it('REFUSES a signed-in stranger who is not the round owner', async () => {
+    const code = await refusalCodeOf(() =>
+      assembleRevealView(storeWithAnswers(), {
+        round_id: ROUND_ID,
+        requested_by: { kind: 'owner', user_id: STRANGER },
+      }),
+    );
+    expect(code).toBe('collab_owner_only');
+  });
+
+  it('ADMITS the round owner (the other half of the pair)', async () => {
+    const view = await assembleRevealView(storeWithAnswers(), {
+      round_id: ROUND_ID,
+      requested_by: { kind: 'owner', user_id: OWNER },
+    });
+    // Bound by IDENTITY, not by "it returned something": the row is found by
+    // participant_id and its value asserted, so this cannot pass on Ada's row.
+    const grace = view.per_target
+      .find((t) => t.target.id === TARGET_ID)
+      ?.responses.find((r) => r.participant_id === GRACE_ID);
+    expect(grace?.value).toBe(GRACE_VALUE);
+  });
+
+  it('REFUSES the stranger on the DISAGREEMENT view too (one inherited gate)', async () => {
+    const code = await refusalCodeOf(() =>
+      assembleDisagreementView(storeWithAnswers(), {
+        round_id: ROUND_ID,
+        requested_by: { kind: 'owner', user_id: STRANGER },
+      }),
+    );
+    expect(code).toBe('collab_owner_only');
+  });
+
+  it('ADMITS the owner on the disagreement view, with the stated basis verbatim', async () => {
+    const view = await assembleDisagreementView(storeWithAnswers(), {
+      round_id: ROUND_ID,
+      requested_by: { kind: 'owner', user_id: OWNER },
+    });
+    const grace = view.per_target
+      .find((t) => t.target.id === TARGET_ID)
+      ?.positions.find((p) => p.participant_id === GRACE_ID);
+    expect(grace?.stated_basis).toBe('Cohort held.');
+  });
+
+  /**
+   * ⚠ ORDERING IS THE ASSERTION HERE, not the refusal. If the ownership check
+   * ran AFTER the status gate, a stranger probing an OPEN round would be told
+   * `collab_round_open` — learning that the round exists and what state it is
+   * in. The refusal must be identical whatever the round's status.
+   */
+  it('refuses the stranger BEFORE disclosing the round status', async () => {
+    const code = await refusalCodeOf(() =>
+      assembleRevealView(storeWithAnswers({ status: 'open' }), {
+        round_id: ROUND_ID,
+        requested_by: { kind: 'owner', user_id: STRANGER },
+      }),
+    );
+    expect(code).toBe('collab_owner_only');
+    expect(code).not.toBe('collab_round_open');
+  });
+
+  it('answers a MISSING round exactly as it answers someone else’s (no existence oracle)', async () => {
+    const missing = await refusalCodeOf(() =>
+      assembleRevealView(storeWithAnswers(), {
+        round_id: '99999999-9999-4999-8999-999999999999',
+        requested_by: { kind: 'owner', user_id: OWNER },
+      }),
+    );
+    const notMine = await refusalCodeOf(() =>
+      assembleRevealView(storeWithAnswers(), {
+        round_id: ROUND_ID,
+        requested_by: { kind: 'owner', user_id: STRANGER },
+      }),
+    );
+    expect(missing).toBe(notMine);
+    expect(missing).toBe('collab_owner_only');
+  });
+
+  it('leaves the PARTICIPANT path untouched', async () => {
+    const view = await assembleRevealView(storeWithAnswers(), {
+      round_id: ROUND_ID,
+      requested_by: { kind: 'participant', participant_id: GRACE_ID },
+    });
+    expect(view.round_id).toBe(ROUND_ID);
+  });
+
+  it('still refuses a participant who is not on the round', async () => {
+    const code = await refusalCodeOf(() =>
+      assembleRevealView(storeWithAnswers(), {
+        round_id: ROUND_ID,
+        requested_by: { kind: 'participant', participant_id: STRANGER_ID },
+      }),
+    );
+    expect(code).toBe('collab_not_a_participant');
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 6. THE ANSWER FAMILY IS TOTAL, AND THE STANDING COPY HAS ONE AUTHOR.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('the answer-family classification is exhaustive', () => {
+  /**
+   * The STRUCTURAL guarantee is the `Record<ElicitationEventKind, boolean>` in
+   * `types.ts`: a kind added to the union is a missing property and `tsc` REDs
+   * at the declaration. That cannot be asserted at runtime (the union is not
+   * enumerable), so what this suite pins is the CLASSIFICATION itself — every
+   * kind named, so a silent re-classification cannot pass.
+   */
+  it.each([
+    ['belief_submitted', true],
+    ['belief_revised', true],
+    ['declined', true],
+    ['clarification_requested', false],
+    ['evidence_attached', false],
+  ] as const)('classifies %s as answer=%s', (kind, expected) => {
+    expect(isAnswerKind(kind)).toBe(expected);
+  });
+
+  it('derives the exported list from that one table', () => {
+    expect([...ELICITATION_ANSWER_KINDS].sort()).toEqual(
+      ['belief_revised', 'belief_submitted', 'declined'].sort(),
+    );
+  });
+});
+
+describe('the standing disagreement copy has exactly one author', () => {
+  it('publishes both standing sentences through the guarded set', () => {
+    // EXACT, so a constant added without registering it REDs here rather than
+    // slipping past the forbidden-word guard unchecked.
+    expect([...STANDING_SENTENCES].sort()).toEqual(
+      [DISSENT_SURVIVES_APPLY, POSITIONS_NOT_COMBINED].sort(),
+    );
+  });
+
+  /**
+   * ⚠ TRAP 21, PINNED. These two sentences answer different questions — one is
+   * a promise about APPLYING, the other a claim about the DISPLAY. A future
+   * tidy-up that collapsed them into one would put an apply promise on a
+   * participant's screen, where there is no apply affordance at all.
+   */
+  it('keeps the apply promise and the display claim distinct', () => {
+    expect(POSITIONS_NOT_COMBINED).not.toBe(DISSENT_SURVIVES_APPLY);
+    expect(DISSENT_SURVIVES_APPLY).toContain('Applying');
+    expect(POSITIONS_NOT_COMBINED).not.toContain('Applying');
+  });
+
+  it('serves the display claim on the view, so no client composes its own', async () => {
+    const view = await assembleDisagreementView(
+      makeStore({ events: [answer({ participant_id: GRACE_ID, value: GRACE_VALUE })] }),
+      { round_id: ROUND_ID, requested_by: { kind: 'owner', user_id: 'owner-user' } },
+    );
+    expect(view.standing_note).toBe(POSITIONS_NOT_COMBINED);
   });
 });

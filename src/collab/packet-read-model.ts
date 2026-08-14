@@ -177,8 +177,41 @@ export async function assembleRevealView(
 ): Promise<RevealView> {
   const round = await store.getRound(args.round_id);
   if (round === null) {
-    refuse('collab_token_invalid', 'No round for that token.');
+    // ⚠ THE OWNER'S "no such round" AND "not yours" ARE ONE ANSWER, exactly as
+    // in `rounds-service.ts`. A distinct code here would make an authenticated
+    // caller an existence oracle over other people's rounds: guess a round_id,
+    // read which refusal comes back, learn whether it exists.
+    refuse(
+      args.requested_by.kind === 'owner' ? 'collab_owner_only' : 'collab_token_invalid',
+      args.requested_by.kind === 'owner'
+        ? 'No round you own with that id.'
+        : 'No round for that token.',
+    );
   }
+
+  /**
+   * ⭐ OWNERSHIP, AND IT IS CHECKED BEFORE STATUS.
+   *
+   * Until this existed, EVERY authenticated Supabase user who held (or guessed)
+   * a round_id could read that round's reveal AND its disagreement view — every
+   * participant's number, their verbatim words and their attached evidence —
+   * because the owner routes verified only that the CALLER was signed in, never
+   * that the ROUND was theirs. `closeRound` (rounds-service.ts:147) and
+   * `ownerPreview` (:202) have always checked; this projection did not, and it
+   * is the one that serves the beliefs.
+   *
+   * ⚠ BEFORE THE STATUS GATE, deliberately. Checking after would answer
+   * `collab_round_open` to a stranger and turn the refusal into a status oracle
+   * on a round they cannot see — a smaller leak than the beliefs, but the same
+   * kind, and free to close by ordering.
+   *
+   * ⚠ `service` is exempt, matching `requireOwnerActor`: an internal caller has
+   * no `user_id` to compare and is not reachable from the browser seam.
+   */
+  if (args.requested_by.kind === 'owner' && round.created_by !== args.requested_by.user_id) {
+    refuse('collab_owner_only', 'No round you own with that id.');
+  }
+
   if (round.status === 'open' || round.status === 'draft') {
     refuse(
       'collab_round_open',
