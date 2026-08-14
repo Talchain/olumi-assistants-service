@@ -22,11 +22,31 @@
  * THE CORPUS IS NOT FROM THE AUTHOR'S HEAD (CLAUDE.md trap 22)
  *
  * `DEPLOYED_STABILITY_LINE` is the exact sentence measured on the deployed
- * build. The `defaulted_assumptions` fixture shape is copied from a REAL
- * enrichment capture in this repo —
- * `src/orchestrator-v5/compose/__tests__/fixtures/dsk-walk/session-a.enrichment.json:949`
- * — not invented here, so the reader is tested against what the producer
- * actually emits.
+ * build.
+ *
+ * ⚠⚠ THE CLAIM THAT USED TO SIT HERE WAS FALSE, AND IT IS WHY F6 SHIPPED —
+ * REPLACED RATHER THAN QUIETLY DELETED (CLAUDE.md trap 14). It read: "The
+ * `defaulted_assumptions` fixture shape is copied from a REAL enrichment
+ * capture ... not invented here, so the reader is tested against what the
+ * producer actually emits."
+ *
+ * Half true, and the false half was load-bearing. The array ENTRY was copied
+ * from `fixtures/dsk-walk/session-a.enrichment.json:949`. The ENVELOPE around
+ * it was authored here as `enrichment: { defaulted_assumptions: … }` — top
+ * level. Line 949 sits at four-space indentation INSIDE `decision_brief`, and
+ * the nested path is the only one PLoT has ever emitted.
+ *
+ * So this suite passed while the reader it certified returned null on every
+ * real payload, and the product disclosed nothing to anybody for the whole of
+ * #940's life. Trap 16-inverse, verbatim: a fixture you wrote yourself is not
+ * evidence about the wire.
+ *
+ * ⭐ AND IT HAD BECOME A TRIPWIRE. Once F6 fixed the reader, this suite was the
+ * only thing in the repo still asserting the top-level shape — so it actively
+ * DEFENDED the wrong path: anyone deleting the tolerated top-level read as dead
+ * code would be stopped by a red test whose header told them top level was what
+ * the producer emits. The envelope below is now the producer's real one; the
+ * single remaining top-level case is labelled for what it actually is.
  *
  * ⚠ FIXTURES ARE NOT EDITED, ONLY READ. That capture is a record of what a
  * dated build received (trap 14b).
@@ -111,7 +131,9 @@ function factWithDefaulted(defaulted: unknown): any {
         scenario_id: 's1',
         leading_option_id: 'opt_a',
         computed_at: '2026-08-13T19:30:00.000Z',
-        enrichment: { defaulted_assumptions: defaulted },
+        // THE PRODUCER'S REAL PATH. See the header: this was top-level, and
+        // that single wrong key is the entire F6 defect.
+        enrichment: { decision_brief: { defaulted_assumptions: defaulted } },
       },
     },
   ];
@@ -346,6 +368,80 @@ describe('conversational recitation — defaulted values', () => {
       // Proves the selector discriminates rather than returning a constant.
       expect(pickLatestDefaultedAssumptions(factWithDefaulted([]))).toBeNull();
       expect(pickLatestDefaultedAssumptions([])).toBeNull();
+    });
+
+    /**
+     * ⚠ THIS IS A TOLERANCE, NOT A CONTRACT — and the label matters more than
+     * the assertion.
+     *
+     * The top-level path is NOT what PLoT emits and never has been. It is read
+     * only so that (a) if the key is ever hoisted into
+     * `ISL_TOPLEVEL_ENRICHMENT_KEYS`, the reader keeps working across the
+     * deploy skew instead of going dark for a window, and (b) any facts written
+     * during such a hoist stay readable.
+     *
+     * It is exactly ONE test on purpose. The previous version of this suite
+     * asserted the top-level shape THROUGHOUT while its header called that
+     * shape the producer's — which is how a green suite certified a reader that
+     * never fired, and then defended the wrong path against cleanup.
+     *
+     * ⭐ RE-SURFACE TRIGGER: delete this test and the tolerated branch in
+     * `readDefaultedAssumptionsFromEnrichment` together, the first time either
+     * is true —
+     *   · PLoT's `assembly/decision-brief.ts` still emits ONLY the nested path
+     *     at the next contract bump (check it; if so the tolerance never had a
+     *     job and should go), OR
+     *   · a hoist has landed AND every service has been on the hoisted schema
+     *     version for one full deploy cycle (then the tolerance is the real
+     *     path and the nested read becomes the legacy one).
+     * Do not leave this dangling: an unexplained second path is how a reader
+     * becomes unfalsifiable.
+     */
+    it('TOLERATED (not the producer shape): a top-level array is still read', () => {
+      const topLevel: any = [
+        {
+          fact_type: 'run_analysis',
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: 's1',
+            leading_option_id: 'opt_a',
+            computed_at: '2026-08-13T19:30:00.000Z',
+            enrichment: { defaulted_assumptions: [REAL_DEFAULTED_ENTRY] },
+          },
+        },
+      ];
+      expect(pickLatestDefaultedAssumptions(topLevel)).toEqual({
+        count: 1,
+        named: ['Market Conditions'],
+      });
+    });
+
+    /**
+     * The nested path WINS when both are present. Pins the precedence so a
+     * future edit cannot quietly make the tolerated path authoritative.
+     */
+    it('prefers the producer’s nested path when both are present', () => {
+      const both: any = [
+        {
+          fact_type: 'run_analysis',
+          fact_version: 1,
+          noop: false,
+          result: {
+            scenario_id: 's1',
+            leading_option_id: 'opt_a',
+            computed_at: '2026-08-13T19:30:00.000Z',
+            enrichment: {
+              defaulted_assumptions: [{ ...REAL_DEFAULTED_ENTRY, factor_label: 'WRONG — top level' }],
+              decision_brief: { defaulted_assumptions: [REAL_DEFAULTED_ENTRY] },
+            },
+          },
+        },
+      ];
+      expect(pickLatestDefaultedAssumptions(both)).toEqual({
+        count: 1,
+        named: ['Market Conditions'],
+      });
     });
   });
 });

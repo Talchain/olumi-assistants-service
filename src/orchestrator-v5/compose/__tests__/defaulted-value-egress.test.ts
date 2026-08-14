@@ -36,6 +36,7 @@ import {
   enumerateSentences,
   findStabilityAssertion,
   isAnalysisBearing,
+  segmentSentences,
 } from '../defaulted-value-egress.js';
 import {
   buildDefaultedAssumptionsDisclosure,
@@ -245,6 +246,10 @@ describe('F6 egress — KNOWN-SUPPRESSED corpus (exact set)', () => {
     'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.',
     'The results are robust to the assumptions we tested.',
     'These findings appear very stable.',
+    // ⭐ REVIEW-MEASURED BREACH — shipped with no suppression and no
+    // disclosure before this pattern existed.
+    "There's little sensitivity here — HubSpot stays in front.",
+    'The lead is fairly insensitive to the inputs we varied.',
   ] as const;
 
   it.each(SUPPRESSED)('suppresses: %s', (sentence) => {
@@ -252,7 +257,7 @@ describe('F6 egress — KNOWN-SUPPRESSED corpus (exact set)', () => {
   });
 
   it('the set is EXACTLY this size — a change here is a deliberate act', () => {
-    expect(SUPPRESSED).toHaveLength(9);
+    expect(SUPPRESSED).toHaveLength(11);
   });
 });
 
@@ -271,6 +276,10 @@ describe('F6 egress — KNOWN-KEPT corpus (exact set): near misses that must sur
     'Would you like to test how stable this looks under a different assumption?',
     'The analysis used a default value for Market Conditions.',
     'Stability is one of the things this analysis reports.',
+    // The over-suppression twin of the sensitivity pattern: a question about
+    // what to test next is not a claim about the run.
+    'Which factors should we test for sensitivity?',
+    'A sensitivity analysis would tell us more here.',
   ] as const;
 
   it.each(KEPT)('keeps: %s', (sentence) => {
@@ -278,7 +287,7 @@ describe('F6 egress — KNOWN-KEPT corpus (exact set): near misses that must sur
   });
 
   it('the set is EXACTLY this size — a change here is a deliberate act', () => {
-    expect(KEPT).toHaveLength(6);
+    expect(KEPT).toHaveLength(8);
   });
 });
 
@@ -346,5 +355,116 @@ describe('F6 egress — the builder and its invariant tail cannot drift apart', 
     expect(buildDefaultedAssumptionsDisclosure(signal).endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(
       true,
     );
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * REVIEW ROUND 2 — the four hazards an adversarial review measured, each
+ * pinned by the string that exposed it.
+ */
+describe('F6 egress — the analysis-bearing gate discriminates (review round 2)', () => {
+  /**
+   * ⭐⭐ THE BOILERPLATE FALSE POSITIVE. The first version of the gate asked
+   * "does this text contain a percentage?", so an EDIT RECEIPT carrying "5%"
+   * collected the caveat — and, because a defaulted analysis exists for the
+   * whole session once it has run, it collected it on every subsequent turn
+   * forever. A disclosure attached to everything is read as boilerplate and
+   * stops disclosing anything, which is the harm the gate exists to prevent,
+   * produced by the gate itself.
+   */
+  it('an edit receipt carrying a percentage is NOT analysis-bearing', () => {
+    const receipt = 'I raised the growth rate to 5%.';
+    expect(isAnalysisBearing(receipt)).toBe(false);
+    expect(applyDefaultedValueEgress(receipt, SIGNAL).text).toBe(receipt);
+  });
+
+  /**
+   * ⭐⭐ THE MEASURED UNDER-DETECTION, the same defect pointing the other way:
+   * a recitation with NO figure at all. Both directions are pinned together on
+   * purpose — a fix for one that reopens the other is the failure mode this
+   * estate has paid for repeatedly (trap 22b).
+   */
+  it('a figure-less recitation IS analysis-bearing and gets both treatments', () => {
+    const breach = "There's little sensitivity here — HubSpot stays in front.";
+    expect(isAnalysisBearing(breach)).toBe(true);
+
+    const out = applyDefaultedValueEgress(breach, SIGNAL);
+    expect(out.text).toContain(DEFAULTED_DISCLOSURE_TAIL);
+  });
+
+  it('the shared leader vocabulary is the base — its carve-outs are inherited', () => {
+    // `X leads to Y` is causal, not a standing claim. The shared enforcing
+    // reader already carves it out; this asserts we inherit that rather than
+    // re-deriving a vocabulary that would have to rediscover it.
+    expect(isAnalysisBearing('More capacity leads to faster delivery.')).toBe(false);
+  });
+});
+
+describe('F6 egress — the suppression floor (review round 2)', () => {
+  /**
+   * ⭐⭐ THE WORST OUTCOME THIS LAYER COULD PRODUCE, and it was reachable: a
+   * markdown answer with no recognised sentence boundary is ONE segment, so a
+   * stability match dropped the WHOLE answer and the user received nothing but
+   * the caveat. Suppressing a claim by deleting the answer is an outage with a
+   * disclaimer attached.
+   */
+  it('never deletes the whole answer — a single-segment answer survives', () => {
+    const markdown = '- This result looks stable and needs no further work';
+    const out = applyDefaultedValueEgress(markdown, SIGNAL);
+
+    expect(out.floorTripped).toBe(true);
+    expect(out.suppressed).toHaveLength(0);
+    expect(out.text).toContain('This result looks stable');
+    // The caveat still arrives — under-suppression is the declared gap, and it
+    // is strictly better than an empty answer.
+    expect(out.text).toContain(DEFAULTED_DISCLOSURE_TAIL);
+  });
+
+  /**
+   * THE FLOOR'S OWN DIRECTION TWIN, and the case that caught the first floor
+   * being set wrong. In the DEPLOYED WITNESS the stability sentence is the
+   * LONGER of two (93 of 152 chars, 61%), so a 50% floor refused to suppress
+   * the exact sentence this lane exists to remove. The floor must not fire
+   * here.
+   */
+  it('does NOT trip on the deployed witness — the stability sentence is still dropped', () => {
+    const witness =
+      "'Adopt HubSpot' currently leads, with a probability of 96%. This result looks "
+      + 'stable, so smaller changes are less likely to flip the outcome on their own.';
+    const out = applyDefaultedValueEgress(witness, SIGNAL);
+
+    expect(out.floorTripped).toBe(false);
+    expect(out.suppressed).toHaveLength(1);
+    expect(out.text).not.toContain('This result looks stable');
+    expect(out.text).toContain('96%');
+  });
+});
+
+describe('F6 egress — the splitter’s two measured hazards (review round 2)', () => {
+  it('does not split inside an abbreviation', () => {
+    const text = 'Several factors matter, e.g. Market Conditions and price.';
+    expect(segmentSentences(text).map((s) => s.text)).toEqual([text]);
+  });
+
+  /**
+   * MARKDOWN IS NOT FLATTENED. An earlier form rejoined every segment with a
+   * single space, so a bulleted or multi-paragraph answer was silently turned
+   * into one run-on block — the layer would have "qualified" an answer by
+   * destroying its formatting.
+   */
+  it('preserves the original separators, so a bulleted answer keeps its shape', () => {
+    const bulleted = 'Here is what I found.\n\n- Capacity matters most.\n- Price matters least.';
+    const out = applyDefaultedValueEgress(bulleted, SIGNAL);
+
+    // Nothing suppressed here; the only change may be the appended caveat.
+    expect(out.text.startsWith('Here is what I found.\n\n- Capacity matters most.')).toBe(true);
+    expect(out.text).toContain('\n- Price matters least.');
+  });
+
+  it('round-trips byte-exactly when there is nothing to change', () => {
+    // A no-defaults run must not even normalise whitespace.
+    const bulleted = 'Findings.\n\n- One thing.\n- Another thing.';
+    expect(applyDefaultedValueEgress(bulleted, null).text).toBe(bulleted);
   });
 });

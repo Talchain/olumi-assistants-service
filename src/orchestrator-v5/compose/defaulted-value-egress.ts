@@ -58,16 +58,34 @@
  *     suite, which REDs if either set grows OR shrinks — an honest record of a
  *     bounded matcher rather than a claim of completeness.
  *
- * ⭐ THE DECLARED GAP. An arbitrary model paraphrase of stability that uses
- * none of the anchored vocabulary is NOT suppressed by this layer. That is a
- * real limit and it is stated rather than hidden. What makes it tolerable is
- * that (a) is unconditional: the disclosure is appended regardless, so even an
- * unrecognised paraphrase now arrives next to "the comparison is illustrative
- * until those values are set" instead of standing alone. The floor this layer
- * guarantees is that the user is never told the numbers are solid WITHOUT also
- * being told they rest on defaults.
+ * ⭐ THE DECLARED GAP, STATED NARROWLY — and the wider version of this sentence
+ * was WRONG, so it is corrected here rather than softened (CLAUDE.md trap 14).
+ *
+ * It used to read: *"(a) is unconditional: the disclosure is appended
+ * regardless, so even an unrecognised paraphrase now arrives next to the
+ * caveat."* That is FALSE. (a) is gated on {@link isAnalysisBearing}, and a
+ * gate is not a guarantee. The review measured the gap in both directions
+ * before the gate was rebuilt — an edit receipt collecting the caveat because
+ * it happened to contain "5%", and a genuine recitation escaping it because it
+ * contained no figure at all.
+ *
+ * THE HONEST STATEMENT OF WHAT THIS LAYER GUARANTEES:
+ *
+ *   · If the answer asserts stability in the ANCHORED vocabulary, that sentence
+ *     is dropped AND the disclosure is appended.
+ *   · If the answer recites a standing in the SHARED leader vocabulary or the
+ *     supplementary recitation forms, the disclosure is appended.
+ *   · Otherwise this layer does nothing at all — deliberately, so the caveat
+ *     does not become boilerplate.
+ *
+ * So an unrecognised paraphrase that ALSO recites a standing still gets the
+ * caveat (the common case); one that recites nothing this layer recognises gets
+ * neither. That residue is real, is bounded by the pinned corpora, and is the
+ * reason the composer-level collapse in `explanation-fallback.ts` remains the
+ * primary defence rather than this layer.
  */
 
+import { textAssertsLeadingOption } from './leading-option-egress-guard.js';
 import {
   buildDefaultedAssumptionsDisclosure,
   DEFAULTED_DISCLOSURE_TAIL,
@@ -94,24 +112,142 @@ const SENTENCE_TERMINATOR = `[.!?]["')\\]]*`;
 const SENTENCE_GAP = `\\s+`;
 const SENTENCE_NEXT_START = `["'([]?[A-Z0-9]`;
 const SENTENCE_BOUNDARY_G = new RegExp(
-  `(?<=${SENTENCE_TERMINATOR})${SENTENCE_GAP}(?=${SENTENCE_NEXT_START})`,
+  `(?<=${SENTENCE_TERMINATOR})(${SENTENCE_GAP})(?=${SENTENCE_NEXT_START})`,
   'g',
 );
 
-/** Split into whole sentences, preserving each sentence's own bytes. */
+/**
+ * Abbreviations whose full stop is NOT a sentence end.
+ *
+ * ⚠ SOURCED FROM A REVIEW BREACH, NOT FROM IMAGINATION. `e.g.` was measured
+ * splitting mid-sentence, which would let half a sentence be suppressed while
+ * the other half shipped — a mangled answer, which is the over-suppression harm
+ * this layer must not trade the under-disclosure harm for (trap 22b).
+ *
+ * `answer-shape.ts` documents the same hazard for the capitalised case
+ * (`Mr. Smith`) and accepts it there because its cost is one repair retry. Here
+ * the cost is deleted user content, so the guard is explicit.
+ */
+const ABBREVIATION_TAIL =
+  /\b(?:e\.g|i\.e|etc|vs|approx|est|cf|al|no|fig|eq|ref|Mr|Mrs|Ms|Dr|Prof|St|Jr|Sr)\.$/i;
+
+/**
+ * Split into whole sentences, preserving each sentence's own bytes AND the
+ * exact whitespace that separated them.
+ *
+ * ⚠ THE SEPARATORS ARE CARRIED, NOT NORMALISED. An earlier form rejoined with a
+ * single space, which silently FLATTENED every bulleted or multi-paragraph
+ * answer into one run-on block — the layer would have "qualified" an answer by
+ * destroying its formatting. Round-tripping the separators makes the no-op case
+ * byte-exact by construction rather than by luck.
+ */
+export function segmentSentences(
+  text: string,
+): Array<{ readonly text: string; readonly sep: string }> {
+  const parts = text.split(SENTENCE_BOUNDARY_G);
+  const segments: Array<{ text: string; sep: string }> = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    segments.push({ text: parts[i] ?? '', sep: parts[i + 1] ?? '' });
+  }
+  // Re-join across an abbreviation: the "boundary" was a full stop inside
+  // `e.g.`, so the following fragment belongs to the SAME sentence.
+  const merged: Array<{ text: string; sep: string }> = [];
+  for (const seg of segments) {
+    const prev = merged[merged.length - 1];
+    if (prev !== undefined && ABBREVIATION_TAIL.test(prev.text)) {
+      merged[merged.length - 1] = {
+        text: `${prev.text}${prev.sep}${seg.text}`,
+        sep: seg.sep,
+      };
+      continue;
+    }
+    merged.push({ text: seg.text, sep: seg.sep });
+  }
+  return merged;
+}
+
+/** Sentence texts only — the reading most callers and tests want. */
 export function enumerateSentences(text: string): string[] {
-  return text.split(SENTENCE_BOUNDARY_G);
+  return segmentSentences(text).map((s) => s.text);
 }
 
 /**
- * A recited probability — the `p(win)` half of the harm.
+ * The refuse-to-suppress-everything floor.
  *
- * Structural, not lexical: a digit followed by a percent sign. This is what
- * makes an answer ANALYSIS-BEARING for the purposes of this layer, and it is
- * deliberately a SHAPE rather than a vocabulary, so it cannot be evaded by
- * rephrasing and cannot drift as copy changes.
+ * ⭐⭐ THE CASE THIS EXISTS FOR, AND IT IS THE WORST OUTCOME THIS LAYER COULD
+ * PRODUCE. A bulleted or markdown answer often contains NO sentence boundary
+ * this splitter recognises, so the whole answer is ONE segment. If that segment
+ * matched a stability pattern it was dropped WHOLE — and the user received
+ * nothing but the caveat. Suppressing a stability claim by deleting the entire
+ * answer is not honesty, it is an outage with a disclaimer attached.
+ *
+ * Above this ratio the layer keeps every byte and appends the disclosure alone:
+ * the user still gets the caveat, and the answer survives. Under-suppression is
+ * a declared gap; destroying the answer is a defect.
+ *
+ * ⚠⚠ THE RATIO WAS 0.5 AND THAT WAS MEASURABLY WRONG — recorded rather than
+ * silently retuned (CLAUDE.md trap 14), because the way it was caught is the
+ * point. The DEPLOYED WITNESS is two sentences, and the stability sentence is
+ * the LONGER of them:
+ *
+ *   "'Adopt HubSpot' currently leads, with a probability of 96%."        (58)
+ *   "This result looks stable, so smaller changes are less likely to
+ *    flip the outcome on their own."                                     (93)
+ *
+ * 93/152 = 61%, so a 0.5 floor REFUSED TO SUPPRESS THE EXACT SENTENCE THIS
+ * WHOLE LANE EXISTS TO REMOVE. A guard added to stop the layer destroying an
+ * answer had instead disabled it on the primary case — trap 22b in one commit:
+ * closing the over-suppression direction reopened the under-suppression one.
+ *
+ * It was caught by the WIRING SPEC on its first run, which is the argument for
+ * that spec in miniature: the pure-function tests all passed, because they were
+ * written against the same assumption as the floor.
+ *
+ * THE REAL HAZARD IS NOT A RATIO, IT IS AN EMPTY RESULT. The review's case was
+ * a markdown answer with no recognised boundary — ONE segment, matched, dropped
+ * whole, user receives only the caveat. That is `kept.length === 0`, which is
+ * now the primary condition and is exact rather than tuned. The ratio is kept
+ * only as a backstop for "one scrap survives and 90% of the answer vanishes",
+ * and is set high enough that ordinary suppression is unaffected.
  */
-const PROBABILITY_FIGURE = /\d\s*%/;
+export const SUPPRESSION_FLOOR_RATIO = 0.8;
+
+/**
+ * RESULT-RECITATION forms the shared leader vocabulary does not carry.
+ *
+ * ⚠⚠ THE BARE `\d\s*%` TEST THAT USED TO LIVE HERE IS GONE, AND ITS REMOVAL IS
+ * A CORRECTION, NOT A SIMPLIFICATION (CLAUDE.md trap 14 — replaced, not quietly
+ * deleted). It asked "does this text contain a percentage?", which is not the
+ * question. Measured consequences, both directions:
+ *
+ *   OVER — "I raised the growth rate to 5%." is an EDIT RECEIPT. It carries a
+ *   percentage, so every such turn for the rest of the session had the caveat
+ *   stapled to it. That is precisely the boilerplate effect `isAnalysisBearing`
+ *   was written to prevent, produced by the gate itself.
+ *
+ *   UNDER — "There's little sensitivity here — HubSpot stays in front" recites
+ *   a standing and a robustness claim with NO figure at all, so it passed
+ *   through with no suppression and no disclosure.
+ *
+ * The question is "does this text RECITE THE ANALYSIS RESULT?", and the answer
+ * is vocabulary, not arithmetic. The base is the estate's existing precise
+ * reader; the entries below are only the forms it demonstrably misses, each
+ * naming the measured string it came from.
+ */
+const RESULT_RECITATION_PATTERNS: readonly RegExp[] = [
+  // Review-measured breach: "…— HubSpot stays in front". The shared vocabulary
+  // carries `out in front` but not `stays in front`.
+  /\b(?:stays?|staying|remains?|sits?|holds?)\s+(?:in\s+front|ahead|on\s+top)\b/i,
+  // Measured Codex-cell output: "Option B wins in 68% of runs". The shared
+  // vocabulary carries `winners?` (the noun), not `wins` (the verb).
+  /\bwins?\s+in\b/i,
+  // analysis-result-headline.ts — "came out ahead in NN% of runs"; the walk's
+  // own capture used "of simulations".
+  /\b(?:of|out\s+of)\s+(?:runs|simulations|scenarios)\b/i,
+  // explanation-fallback.ts / post-analysis-advice-gate.ts — "with a
+  // probability of NN%", the opener of every deterministic recitation.
+  /\bprobability\s+of\b/i,
+];
 
 /**
  * STABILITY / ROBUSTNESS ASSERTIONS OVER THE RESULT.
@@ -158,6 +294,17 @@ export const STABILITY_ASSERTION_PATTERNS: readonly RegExp[] = [
   // family so a factor-level sentence cannot match. Covers "the result is
   // stable", "these findings appear robust", "the outcome seems very stable".
   /\b(?:this |these |the )?(?:results?|outcomes?|findings?|rankings?|pictures?)\s+(?:is|are|looks?|appears?|seems?)\s+(?:very |fairly |quite |highly )?(?:stable|robust)\b/i,
+  // ⭐ REVIEW-MEASURED BREACH: "There's little sensitivity here — HubSpot stays
+  // in front" shipped with no suppression. An assertion that the result is
+  // INSENSITIVE is the stability claim in another vocabulary, and over defaulted
+  // inputs it is exactly as unlicensed.
+  //
+  // Anchored to the QUANTIFIER so it cannot eat an invitation to test
+  // sensitivity — "Which factors should we test for sensitivity?" is a question
+  // about what to do next, not a claim about the run, and its KNOWN-KEPT twin
+  // pins that.
+  /\b(?:little|low|not\s+much|hardly\s+any|no)\s+sensitivity\b/i,
+  /\b(?:is|are|looks?|appears?|seems?)\s+(?:fairly\s+|quite\s+|very\s+)?insensitive\b/i,
 ];
 
 export function findStabilityAssertion(sentence: string): RegExp | null {
@@ -179,7 +326,16 @@ export function findStabilityAssertion(sentence: string): RegExp | null {
  * read at all, which is how a true sentence stops disclosing anything.
  */
 export function isAnalysisBearing(text: string): boolean {
-  return PROBABILITY_FIGURE.test(text) || findStabilityAssertion(text) !== null;
+  if (findStabilityAssertion(text) !== null) return true;
+  // ⭐ THE SHARED PRECISE READER IS THE BASE, NOT A COPY OF ITS WORDS. This is
+  // the same question `compose/leading-option-egress-guard.ts` already answers
+  // for the enforcing consumers — "does this text assert a standing?" — and it
+  // already carries the documented false-positive carve-outs (`X leads to Y`,
+  // `team lead`) that a second hand-written vocabulary here would have to
+  // rediscover and would drift from (CLAUDE.md trap 12). Reusing it means a
+  // string this layer qualifies is a string that guard also sees.
+  if (textAssertsLeadingOption(text)) return true;
+  return RESULT_RECITATION_PATTERNS.some((re) => re.test(text));
 }
 
 export interface DefaultedValueEgressResult {
@@ -192,6 +348,14 @@ export interface DefaultedValueEgressResult {
   readonly disclosureAdded: boolean;
   /** Duplicate disclosures removed to satisfy the exactly-once invariant. */
   readonly duplicatesRemoved: number;
+  /**
+   * True when suppression would have removed more than
+   * {@link SUPPRESSION_FLOOR_RATIO} of the answer, so NOTHING was suppressed and
+   * the disclosure was appended to the intact text. Surfaced (not hidden)
+   * because it is the signal that the matcher met an answer shape it cannot
+   * segment — the thing worth knowing about, and silent otherwise.
+   */
+  readonly floorTripped: boolean;
   readonly mode:
     | 'no_defaults'
     | 'not_analysis_bearing'
@@ -208,6 +372,7 @@ function unchanged(
     suppressed: [],
     disclosureAdded: false,
     duplicatesRemoved: 0,
+    floorTripped: false,
     mode,
   };
 }
@@ -245,31 +410,53 @@ export function applyDefaultedValueEgress(
   let duplicatesRemoved = 0;
   let seenDisclosure = false;
 
-  const kept: string[] = [];
-  for (const sentence of enumerateSentences(text)) {
+  const kept: Array<{ text: string; sep: string }> = [];
+  for (const seg of segmentSentences(text)) {
     // (a) EXACTLY ONCE — the first canonical disclosure survives; any further
     // copy is dropped. Recognised by the builder's own invariant tail, imported
     // rather than re-spelled, so this can never stop recognising the
     // deterministic composers' sentence.
-    if (sentence.includes(DEFAULTED_DISCLOSURE_TAIL)) {
+    if (seg.text.includes(DEFAULTED_DISCLOSURE_TAIL)) {
       if (seenDisclosure) {
         duplicatesRemoved += 1;
         continue;
       }
       seenDisclosure = true;
-      kept.push(sentence);
+      kept.push(seg);
       continue;
     }
     // (b) + (c) — stand down stability language over defaulted inputs.
-    const hit = findStabilityAssertion(sentence);
-    if (hit !== null) {
-      suppressed.push(sentence);
+    if (findStabilityAssertion(seg.text) !== null) {
+      suppressed.push(seg.text);
       continue;
     }
-    kept.push(sentence);
+    kept.push(seg);
   }
 
-  let out = kept.join(' ').replace(/\s+\n/g, '\n').trim();
+  // ⭐ THE FLOOR. Never trade an over-claim for an empty answer — see
+  // SUPPRESSION_FLOOR_RATIO. Measured on the ORIGINAL text so a single-segment
+  // markdown answer (no recognised boundary ⇒ one segment ⇒ 100% removed) can
+  // never be deleted whole.
+  const suppressedChars = suppressed.reduce((n, s) => n + s.length, 0);
+  const floorTripped =
+    suppressed.length > 0
+    && (
+      // PRIMARY, and exact: suppression would leave NOTHING. The markdown /
+      // single-segment case, plus any answer that is stability claims end to
+      // end. Never ship a caveat where an answer used to be.
+      kept.length === 0
+      // BACKSTOP, deliberately high: a scrap survives while almost the whole
+      // answer disappears. Tuned to sit well clear of ordinary two-sentence
+      // suppression — see the note on SUPPRESSION_FLOOR_RATIO.
+      || (text.length > 0 && suppressedChars / text.length > SUPPRESSION_FLOOR_RATIO)
+    );
+  const segments = floorTripped ? segmentSentences(text) : kept;
+  const suppressedFinal = floorTripped ? [] : suppressed;
+
+  let out = segments
+    .map((s, i) => (i === segments.length - 1 ? s.text : `${s.text}${s.sep === '' ? ' ' : s.sep}`))
+    .join('')
+    .trimEnd();
 
   let disclosureAdded = false;
   if (!seenDisclosure) {
@@ -283,9 +470,10 @@ export function applyDefaultedValueEgress(
   return {
     text: out,
     changed: true,
-    suppressed: Object.freeze(suppressed),
+    suppressed: Object.freeze(suppressedFinal),
     disclosureAdded,
     duplicatesRemoved,
+    floorTripped,
     mode: 'applied',
   };
 }
