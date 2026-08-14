@@ -26,6 +26,10 @@ import type {
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
+import {
+  magnitudeUnderScale,
+  resolveMagnitudeScale,
+} from "../provenance/stated-amounts.js";
 import { readIsBaseline } from "../baseline-identity.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 
@@ -282,9 +286,71 @@ function buildInterventionDetail(
   factorNode: NodeV3T | undefined,
   interventionDisplayValue?: string,
 ): InterventionDetail {
+  // ⚠ F3 (Codex, 2026-08-13) — AN OPTION'S RECEIPT USED TO DESCRIBE THE FACTOR,
+  // NOT THE OPTION. Every branch below returned the FACTOR's
+  // `observed_state.raw_value` and, in the second branch, the FACTOR's
+  // `display_value` — the same bytes for EVERY option that touches the factor.
+  // On the brief "Plan A sets the support headcount to 80. Plan B sets it to
+  // 50. It is currently 40", Plan A (level .8) and Plan B (level .5) both
+  // showed `raw_value: 40` / "40": the status quo, presented as each option's
+  // proposal. `synthesiseDisplayValue` prioritises `raw_value` over `value`
+  // (display-value.ts:176), so the factor's raw won even though the option's
+  // own level was passed beside it.
+  //
+  // THE SPEC: a display value must describe ITS OWN intervention. So the
+  // option's magnitude is derived from the option's OWN level under the
+  // factor's scale — the same `resolveMagnitudeScale` / `recoverScaleFrame`
+  // authority the provenance seam uses, never a second derivation.
+  //
+  // ⚠ WHY THE TEST CORPUS COULD NOT SEE THIS: every pre-existing fixture sets
+  // the intervention level EQUAL to the factor's observed value (0.5 on a
+  // {0.5, 5} factor, 0.4 on a {0.4, 200000} factor). At equal levels the
+  // borrowed value and the derived value COINCIDE, so 21 `intervention_details`
+  // assertions and 18 `display_value` assertions all passed while the defect
+  // was live. The corpus never varied two options on one factor — CLAUDE.md
+  // trap 22, and the reason the RED fixtures below do exactly that.
+  const os = factorNode?.observed_state;
+  const unit = os?.unit;
+  const factorType = factorNode?.factor_type ?? os?.factor_type;
+
+  // Is this option sitting AT the factor's observed state? Only then does a
+  // factor-scoped display string ("£200k") truthfully describe the option's
+  // intervention. This is what keeps the baseline/status-quo option rendering
+  // exactly as before while a genuinely different lever stops borrowing it.
+  const sitsAtObservedState =
+    typeof os?.value === "number" && os.value === normalisedValue;
+
+  // The magnitude THIS option's level denotes, or null when the record settles
+  // no denominator (zero baseline, no `raw_value`, no `observed_state`). Null
+  // means the receipt omits `raw_value` rather than borrowing the factor's —
+  // visible absence over confident wrongness.
+  //
+  // ⚠ FLOAT DIRT AT THE BASELINE (review of #944). The frame is RECOVERED as
+  // `raw / value`, so re-deriving the baseline as `value × (raw / value)` is a
+  // round-trip through binary floating point and does NOT always return the
+  // input: a factor observed at 29 with frame 100 yields
+  // `raw_value: 28.999999999999996` where the pre-fix receipt carried an exact
+  // 29. It fails for ~2.3% of producer-domain pairs and lands precisely on the
+  // STATUS-QUO option, i.e. the one case where the honest answer is already
+  // recorded verbatim. So where this option sits at the observed state, the
+  // recorded `raw_value` is returned DIRECTLY — no arithmetic to be dirty.
+  // (The pre-existing `{0.5, 5}` fixtures round-trip exactly, which is why the
+  // first version of this suite could not see it — trap 22, again.)
+  const ownRawValue =
+    sitsAtObservedState && typeof os?.raw_value === "number"
+      ? os.raw_value
+      : magnitudeUnderScale(normalisedValue, unit, resolveMagnitudeScale(os));
+
+  const ownFields = {
+    normalised_value: normalisedValue,
+    ...(ownRawValue !== null && { raw_value: ownRawValue }),
+    ...(unit !== undefined && { unit }),
+  };
+
   // Highest priority: display_value on the intervention itself (LLM/enricher-
   // supplied). This lets the draft prompt provide per-intervention display
-  // strings without having to mutate factor node state.
+  // strings without having to mutate factor node state. It is already
+  // per-intervention, so it is the option's own and is kept verbatim.
   if (interventionDisplayValue && interventionDisplayValue.trim().length > 0) {
     const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
     const candidate = interventionDisplayValue.toLowerCase().trim();
@@ -294,19 +360,15 @@ function buildInterventionDetail(
     if (!isEcho) {
       return {
         display_value: interventionDisplayValue,
-        normalised_value: normalisedValue,
-        ...(factorNode?.observed_state?.raw_value !== undefined && {
-          raw_value: factorNode.observed_state.raw_value,
-        }),
-        ...(factorNode?.observed_state?.unit !== undefined && {
-          unit: factorNode.observed_state.unit,
-        }),
+        ...ownFields,
       };
     }
   }
 
-  // Prefer LLM/enricher-provided display_value on the factor node
-  if (factorNode?.display_value) {
+  // Prefer LLM/enricher-provided display_value on the factor node — but ONLY
+  // when this option sits at the factor's observed state (see above). For any
+  // other lever it is the status quo wearing the option's name.
+  if (factorNode?.display_value && sitsAtObservedState) {
     const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
     const candidate = factorNode.display_value.toLowerCase().trim();
     // CEE-6: strip echo — display_value must not be identical to or fully contain the
@@ -320,26 +382,18 @@ function buildInterventionDetail(
     if (!isEcho) {
       return {
         display_value: factorNode.display_value,
-        normalised_value: normalisedValue,
-        ...(factorNode.observed_state?.raw_value !== undefined && {
-          raw_value: factorNode.observed_state.raw_value,
-        }),
-        ...(factorNode.observed_state?.unit !== undefined && {
-          unit: factorNode.observed_state.unit,
-        }),
+        ...ownFields,
       };
     }
   }
 
-  // Synthesise from observed_state fields
-  const os = factorNode?.observed_state;
-  const rawValue = os?.raw_value;
-  const unit = os?.unit;
-  const factorType = factorNode?.factor_type ?? os?.factor_type;
-
+  // Synthesise from the option's OWN magnitude. When it is underivable,
+  // `raw_value` is undefined and `synthesiseDisplayValue` falls through to its
+  // normalised-value ladder (qualitative band / bare level) — which describes
+  // this option's own lever and borrows nothing.
   const synthesised = synthesiseDisplayValue({
     value: normalisedValue,
-    raw_value: rawValue,
+    raw_value: ownRawValue ?? undefined,
     unit,
     factor_type: factorType,
   });
@@ -362,9 +416,7 @@ function buildInterventionDetail(
 
   return {
     display_value: finalDisplay,
-    normalised_value: normalisedValue,
-    ...(rawValue !== undefined && { raw_value: rawValue }),
-    ...(unit !== undefined && { unit }),
+    ...ownFields,
   };
 }
 

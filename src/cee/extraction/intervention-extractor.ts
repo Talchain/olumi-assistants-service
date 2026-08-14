@@ -19,7 +19,10 @@ import type {
 } from "../../schemas/cee-v3.js";
 import { parseNumericValue, resolveRelativeValue, type ParsedValue } from "./numeric-parser.js";
 import { matchInterventionToFactor } from "./factor-matcher.js";
-import { isAmountStatedInBrief } from "../provenance/stated-amounts.js";
+import {
+  classifyAmountAgainstBrief,
+  resolveMagnitudeScale,
+} from "../provenance/stated-amounts.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import {
   computeOptionStatus,
@@ -577,12 +580,52 @@ function buildInterventionsFromV4Data(
     // already in scope. Passing it asks the predicate about the magnitude the
     // encoding denotes (`level × cap`) rather than about the lever level, and
     // the de-normalisation itself delegates to the estate's shared inverse —
-    // see `denormalisedMagnitude`. The direction of the change is still
-    // one-way: it can only ever restore a claim the model already made about
-    // a magnitude the user really did state.
-    const unit = factor?.observed_state?.unit;
-    const cap = factor?.observed_state?.cap;
-    const statedInBrief = isAmountStatedInBrief(value, unit, briefText, cap);
+    // see `denormalisedMagnitude`.
+    //
+    // ⚠ WHAT THIS PREDICATE ACTUALLY GUARANTEES (corrected at the review of
+    // #944; the previous sentence here claimed it "can only ever restore a
+    // claim about a magnitude the user really did state", which is STRONGER
+    // THAN THE CODE). The scan is over the WHOLE brief and is not bound to the
+    // factor the intervention targets. So a model-INVENTED level earns
+    // `brief_extraction` / high whenever its de-normalised magnitude appears
+    // ANYWHERE in the brief: measured, level 0.5 on a `{0.4, 40}` factor is
+    // stamped "stated" against the sentence "we serve 50 customers", which is
+    // about a different quantity entirely. UNIT-KIND COMPATIBILITY GUARDS THIS
+    // (a currency level needs a currency statement in the same currency, a
+    // percent needs a percent); FACTOR-LABEL BINDING DOES NOT EXIST. This is
+    // #873's pre-existing design, widened by necessity when the frame path
+    // made the predicate able to fire at all on capless factors. The residual
+    // is rowed separately — it is NOT closed here.
+    // ⚠ F2 (Codex, 2026-08-13) — THE CAP IS ONLY ONE OF THREE DENOMINATORS, AND
+    // PASSING IT ALONE MADE THE PRODUCT CALL THE USER'S OWN NUMBER "INFERRED".
+    //
+    // The fix above was correct about capped factors and silently wrong about
+    // capless FRAMED ones, which is the shape the records projector writes for
+    // every magnitude-scaled baseline (`{value: raw/frame, raw_value: raw}`,
+    // projector.ts:1667 — the frame is deliberately NOT persisted). With no
+    // `cap`, `denormalisedMagnitude` returns null and the `?? value` fallback
+    // compared the NORMALISED LEVEL against the brief's RAW magnitudes:
+    // measured at pristine on the brief "Plan A sets the support headcount to
+    // 80 … currently 40", `isAmountStatedInBrief(0.8, …)` is FALSE while
+    // `isAmountStatedInBrief(80, …)` is true. So the user's own "80" was
+    // stamped `cee_hypothesis` / low / "this amount is not stated in the
+    // brief" — a false claim about words the user typed, rendered by the UI as
+    // "inferred" with a warning.
+    //
+    // `resolveMagnitudeScale` asks the factor's WHOLE `observed_state` which of
+    // the producers' conventions it is in, recovering a capless frame through
+    // the estate's single authority (`recoverScaleFrame`) rather than minting a
+    // second one. The verdict is THREE-STATE because the honest answer
+    // sometimes is "we cannot tell": where the record settles no denominator
+    // (a zero baseline, no `raw_value`), a non-match proves nothing, and
+    // claiming the amount is absent from the brief would be the same false
+    // claim in a different case. Confidence stays low either way — only the
+    // sentence changes, and only from a falsehood to an admission.
+    const observedState = factor?.observed_state;
+    const unit = observedState?.unit;
+    const scale = resolveMagnitudeScale(observedState);
+    const verdict = classifyAmountAgainstBrief(value, unit, briefText, scale);
+    const statedInBrief = verdict === "stated";
 
     interventions[factorId] = {
       value,
@@ -594,9 +637,12 @@ function buildInterventionsFromV4Data(
         confidence: "high", // Direct from V4 prompt = high confidence
       },
       value_confidence: statedInBrief ? "high" : "low",
-      reasoning: statedInBrief
-        ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
-        : "Model-chosen intervention level; this amount is not stated in the brief",
+      reasoning:
+        verdict === "stated"
+          ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+          : verdict === "not_stated"
+            ? "Model-chosen intervention level; this amount is not stated in the brief"
+            : "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief",
     };
   }
 

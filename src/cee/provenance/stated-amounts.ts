@@ -83,6 +83,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { resolveExistingRawValue } from "../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js";
+import { recoverScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
 /** What KIND of quantity a written amount (or a unit string) denotes. */
 export type AmountKind = "currency" | "percent" | "plain";
@@ -370,11 +371,29 @@ export function isAmountStatedInBrief(
   cap?: number | null,
 ): boolean {
   if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  const magnitude = denormalisedMagnitude(value, unit, cap) ?? value;
+  return magnitudeAppearsInBrief(magnitude, unit, briefText);
+}
+
+/**
+ * Does `magnitude` (already de-normalised, in `unit`) appear in `briefText`?
+ *
+ * Extracted from {@link isAmountStatedInBrief} so the kind-compatibility rules
+ * documented on that function are stated ONCE and cannot drift between the
+ * boolean predicate and the three-state {@link classifyAmountAgainstBrief}
+ * (CLAUDE.md trap 21 / the two-`generateGraphHash` scar). Behaviour of the
+ * boolean caller is unchanged: it still supplies `denormalisedMagnitude(...) ??
+ * value` and still refuses a missing brief or an empty scan.
+ */
+function magnitudeAppearsInBrief(
+  magnitude: number,
+  unit: string | null | undefined,
+  briefText: string | null | undefined,
+): boolean {
   const amounts = findStatedAmounts(briefText);
   if (amounts.length === 0) return false;
 
   const reading = readUnit(unit);
-  const magnitude = denormalisedMagnitude(value, unit, cap) ?? value;
   const target = magnitude * reading.multiplier;
   if (!Number.isFinite(target)) return false;
 
@@ -391,4 +410,148 @@ export function isAmountStatedInBrief(
     if (magnitudesMatch(amount.magnitude, target)) return true;
   }
   return false;
+}
+
+/**
+ * THE DENOMINATOR THAT TURNS A STORED LEVER LEVEL INTO THE MAGNITUDE IT DENOTES.
+ *
+ * The pipeline reasons in lever space and records the denominator beside the
+ * level in one of THREE mutually-exclusive conventions — and the honest answer
+ * to "what magnitude is this?" depends on which one the factor is in:
+ *
+ *   · `cap`      — the denominator is persisted (`observed_state.cap`).
+ *                  magnitude = `resolveExistingRawValue` (the shared inverse).
+ *   · `frame`    — a capless FRAMED pair, written by the records projector as
+ *                  `{value: raw/frame, raw_value: raw}` with the frame
+ *                  deliberately NOT persisted (projector.ts:1667). The frame is
+ *                  recovered from the pair by the estate's single authority,
+ *                  {@link recoverScaleFrame} — consumed, never re-derived.
+ *   · `identity` — an UNFRAMED pair `{x, x}` (projector.ts:986: counts, ratios,
+ *                  unbounded scales). Lever space IS magnitude space, so the
+ *                  level is already the magnitude and today's raw comparison is
+ *                  correct. THIS IS NOT AN UNKNOWN: the pair positively proves
+ *                  the factor is unframed.
+ *   · `unknown`  — no cap, and the pair settles nothing: a ZERO baseline
+ *                  (`{0, 0}` — `recoverScaleFrame` refuses zero pairs BY
+ *                  DESIGN, scale-frame.ts:47, and that refusal is correct;
+ *                  frame persistence is a separately-owned question), a missing
+ *                  `raw_value`, or no `observed_state` at all. A level of 0.8
+ *                  here may denote 0.8 or 80 and NOTHING IN THE RECORD SAYS
+ *                  WHICH.
+ *
+ * ⚠ THE `identity` CASE IS WHY THIS IS A FOUR-WAY ANSWER AND NOT
+ * "frame recovered / not recovered". `recoverScaleFrame` returns undefined for
+ * BOTH `{40, 40}` and `{0, 0}`, but only the second is undecidable. Collapsing
+ * them would withdraw the honest "not stated in the brief" disowning from every
+ * plain count in the estate — the opposite-direction harm, and the larger class.
+ */
+export type MagnitudeScale =
+  | { readonly kind: "cap"; readonly cap: number }
+  | { readonly kind: "frame"; readonly frame: number }
+  | { readonly kind: "identity" }
+  | { readonly kind: "unknown" };
+
+/**
+ * Which of the four conventions is this factor's `observed_state` in?
+ *
+ * Precedence is the WRITE path's own precedence (`normaliseFactorValue`): a
+ * usable cap wins, else the framed pair, else a positive identity pair. Total
+ * and pure; every "we cannot tell" answer is `unknown`, never a guess.
+ */
+export function resolveMagnitudeScale(
+  observed:
+    | {
+        readonly value?: unknown;
+        readonly raw_value?: unknown;
+        readonly cap?: unknown;
+      }
+    | null
+    | undefined,
+): MagnitudeScale {
+  const cap = observed?.cap;
+  if (typeof cap === "number" && Number.isFinite(cap) && cap > 0) {
+    return { kind: "cap", cap };
+  }
+
+  const frame = recoverScaleFrame({
+    value: observed?.value,
+    raw_value: observed?.raw_value,
+  });
+  if (frame !== undefined) return { kind: "frame", frame };
+
+  const value = observed?.value;
+  const raw = observed?.raw_value;
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    typeof raw === "number" &&
+    raw === value
+  ) {
+    return { kind: "identity" };
+  }
+
+  return { kind: "unknown" };
+}
+
+/**
+ * The magnitude `level` denotes under `scale`, or `null` when undecidable.
+ *
+ * `null` means exactly one thing: THE RECORD DOES NOT DETERMINE THE ANSWER.
+ * It is never a computation failure dressed as an unknown.
+ */
+export function magnitudeUnderScale(
+  level: number,
+  unit: string | null | undefined,
+  scale: MagnitudeScale,
+): number | null {
+  if (typeof level !== "number" || !Number.isFinite(level)) return null;
+  switch (scale.kind) {
+    case "cap":
+      return denormalisedMagnitude(level, unit, scale.cap);
+    case "frame": {
+      const magnitude = level * scale.frame;
+      return Number.isFinite(magnitude) ? magnitude : null;
+    }
+    case "identity":
+      return level;
+    case "unknown":
+      return null;
+  }
+}
+
+/**
+ * Three-state provenance verdict: did the user state THIS amount in the brief?
+ *
+ * ⚠ THE SPEC THIS IS WRITTEN AGAINST (not the failure mode that motivated it):
+ * **a provenance claim in the reasoning string must be TRUE of the brief text.**
+ * There are two ways to break that, and they are not symmetric:
+ *   - claiming "stated" for a value the user never wrote — a fabrication;
+ *   - claiming "this amount is not stated in the brief" about a number the user
+ *     typed themselves — a FALSE CLAIM ABOUT THE USER'S OWN WORDS, which is the
+ *     one the product shipped (PR #873: stated 80 compared as the level 0.8).
+ * A two-state boolean cannot express the third, honest answer, so it was forced
+ * to pick one of the two lies. Hence `undecidable`.
+ *
+ * ASYMMETRY OF EVIDENCE, and it is the load-bearing rule here:
+ *   · a MATCH is decisive whatever the denominator — if the number appears in
+ *     the text, the user wrote it;
+ *   · a NON-MATCH is decisive ONLY when the denominator was known. Under
+ *     `unknown` we compared a level against magnitudes and learned nothing.
+ * So a non-match under an unknown scale returns `undecidable`, NOT `not_stated`.
+ */
+export type BriefAmountVerdict = "stated" | "not_stated" | "undecidable";
+
+export function classifyAmountAgainstBrief(
+  level: number,
+  unit: string | null | undefined,
+  briefText: string | null | undefined,
+  scale: MagnitudeScale,
+): BriefAmountVerdict {
+  if (typeof level !== "number" || !Number.isFinite(level)) return "undecidable";
+
+  const magnitude = magnitudeUnderScale(level, unit, scale);
+  if (magnitudeAppearsInBrief(magnitude ?? level, unit, briefText)) return "stated";
+
+  return magnitude === null ? "undecidable" : "not_stated";
 }
