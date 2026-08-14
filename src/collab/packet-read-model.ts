@@ -33,6 +33,7 @@
  */
 
 import {
+  isAnswerKind,
   refuse,
   type CollabStore,
   type ElicitationEventRow,
@@ -86,7 +87,12 @@ export async function assembleOpenPacket(
   const ownEvents = await store.listOwnEvents(args.round_id, args.participant_id);
   const completed = new Set<string>();
   for (const e of ownEvents) {
-    if (e.kind === 'belief_submitted' || e.kind === 'belief_revised' || e.kind === 'declined') {
+    // ⚠ DERIVED FROM THE ANSWER FAMILY, not a re-listed set of kinds. Attaching
+    // evidence is NOT answering: a participant who uploads a link and leaves
+    // must still be shown as owing an answer. The kinds used to be enumerated
+    // here, which was correct while every kind was an answer and would have
+    // gone silently wrong the moment one was not.
+    if (isAnswerKind(e.kind)) {
       completed.add(e.target.id);
     }
   }
@@ -107,7 +113,15 @@ export async function assembleOpenPacket(
 }
 
 /**
- * Fold the append-only log to the latest event per (participant, target).
+ * Fold the append-only log to the latest ANSWER per (participant, target).
+ *
+ * ⭐⭐ "ANSWER", NOT "EVENT", AND THE DISTINCTION IS THE WHOLE REASON EVIDENCE
+ * DID NOT BREAK THE APPLY PATH. See `ELICITATION_ANSWER_KINDS` in `types.ts`
+ * for the failure this filter prevents: once a non-answer kind shares the log,
+ * "the participant's latest row" and "the participant's stated position" stop
+ * being the same question, and the unscoped fold answers the wrong one —
+ * blanking a real number on the reveal and refusing a legitimate apply, both
+ * silently, and both WORSE for the participant who supplied more reasoning.
  *
  * ⚠ EXPORTED 0.40.0, AND THE EXPORT IS LOAD-BEARING. `apply-verification.ts`
  * resolves "which answer did this participant actually give for this target?"
@@ -135,6 +149,9 @@ export function foldLatestPerParticipant(
   const latest = new Map<string, { row: ElicitationEventRow; index: number }>();
   events.forEach((row, index) => {
     if (row.target.id !== targetId) return;
+    // THE ANSWER FILTER. A non-answer row for this target is skipped entirely
+    // rather than being allowed to win the recency contest.
+    if (!isAnswerKind(row.kind)) return;
     const held = latest.get(row.participant_id);
     if (
       held === undefined ||

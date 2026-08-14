@@ -1,9 +1,18 @@
 /**
  * COLLAB U-S0 — PARTICIPANT routes (seam pinned by contracts.ts:84).
  *
- *   GET  /collab/v1/packet/:round_id           → the blind packet
- *   POST /collab/v1/packet/:round_id/events    → contribute a belief
- *   GET  /collab/v1/packet/:round_id/reveal    → post-close, everyone's answers
+ *   GET  /collab/v1/packet/:round_id              → the blind packet
+ *   POST /collab/v1/packet/:round_id/events       → contribute a belief, or attach evidence
+ *   GET  /collab/v1/packet/:round_id/reveal       → post-close, everyone's answers
+ *   GET  /collab/v1/packet/:round_id/disagreement → post-close, WHERE and HOW they differ
+ *
+ * ⚠ EVIDENCE RIDES `/events`, IT DID NOT GET AN ENDPOINT OF ITS OWN. Attaching
+ * evidence is a participant appending an attributed, append-only, round-scoped,
+ * target-bound row — the same act with the same authorisation and the same
+ * blindness properties as submitting a belief. A second endpoint would have been
+ * a second copy of the token check, the revocation re-read and the round-open
+ * gate, i.e. three more places for this path to disagree with the first about
+ * who may write. The append seam splits on `kind` INSIDE the one door.
  *
  * Reachable from the browser via the `/bff/collab/*` edge function, which
  * rewrites to this prefix — see `route-support.ts`.
@@ -26,6 +35,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { assembleDisagreementView } from '../collab/disagreement-read-model.js';
 import { appendParticipantEvent } from '../collab/elicitation-append.js';
 import { assembleOpenPacket, assembleRevealView } from '../collab/packet-read-model.js';
 import { verifyParticipantToken } from '../collab/participant-tokens.js';
@@ -148,6 +158,34 @@ export default async function route(
       if (participant === null) return reply;
       try {
         const view = await assembleRevealView(store, {
+          round_id: roundIdOf(req),
+          requested_by: { kind: 'participant', participant_id: participant.participant_id },
+        });
+        return reply.code(200).send(view);
+      } catch (err) {
+        return replyForRefusal(reply, req, err);
+      }
+    });
+  }
+
+  // ── DISAGREEMENT ─────────────────────────────────────────────────────────
+  //
+  // ⭐ PARTICIPANTS GET THIS TOO, AND THAT IS THE COLLABORATION POINT rather
+  // than a permissions oversight. Interrogating why two people differ is
+  // something they do TOGETHER; a view of the disagreement available only to
+  // the owner would make it a management report about a team rather than a
+  // shared surface for that team. It exposes nothing new to a participant —
+  // they already receive the full reveal, and evidence is what they wrote.
+  //
+  // Same gate as the reveal, inherited from `assembleRevealView` inside the
+  // projection rather than restated here.
+  for (const path of collabPaths('/packet/:round_id/disagreement')) {
+    app.get(path, async (req, reply) => {
+      const store = resolveStore();
+      const participant = await requireParticipant(req, reply, store);
+      if (participant === null) return reply;
+      try {
+        const view = await assembleDisagreementView(store, {
           round_id: roundIdOf(req),
           requested_by: { kind: 'participant', participant_id: participant.participant_id },
         });

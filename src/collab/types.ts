@@ -109,7 +109,42 @@ export type ElicitationEventKind =
   | 'belief_submitted'
   | 'belief_revised'
   | 'declined'
-  | 'clarification_requested';
+  | 'clarification_requested'
+  | 'evidence_attached';
+
+/**
+ * ⭐⭐ THE ANSWER FAMILY — the kinds that mean "this person stated a position on
+ * this target". THIS CONSTANT IS LOAD-BEARING AND IT IS WHY `evidence_attached`
+ * DID NOT SILENTLY BREAK THE APPLY PATH.
+ *
+ * Before evidence existed, `elicitation_events` held only answer rows, so
+ * "this participant's latest EVENT for this target" and "this participant's
+ * latest ANSWER for this target" were the same question and one fold answered
+ * both. Adding a non-answer kind to the same append-only log SPLITS those into
+ * two different questions under one name — CLAUDE.md trap 21 exactly — and the
+ * failure would have been severe and silent:
+ *
+ *   Grace answers 0.85, then attaches a link supporting it. Her evidence row is
+ *   now her newest row for that target. An unscoped fold returns it, so
+ *   · the reveal shows Grace with NO number, next to her own words, and
+ *   · `verifyAppliedFrom` refuses the owner's "Use Grace's 0.85" with
+ *     `collab_apply_no_stated_value` — a legitimate apply, refused, because
+ *     the person supplied MORE reasoning rather than less.
+ *
+ * So the fold filters to this set, `foldLatestPerParticipant` is documented as
+ * an ANSWER fold, and a discriminating mutant pair pins it. Adding another
+ * non-answer kind later is safe for the same reason; adding an answer kind
+ * without listing it here is not, which is why this lives beside the union.
+ */
+export const ELICITATION_ANSWER_KINDS: readonly ElicitationEventKind[] = [
+  'belief_submitted',
+  'belief_revised',
+  'declined',
+];
+
+export function isAnswerKind(kind: ElicitationEventKind): boolean {
+  return ELICITATION_ANSWER_KINDS.includes(kind);
+}
 
 export type ElicitationTargetKind = 'factor' | 'edge';
 
@@ -177,6 +212,51 @@ export interface ElicitationProvenance {
   elicitation_version: string;
 }
 
+/**
+ * What a piece of evidence DOES to the position it is attached to.
+ *
+ * ⚠ THREE VALUES, NOT TWO, AND THE THIRD IS THE POINT. A binary
+ * supports/challenges forces every contribution into a side and quietly turns
+ * an evidence trail into a vote count — which is the averaging failure wearing
+ * different clothes. `qualifies` is where most real expertise lives: "true, but
+ * only above 500 seats". A participant who can only pick a side will pick one,
+ * and the model loses the condition that was the actual contribution.
+ */
+export type EvidenceStance = 'supports' | 'challenges' | 'qualifies';
+
+export type EvidenceKind = 'note' | 'link';
+
+/**
+ * A participant's evidence for or against a position on one target.
+ *
+ * ⚠ NOTE THE ABSENCE, IT IS THE SAME POINT AS `PacketTarget`: there is no
+ * `weight`, `strength`, `score`, `quality` or `rank` member. Evidence is read
+ * by people, and a numeric strength would be an aggregate input — the first
+ * step towards a combined answer, which this feature exists not to produce.
+ */
+export interface ElicitationEvidence {
+  kind: EvidenceKind;
+  /**
+   * The person's own words, VERBATIM — never normalised, never summarised
+   * server-side. Same rule as `ElicitationBelief.expression_raw`, and for the
+   * same reason: this is the reasoning, not a label for it.
+   */
+  body: string;
+  /** Populated only for `kind: 'link'`. http/https only — see the append seam. */
+  url: string | null;
+  stance: EvidenceStance;
+  /**
+   * Whose position this evidence speaks to, or null for the target at large.
+   *
+   * ⚠ A PARTICIPANT ID, RESOLVED AGAINST THE ROUND at append time. It lets a
+   * challenge be aimed ("this is about Grace's 0.85") rather than floating —
+   * which is what makes the disagreement interrogable rather than a pile of
+   * notes. It is NOT an attribution claim: `provenance.authored_by` still says
+   * who WROTE this, and the wire may not set that.
+   */
+  about_participant_id: string | null;
+}
+
 export interface ElicitationEventRow {
   event_id: string;
   round_id: string;
@@ -185,6 +265,16 @@ export interface ElicitationEventRow {
   kind: ElicitationEventKind;
   target: ElicitationTarget;
   belief: ElicitationBelief | null;
+  /**
+   * Populated only on `evidence_attached` rows; null on every answer row.
+   *
+   * ⚠ A SEPARATE MEMBER RATHER THAN AN OVERLOADED `belief`. The column is JSONB
+   * and evidence would have fitted; a member named `belief` carrying evidence
+   * is the differently-named-twins defect this estate pays for repeatedly, and
+   * the first reader to write `row.belief.value` would get `undefined` with no
+   * error anywhere.
+   */
+  evidence: ElicitationEvidence | null;
   provenance: ElicitationProvenance;
   created_at: string;
 }
@@ -199,6 +289,7 @@ export interface NewElicitationEventPayload {
   kind: ElicitationEventKind;
   target: ElicitationTarget;
   belief: ElicitationBelief | null;
+  evidence: ElicitationEvidence | null;
 }
 
 export interface RoundEventRow {

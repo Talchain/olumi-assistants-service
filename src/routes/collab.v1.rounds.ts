@@ -1,10 +1,11 @@
 /**
  * COLLAB U-S0 — OWNER routes (seam pinned by contracts.ts:83).
  *
- *   POST /collab/v1/rounds                       → mint a round + participants
- *   POST /collab/v1/rounds/:round_id/close       → close it; reveal becomes possible
- *   GET  /collab/v1/rounds/:round_id/preview     → roster + targets, NO beliefs
- *   GET  /collab/v1/rounds/:round_id/reveal      → post-close, everyone's answers
+ *   POST /collab/v1/rounds                        → mint a round + participants
+ *   POST /collab/v1/rounds/:round_id/close        → close it; reveal becomes possible
+ *   GET  /collab/v1/rounds/:round_id/preview      → roster + targets, NO beliefs
+ *   GET  /collab/v1/rounds/:round_id/reveal       → post-close, everyone's answers
+ *   GET  /collab/v1/rounds/:round_id/disagreement → post-close, WHERE and HOW they differ
  *
  * Reachable from the browser via the `/bff/collab/*` edge function, which
  * rewrites to this prefix — see `route-support.ts`.
@@ -28,6 +29,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { assembleDisagreementView } from '../collab/disagreement-read-model.js';
 import { mintParticipantToken } from '../collab/participant-tokens.js';
 import { assembleRevealView } from '../collab/packet-read-model.js';
 import { closeRound, mintRound, ownerPreview } from '../collab/rounds-service.js';
@@ -239,6 +241,29 @@ export default async function route(
       const store = resolveStore();
       try {
         const view = await assembleRevealView(store, {
+          round_id: roundIdOf(req),
+          requested_by: { kind: 'owner', user_id: userId },
+        });
+        return reply.code(200).send(view);
+      } catch (err) {
+        return replyForRefusal(reply, req, err);
+      }
+    });
+  }
+
+  // ── DISAGREEMENT (post-close: WHERE views differ, and on what basis) ─────
+  //
+  // ⚠ SAME GATE AS THE REVEAL, INHERITED RATHER THAN RESTATED. The refusal
+  // comes from `assembleRevealView` inside the projection, so there is no
+  // second open-round check here that could drift and let this endpoint become
+  // an early peek at a blind round.
+  for (const path of collabPaths('/rounds/:round_id/disagreement')) {
+    app.get(path, async (req, reply) => {
+      const userId = await requireOwnerUser(req, reply);
+      if (userId === null) return reply;
+      const store = resolveStore();
+      try {
+        const view = await assembleDisagreementView(store, {
           round_id: roundIdOf(req),
           requested_by: { kind: 'owner', user_id: userId },
         });

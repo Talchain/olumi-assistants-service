@@ -260,6 +260,10 @@ export class SupabaseCollabStore implements CollabStore {
         kind: row.kind,
         target: row.target,
         belief: row.belief,
+        // Null on every answer row; populated only on `evidence_attached`.
+        // Written as its own column rather than folded into `belief` — see the
+        // note on `ElicitationEventRow.evidence`.
+        evidence: row.evidence,
         provenance: row.provenance,
         created_at: row.created_at,
       }),
