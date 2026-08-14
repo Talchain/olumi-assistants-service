@@ -493,6 +493,106 @@ describe("F2b — baseline tiering: an ambiguous label no longer INVENTS a basel
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+/**
+ * ⭐⭐ THE DERIVED SEAM-COMPLETENESS GUARD — WRITTEN HERE BECAUSE IT DID NOT EXIST.
+ *
+ * `seam.ts:86-88` says: *"`assertSeamCarriesEveryGrammarField` below now makes the
+ * next such omission a red rather than a dark capability."* **That function has
+ * never existed.** Swept at this tip with a contrast control: the symbol occurs
+ * ONCE in the whole repo — inside the comment promising it — while
+ * `draftClaimSchemaKeys` (which `grammar.ts:463-473` calls "the completeness
+ * source for `seam.ts`'s field-by-field rebuild") had NO test consumer at all.
+ * The estate believed it held a derived guard against the `sets_to` defect class
+ * and held a sentence about one instead: guarantee theatre, in the exact place
+ * built to prevent a silent drop.
+ *
+ * ⚠ AND IT WAS NOT HYPOTHETICAL — a mutant proved it live. Deleting the seam's
+ * `claim.is_baseline` carriage left this suite at 39/39 GREEN, because the
+ * projector tests call the projector DIRECTLY and the live path runs through the
+ * seam (trap 3b/19). My own seam test covered the STATED flag and not the CLAIM
+ * flag: an invariant written with the same asymmetry as the code it guards
+ * (trap 13d). This closes the whole class rather than my one field.
+ *
+ * DERIVED, never a list: the fixture is BUILT FROM the grammar's own JSON Schema,
+ * so a field added to the grammar tomorrow is populated and asserted here without
+ * anyone remembering to update a mirror (trap 12).
+ */
+describe("assertSeamCarriesEveryGrammarField — derived, and it did not exist before", () => {
+  /** A value satisfying a declared property schema. Derived from `type`/`enum`. */
+  function valueFor(key: string, schema: Record<string, unknown>, index: number): unknown {
+    if (Array.isArray(schema.enum)) return schema.enum[0];
+    switch (schema.type) {
+      case "boolean":
+        return true;
+      case "integer":
+        return 0;
+      case "number":
+        return 0.5 + index / 100;
+      case "array":
+        return [0];
+      case "string":
+        return `derived-${key}`;
+      default:
+        throw new Error(`unhandled declared type for ${key}: ${JSON.stringify(schema)}`);
+    }
+  }
+
+  function populateFromSchema(props: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    let i = 0;
+    for (const [key, sub] of Object.entries(props)) {
+      out[key] = valueFor(key, sub as Record<string, unknown>, i++);
+    }
+    return out;
+  }
+
+  const statedProps = (buildDraftRecordsSchema() as any).properties.stated_items.items
+    .properties as Record<string, unknown>;
+  const claimProps = (buildDraftClaimItemSchema() as any).properties as Record<string, unknown>;
+
+  it("carries EVERY declared `stated_items[]` field through the seam", () => {
+    const item = populateFromSchema(statedProps);
+    const seam = projectDraftRecords({ stated_items: [item], claims: [] } as never, undefined);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const carried = seam.records.stated_items[0] as unknown as Record<string, unknown>;
+    // Assert the KEY SET first, so a missing field names itself rather than
+    // surfacing as one confusing value mismatch.
+    expect(Object.keys(carried).sort()).toEqual(draftStatedItemSchemaKeys());
+    for (const key of draftStatedItemSchemaKeys()) {
+      expect(carried[key]).toEqual(item[key]);
+    }
+  });
+
+  it("carries EVERY declared `claims[]` field through the seam", () => {
+    const claim = populateFromSchema(claimProps);
+    const seam = projectDraftRecords(
+      { stated_items: [{ kind: "goal", source_quote: "a goal" }], claims: [claim] } as never,
+      undefined,
+    );
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const carried = seam.records.claims[0] as unknown as Record<string, unknown>;
+    expect(Object.keys(carried).sort()).toEqual(draftClaimSchemaKeys());
+    for (const key of draftClaimSchemaKeys()) {
+      expect(carried[key]).toEqual(claim[key]);
+    }
+  });
+
+  it("the fixture is non-empty and covers every key — the guard's own precondition", () => {
+    // A derived guard whose derivation silently yields nothing passes by testing
+    // nothing (trap 13). Both key sets must be non-trivial AND must contain the
+    // fields whose loss is already on the record.
+    expect(draftStatedItemSchemaKeys().length).toBeGreaterThanOrEqual(6);
+    expect(draftClaimSchemaKeys().length).toBeGreaterThanOrEqual(12);
+    expect(draftClaimSchemaKeys()).toContain("sets_to");
+    expect(draftClaimSchemaKeys()).toContain("is_baseline");
+    expect(draftStatedItemSchemaKeys()).toContain("is_baseline");
+    expect(Object.keys(populateFromSchema(claimProps)).sort()).toEqual(draftClaimSchemaKeys());
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 describe("fixed-input replay — the banked live emission is unharmed", () => {
   it("still replays, and still loses its stated figures to M1a (scope, stated honestly)", async () => {
     // ⚠ This assertion is a FACT ABOUT THE REMAINING DEFECT, deliberately pinned
