@@ -370,6 +370,29 @@ describe('δ2 row 4 — what_would_flip focuses the factor its own proposal targ
     const supp = sink.filter((e) => e.event === 'v5.ui_directive.suppressed');
     expect(supp.some((e) => e.data.reason === 'target_unresolved')).toBe(true);
   });
+
+  it('KIND GATE — an id that resolves to a NON-factor node → NOTHING (fail-closed)', () => {
+    // Added 14 Aug 2026 because a mutant that deleted `ref.kind !== 'factor'`
+    // SURVIVED: every fixture here happened to resolve to a factor, so the
+    // corpus could not observe the guard at all. This is the "check what your
+    // corpus EXCLUDES, not what it covers" rule — the guard was correct and
+    // simply unwatched.
+    //
+    // `opt_x` is a real, resolvable node, so the suppression measures the KIND
+    // GATE and not an unresolvable id: the positive control directly above
+    // proves an unresolvable id takes the same exit, and the row-4 positive
+    // control proves a factor id emits. Row 4 says "look at the assumption you
+    // could test"; pointing it at an OPTION would make that sentence false.
+    const env = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [flipFact()],
+      persistedGraph: GRAPH,
+      flipFocusFactorId: 'opt_x',
+    });
+    expect(directives(env)).toHaveLength(0);
+    const supp = sink.filter((e) => e.event === 'v5.ui_directive.suppressed');
+    expect(supp.some((e) => e.data.reason === 'target_unresolved')).toBe(true);
+  });
 });
 
 // ===========================================================================
