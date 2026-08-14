@@ -414,7 +414,7 @@ function fixControllableMissingData(
   return repairs;
 }
 
-function fixObservableMissingData(
+export function fixObservableMissingData(
   graph: GraphT,
   violations: ValidationIssue[],
 ): Repair[] {
@@ -434,23 +434,58 @@ function fixObservableMissingData(
     const data = (node as any).data;
     const hasValue = data && typeof data.value === "number";
 
+    // ⭐⭐ THE STAMP IS `inferred`, AND ONE WORD IS THE WHOLE DEFECT THIS CLOSES.
+    //
+    // Both branches below write an `extractionType` that NOTHING in the record
+    // supports: branch A invents the value as well, branch B supplies a label for
+    // a value whose origin the model never declared. Stamping `"observed"` told
+    // the rest of the system the opposite — `schema-v3.ts:296` maps any
+    // non-`inferred` type to `source: "brief_extraction"`, and
+    // `provenance-display.ts:26` maps `"observed"` to `from_brief`. So a repair's
+    // own guess reached the user badged as THEIR OWN WORDS.
+    //
+    // MEASURED on the deployed build `41156fc` (first-use acceptance, 14 Aug,
+    // P0-3): brief `D_messy` says "the team is stretched thin" and states no
+    // number; the delivered graph carried "Team burnout and attrition risk" as
+    // `{value: 0, source: "brief_extraction", extractionType: "observed"}`,
+    // `provenance: "from_brief"` — the product claiming it had OBSERVED, FROM THE
+    // USER'S BRIEF, a burnout of zero. It was the ONLY `from_brief` claim in the
+    // whole streaming-frame surface across 12 draws, and it was false.
+    //
+    // ⚠ THAT WITNESS CAME FROM BRANCH B, NOT BRANCH A. `value: 0` is a number, so
+    // `hasValue` is true and the defaulted fill never ran. A fix to the defaulted
+    // fill alone would have left the shipped defect alive; both branches move.
+    //
+    // `inferred` is not this author's preference — it is what the SIBLING repair
+    // twenty lines above already writes for the identical situation
+    // (`fixControllableMissingData`), what the LLM normaliser writes for its own
+    // fill (`adapters/llm/normalisation.ts:993`), and what the served prompt
+    // declares for an unstated baseline (`defaults-v19.ts:154`). The wire enum has
+    // four members and no "defaulted" class, so it is also the only truthful one
+    // available. `mayClaimFromBrief` (`factor-value-provenance.ts:132`) then
+    // returns false by construction, which is the point: the honesty guard could
+    // never catch this, because the repair was manufacturing exactly the two facts
+    // the guard checks for.
+    //
+    // NOTHING ELSE MOVES. A stamp the MODEL emitted — `explicit`, or `observed`
+    // it chose itself — is left alone; only the stamps this function writes change.
     if (!hasValue) {
       (node as any).data = {
         ...(data ?? {}),
         value: 0.5,
-        extractionType: "observed",
+        extractionType: "inferred",
       };
       repairs.push({
         code: "OBSERVABLE_MISSING_DATA",
         path: `nodes[${node.id}]`,
-        action: `Added data.value=0.5 and extractionType="observed"`,
+        action: `Added data.value=0.5 and extractionType="inferred"`,
       });
     } else if (data.extractionType === undefined) {
-      data.extractionType = "observed";
+      data.extractionType = "inferred";
       repairs.push({
         code: "OBSERVABLE_MISSING_DATA",
         path: `nodes[${node.id}]`,
-        action: `Added extractionType="observed"`,
+        action: `Added extractionType="inferred"`,
       });
     }
   }
