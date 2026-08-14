@@ -107,6 +107,99 @@ describe('F1 — negation is REFUSED, never inverted (reviewer corpus)', () => {
 });
 
 // ============================================================================
+// F1 ROUND TWO — three MORE avoidance idioms, from a second reviewer
+// ============================================================================
+
+/**
+ * ⚠⚠ THE CUE LIST IS OPEN VOCABULARY, AND THIS BLOCK IS THE PROOF.
+ *
+ * Round one closed four measured misses with
+ * `avoid|never|do not|don't|stop|prevent|refuse|without`. A second reviewer
+ * then found THREE MORE idioms outside that list, each of which FIRED and
+ * emitted the false *"…the way your goal asks"* sentence. Measured at
+ * `3992c887` before this fix:
+ *
+ *     "Steer clear of raising the price"            → FIRED dir=increase
+ *     "Refrain from increasing the price"           → FIRED dir=increase
+ *     "Resist pressure to cut the marketing budget" → FIRED dir=decrease
+ *
+ * The module header records this as a KNOWN LIMIT with the procedure for the
+ * next cue. **Assume the list is incomplete; a fourth reviewer will find more.**
+ * What matters is that each addition is cheap, mandatory, and monotone-safe.
+ */
+describe('F1 round two — further avoidance idioms are refused (reviewer probes)', () => {
+  it('RED-first: the three fresh probes return UNDETERMINED', () => {
+    expect(deriveGoalIntent('Steer clear of raising the price').direction).toBe('undetermined');
+    expect(deriveGoalIntent('Refrain from increasing the price').direction).toBe('undetermined');
+    expect(deriveGoalIntent('Resist pressure to cut the marketing budget').direction).toBe(
+      'undetermined',
+    );
+  });
+
+  it('the inflected forms of the same three cues', () => {
+    for (const label of [
+      'Steering clear of raising the price',
+      'Steers clear of cutting the budget',
+      'Refrains from increasing headcount',
+      'Refraining from cutting the support team',
+      'Resisting pressure to raise prices',
+      'Resists the urge to cut marketing',
+    ]) {
+      expect(deriveGoalIntent(label).direction, label).toBe('undetermined');
+    }
+  });
+
+  /**
+   * ⭐ THE OPPOSITE-DIRECTION TWINS (trap 22b). The same aims with the cue
+   * removed must STILL FIRE — a fix that closes a lie by silencing the surface
+   * has traded one failure for another.
+   */
+  it('TWIN — the same aims WITHOUT the avoidance idiom still resolve', () => {
+    expect(deriveGoalIntent('Raising the price').direction).toBe('increase');
+    expect(deriveGoalIntent('Increasing the price').direction).toBe('increase');
+    expect(deriveGoalIntent('Cut the marketing budget').direction).toBe('decrease');
+    expect(deriveGoalIntent('Increase headcount').direction).toBe('increase');
+    expect(deriveGoalIntent('Raise prices').direction).toBe('increase');
+  });
+
+  /**
+   * ⭐⭐ MONOTONICITY, PROVEN RATHER THAN ASSUMED.
+   *
+   * Widening a pure refusal can only move a label FIRING → SILENT, never the
+   * reverse, because the cue check sits after the stem is located and can only
+   * return `undetermined`. That is the argument; this is the measurement. Every
+   * aim the surface is REQUIRED to read must still read exactly as before, or
+   * the widening has eaten legitimate business English.
+   *
+   * The set deliberately includes aims containing the new cue STEMS in
+   * non-avoidance senses, which is where a careless widening would bite.
+   */
+  it('MUST-FIRE set is unchanged by the widening (monotone-safe, measured)', () => {
+    const mustFire: ReadonlyArray<readonly [string, 'increase' | 'decrease']> = [
+      ['Increase our subscription price', 'increase'],
+      ['Raise seat price to £59', 'increase'],
+      ['Grow MRR to £250,000', 'increase'],
+      ['Maximise ARR', 'increase'],
+      ['Double Revenue', 'increase'],
+      ['Accelerate product delivery', 'increase'],
+      ['Reduce churn', 'decrease'],
+      ['Minimise TCO over 3 years', 'decrease'],
+      ['Lower cost to serve', 'decrease'],
+      ['Cut support headcount', 'decrease'],
+      ['Grow revenue without discounting', 'increase'],
+      // ⚠ The new cue stems in NON-avoidance senses. "Resistance" is a noun
+      // here and must not be read as the verb `resist`; `\b`-anchoring is what
+      // keeps them apart, and a bare-substring cue would silence both.
+      ['Increase price despite customer resistance', 'increase'],
+      ['Grow revenue from the steering committee segment', 'increase'],
+    ];
+    for (const [label, expected] of mustFire) {
+      expect(deriveGoalIntent(label).direction, label).toBe(expected);
+    }
+  });
+});
+
+// ============================================================================
 // F2 — SUBJECT RESOLUTION (P1/P2). Substring collision + first-match binding.
 // ============================================================================
 

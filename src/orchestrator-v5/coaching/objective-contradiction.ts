@@ -75,6 +75,51 @@
  *     and report** rather than patching the reverse. Two reversals on one
  *     predicate is a signal; four is proof the approach is wrong.
  *
+ * ## ⚠⚠ KNOWN LIMIT — THE NEGATION CUE LIST IS OPEN VOCABULARY, AND CLOSED
+ * ## LISTS DO NOT EXHAUST ENGLISH AVOIDANCE IDIOMS
+ *
+ * `NEGATION_CUE_RE` is a hand-maintained list, which is the defect class this
+ * estate pays for most often (trap 12). It cannot be derived: there is no
+ * canonical enumeration of the ways English declines a direction, so there is
+ * no source of truth to derive it FROM. The honest response is to record the
+ * limit here rather than to imply completeness.
+ *
+ * **This has already been demonstrated twice, by two different reviewers.**
+ * Round one added `avoid|never|do not|don't|stop|prevent|refuse|without` after
+ * four measured misses. Round two then found THREE MORE idioms outside that
+ * list, each of which FIRED and emitted the false *"…the way your goal asks"*
+ * sentence:
+ *
+ *     "Steer clear of raising the price"
+ *     "Refrain from increasing the price"
+ *     "Resist pressure to cut the marketing budget"
+ *
+ * A third reviewer will find more — *"think twice before"*, *"hold off on"*,
+ * *"rule out"*, *"the last thing we want is to"*. **Assume the list is
+ * incomplete; do not assume the next miss is a new defect class.**
+ *
+ * ⭐ WHY THIS IS TOLERABLE, STATED PRECISELY. The failure is **fail-open in the
+ * lie direction**, which is the bad direction — an unrecognised cue means the
+ * surface asserts a direction the user declined. That is why each addition is
+ * cheap and mandatory rather than optional. What makes it survivable is that
+ * widening is **MONOTONE-SAFE**: adding a cue can only move a label from FIRING
+ * to SILENT, never the reverse, because the cue check is a pure refusal placed
+ * after the stem is located. So a new cue can never resurrect a suppressed
+ * contradiction or invert an existing one — the two harms trap 22b warns about.
+ * **Monotonicity is proven, not assumed**: every addition re-runs the must-fire
+ * corpus, and `objective-contradiction.reviewer-corpus.test.ts` asserts the
+ * must-fire set stays green in the same block as the new probes.
+ *
+ * **PROCEDURE FOR THE NEXT CUE — follow it rather than rediscovering it:**
+ *   1. add the cue to `NEGATION_CUE_RE`;
+ *   2. add the verbatim probe to the reviewer corpus (must be UNDETERMINED);
+ *   3. add its OPPOSITE-DIRECTION TWIN — the same aim with the cue removed,
+ *      which must still FIRE;
+ *   4. re-run the must-fire corpus and show it unchanged.
+ *
+ * This note exists so the limit is found IN THE SUITE, by a reader, rather than
+ * rediscovered as a fresh surprise by a fourth review.
+ *
  * ## ⭐ THE MEASURED SCOPE FACT A FUTURE READER MUST NOT RE-DISCOVER
  *
  * **Zero of the 73 harvested goal labels state a direction over a factor the
@@ -311,7 +356,7 @@ const DIRECTION_STEM_RE = new RegExp(
  * keyboard emits.
  */
 const NEGATION_CUE_RE =
-  /\b(?:avoid|never|stop|prevent|refuse|without|don['’]t|do\s+not|cannot|can['’]t|no\s+longer)\b/gi;
+  /\b(?:avoid|never|stop|prevent|refuse|without|don['’]t|do\s+not|cannot|can['’]t|no\s+longer|steer(?:s|ing|ed)?\s+clear\s+of|refrain(?:s|ing|ed)?\s+from|resist(?:s|ing|ed)?)\b/gi;
 
 /**
  * Does a negation cue GOVERN the direction stem — i.e. appear before it?
