@@ -274,6 +274,61 @@ const DIRECTION_STEM_RE = new RegExp(
 );
 
 /**
+ * ⚠⚠ NEGATION — REFUSE, NEVER INVERT. THE CEE #888 CLASS, FOUND BY THE
+ * REVIEWER'S CORPUS AND NOT BY THE AUTHOR'S.
+ *
+ * The author's 73-label corpus contained **zero negation cases**, so this hole
+ * was invisible to a confusion matrix, opposite-direction twins, a pinned
+ * KNOWN-UNDETERMINED set AND a 10/10 mutant kit. Trap 22, exactly as written: a
+ * corpus that shares the code's blind spot cannot see the code's defect.
+ *
+ * MEASURED MISSES at `2186fa3c`, verbatim:
+ *   "Do not increase headcount"       → FIRED, dir=increase
+ *   "Never cut the marketing budget"  → FIRED, dir=decrease
+ *   "Avoid cutting the support team"  → FIRED, dir=decrease
+ *   "Avoid raising prices"            → direction read increase (silent only
+ *                                        because the plural token missed)
+ *
+ * The second is the worst thing this surface has done: **the emitted copy
+ * endorsed the options that CUT the budget the user said never to cut.** Not a
+ * gap — the product actively recommending the forbidden action.
+ *
+ * ⭐ WHY REFUSE RATHER THAN INVERT (trap 22f). Reading "do not increase" as
+ * `decrease` is a second guess stacked on the first: the user has ruled a
+ * direction OUT and left what they want UNSTATED. "Do not increase headcount"
+ * does not mean "reduce headcount". Inverting would trade a loud lie for a
+ * quiet one, which is the oscillation #888 lost four rounds to. UNDETERMINED is
+ * the only answer that cannot be wrong.
+ *
+ * ⚠ POSITION IS LOAD-BEARING: the cue must PRECEDE the direction stem to govern
+ * it. "Grow revenue without discounting" states a real direction on revenue —
+ * its `without` governs a different verb entirely, and a position-blind refusal
+ * would silence a legitimate aim. That is the precision half of the
+ * two-parameter rule (trap 22b): wide enough to catch all four misses, narrow
+ * enough not to eat ordinary business English.
+ *
+ * Both apostrophes are carried: ASCII `'` and the typographic `’` a real user's
+ * keyboard emits.
+ */
+const NEGATION_CUE_RE =
+  /\b(?:avoid|never|stop|prevent|refuse|without|don['’]t|do\s+not|cannot|can['’]t|no\s+longer)\b/gi;
+
+/**
+ * Does a negation cue GOVERN the direction stem — i.e. appear before it?
+ *
+ * Returns false when there is no direction stem at all; the caller has already
+ * established one by then, and a cue with nothing to govern is not a refusal.
+ */
+function negationGovernsDirection(label: string, stemIndex: number): boolean {
+  NEGATION_CUE_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = NEGATION_CUE_RE.exec(label)) !== null) {
+    if (match.index < stemIndex) return true;
+  }
+  return false;
+}
+
+/**
  * ⭐ THE ENTIRE NATURAL-LANGUAGE SURFACE OF THIS MODULE, and it decides only
  * ONE thing: which direction the user asked for. It can never, on its own,
  * cause a sentence to ship — the arithmetic gates in
@@ -300,6 +355,11 @@ export function deriveGoalIntent(goalLabel: unknown): GoalIntent {
 
   const match = DIRECTION_STEM_RE.exec(label);
   if (match === null) return undetermined;
+
+  // ⚠ NEGATION IS CHECKED HERE, AFTER the stem is located and BEFORE the
+  // direction is returned — the cue must govern THIS stem, and position is what
+  // decides that. Refuse, never invert.
+  if (negationGovernsDirection(label, match.index)) return undetermined;
 
   const after = label.slice(match.index + match[0].length).trim();
   const boundary = after.search(SUBJECT_BOUNDARY);
@@ -328,6 +388,37 @@ function isComparable(option: ObjectiveOptionView): boolean {
 
 function finite(value: number | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * ⚠ A PROBABILITY IS A NUMBER IN THE CLOSED UNIT INTERVAL — WRITE THE INVARIANT
+ * AGAINST THE SPEC, NOT AGAINST THE FAILURE MODE (trap 13d).
+ *
+ * MEASURED at `2186fa3c`: `probability_of_goal: 1.5` rendered
+ * *"(150% against 20%)"* and PASSED egress, because the tail grammar's
+ * `\d{1,3}` admits anything up to 999. Guarding at "less than 1000" would be
+ * writing the guard against what the GRAMMAR happens to allow; the consumer's
+ * actual contract is `[0, 1]`, and that is what this asserts. Both ends: a
+ * negative is as impossible as a 1.5.
+ *
+ * ⚠ THIS IS DELIBERATELY *NOT* FOLDED INTO {@link finite}, and the distinction
+ * is load-bearing. `finite` also guards INTERVENTION VALUES, which are in the
+ * factor's own units and legitimately leave [0,1] — a headcount of 20, a price
+ * of 59, a spend of 600000. Tightening `finite` globally would silently blind
+ * the directional arm to every non-normalised lever in the estate: a fix for
+ * one field that breaks a different one, under a shared name (trap 21).
+ */
+function unitProbability(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * The RENDERED integer percentage. Declared here, beside the detector, because
+ * the detector's contradiction test must be made on the SAME number the copy
+ * prints — see {@link detectGoalAttainmentContradiction}.
+ */
+function toPercent(probability: number): number {
+  return Math.round(probability * 100);
 }
 
 /**
@@ -365,12 +456,12 @@ export function detectGoalAttainmentContradiction(
     }
   }
   if (leader === null) return null;
-  if (!finite(leader.probability_of_goal)) return null;
+  if (!unitProbability(leader.probability_of_goal)) return null;
 
   let best: ObjectiveOptionView | null = null;
   for (const option of comparable) {
     if (option.option_id === leader.option_id) continue;
-    if (!finite(option.probability_of_goal)) continue;
+    if (!unitProbability(option.probability_of_goal)) continue;
     if (best === null || option.probability_of_goal > (best.probability_of_goal as number)) {
       best = option;
     }
@@ -379,8 +470,14 @@ export function detectGoalAttainmentContradiction(
 
   const leaderPog = leader.probability_of_goal;
   const bestPog = best.probability_of_goal as number;
-  // Strictly greater. A tie is not a contradiction.
-  if (bestPog <= leaderPog) return null;
+  // ⚠ THE COMPARISON IS ON THE RENDERED INTEGERS, NOT THE RAW FLOATS.
+  // MEASURED at `2186fa3c`: 0.484 vs 0.478 are strictly ordered as floats but
+  // BOTH render 48%, so the surface emitted "more likely to reach your stated
+  // target (48% against 48%)" — a sentence asserting a difference the very
+  // numbers it prints do not show. A claim must be true of the text the user
+  // reads, not of the doubles behind it. Strictly greater still: a tie is not a
+  // contradiction.
+  if (toPercent(bestPog) <= toPercent(leaderPog)) return null;
 
   return {
     kind: 'goal_attainment',
@@ -410,11 +507,86 @@ export function detectGoalAttainmentContradiction(
  * returns the factor's ID and every later step keys on that ID — never on "the
  * factor whose value looks right", which another factor could satisfy.
  */
-function subjectMatchesFactor(subject: string, factorLabel: string): boolean {
-  const subjectTokens = subject.split(/\s+/).filter((t) => t.length > 2);
-  if (subjectTokens.length === 0) return false;
-  const factor = factorLabel.toLowerCase();
-  return subjectTokens.some((token) => factor.includes(token));
+const SUBJECT_STOPWORDS: ReadonlySet<string> = new Set([
+  'the',
+  'our',
+  'your',
+  'their',
+  'its',
+  'all',
+  'any',
+  'new',
+  'net',
+  'total',
+  'overall',
+  'current',
+  'this',
+  'that',
+  'these',
+  'those',
+  'more',
+  'less',
+  'and',
+  'for',
+  'per',
+  'from',
+  'with',
+  'into',
+  'over',
+  'under',
+]);
+
+function tokenise(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 2 && !SUBJECT_STOPWORDS.has(t));
+}
+
+/**
+ * How strongly does an intervened factor's label name the subject the goal's
+ * direction governs? Returns the count of shared content words; `0` is no match.
+ *
+ * ⚠⚠ WORD EQUALITY, NOT SUBSTRING — AND THE OLD SUBSTRING TEST SHIPPED FOUR
+ * MEASURED DEFECTS, ALL FOUND BY THE REVIEWER'S CORPUS.
+ *
+ *   "Increase our subscription price" → matched "Hourly Support Rate"
+ *        because  "our" ⊂ "h-OUR-ly"
+ *   "Grow total revenue"              → matched "Total Headcount"
+ *        because  "total" was admitted as a content word
+ *   "Increase win rate"               → matched "Pricing Strategy"
+ *        because  "rate" ⊂ "st-RATE-gy"
+ *
+ * Two independent causes, and both are fixed here rather than one:
+ *   1. `includes()` matched INSIDE a word. Tokenising the factor label and
+ *      comparing whole tokens makes that impossible by construction.
+ *   2. `length > 2` admitted stopwords — "our", "the", "all", "net", "total",
+ *      "new" — which carry no subject identity and collide constantly. They are
+ *      dropped from BOTH sides.
+ *
+ * ⭐ AND THE FOURTH DEFECT, WHICH WAS A GAP RATHER THAN A LIE AND IS THE ONE
+ * THE WHOLE SURFACE EXISTS TO CATCH: the caller used `interventions.find(...)`,
+ * binding the FIRST factor whose label collided. With a decoy ordered ahead of
+ * the genuinely-defied lever, the real contradiction was never examined and the
+ * product went SILENT on a true contradiction. That is why this function
+ * returns a SCORE and the caller takes the BEST match — see
+ * {@link detectDirectionalContradiction}.
+ *
+ * ⚠ NO STEMMING, deliberately, and the gap is PINNED rather than hidden:
+ * "Raise our prices" does not resolve against "Price Level". That is
+ * fail-closed (silent on a real contradiction, never a false claim), and the
+ * exact set is asserted in `objective-contradiction.reviewer-corpus.test.ts`
+ * with a positive control on the singular forms, so it REDs if the set grows or
+ * shrinks (trap 22f).
+ */
+function subjectFactorMatchScore(subject: string, factorLabel: string): number {
+  const subjectTokens = tokenise(subject);
+  if (subjectTokens.length === 0) return 0;
+  const factorTokens = new Set(tokenise(factorLabel));
+  if (factorTokens.size === 0) return 0;
+  let score = 0;
+  for (const token of subjectTokens) if (factorTokens.has(token)) score += 1;
+  return score;
 }
 
 /**
@@ -457,9 +629,20 @@ export function detectDirectionalContradiction(
   }
   if (leader === null) return null;
 
-  const factor = interventions.find((i) =>
-    subjectMatchesFactor(intent.subject as string, i.factor_label),
-  );
+  // ⚠ BEST MATCH, NOT FIRST MATCH. `interventions.find(...)` bound whichever
+  // intervened factor happened to be ordered first, so a decoy label could
+  // shadow the genuinely-defied lever and the surface went SILENT on a true
+  // contradiction (reviewer corpus, measured). Ties keep the earlier factor,
+  // which is stable and arbitrary rather than arbitrary and unstable.
+  let factor: InterventionView | undefined;
+  let bestScore = 0;
+  for (const candidate of interventions) {
+    const score = subjectFactorMatchScore(intent.subject as string, candidate.factor_label);
+    if (score > bestScore) {
+      bestScore = score;
+      factor = candidate;
+    }
+  }
   if (factor === undefined) return null;
 
   const leaderValue = factor.by_option.get(leader.option_id);
@@ -567,7 +750,10 @@ function quote(label: string): string {
  * presentation preference.
  */
 function pct(probability: number): number {
-  return Math.round(probability * 100);
+  // DELEGATES to the detector's own `toPercent`, so the number the copy prints
+  // and the number the contradiction test was made on cannot drift apart. Two
+  // roundings under one name is exactly how "(48% against 48%)" shipped.
+  return toPercent(probability);
 }
 
 function composeAttainment(

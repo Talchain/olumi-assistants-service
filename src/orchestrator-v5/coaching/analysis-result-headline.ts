@@ -1908,7 +1908,22 @@ const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${RED
  * template.length`), so an empty match cannot admit a bare template twice.
  */
 const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
-  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?$`,
+  // ⚠⚠ THE OBJECTIVE-CONTRADICTION TAIL IS DELIBERATELY *NOT* REGISTERED HERE,
+  // and adding it was a real defect caught by independent review.
+  //
+  // This branch is the TEMPLATE path — the shape a turn takes when NO headline
+  // was composed, i.e. when the analysis is not entitled to name a leading
+  // option. The objective-contradiction tail NAMES OPTIONS and only ships when
+  // `headline !== null`, so `template + tail` is a composition the handler can
+  // never emit. Registering it bought nothing and cost the one thing this
+  // branch exists to protect: it made the WITHHELD egress path ADMIT a
+  // leader-naming tail, contradicting the doctrine stated a few lines below and
+  // reopening the G-CEE-1 class at the allowlist itself.
+  //
+  // The tail belongs ONLY in TAIL_PATTERN, which is reached via a headline.
+  // `run-analysis-objective-contradiction-wiring.test.ts` pins `template + tail`
+  // as REJECTED so this cannot be "helpfully" re-added.
+  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?$`,
 );
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three

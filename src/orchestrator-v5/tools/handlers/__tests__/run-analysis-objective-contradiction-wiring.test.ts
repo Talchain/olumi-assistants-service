@@ -179,7 +179,9 @@ describe('egress — the sentence actually reaches the user', () => {
     );
     // THE LOAD-BEARING ASSERTION: without this, the tail is composed and then
     // silently discarded at egress, and the user gets the locked template.
-    expect(isAllowedRunAnalysisAssistantText(composeSummaryAsHandlerDoes(disclosure))).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(composeSummaryWithRealHeadline(disclosure))).toBe(
+      true,
+    );
   });
 
   it('⭐ ARM A on the same real graph with a lever-directional aim: composed and ADMITTED', () => {
@@ -199,7 +201,9 @@ describe('egress — the sentence actually reaches the user', () => {
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
         ' “Raise to £59 Per Seat” came out ahead in 28% of runs.',
     );
-    expect(isAllowedRunAnalysisAssistantText(composeSummaryAsHandlerDoes(disclosure))).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(composeSummaryWithRealHeadline(disclosure))).toBe(
+      true,
+    );
   });
 
   /**
@@ -323,7 +327,39 @@ describe('silence — a run with nothing honest to add changes the summary by ZE
     expect(composeSummaryAsHandlerDoes(disclosure)).toBe(
       RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT,
     );
-    expect(isAllowedRunAnalysisAssistantText(composeSummaryAsHandlerDoes(disclosure))).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(composeSummaryWithRealHeadline(disclosure))).toBe(
+      true,
+    );
+  });
+
+  /**
+   * ⚠⚠ F3 — THE TEMPLATE PATH MUST *REJECT* THIS TAIL, and an earlier revision
+   * of this PR wrongly registered it there.
+   *
+   * The template path is the shape a turn takes when NO headline was composed —
+   * i.e. when the analysis is not entitled to name a leading option. This tail
+   * NAMES options and only ships when `headline !== null`, so `template + tail`
+   * is a composition the handler can never emit. Registering it in
+   * `TEMPLATE_SUFFIX_ONLY_REGEX` bought nothing and made the WITHHELD egress
+   * path ADMIT a leader-naming tail — reopening the G-CEE-1 class at the
+   * allowlist itself, which is the last place it should be reachable.
+   *
+   * This pin is what stops it being "helpfully" re-added. Its twin directly
+   * above proves the same tail IS admitted on the headline path, so the pair
+   * discriminates the two paths rather than asserting the tail is simply
+   * unusable.
+   */
+  it('⭐ F3: template + tail is REJECTED, while headline + the SAME tail is admitted', () => {
+    const disclosure = composeObjectiveContradictionDisclosure(
+      PRICING_GRAPH,
+      RECORDS_WITH_GOAL_PROBABILITY,
+      true,
+    );
+    expect(disclosure).not.toBe(''); // positive control: there is a tail to test
+    expect(isAllowedRunAnalysisAssistantText(composeSummaryAsHandlerDoes(disclosure))).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(composeSummaryWithRealHeadline(disclosure))).toBe(
+      true,
+    );
   });
 
   it('a WITHHELD headline ships nothing, even when a contradiction exists', () => {
