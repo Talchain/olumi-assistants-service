@@ -1093,7 +1093,7 @@ export function transformResponseToV3(
   //
   // ── MEASURED, ON BANKED CAPTURES ─────────────────────────────────────────
   // 201 nodes across four capture runs and six briefs (closing witness 14 Aug,
-  // `driver/captures-*​/captures/*​/committed-graph.json`):
+  // `driver/captures-<run>/captures/<arm>/committed-graph.json`):
   //
   //     option/from_brief    20   ← every from_brief in the corpus
   //     option/ai_inferred   38       risk/ai_inferred     37

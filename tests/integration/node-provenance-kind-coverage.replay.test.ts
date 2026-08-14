@@ -4,7 +4,7 @@
  * ── THE DEFECT, MEASURED ON BANKED CAPTURES, NOT IMAGINED ──────────────────
  * 201 nodes across four capture runs and six briefs
  * (`olumi-docs/PHASE0-EVIDENCE-2026-07-28/closing-witness-20260814/driver/
- *   captures-*​/captures/*​/committed-graph.json`):
+ *   captures-<run>/captures/<arm>/committed-graph.json`):
  *
  *   option/from_brief    20        risk/ai_inferred      37
  *   option/ai_inferred   38        outcome/ai_inferred   26
