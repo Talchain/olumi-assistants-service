@@ -1031,6 +1031,11 @@ export async function dispatchChipClickRunAnalysis(
       ...(outcome.__scaffolded_options !== undefined
         ? { scaffoldedOptions: outcome.__scaffolded_options }
         : {}),
+      // No-rank ruling (2026-08-14): same source as the routed path — the
+      // options the run left out, not the status quo it held.
+      ...(outcome.__excluded_options !== undefined
+        ? { excludedOptions: outcome.__excluded_options }
+        : {}),
     });
 
     // Compose the response using the same composer TurnExecutor uses. The

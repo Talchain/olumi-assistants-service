@@ -1858,9 +1858,23 @@ describe('D-ask-1 scaffold disclosure channel (P1-2)', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     const input = spy.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
     expect(input.scaffold_disclosure).toBeDefined();
-    expect(input.scaffold_disclosure).toMatch(/[Pp]laceholder/);
+    // ⚠ RE-PINNED BY THE NO-RANK RULING (2026-08-14). This channel now carries
+    // only STATUS-QUO HOLDS, so the line the review sees says the option IS the
+    // status quo and its numbers are the model's current position — not that
+    // "placeholder values were used". And the tail no longer tells the review to
+    // treat the WHOLE comparison as illustrative: a held status quo shifts
+    // nothing, the comparison against it is SOUND, and caveating it would make
+    // the product understate what it actually knows.
+    expect(input.scaffold_disclosure).toMatch(/is the STATUS QUO/);
     expect(input.scaffold_disclosure).toContain('New Option');
-    expect(input.scaffold_disclosure).toMatch(/illustrative/);
+    expect(input.scaffold_disclosure).toMatch(/not values the user set for this option/);
+    expect(input.scaffold_disclosure).not.toMatch(/[Pp]laceholder/);
+    // The tail INSTRUCTS the review not to caveat, rather than caveating: a
+    // held status quo shifts nothing, so the comparison against it is sound.
+    expect(input.scaffold_disclosure).toMatch(
+      /comparison against the status quo is SOUND/,
+    );
+    expect(input.scaffold_disclosure).toMatch(/do not caveat it as illustrative/);
 
     // The prompt context the LLM actually sees renders the disclosure in an
     // explicit section — not buried in _meta (which never reaches the
@@ -1868,7 +1882,12 @@ describe('D-ask-1 scaffold disclosure channel (P1-2)', () => {
     const message = invokeMod.buildDecisionReviewUserMessage(input, null);
     expect(message).toContain('<SCAFFOLDED_OPTIONS>');
     expect(message).toContain('New Option');
-    expect(message).toMatch(/[Pp]laceholder/);
+    // The section still reaches the LLM — with the HONEST content for what this
+    // channel now carries. It matters that the DR is told the option IS the
+    // status quo: without it the review can narrate CEE's own held numbers as
+    // values the user chose for that option.
+    expect(message).toMatch(/is the STATUS QUO/);
+    expect(message).not.toMatch(/[Pp]laceholder values/);
   });
 
   it('no scaffolded options → no disclosure field and no SCAFFOLDED_OPTIONS section (byte-identical prompt)', async () => {
@@ -1917,7 +1936,8 @@ describe('D-ask-1 scaffold disclosure channel (P1-2)', () => {
 
       expect(decomposed).toHaveBeenCalledTimes(1);
       const input = decomposed.mock.calls[0][0] as invokeMod.DecisionReviewInvokeInput;
-      expect(input.scaffold_disclosure).toMatch(/[Pp]laceholder/);
+      expect(input.scaffold_disclosure).toMatch(/is the STATUS QUO/);
+    expect(input.scaffold_disclosure).not.toMatch(/[Pp]laceholder/);
       // The headline slice (R1) — the one that narrates option numbers —
       // must carry the disclosure block.
       const { slices } = decomposeMod.buildSlices(input);

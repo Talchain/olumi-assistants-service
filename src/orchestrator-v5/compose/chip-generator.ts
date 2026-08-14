@@ -166,6 +166,14 @@ export interface ChipGeneratorInput {
   readonly scaffoldedOptions?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
   >;
+  /**
+   * No-rank ruling (2026-08-14) — options the CURRENT turn's run_analysis
+   * EXCLUDED from the comparison because they have no values set. These, not
+   * the held status quo, are the options a configure step actually helps.
+   */
+  readonly excludedOptions?: ReadonlyArray<
+    import('../coaching/scaffold-disclosure.js').OmittedOptionRecord
+  >;
 }
 
 const MAX_CHIPS = 3;
@@ -540,8 +548,13 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // (buildScaffoldConfigureChip), so message and deterministic route
     // cannot drift apart. Prompt chip (no action_type): the message text
     // routes through the configure-option gate.
-    if (input.scaffoldedOptions !== undefined && input.scaffoldedOptions.length > 0) {
-      const configureChip = buildScaffoldConfigureChip(input.scaffoldedOptions);
+    // ⚠ SOURCED FROM THE EXCLUDED OPTIONS SINCE THE NO-RANK RULING, NOT THE
+    // HELD ONES. The channel this used to read now carries only status-quo
+    // HOLDS, for which "Help me configure X" is a futile step — offered right
+    // beneath a disclosure that deliberately prescribes nothing. The options a
+    // configure step genuinely repairs are the ones we LEFT OUT.
+    if (input.excludedOptions !== undefined && input.excludedOptions.length > 0) {
+      const configureChip = buildScaffoldConfigureChip(input.excludedOptions);
       chips.push({
         id: configureChip.id,
         label: configureChip.label,

@@ -1790,6 +1790,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // `value_defaulted` and no `factor_ids`, because nothing was minted for
       // them. Their disclosure is the summary suffix above, which names them
       // and gives the configure route.
+      // The configure chip's source (see chip-generator): the options a
+      // configure step actually repairs.
+      ...(gate.excluded.length > 0 ? { __excluded_options: gate.excluded } : {}),
       ...(gate.held.length > 0
         ? { __scaffolded_options: heldPresence.stamped }
         : {}),

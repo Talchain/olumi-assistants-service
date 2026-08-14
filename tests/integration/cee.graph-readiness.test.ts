@@ -498,7 +498,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   //   3. `buildReadinessRawPersistedGraph` used to READ that status as if it
   //      carried the narrow meaning and FABRICATE an intervention-intent key for
   //      it, even with `interventions: {}` and NO `raw_interventions`.
-  //   4. Intent is never scaffolded over (`scaffold-unconfigured-options.ts`), so
+  //   4. Intent is never scaffolded over (`analysable-option-gate.ts`), so
   //      the fabricated intent suppressed the scaffold →
   //      `will_scaffold_options: false` → the UI's OR-term collapsed → the run
   //      was refused.

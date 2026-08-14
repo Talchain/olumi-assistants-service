@@ -8,7 +8,7 @@
  * scaffold the run path will NOT perform (it leaves the option on the honest
  * configure path). `buildReadinessRawPersistedGraph` folds that intent back in
  * from the analysis_ready wire (needs_encoding + raw_interventions) so the ONE
- * shared predicate (`scaffoldUnconfiguredOptions` /
+ * shared predicate (`gateAnalysableOptions` /
  * `collectInterventionIntentOptionIds`) sees exactly what the run path sees.
  *
  * These tests pin the reconstruction AND the end-to-end parity: feeding the
@@ -19,11 +19,19 @@
 import { describe, it, expect } from "vitest";
 
 import { buildReadinessRawPersistedGraph } from "../../src/routes/assist.v1.graph-readiness.js";
-import { scaffoldUnconfiguredOptions } from "../../src/orchestrator-v5/tools/handlers/scaffold-unconfigured-options.js";
+import { gateAnalysableOptions } from "../../src/orchestrator-v5/tools/handlers/analysable-option-gate.js";
 
-// A GraphV3-ish request graph: fac_price carries a prior neutral so the
-// scaffold has a projectable target; opt_a configured, opt_b the option under
-// test. The parsed request graph never carries opt_b's non-numeric intent.
+// A GraphV3-ish request graph. `fac_price` carries an `observed_state` so the
+// STATUS-QUO HOLD has a projectable target; opt_a configured, opt_b the option
+// under test. The parsed request graph never carries opt_b's non-numeric intent.
+//
+// ⚠ IT USED TO CARRY ONLY A PRIOR ("a prior neutral so the scaffold has a
+// projectable target"). The prior-range MIDPOINT RUNG WAS DELETED with the
+// no-rank ruling, so on the old fixture `opt_b` was excluded for TWO reasons at
+// once — not the baseline, AND no holdable target — which CONFOUNDS the parity
+// property this file exists to pin. With an observed value present, the
+// `is_baseline` flag is the only variable, and the discriminating pair below
+// measures what it claims to measure.
 function makeGraph() {
   return {
     nodes: [
@@ -33,6 +41,7 @@ function makeGraph() {
         id: "fac_price",
         kind: "factor",
         label: "Price",
+        observed_state: { value: 0.4 },
         prior: { distribution: "uniform", range_min: 10, range_max: 30 },
       },
       { id: "opt_a", kind: "option", label: "Premium" },
@@ -110,7 +119,12 @@ describe("F4 buildReadinessRawPersistedGraph — intent reconstruction from anal
   });
 });
 
-describe("F4 parity — reconstructed intent suppresses the scaffold exactly as the run path does", () => {
+// ⚠ RE-POINTED BY THE NO-RANK RULING (2026-08-14). The run predicate no longer
+// SCAFFOLDS an unconfigured option — it EXCLUDES it (only a flagged status quo
+// is held). The parity property under test is unchanged and is the whole point
+// of this file: whatever the run path does with `opt_b`, the readiness
+// predicate must do the same, because they are one computation.
+describe("F4 parity — reconstructed intent suppresses the gate exactly as the run path does", () => {
   const options = [configured("opt_a", { fac_price: 0.9 }), unconfiguredProjection("opt_b")];
 
   it("configured-but-non-numeric opt_b → run predicate does NOT scaffold it (intent), matching the run path", () => {
@@ -118,14 +132,19 @@ describe("F4 parity — reconstructed intent suppresses the scaffold exactly as 
       { id: "opt_a", status: "ready", interventions: { fac_price: 0.9 } },
       { id: "opt_b", status: "needs_encoding", interventions: {}, raw_interventions: { fac_price: "UK" } },
     ]);
-    const outcome = scaffoldUnconfiguredOptions({
+    const outcome = gateAnalysableOptions({
       options,
       graph: makeGraph(),
       rawPersistedGraph,
       scaleNetEnabled: true,
     });
-    expect(outcome.scaffolded.map((s) => s.option_id)).not.toContain("opt_b");
-    expect(outcome.scaffolded.length).toBe(0);
+    // Intent is user authorship: never written over, and never held at values
+    // CEE chose. Unchanged by the ruling.
+    expect(outcome.held).toEqual([]);
+    // ⭐ AND IT IS NOT SILENTLY DROPPED EITHER — it is excluded, which is a
+    // NAMED, disclosed outcome. Without this assertion "not held" would be
+    // equally satisfied by the option vanishing without trace.
+    expect(outcome.excluded.map((s) => s.option_id)).toEqual(["opt_b"]);
   });
 
   // ⚠ F4 #2: the `needs_user_mapping` arm below is a status the CHAT-ADD
@@ -133,31 +152,47 @@ describe("F4 parity — reconstructed intent suppresses the scaffold exactly as 
   // `needs_encoding`. Keeping it alone made this "true-scaffold case preserved"
   // control vacuous for the state Paul actually hit, so the `needs_encoding`
   // arm is added beside it and is the one that reproduces his journey.
-  it("genuinely-empty opt_b (needs_encoding — the chat-add producer's status) → run predicate DOES scaffold it", () => {
+  it("genuinely-empty opt_b (needs_encoding — the chat-add producer's status) → run predicate EXCLUDES it", () => {
     const rawPersistedGraph = buildReadinessRawPersistedGraph(makeGraph(), [
       { id: "opt_a", status: "ready", interventions: { fac_price: 0.9 } },
       { id: "opt_b", status: "needs_encoding", interventions: {} },
     ]);
-    const outcome = scaffoldUnconfiguredOptions({
+    const outcome = gateAnalysableOptions({
       options,
       graph: makeGraph(),
       rawPersistedGraph,
       scaleNetEnabled: true,
     });
-    expect(outcome.scaffolded.map((s) => s.option_id)).toEqual(["opt_b"]);
+    // This is the state Paul actually hit. It is no longer filled with values
+    // CEE chose and then RANKED — it is excluded and disclosed by name.
+    expect(outcome.excluded.map((s) => s.option_id)).toEqual(["opt_b"]);
+    expect(outcome.held).toEqual([]);
   });
 
-  it("genuinely-empty opt_b → run predicate DOES scaffold it (true-scaffold case preserved)", () => {
+  it("genuinely-empty opt_b → EXCLUDED; the SAME option flagged as the status quo is HELD (discriminating pair)", () => {
     const rawPersistedGraph = buildReadinessRawPersistedGraph(makeGraph(), [
       { id: "opt_a", status: "ready", interventions: { fac_price: 0.9 } },
       { id: "opt_b", status: "needs_user_mapping", interventions: {} },
     ]);
-    const outcome = scaffoldUnconfiguredOptions({
+    const outcome = gateAnalysableOptions({
       options,
       graph: makeGraph(),
       rawPersistedGraph,
       scaleNetEnabled: true,
     });
-    expect(outcome.scaffolded.map((s) => s.option_id)).toEqual(["opt_b"]);
+    expect(outcome.excluded.map((s) => s.option_id)).toEqual(["opt_b"]);
+
+    // ⭐ THE DISCRIMINATING HALF: byte-identical input except `is_baseline`.
+    // Without it, "excluded" above is equally consistent with a gate that
+    // excludes everything unconfigured, which would silently delete the status
+    // quo from every comparison.
+    const heldOutcome = gateAnalysableOptions({
+      options: [options[0], { ...options[1], is_baseline: true }],
+      graph: makeGraph(),
+      rawPersistedGraph,
+      scaleNetEnabled: true,
+    });
+    expect(heldOutcome.held.map((s) => s.option_id)).toEqual(["opt_b"]);
+    expect(heldOutcome.excluded).toEqual([]);
   });
 });

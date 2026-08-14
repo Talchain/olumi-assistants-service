@@ -51,7 +51,29 @@ function makeBase(): Dict {
     nodes: [
       { id: 'goal_1', kind: 'goal', label: 'Maximise outcome', goal_threshold: 0.5 },
       { id: 'dec_1', kind: 'decision', label: 'Choose approach' },
-      { id: 'fac_annual_cost', kind: 'factor', label: 'Annual cost', observed_state: { value: 0.6, unit: '£', cap: 150000 } },
+      // ⚠ `raw_value` ADDED BY THE NO-RANK RULING (2026-08-14), and it is a
+      // REAL product finding, not fixture tidying.
+      //
+      // This factor declared a cap and a framed `value` but NO corroborating
+      // `raw_value`, so the pair cannot PROVE its convention. PLoT divides
+      // intervention values by `observed_state.cap`, so submitting 0.6 here
+      // would reach ISL as 0.6 / 150000 ≈ 0.000004 — a catastrophic
+      // intervention wearing the status quo's clothes. The gate therefore
+      // refuses it as hold provenance (`ambiguous_no_evidence`), which leaves
+      // `opt_status_quo` EXCLUDED and this scenario with one option, i.e. no
+      // comparison at all.
+      //
+      // The old fixture only "worked" because this file's PLoT mock does not
+      // enforce the preflight: at pristine the status quo went to the wire with
+      // `interventions: {}`, which the REAL PLoT rejects with
+      // `EMPTY_INTERVENTIONS`, failing the whole run. So the behaviour this
+      // fixture encoded was never reachable in production.
+      //
+      // 0.6 x 150000 = 90000 — the consistent pair a drafter that stores a cap
+      // should be storing. (Rowed separately: a projector that writes a cap and
+      // a framed value but no raw_value leaves its factors unusable as hold
+      // provenance.)
+      { id: 'fac_annual_cost', kind: 'factor', label: 'Annual cost', observed_state: { value: 0.6, raw_value: 90000, unit: '£', cap: 150000 } },
       { id: 'opt_hybrid', kind: 'option', label: 'Hybrid', interventions: { fac_annual_cost: { value: 0.8, source: 'user_specified' } } },
       { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: {} },
     ],

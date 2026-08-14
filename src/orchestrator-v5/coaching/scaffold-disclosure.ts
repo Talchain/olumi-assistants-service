@@ -551,7 +551,7 @@ export function buildAnalysisSubmissionDisclosure(
  * can never drift apart.
  */
 export function buildScaffoldConfigureChip(
-  scaffolded: readonly ScaffoldedOptionRecord[],
+  scaffolded: readonly OmittedOptionRecord[],
 ): ConfigureOptionChip {
   if (scaffolded.length === 1) {
     const label = safeScaffoldOptionLabel(scaffolded[0].label);

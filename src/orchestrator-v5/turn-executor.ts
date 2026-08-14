@@ -9299,6 +9299,12 @@ export async function runTurnExecutor(
         ...(handlerOutcome?.__scaffolded_options !== undefined
           ? { scaffoldedOptions: handlerOutcome.__scaffolded_options }
           : {}),
+        // No-rank ruling (2026-08-14): the options the run LEFT OUT — the
+        // ones a configure step actually repairs, and therefore the chip
+        // generator's real source. The held status quo above needs no repair.
+        ...(handlerOutcome?.__excluded_options !== undefined
+          ? { excludedOptions: handlerOutcome.__excluded_options }
+          : {}),
       });
 
       // V5 P0.2 — flip-threshold proposal emission (Seam 1). On a
