@@ -59,6 +59,11 @@ import {
 export interface AppliedFromClaim {
   readonly round_id: string;
   readonly participant_id: string;
+  /**
+   * 0.41.0 OPTIONAL. The evidence row the owner says motivated this edit.
+   * A CLAIM like the two above it, and verified like them — binding (f).
+   */
+  readonly evidence_event_id?: string;
 }
 
 /**
@@ -69,6 +74,8 @@ export interface VerifiedAppliedValue {
   readonly value: number;
   readonly round_id: string;
   readonly participant_id: string;
+  /** Present only when binding (f) verified a citation. */
+  readonly evidence_event_id?: string;
 }
 
 /**
@@ -105,8 +112,8 @@ const APPLYABLE_ROUND_STATUSES: ReadonlySet<RoundStatus> = new Set<RoundStatus>(
  * a repaired result, and never falls back to the client's number. The caller
  * turns the refusal into honest user-facing copy and writes nothing.
  *
- * The five bindings, each a different question. THE EXECUTION ORDER BELOW IS
- * (a) (d) (b) (c/e) — written out in the order the code actually runs, because
+ * The SIX bindings, each a different question. THE EXECUTION ORDER BELOW IS
+ * (a) (d) (b) (c/e) (f) — written out in the order the code actually runs, because
  * a comment that lists them (a)(b)(c)(d)(e) while the code runs something else
  * is a hand-maintained mirror of control flow, and the next reader debugging a
  * refusal code will trust the comment:
@@ -225,6 +232,50 @@ export async function verifyAppliedFrom(
     );
   }
 
+  // ── (f) the CITED EVIDENCE exists, is evidence, is on THIS round, and is
+  //        about THIS target ───────────────────────────────────────────────
+  //
+  // 0.41.0. An unverified citation stamped into the graph would attribute a
+  // model change to a colleague's reasoning that never motivated it — the same
+  // fabrication class bindings (a)-(e) exist to stop, arriving one field to the
+  // right. So the citation is checked exactly as hard as the value was.
+  //
+  // ⚠ REUSES `events` — the read already made for (c)/(e). A second
+  // `listAllRoundEvents` could observe a different state, and then the row this
+  // check admitted would not be the row the fold saw.
+  //
+  // ⚠⚠ NO AUTHOR-EQUALITY CHECK, AND THAT ABSENCE IS THE FEATURE. The cited
+  // evidence need not be authored by `participant_id`: applying Grace's number
+  // BECAUSE ADA CHALLENGED IT is the most valuable case this whole feature has.
+  // A check tying the two together would read like tightening and would forbid
+  // precisely the journey the hop exists to deliver. The contract pins the same
+  // asymmetry at the schema layer; do not "restore symmetry" here.
+  let verifiedEvidenceEventId: string | undefined;
+  if (claim.evidence_event_id !== undefined) {
+    const cited = events.find((e) => e.event_id === claim.evidence_event_id);
+    if (
+      cited === undefined ||
+      cited.kind !== 'evidence_attached' ||
+      cited.target.id !== target_id
+    ) {
+      // ONE code for all three failures, deliberately — unlike (a)-(e), which
+      // separate their questions. The distinctions here ("no such event" vs
+      // "that is a belief row" vs "that evidence is about another factor") are
+      // exactly the enumeration oracle F-4 warns about: the round's event ids
+      // are not otherwise visible to this caller, and a differentiated refusal
+      // would let one probe which ids exist and what kind each is.
+      refuse(
+        'collab_apply_evidence_not_found',
+        'That evidence is not on this round for this factor.',
+      );
+    }
+    // The STORE's id, not the claim's. They are equal here by construction —
+    // which is the point: returning the row's own id means the stamp comes from
+    // the store, so a future weakening of the lookup cannot become a
+    // client-controlled write. Same reasoning as `serverValue` below.
+    verifiedEvidenceEventId = cited.event_id;
+  }
+
   return {
     // The SERVER's number. Even though the equality check above has just proven
     // the two agree, returning `serverValue` rather than `claimed_value` is
@@ -234,5 +285,11 @@ export async function verifyAppliedFrom(
     value: serverValue,
     round_id: round.round_id,
     participant_id: participant.participant_id,
+    // Present ONLY when a citation was made AND verified. Absence means "this
+    // apply cited no evidence", never "the citation was lost" — the contract's
+    // stated absence semantics, carried through the verifier unchanged.
+    ...(verifiedEvidenceEventId !== undefined
+      ? { evidence_event_id: verifiedEvidenceEventId }
+      : {}),
   };
 }
