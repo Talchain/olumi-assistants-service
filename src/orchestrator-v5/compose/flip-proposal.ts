@@ -518,7 +518,26 @@ export function selectFlipProposal(
 }
 
 export type FlipEmitResult =
-  | { readonly status: 'emitted'; readonly chip: SuggestedAction; readonly pending: PendingAction }
+  | {
+      readonly status: 'emitted';
+      readonly chip: SuggestedAction;
+      readonly pending: PendingAction;
+      /**
+       * §2.1 row 4 — the factor THIS proposal targets, surfaced so the turn's
+       * `focus` gesture can bind to the same selection the chip names.
+       *
+       * It was already computed here (`selectFlipProposal` returns the source
+       * entry) and discarded on the line below; the directive then had no
+       * authority to bind to and pointed at nothing. Returning it keeps ONE
+       * derivation with TWO read points — the rule ROADMAP 2.211 applies to
+       * `selectLens` — instead of letting compose re-derive "the flip factor"
+       * from `flip_thresholds` and disagree with the chip the user is reading
+       * (the two-authorities defect: `selectFlipProposal` SKIPS entries that
+       * cannot render a safe proposal, so `flip_thresholds[0]` is frequently
+       * NOT the proposed factor).
+       */
+      readonly factor_id: string;
+    }
   | { readonly status: 'no_proposal' }
   | { readonly status: 'unsafe_copy' }
   | { readonly status: 'unknown_intent' };
@@ -543,7 +562,12 @@ export function buildFlipProposalEmit(
   if (!sel) return { status: 'no_proposal' };
   const emitted = emitProposedChange(sel.proposal, ctx);
   if (emitted.status === 'success') {
-    return { status: 'emitted', chip: emitted.chip, pending: emitted.pending };
+    return {
+      status: 'emitted',
+      chip: emitted.chip,
+      pending: emitted.pending,
+      factor_id: sel.entry.factor_id,
+    };
   }
   if (emitted.status === 'unsafe_copy') return { status: 'unsafe_copy' };
   return { status: 'unknown_intent' };

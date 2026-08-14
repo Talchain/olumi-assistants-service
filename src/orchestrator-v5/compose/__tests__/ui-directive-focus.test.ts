@@ -141,20 +141,23 @@ function mutationFact(
   } as unknown as HandlerFact;
 }
 
-function flipFact(opts: { preconditionUnmet?: boolean; factorId?: string | null } = {}): HandlerFact {
-  const scenarios =
-    opts.factorId === null
-      ? []
-      : [
-          {
-            factor_id: opts.factorId ?? 'fac_a',
-            current_value: 0.5,
-            flip_threshold: 0.6,
-            from_option_id: 'opt_x',
-            to_option_id: 'opt_y',
-            fragile: true,
-          },
-        ];
+/**
+ * ⚠ REWRITTEN 14 Aug 2026. This fixture used to carry `flip_scenarios`, and row
+ * 4 used to read it. That was trap 16-inverse: the code path was LIVE and the
+ * DATA could never reach it, hidden by a fixture the author wrote. NEITHER
+ * producer (`tools/handlers/what-would-flip.ts:95`, `:223`) writes
+ * `flip_scenarios` — the schema still admits it, but its own comment says new
+ * code populates only the no-op fields. So every real flip turn suppressed
+ * `no_flip_factor` while this suite stayed green.
+ *
+ * The fact now carries EXACTLY what the producers write. The flip factor
+ * arrives through `flipFocusFactorId` instead — the factor the turn's own
+ * `set_factor_value` proposal targets, threaded from the turn executor. See
+ * `__tests__/turn-executor-flip-focus-directive.test.ts` for the end-to-end
+ * proof through `runTurnExecutor`, which is what establishes that the shape
+ * asserted here is the shape production actually produces.
+ */
+function flipFact(opts: { preconditionUnmet?: boolean } = {}): HandlerFact {
   return {
     fact_type: 'what_would_flip',
     fact_version: 1,
@@ -162,7 +165,9 @@ function flipFact(opts: { preconditionUnmet?: boolean; factorId?: string | null 
     result: {
       precondition_unmet: opts.preconditionUnmet ?? false,
       option_count: 2,
-      flip_scenarios: scenarios,
+      answer_source: 'deterministic_fallback',
+      fallback_reason: null,
+      answer_text_length: 42,
     },
   } as unknown as HandlerFact;
 }
@@ -313,12 +318,13 @@ describe('δ2 row 1 — applied mutation emits open_inspector @ the changed node
 // ===========================================================================
 // Row 4 — what_would_flip focus
 // ===========================================================================
-describe('δ2 row 4 — what_would_flip focuses the first flip factor', () => {
-  it('POSITIVE CONTROL: precondition met + resolvable factor → focus @ the flip factor', () => {
+describe('δ2 row 4 — what_would_flip focuses the factor its own proposal targets', () => {
+  it('POSITIVE CONTROL: precondition met + resolvable proposal factor → focus @ that factor', () => {
     const env = composeToolCallResponse({
       ...BASE_INPUT,
-      handlerFacts: [flipFact({ factorId: 'fac_a' })],
+      handlerFacts: [flipFact()],
       persistedGraph: GRAPH,
+      flipFocusFactorId: 'fac_a',
     });
     const dir = directives(env);
     expect(dir).toHaveLength(1);
@@ -326,29 +332,39 @@ describe('δ2 row 4 — what_would_flip focuses the first flip factor', () => {
     expect(dir[0]!.targets[0]!.id).toBe('fac_a');
   });
 
-  it('precondition_unmet → NOTHING', () => {
+  it('precondition_unmet → NOTHING (even with a proposal factor threaded)', () => {
     const env = composeToolCallResponse({
       ...BASE_INPUT,
       handlerFacts: [flipFact({ preconditionUnmet: true })],
       persistedGraph: GRAPH,
+      flipFocusFactorId: 'fac_a',
     });
     expect(directives(env)).toHaveLength(0);
   });
 
-  it('no flip factor → NOTHING', () => {
+  it('no proposal on this turn → NOTHING, and the row says so honestly', () => {
+    // The turn offered no `set_factor_value` change, so there is no factor the
+    // product invited the user to test. Fail closed rather than reaching for
+    // "some factor from the analysis" — that is the two-authorities defect the
+    // proposal binding exists to prevent.
     const env = composeToolCallResponse({
       ...BASE_INPUT,
-      handlerFacts: [flipFact({ factorId: null })],
+      handlerFacts: [flipFact()],
       persistedGraph: GRAPH,
     });
     expect(directives(env)).toHaveLength(0);
+    const supp = sink.filter((e) => e.event === 'v5.ui_directive.suppressed');
+    expect(supp.some((e) => e.data.reason === 'no_flip_proposal')).toBe(true);
+    // The retired false-negative tag must NOT reappear under a new mechanism.
+    expect(supp.some((e) => e.data.reason === 'no_flip_factor')).toBe(false);
   });
 
-  it('flip factor unresolvable in the graph → NOTHING (fail-closed)', () => {
+  it('proposal factor unresolvable in the graph → NOTHING (fail-closed)', () => {
     const env = composeToolCallResponse({
       ...BASE_INPUT,
-      handlerFacts: [flipFact({ factorId: 'fac_ghost' })],
+      handlerFacts: [flipFact()],
       persistedGraph: GRAPH,
+      flipFocusFactorId: 'fac_ghost',
     });
     expect(directives(env)).toHaveLength(0);
     const supp = sink.filter((e) => e.event === 'v5.ui_directive.suppressed');
