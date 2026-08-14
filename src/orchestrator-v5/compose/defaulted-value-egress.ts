@@ -269,7 +269,12 @@ export const STABILITY_ASSERTION_PATTERNS: readonly RegExp[] = [
   // post-analysis-advice-gate.ts — "This result looks ${stabilityPhrase}, so
   // smaller adjustments may not move the picture much." / "…so this view should
   // hold under reasonable variation." / "…but it is worth checking the main
-  // assumptions before deciding."
+  // assumptions before deciding." / "…so smaller changes are unlikely to change
+  // which option leads." (:2357 — a NEAR-SYNONYM of the explanation-fallback
+  // line above; already matched by this regex, but it was missing from this
+  // block. This module's own rule is that every pattern names its origin, and a
+  // producer absent from the list is a producer nobody re-checks when the
+  // pattern is next edited.)
   // The four phrases come from `describeRobustnessBand`: very stable, stable,
   // fairly stable, fragile.
   /\bthis result looks (?:very |fairly |quite |highly )?(?:stable|robust|fragile)\b/i,
@@ -336,6 +341,30 @@ export function isAnalysisBearing(text: string): boolean {
   // string this layer qualifies is a string that guard also sees.
   if (textAssertsLeadingOption(text)) return true;
   return RESULT_RECITATION_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * How the disclosure attaches to the answer it qualifies.
+ *
+ * ⚠ IT WAS ALWAYS A SINGLE SPACE, AND THAT RENDERED WRONG ON EVERY BLOCK-
+ * STRUCTURED ANSWER. Appended with a space, the caveat becomes the tail of
+ * whatever the last line happened to be — on a bulleted answer it renders as
+ * part of the FINAL BULLET, so a statement about the whole analysis reads as a
+ * remark about one item. The sentence was correct and its placement made it say
+ * something else.
+ *
+ * A block separator anywhere in the ORIGINAL text is the signal: the author
+ * (deterministic composer or model) was writing in blocks, so the disclosure
+ * gets its own paragraph. A plain single-paragraph answer keeps the space,
+ * because starting a new paragraph for one trailing sentence there would be its
+ * own small distortion.
+ *
+ * Pinned by an assertion on the append point. This is cosmetic and it is pinned
+ * anyway — an unpinned cosmetic in the one module whose entire purpose is
+ * user-facing text is how drift accrues.
+ */
+export function disclosureJoiner(originalText: string): string {
+  return /\n/.test(originalText) ? '\n\n' : ' ';
 }
 
 export interface DefaultedValueEgressResult {
@@ -461,7 +490,7 @@ export function applyDefaultedValueEgress(
   let disclosureAdded = false;
   if (!seenDisclosure) {
     const disclosure = buildDefaultedAssumptionsDisclosure(signal);
-    out = out.length > 0 ? `${out} ${disclosure}` : disclosure;
+    out = out.length > 0 ? `${out}${disclosureJoiner(text)}${disclosure}` : disclosure;
     disclosureAdded = true;
   }
 

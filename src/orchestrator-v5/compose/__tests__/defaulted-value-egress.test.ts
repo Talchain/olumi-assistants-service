@@ -37,6 +37,7 @@ import {
   findStabilityAssertion,
   isAnalysisBearing,
   segmentSentences,
+  disclosureJoiner,
 } from '../defaulted-value-egress.js';
 import {
   buildDefaultedAssumptionsDisclosure,
@@ -527,5 +528,46 @@ describe('F6 egress — the survivors, now discriminated', () => {
     const out = applyDefaultedValueEgress(twoParagraphs, SIGNAL);
     expect(out.text).toContain('Launch now leads.\n\nPrice matters least.');
     expect(out.text).not.toContain('Launch now leads. Price matters least.');
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE APPEND POINT — pinned because it is user-facing, not because it is
+ * clever. Appended with a single space, the caveat renders as the tail of the
+ * final bullet on any block-structured answer: a statement about the whole
+ * analysis, presented as a remark about one item. Correct sentence, wrong
+ * placement, saying something it does not mean.
+ */
+describe('F6 egress — the disclosure’s append point', () => {
+  it('gets its own paragraph when the answer is block-structured', () => {
+    const bulleted =
+      'Launch now leads.\n\n- Capacity matters most.\n- Price matters least.';
+    // PRECONDITION: the answer really is block-structured AND analysis-bearing,
+    // or this asserts nothing about the append point.
+    expect(bulleted).toContain('\n');
+    expect(isAnalysisBearing(bulleted)).toBe(true);
+
+    const out = applyDefaultedValueEgress(bulleted, SIGNAL);
+
+    expect(out.disclosureAdded).toBe(true);
+    // The caveat starts a new block — it is NOT glued to the last bullet.
+    expect(out.text).toContain(`- Price matters least.\n\nThe analysis used a default`);
+    expect(out.text).not.toContain('- Price matters least. The analysis used a default');
+  });
+
+  it('stays inline on a plain single-paragraph answer', () => {
+    const plain = 'Launch now leads, with a probability of 62%.';
+    expect(plain).not.toContain('\n');
+
+    const out = applyDefaultedValueEgress(plain, SIGNAL);
+
+    expect(out.disclosureAdded).toBe(true);
+    expect(out.text).toBe(`${plain} ${DISCLOSURE}`);
+  });
+
+  it('the joiner is decided by the ORIGINAL text, both ways', () => {
+    expect(disclosureJoiner('one paragraph only')).toBe(' ');
+    expect(disclosureJoiner('two\nlines')).toBe('\n\n');
   });
 });
