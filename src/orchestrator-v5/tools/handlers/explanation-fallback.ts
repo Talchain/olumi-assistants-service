@@ -67,6 +67,41 @@ export { formatSensitivityDirection };
 const CANONICAL_FRAGILE_BAND = 'fragile';
 
 /**
+ * The one sentence that states a POSITIVE producer attestation that nothing
+ * flips in range, in the `flip` voice.
+ *
+ * ⭐ EXPORTED, AND THAT IS THE POINT (ROADMAP 2.278 continued, 14 Aug 2026).
+ * It was an inline literal here, reachable only through
+ * `composeWhatWouldFlipFallback` — i.e. only when the turn is ROUTED to the
+ * `what_would_flip` handler. It is witnessed doing so on a FREE-TEXT turn
+ * (`source: 'composer'`, `chip: null`, one routing call) at
+ * `olumi-docs/PHASE0-EVIDENCE-2026-07-28/deploy-witness-946-944-20260814T015916Z/step2-golden-journey/step-E7_FLIP_QUESTION.json`.
+ *
+ * The OTHER free-text path to the same question —
+ * `routing/post-analysis-advice-gate.ts::composeWhatWouldFlip`, which the
+ * `what_would_flip_free_text` advice class takes with ZERO LLM calls — said
+ * nothing at all on an attested-no-flip run:
+ * `olumi-docs/PHASE0-EVIDENCE-2026-07-28/p1-conversation-derivation-2026-08-14/raw/run-1/step-Q2_WHAT_WOULD_CHANGE.json`
+ * (0 LLM calls, no flip content, on a run whose three `flip_thresholds` rows
+ * were ALL `flip_reason: "structurally_invariant"` / `no_flip_in_range: true`).
+ *
+ * ⚠ The distinction is HANDLER-vs-ADVICE-GATE, not chip-click-vs-free-text: an
+ * earlier draft of this docstring said "the CHIP-CLICK answer", and no
+ * chip-click flip turn exists in either capture cited here (caught in review of
+ * #947). Both witnessed turns are free text; what differs is which composer
+ * owns them.
+ *
+ * That composer's own header already declares the invariant this export serves:
+ * *"the same voice `composeWhatWouldFlipFallback` uses, so the chip-click
+ * fallback and the free-text answer to 'what would flip this?' cannot disagree
+ * about either axis."* They disagreed about the flip axis, because the sentence
+ * had no owner to import. It has one now — restating it at the second call site
+ * would be the hand-maintained-mirror class (CLAUDE.md trap 12).
+ */
+export const ATTESTED_NO_FLIP_SENTENCE =
+  'Within the tested range, no single factor on its own reached a tipping point that would change which option leads.';
+
+/**
  * SINGLE near-tie derivation shared by BOTH deterministic post-analysis
  * composers (`composeExplainResultsFallback` and `composeWhatWouldFlipFallback`).
  *
@@ -682,9 +717,7 @@ export function composeWhatWouldFlipFallback(
   if (flipVerdict === 'no_practical_flip') {
     // flip_value null + reason no_effect_within_bounds across the tested
     // factors: say so plainly. No fragility/flippability claim.
-    sentences.push(
-      'Within the tested range, no single factor on its own reached a tipping point that would change which option leads.',
-    );
+    sentences.push(ATTESTED_NO_FLIP_SENTENCE);
   } else if (flipVerdict === 'concrete') {
     // A real single-factor tipping point exists. Name the clearest lever(s)
     // and frame as something to TEST. We deliberately do not quote a

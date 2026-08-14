@@ -74,6 +74,7 @@ import {
 } from '../coaching/robustness-honesty.js';
 import type { DefaultedAssumptionsSignal } from '../coaching/pick-defaulted-assumptions.js';
 import {
+  ATTESTED_NO_FLIP_SENTENCE,
   composeRobustnessVerdict,
   type RobustnessVerdict,
   type RobustnessVerdictMode,
@@ -1556,6 +1557,10 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.analysis,
         input.rawRobustness,
         input.decisionReview,
+        // ROADMAP 2.278 continued — the FIFTH surface. Every sibling class
+        // above already receives this; the class whose question IS the flip
+        // question did not. See the beat-3 note in composeWhatWouldFlip.
+        input.flipClaimPosture,
       );
   }
 }
@@ -2259,7 +2264,43 @@ function composeWhatWouldFlip(
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
   decisionReview: Record<string, unknown> | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  // ROADMAP 2.278 continued (14 Aug 2026) — THE FIFTH, UNSWEPT SURFACE.
+  //
+  // 2.278 swept four composers (`advice`, `improvement`, `meaning`,
+  // `explain_results`) and its own suite enumerates exactly those four. It
+  // never reached THIS one — the composer whose entire job is to answer "what
+  // would change this result?" — because the sweep was aimed at surfaces that
+  // ASSERT flippability, and this composer's defect is the mirror image: it
+  // asserts nothing and OMITS the producer's attestation entirely.
+  //
+  // Witnessed on the deployed build (14 Aug, CEE 41156fc). Asked "What would
+  // have to change for another option to win?" on a run whose three
+  // `flip_thresholds` rows were ALL `flip_reason: "structurally_invariant"` /
+  // `no_flip_in_range: true`, THIS composer recited the lead and a link to
+  // check and said NOTHING about flip behaviour —
+  // `p1-conversation-derivation-2026-08-14/raw/run-1/step-Q2_WHAT_WOULD_CHANGE.json`
+  // (0 LLM calls; the advice gate owns the turn).
+  //
+  // THREE PATHS CAN ANSWER A FREE-TEXT FLIP QUESTION, AND ONLY THIS ONE WAS
+  // SILENT. Each citation names the capture it comes from, because an earlier
+  // draft of this comment attributed the second one to a CHIP CLICK and no such
+  // turn exists in any capture cited here (caught in review of #947; CLAUDE.md
+  // trap 16 — a capture proves what it was pointed at):
+  //   1. this composer, via `tryPostAnalysisAdviceGate` — silent (above);
+  //   2. the routed `what_would_flip` HANDLER, whose
+  //      `composeWhatWouldFlipFallback` states the attestation — witnessed on a
+  //      FREE-TEXT turn (`source: 'composer'`, `chip: null`) at
+  //      `deploy-witness-946-944-20260814T015916Z/step2-golden-journey/step-E7_FLIP_QUESTION.json`,
+  //      same deployed build, 01:59Z the same day;
+  //   3. a Sonnet-authored `answer_text`, which states it in its own words
+  //      ("Nothing in the tested range currently overturns this") —
+  //      `…/raw/run-1/step-Q3_OVERTURN.json`.
+  // Which path takes a turn is decided by whether the advice gate's narrow
+  // pattern matches, so the SILENT path is also the fastest and the one that
+  // fires on the tightest phrasings of the question.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
   // margin, robustness and fragile edges are optional and degrade
   // gracefully. Numerics pass-through only — F.6 invariant.
@@ -2338,6 +2379,28 @@ function composeWhatWouldFlip(
     sentences.push(
       `One threshold signal to inspect is ${quoteLabel(flip.factor_label)}.`,
     );
+  } else if (noFlip) {
+    // ⭐ THE MISSING NEGATIVE ARM. The producer positively attested that no
+    // single factor reaches a tipping point in range; on the flip question that
+    // attestation IS the answer, so it is stated rather than omitted.
+    //
+    // The sentence is IMPORTED from `composeWhatWouldFlipFallback`'s owner, not
+    // restated, so the ADVICE-GATE and ROUTED-HANDLER answers to this one
+    // question cannot drift apart (this composer's header declares that
+    // invariant, though it calls the handler path "chip-click" — the composer is
+    // in fact reached on free text too, which is how it is witnessed above;
+    // trap 12 is why the constant moved rather than being copied).
+    //
+    // ⚠ STRICTLY `else if` — `flip_found` KEEPS PRECEDENCE, DELIBERATELY.
+    // The two inputs are different channels answering different questions
+    // (CLAUDE.md trap 21): `deriveFlipStatus` reads
+    // `decision_review.flip_thresholds`, while `flipClaimPosture` is derived
+    // from `enrichment.flip_thresholds[]` by `readFlipClaimPosture`. Where they
+    // disagree, the fail-safe reading is the one that does NOT deny
+    // flippability while naming a threshold to inspect — the exact
+    // self-contradicting answer 2.278's A3 arm exists to forbid. So a named
+    // threshold silences this arm; it never appears alongside one.
+    sentences.push(ATTESTED_NO_FLIP_SENTENCE);
   }
 
   // 4. Exactly one consolidated caveat. The if/else-if makes stacking
