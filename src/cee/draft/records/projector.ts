@@ -295,9 +295,15 @@ export interface DroppedRecordRef {
   readonly node_id?: string;
   /**
    * ⭐⭐ THE MAGNITUDE THE USER STATED, CARRIED THROUGH THE WITHDRAWAL THAT
-   * REMOVES ITS NODE — present only on `unconnected_to_goal`, only for a record
+   * REMOVES ITS NODE — present only on the two CONNECTIVITY-PRUNE reasons
+   * (`unconnected_to_goal` and `disconnected_by_shape_gate`), only for a record
    * whose `provenance_class` is `stated`, and only when the projector holds a
    * finite number for it.
+   *
+   * ⚠ The second reason was split out of the first after this field landed; the
+   * condition is unchanged in substance (it is "whatever the prune withdraws"),
+   * and it is spelled with both names rather than one so this note cannot read as
+   * true while quietly covering half the sites.
    *
    * WHY. The disclosure already carried the user's WORDS (`label` is their
    * verbatim quote) and threw away their NUMBER. So "you told me this and it is
@@ -414,6 +420,46 @@ export interface DroppedRecordRef {
      */
     | "endpoint_demoted_duplicate"
     /**
+     * ⭐⭐ THE PROJECTOR'S OWN GATE DISCONNECTED THIS RECORD — not the model.
+     *
+     * The connectivity prune below withdraws any factor/constraint that cannot
+     * reach the goal, and until now it reported every one of them as
+     * `unconnected_to_goal`. That name answers ONE question — *"the model never
+     * connected this"* — and the prune was minting it for TWO:
+     *
+     *   Q1  the model emitted no link for this record (its real silence);
+     *   Q2  the model DID emit a link, `ref_kind_illegal` refused it above, and
+     *       the record then failed the reachability test AS A CONSEQUENCE OF OUR
+     *       REFUSAL.
+     *
+     * Q2 reported as Q1 tells the user the model failed at something it
+     * demonstrably did. MEASURED on the banked live emission
+     * (`live-emission-round11-set12.json`): three links the model emitted with
+     * strengths 0.4 / 0.75 / 0.5 were refused, and their factors — `LLM Serving
+     * Cost` (carrying the stated £3/seat/month), `Data-Processing Legal
+     * Clearance`, `Competitive Window` — were withdrawn under Q1's name.
+     *
+     * ⚠ THE REFUSAL ABOVE IS CORRECT AND IS NOT WHAT CHANGED. Derived at
+     * `ALLOWED_EDGES` (`graph-validator.types.ts:293-302`) + `inferFactorCategories`
+     * (`graph-validator.ts:83-134`, read STRUCTURALLY at `:499-514` — a model's
+     * declared `category` never licenses the edge), then EXECUTED: with the gate
+     * disabled, all three edges reach the validator untouched by any repair stage
+     * and raise `INVALID_EDGE_TYPE`. The gate is protective. Only its CONSEQUENCE
+     * was mislabelled.
+     *
+     * ⭐ THE PREDICATE IS COUNTERFACTUAL REACHABILITY, NOT "was this node an
+     * endpoint of a refused link". The two agree on the banked emission, but only
+     * the counterfactual states the claim this name actually makes: *with the
+     * refused links restored, this record WOULD have reached the goal.* An
+     * endpoint test would also fire for a node whose refused link led nowhere in
+     * the first place — which is still the model's silence, wearing our name.
+     * (Written against the SPEC of the sentence, not against the case in hand —
+     * trap 13d.)
+     *
+     * Named apart for the same reason `endpoint_demoted_duplicate` is (trap 21).
+     */
+    | "disconnected_by_shape_gate"
+    /**
      * ⭐ ROOT 2(a). A `constraint` carried a value but no `direction`, so no
      * operator was asserted. The node keeps the user's words; the THRESHOLD is
      * withheld until the direction is known. This is the ask, not a loss.
@@ -445,6 +491,29 @@ export interface DroppedRecordRef {
   /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
   readonly from_kind?: string;
   readonly to_kind?: string;
+  /**
+   * ⭐ WHICH OF THE TWO REFUSAL RULES FIRED — present only on `ref_kind_illegal`.
+   *
+   * `ref_kind_illegal` has always covered two structurally different refusals,
+   * and a consumer that cannot tell them apart cannot describe either one
+   * truthfully:
+   *
+   *   `unrescuable_shape`       the KIND PAIR itself is unrescuable
+   *                             (`UNRESCUABLE_EDGE_SHAPES`) — e.g. `factor→option`.
+   *                             The shape is wrong however the graph is arranged.
+   *   `option_controlled_target` the one edge rule. The kind pair is `factor→factor`,
+   *                             which is LEGAL in general; this particular target is
+   *                             a factor an option already sets, so it is
+   *                             `controllable` and cannot be written into.
+   *
+   * ⚠ WHY IT IS CARRIED RATHER THAN RE-DERIVED AT THE CONSUMER. The completion
+   * ask needs to name the rule that fired. It could infer it — "both kinds are
+   * `factor` ⇒ it must be the one edge rule" — but that is a hand-maintained
+   * mirror of this gate's internal structure (trap 12): the day `factor->factor`
+   * is added to `UNRESCUABLE_EDGE_SHAPES`, the inference silently starts lying
+   * and nothing goes red. The producer knows which branch it took; it says so.
+   */
+  readonly refusal_rule?: "unrescuable_shape" | "option_controlled_target";
   /**
    * Present only on the demote reasons: the minted id of the option kept.
    *
@@ -1641,6 +1710,18 @@ function projectOnce(
     if (f.id && t.id && kindAtLinkTime.get(f.id) === "option") provisionalOptionTargets.push({ from: f.id, to: t.id });
   }
 
+  /**
+   * ⭐ THE LINKS THE KIND GATE REFUSED, as RESOLVED ID PAIRS.
+   *
+   * Collected here because the connectivity prune below must be able to ask a
+   * counterfactual question — *would this record have reached the goal on the
+   * model's own links?* — and `dropped` carries only the rendered `claims[n]`
+   * REFERENCE strings, which are not node ids and cannot be walked as a graph.
+   * Without this the prune can only observe the symptom (unreachable) and never
+   * the cause (we cut it).
+   */
+  const refusedByShapeGate: { from: string; to: string }[] = [];
+
   claims.forEach((claim, index) => {
     if (claim.claim_kind !== "causal_link") return;
     const label = canonicalText(claim.label ?? "");
@@ -1681,13 +1762,21 @@ function projectOnce(
     const toRaw = kindAtLinkTime.get(to.id) ?? "";
     const fromKind = PROJECTED_KIND_AFTER_NORMALISATION[fromRaw] ?? fromRaw;
     const toKind = PROJECTED_KIND_AFTER_NORMALISATION[toRaw] ?? toRaw;
-    const illegal =
-      UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`) ||
-      // The one edge rule: nothing may point INTO a factor an option acts on.
-      (fromKind === "factor" &&
-        toKind === "factor" &&
-        isOptionControlledFactor(to.id, kindAtLinkTime, provisionalOptionTargets));
-    if (illegal) {
+    // The two branches are evaluated SEPARATELY rather than as one `||`, because
+    // which one fired is a fact the disclosure carries (`refusal_rule`) and a
+    // collapsed boolean cannot say. Order is unchanged and so is the verdict:
+    // `illegal` is still exactly their disjunction.
+    const unrescuableShape = UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`);
+    // The one edge rule: nothing may point INTO a factor an option acts on.
+    const optionControlledTarget =
+      fromKind === "factor" &&
+      toKind === "factor" &&
+      isOptionControlledFactor(to.id, kindAtLinkTime, provisionalOptionTargets);
+    if (unrescuableShape || optionControlledTarget) {
+      // Recorded BEFORE the early return, as resolved ids, for the prune's
+      // counterfactual. Both branches are recorded: the prune's question is "did
+      // WE cut this link", and both of these are us.
+      refusedByShapeGate.push({ from: from.id, to: to.id });
       dropped.push({
         claim_index: index,
         claim_kind: claim.claim_kind,
@@ -1697,6 +1786,7 @@ function projectOnce(
         ...(toRef !== undefined ? { to_ref: toRef } : {}),
         from_kind: fromKind,
         to_kind: toKind,
+        refusal_rule: unrescuableShape ? "unrescuable_shape" : "option_controlled_target",
       });
       return;
     }
@@ -1773,20 +1863,40 @@ function projectOnce(
   // the record set and stays deterministic.
   const goalNodes = nodes.filter((n) => n.kind === "goal");
   if (goalNodes.length > 0) {
-    const incoming = new Map<string, string[]>();
-    for (const e of edges) {
-      const list = incoming.get(e.to);
-      if (list) list.push(e.from);
-      else incoming.set(e.to, [e.from]);
-    }
-    const reachesGoal = new Set<string>();
-    const stack = goalNodes.map((n) => n.id);
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      if (reachesGoal.has(current)) continue;
-      reachesGoal.add(current);
-      for (const from of incoming.get(current) ?? []) stack.push(from);
-    }
+    /** Reverse-reachability from the goal over a given edge list. */
+    const reachingGoal = (links: readonly { from: string; to: string }[]): Set<string> => {
+      const incoming = new Map<string, string[]>();
+      for (const e of links) {
+        const list = incoming.get(e.to);
+        if (list) list.push(e.from);
+        else incoming.set(e.to, [e.from]);
+      }
+      const seen = new Set<string>();
+      const stack = goalNodes.map((n) => n.id);
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        if (seen.has(current)) continue;
+        seen.add(current);
+        for (const from of incoming.get(current) ?? []) stack.push(from);
+      }
+      return seen;
+    };
+
+    const reachesGoal = reachingGoal(edges);
+
+    // ⭐⭐ THE COUNTERFACTUAL — the ONE question that separates the model's silence
+    // from our own refusal. Same reachability, over the graph the model actually
+    // drew: emitted edges PLUS the links the kind gate refused. A record that
+    // reaches the goal here but not above was connected by the model and
+    // disconnected by us, and it is entitled to say so.
+    //
+    // Computed over the pre-prune node set, so a chain that runs through another
+    // refused link is followed too. Deterministic and side-effect free: it reads
+    // `edges` and `refusedByShapeGate` and writes neither.
+    const reachesGoalOnModelsOwnLinks =
+      refusedByShapeGate.length === 0
+        ? reachesGoal
+        : reachingGoal([...edges, ...refusedByShapeGate]);
 
     const unmodelled = nodes.filter(
       (n) => (n.kind === "factor" || n.kind === "constraint") && !reachesGoal.has(n.id),
@@ -1802,7 +1912,12 @@ function projectOnce(
           claim_kind: node.provenance?.provenance_class === "stated" ? "stated_item" : "claim",
           label: node.label,
           node_id: node.id,
-          reason: "unconnected_to_goal",
+          // Which of the two questions this withdrawal answers. See the contract
+          // note on `disconnected_by_shape_gate`: the model's silence and our own
+          // refusal are different findings and may not share a name (trap 21).
+          reason: reachesGoalOnModelsOwnLinks.has(node.id)
+            ? "disconnected_by_shape_gate"
+            : "unconnected_to_goal",
           // The user's own number survives the withdrawal of its node. See the
           // contract note on `DroppedRecordRef.value`.
           ...statedMagnitudeOf(node),
