@@ -43,6 +43,8 @@
  * answering near-identical questions is CLAUDE.md trap 21.
  */
 
+import type { RoundParticipantRef } from '@talchain/schemas/boundary';
+
 import { foldLatestPerParticipant } from './packet-read-model.js';
 import {
   refuse,
@@ -51,20 +53,26 @@ import {
 } from './types.js';
 
 /**
- * The client's attribution claim, structurally identical to the contract's
- * `RoundParticipantRefSchema` (ids only, `.strict()` — a display name is
+ * The client's attribution claim — DERIVED FROM THE CONTRACT, not retyped.
+ *
+ * ⚠ THIS WAS A HAND-WRITTEN INTERFACE AND THE MIRROR HAD ALREADY BEEN CAUGHT
+ * DRIFTING ONE FIELD AWAY: 0.41.0 added `evidence_event_id` to
+ * `RoundParticipantRefSchema` and the `elicited_from` pin in
+ * `schemas/__tests__/observed-state-source-derivation.test.ts` stayed on two
+ * keys, fully green. A copy of a contract shape cannot fail loud — TypeScript
+ * accepts a value with MORE members than the interface declares, so the day the
+ * contract grows again a hand-written copy would go on typechecking while this
+ * verifier silently ignored the new member and the stamp silently lost it.
+ * Aliasing the published type means there is nothing left to keep in sync:
+ * a new member appears here the moment the pin bumps, and the `...` spread in
+ * `factor-value-edit.ts` is then the only place that has to decide about it.
+ *
+ * Semantics live at the contract (ids only, `.strict()` — a display name is
  * refused at parse, which is the PII rule made structural rather than
- * remembered).
+ * remembered; `evidence_event_id` is the owner's CITATION and is verified by
+ * binding (f) below, never trusted).
  */
-export interface AppliedFromClaim {
-  readonly round_id: string;
-  readonly participant_id: string;
-  /**
-   * 0.41.0 OPTIONAL. The evidence row the owner says motivated this edit.
-   * A CLAIM like the two above it, and verified like them — binding (f).
-   */
-  readonly evidence_event_id?: string;
-}
+export type AppliedFromClaim = Readonly<RoundParticipantRef>;
 
 /**
  * What the server is willing to stamp, after checking. `value` is the SERVER's
