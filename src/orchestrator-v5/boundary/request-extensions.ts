@@ -49,6 +49,10 @@
 
 import { z } from 'zod';
 import type { BoundaryError } from '@talchain/schemas/boundary';
+// The PUBLISHED selected-element ref, imported rather than restated: this
+// parser's job is to admit what the contract declares, and a hand-copy of the
+// ref shape here would be free to drift from it silently (trap 12).
+import { SelectedElementRefSchema } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
@@ -123,19 +127,50 @@ export type AnalysisStateIngress = z.infer<typeof AnalysisStateIngressSchema>;
 export const UserIdIngressSchema = z.string().uuid();
 
 /**
- * UI-side selection context. The DecisionGuideAI client emits
- * `selected_elements: { node_ids?: string[]; edge_ids?: string[] }` on
- * conversation/explain/chip turns (see UI services/turn-request-builder.ts).
- * The V5 deterministic value-update pre-route consumes `node_ids` as a
- * tie-breaker when label evidence is ambiguous AND the user used a deictic
- * reference like "that factor" — strictly factor-kind narrowing only.
+ * UI-side selection context — what the user had selected on the canvas at send
+ * time.
  *
- * Permissive parse: arrays of strings; both `node_ids` and `edge_ids` are
- * optional. Older clients send a bare string array (legacy V4 shape) — we
- * accept that too and treat it as `node_ids` so the V5 path doesn't reject
- * traffic from clients that haven't migrated. Empty arrays pass through.
+ * ⚠⚠ THREE SHAPES, AND THE ONE THE LIVE CLIENT SENDS WAS NOT ACCEPTED HERE.
+ *
+ * This comment used to describe ONLY `{node_ids?, edge_ids?}` and cite the UI's
+ * `services/turn-request-builder.ts`. That builder posts to the **410'd v1
+ * route** and cannot execute under the deployed `VITE_ENABLE_V5_ORCHESTRATOR`
+ * bake — so the shape this parser was written for is the shape of a producer
+ * that no longer runs.
+ *
+ * The PUBLISHED contract at our own pin declares something different on the V5
+ * message turn (`MessageTurnPayloadSchema.selected_elements`, @talchain/schemas
+ * 0.15.0+, live at 0.40.0):
+ *
+ *     z.array(SelectedElementRefSchema).max(20).optional()
+ *     SelectedElementRefSchema = { id, kind, label? }.strict()
+ *
+ * Two differently-shaped fields under one name — the schema's own comment says
+ * they "coexist under the same name on different schema versions/turn shapes".
+ * An array of OBJECTS matched neither branch of the old union, so the live
+ * client's selection was dropped BEST-EFFORT: silently, by design, with the turn
+ * continuing exactly as if nothing had been selected. A grep for the field name
+ * would have reported the seam as wired.
+ *
+ * The union therefore accepts all three, newest first:
+ *
+ *   1. the PUBLISHED V5 ref array — `SelectedElementRefSchema` is imported from
+ *      the contract, never restated here, so a contract change to the ref shape
+ *      cannot silently diverge from what this admits (trap 12);
+ *   2. the V4-era `{node_ids?, edge_ids?}` object, still sent by nothing live
+ *      but cheap to keep and load-bearing for the existing ingress tests;
+ *   3. the legacy bare string array.
+ *
+ * `[]` matches (1) and (2) equally and normalises to the same empty selection
+ * either way, so the union's order is not load-bearing for it.
+ *
+ * Consumption: the V5 deterministic value-update pre-route uses `node_ids` as a
+ * strict tie-breaker (factor-kind, exactly-one-factor narrowing), and
+ * `buildTurnContext` resolves the ids against the persisted graph into
+ * groundable answering context (`EnrichedTurnContext.selection`).
  */
 export const SelectedElementsIngressSchema = z.union([
+  z.array(SelectedElementRefSchema),
   z
     .object({
       node_ids: z.array(z.string()).optional(),
@@ -186,11 +221,37 @@ export const V5RequestExtensionsSchema = z
 
 export type V5RequestExtensions = z.infer<typeof V5RequestExtensionsSchema>;
 
+/**
+ * The one `kind` value on a published ref that means "this is an edge, not a
+ * node". Everything else the canvas can select is a node, and its `kind` is the
+ * node's own type (`factor`, `option`, `goal`, …).
+ *
+ * Deliberately a positive test for ONE value rather than an allow-list of node
+ * kinds: the canvas's node vocabulary grows, and a node kind missing from an
+ * allow-list would be silently reclassified as an edge — a selection quietly
+ * routed to the array nothing reads. Getting it wrong in this direction is
+ * visible (an edge id lands in `node_ids`, where every consumer filters it out
+ * against the graph anyway); getting it wrong in the other direction is silent.
+ */
+const EDGE_REF_KIND = 'edge';
+
 function normaliseSelectedElements(
   parsed: z.infer<typeof SelectedElementsIngressSchema>,
 ): SelectedElementsIngress {
   if (Array.isArray(parsed)) {
-    return { node_ids: parsed, edge_ids: [] };
+    // Both array branches land here. Discriminate on the ELEMENT type rather
+    // than on which union branch matched — zod does not tell us which one did,
+    // and `[]` is genuinely ambiguous (and genuinely empty either way).
+    const nodeIds: string[] = [];
+    const edgeIds: string[] = [];
+    for (const entry of parsed) {
+      if (typeof entry === 'string') {
+        nodeIds.push(entry);
+        continue;
+      }
+      (entry.kind === EDGE_REF_KIND ? edgeIds : nodeIds).push(entry.id);
+    }
+    return { node_ids: nodeIds, edge_ids: edgeIds };
   }
   return {
     node_ids: parsed.node_ids ?? [],
