@@ -330,8 +330,13 @@ export interface EnrichedTurnContext extends TurnContext {
  * on the strength of a regenerated display field would be fabricating
  * attribution. `value_source` below is the authoritative one — it is
  * `observed_state.source`, the field the estate's user-edit writers actually
- * stamp (`user_override` is the pill-earning literal) and the one the shared
- * contract owns the vocabulary for.
+ * stamp and the one the shared contract owns the vocabulary for
+ * (`OBSERVED_STATE_SOURCE_LITERALS`).
+ *
+ * This module READS that field and never writes it, which is why it is
+ * deliberately absent from the reviewed writer manifest in
+ * `no-brief-derived-user-override.writers.test.ts` — the guard is scoped to
+ * files that can STAMP a value as the user's own, and nothing here can.
  */
 export interface SelectedElementContext {
   readonly id: string;

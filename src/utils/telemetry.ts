@@ -1459,7 +1459,7 @@ export const TelemetryEvents = {
   // server model does not have) than under `degraded` (CEE could not read the
   // model at all), and an alert that cannot tell them apart will chase the wrong
   // fault.
-  V5TurnSelectionResolved: "v5.turn.selection_resolved",
+  V5TurnSelectionResolved: "v5.selection.resolved",
 
   // V5 Group 1 Task B: decision_review auto-fire after successful
   // run_analysis. Invoked emits once the enricher decides to fire. Skipped

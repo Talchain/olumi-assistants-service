@@ -343,7 +343,7 @@ describe('buildTurnContext — selection telemetry is observable and content-fre
       sessionStore: storeWithGraph(persistedGraph()),
       selectedElements: selection(['factor_price', 'ghost_node']),
     });
-    const evt = events.find((e) => e.name === 'v5.turn.selection_resolved');
+    const evt = events.find((e) => e.name === 'v5.selection.resolved');
     expect(evt).toBeDefined();
     expect(evt?.data).toMatchObject({
       requested_count: 2,
@@ -358,7 +358,7 @@ describe('buildTurnContext — selection telemetry is observable and content-fre
       sessionStore: storeWithGraph(persistedGraph()),
       selectedElements: selection(['factor_price']),
     });
-    const evt = events.find((e) => e.name === 'v5.turn.selection_resolved');
+    const evt = events.find((e) => e.name === 'v5.selection.resolved');
     expect(evt).toBeDefined();
     const serialised = JSON.stringify(evt?.data ?? {});
     // Bound by IDENTITY to the exact id and label the fixture selected, so this
@@ -371,6 +371,6 @@ describe('buildTurnContext — selection telemetry is observable and content-fre
     await buildTurnContext(BASE, 'req-t3', {
       sessionStore: storeWithGraph(persistedGraph()),
     });
-    expect(events.find((e) => e.name === 'v5.turn.selection_resolved')).toBeUndefined();
+    expect(events.find((e) => e.name === 'v5.selection.resolved')).toBeUndefined();
   });
 });
