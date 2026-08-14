@@ -691,3 +691,151 @@ describe('F1 — the analysis join never attaches another node’s figures', () 
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// GUARD 2 (KIND SCOPING) — ITS ONLY DISTINCTIVE WORK, AND THEREFORE ITS ONLY
+// HONEST PIN
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐⭐ WHY THIS BLOCK EXISTS: GUARD 2 WAS UNPINNED, AND EVERY OTHER TEST IN THIS
+ * FILE WAS BLIND TO IT — trap 11, exactly.
+ *
+ * A review deleted kind scoping ON ITS OWN (nothing else) and this spec stayed
+ * **38/38 GREEN**. The reason is structural and worth stating plainly, because
+ * it is the kind of thing a mutant kit reports as "covered" while covering
+ * nothing:
+ *
+ *   Guard 1 (uncapped uniqueness) fires FIRST. Every cross-kind fixture in this
+ *   file gives BOTH colliding entities an id, so both land in the index, so
+ *   `idsPerLabel > 1`, so guard 1 refuses and **guard 2 is never consulted**.
+ *   My earlier "guard 2 removed" mutant reported RED only because it forced
+ *   `isOption = false` for everything — a BROADER mutation that also stopped
+ *   options reading the options list. It never isolated kind scoping at all.
+ *
+ * So guard 2's ONLY distinctive work is on the lists guard 1 CANNOT SEE: the
+ * ID-LESS ones. `EvidenceGapSignal.factor_id` is optional and
+ * `projectAnalysis` strips it regardless, so a VOI entry can exist with no id
+ * anywhere — invisible to the index, invisible to `idsPerLabel`, and therefore
+ * reachable ONLY by kind scoping.
+ *
+ * That is what the test below drives, with both preconditions pinned in-test so
+ * it cannot pass for the wrong reason (trap 13b): `idsPerLabel === 1` (proving
+ * guard 1 is genuinely blind here) AND the display genuinely carrying the VOI
+ * entry (proving the formatter produced something for guard 2 to refuse).
+ */
+describe('GUARD 2 — kind scoping, pinned on the id-less lists guard 1 cannot see', () => {
+  const LABEL = 'Runway';
+  const P4_GRAPH = {
+    nodes: [
+      { id: 'opt_runway', kind: 'option', label: LABEL },
+      { id: 'opt_alt', kind: 'option', label: 'Alternative' },
+      { id: 'goal_p4', kind: 'goal', label: 'Some goal' },
+    ],
+    edges: [],
+  };
+  const P4_ANALYSIS = {
+    winner: { option_id: 'opt_runway', option_label: LABEL, win_probability: 0.55 },
+    options: [
+      { option_id: 'opt_runway', option_label: LABEL, win_probability: 0.55 },
+      { option_id: 'opt_alt', option_label: 'Alternative', win_probability: 0.45 },
+    ],
+    top_drivers: [],
+    // ⭐ THE WHOLE POINT: a FACTOR-scoped VOI entry sharing the OPTION's label
+    // and carrying NO `factor_id`. `EvidenceGapSignal.factor_id` is optional,
+    // so this is a shape the producer genuinely emits — not a contrivance.
+    evidence_gaps: [{ factor_label: LABEL, voi_score: 0.6 }],
+    robustness_level: 'moderate', fragile_edge_count: 0, margin: 0.1, margin_pp: 10,
+    analysis_status: 'computed',
+  } as unknown as Parameters<typeof assembleContextPack>[0]['analysis'];
+
+  const P4_PACK = assembleContextPack({
+    payload: makeMessagePayload({ scenario_id: 'scen-guard2', message: 'why?' }),
+    priorTurns: [], priorFacts: [], analysis: P4_ANALYSIS, graph: P4_GRAPH as never,
+  });
+  const P4_DISPLAY = formatAnalysisForContext(P4_PACK.analysis);
+  const P4_INDEX = buildAnalysisIdentityIndex(P4_ANALYSIS);
+
+  function p4Focus(id: string) {
+    const selection = resolveTurnSelection([id], P4_GRAPH, 'ok_present');
+    if (selection === null) throw new Error('fixture: no selection');
+    const focus = projectFocus(selection, P4_DISPLAY, P4_INDEX);
+    if (focus === null) throw new Error('fixture: no focus');
+    return focus.elements[0]!;
+  }
+
+  it('PRECONDITION A — guard 1 is provably BLIND to this collision', () => {
+    // The id-less VOI factor never enters the index, so exactly ONE id claims
+    // the label and the uniqueness guard cannot fire. If this ever reads 2,
+    // guard 1 would be doing the work and the test below would stop
+    // discriminating — it would pass for the wrong reason.
+    expect(P4_INDEX.idsPerLabel.get(LABEL)).toBe(1);
+    expect(P4_INDEX.byId.get('opt_runway')).toEqual({ label: LABEL, kind: 'option' });
+    // And nothing id-less crept into the index.
+    expect([...P4_INDEX.byId.values()].filter((e) => e.kind === 'factor')).toEqual([]);
+  });
+
+  it('PRECONDITION B — the display genuinely carries a VOI entry under that label', () => {
+    // An absence assertion is vacuous unless the thing being refused EXISTS.
+    // Driven through the REAL formatter, not a hand-shaped display object.
+    const voi = P4_DISPLAY!.value_of_information;
+    expect(voi, 'the formatter produced no VOI list — the guard-2 test would be vacuous').toBeDefined();
+    expect(voi!.some((g) => g.label === LABEL)).toBe(true);
+  });
+
+  it('THE DISCRIMINATOR — the OPTION links its own figure and does NOT collect the factor’s VOI', () => {
+    const el = p4Focus('opt_runway');
+    expect(el.analysis_link).toBe('linked');
+    // Its own figure, by identity.
+    expect(el.analysis!.win_probability).toBe('55%');
+    // The id-less factor's VOI band belongs to a DIFFERENT node and must not
+    // appear here. Only kind scoping prevents this — guard 1 is blind (A) and
+    // the per-list `many` check sees exactly one entry, so it is silent too.
+    expect(el.analysis!.value_of_information).toBeUndefined();
+  });
+
+  /**
+   * ⚠ THE RESIDUAL, PINNED RATHER THAN HIDDEN.
+   *
+   * Kind scoping stops an OPTION reading factor figures. It CANNOT stop a
+   * FACTOR from reading a same-label VOI entry belonging to a DIFFERENT factor
+   * that exists only in the id-less list — both are factor-kind, and there is
+   * no id to tell them apart at this seam. It is irreducible here.
+   *
+   * The honest exit is the already-pinned premise: carry `factor_id` through
+   * `projectAnalysis` into the pack, and this class closes with it. Recording
+   * the gap in the suite is what keeps it honest — a gap the suite cannot see
+   * is how it survives.
+   */
+  it('KNOWN RESIDUAL — a factor CAN still collect a same-label id-less VOI entry', () => {
+    const graph = {
+      nodes: [
+        { id: 'fac_a', kind: 'factor', label: 'Churn' },
+        { id: 'goal_r', kind: 'goal', label: 'Some goal' },
+      ],
+      edges: [],
+    };
+    const analysis = {
+      winner: { option_id: 'opt_o', option_label: 'An option', win_probability: 0.6 },
+      options: [{ option_id: 'opt_o', option_label: 'An option', win_probability: 0.6 }],
+      top_drivers: [
+        { factor_id: 'fac_a', factor_label: 'Churn', sensitivity: 0.3, direction: 'positive' },
+      ],
+      // A DIFFERENT factor, same label, no id — indistinguishable from fac_a here.
+      evidence_gaps: [{ factor_label: 'Churn', voi_score: 0.6 }],
+      robustness_level: 'moderate', fragile_edge_count: 0, margin: 0.1, margin_pp: 10,
+      analysis_status: 'computed',
+    } as unknown as Parameters<typeof assembleContextPack>[0]['analysis'];
+    const pack = assembleContextPack({
+      payload: makeMessagePayload({ scenario_id: 'scen-residual', message: 'why?' }),
+      priorTurns: [], priorFacts: [], analysis, graph: graph as never,
+    });
+    const selection = resolveTurnSelection(['fac_a'], graph, 'ok_present')!;
+    const el = projectFocus(selection, formatAnalysisForContext(pack.analysis), buildAnalysisIdentityIndex(analysis))!.elements[0]!;
+    // Documented, not endorsed: this asserts the CURRENT honest limit. It REDs
+    // if the residual is closed (good — close it and delete this test) and REDs
+    // if it silently widens.
+    expect(el.analysis_link).toBe('linked');
+    expect(el.analysis!.value_of_information).toBeDefined();
+  });
+});
