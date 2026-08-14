@@ -868,7 +868,13 @@ export async function runTurnExecutor(
 
   let buildContextStartedAt = 0;
   if (timingsEnabled) buildContextStartedAt = Date.now();
-  const context = await buildTurnContext(payload, requestId);
+  // `selectedElements` is threaded so the context builder can resolve the
+  // canvas selection against canonical state. Before this it stopped at the
+  // value-update tie-breaker below (~L5000), which narrows a MUTATION — no
+  // answering path could tell which element the user meant.
+  const context = await buildTurnContext(payload, requestId, {
+    selectedElements: options.selectedElements,
+  });
   if (timingsEnabled) {
     turnTimings.build_turn_context_ms = Date.now() - buildContextStartedAt;
   }

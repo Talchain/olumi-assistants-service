@@ -33,7 +33,7 @@ import type { SessionTurnWithContent } from './session/conversation-content.js';
 import type { GraphWriteFailureDisclosure } from './session/store.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
-import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { GraphV3, NodeV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { config } from '../config/index.js';
 import {
   computeStructuralReadiness,
@@ -291,6 +291,94 @@ export interface EnrichedTurnContext extends TurnContext {
    * routing prompt, or DGAI output. Tests set it explicitly (or cast via `as unknown as`).
    */
   readonly coaching_lifecycle: CoachingLifecycle;
+  /**
+   * SELECTION-AWARE ANSWERING (hop 3): what the user had selected on the canvas
+   * at send time, RESOLVED against the persisted graph into something an answer
+   * can actually be grounded in.
+   *
+   * Present ONLY when the turn carried a node selection; absent otherwise, so
+   * every hand-constructed test context keeps compiling and the strict
+   * `TurnContextSchema` round-trip in the existing suite is unaffected.
+   *
+   * ⚠ NAMED APART FROM `selected_elements` DELIBERATELY. `ConversationContext`
+   * (`orchestrator/types.ts:841`) and `EnrichedContext`
+   * (`orchestrator/pipeline/types.ts:344`) both already declare a
+   * `selected_elements: string[]`, and the `## FOCUS` prompt section that reads
+   * the former is EDIT-scoped — its literal instruction is *"Prioritise changes
+   * to these"*, rendered only by `serialiseEditContextForLLMWithMeta`, which is
+   * called only from the `edit_graph` tool. Reusing that name here would put two
+   * different questions ("what should I change?" vs "what should I answer
+   * about?") under one word, which is exactly the defect trap 21 records.
+   */
+  readonly selection?: TurnSelection;
+}
+
+/**
+ * One selected element, resolved from CANONICAL state.
+ *
+ * Every field is copied out of the persisted node — never out of the client's
+ * claim — because the client's canvas can be ahead of, behind, or simply
+ * different from the model CEE holds, and an answer grounded in the client's
+ * own assertion is an answer grounded in nothing. The client's `kind` and
+ * `label` are used only to route the id (node vs edge) at ingress.
+ *
+ * ⚠ `provenance` (the NODE-LEVEL field) is DELIBERATELY NOT CARRIED, and this
+ * is a confession rather than an oversight. `NodeV3.provenance` is documented in
+ * its own schema as *"RESPONSE-ONLY: recomputed deterministically by
+ * `transformResponseToV3` on every response … Safe to ignore on round-tripped
+ * graphs — value is regenerated."* A composer that said "you set this yourself"
+ * on the strength of a regenerated display field would be fabricating
+ * attribution. `value_source` below is the authoritative one — it is
+ * `observed_state.source`, the field the estate's user-edit writers actually
+ * stamp and the one the shared contract owns the vocabulary for
+ * (`OBSERVED_STATE_SOURCE_LITERALS`).
+ *
+ * This module READS that field and never writes it, which is why it is
+ * deliberately absent from the reviewed writer manifest in
+ * `no-brief-derived-user-override.writers.test.ts` — the guard is scoped to
+ * files that can STAMP a value as the user's own, and nothing here can.
+ */
+export interface SelectedElementContext {
+  readonly id: string;
+  /** The persisted node's own kind (`factor` | `option` | `goal` | …). */
+  readonly kind: string;
+  readonly label: string;
+  readonly description?: string;
+  /** `controllable` | `observable` | `external` — factor nodes only. */
+  readonly category?: string;
+  /** Present only when the node carries an `observed_state.value`. */
+  readonly value?: number;
+  readonly unit?: string;
+  readonly display_value?: string;
+  /** `observed_state.source` — who set this value. See the note above. */
+  readonly value_source?: string;
+}
+
+/**
+ * The turn's selection, and — just as importantly — what could NOT be resolved
+ * and why.
+ *
+ * ⭐ `graph_read` IS THE LOAD-BEARING FIELD. Without it, "the node you selected
+ * is not in the model" and "I could not read the model" are the same observation
+ * downstream, and a composer would confidently tell a user their node is gone
+ * when the truth is that CEE could not look. That is the same conflation F2
+ * removed at the graph-commit chokepoint (`CanonicalGraphReadState`), reaching a
+ * different consumer; it is reproduced here rather than re-derived so the two
+ * cannot disagree.
+ */
+export interface TurnSelection {
+  /** Every node id the turn carried, in the order it arrived. */
+  readonly requested_ids: readonly string[];
+  /** Those that resolved against the persisted graph. */
+  readonly elements: readonly SelectedElementContext[];
+  /** Those that did not. Read WITH `graph_read`, never without it. */
+  readonly unresolved_ids: readonly string[];
+  /**
+   * `ok_present` — the graph was read and holds nodes.
+   * `ok_absent`  — the graph was read and there is none stored.
+   * `degraded`   — the read FAILED. Unresolved means UNKNOWN, not absent.
+   */
+  readonly graph_read: CanonicalGraphReadState['status'];
 }
 
 export interface BuildTurnContextOptions {
@@ -300,6 +388,19 @@ export interface BuildTurnContextOptions {
    * real Supabase.
    */
   readonly sessionStore?: SessionStore;
+  /**
+   * The turn's canvas selection, as normalised at ingress
+   * (`parseRequestExtensions`). Threaded from `RunTurnExecutorOptions` so the
+   * context builder can resolve it against canonical state.
+   *
+   * `edge_ids` is accepted and deliberately NOT resolved in this slice: nothing
+   * reads an edge selection, and shipping a resolved field with no consumer is
+   * this estate's dominant defect. Edge answers are a separate slice.
+   */
+  readonly selectedElements?: {
+    readonly node_ids: readonly string[];
+    readonly edge_ids: readonly string[];
+  } | null;
 }
 
 export interface RunAnalysisScenarioSnapshot {
@@ -603,6 +704,36 @@ export async function buildTurnContext(
     );
   }
 
+  // SELECTION-AWARE ANSWERING (hop 3). Resolved from the SAME canonical read
+  // every other projection above uses — no second Supabase round trip, and no
+  // second view of the graph that could disagree with the one the rest of the
+  // turn reasons over. Pure and read-only: `resolveTurnSelection` copies out of
+  // the persisted nodes and writes nothing back.
+  const turnSelection = resolveTurnSelection(
+    options.selectedElements?.node_ids ?? [],
+    scenarioState.graph,
+    scenarioState.read.status,
+  );
+  if (turnSelection !== null) {
+    try {
+      emit(TelemetryEvents.V5TurnSelectionResolved, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        requested_count: turnSelection.requested_ids.length,
+        resolved_count: turnSelection.elements.length,
+        unresolved_count: turnSelection.unresolved_ids.length,
+        graph_read: turnSelection.graph_read,
+      });
+    } catch {
+      // Internal-only observability — a telemetry fault must never fail turn
+      // construction (mirrors the coaching-lifecycle emit above).
+      log.warn(
+        { request_id: requestId, scenario_id: payload.scenario_id },
+        'V5 build-turn-context — v5.turn.selection_resolved emit failed; continuing',
+      );
+    }
+  }
+
   return {
     ...baseContext,
     prior_turns: priorTurns,
@@ -619,6 +750,79 @@ export async function buildTurnContext(
     coaching_state: coachingState,
     prior_coaching_state: priorCoachingState,
     coaching_lifecycle: coachingLifecycle,
+    // Spread conditionally: a turn with no selection carries NO key, so every
+    // hand-constructed test context and the strict TurnContextSchema round-trip
+    // stay exactly as they were.
+    ...(turnSelection !== null ? { selection: turnSelection } : {}),
+  };
+}
+
+/**
+ * Resolve selected node ids against the persisted graph.
+ *
+ * Returns `null` — meaning "this turn has no selection to carry" — when no node
+ * ids arrived. An EMPTY selection is not a selection: emitting
+ * `{requested_ids: [], elements: []}` would make every turn look selection-aware
+ * and would give a downstream consumer a truthy object to branch on.
+ *
+ * ⚠ PARSES NODE-BY-NODE, ON PURPOSE. A whole-graph `GraphV3.safeParse` would
+ * throw away every node because of one malformed sibling, and the failure would
+ * look exactly like "the user selected something that isn't there" — the
+ * conflation this whole structure exists to prevent. Each candidate node is
+ * validated against the CANONICAL `NodeV3` schema (derived, not a local mirror
+ * of the node shape), so a bad node costs that node and nothing else.
+ *
+ * READ-ONLY BY CONSTRUCTION: every returned field is a copied primitive. Nothing
+ * here writes to the graph, and nothing returns a live reference into it — a
+ * consumer mutating a resolved element must not be able to mutate canonical
+ * state. STABLE MODEL, ADAPTIVE ATTENTION: answering never edits.
+ */
+export function resolveTurnSelection(
+  nodeIds: readonly string[],
+  persistedGraph: unknown | null,
+  graphRead: CanonicalGraphReadState['status'],
+): TurnSelection | null {
+  if (nodeIds.length === 0) return null;
+
+  const wanted = new Set(nodeIds);
+  const elements: SelectedElementContext[] = [];
+  const found = new Set<string>();
+
+  const rawNodes =
+    persistedGraph !== null &&
+    typeof persistedGraph === 'object' &&
+    Array.isArray((persistedGraph as { nodes?: unknown }).nodes)
+      ? ((persistedGraph as { nodes: readonly unknown[] }).nodes)
+      : [];
+
+  for (const raw of rawNodes) {
+    const id = (raw as { id?: unknown })?.id;
+    if (typeof id !== 'string' || !wanted.has(id) || found.has(id)) continue;
+    const parsed = NodeV3.safeParse(raw);
+    if (!parsed.success) continue;
+    const node = parsed.data;
+    const observed = node.observed_state;
+    elements.push({
+      id: node.id,
+      kind: node.kind,
+      label: node.label,
+      ...(node.description !== undefined ? { description: node.description } : {}),
+      ...(node.category !== undefined ? { category: node.category } : {}),
+      // Absence is meaningful: a node with no observed value has no value, and
+      // a defaulted 0 would be indistinguishable from a real one.
+      ...(observed?.value !== undefined ? { value: observed.value } : {}),
+      ...(observed?.unit !== undefined ? { unit: observed.unit } : {}),
+      ...(node.display_value !== undefined ? { display_value: node.display_value } : {}),
+      ...(observed?.source !== undefined ? { value_source: observed.source } : {}),
+    });
+    found.add(id);
+  }
+
+  return {
+    requested_ids: [...nodeIds],
+    elements,
+    unresolved_ids: nodeIds.filter((id) => !found.has(id)),
+    graph_read: graphRead,
   };
 }
 

@@ -49,6 +49,7 @@ import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // restated — `nodes[].provenance` and `options[].provenance.source` describe one
 // fact and must not be able to disagree about it (trap 12).
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from "../provenance/brief-binding.js";
+import { mergeRephrasedOptions } from "./option-rephrase-merge.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 
 // ============================================================================
@@ -1038,6 +1039,48 @@ export function transformResponseToV3(
     };
   }
 
+  // ⭐⭐ REPHRASE ABSORPTION — an obvious restatement of the user's own option may
+  // not become a second canonical option (Paul's ruling, 14 Aug 2026).
+  //
+  // PLACED EXACTLY HERE, AND THE POSITION IS LOAD-BEARING:
+  //   • AFTER the provenance loop above, because authorship is the gate's first
+  //     conjunct and `node.provenance` does not exist until that loop runs. The
+  //     capture proves no earlier field can stand in for it —
+  //     `extraction_metadata.source` reads `cee_hypothesis` for 34 of 39 banked
+  //     options, including every brief-borne one in the A/B/C scenarios.
+  //   • BEFORE `getOptionIdMismatchSummary`, `generateValidationWarnings` and
+  //     `buildAnalysisReadyPayload`, so the graph, `options[]`, the warnings and
+  //     the analysis payload all describe the SAME, post-merge option set. A
+  //     merge after any of them would leave the response disagreeing with itself
+  //     about how many options exist.
+  //
+  //     ⚠ NARROWED after review MEASURED an over-claim in the earlier wording
+  //     ("every downstream summary"): the `transform_complete` TELEMETRY below
+  //     derives `options_total`/`options_needs_mapping` from `extractedOptions`,
+  //     which is captured BEFORE this merge, so one event read
+  //     `optionCount: 3, options_total: 4`. That is internal-only and left as
+  //     is deliberately — the pre-merge count is the honest answer to "how many
+  //     options did extraction produce". The claim above is about the RESPONSE,
+  //     not about telemetry, and now says so.
+  //
+  // The existing intervention-signature dedup cannot see this defect: on the
+  // witnessed draw the model's twin carried `interventions: {}` and the user's
+  // carried one, so their signatures differ by construction.
+  const rephraseMerge = mergeRephrasedOptions({
+    nodes: v3Graph.nodes as NodeV3T[],
+    edges: v3Graph.edges as EdgeV3T[],
+    options: v3Options,
+  });
+  if (rephraseMerge.absorbedOptionIds.length > 0) {
+    log.info(
+      {
+        requestId: context.requestId,
+        absorbedOptionIds: rephraseMerge.absorbedOptionIds,
+      },
+      "cee.v3_transform.option_rephrase_absorbed"
+    );
+  }
+
   const optionIdSummary = getOptionIdMismatchSummary(v3Graph, v3Options);
   if (optionIdSummary.missingOptionIds.length > 0) {
     log.warn(
@@ -1066,6 +1109,16 @@ export function transformResponseToV3(
     v3Options,
     goalNodeId
   );
+
+  // The absorption's disclosures ride the same channel as the other
+  // transform-stage findings. ⚠ NOT a user-facing channel on the draft turn —
+  // an independent review established at the artefacts that
+  // `validation_warnings` has no wire carrier there (the draft block schema is
+  // `.strict()` and omits it) and that the UI's only readers are debug panels.
+  // What a user can actually reach is the "Also drafted as: …" description on
+  // the surviving option, code-traced to the option inspector. This push is a
+  // RECORD of the merge, not the notice.
+  validationWarnings.push(...rephraseMerge.warnings);
 
   // ── WS-A item 1(b): THE COMMIT-TIME MONEY INVARIANT ──────────────────────
   //

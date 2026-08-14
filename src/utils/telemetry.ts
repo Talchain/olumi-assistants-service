@@ -1440,6 +1440,27 @@ export const TelemetryEvents = {
   // follow-up.
   V5SessionContinuityGap: "v5.session.continuity_gap",
 
+  // Selection-aware answering (hop 3). Emitted once per turn that CARRIED a
+  // canvas selection, after the ids are resolved against the persisted graph.
+  //
+  // This event exists so the seam can be WITNESSED ON STAGING BEFORE ITS
+  // CONSUMER EXISTS: hop 4 (the grounded answer) lands separately, and without
+  // a signal here the intervening deploys would carry a capability nobody could
+  // tell was working. A dark field with no observability is worse than a dark
+  // field.
+  //
+  // Same privacy contract as DecisionContextDerived: STANDARD correlation ids
+  // plus COUNTS and CLOSED-ENUM codes ONLY — never node ids, labels or values.
+  // Payload: { request_id, scenario_id, requested_count, resolved_count,
+  // unresolved_count, graph_read: 'ok_present'|'ok_absent'|'degraded' }.
+  //
+  // `graph_read` is the one that matters operationally: `unresolved_count > 0`
+  // means something different under `ok_present` (the user pointed at a node the
+  // server model does not have) than under `degraded` (CEE could not read the
+  // model at all), and an alert that cannot tell them apart will chase the wrong
+  // fault.
+  V5TurnSelectionResolved: "v5.selection.resolved",
+
   // V5 Group 1 Task B: decision_review auto-fire after successful
   // run_analysis. Invoked emits once the enricher decides to fire. Skipped
   // emits with a reason when the prerequisite data is absent. Failed emits
