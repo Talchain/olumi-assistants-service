@@ -180,9 +180,19 @@ describe('A3 — the FOURTH surface: no answer may deny and assert flippability 
 // `p1-conversation-derivation-2026-08-14/raw/run-1/step-Q2_WHAT_WOULD_CHANGE.json`:
 // "What would have to change for another option to win?" → 0 LLM calls, zero
 // flip content, on a run whose three `flip_thresholds` rows were ALL
-// `flip_reason: "structurally_invariant"` / `no_flip_in_range: true`. The SAME
-// run's chip-click path and a near-synonym question routed to the LLM both
-// stated the attestation. One question, three paths, one silent.
+// `flip_reason: "structurally_invariant"` / `no_flip_in_range: true`.
+//
+// Two OTHER paths answer the same free-text question and BOTH state the
+// attestation, each cited to its own capture:
+//   - the routed `what_would_flip` handler (`composeWhatWouldFlipFallback`) on a
+//     free-text turn — `deploy-witness-946-944-20260814T015916Z/
+//     step2-golden-journey/step-E7_FLIP_QUESTION.json`;
+//   - a Sonnet-authored answer — `…/raw/run-1/step-Q3_OVERTURN.json`.
+// ⚠ An earlier draft of this header credited the first to a CHIP CLICK. No
+// chip-click flip turn exists in either capture (review of #947): run-1's only
+// chip click is `run_analysis`. Three paths, one silent — and the silent one is
+// the deterministic gate, i.e. the fastest and the one that claims the tightest
+// phrasings.
 // =========================================================================
 describe('2.278 fifth surface — what_would_flip_free_text states the attestation', () => {
   const attested = { flipClaimPosture: 'attested_no_flip' as const };

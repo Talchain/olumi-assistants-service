@@ -2275,14 +2275,31 @@ function composeWhatWouldFlip(
   // ASSERT flippability, and this composer's defect is the mirror image: it
   // asserts nothing and OMITS the producer's attestation entirely.
   //
-  // Witnessed on the deployed build (14 Aug, CEE 41156fc, evidence dir
-  // `p1-conversation-derivation-2026-08-14/raw/run-1/`): asked "What would have
-  // to change for another option to win?" on a run whose three
+  // Witnessed on the deployed build (14 Aug, CEE 41156fc). Asked "What would
+  // have to change for another option to win?" on a run whose three
   // `flip_thresholds` rows were ALL `flip_reason: "structurally_invariant"` /
-  // `no_flip_in_range: true`, the answer recited the lead and a link to check
-  // and said NOTHING about flip behaviour — while the same run's chip-click
-  // path (`composeWhatWouldFlipFallback`) and a near-synonym question routed to
-  // the LLM BOTH stated the attestation. One question, three paths, one silent.
+  // `no_flip_in_range: true`, THIS composer recited the lead and a link to
+  // check and said NOTHING about flip behaviour —
+  // `p1-conversation-derivation-2026-08-14/raw/run-1/step-Q2_WHAT_WOULD_CHANGE.json`
+  // (0 LLM calls; the advice gate owns the turn).
+  //
+  // THREE PATHS CAN ANSWER A FREE-TEXT FLIP QUESTION, AND ONLY THIS ONE WAS
+  // SILENT. Each citation names the capture it comes from, because an earlier
+  // draft of this comment attributed the second one to a CHIP CLICK and no such
+  // turn exists in any capture cited here (caught in review of #947; CLAUDE.md
+  // trap 16 — a capture proves what it was pointed at):
+  //   1. this composer, via `tryPostAnalysisAdviceGate` — silent (above);
+  //   2. the routed `what_would_flip` HANDLER, whose
+  //      `composeWhatWouldFlipFallback` states the attestation — witnessed on a
+  //      FREE-TEXT turn (`source: 'composer'`, `chip: null`) at
+  //      `deploy-witness-946-944-20260814T015916Z/step2-golden-journey/step-E7_FLIP_QUESTION.json`,
+  //      same deployed build, 01:59Z the same day;
+  //   3. a Sonnet-authored `answer_text`, which states it in its own words
+  //      ("Nothing in the tested range currently overturns this") —
+  //      `…/raw/run-1/step-Q3_OVERTURN.json`.
+  // Which path takes a turn is decided by whether the advice gate's narrow
+  // pattern matches, so the SILENT path is also the fastest and the one that
+  // fires on the tightest phrasings of the question.
   const noFlip = flipClaimPosture === 'attested_no_flip';
   // Top driver presence is guaranteed by CLASS_REQUIREMENTS; runner-up,
   // margin, robustness and fragile edges are optional and degrade
