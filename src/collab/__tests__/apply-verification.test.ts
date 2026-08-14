@@ -690,4 +690,82 @@ describe('verifyAppliedFrom — binding (f), the cited evidence', () => {
     });
     expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
   });
+
+  /**
+   * ⚠⚠ THE TEST ABOVE CANNOT DISCRIMINATE, AND THIS ONE IS WHY IT DOESN'T HAVE
+   * TO — recorded rather than glossed, because the gap is in the INSTRUMENT and
+   * not in the code.
+   *
+   * Its name asserts "the STORE's id, not the CLAIM's string". Under the exact
+   * `===` lookup above, those two values are necessarily EQUAL, so a mutant
+   * returning `claim.evidence_event_id` leaves it fully GREEN. Its own comment
+   * says as much ("equal to the claim here by construction") — which is true,
+   * and is exactly the shape CLAUDE.md trap 13b warns about: a guard whose
+   * discriminating power rests on a property nothing pins.
+   *
+   * The property that MATTERS is conditional: the store/claim distinction only
+   * becomes observable — and the client-controlled-write risk only becomes
+   * real — IF THE LOOKUP EVER STOPS BEING EXACT. A case-insensitive, trimming,
+   * or prefix-matching lookup would admit a claim string that DIFFERS from the
+   * stored id, and at that moment "which one gets stamped" is a live question
+   * with a wrong answer available.
+   *
+   * So this pins the precondition instead of the consequence: a near-miss id
+   * must be REFUSED. It REDs the moment the lookup is weakened in any of those
+   * directions — i.e. precisely when the test above would need to start
+   * discriminating and could not.
+   *
+   * It doubles as the enumeration-oracle guard: a near-miss must be
+   * indistinguishable from a wholly invented id, or the refusal leaks which
+   * prefixes exist.
+   */
+  it('⭐ refuses a NEAR-MISS event id — the lookup is EXACT, which is what makes the stamp safe', async () => {
+    const nearMisses = [
+      ADA_EVIDENCE_ID.toUpperCase(),
+      ` ${ADA_EVIDENCE_ID}`,
+      `${ADA_EVIDENCE_ID} `,
+      ADA_EVIDENCE_ID.slice(0, -1),
+      `${ADA_EVIDENCE_ID}x`,
+    ];
+    // The fixture is genuinely a near miss, not an unrelated string: each
+    // differs from the real id, and none IS it. Pinned so a future rename of
+    // ADA_EVIDENCE_ID cannot quietly turn these into unrelated inputs.
+    for (const nearMiss of nearMisses) {
+      expect(nearMiss).not.toBe(ADA_EVIDENCE_ID);
+      expect(nearMiss.trim().toLowerCase().replace(/x$/, '')).toContain(
+        ADA_EVIDENCE_ID.slice(0, 8),
+      );
+    }
+
+    for (const nearMiss of nearMisses) {
+      await expect(
+        verifyAppliedFrom(storeWithAdaEvidence(), {
+          scenario_id: SCENARIO_ID,
+          target_id: TARGET_ID,
+          claim: {
+            round_id: ROUND_ID,
+            participant_id: GRACE_ID,
+            evidence_event_id: nearMiss,
+          },
+          claimed_value: GRACE_VALUE,
+        }),
+        `a near-miss id was ACCEPTED: ${JSON.stringify(nearMiss)}`,
+      ).rejects.toMatchObject({ code: 'collab_apply_evidence_not_found' });
+    }
+
+    // POSITIVE CONTROL: the exact id still verifies, so the loop above is
+    // rejecting near-misses rather than rejecting everything — an absence
+    // assertion needs a demonstrated presence.
+    const verified = await verifyAppliedFrom(storeWithAdaEvidence(), {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: {
+        round_id: ROUND_ID,
+        participant_id: GRACE_ID,
+        evidence_event_id: ADA_EVIDENCE_ID,
+      },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
+  });
 });
