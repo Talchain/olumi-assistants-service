@@ -52,6 +52,7 @@ import {
   buildUserMessage,
   COACHING_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
+  FOCUS_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -111,6 +112,10 @@ const MODEL_FACING_CORPUS = [
   SERVED_PROMPT,
   COACHING_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
+  // Hop 4 (selection-aware answering). Emitted by the SAME condition that puts
+  // `focus` on the pack, so a field sanctioned only here is genuinely
+  // sanctioned — the same reasoning as its two siblings above.
+  FOCUS_INSTRUCTION,
 ].join('\n\n');
 
 /** The same corpus composition, built from the v119 historical control prompt. */
@@ -211,7 +216,15 @@ const ANALYSIS = {
     { option_id: 'opt_local', option_label: 'Hire locally', win_probability: 0.62 },
     { option_id: 'opt_offshore', option_label: 'Offshore partner', win_probability: 0.38 },
   ],
-  top_drivers: [{ factor_label: 'Engineer salary in the local market', sensitivity_value: 0.4 }],
+  // The REAL upstream `DriverSummary` shape: `{factor_id, factor_label,
+  // sensitivity, direction}`. This fixture previously used `sensitivity_value`,
+  // which `projectTopDrivers` filters out via `isFiniteSensitivity(d.sensitivity)`
+  // — so the pack carried `top_drivers: []` and this gate had never once seen
+  // the field populated. Corrected; the gate stays green, so nothing was being
+  // masked today, but it was one field away from being unable to see a leak.
+  top_drivers: [
+    { factor_id: 'factor_salary', factor_label: 'Engineer salary in the local market', sensitivity: 0.4, direction: 'positive' },
+  ],
   robustness_level: 'moderate',
   fragile_edge_count: 1,
   margin: 0.24,
@@ -262,6 +275,23 @@ function assembleMaximalPack(
     // state. Populating it with invented prose here manufactured a FALSE
     // POSITIVE on the first run of this gate — the fixture must be REALISTIC,
     // not maximal-in-the-abstract.
+    // Hop 4 — FIXTURE_COMPLETENESS: `focus` is a schema-declared key, so the
+    // maximal fixture must populate it or this gate narrows its own scope. A
+    // REALISTIC selection: one element that resolves against the fixture graph
+    // (so the projected labels are genuine prose the gate must see sanctioned),
+    // plus one that does not, so the `unresolved` disclosure is exercised too.
+    selection: {
+      requested_ids: ['dec_hire', 'ghost_node'],
+      elements: [
+        {
+          id: 'dec_hire',
+          kind: 'decision',
+          label: 'Hire two senior engineers locally',
+        },
+      ],
+      unresolved_ids: ['ghost_node'],
+      graph_read: 'ok_present',
+    } as never,
     coachingContext: {
       analysis_present: true,
       freshness: 'fresh',

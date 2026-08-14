@@ -481,6 +481,59 @@ const ContextBudgetDisclosureSchema = z
   })
   .strict();
 
+/**
+ * Selection-aware answering (hop 4) — the analysis outputs attached to a
+ * selected element. DISPLAY STRINGS ONLY (percent strings, banded phrases),
+ * copied from `display_analysis`. `.strict()` so a raw float cannot appear.
+ */
+const ContextPackFocusAnalysisSchema = z
+  .object({
+    win_probability: z.string().optional(),
+    target_fit: z.string().optional(),
+    influence: z.string().optional(),
+    value_of_information: z.string().optional(),
+    tipping_point_risk: z.string().optional(),
+  })
+  .strict();
+
+const ContextPackFocusElementSchema = z
+  .object({
+    id: z.string(),
+    kind: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+    category: z.string().optional(),
+    value: z.number().optional(),
+    unit: z.string().optional(),
+    display_value: z.string().optional(),
+    value_source: z.string().optional(),
+    /**
+     * Closed enum. `ambiguous_label` is the FAIL-CLOSED state: the pack's
+     * analysis projection is label-keyed, so an ambiguous label means the join
+     * was refused rather than guessed (see `projectFocus`).
+     */
+    analysis_link: z.enum(['linked', 'not_in_analysis', 'ambiguous_label', 'no_analysis']),
+    analysis: ContextPackFocusAnalysisSchema.optional(),
+  })
+  .strict();
+
+/**
+ * The focus section. `unresolved` is a CLOSED ENUM and never prose: the reason
+ * an element is missing is a FACT, and `not_in_model` (the model does not
+ * contain it) must never collapse into `could_not_check` (the model could not
+ * be read) — that conflation is the defect `graph_read` exists to prevent.
+ */
+const ContextPackFocusSchema = z
+  .object({
+    elements: z.array(ContextPackFocusElementSchema).readonly(),
+    unresolved: z.enum(['none', 'not_in_model', 'could_not_check']),
+    requested_count: z.number().int().nonnegative(),
+    unresolved_count: z.number().int().nonnegative(),
+    /** Disclosed truncation — present ONLY when the element cap cut entries. */
+    elements_omitted: z.number().int().positive().optional(),
+  })
+  .strict();
+
 export const ContextPackSchema = z
   .object({
     version: z.literal(CONTEXT_PACK_VERSION_LITERAL),
@@ -502,6 +555,15 @@ export const ContextPackSchema = z
     analysis: ContextPackAnalysisSchema.nullable(),
     display_analysis: DisplaySafeAnalysisSchema,
     display_graph: DisplaySafeGraphSchema,
+    /**
+     * SELECTION-AWARE ANSWERING (hop 4): the user's canvas selection, resolved
+     * against canonical state and projected display-safe by `projectFocus`.
+     * Present ONLY when the turn carried a selection (key absent otherwise —
+     * byte-identity for every turn that did not). `.strict()` on both levels so
+     * a raw coefficient cannot silently join the section that reaches the
+     * prompt.
+     */
+    focus: ContextPackFocusSchema.optional(),
     conversation: ContextPackConversationSchema,
     /**
      * Context v2 S4-INJECT (unconditional since the O-2 activation —
