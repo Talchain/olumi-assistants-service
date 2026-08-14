@@ -124,6 +124,32 @@ describe("row 2.1207 — OPPOSITE-DIRECTION TWINS: genuine quantities are untouc
     expect(out).toMatch(/£/);
   });
 
+  /**
+   * ⭐⭐ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED, AND THE SURVIVOR WAS THE
+   * FINDING.
+   *
+   * The kit mutated the predicate from `Math.abs(x) <= 1` to `x <= 1` — the
+   * sign-asymmetric form — and **all 48 tests stayed green**. The corpus's only
+   * negative case was `{-0.4, 0.4}`, which BOTH predicates classify as
+   * normalised, so it could not tell them apart: it proved the guard bites the
+   * original defect and said nothing about its shape.
+   *
+   * The two forms diverge on a LARGE negative bound — an ordinary deficit range
+   * a brief can state ("we are running a -£500k deficit"), which the schema
+   * admits (`z.number()`, unbounded). `Math.abs` reads it as the genuine
+   * currency quantity it is and renders; the asymmetric form reads `-500000 <= 1`
+   * as "normalised" and silently suppresses a real value.
+   *
+   * A survivor is a claim in either direction and has to be DEMONSTRATED, never
+   * asserted (trap 13c). This is the demonstration, and it is a class the
+   * witnessed capture never contained (trap 13d(c) — check what the corpus
+   * EXCLUDES).
+   */
+  it("DISCRIMINATOR — a large NEGATIVE currency bound is a genuine quantity and renders", () => {
+    const out = synthesiseRangeDisplayValue({ range_min: -500000, range_max: 0.5 }, "£", "cost");
+    expect(out).toMatch(/£/);
+  });
+
   it("percentages are untouched — the branch that already scaled correctly", () => {
     expect(synthesiseRangeDisplayValue({ range_min: 0.1, range_max: 0.25 }, "%")).toBe(
       "10% to 25%",
