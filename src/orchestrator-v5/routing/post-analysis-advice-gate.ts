@@ -2385,9 +2385,11 @@ function composeWhatWouldFlip(
     // attestation IS the answer, so it is stated rather than omitted.
     //
     // The sentence is IMPORTED from `composeWhatWouldFlipFallback`'s owner, not
-    // restated, so the chip-click and free-text answers to this one question
-    // cannot drift apart (this composer's header already declares that
-    // invariant; trap 12 is why the constant moved rather than being copied).
+    // restated, so the ADVICE-GATE and ROUTED-HANDLER answers to this one
+    // question cannot drift apart (this composer's header declares that
+    // invariant, though it calls the handler path "chip-click" — the composer is
+    // in fact reached on free text too, which is how it is witnessed above;
+    // trap 12 is why the constant moved rather than being copied).
     //
     // ⚠ STRICTLY `else if` — `flip_found` KEEPS PRECEDENCE, DELIBERATELY.
     // The two inputs are different channels answering different questions
