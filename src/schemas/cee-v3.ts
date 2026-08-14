@@ -437,6 +437,11 @@ export const ValidationWarningCode = z.enum([
   "OPTION_NODE_IN_GRAPH",
   "DUPLICATE_NODE_ID",
   "INVALID_NODE_ID",
+  // An AI-drafted option was absorbed into the user-authored option it restates.
+  // Registered here for consistency with the other transform-stage codes
+  // (`ValidationWarningV3.code` is the shared `z.string()`, so an unregistered
+  // code was never at risk of being stripped — this is legibility, not a fix).
+  "OPTION_REPHRASE_ABSORBED",
   // CIL warning codes from @talchain/schemas
   CIL_WARNING_CODES.STRENGTH_DEFAULT_APPLIED,
   CIL_WARNING_CODES.STRENGTH_MEAN_DEFAULT_DOMINANT,
