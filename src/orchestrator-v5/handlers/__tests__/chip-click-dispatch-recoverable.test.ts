@@ -207,8 +207,17 @@ describe('chip-click run_analysis — recoverable-cause escape (cause gating)', 
     expect(out.response.blocks).toEqual([]);
     expect(out.response.suggested_actions.length).toBeGreaterThan(0);
 
-    // No analysis ran / no graph mutated → no analysis_ready, no commit.
-    expect(out.analysisReady).toBeUndefined();
+    // ⚠ CONTRACT CHANGED — ROADMAP 2.1091 / golden-journey EXT-2. This
+    // assertion read `expect(out.analysisReady).toBeUndefined()` and it was
+    // PINNING THE DEFECT: on staging (2026-08-13) the post-add-option analyse
+    // chip therefore shipped a 200 with no `analysis_ready` key at all, so the
+    // run was neither admitted nor typed-blocked and no consumer could act on
+    // it. The recovered outcome now carries the TYPED REFUSAL. Corrected at
+    // source rather than absorbed into a baseline.
+    expect(out.analysisReady).toBeDefined();
+    expect(out.analysisReady.status).toBe('blocked');
+    expect(out.analysisReady.blocked_reason).toBe('options_not_configured');
+    // Still no commit and still no graph mutation — that half is unchanged.
     expect(out.commitPerformed).toBe(false);
     expect(out.causeKind).toBe('options_not_configured');
   });
