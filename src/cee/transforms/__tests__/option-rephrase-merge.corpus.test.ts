@@ -184,6 +184,14 @@ describe("degenerate and vacuous inputs decline", () => {
     ["hire", "Hire Two Developers Only"],
     ["price", "Raise Enterprise Pricing"],
     ["the", "Keep What We Have"],
+    // ⭐ THESE TWO PIN THE SPECIFICITY FLOOR ITSELF, and they were added because
+    // a mutant proved the floor was otherwise UNGUARDED: dropping it to 1 left
+    // the whole suite green. Here the surplus is entirely elaborative, so the
+    // allow-list clause cannot decline them and ONLY the floor can — measured
+    // both ways (floor 2 ⇒ false, floor 1 ⇒ true). Without these, a later lane
+    // could delete the floor and every test would still pass.
+    ["developers", "Hire Developers Only"],
+    ["keep", "Keep Option"],
   ])("declines %s vs %s", (a, b) => {
     expect(isHighConfidenceRephrase(a, b)).toBe(false);
   });
