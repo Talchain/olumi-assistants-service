@@ -191,6 +191,25 @@ interface ObservedSnapshot {
   readonly raw_value?: number;
   readonly unit?: string;
   readonly cap?: number;
+  /**
+   * 0.40.0 — the provenance stamp, carried on the `after` side ONLY.
+   *
+   * ⚠ WITHOUT THIS THE ATTRIBUTION IS INVISIBLE UNTIL A RELOAD, which would make
+   * "visible consequence" a claim the product could not honour on the turn that
+   * produced it. The `graph_patch` block's `after` is what the UI applicator
+   * spreads into `node.data.observedState`; a snapshot that stops at
+   * value/raw_value/unit/cap leaves the canvas pill reading whatever it read
+   * before, so an owner who just applied Grace's number would still see "AI
+   * estimate" until they refreshed. Both hops were probed at the 0.40.0 bytes
+   * before this was widened: `SetFactorValueHandlerFactSchema` and the boundary
+   * `GraphPatchBlockSchema` both accept these keys inside `after` (each with a
+   * minimal-`after` control, so the pass is not vacuous).
+   *
+   * `before` never carries them — it is a snapshot of what was there, and the
+   * pre-edit provenance is not what this event is reporting.
+   */
+  readonly source?: string;
+  readonly elicited_from?: { readonly round_id: string; readonly participant_id: string };
 }
 
 function snapshotObservedState(node: GraphV3T['nodes'][number]): ObservedSnapshot {
@@ -378,6 +397,20 @@ export function createSetFactorValueHandler(): HandlerFn {
     const after: ObservedSnapshot = {
       value: normalised.value,
       raw_value: normalised.raw_value,
+      // The SAME provenance the merged node is stamped with below, so the wire
+      // patch and the persisted graph cannot disagree about who owns the number.
+      //
+      // CONDITIONAL, so the ORDINARY edit path's `after` stays byte-identical:
+      // the UI already stamps `user_override` locally for its own edits, so
+      // adding it here would change an existing payload for no gain. Only a
+      // verified panel apply — which the UI CANNOT stamp for itself, because it
+      // is a server fact — widens the snapshot.
+      ...(appliedProvenance !== undefined
+        ? {
+            source: appliedProvenance.source,
+            elicited_from: appliedProvenance.elicited_from,
+          }
+        : {}),
       ...(parsed.unit !== undefined
         ? { unit: parsed.unit }
         : before.unit !== undefined

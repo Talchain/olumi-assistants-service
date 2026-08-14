@@ -253,6 +253,67 @@ describe('factor_value_edit — the verified panel apply', () => {
     expect(result.response.assistant_text).toContain("haven't changed anything");
   });
 
+  it('⭐ the attribution reaches the WIRE, not just the persisted graph', async () => {
+    // "Visible consequence" is a claim about what the owner SEES on the turn
+    // that produced it. The UI applicator spreads `graph_patch.after` into
+    // `node.data.observedState`, so a snapshot that stopped at
+    // value/raw_value/unit/cap would leave the canvas pill reading "AI
+    // estimate" until a reload — the capability would be real and invisible.
+    const event = payloadFor({
+      target_id: TARGET_ID,
+      value: GRACE_VALUE,
+      field: 'value',
+      applied_from: { round_id: ROUND_ID, participant_id: GRACE_ID },
+    }).event as never;
+
+    const result = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: GRACE_VALUE }),
+      event,
+      requestId: 'req-apply-wire',
+      persistedGraph: buildPersistedGraph(),
+      priorFacts: [],
+      collabStore: closedRoundStore(),
+    });
+
+    expect(result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+
+    const fact = result.handlerFacts.find((f) => f.fact_type === 'set_factor_value') as
+      | { result: { after: Record<string, unknown> } }
+      | undefined;
+    expect(fact, 'no set_factor_value fact was emitted').toBeDefined();
+    expect(fact?.result.after.source).toBe('panel_elicited');
+    expect(fact?.result.after.elicited_from).toEqual({
+      round_id: ROUND_ID,
+      participant_id: GRACE_ID,
+    });
+  });
+
+  it('the ORDINARY edit wire payload is byte-unchanged — no source on `after`', async () => {
+    // The paired negative. The widening is scoped to a verified apply; an
+    // ordinary edit's `after` must not gain a field, because the UI already
+    // stamps `user_override` locally and a changed payload would be a
+    // behaviour change bought for nothing. Without this, M-style mutation of
+    // the conditional into an unconditional stamp would go unnoticed.
+    const event = payloadFor({ target_id: TARGET_ID, value: 0.6, field: 'value' }).event as never;
+    const result = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: 0.6 }),
+      event,
+      requestId: 'req-plain-wire',
+      persistedGraph: buildPersistedGraph(),
+      priorFacts: [],
+      collabStore: {} as CollabStore,
+    });
+
+    expect(result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const fact = result.handlerFacts.find((f) => f.fact_type === 'set_factor_value') as
+      | { result: { after: Record<string, unknown> } }
+      | undefined;
+    expect(fact?.result.after.source).toBeUndefined();
+    expect(fact?.result.after.elicited_from).toBeUndefined();
+  });
+
   it("refuses attributing Ada's number to Grace — the attribution-swap forgery", async () => {
     const event = payloadFor({
       target_id: TARGET_ID,
