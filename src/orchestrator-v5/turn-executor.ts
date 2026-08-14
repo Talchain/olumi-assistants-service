@@ -374,6 +374,7 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
+import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import {
   pickLatestFlipClaimPosture,
   pickLatestFlipSummary,
@@ -1835,6 +1836,26 @@ export async function runTurnExecutor(
     return response;
   };
 
+  /**
+   * ⭐ HOISTED FOR THE FINALISER GUARDS — the same house pattern as
+   * `functionalAnswerText`, `proposedHandlerIdForOutcome` and
+   * `handlerEmittedMutatedGraph` directly above: state a finaliser guard must
+   * read is declared at THIS scope and assigned inside the `try`, because the
+   * guards are siblings of the try block, not children of it.
+   *
+   * These two were previously declared inside the try. Widening the
+   * DECLARATION (rather than mirroring the values into new variables) is
+   * deliberate — a mirror would need every assignment site to remember to
+   * update it, which is the hand-maintained-mirror defect this estate keeps
+   * paying for (CLAUDE.md trap 12). There is exactly one declaration of each,
+   * so no shadowing is introduced.
+   *
+   * Their initial values are the honest defaults: no facts yet, and an analysis
+   * source that is not request-supplied.
+   */
+  let handlerFactsForCommit: readonly HandlerFact[] = [];
+  let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
+
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
     // (nodes present but none mappable) fails the turn fast, before we
@@ -2121,7 +2142,6 @@ export async function runTurnExecutor(
 
     let analysisSummary: AnalysisResponseSummary | null = null;
     let analysisStalenessReason: string | null = null;
-    let analysisStateSource: 'request' | 'fallback' | 'absent' = 'absent';
     // Which shape produced the fragile edges / top drivers, for telemetry.
     // Set on the request path (below); null on the fallback/absent paths —
     // the fallback already reconciles both inside buildAnalysisFromPriorFacts.
@@ -7336,7 +7356,6 @@ export async function runTurnExecutor(
     // Buckets for the remaining steps. Populated conditionally per intent.
     let handlerOutcome: HandlerOutcome | null = null;
     let handlerIdForCommit: V5ActionType | null = null;
-    let handlerFactsForCommit: readonly HandlerFact[] = [];
     let composedOk: OlumiResponse | null = null;
     // V5 P0.2 — a flip-threshold proposal's pending action, emitted on a
     // what_would_flip turn and merged into the committed pending_actions.
@@ -11135,6 +11154,107 @@ export async function runTurnExecutor(
   }
 
   /**
+   * F6 — THE DEFAULTED-VALUE EGRESS INVARIANT. The FOURTH finaliser guard, and
+   * deliberately the LAST to run.
+   *
+   * ⭐ WHY IT MUST BE LAST. The three guards above all perform WHOLE-TEXT
+   * SUBSTITUTION — they can replace the answer with a leader-free rewrite, a
+   * neutral fallback, or a structural decline. A disclosure appended before any
+   * of them would simply be thrown away by the substitution, silently, with the
+   * telemetry still reporting that it had been added. Running last means this
+   * layer qualifies the text that actually ships.
+   *
+   * ⭐ WHY IT IS SAFE TO RUN AFTER THE FORBIDDEN-PHRASE GUARD, which is the
+   * ordering question that matters. That guard's own substitution constants
+   * make no analysis claim and carry no probability figure, so
+   * `isAnalysisBearing` returns false for them and this layer stands down by
+   * construction rather than by special-casing. The sentence this layer can add
+   * is a single reviewed constant built by the one owner of those words, so it
+   * cannot reintroduce a forbidden phrase or a leader claim.
+   *
+   * ⚠ IT READS THE FACT ITSELF RATHER THAN TAKING A THREADED PARAMETER, and
+   * that is the point. Whether the numbers rest on defaulted inputs is a
+   * property OF THE ANALYSIS, not of this turn — so every exit inherits the rule
+   * without a parallel argument on 44 return sites, and a dispatch path added
+   * tomorrow is covered the day it is written. A threaded parameter is exactly
+   * how the disclosure reached two composers and not the generic router.
+   *
+   * ⚠⚠ IT READS THE UNIFIED ARRAY, NOT BARE `context.prior_facts` — AND THE
+   * FIRST VERSION OF THIS GUARD GOT THAT WRONG (corrected in review, recorded
+   * rather than quietly fixed, CLAUDE.md trap 14).
+   *
+   * `context.prior_facts` is never mutated anywhere in this service (verified
+   * by sweep: no assignment, push or splice). An EXECUTE turn produces its OWN
+   * `run_analysis` fact in `handlerFactsForCommit`, which is NEWER than
+   * anything in `prior_facts` — this file names passing the bare array "the
+   * historical routed-turn bug" at the freshness call site for exactly this
+   * reason. Reading it bare meant:
+   *
+   *   · a FIRST analysis disclosed nothing at all — its own defaults were in
+   *     `handlerFactsForCommit`, which the guard never looked at;
+   *   · a RERUN qualified this turn's numbers with the PREVIOUS run's defaults.
+   *
+   * Both failures are silent and both point the wrong way. `[...handlerFacts
+   * ForCommit, ...context.prior_facts]` is the canonical basis used everywhere
+   * else in this function.
+   *
+   * ⭐ AND THE SAME-RUN GUARD, DELIBERATELY DUPLICATED RATHER THAN WIDENED —
+   * the identical condition, and the identical wording, as the four existing
+   * selector call sites (`rawRobustness`, `flipSummary`,
+   * `analysisLeadingOptionId`, and the composer-level `defaultedAssumptions`).
+   * `registry.ts` declares the contract those sites implement: this signal is
+   * read off the SAME `run_analysis` fact the robustness evidence is read from,
+   * under the SAME same-run guard.
+   *
+   * When the request body carries `analysis_state`, the numbers on screen
+   * describe the REQUEST run while any fact-sourced signal describes a PRIOR
+   * one. Pairing them would let the disclosure qualify a different run than the
+   * numbers it appears beside — or invent a caveat about a run that defaulted
+   * nothing, which this module's own header forbids. Standing down there is the
+   * pre-existing behaviour and makes no new claim.
+   */
+  function enforceDefaultedValueDisclosureGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    // SAME-RUN GUARD — see the note above. Never qualify request-sourced
+    // numbers with fact-sourced defaults.
+    if (analysisStateSource === 'request') return;
+
+    const defaulted = pickLatestDefaultedAssumptions([
+      ...handlerFactsForCommit,
+      ...context.prior_facts,
+    ]);
+    if (defaulted === null) return;
+
+    const applied = applyDefaultedValueEgress(assistantText, defaulted);
+    if (!applied.changed) return;
+
+    emit(TelemetryEvents.V5DefaultedValueEgressApplied, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      dispatch_path: dispatchPath,
+      defaulted_count: defaulted.count,
+      disclosure_added: applied.disclosureAdded,
+      suppressed_count: applied.suppressed.length,
+      duplicates_removed: applied.duplicatesRemoved,
+    });
+
+    response = {
+      ...response,
+      assistant_text: applied.text,
+    };
+    // Same classification-carry as the forbidden-phrase guard: this layer
+    // QUALIFIES an answer rather than replacing it, so a turn that was
+    // functional stays functional and a substantive answer stays substantive.
+    if (functionalAnswerText === assistantText) {
+      functionalAnswerText = applied.text;
+    }
+  }
+
+  /**
    * ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD finaliser-level guard.
    *
    * ═══════════════════════════════════════════════════════════════════════════
@@ -11541,6 +11661,11 @@ export async function runTurnExecutor(
     // claim with no committed mutation. Commit-anchored, precision-first, not
     // flag-gated. See `enforceStructuralSuccessClaimGuard`.
     enforceStructuralSuccessClaimGuard('turn_executor_finalise');
+    // F6 — LAST, after every whole-text substitution above, so the disclosure
+    // qualifies the text that actually ships rather than one a later guard
+    // discards. See `enforceDefaultedValueDisclosureGuard` for the ordering
+    // argument and for why it reads `context.prior_facts` directly.
+    enforceDefaultedValueDisclosureGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and

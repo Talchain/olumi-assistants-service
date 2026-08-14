@@ -532,6 +532,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5DecisionReviewFailed: "v5.decision_review.failed",
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
+        // F6 — the defaulted-value egress invariant fired on an analysis-bearing
+        // answer over a run the engine defaulted. Log-only (see debugOnlyEvents).
+        V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
         V5DeterministicValueUpdate: "v5.deterministic_value_update",
         V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
         V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
@@ -1502,6 +1505,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5InterceptedChipClarify,
         TelemetryEvents.V5InterceptedVagueEdit,
         TelemetryEvents.V5EgressForbiddenPhraseDetected,
+        // F6 — same posture as the forbidden-phrase guard directly above: a
+        // finaliser-level egress guard whose hits are diagnostic and logged
+        // locally, with no Datadog counter wired yet.
+        TelemetryEvents.V5DefaultedValueEgressApplied,
         TelemetryEvents.V5FrameStageNoBriefGuard,
         // ROADMAP 2.63 C1 — explicit-generate wire flag. Diagnostic-only
         // (structured logs are the operational signal; no Datadog metric
@@ -2193,6 +2200,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.false_success_rewritten",
         "v5.edit_graph.intercepted_chip_clarify",
         "v5.edit_graph.intercepted_vague_edit",
+        "v5.egress.defaulted_value_applied",
         "v5.egress.forbidden_phrase_detected",
         "v5.egress.leading_option_claim_withheld_violated",
         // The ENFORCING sibling of the line above: same subject, same

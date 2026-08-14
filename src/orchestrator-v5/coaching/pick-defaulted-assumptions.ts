@@ -5,18 +5,39 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * WHY THIS EXISTS — A DISCLOSURE THE PRODUCER ALREADY SHIPS AND NOBODY READ
  *
- * ISL/PLoT emit a top-level `enrichment.defaulted_assumptions[]` on every
- * analysis that ran on a value the user never supplied. Each entry carries a
- * `factor_label`, a `source` (`"value_defaulted"`) and a user-facing `note`.
- * The array is persisted BYTE-FOR-BYTE inside the `run_analysis` fact's
- * `result.enrichment`, so it is available on every later turn.
+ * ⚠⚠ THE SENTENCE THAT USED TO OPEN THIS BLOCK WAS FALSE, AND IT IS THE WHOLE
+ * F6 DEFECT — REPLACED RATHER THAN QUIETLY DELETED (CLAUDE.md trap 14). It
+ * read: "ISL/PLoT emit a TOP-LEVEL `enrichment.defaulted_assumptions[]` on
+ * every analysis…". PLoT has only ever emitted it NESTED:
  *
- * Measured on this tip (contrast-controlled sweep, CLAUDE.md trap 13e): the
- * string `defaulted_assumptions` had exactly ONE non-test occurrence in `src/`
- * and it was a COMMENT (`compose/withheld-claim-projection.ts:112`), while the
- * contrast keys `evidence_gaps` and `flip_thresholds` returned 14 and 35 files
- * respectively. The producer's disclosure was DARK: real absence of a reader,
- * not instrument blindness.
+ *     enrichment.decision_brief.defaulted_assumptions
+ *
+ * (PLoT `assembly/decision-brief.ts`, returned at `run.ts`; the key is NOT in
+ * `ISL_TOPLEVEL_ENRICHMENT_KEYS` and there is no wholesale spread that would
+ * hoist it). CEE persists PLoT's response BYTE-FOR-BYTE into the `run_analysis`
+ * fact's `result.enrichment` (`tools/handlers/run-analysis.ts`), so the nesting
+ * survives verbatim onto every later turn — which is exactly why the disclosure
+ * is available at all, and exactly which key it is under.
+ *
+ * The cost of the wrong path: this selector returned `null` on EVERY real
+ * payload from the day it shipped, so `defaulted_disclosure` was always `null`,
+ * the stability axis was never collapsed, and NO surface ever disclosed
+ * anything — while the suite that shipped it was fully green.
+ *
+ * ⭐ HOW A GREEN SUITE MISSED IT, because that is the reusable part. The
+ * original suite DID source from a real capture — it cites
+ * `fixtures/dsk-walk/session-a.enrichment.json:949` — but it copied the ARRAY
+ * ENTRY and then authored the ENVELOPE around it by hand
+ * (`enrichment: { defaulted_assumptions: … }`). Line 949 sits at four-space
+ * indentation INSIDE `decision_brief`. The entry was the producer's; the PATH
+ * was the author's model of the producer. CLAUDE.md trap 16-inverse, verbatim:
+ * *a fixture you wrote yourself is not evidence about the wire.* The guard
+ * against a repeat is `coaching/__tests__/defaulted-assumptions-producer-path.
+ * test.ts`, which loads the captured envelope VERBATIM and refuses to construct
+ * an enrichment object at all.
+ *
+ * Each entry carries a `factor_label`, a `source` (`"value_defaulted"`) and a
+ * user-facing `note`.
  *
  * The cost of that was measured on the deployed build. With
  * `analysis_ready.options[].status = needs_encoding` on the same payload, an
@@ -137,6 +158,38 @@ export function readDefaultedAssumptions(
   return { count, named: Object.freeze(named) };
 }
 
+/**
+ * Read the defaulted-value array off a persisted enrichment envelope.
+ *
+ * ⭐ TWO PATHS, ONE OF THEM REAL, AND DELIBERATELY NOT THREE. The nested path
+ * is the producer's and is tried FIRST; the top-level read is retained ONLY as
+ * a tolerated alternative, so that (a) if PLoT ever hoists the key into
+ * `ISL_TOPLEVEL_ENRICHMENT_KEYS` this reader keeps working across the deploy
+ * skew rather than going dark for a window, and (b) the historic facts written
+ * by any future hoist are still readable. Nothing else may be added here: a
+ * third speculative path would make this function unfalsifiable — it would
+ * "work" against any envelope anyone imagined, which is precisely the property
+ * that let the original defect ship.
+ *
+ * Exported so the producer-path suite can bind to THIS function by identity
+ * rather than re-implementing the traversal (CLAUDE.md trap 19).
+ */
+export function readDefaultedAssumptionsFromEnrichment(
+  enrichment: unknown,
+): DefaultedAssumptionsSignal | null {
+  const envelope = asObject(enrichment);
+  if (envelope === null) return null;
+
+  // The producer's real path.
+  const brief = asObject(envelope['decision_brief']);
+  const nested =
+    brief === null ? null : readDefaultedAssumptions(brief['defaulted_assumptions']);
+  if (nested !== null) return nested;
+
+  // Tolerated alternative — see the note above.
+  return readDefaultedAssumptions(envelope['defaulted_assumptions']);
+}
+
 export function pickLatestDefaultedAssumptions(
   priorFacts: readonly HandlerFact[],
 ): DefaultedAssumptionsSignal | null {
@@ -144,9 +197,7 @@ export function pickLatestDefaultedAssumptions(
   if (selected === null) return null;
   const fact = selected.fact;
   if (fact.fact_type !== 'run_analysis') return null;
-  const enrichment = asObject(fact.result.enrichment);
-  if (enrichment === null) return null;
-  return readDefaultedAssumptions(enrichment['defaulted_assumptions']);
+  return readDefaultedAssumptionsFromEnrichment(fact.result.enrichment);
 }
 
 /**
@@ -168,6 +219,24 @@ export function pickLatestDefaultedAssumptions(
  * computation; "you did not set X" would be a statement about the user, and is
  * also false where the drafter, not the user, owned the omission.
  */
+/**
+ * The disclosure's INVARIANT TAIL — the substring that is identical for every
+ * subject/count permutation the builder can produce.
+ *
+ * ⭐ IT EXISTS SO THE EGRESS LAYER CAN RECOGNISE THIS SENTENCE WITHOUT OWNING A
+ * COPY OF IT (CLAUDE.md trap 12: derive, don't mirror). `compose/
+ * defaulted-value-egress.ts` must answer "is the canonical disclosure already
+ * in this text?" to keep it to EXACTLY ONE. A hand-copied fragment there would
+ * drift the moment the words here change, and the drift is silent in the worst
+ * direction: the egress layer stops recognising the deterministic composers'
+ * disclosure and appends a SECOND one.
+ *
+ * `buildDefaultedAssumptionsDisclosure` is required to end with this string —
+ * pinned by the builder/tail agreement test, which fails if either side moves.
+ */
+export const DEFAULTED_DISCLOSURE_TAIL =
+  'so the comparison is illustrative until those values are set.';
+
 export function buildDefaultedAssumptionsDisclosure(
   signal: DefaultedAssumptionsSignal,
 ): string {
@@ -183,6 +252,6 @@ export function buildDefaultedAssumptionsDisclosure(
   const verb = count === 1 ? 'has' : 'have';
   return (
     `The analysis used a default value for ${subject}, which ${verb} no value set, `
-    + 'so the comparison is illustrative until those values are set.'
+    + DEFAULTED_DISCLOSURE_TAIL
   );
 }

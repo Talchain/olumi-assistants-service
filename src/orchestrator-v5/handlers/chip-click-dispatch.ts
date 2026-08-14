@@ -95,6 +95,8 @@ import {
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
+import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
+import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
@@ -995,6 +997,66 @@ export async function dispatchChipClickRunAnalysis(
           dispatch_path: 'chip_click_finalise',
         });
         response = { ...response, assistant_text: guarded.text };
+      }
+    }
+
+    /**
+     * F6 — THE DEFAULTED-VALUE EGRESS INVARIANT, DELIBERATELY DUPLICATED HERE.
+     *
+     * ⭐⭐ THE DUPLICATION IS THE POINT, AND THIS IS THE ONE EXIT THAT NEEDS IT.
+     * `DETERMINISTIC_CHIP_ACTION_TYPES` includes `run_analysis`, so the
+     * ANALYSIS-COMPLETION turn — the turn that ships "came out ahead in NN% of
+     * runs of this model" (`coaching/analysis-result-headline.ts`, reaching the
+     * user through the validation registry's confirmation template) — bypasses
+     * the turn executor entirely and therefore never meets
+     * `enforceDefaultedValueDisclosureGuard`. Without this block, the single
+     * most analysis-bearing sentence the product emits is the one sentence the
+     * invariant cannot see.
+     *
+     * The guard directly above is duplicated for exactly the same reason and
+     * says so; this follows its shape deliberately rather than inventing a
+     * second one.
+     *
+     * ⚠ WHY NOT MOVE THE WHOLE LAYER TO `sendFinalised200` INSTEAD — the
+     * alternative was measured and rejected on evidence, not on effort. Of the
+     * 20 route-level exits, NONE has a `run_analysis` fact in scope; a threaded
+     * parameter would be `null` at 19 of them, which is opt-out-by-omission
+     * wearing a required-parameter costume. Deriving it there from the
+     * memoised turn-claim-safety resolver would cover 18 — but NOT this one,
+     * because that resolver reads `context.prior_facts`, and on THIS turn the
+     * analysis has only just been produced: its fact is in `enrichedFacts`, not
+     * in prior_facts. That is the same execute-turn blind spot that made the
+     * executor guard read the wrong array. So the route-level relocation would
+     * add reach everywhere except the place the harm was actually measured.
+     *
+     * ⭐ AND IT COSTS NOTHING. `composedRunFact` is already in scope from the
+     * compose seam above — the enrichment is read straight off the fact this
+     * dispatch just produced, with no second DB read and no new parameter.
+     *
+     * Placed AFTER the forbidden-phrase guard (same ordering argument as the
+     * executor: whole-text substitutions run first, so this qualifies the text
+     * that actually ships) and BEFORE `commitDirectAnswer`, so the disclosed
+     * text is what gets persisted as well as what gets sent.
+     */
+    {
+      const defaulted =
+        composedRunFact !== undefined && composedRunFact.fact_type === 'run_analysis'
+          ? readDefaultedAssumptionsFromEnrichment(composedRunFact.result.enrichment)
+          : null;
+      if (defaulted !== null) {
+        const applied = applyDefaultedValueEgress(response.assistant_text ?? '', defaulted);
+        if (applied.changed) {
+          emit(TelemetryEvents.V5DefaultedValueEgressApplied, {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            dispatch_path: 'chip_click_finalise',
+            defaulted_count: defaulted.count,
+            disclosure_added: applied.disclosureAdded,
+            suppressed_count: applied.suppressed.length,
+            duplicates_removed: applied.duplicatesRemoved,
+          });
+          response = { ...response, assistant_text: applied.text };
+        }
       }
     }
 

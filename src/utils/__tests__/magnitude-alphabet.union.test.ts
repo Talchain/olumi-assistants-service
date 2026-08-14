@@ -400,6 +400,16 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // (ROADMAP 2.714).
     'cee/compound-goal/direction-gate.ts':
       'incidental — comment only; the file imports AMT/parseValue and spells no alphabet',
+    // F6 — INCIDENTAL, and for the SAME reason as the direction gate directly
+    // above: the only magnitude word is `£1.5 million` inside the comment
+    // explaining why the sentence splitter must not cut on a bare `[.!?]`. The
+    // module holds no magnitude list, performs no numeric parsing, and never
+    // multiplies anything — it enumerates sentences and matches stability
+    // vocabulary. Two files now carry this identical comment-only mention,
+    // which is a signal the decimal-split hazard is worth stating once in a
+    // shared place rather than a third time.
+    'orchestrator-v5/compose/defaulted-value-egress.ts':
+      'incidental — comment only; spells no alphabet and parses no numbers',
     // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
     // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a
     // magnitude vocabulary (`hundreds?|thousands?|millions?|billions?`). It is
