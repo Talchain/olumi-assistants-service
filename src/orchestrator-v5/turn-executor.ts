@@ -171,6 +171,10 @@ import {
   type TypedChipGraphView,
 } from './routing/typed-chip-mutation-proposal.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from './routing/answer-shape.js';
+import {
+  projectGroundedSelection,
+  type GroundedSelection,
+} from './context/grounded-selection.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
   composeStateQueryChip,
@@ -264,6 +268,7 @@ import {
   assembleContextPackWithSummary,
   CONTEXT_PACK_RECENT_TURNS_CAP,
   type ContextPack,
+  type ContextPackFocus,
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
@@ -627,6 +632,23 @@ export interface TurnExecutorRunResult {
    * the shape, so the sidecar can never contradict what the user reads.
    */
   answerShape?: AnswerShape;
+  /**
+   * SELECTION-AWARE ANSWERING (hop 4b) — WHICH MODEL ELEMENTS THIS TURN'S
+   * ANSWER WAS GROUNDED ON, surfaced for route-v2's `_grounded_selection`
+   * wire sidecar (same strip → validate → re-attach mechanic as
+   * `answerShape` above; never attached to `response` here).
+   *
+   * Projected from `ContextPack.focus` — the SAME object hop 4 put in the
+   * routing prompt — so the wire cannot disagree with what the model was
+   * given. Absent whenever the pack carried no focus (no selection, or an
+   * empty one) and whenever the turn FAILED: error copy is not an answer
+   * about the user's selected element, and a consumer highlighting the
+   * canvas off a failure turn would be claiming otherwise.
+   *
+   * See `context/grounded-selection.ts` for the question this field answers
+   * and, just as importantly, the one it does not.
+   */
+  groundedSelection?: GroundedSelection;
   /**
    * ROADMAP 1.132 (F1) — the SUBSTANTIVE/FUNCTIONAL classification of this
    * turn's answer, for route-v2's egress answer-shape synthesiser (see
@@ -1807,6 +1829,13 @@ export async function runTurnExecutor(
   // clarify / text_only turns, and whenever a post-capture rewrite diverges
   // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
+  // SELECTION-AWARE ANSWERING (hop 4b) — the `focus` section of the pack this
+  // turn's routing prompt actually carried, hoisted for the same reason as
+  // `capturedAnswerShape` above (finalizeRun, declared outside the try, reads
+  // it). Set at ONE place: immediately after the final ContextPack is built.
+  // Stays undefined on every early exit that never assembled a pack — which is
+  // the honest answer there, because no answer was grounded on anything.
+  let capturedFocus: ContextPackFocus | undefined;
   // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). The composed
   // text of the turn's FUNCTIONAL answer (clarify question / add-option or edit
   // receipt / decline / deterministic recovery), captured at EACH functional
@@ -2566,6 +2595,15 @@ export async function runTurnExecutor(
                   ),
                 }),
           };
+      // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE.
+      //
+      // Captured off the FINAL pack (the one `buildUserMessage` serialises),
+      // not off `assembledContextPack`, so a future withheld-claim projection
+      // that touched `focus` could never leave the sidecar describing a
+      // section the model was not given. Neutering this line is a mutant that
+      // MUST turn `grounded-selection-route-level.test.ts` red — a defended
+      // pure function with a dark call site is chronic failure #1.
+      capturedFocus = contextPack.focus;
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
         request_id: requestId,
@@ -11960,6 +11998,22 @@ export async function runTurnExecutor(
       // re-verified against the FINAL assistant_text just above — absent
       // whenever a post-capture rewriter diverged the text from the shape.
       ...(answerShapeForRun ? { answerShape: answerShapeForRun } : {}),
+      // SELECTION-AWARE ANSWERING (hop 4b) — which elements THIS answer was
+      // grounded on, for route-v2's `_grounded_selection` wire sidecar (never
+      // attached to `response` here).
+      //
+      // Two conditions, and the second one is the honesty condition. The pack
+      // having a `focus` says the prompt was grounded; `failureType !== null`
+      // says the user is reading ERROR COPY, which is not an answer about the
+      // element they selected. Emitting on a failure turn would have the
+      // canvas point at a node and say "this answer is about that" while the
+      // answer says the turn broke. Pinned as a discriminating pair.
+      ...(capturedFocus !== undefined && failureType === null
+        ? (() => {
+            const grounded = projectGroundedSelection(capturedFocus, context.selection);
+            return grounded !== null ? { groundedSelection: grounded } : {};
+          })()
+        : {}),
       // ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification for route-v2's
       // egress answer-shape synthesiser (see above + TurnExecutorRunResult.answerKind).
       // Always surfaced when a response was composed; route synthesises a shape

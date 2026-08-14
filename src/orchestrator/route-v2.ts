@@ -787,6 +787,13 @@ async function sendFinalised200(
      */
     readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
     /**
+     * SELECTION-AWARE ANSWERING (hop 4b) — the elements this turn's answer was
+     * grounded on, threaded from `run.groundedSelection` and attached to the
+     * wire body as `_grounded_selection` AFTER egress validation (same
+     * re-attach mechanic as `_answer_shape`). Never on the fallback envelope.
+     */
+    readonly groundedSelection?: import('../orchestrator-v5/context/grounded-selection.js').GroundedSelection;
+    /**
      * ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification driving the
      * egress answer-shape synthesiser below. EGRESS-DEFAULT INVERSION (fourth F1
      * fix): the synthesiser now shapes UNLESS `answerKind === 'functional'`, so
@@ -970,7 +977,20 @@ async function sendFinalised200(
     // below is the sole authority, and the strict `OlumiResponseSchema` must
     // not see an unknown key.
     const hasAnswerShape = '_answer_shape' in asRecord;
-    if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning && !hasAnswerShape) {
+    // Hop 4b — `_grounded_selection` is threaded via `ctx`, never body-attached
+    // by any dispatch path today. Stripped defensively anyway (same
+    // defence-in-depth posture as `_answer_shape`): the re-attach block below
+    // is the sole authority, and the strict `OlumiResponseSchema` must not see
+    // an unknown key.
+    const hasGroundedSelection = '_grounded_selection' in asRecord;
+    if (
+      !hasTimings &&
+      !hasTrace &&
+      !hasContextSummary &&
+      !hasReasoning &&
+      !hasAnswerShape &&
+      !hasGroundedSelection
+    ) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
     const cloned = { ...asRecord };
@@ -981,6 +1001,7 @@ async function sendFinalised200(
     delete cloned._context_summary;
     delete cloned._reasoning;
     delete cloned._answer_shape;
+    delete cloned._grounded_selection;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -1480,6 +1501,41 @@ async function sendFinalised200(
       projected = withoutShape;
     }
     wireBody = finaliseV5Response(projected, ctx);
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SELECTION-AWARE ANSWERING (hop 4b) — re-attach `_grounded_selection`.
+  //
+  // UNCONDITIONAL on the success path (no flag, no debug token): this is
+  // product content, and Paul's standing ruling is to ship capabilities ON.
+  // The fallback envelope never carries it — an egress-violation body is not
+  // an answer about the user's selected element. An upstream body-attach was
+  // already dropped by the strip step above, so `ctx.groundedSelection` is the
+  // sole authority.
+  //
+  // WHY HERE, and it is a deliberate position, not the family's habit:
+  //   · AFTER the claim-safety wire gate, because that gate's `withoutShape`
+  //     destructure and re-finalise rebuild the body, and a sidecar attached
+  //     upstream would survive only by accident.
+  //   · BEFORE the Layer-3 scan, which is pinned by
+  //     `single-pass-egress-byte-identity.test.ts` to sit after the LAST
+  //     `wireBody` write. This block is that last write; the scan still reads
+  //     the exact object handed to `reply.send`.
+  //
+  // NO TIE-CHECK, and the reason is the whole point of the field's docstring:
+  // `_answer_shape` needs one because it RECONSTRUCTS `assistant_text` and can
+  // therefore describe text the user never sees. This sidecar describes the
+  // answer's CONTEXT — which elements the prompt was grounded on — a fact
+  // fixed before the model ever replied and unaffected by any prose rewrite
+  // downstream of it. A claim-safety edit changes what the answer SAYS about
+  // the element; it does not change WHICH element the answer is about.
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (egress.ok && ctx.groundedSelection) {
+    const augmented: OlumiResponseWithDebugFields = {
+      ...wireBody,
+      _grounded_selection: ctx.groundedSelection,
+    };
+    // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
+    wireBody = finaliseV5Response(augmented, ctx);
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
@@ -5217,6 +5273,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
       // ctx docs above).
       ...(run.answerShape ? { answerShape: run.answerShape } : {}),
+      // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE'S SECOND
+      // HALF. `projectGroundedSelection` and the executor capture can both be
+      // fully green while the capability is DARK if this line is missing:
+      // that is chronic failure #1, one dispatch-thread further down than the
+      // hop-4 line it mirrors. Neutering it MUST turn the route-level wire
+      // test red.
+      ...(run.groundedSelection ? { groundedSelection: run.groundedSelection } : {}),
       // ROADMAP 1.132 (F1): thread the turn-executor's declared answer kind so
       // the egress synthesiser shapes ONLY substantive answers (coach / converse /
       // text_only model prose AND the deterministic post-analysis advice-gate /
