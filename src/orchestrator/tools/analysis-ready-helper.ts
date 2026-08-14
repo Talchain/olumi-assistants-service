@@ -332,7 +332,7 @@ export function computeStructuralReadiness(
 export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
 
 /**
- * Stamp a REFUSED analyse turn onto a structural readiness payload.
+ * Build the typed readiness state for a REFUSED analyse turn.
  *
  * WHY THIS EXISTS (witnessed on staging 2026-08-13, golden journey EXT-2):
  * when the analyse handler refuses — the mixed-scale gate, the baseline-scale
@@ -349,46 +349,49 @@ export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
  * (which claims to be the single source of truth in its own header) and
  * `computeStructuralReadiness` above (which is the one on the live V5 wire
  * path). A refusal helper anywhere else would be a THIRD. It is deliberately
- * a thin transform over this module's own output so the two concepts cannot
- * drift apart.
+ * the same module so the two concepts cannot drift apart.
  *
- * ⚠ WHAT IT DELIBERATELY DOES NOT TOUCH (ROADMAP 2.1134(a); the
- * reconciliation the #940 lane refused). The PAYLOAD-level status and the
- * PER-OPTION statuses answer different questions:
+ * ⚠⚠ THE SHAPE IS A PRESENT-BUT-EMPTY CARRIER, AND THAT IS A CORRECTION.
+ * The first version of this helper CARRIED the real structural options onto
+ * the refusal, reasoning that an empty block would discard consumer state.
+ * An adversarial review measured what that does on the DEPLOYED UI: real
+ * options flip `DecisionOverviewCard` from `unassessed` to `needs_input`,
+ * which auto-expands "Olumi needs a little more from you" — with no
+ * `user_questions` — mis-describing a SCALE refusal as a framing gap, and the
+ * payload is then echoed back to CEE and persisted to sessionStorage.
+ * Shipping a new false surface in order to deliver an honest wire field is
+ * the wrong trade. This is the shape `synthesiseFreshnessOnlyAnalysisReady`
+ * already puts on the wire and the UI already handles.
  *
- *   · `options[].status` — "do we have user-warranted values for this option?"
- *   · payload `status`   — "did this turn's analyse attempt proceed?"
+ * ⚠ ROADMAP 2.1134(a), DERIVED AT THE REGISTER BYTES rather than paraphrased,
+ * because the first version cited it for something it does not say. The row
+ * withdraws a claimed defect between `analysis_ready.options[].status` (CEE:
+ * "do we have user-warranted values?") and `enrichment.option_comparison[]
+ * .status` (ISL/PLoT: "did this arm compute?"), and its ruling is *"Name them
+ * apart; do not reconcile"* — forcing agreement would have broken
+ * `isRecommendableOption`. It says NOTHING about refusal turns and does NOT
+ * require options to be carried on one. A refusal turn produces no
+ * `option_comparison` and names no leader, so there is nothing to reconcile
+ * and `isRecommendableOption` has nothing to read. The row's genuine
+ * requirement survives here as a stronger property: this function writes NO
+ * per-option status at all.
  *
- * Only the payload level is overwritten. Making them agree would trade a
- * wrong-value defect for a missing-leader one (`isRecommendableOption` reads
- * the per-option answer), and CLAUDE.md trap 21 is precisely about two
- * authorities that look inconsistent while correctly answering two questions.
+ * ⚠ `options` and `goal_node_id` are PRESENT-but-empty, never dropped. Both
+ * are REQUIRED at the boundary (`@talchain/schemas` `OlumiResponseSchema`
+ * declares `options: z.array(z.unknown())` and `goal_node_id: z.string()`),
+ * so omitting either fails egress validation and destroys the whole turn.
+ * Pinned by a test.
  *
- * The options array is CARRIED, not emptied. An empty blocked carrier would
- * replace whatever readiness a consumer already holds with nothing — the
- * product decision `FRESHNESS_ONLY_SYNTHESIS_REASONS` explicitly declines to
- * take. Carrying the real, still-true per-option answers costs nothing and
- * loses nothing.
- *
- * @param structural   Readiness for the graph this turn saw, or `undefined`
- *                     when none could be computed (no goal node, no graph).
- *                     Undefined yields the minimal typed carrier rather than
- *                     an omission — "never absent" is the invariant.
  * @param blockedReason Stable, SPECIFIC code. Callers derive it with
  *                     `blockedReasonForHandlerFailure`, which cannot return
  *                     an empty or generic value.
  */
-export function applyAnalysisRefusal(
-  structural: AnalysisReadyPayload | undefined,
+export function buildAnalysisRefusalReadiness(
   blockedReason: string,
 ): AnalysisReadyPayload {
-  const base: AnalysisReadyPayload = structural ?? {
+  return {
     options: [],
     goal_node_id: '',
-    status: ANALYSIS_READY_BLOCKED_STATUS,
-  };
-  return {
-    ...base,
     status: ANALYSIS_READY_BLOCKED_STATUS,
     blocked_reason: blockedReason,
   };

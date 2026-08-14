@@ -2503,6 +2503,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
             analysisReady: cc.analysisReady,
+            // ROADMAP 2.1091 D2 — threaded exactly as the `ok` exit below
+            // does. Omitting it made `attachComputedAt` stamp a block with no
+            // freshness fields, and the deployed UI reads their absence as
+            // "cannot confirm whether this analysis is current" — a refusal
+            // turn would have degraded the freshness strip as a side effect.
+            freshness: cc.freshness,
             graph: cc.graph,
             // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
             // the permission belongs to the fact this response DISPLAYS, not to

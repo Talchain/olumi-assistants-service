@@ -126,16 +126,30 @@ function recoveredOlumiResponse() {
 /**
  * ROADMAP 2.1091 / golden-journey EXT-2 — the typed refusal the dispatcher
  * now returns on `handler_recovered`. Shaped exactly as
- * `applyAnalysisRefusal` builds it.
+ * `buildAnalysisRefusalReadiness` builds it.
  */
 function blockedReadiness(blockedReason: string) {
   return {
-    options: [
-      { option_id: 'opt_a', label: 'Move to HubSpot', status: 'ready', interventions: { fac_1: 0.7 } },
-    ],
-    goal_node_id: 'goal_1',
+    // PRESENT-but-empty: both keys are REQUIRED at the boundary, and carrying
+    // real option rows on a refusal was measured flipping the deployed
+    // DecisionOverviewCard into a false "needs_input" state. See
+    // `buildAnalysisRefusalReadiness`.
+    options: [] as unknown[],
+    goal_node_id: '',
     status: 'blocked' as const,
     blocked_reason: blockedReason,
+  };
+}
+
+/** ROADMAP 2.1091 D2 — the derivation the dispatcher now returns alongside it. */
+function staleFreshness() {
+  return {
+    freshness: 'stale' as const,
+    reason: 'graph_hash_mismatch',
+    selected_fact_index: 0,
+    graph_hash_at_run: 'aaaa111122223333',
+    current_graph_hash: 'bbbb444455556666',
+    computed_at: '2026-08-13T19:07:44.000Z',
   };
 }
 
@@ -179,6 +193,7 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
       commitPerformed: false,
       causeKind: 'options_not_configured',
       analysisReady: blockedReadiness('options_not_configured'),
+      freshness: staleFreshness(),
       graph: null,
     });
 
@@ -216,6 +231,7 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
       commitPerformed: false,
       causeKind: 'analysis_not_ready',
       analysisReady: blockedReadiness('mixed_scale_unresolved'),
+      freshness: staleFreshness(),
       graph: null,
     });
 
@@ -234,16 +250,36 @@ describe('route-v2 chip-click run_analysis — recoverable outcome → wire stat
       status?: string;
       blocked_reason?: string;
       options?: unknown[];
+      goal_node_id?: string;
       computed_at?: string;
+      freshness?: string;
+      freshness_reason?: string;
+      graph_hash_at_run?: string;
+      current_graph_hash?: string;
     };
     expect(ar.status).toBe('blocked');
     // Bound by IDENTITY to the reason the producer declared — not to "some
     // non-empty string", which a generic fallback would also satisfy.
     expect(ar.blocked_reason).toBe('mixed_scale_unresolved');
-    // Not the empty carrier: the real options ride along.
-    expect(Array.isArray(ar.options) && ar.options.length).toBe(1);
+    // PRESENT-but-empty carrier. Both keys must survive to the wire: they are
+    // REQUIRED at the boundary and dropping either destroys the turn.
+    expect(Object.keys(ar)).toContain('options');
+    expect(Object.keys(ar)).toContain('goal_node_id');
+    expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
     // The finaliser — and only the finaliser — stamps computed_at.
     expect(typeof ar.computed_at).toBe('string');
+
+    // ROADMAP 2.1091 D2 — the freshness fields must reach the wire. Without
+    // them the deployed UI replaces a correct verdict with "cannot confirm
+    // whether this analysis is current", so a refusal turn would degrade the
+    // freshness strip as a side effect of reporting readiness honestly.
+    expect(ar.freshness).toBe('stale');
+    expect(ar.freshness_reason).toBe('graph_hash_mismatch');
+    expect(ar.graph_hash_at_run).toBe('aaaa111122223333');
+    expect(ar.current_graph_hash).toBe('bbbb444455556666');
+    // computed_at comes from the SELECTED FACT, not wire-emit time.
+    expect(ar.computed_at).toBe('2026-08-13T19:07:44.000Z');
   });
 
   it('handler_failure (fatal) → HTTP 500 unchanged (mapping stays outcome-gated)', async () => {

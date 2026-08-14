@@ -31,6 +31,7 @@ import type {
 } from '../../adapters/llm/types.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { isRecoverableHandlerCause } from '../compose/recoverable-handler-causes.js';
 import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 
 let appendShouldThrow: Error | null = null;
@@ -148,6 +149,67 @@ function mixedScaleRegistry(): HandlerRegistry {
   return new Map([['run_analysis', handler]]);
 }
 
+/**
+ * An `add_constraint` proposal that passes validation, so the handler is
+ * actually INVOKED and gets the chance to throw. Shape copied from
+ * `journey-3-and-6-envelope-contract.test.ts`, which drives the same handler
+ * through the same executor.
+ */
+const PROPOSAL_ADD_CONSTRAINT = {
+  intent_class: 'execute',
+  action: {
+    handler_id: 'add_constraint',
+    entity: {
+      id: 'fac_licence',
+      kind: 'node',
+      resolution_status: 'resolved',
+      resolution_method: 'id_match',
+    },
+    parameters: [
+      { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+      { name: 'value', value: 50000, source: 'user_explicit' },
+      { name: 'unit', value: '£', source: 'user_explicit' },
+    ],
+    cited_context_fields: ['graph.nodes'],
+  },
+};
+
+/**
+ * The twin's own payload. A graph-mutating handler executes only on an
+ * affirmative MUTATION WARRANT (INV-1), so "run the analysis" would leave
+ * `add_constraint` held for confirmation and the handler would never be
+ * invoked — the test would then pass while asserting nothing. This message
+ * carries the warrant, and `nonAnalyseHandlerInvoked` proves it worked.
+ */
+const CONSTRAINT_PAYLOAD = makeMessagePayload({
+  turn_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  scenario_id: SCENARIO_ID,
+  message: "We can't spend more than £50,000 on the Annual CRM Licence Cost.",
+  turn_class: 'frame',
+  stage: 'analyse',
+});
+
+/** Observability for the twin's precondition assertion. */
+let nonAnalyseHandlerInvoked = false;
+
+/**
+ * A NON-analyse handler that throws a cause which IS on
+ * `RECOVERABLE_HANDLER_CAUSES` — exactly what `d1-shared/error-boundary.ts`
+ * produces for a `PARAMETER_INVALID` D1 error
+ * (`CAUSE_BY_D1_CODE.PARAMETER_INVALID === 'parameter_invalid_at_execute'`).
+ */
+function nonAnalyseRecoverableRegistry(): HandlerRegistry {
+  const handler: HandlerFn = async () => {
+    nonAnalyseHandlerInvoked = true;
+    throw new HandlerInvocationFailedError('test-induced parameter failure', {
+      cause_kind: 'parameter_invalid_at_execute',
+      retryable: false,
+      details: { handler_id: 'add_constraint', specific_issue: 'simulated' },
+    });
+  };
+  return new Map([['add_constraint', handler]]) as unknown as HandlerRegistry;
+}
+
 /** A successful handler — the CONTROL arm. */
 function okRegistry(): HandlerRegistry {
   const handler: HandlerFn = async () => ({
@@ -164,6 +226,7 @@ let errorSpy: ReturnType<typeof vi.spyOn> | null = null;
 beforeEach(() => {
   appendCalls.length = 0;
   appendShouldThrow = null;
+  nonAnalyseHandlerInvoked = false;
   setTestSink(() => {});
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
@@ -201,15 +264,20 @@ describe('EXT-2 / 2.1091 — the routed analyse arm must not report READY on a r
     );
   });
 
-  // ⚠ HONEST LABEL: this one is NOT a RED — it passed at pristine `dbd012eb`
-  // too, because the pristine payload also carried these options untouched.
-  // It is a NON-RECONCILIATION FENCE: it exists to RED if a future change
-  // "tidies up" by pushing the payload-level refusal down onto the per-option
-  // statuses, which is the trade ROADMAP 2.1134(a) refused. Recorded as a
-  // fence rather than dressed up as a RED (CLAUDE.md trap 13b — a guard that
-  // agrees with itself is not evidence, and mislabelling one is how the next
-  // reader stops checking).
-  it('FENCE: the refused turn keeps the real options and does NOT reconcile the per-option statuses (ROADMAP 2.1134(a))', async () => {
+  /**
+   * ROADMAP 2.1134(a), derived at the register bytes: its ruling is "name them
+   * apart; do not reconcile" — CEE's per-option readiness must never be forced
+   * to agree with PLoT/ISL's `option_comparison`. The refusal payload honours
+   * that in the strongest available form: it carries NO option rows, so there
+   * is no per-option status for a later "tidy-up" to reconcile.
+   *
+   * ⚠ HONEST LABEL: this is a FENCE, not a RED — it also passed at pristine
+   * `dbd012eb` (which carried no options either, because it emitted no block
+   * at all). It exists to RED if a future change starts writing option rows
+   * onto a refusal, which is the shape an adversarial review measured flipping
+   * the deployed `DecisionOverviewCard` into a false "needs_input" state.
+   */
+  it('FENCE: the refused routed turn writes NO per-option status — present-but-empty carrier (ROADMAP 2.1134(a))', async () => {
     const routingAdapter = mockRoutingAdapter(async () =>
       mkToolUseResult(PROPOSAL_RUN_ANALYSIS, 'Routing…'),
     );
@@ -221,12 +289,10 @@ describe('EXT-2 / 2.1091 — the routed analyse arm must not report READY on a r
     });
 
     const ar = result.analysisReady!;
-    expect(ar.goal_node_id).toBe('goal_1');
-    expect(ar.options.map((o) => o.option_id).sort()).toEqual(['opt_a', 'opt_b']);
-    // The per-option question ("do we have user-warranted values?") is
-    // answered independently and stays `ready`. Only the payload-level status
-    // carries this turn's refusal.
-    expect(ar.options.every((o) => o.status === 'ready')).toBe(true);
+    expect(Object.keys(ar)).toContain('options');
+    expect(Object.keys(ar)).toContain('goal_node_id');
+    expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
   });
 
   it('CONTROL: an ADMITTED routed analyse turn still reports the structural status, never blocked', async () => {
@@ -242,6 +308,55 @@ describe('EXT-2 / 2.1091 — the routed analyse arm must not report READY on a r
 
     expect(result.analysisReady).toBeDefined();
     expect(result.analysisReady!.status).toBe('ready');
+    expect((result.analysisReady as { blocked_reason?: string }).blocked_reason).toBeUndefined();
+  });
+
+  /**
+   * ⭐ D1 — THE OPPOSITE-DIRECTION TWIN, and it is the reason this file exists
+   * in its current form.
+   *
+   * TurnExecutor's recoverable-handler catch is GENERIC across every
+   * registered handler. `d1-shared/error-boundary.ts` maps four D1 error codes
+   * onto RECOVERABLE_HANDLER_CAUSES, so `set_factor_value`, `add_constraint`
+   * and `adjust_edge_strength` all reach it. The first version of the 2.1091
+   * fix gated on `isRecoverableHandlerCause` ALONE and never consulted
+   * `proposedHandlerId` — so a failed FACTOR EDIT emitted
+   * `analysis_ready.status: 'blocked'` with
+   * `blocked_reason: 'parameter_invalid_at_execute'`: the product claiming the
+   * ANALYSIS was blocked because an EDIT failed. A defect manufactured by the
+   * very change meant to stop it lying about analysis state. Reproduced by an
+   * adversarial review against a base-vs-head contrast.
+   *
+   * Every corpus case gets its opposite-direction twin (CLAUDE.md trap 22b):
+   * RED-R1 above proves the analyse handler's refusal IS marked; this proves a
+   * NON-analyse handler's refusal is NOT. Together they bind the gate to the
+   * named handler rather than to "any recoverable failure". The mutant that
+   * removes the `proposedHandlerId === ANALYSE_HANDLER_ID` gate REDs this test
+   * and leaves RED-R1 green — a discriminating pair on the handler axis.
+   */
+  it('D1: a NON-analyse handler failure on the same recoverable cause does NOT touch analysis_ready', async () => {
+    const routingAdapter = mockRoutingAdapter(async () =>
+      mkToolUseResult(PROPOSAL_ADD_CONSTRAINT, 'Adding a limit…'),
+    );
+
+    const result = await runTurnExecutor(CONSTRAINT_PAYLOAD, 'req-ext2-d1-twin', {
+      routingAdapter,
+      handlerRegistry: nonAnalyseRecoverableRegistry(),
+      graphState: READY_GRAPH,
+    });
+
+    // PRECONDITIONS PINNED IN-TEST (CLAUDE.md trap 13b) — without these the
+    // test could pass because the handler was never invoked, or because the
+    // failure was fatal rather than recoverable, and would then be asserting
+    // nothing about the gate.
+    expect(nonAnalyseHandlerInvoked).toBe(true);
+    expect(result.telemetry.failure_type).toBeNull();
+    expect(result.telemetry.turn_class).toBe('direct_answer');
+    expect(isRecoverableHandlerCause('parameter_invalid_at_execute')).toBe(true);
+
+    // THE ASSERTION: an edit failure is not an analysis refusal.
+    expect(result.analysisReady).toBeDefined();
+    expect(result.analysisReady!.status).not.toBe('blocked');
     expect((result.analysisReady as { blocked_reason?: string }).blocked_reason).toBeUndefined();
   });
 });

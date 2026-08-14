@@ -592,7 +592,7 @@ export interface GraphPatchBlockData {
     /**
      * ROADMAP 2.1091 / golden-journey EXT-2 — WHY this turn's analysis was
      * refused, as a stable machine-readable code. Present if and only if
-     * `status === 'blocked'`; written ONLY by `applyAnalysisRefusal` in
+     * `status === 'blocked'`; written ONLY by `buildAnalysisRefusalReadiness` in
      * `src/orchestrator/tools/analysis-ready-helper.ts` (the live readiness
      * writer — see ROADMAP 2.1135 on the twin that is NOT on the wire path).
      *

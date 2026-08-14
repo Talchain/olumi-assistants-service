@@ -151,6 +151,28 @@ function normaliseDetails(raw: unknown): Readonly<HandlerFailureDetails> {
 }
 
 /**
+ * ROADMAP 2.1091 / golden-journey EXT-2 — the handler whose failure IS an
+ * analysis refusal.
+ *
+ * ⚠ THIS CONSTANT EXISTS BECAUSE ITS ABSENCE SHIPPED A DEFECT. TurnExecutor's
+ * recoverable-handler catch is GENERIC across every registered handler, and
+ * `d1-shared/error-boundary.ts` maps four D1 error codes onto recoverable
+ * causes. A first version of the 2.1091 fix gated only on
+ * `isRecoverableHandlerCause`, so a failed `set_factor_value` /
+ * `add_constraint` / `adjust_edge_strength` emitted
+ * `analysis_ready.status: 'blocked'` — the product claiming the ANALYSIS was
+ * blocked because a CONSTRAINT EDIT failed.
+ *
+ * Scope is `run_analysis` only. The explain family (`explain_results`,
+ * `what_would_flip`, `explain_from_structure`) READS an analysis rather than
+ * running one, so a refusal there says nothing about analysis readiness. This
+ * is also exactly the chip-click arm's scope — `DETERMINISTIC_CHIP_ACTION_TYPES`
+ * has one member — and a test asserts the two agree by DERIVATION, so a future
+ * widening of the chip whitelist REDs here rather than drifting silently.
+ */
+export const ANALYSE_HANDLER_ID = 'run_analysis';
+
+/**
  * ROADMAP 2.1091 / golden-journey EXT-2 — the SPECIFIC, machine-readable
  * reason a refused analyse turn reports on `analysis_ready.blocked_reason`.
  *

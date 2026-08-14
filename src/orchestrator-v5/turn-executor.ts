@@ -80,7 +80,7 @@ import {
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
 import {
-  applyAnalysisRefusal,
+  buildAnalysisRefusalReadiness,
   computeStructuralReadiness,
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
@@ -232,6 +232,7 @@ import { deriveBriefTextSeed } from './session/derive-brief-seed.js';
 import { randomUUID } from 'node:crypto';
 import type { ProposalAction } from './routing/types.js';
 import {
+  ANALYSE_HANDLER_ID,
   blockedReasonForHandlerFailure,
   HandlerInvocationFailedError,
   HandlerResultInvalidError,
@@ -8682,18 +8683,31 @@ export async function runTurnExecutor(
           // nothing at all), and it is the more dangerous half: present-and-
           // false beats absent for how confidently a consumer acts on it.
           //
-          // The refusal is applied through the SAME live readiness writer the
-          // chip arm uses (`applyAnalysisRefusal`), with the SAME reason
-          // derivation (`blockedReasonForHandlerFailure`). One authority, two
-          // arms — CLAUDE.md trap 21 is exactly the case of two paths fixing
-          // one harm a day apart and re-opening it between them.
+          // ⚠⚠ SCOPED TO THE ANALYSE HANDLER, AND THAT IS A CORRECTION. The
+          // first version of this hunk gated on `isRecoverableHandlerCause`
+          // ALONE and never consulted `proposedHandlerId`. This catch is
+          // GENERIC: `d1-shared/error-boundary.ts` maps four D1 error codes
+          // onto recoverable causes, so a failed `set_factor_value`,
+          // `add_constraint` or `adjust_edge_strength` — none of which run an
+          // analysis — reached this line. A failed CONSTRAINT EDIT therefore
+          // emitted `analysis_ready.status: 'blocked'` with
+          // `blocked_reason: 'parameter_invalid_at_execute'`: a false claim
+          // that the ANALYSIS is blocked, manufactured by the very change
+          // meant to stop the product lying about analysis state. Reproduced
+          // by an adversarial review against a base-vs-head contrast.
           //
-          // Per-option statuses are untouched (ROADMAP 2.1134(a)): they answer
-          // "do we have user-warranted values?", not "did this run proceed?".
-          analysisReadyForTurn = applyAnalysisRefusal(
-            analysisReadyForTurn,
-            blockedReasonForHandlerFailure(error),
-          );
+          // The gate is now the analyse handler by IDENTITY, which is also
+          // exactly the chip arm's scope (`DETERMINISTIC_CHIP_ACTION_TYPES`
+          // has one member, `run_analysis`) — so the two arms agree on WHEN a
+          // refusal is an analysis refusal, not merely on how to describe one.
+          // The explain-family handlers (`explain_results`, `what_would_flip`,
+          // `explain_from_structure`) READ an analysis rather than run one, so
+          // their failures are deliberately out of scope too.
+          if (proposedHandlerId === ANALYSE_HANDLER_ID) {
+            analysisReadyForTurn = buildAnalysisRefusalReadiness(
+              blockedReasonForHandlerFailure(error),
+            );
+          }
 
           response = recovered.response;
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: handler-recovery

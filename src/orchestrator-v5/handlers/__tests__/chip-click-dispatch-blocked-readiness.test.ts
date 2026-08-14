@@ -38,8 +38,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { RECOVERABLE_HANDLER_CAUSES } from '../../compose/recoverable-handler-causes.js';
+import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { ANALYSE_HANDLER_ID } from '../../tools/handler-errors.js';
+import { DETERMINISTIC_CHIP_ACTION_TYPES } from '../chip-click-dispatch.js';
 import {
   HandlerInvocationFailedError,
   type HandlerInvocationFailedCause,
@@ -270,14 +275,33 @@ describe('EXT-2 / 2.1091 — the mixed-scale analyse arm emits a typed readiness
     });
 
     if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
-    const ar = out.analysisReady!;
+    const ar = out.analysisReady;
     expect(ar.status).toBe('blocked');
     // Bound by IDENTITY to the producer's own reason_code, not by a value
     // predicate another reason could satisfy (CLAUDE.md trap 19).
     expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
   });
 
-  it('RED-3: the blocked payload keeps the real options — it is not the empty carrier that would wipe UI readiness state', async () => {
+  /**
+   * ⚠ THIS TEST WAS INVERTED BY AN ADVERSARIAL REVIEW, AND THE INVERSION IS
+   * THE POINT. It used to assert the refusal CARRIED the real options. The
+   * review measured what that does on the DEPLOYED UI: real options flip
+   * `DecisionOverviewCard` from `unassessed` to `needs_input`, auto-expanding
+   * "Olumi needs a little more from you" with no `user_questions` — a SCALE
+   * refusal mis-described as a framing gap, then echoed back to CEE and
+   * persisted to sessionStorage. Shipping a new false surface in order to
+   * deliver an honest wire field is the wrong trade.
+   *
+   * ROADMAP 2.1134(a), read at the REGISTER BYTES rather than paraphrased,
+   * does NOT require options on a refusal turn. It withdraws a claimed defect
+   * between CEE's `analysis_ready.options[].status` and PLoT/ISL's
+   * `enrichment.option_comparison[].status` and rules "name them apart; do not
+   * reconcile". A refusal turn produces no `option_comparison` and names no
+   * leader, so `isRecommendableOption` has nothing to read. The row's genuine
+   * requirement survives as the STRONGER property asserted here: the refusal
+   * writes no per-option status at all, because it carries no option rows.
+   */
+  it('RED-3: the refusal is a PRESENT-but-empty carrier — it invents no option rows and writes no per-option status', async () => {
     handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
 
@@ -287,23 +311,90 @@ describe('EXT-2 / 2.1091 — the mixed-scale analyse arm emits a typed readiness
     });
 
     if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
-    const ar = out.analysisReady!;
-    expect(ar.goal_node_id).toBe('goal_revenue');
-    expect(ar.options.map((o) => o.option_id).sort()).toEqual([
-      'opt_hubspot',
-      'opt_migrate',
-      'opt_stay',
-    ]);
-    // ROADMAP 2.1134(a): the PER-OPTION question is untouched. `opt_migrate`
-    // is wired to a factor with no encoded value, so it stays
-    // `needs_encoding`; the two configured options stay `ready`. Only the
-    // PAYLOAD-level status carries the refusal.
-    const byId = new Map(ar.options.map((o) => [o.option_id, o.status]));
-    expect(byId.get('opt_hubspot')).toBe('ready');
-    expect(byId.get('opt_stay')).toBe('ready');
-    expect(byId.get('opt_migrate')).toBe('needs_encoding');
+    const ar = out.analysisReady;
+
+    // PRESENT, not dropped — both are REQUIRED at the boundary, and omitting
+    // either fails egress validation and destroys the whole turn.
+    expect(Object.keys(ar)).toContain('options');
+    expect(Object.keys(ar)).toContain('goal_node_id');
+    expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
+
+    // PRECONDITION PINNED IN-TEST (CLAUDE.md trap 13b): the snapshot graph
+    // really does have three options and a goal node, so the empty carrier is
+    // a deliberate choice and not an artefact of an empty fixture.
+    expect(computeStructuralReadiness(ADDED_OPTION_GRAPH)!.options).toHaveLength(3);
+
     // The dispatcher never stamps computed_at — that is the finaliser's job.
     expect((ar as { computed_at?: string }).computed_at).toBeUndefined();
+  });
+
+  /**
+   * The keys are PRESENT-but-empty for a hard reason, and this test is that
+   * reason. `@talchain/schemas`' `OlumiResponseSchema` declares
+   * `analysis_ready` with REQUIRED `options` and `goal_node_id`; dropping
+   * either fails `safeParse` and takes the whole turn down. Asserted against
+   * the REAL boundary schema, with positive controls proving the probe can
+   * see a failure at all.
+   */
+  it('BOUNDARY: the refusal payload validates against the real OlumiResponseSchema — and dropping either key does NOT', async () => {
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-boundary',
+    });
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+
+    const envelope = {
+      response_version: 2 as const,
+      assistant_text: 'x',
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: 'analyse' as const,
+      analysis_ready: out.analysisReady as Record<string, unknown>,
+    };
+    expect(OlumiResponseSchema.safeParse(envelope).success).toBe(true);
+
+    // POSITIVE CONTROLS — the probe can see a failure.
+    const bare = out.analysisReady as Record<string, unknown>;
+    const noOptions = { ...bare }; delete noOptions.options;
+    const noGoal = { ...bare }; delete noGoal.goal_node_id;
+    expect(OlumiResponseSchema.safeParse({ ...envelope, analysis_ready: noOptions }).success).toBe(false);
+    expect(OlumiResponseSchema.safeParse({ ...envelope, analysis_ready: noGoal }).success).toBe(false);
+  });
+
+  /**
+   * ROADMAP 2.1091 D2 — a refusal turn must not DEGRADE the freshness strip
+   * as a side effect of reporting readiness honestly.
+   *
+   * `attachComputedAt` stamps the freshness wire fields only when the
+   * finaliser is handed a derivation. Without one the block ships
+   * freshness-free, and the deployed UI reads that as "cannot confirm whether
+   * this analysis is current" — replacing a correct verdict on exactly the
+   * witnessed refusal.
+   */
+  it('D2: the refusal carries a REAL freshness derivation for the prior analysis against the current graph', async () => {
+    handlerFnMock.mockRejectedValueOnce(mixedScaleRefusal());
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
+
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-ext2-d2',
+    });
+
+    if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
+    expect(out.freshness).toBeDefined();
+    // Bound by IDENTITY to the honest verdict for this fixture (no prior
+    // run_analysis fact), not merely "some verdict is present".
+    expect(out.freshness!.freshness).toBe('none');
+    expect(out.freshness!.reason).toBe('no_successful_run_analysis_fact');
+    // And it is a REAL derivation against the snapshot, not a stub: the
+    // current graph hash is populated from the raw persisted graph.
+    expect(typeof out.freshness!.current_graph_hash).toBe('string');
+    expect((out.freshness!.current_graph_hash ?? '').length).toBeGreaterThan(0);
   });
 
   it('RED-4 (SPEC, not the arm): EVERY recoverable handler cause emits a typed readiness state with a specific reason', async () => {
@@ -342,10 +433,25 @@ describe('EXT-2 / 2.1091 — the mixed-scale analyse arm emits a typed readiness
     });
 
     if (out.outcome !== 'handler_recovered') throw new Error(`expected handler_recovered, got ${out.outcome}`);
-    const ar = out.analysisReady!;
+    const ar = out.analysisReady;
     expect(ar.status).toBe('blocked');
     expect((ar as { blocked_reason?: string }).blocked_reason).toBe('mixed_scale_unresolved');
     expect(ar.options).toEqual([]);
+    expect(ar.goal_node_id).toBe('');
+  });
+
+  /**
+   * ROADMAP 2.1091 D1 — the two arms must agree on WHEN a refusal is an
+   * ANALYSIS refusal, not merely on how to describe one.
+   *
+   * DERIVED, not mirrored (CLAUDE.md trap 12): the routed arm gates on
+   * `ANALYSE_HANDLER_ID` and the chip arm's scope is its whitelist. If the
+   * whitelist ever grows, this REDs and forces a decision about whether the
+   * new action's failure really means the analysis is blocked — rather than
+   * the two arms drifting silently.
+   */
+  it('D1 SCOPE: the chip whitelist and the routed arm\'s analyse-handler gate are the SAME scope', () => {
+    expect([...DETERMINISTIC_CHIP_ACTION_TYPES]).toEqual([ANALYSE_HANDLER_ID]);
   });
 
   it('CONTROL: the ordinary admitted path is unchanged — structural readiness still reports needs_encoding, never blocked', async () => {
