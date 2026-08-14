@@ -1156,7 +1156,6 @@ export function transformResponseToV3(
   ]);
   for (const node of v3NodesTyped) {
     if (!LABEL_BOUND_KINDS.has(node.kind)) continue;
-    const anyNode = node as unknown as Record<string, unknown>;
     // ⚠ THE FIELD NAMES HERE WERE WRONG ON THE FIRST WRITE, AND A TEST CAUGHT
     // IT — worth recording, because the guard was PRESENT and CORRECT and
     // pointed at bytes that do not exist (trap 22: verify what a guard actually
@@ -1165,12 +1164,19 @@ export function transformResponseToV3(
     // `goal_threshold_raw` (`schemas/cee-v3.ts:155-178`), so a thresholded goal
     // sailed straight past it and earned the badge. Derived at the schema, then
     // re-measured.
+    //
+    // ⚠ AND READ THROUGH THE DECLARED TYPE, NOT THROUGH A DOUBLE CAST. The
+    // first version reached these fields via `node as unknown as Record<string,
+    // unknown>` and CI's forbidden-boundary ratchet caught it (`as_unknown_as`,
+    // 59 exact) — correctly: every one of these fields is DECLARED on `NodeV3T`
+    // (`schemas/cee-v3.ts`), so the cast bought nothing and erased the very
+    // types that would have caught the wrong field names above.
     const carriesValue =
-      anyNode.observed_state !== undefined ||
-      anyNode.prior !== undefined ||
-      anyNode.display_value !== undefined ||
-      typeof anyNode.goal_threshold === "number" ||
-      typeof anyNode.goal_threshold_raw === "number";
+      node.observed_state !== undefined ||
+      node.prior !== undefined ||
+      node.display_value !== undefined ||
+      typeof node.goal_threshold === "number" ||
+      typeof node.goal_threshold_raw === "number";
     if (carriesValue) continue;
     const binding = bindOptionLabelToBrief(node.label, context.brief);
     if (bindingEarnsBriefClaim(binding)) {
