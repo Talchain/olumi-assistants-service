@@ -9,7 +9,7 @@
  *   The drafter frames a £600,000 money factor CORRECTLY as
  *   `{value: 0.6, raw_value: 600000}` and stores NO cap (a deliberate
  *   `projector.ts` decision). It also, unprompted, adds a third "phased" option
- *   it leaves unconfigured — in 3 of 3 big-money arms. `scaffoldUnconfiguredOptions`
+ *   it leaves unconfigured — in 3 of 3 big-money arms. `gateAnalysableOptions`
  *   then fills that option from the factor's `observed_state` INCLUDING
  *   `raw_value`, `resolveRawInterventionValue` rule 1 makes `raw_value` WIN, and
  *   **600000** lands on the wire beside its siblings' 0.6 and 0. With no cap the
@@ -53,7 +53,7 @@ import {
   type ScenarioReader,
 } from '../run-analysis.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { scaffoldUnconfiguredOptions } from '../scaffold-unconfigured-options.js';
+import { gateAnalysableOptions } from '../analysable-option-gate.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -307,7 +307,7 @@ describe('FIX 1 — a money brief with an unconfigured option must analyse (bank
         { from: 'opt_b', to: 'f_capless' },
       ],
     };
-    const outcome = scaffoldUnconfiguredOptions({
+    const outcome = gateAnalysableOptions({
       options: [
         { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_capped: { value: 0.72, raw_value: 72000 } } },
         { id: 'opt_b', option_id: 'opt_b', label: 'Added later', interventions: {} },

@@ -8,7 +8,7 @@
  * "V3 analysis not ready: 1 option(s) blocked". The two gates disagree.
  *
  * The fix is a SHARED predicate, not a copied one: `computeScaffoldPlan`
- * DELEGATES to `scaffoldUnconfiguredOptions` (the exact function run_analysis
+ * DELEGATES to `gateAnalysableOptions` (the exact function run_analysis
  * invokes). This suite pins the by-construction property — for any input the
  * plan the panel shows equals what the run path would actually scaffold —
  * because a copied predicate would re-create the very drift F4 closes.
@@ -24,9 +24,9 @@ import { describe, it, expect } from 'vitest';
 
 import {
   computeScaffoldPlan,
-  scaffoldUnconfiguredOptions,
+  gateAnalysableOptions,
   type ScaffoldUnconfiguredInput,
-} from '../scaffold-unconfigured-options.js';
+} from '../analysable-option-gate.js';
 
 // A configured option carries ≥1 intervention; an unconfigured one carries none.
 const configured = (id: string, interventions: Record<string, number>) => ({
@@ -65,7 +65,7 @@ function makeGraph(edges: Array<{ from: string; to: string }> = []) {
 
 /** Assert the plan is the exact projection of the run predicate's outcome. */
 function expectPlanMatchesOutcome(input: ScaffoldUnconfiguredInput) {
-  const outcome = scaffoldUnconfiguredOptions(input);
+  const outcome = gateAnalysableOptions(input);
   const plan = computeScaffoldPlan(input);
   expect(plan.will_scaffold_options).toBe(outcome.scaffolded.length > 0);
   expect(plan.option_count).toBe(outcome.scaffolded.length);

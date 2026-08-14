@@ -1,6 +1,6 @@
 /**
  * Review-fix pins (17 Jul code review, FIX-B cluster) for the D-ask-1
- * scaffold — direct unit pins on scaffoldUnconfiguredOptions.
+ * scaffold — direct unit pins on gateAnalysableOptions.
  *
  * B3 — net-OFF prior-midpoint scale guard: a raw-magnitude prior (outside
  *      the [0,1] sibling convention) must NOT produce a scaffold value on
@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-import { scaffoldUnconfiguredOptions } from '../scaffold-unconfigured-options.js';
+import { gateAnalysableOptions } from '../analysable-option-gate.js';
 
 function graphWith(nodes: unknown[], edges: unknown[] = []): unknown {
   return { nodes, edges };
@@ -40,7 +40,7 @@ describe('B3 — net-OFF prior-midpoint scale guard', () => {
       ],
       edges,
     );
-    const out = scaffoldUnconfiguredOptions({
+    const out = gateAnalysableOptions({
       options: [CONFIGURED, { option_id: 'opt_new', interventions: {} }],
       graph,
       scaleNetEnabled: false,
@@ -65,7 +65,7 @@ describe('B3 — net-OFF prior-midpoint scale guard', () => {
       ],
       edges,
     );
-    const out = scaffoldUnconfiguredOptions({
+    const out = gateAnalysableOptions({
       options: [CONFIGURED, { option_id: 'opt_new', interventions: {} }],
       graph,
       scaleNetEnabled: false,
@@ -93,7 +93,7 @@ describe('B4 — comparison-basis fallback fires ONLY for edge-less options', ()
       ],
       [{ from: 'opt_new', to: 'fac_dark' }],
     );
-    const out = scaffoldUnconfiguredOptions({
+    const out = gateAnalysableOptions({
       options: [CONFIGURED, { option_id: 'opt_new', interventions: {} }],
       graph,
       scaleNetEnabled: false,
@@ -112,7 +112,7 @@ describe('B4 — comparison-basis fallback fires ONLY for edge-less options', ()
       ],
       [],
     );
-    const out = scaffoldUnconfiguredOptions({
+    const out = gateAnalysableOptions({
       options: [CONFIGURED, { option_id: 'opt_new', interventions: {} }],
       graph,
       scaleNetEnabled: false,
@@ -132,7 +132,7 @@ describe('B5 — the totality catch is no longer silent', () => {
       },
     });
     const options = [poisoned, { option_id: 'opt_new', interventions: {} }];
-    const out = scaffoldUnconfiguredOptions({
+    const out = gateAnalysableOptions({
       options,
       graph: graphWith([]),
       scaleNetEnabled: false,

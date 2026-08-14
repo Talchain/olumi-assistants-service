@@ -50,7 +50,7 @@ import {
   buildUnconfiguredOptionsNotice,
   deriveUnconfiguredOptionLabels,
 } from '../gm-held-execute.js';
-import { computeScaffoldPlan } from '../../tools/handlers/scaffold-unconfigured-options.js';
+import { computeScaffoldPlan } from '../../tools/handlers/analysable-option-gate.js';
 import { detectConfigureOptionIntent } from '../../routing/configure-option-intent.js';
 
 // ---------------------------------------------------------------------------

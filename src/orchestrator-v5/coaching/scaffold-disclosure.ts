@@ -48,15 +48,35 @@ import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 
 /**
- * One scaffolded option, as reported by the run_analysis scaffold mechanism
- * (`tools/handlers/scaffold-unconfigured-options.ts`) on the
- * `HandlerOutcome.__scaffolded_options` channel.
+ * The MINIMUM an option needs to be named in an omission sentence: an
+ * identity, and a label to name it by.
+ *
+ * Split out (2026-08-14, no-rank ruling) so an option EXCLUDED from the PLoT
+ * submission can be disclosed by the same machinery WITHOUT carrying
+ * `value_defaulted: true` — which is FALSE for it, because nothing was
+ * defaulted for an option nothing was minted for. A field minted to satisfy a
+ * type is a lie the type then launders.
  */
-export interface ScaffoldedOptionRecord {
+export interface OmittedOptionRecord {
   readonly option_id: string;
   /** Raw option label (unsanitised); null when the node carried none. */
   readonly label: string | null;
-  /** Factor ids that received a neutral placeholder intervention. */
+}
+
+/**
+ * One option whose values CEE supplied, as reported by the run_analysis
+ * analysable-option gate (`tools/handlers/analysable-option-gate.ts`) on the
+ * `HandlerOutcome.__scaffolded_options` channel.
+ *
+ * Since the 2026-08-14 no-rank ruling the only options that reach this type
+ * are STATUS-QUO HOLDS: an option flagged `is_baseline` and left without
+ * interventions, submitted with every factor held at its own observed value —
+ * which for the status quo is not a placeholder but the complete and correct
+ * specification of "no change". Every other unconfigured option is now
+ * EXCLUDED (see {@link OmittedOptionRecord}).
+ */
+export interface ScaffoldedOptionRecord extends OmittedOptionRecord {
+  /** Factor ids that received a held/defaulted intervention value. */
   readonly factor_ids: readonly string[];
   /**
    * Established disclosure vocabulary — mirrors the factor-level
@@ -179,6 +199,64 @@ function pluralSuffix(count: number): string {
     `the whole comparison is illustrative until you configure them. ` +
     `To set real values, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
   );
+}
+
+// ── BASELINE-HOLD form (2026-08-14, the no-rank ruling) ─────────────────
+// The placeholder sentences above are FALSE for a held status quo, twice over:
+//   - nothing was "defaulted because it has no values set" — holding every
+//     factor at its own observed value IS the complete specification of "no
+//     change", so no value was guessed at;
+//   - the comparison is NOT "illustrative until you configure it". It is sound.
+//     The status-quo arm is exactly what it claims to be.
+// So the hold gets its own sentence. It reports; it prescribes nothing.
+//
+// DELIBERATELY NO ADVISED-ACTION EXEMPLAR (no "say 'Help me configure …'"):
+// there is nothing for the user to fix here, and a disclosure that prescribes a
+// futile step is worse than one that simply reports — the same reasoning that
+// makes the Research CTA's refusal a defect rather than a feature.
+function baselineHoldLabelledSuffix(label: string): string {
+  return (
+    ` '${label}' was analysed as no change — the factors it compares against were held at ` +
+    `the values your model records today.`
+  );
+}
+
+function baselineHoldGenericSingleSuffix(): string {
+  return (
+    ` One of your options was analysed as no change — the factors it compares against were ` +
+    `held at the values your model records today.`
+  );
+}
+
+function baselineHoldPluralSuffix(count: number): string {
+  return (
+    ` ${count} of your options were analysed as no change — the factors they compare against ` +
+    `were held at the values your model records today.`
+  );
+}
+
+/**
+ * The BASELINE-HOLD counterpart of {@link safeScaffoldOptionLabel}. Same
+ * mechanism, different composed suffix — a label is only usable in the "no
+ * change" copy when THAT sentence survives egress.
+ */
+function safeBaselineHoldLabel(label: string | null | undefined): string | null {
+  return safeLabelForSuffix(label, baselineHoldLabelledSuffix);
+}
+
+/**
+ * Build the disclosure suffix for status-quo options HELD at their observed
+ * position and submitted. Returns '' for an empty list.
+ */
+export function buildBaselineHoldSuffix(
+  held: readonly OmittedOptionRecord[],
+): string {
+  if (held.length === 0) return '';
+  if (held.length === 1) {
+    const label = safeBaselineHoldLabel(held[0].label);
+    return label !== null ? baselineHoldLabelledSuffix(label) : baselineHoldGenericSingleSuffix();
+  }
+  return baselineHoldPluralSuffix(Math.min(held.length, 99));
 }
 
 // ── OMITTED form (2026-07-25) ───────────────────────────────────────────
@@ -384,7 +462,7 @@ export function buildScaffoldDisclosureSuffix(
  * Same shape rules as {@link buildScaffoldDisclosureSuffix}; different claim.
  */
 export function buildScaffoldOmittedSuffix(
-  omitted: readonly ScaffoldedOptionRecord[],
+  omitted: readonly OmittedOptionRecord[],
   keptLabelFor?: DedupKeptLabelResolver,
 ): string {
   if (omitted.length === 0) return '';
@@ -438,6 +516,35 @@ export function buildScaffoldDisclosureForPartition(
 }
 
 /**
+ * The WHOLE submission disclosure for one run under the 2026-08-14 no-rank
+ * ruling: what was HELD (status quo, submitted) and what was left out (held
+ * options the engine then dropped, PLUS options the gate never submitted).
+ *
+ * ⚠ THE TWO ARGUMENTS ARRIVE BY DIFFERENT EPISTEMIC ROUTES AND THAT IS THE
+ * POINT (trap 21 — one predicate, two questions).
+ *
+ *   - `heldPartition` is DERIVED from the returned `option_comparison[]` by
+ *     {@link partitionScaffoldedByAnalysisPresence}, whose fail-safe classifies
+ *     everything as `analysed` when no option identity came back. That is the
+ *     right fail-safe for a DERIVED verdict: it makes no new claim.
+ *   - `excluded` is a fact CEE KNOWS at submission time. It must NOT go through
+ *     that partition: on an identity-less result the fail-safe would classify a
+ *     never-submitted option as `analysed` and ship *"Placeholder values were
+ *     used for 'X'"* about an option nothing was minted for. A fail-safe correct
+ *     for a derived verdict is the wrong one for a known verdict.
+ */
+export function buildAnalysisSubmissionDisclosure(
+  heldPartition: ScaffoldPresencePartition,
+  excluded: readonly OmittedOptionRecord[],
+  keptLabelFor?: DedupKeptLabelResolver,
+): string {
+  return (
+    buildBaselineHoldSuffix(heldPartition.analysed) +
+    buildScaffoldOmittedSuffix([...heldPartition.omitted, ...excluded], keptLabelFor)
+  );
+}
+
+/**
  * The configure chip a scaffolded run_analysis success turn offers — same
  * single copy source as the `options_not_configured` recovery composer and
  * the GM held-apply receipt (#487), so chip message and deterministic route
@@ -483,9 +590,10 @@ export function buildScaffoldPromptDisclosure(
   const lines = analysed.map((record) => {
     const factorCount = record.factor_ids.length;
     return (
-      `Option '${nameOf(record)}' had no user-provided values, so the analysis used neutral ` +
-      `placeholder interventions on ${factorCount} factor${factorCount === 1 ? '' : 's'} ` +
-      `(value_defaulted). Its numbers are defaults, not user data.`
+      `Option '${nameOf(record)}' is the STATUS QUO: it specifies no changes, so the analysis ` +
+      `held ${factorCount} factor${factorCount === 1 ? '' : 's'} at the values the model records ` +
+      `today (value_defaulted). Its numbers are the model's current position, not values the ` +
+      `user set for this option.`
     );
   });
   const omittedLines = omitted.map(
@@ -495,12 +603,18 @@ export function buildScaffoldPromptDisclosure(
       `imply a result, ranking, or probability for it.`,
   );
   const allLines = [...lines, ...omittedLines];
+  // ⚠ The tail changed with the 2026-08-14 no-rank ruling. It used to say
+  // "treat the WHOLE comparison as illustrative", which was right when an
+  // arbitrary option was being filled with substituted values that shifted
+  // every other option's relative position. A held STATUS QUO shifts nothing:
+  // it is a real arm, correctly specified, and the comparison against it is
+  // sound. Telling the review to caveat a sound comparison would make the
+  // product understate what it actually knows.
   const tail =
     analysed.length > 0
-      ? 'Because placeholder values shift every option\'s relative position, treat the WHOLE ' +
-        'comparison as illustrative until the scaffolded option(s) are configured. Never present ' +
-        'a scaffolded option\'s numbers as real or user-provided; caveat any comparison that ' +
-        'involves them.'
+      ? 'The comparison against the status quo is SOUND — do not caveat it as illustrative or ' +
+        'provisional. Describe that option as "no change" / the current position rather than as ' +
+        'something the user configured, and never present its numbers as values the user set.'
       : 'The comparison covers only the options listed in the analysis data. Do not describe the ' +
         'omitted option(s) as compared, ranked, or scored.';
   return `${allLines.join('\n')}\n${tail}`;
@@ -525,6 +639,17 @@ export const SCAFFOLD_DISCLOSURE_RE_SRC =
   'because (?:it has|they have) no values set — ' +
   'the whole comparison is illustrative until you configure (?:it|them)\\. ' +
   `To set real values, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'`;
+
+/**
+ * Grammar source for the BASELINE-HOLD suffix (the 2026-08-14 no-rank ruling).
+ * Same three shapes as every other disclosure form. Note it carries NO
+ * `Help me configure …` exemplar slot — deliberately, because the hold
+ * prescribes no repair (see {@link buildBaselineHoldSuffix}).
+ */
+export const SCAFFOLD_BASELINE_HOLD_RE_SRC =
+  ` (?:'[^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}}' was|One of your options was|\\d{1,2} of your options were) ` +
+  'analysed as no change — the factors (?:it compares|they compare) against were held at ' +
+  'the values your model records today\\.';
 
 /**
  * Grammar source for the OMITTED suffix. Same three shapes, same pinned
@@ -581,7 +706,15 @@ export const SCAFFOLD_OMITTED_ANY_RE_SRC =
  * in every consumer's pattern.
  */
 export const SCAFFOLD_ANY_DISCLOSURE_RE_SRC =
-  `(?:${SCAFFOLD_DISCLOSURE_RE_SRC}(?:${SCAFFOLD_OMITTED_ANY_RE_SRC})?|${SCAFFOLD_OMITTED_ANY_RE_SRC})`;
+  '(?:' +
+  `${SCAFFOLD_DISCLOSURE_RE_SRC}(?:${SCAFFOLD_OMITTED_ANY_RE_SRC})?` +
+  // The no-rank ruling's leading slot: a held status quo, optionally followed
+  // by the omission tail (a run can hold the baseline AND exclude an
+  // unconfigured option — `buildAnalysisSubmissionDisclosure` appends in
+  // exactly this order).
+  `|${SCAFFOLD_BASELINE_HOLD_RE_SRC}(?:${SCAFFOLD_OMITTED_ANY_RE_SRC})?` +
+  `|${SCAFFOLD_OMITTED_ANY_RE_SRC}` +
+  ')';
 
 /**
  * Egress budget the allowlist length cap is extended by — computed from the
@@ -596,6 +729,13 @@ export const SCAFFOLD_DISCLOSURE_MAX_CHARS =
     labelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
     genericSingleSuffix().length,
     pluralSuffix(99).length,
+    // The baseline-hold sentence occupies the SAME leading slot as the
+    // placeholder sentence (a run ships one or the other, never both), so it
+    // belongs INSIDE this max — adding it would over-budget the cap and hide a
+    // genuine over-run behind slack.
+    baselineHoldLabelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
+    baselineHoldGenericSingleSuffix().length,
+    baselineHoldPluralSuffix(99).length,
   ) +
   Math.max(
     omittedLabelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,

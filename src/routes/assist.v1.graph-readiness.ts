@@ -14,7 +14,7 @@ import { AnalysisReadyPayload, type AnalysisReadyPayloadT } from "../schemas/ana
 import {
   computeScaffoldPlan,
   type ScaffoldPlan,
-} from "../orchestrator-v5/tools/handlers/scaffold-unconfigured-options.js";
+} from "../orchestrator-v5/tools/handlers/analysable-option-gate.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -128,7 +128,7 @@ export function buildReadinessRawPersistedGraph(
   // `OPTION_NEEDS_ENCODING_WITHOUT_RAW` (`cee/transforms/analysis-ready.ts`).
   //
   // The cost of the fiction was a FALSE NEGATIVE that blocked the product:
-  // intent is never scaffolded over (`scaffold-unconfigured-options.ts`), so the
+  // intent is never held over (`analysable-option-gate.ts`), so the
   // fabricated key suppressed the scaffold → `will_scaffold_options: false` →
   // the pre-run panel refused a run that `run_analysis` performs successfully
   // (it reads the REAL persisted graph, which carries no such key). F4 was
@@ -670,7 +670,7 @@ export default async function route(app: FastifyInstance) {
         // and succeeds; the pre-run panel derives "blocked" purely from
         // `can_run_analysis === false` and so contradicts the run. This plan is
         // computed by the SAME predicate run_analysis uses (computeScaffoldPlan
-        // → scaffoldUnconfiguredOptions), so the two gates cannot drift: for
+        // → gateAnalysableOptions), so the two gates cannot drift: for
         // this input the panel now knows the run would proceed with placeholders
         // rather than block. Additive only — no readiness verdict changes.
         const scaffoldPlan: ScaffoldPlan = computeScaffoldPlan({

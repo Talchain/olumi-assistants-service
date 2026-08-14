@@ -3,7 +3,7 @@
  *
  * Round 3 asserted coherence inside the snapshot LOADER, and two things defeated it:
  *
- *  (a) TOCTOU: `scaffoldUnconfiguredOptions` runs AFTER the loader's projection and
+ *  (a) TOCTOU: `gateAnalysableOptions` runs AFTER the loader's projection and
  *      adds neutral interventions through its own per-value resolver — so the loader
  *      attests `demoted:true, allWithinUnitInterval:true, mixedUnresolved:false` and
  *      the scaffold then pushes a raw-scale neutral (e.g. 35000) into the wire.
