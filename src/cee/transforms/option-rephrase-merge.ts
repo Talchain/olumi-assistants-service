@@ -73,7 +73,10 @@
 
 import type { NodeV3T, OptionV3T, EdgeV3T, ValidationWarningV3T } from "../../schemas/cee-v3.js";
 
-/** Code for the disclosure a merge emits. Never silent. */
+/**
+ * Code for the record a merge emits. ⚠ NOT a user notice on the draft turn —
+ * `validation_warnings` has no wire carrier there (see the header).
+ */
 export const OPTION_REPHRASE_ABSORBED = "OPTION_REPHRASE_ABSORBED";
 
 /**
@@ -118,20 +121,68 @@ const FUNCTION_WORDS: ReadonlySet<string> = new Set([
  * absent by design, and `__tests__/option-rephrase-merge.corpus.test.ts` asserts
  * this list is DISJOINT from an explicit discriminator corpus — so adding one
  * of them here REDs immediately rather than being discovered in a capture.
+ *
+ * ⭐⭐ AND THE STRONGER RULE, ADDED 14 Aug 2026: **EVERY ENTRY MUST BE EARNED.**
+ * The corpus ablates each entry in turn and requires that removing it BREAKS at
+ * least one must-merge case. The list went 31 → 23 → 6 under that guard: the
+ * status-quo verbs were removed because they were WRONG, and seventeen more
+ * because they were merely UNUSED. Both cuts matter, and the second is the
+ * general defence — the four false merges the review found came from words
+ * nothing required, so nothing objected to them. An unearned entry is pure
+ * attack surface with no demonstrated benefit; a missing one only declines a
+ * merge. When a real capture needs a word, it arrives WITH the case that earns
+ * it, never on its own.
  */
 const ELABORATIVE_MODIFIERS: ReadonlySet<string> = new Set([
-  // Domain action verbs. An option is the thing done; naming the doing does not
-  // change the thing. "two developers" and "hire two developers" are one option.
-  "hire", "hiring", "recruit", "recruiting", "employ", "appoint",
-  "keep", "keeping", "retain", "retaining",
-  "adopt", "adopting", "use", "using", "choose", "choosing", "select",
-  "go", "going", "proceed", "continue",
+  // Domain action verbs that name ACQUIRING the thing the option names. An
+  // option is the thing done; naming the doing does not change the thing.
+  // "two developers" and "hire two developers" are one option.
+  "hire", "hiring", "adopt",
   // Neutral nominal fillers — they name the CATEGORY, never the member.
-  "option", "approach", "plan", "route", "path", "strategy", "scenario",
-  // Neutral restrictives. `only`/`just` narrow to the named thing itself and so
-  // cannot select a different one; witnessed in "Hire Two Developers Only".
-  "only", "just", "simply",
+  "option", "approach",
+  // Neutral restrictive, witnessed in "Hire Two Developers Only".
+  //
+  // ⚠ CONDITIONAL ON MUTUAL EXCLUSIVITY of the option set, which holds for
+  // options under one decision: the bare label already excludes its siblings,
+  // so `Only` restates that exclusion rather than adding one. A portfolio- or
+  // combination-style option set would break this, and it would have to go.
+  // Named because the condition is invisible from the tokens alone.
+  "only",
 ]);
+
+/**
+ * ⭐⭐ THE STATUS-QUO VERBS ARE NOT ELABORATIVE — REMOVED 14 Aug 2026 AFTER AN
+ * INDEPENDENT CORPUS PROVED THEY MERGE GENUINE ALTERNATIVES.
+ *
+ * `keep`, `keeping`, `retain`, `retaining` and `continue` were on the list above
+ * on the reasoning that they name "the doing" of the option. **That reasoning was
+ * wrong, and it is worth naming why, because the same mistake is available for
+ * any verb.** These verbs do not name the doing of the thing — they name
+ * PERSISTING WITH a thing you already have, which is a DIFFERENT ACTION from
+ * acquiring it. In a hiring brief, "two developers" is the hire; "Keep Two
+ * Developers" is the status quo. They are the two sides of the decision.
+ *
+ * Demonstrated by execution through `mergeRephrasedOptions`, not argued: one
+ * canonical "two developers" with twins "Hire Two Developers" AND "Keep Two
+ * Developers" absorbed BOTH — two different actions folded into one option. At
+ * most one of them can be a rephrase, so at least one absorption destroyed an
+ * alternative. No context is needed for that form of the argument.
+ *
+ * ⚠ AND THE COMPOSITIONAL LESSON, which is the durable one: allow-listed words
+ * STACK. "Keep Hiring Two Developers" and "Choose To Keep Two Developers" each
+ * built a discriminator out of TWO individually-allowed tokens. **An entry is
+ * safe only if it is safe in every combination with every other entry**, and a
+ * per-word review cannot see that. The mitigations are the ablation guard below
+ * (no unearned entries) and a corpus that includes stacked surplus.
+ *
+ * This set exists so the removal is a DECISION with a reason attached rather
+ * than an absence a later lane "restores" — the corpus test asserts every member
+ * is refused as a surplus token.
+ */
+const REFUSED_STATUS_QUO_VERBS: readonly string[] = [
+  "keep", "keeping", "retain", "retaining", "continue", "continuing",
+  "maintain", "maintaining", "stay", "remain", "preserve",
+];
 
 /** Tokens that are pure punctuation/empty after normalisation are dropped. */
 function tokenise(label: string): string[] {
@@ -144,25 +195,38 @@ function tokenise(label: string): string[] {
 }
 
 /**
- * Fold a trivial English plural so "developers" and "developer" compare equal.
+ * ⭐⭐ THERE IS DELIBERATELY NO PLURAL FOLD. REMOVED 14 Aug 2026; DO NOT RESTORE.
  *
- * ⚠ Applied SYMMETRICALLY to both labels, so an imperfect fold ("business" →
- * "busines") cannot make two different words equal — it can only make the same
- * word equal to itself. Length floor of 4 keeps "as"/"is"-shaped tokens intact.
+ * A `foldPlural` step ("developers" → "developer") was here, justified as
+ * symmetric and therefore harmless. **It was neither necessary nor harmless.**
+ *
+ *  - NOT NECESSARY, measured: disabling it left the whole suite GREEN, 67/67,
+ *    including the witnessed pair — because a rephrase of a plural label is
+ *    almost always ALSO plural ("two developers" / "Hire Two Developers Only").
+ *    The fold was carrying no case at all.
+ *  - NOT HARMLESS: an independent corpus showed `"hire a developer"` absorbing
+ *    `"Hire Developers"` — the article `a` dropped as a function word and the
+ *    plural folded away, **erasing a headcount distinction**. One developer and
+ *    several developers are different options, and the two normalisation steps
+ *    composed to delete exactly the token that said so.
+ *
+ * ⭐ THE RULE THIS ESTABLISHES: in English a plural IS often count-bearing, so
+ * folding it is a semantic change wearing the costume of a normalisation. The
+ * symmetry argument ("applied to both sides, so it cannot make two different
+ * words equal") is TRUE and IRRELEVANT — the harm was never two different words
+ * colliding, it was one word losing the meaning that distinguished the options.
+ * A normalisation is safe only if the thing it discards cannot be a
+ * discriminator; grammatical number can be.
+ *
+ * The cost is paid in KNOWN-DROPPED: genuine singular/plural rephrases now
+ * decline. That is the direction that loses nothing.
  */
-function foldPlural(token: string): string {
-  if (token.length >= 4 && token.endsWith("s") && !token.endsWith("ss")) {
-    return token.slice(0, -1);
-  }
-  return token;
-}
 
-/** Content tokens: normalised, plural-folded, function words removed. */
+/** Content tokens: normalised and function words removed. No stemming — see above. */
 function contentTokens(label: string | null | undefined): Set<string> {
   if (typeof label !== "string") return new Set();
   const out = new Set<string>();
-  for (const raw of tokenise(label)) {
-    const token = foldPlural(raw);
+  for (const token of tokenise(label)) {
     if (FUNCTION_WORDS.has(token)) continue;
     out.add(token);
   }
@@ -181,13 +245,29 @@ function contentTokens(label: string | null | undefined): Set<string> {
 const MIN_SHARED_CONTENT_TOKENS = 2;
 
 /**
+ * The allow-list the predicate uses by default. Exported so the corpus test can
+ * ABLATE it — see `isHighConfidenceRephrase`'s third parameter.
+ */
+export const DEFAULT_ELABORATIVE_MODIFIERS = ELABORATIVE_MODIFIERS;
+
+/** The status-quo verbs, exported so the corpus can assert each is refused. */
+export const REFUSED_STATUS_QUO_VERBS_FOR_TEST = REFUSED_STATUS_QUO_VERBS;
+
+/**
  * Is `twinLabel` a high-confidence rephrase of `canonicalLabel`?
  *
  * Pure and exported so the corpus test can drive it directly.
+ *
+ * `elaborative` exists ONLY so the corpus can prove **every allow-list entry is
+ * EARNED** — removing any one of them must break at least one must-merge case.
+ * That guard is what stops the list re-growing an unearned entry, which is
+ * exactly how the status-quo verbs got in: nothing required them, so nothing
+ * objected. Production always uses the default.
  */
 export function isHighConfidenceRephrase(
   canonicalLabel: string | null | undefined,
   twinLabel: string | null | undefined,
+  elaborative: ReadonlySet<string> = ELABORATIVE_MODIFIERS,
 ): boolean {
   const canonical = contentTokens(canonicalLabel);
   const twin = contentTokens(twinLabel);
@@ -209,7 +289,7 @@ export function isHighConfidenceRephrase(
   // which option is meant. An unknown word declines the merge.
   for (const token of superset) {
     if (subset.has(token)) continue;
-    if (!ELABORATIVE_MODIFIERS.has(token)) return false;
+    if (!elaborative.has(token)) return false;
   }
   return true;
 }
@@ -222,21 +302,60 @@ function interventionTargets(map: InterventionMap): string[] {
 }
 
 /**
+ * Read an intervention's numeric level, whatever shape it arrives in.
+ *
+ * At this seam an entry is either a bare number (the analysis-ready shape) or
+ * an object carrying `value` (the draft-graph shape) — both occur in the banked
+ * captures for the same option, so reading only one of them would silently
+ * treat every entry of the other shape as level-less.
+ */
+function interventionLevel(entry: unknown): number | undefined {
+  if (typeof entry === "number" && Number.isFinite(entry)) return entry;
+  if (entry && typeof entry === "object") {
+    const v = (entry as { value?: unknown }).value;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
+/**
  * May these two options be merged on their interventions?
  *
- * If BOTH carry interventions they must name exactly the same targets. Two
- * options levering different factors — or the same factor at different levels —
- * are two different proposals whatever their labels say, and the label
- * predicate does not get to overrule that. Only a one-sided or empty
- * intervention set is compatible.
+ * If BOTH carry interventions they must name exactly the same targets **AND
+ * agree on every level**. Two options levering different factors — or the same
+ * factor at different levels — are two different proposals whatever their
+ * labels say, and the label predicate does not get to overrule that. Only a
+ * one-sided or empty intervention set is otherwise compatible.
+ *
+ * ⚠⚠ THE LEVEL CHECK WAS DOCUMENTED HERE BEFORE IT EXISTED, AND THAT IS THE
+ * DEFECT THIS COMMENT NOW RECORDS. The first version compared `Object.keys`
+ * only, while this paragraph already claimed "the same factor at different
+ * levels" was refused. So `raise prices {price: 0.10}` and
+ * `Raise Prices Option {price: 0.30}` had equal target sets, passed as
+ * compatible, and the 0.30 proposal was absorbed — and because the disclosure
+ * filters on target NAMES the canonical lacks, a divergent level on a SHARED
+ * target was not offered either. **Silently discarded, under a docstring saying
+ * it could not be.** A comment that describes a check the code does not perform
+ * is worse than no comment: it retires the question for every later reader.
+ * The code now does what this paragraph says.
  */
 export function interventionsAreCompatible(a: InterventionMap, b: InterventionMap): boolean {
   const ta = interventionTargets(a);
   const tb = interventionTargets(b);
   if (ta.length === 0 || tb.length === 0) return true;
   if (ta.length !== tb.length) return false;
+  // Same targets is necessary, not sufficient: the LEVELS must agree too.
   const setB = new Set(tb);
-  return ta.every((t) => setB.has(t));
+  for (const target of ta) {
+    // A target the other side does not name at all: not the same proposal.
+    if (!setB.has(target)) return false;
+    const la = interventionLevel((a as Record<string, unknown>)[target]);
+    const lb = interventionLevel((b as Record<string, unknown>)[target]);
+    // An unreadable level on either side is not evidence of agreement.
+    if (la === undefined || lb === undefined) return false;
+    if (la !== lb) return false;
+  }
+  return true;
 }
 
 export interface RephraseMergeResult {
@@ -260,6 +379,28 @@ export interface RephraseMergeResult {
  *     NOT is DISCLOSED in the warning's `details`, and deliberately NOT adopted.
  *     Adopting them would let a merge silently rewire the user's option — the
  *     #853 defect class. Offered, never taken.
+ *
+ * ⚠⚠ WHERE THAT DISCLOSURE ACTUALLY REACHES, AT ITS HONEST RUNG (corrected
+ * 14 Aug 2026 — the first version of this file called the warning channel
+ * "user-facing", which an independent review REFUTED at the artefacts):
+ *
+ *   - `OPTION_REPHRASE_ABSORBED` rides `validation_warnings`, and on the DRAFT
+ *     TURN that channel has **no wire carrier**: the draft-turn projector
+ *     builds `{nodes, edges, node_count, edge_count, goal_constraints?}` and
+ *     `DraftGraphBlockSchema` is `.strict()`, so warnings cannot ride it. They
+ *     appear nowhere in the captured turn payload. The UI's only readers are
+ *     debug-panel surfaces. **So the warning is NOT how a user learns of a
+ *     merge today.**
+ *   - The genuinely user-reachable trace is the `description` line: it rides
+ *     the wire on the node, survives the UI mapper's `...rest`, and renders in
+ *     the option inspector. Rung: CODE-TRACED end to end, **not**
+ *     journey-witnessed.
+ *
+ * So the accurate statement is: the merge is RECORDED, and it is reachable for
+ * a user who opens the option inspector. Anyone wanting it on the primary
+ * surface needs the warning given a wire carrier — a contract change, rowed,
+ * not something this module can do. Do not restate "never silent" without
+ * naming which rung; that phrasing is what the review had to refute.
  */
 export function mergeRephrasedOptions(args: {
   readonly nodes: NodeV3T[];
@@ -338,6 +479,8 @@ export function mergeRephrasedOptions(args: {
       severity: "info",
       // Says what happened and what was kept. It does not claim the model was
       // wrong, and it does not tell the user to do anything.
+      // ⚠ This rides `validation_warnings`, which has NO wire carrier on the
+      // draft turn (see the header). It is a RECORD, not a user notice.
       message:
         `“${twin.label}” was drafted as a restatement of your own option ` +
         `“${canonicalNode.label}”, so the two are shown as one. Your wording is kept.` +

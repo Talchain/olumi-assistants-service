@@ -1049,10 +1049,19 @@ export function transformResponseToV3(
   //     `extraction_metadata.source` reads `cee_hypothesis` for 34 of 39 banked
   //     options, including every brief-borne one in the A/B/C scenarios.
   //   • BEFORE `getOptionIdMismatchSummary`, `generateValidationWarnings` and
-  //     `buildAnalysisReadyPayload`, so every downstream summary, warning and
+  //     `buildAnalysisReadyPayload`, so the graph, `options[]`, the warnings and
   //     the analysis payload all describe the SAME, post-merge option set. A
   //     merge after any of them would leave the response disagreeing with itself
   //     about how many options exist.
+  //
+  //     ⚠ NARROWED after review MEASURED an over-claim in the earlier wording
+  //     ("every downstream summary"): the `transform_complete` TELEMETRY below
+  //     derives `options_total`/`options_needs_mapping` from `extractedOptions`,
+  //     which is captured BEFORE this merge, so one event read
+  //     `optionCount: 3, options_total: 4`. That is internal-only and left as
+  //     is deliberately — the pre-merge count is the honest answer to "how many
+  //     options did extraction produce". The claim above is about the RESPONSE,
+  //     not about telemetry, and now says so.
   //
   // The existing intervention-signature dedup cannot see this defect: on the
   // witnessed draw the model's twin carried `interventions: {}` and the user's
@@ -1101,9 +1110,14 @@ export function transformResponseToV3(
     goalNodeId
   );
 
-  // The absorption's disclosures ride the same user-facing channel as the other
-  // transform-stage findings. A merge is never silent: the user is told which of
-  // their options absorbed which restatement, and what was offered but not taken.
+  // The absorption's disclosures ride the same channel as the other
+  // transform-stage findings. ⚠ NOT a user-facing channel on the draft turn —
+  // an independent review established at the artefacts that
+  // `validation_warnings` has no wire carrier there (the draft block schema is
+  // `.strict()` and omits it) and that the UI's only readers are debug panels.
+  // What a user can actually reach is the "Also drafted as: …" description on
+  // the surviving option, code-traced to the option inspector. This push is a
+  // RECORD of the merge, not the notice.
   validationWarnings.push(...rephraseMerge.warnings);
 
   // ── WS-A item 1(b): THE COMMIT-TIME MONEY INVARIANT ──────────────────────
