@@ -322,6 +322,20 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           prior: { distribution: "uniform", range_min: 10, range_max: 30 },
         },
         { id: "opt_a", kind: "option", label: "Premium" },
+        // ⚠ ADDED BY THE NO-RANK RULING (2026-08-14). `opt_b` is now EXCLUDED
+        // rather than filled, so with only two options the run would REFUSE
+        // ("one option is not a comparison") and `will_scaffold_options` —
+        // which answers "will the run proceed even though not every option is
+        // configured?" — would honestly be false. A third configured option
+        // restores the shape these specs are actually about.
+        //
+        // The two-option answer is pinned at the UNIT level, by
+        // `scaffold-plan-readiness.test.ts` → "⭐ TWIN — exclusion that leaves
+        // fewer than two options says the run will NOT proceed". It is NOT
+        // duplicated here: this route's suite shares one rate-limit budget
+        // across its injections, and the route only serialises the plan the
+        // unit twin already measures.
+        { id: "opt_c", kind: "option", label: "Value" },
         { id: "opt_b", kind: "option", label: "Unconfigured" },
       ],
       edges: [
@@ -329,6 +343,8 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
         { id: "e2", from: "decision", to: "opt_b" },
         { id: "e3", from: "opt_a", to: "fac_price" },
         { id: "e4", from: "opt_b", to: "fac_price" },
+        { id: "e5", from: "decision", to: "opt_c" },
+        { id: "e6", from: "opt_c", to: "fac_price" },
       ],
     };
   }
@@ -345,6 +361,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "needs_user_mapping",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             // opt_b: added WITHOUT configuration — the exact symptom.
             { id: "opt_b", label: "Unconfigured", status: "needs_user_mapping", interventions: {} },
           ],
@@ -378,6 +395,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "ready",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             { id: "opt_b", label: "Volume", status: "ready", interventions: { fac_price: 0.2 } },
           ],
         },
@@ -412,7 +430,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   // (the OptionData schema is numeric-only), so readiness's ONLY intent
   // authority for this option is analysis_ready — exactly the provenance the
   // over-report ignored.
-  it("F4 over-report: configured-but-non-numeric option (needs_encoding + raw_interventions) → will_scaffold_options=false (agrees with the run path's block)", async () => {
+  it("F4 over-report: configured-but-non-numeric option (needs_encoding + raw_interventions) → the run PROCEEDS WITHOUT it, and the panel says so", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/graph-readiness",
@@ -424,6 +442,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "needs_encoding",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             // opt_b: the user DID configure it — with a categorical value that
             // has not been encoded to a number yet. This is intervention INTENT,
             // not an empty option; the run path will NOT scaffold over it.
@@ -442,12 +461,23 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.scaffold_plan).toBeDefined();
-    // The run path leaves opt_b on the configure path (persisted intent) → the
-    // panel must NOT advertise a scaffold. Over-reporting `true` here would
-    // un-block the panel while run_analysis stays blocked — the exact drift F4
-    // closes, in the permissive direction.
-    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
-    expect(body.scaffold_plan.option_count).toBeUndefined();
+    // ⚠ RE-PINNED BY THE NO-RANK RULING (2026-08-14), and the property under
+    // test is UNCHANGED: the panel says exactly what the run path will do,
+    // because they are one computation.
+    //
+    // What changed is what the run path DOES. It used to leave opt_b on the
+    // wire unconfigured and BLOCK on PLoT's preflight, so the honest answer was
+    // "will not proceed". Now it EXCLUDES opt_b and compares the other two, so
+    // the honest answer is "will proceed" — and reporting `false` would be the
+    // same F4 drift in the RESTRICTIVE direction: a panel blocking a run that
+    // succeeds.
+    //
+    // Intent is still never written over. That is now visible as opt_b being
+    // EXCLUDED (named, disclosed, one configure step away) rather than held at
+    // values CEE chose in place of the user's.
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
+    // can_run_analysis stays HONEST and unchanged (#612's invariant).
     expect(body.can_run_analysis).toBe(false);
   });
 
@@ -463,6 +493,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "needs_user_mapping",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             // Intent present via raw_interventions (a value the user typed that
             // failed numeric projection) — the run path treats ANY intervention
             // entry, numeric or not, as intent. Readiness must too.
@@ -480,7 +511,11 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
+    // Same re-pin as its sibling above: raw_interventions intent is still never
+    // written over — the option is EXCLUDED — and the run proceeds on the two
+    // options that are configured.
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
     expect(body.can_run_analysis).toBe(false);
   });
 
@@ -526,6 +561,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "needs_encoding",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             // opt_b: added by chat, never configured. NOTHING was set — no
             // numeric intervention, no raw value. There is no user intent here
             // to protect; the run path scaffolds it and succeeds.
@@ -552,8 +588,8 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     // The structured fields the UI must compose its blocked/runnable copy from
     // stay truthful and specific — never "add a decision, a goal and at least
     // two options" when five options are present.
-    expect(body.options_total).toBe(2);
-    expect(body.options_ready).toBe(1);
+    expect(body.options_total).toBe(3);
+    expect(body.options_ready).toBe(2);
     expect(body.issues).toContain('Option "opt_b" has no interventions');
   });
 
@@ -573,6 +609,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "needs_encoding",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             {
               id: "opt_b",
               label: "Partner with a specialist consultancy",
@@ -646,6 +683,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           status: "needs_user_mapping",
           options: [
             { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
             { id: "opt_b", label: "Unconfigured", status: "needs_user_mapping", interventions: {} },
           ],
           user_questions: ["Which factors and values for: Unconfigured?"],
