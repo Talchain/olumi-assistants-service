@@ -109,15 +109,46 @@ const HISTORIC_V4_INSTRUCTION_BYTES = 4426;
  * ⚠ v4 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED — round 7's five-gate
  * block was measured against exactly those bytes.
  */
-const PREREGISTERED_V5_INSTRUCTION_SHA256 =
+const HISTORIC_V5_INSTRUCTION_SHA256 =
   "2e5bc9695f1907a802ab9f2dfa7f697bf36692f10c3675e9227c06994de98182";
-const PREREGISTERED_V5_INSTRUCTION_BYTES = 4688;
+const HISTORIC_V5_INSTRUCTION_BYTES = 4688;
+
+/**
+ * ⭐ v6 — 2026-08-14, the instruction half of the risk/outcome grammar widening.
+ *
+ * ⚠ STATUS: UNMEASURED AGAINST A LIVE DRAW at the time of pinning, and this
+ * comment is what a future session will find first, so it says so plainly. The
+ * bytes were written against `grammar.ts`'s widened `DRAFT_RECORD_CLAIM_KINDS`,
+ * against `ALLOWED_EDGES`, and against the SERVED graph prompt's own BRIDGE
+ * TERMINALITY / NODE ORIENTATION sections — i.e. against three authorities at
+ * their bytes, and against ZERO live results. What the model actually emits
+ * under the widened schema is the post-merge deploy witness's job
+ * (`scripts/records-pinned-brief-acceptance.ts`), and no claim about it is made
+ * here.
+ *
+ * ⚠ v5 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. The round-11 block and
+ * every measurement taken through 2026-08-13 were served exactly those bytes;
+ * re-pointing the literal would detach that evidence from the artefact that
+ * produced it. Both halves moved in v6, which has not happened before — the
+ * shape half changed in v4 only, and the connect half in v3/v4/v5 — because a
+ * new claim KIND has to be both declared (shape) and connected (connect).
+ */
+const PREREGISTERED_V6_INSTRUCTION_SHA256 =
+  "b4916b58954b30838a5ca37a770fd796371b17400a1002131defba6bd7a69162";
+const PREREGISTERED_V6_INSTRUCTION_BYTES = 6021;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v5 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V5_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v6 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V6_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V5_INSTRUCTION_BYTES,
+      PREREGISTERED_V6_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v5 bytes, so round 11's block stays attributable", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V5_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V5_INSTRUCTION_BYTES,
     );
   });
 
@@ -169,9 +200,15 @@ describe("the draft records instruction is the measured artefact", () => {
     // half is unchanged" was true for two versions running and is exactly the
     // kind of inherited sentence that survives past the change that falsified it.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "575509cbc8570c1bd4fb8d31f9ce8b83f3d5508f28f37a5f11417a1f6dd30a3e",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(2373);
+    // HISTORIC — v4/v5's shared shape half. Asserted DISTINCT: it stood
+    // unchanged for two versions, which is exactly the kind of "unchanged" a
+    // reader inherits past the change that ended it.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "175af059317040381c4529c0e9ec0342070b7d14425b62fd6c5b374df48a99d6",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(1771);
     // HISTORIC — v2/v3's shared shape half. Asserted DISTINCT so the two cannot
     // be conflated in the record.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -193,8 +230,12 @@ describe("the draft records instruction is the measured artefact", () => {
     // completion-side half names the goal's exact index in the ask.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("6f395141d575f2b1b6e04454da84dc0b755cadfc60bd77fde7894207913a5b87");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(2917);
+    ).toBe("44c966336427c2672c2a0ee96bb6a507877ee7819660d77d496d9f982d1b879f");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(3648);
+    // HISTORIC — v5's connect half, asserted DISTINCT.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("6f395141d575f2b1b6e04454da84dc0b755cadfc60bd77fde7894207913a5b87");
     // HISTORIC — v4's connect half, asserted DISTINCT.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),

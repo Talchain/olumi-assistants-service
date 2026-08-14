@@ -56,6 +56,44 @@ import { createHash } from "node:crypto";
  *   · `sets_to`, so the analysis can compute a real number instead of comparing
  *     bare labels — asked for only where the brief supports it.
  *
+ * ⭐⭐ WHAT v6 CHANGED (2026-08-14), and why each line exists:
+ *   · `outcome` and `risk` became EXPRESSIBLE claim kinds (`grammar.ts`), and an
+ *     instruction that did not name them would leave the widening dark: the
+ *     model cannot use a kind it is never told exists. Both halves move.
+ *   · The shape half now ENUMERATES `claim_kind`, which it never did — it
+ *     described the claims in prose and left the model to infer the vocabulary
+ *     from the schema. With six kinds and two of them new that is not good
+ *     enough.
+ *   · "Name a result an `outcome` and a downside a `risk`. Do not file either as
+ *     a `factor`." This is a RECLASSIFICATION instruction and applies NO
+ *     pressure to invent — it tells the model where to put something it was
+ *     already going to say. MEASURED cause: the banked capture
+ *     `live-emission-round11-set12.json` carries a factor claim labelled
+ *     "Engineering Attrition Risk", and 5/5 live draws on the pinned brief
+ *     produced `riskCount: 0`.
+ *   · Terminality and orientation, stated in records terms. These are NOT new
+ *     rules and NOT this lane's invention: they are the served graph prompt's
+ *     own BRIDGE TERMINALITY and NODE ORIENTATION sections
+ *     (`defaults-v187` — "Outcomes and risks are terminal bridge nodes… Do not
+ *     connect outcome→outcome, outcome→risk, risk→outcome, or risk→risk";
+ *     "Outcomes are higher-is-better; risks are higher-is-worse"), which agree
+ *     exactly with `ALLOWED_EDGES`. This is the RECONCILIATION half: system
+ *     block 1 has asked for "≥1 outcome and ≥1 risk" throughout, and block 2 now
+ *     stops contradicting it by silence.
+ *   · "Point a factor at an `outcome` or a `risk` rather than at the goal
+ *     directly", with the REASON given rather than an imperative: a bare
+ *     `factor → goal` edge is bridged by `fixFactorGoalEdges`, and that bridge
+ *     is the machine's guess at the result. Saying why is what makes it a
+ *     contract rather than a rule the model discards under load.
+ *
+ * ⚠ WHAT v6 DELIBERATELY DID NOT TOUCH: system block 1 itself. Derived at the
+ * bytes — `getSystemPrompt('draft_graph')` resolves from the prompt STORE with
+ * the registered default as fallback, so `Prompts/canonical/draft_graph.txt` is
+ * REFERENCE, not the served bytes, and editing it would change nothing a model
+ * receives. The one contradiction that mattered ran the other way (block 1 asked
+ * for risks and outcomes the grammar could not express), and it is closed from
+ * this side.
+ *
  * ── WHAT IT DELIBERATELY DOES NOT SAY ──────────────────────────────────────
  * NOTHING ABOUT PROVENANCE. The projector owns provenance mechanically, and a
  * model that could speak about provenance could commit false authorship — the
@@ -108,9 +146,22 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
 Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
 user did not state, and do not round or rescale one they did.
 
-**claims** — one entry for each thing YOU are adding that the user did not say:
-factors worth modelling, causal links between them, refinements of an option, or
-a prior. Set \`basis\` to the array positions of the stated_items your claim
+**claims** — one entry for each thing YOU are adding that the user did not say.
+Use \`claim_kind\`:
+- \`factor\` — something that varies and that an option can move or that bears on
+  what happens
+- \`outcome\` — a result the decision produces. Higher is better.
+- \`risk\` — something that could go wrong, or a downside the decision carries.
+  Higher is worse.
+- \`causal_link\` — one thing affecting another
+- \`option_refinement\` — a sharper version of an option
+- \`prior\` — what you believe about a quantity, and how sure you are
+
+Name a result an \`outcome\` and a downside a \`risk\`. Do not file either as a
+\`factor\`: a factor is something that VARIES on the way to a result, and calling
+a result a factor loses the distinction the analysis needs to compare options.
+
+Set \`basis\` to the array positions of the stated_items your claim
 builds on. If a claim rests on nothing the user said, leave \`basis\` empty — that
 is a legitimate and expected answer, and marking it honestly is more useful than
 attaching a basis that does not hold.
@@ -136,9 +187,16 @@ A decision only holds together if its parts join up, so state the connections as
 and \`basis\` still records whatever the user said that you built them on.
 
 - Every option needs a chain that reaches the \`goal\`: a \`causal_link\` FROM the
-  option TO a factor it changes, then onward from that factor until the chain
-  ends at the goal. An option whose chain stops short cannot be compared with
-  any other option.
+  option TO a factor it changes, then onward from that factor to an \`outcome\`
+  or a \`risk\`, and from there to the goal. An option whose chain stops short
+  cannot be compared with any other option.
+- **An \`outcome\` and a \`risk\` are where a chain ENDS.** A factor may point at
+  one; the only link LEAVING one goes to the goal. Do not link an outcome or a
+  risk to another outcome, risk or factor. If two results feel connected, say so
+  by linking them to the goal separately, or make the upstream one a \`factor\`.
+- Point a factor at an \`outcome\` or a \`risk\` rather than at the goal directly.
+  A factor linked straight to the goal has to be bridged for you, and the bridge
+  is then the machine's guess at what the result was, not yours.
 - The goal is a \`stated_item\`, so a link that reaches it sets \`to_stated\`. The
   goal is never one of your \`claims\`, so \`to_claim\` cannot reach it: a link that
   tries lands on a factor instead, and every record behind it is dropped for not
@@ -164,7 +222,9 @@ and \`basis\` still records whatever the user said that you built them on.
   decision.
 - If a stated figure or constraint bears on the goal, say so with a
   \`causal_link\` from it to the goal, or into the chain that reaches the goal.
-- Set \`effect\` to \`positive\` or \`negative\` on every \`causal_link\`.
+- Set \`effect\` to \`positive\` or \`negative\` on every \`causal_link\`. On the link
+  from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
+  the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
 
 Do not emit a factor you cannot connect. But never drop something the user
 stated: keep it in \`stated_items\`, and connect it if it bears on the goal.

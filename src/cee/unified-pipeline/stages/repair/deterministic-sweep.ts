@@ -15,6 +15,15 @@ import type { StageContext } from "../../types.js";
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
 import { isDirectedEdge } from "../../../../schemas/graph.js";
 import type { ValidationIssue } from "../../../../validators/graph-validator.types.js";
+// ⭐ DERIVED, NEVER MIRRORED. The bridge-into-goal vocabulary this file's gap
+// gate honours is the validator's OWN matrix, imported — a hand-copied
+// `["outcome", "risk"]` would be a second authority for one rule and would drift
+// silently the day a bridge rule is added (trap 12).
+import { ALLOWED_EDGES } from "../../../../validators/graph-validator.types.js";
+// ⭐ THE ONE SCAFFOLDING-BADGE AUTHORITY, shared with the projector. See its
+// definition: the class is the projector's existing third provenance class, not
+// a new vocabulary minted here.
+import { scaffoldingProvenance } from "../../../draft/records/projector.js";
 import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
@@ -949,8 +958,58 @@ export function warnGoalThresholdPossiblyInferred(graph: GraphT): Repair[] {
  *  3. Log repair with code FACTOR_GOAL_EDGE_SPLIT
  *
  * Runs proactively (not gated by violations) like unreachable-factor handling.
+ *
+ * ── ⭐⭐ GATED ON A GENUINE GAP, 2026-08-14, AND WHAT IT MINTS SAYS SO ──────
+ * This repair used to fire on EVERY `factor → goal` edge, unconditionally. That
+ * was right while it stood: the draft grammar could not express an `outcome` at
+ * all, so this was the only bridge layer available and the alternative was a
+ * goal unreachable by construction.
+ *
+ * It became a defect the moment nothing else could produce an outcome. Measured
+ * on `dbd012e`, 5/5 live draws on the pinned brief: every outcome on every
+ * graph was minted here, badged `ai_inferred` like the model's own work, and
+ * NOTHING distinguished the two — 100 % of the outcome layer was scaffolding
+ * wearing the model's clothes (`analysis-outage-2026-08-14/summary.json`).
+ *
+ * TWO SEPARATE QUESTIONS, ANSWERED SEPARATELY (trap 21):
+ *
+ *  1. *Is there anything to bridge?* — the GAP GATE. Where the model already
+ *     drew `factor → <bridge> → goal`, a `factor → goal` edge is a REDUNDANT
+ *     SHORTCUT over a path that exists, and minting a second mediator for it
+ *     manufactures scaffolding beside authored work. Such an edge is dropped and
+ *     DISCLOSED (`FACTOR_GOAL_SHORTCUT_REDUNDANT`) rather than split.
+ *
+ *     ⚠ THE GATE IS PER PATH, NOT PER GRAPH. "Does any outcome exist?" would
+ *     starve a second, genuinely gapped factor and leave its illegal edge to be
+ *     rejected downstream. And the bridge vocabulary is the VALIDATOR's, not
+ *     this function's name: `ALLOWED_EDGES` carries BOTH `factor → outcome →
+ *     goal` and `factor → risk → goal`, so an authored RISK bridge is an
+ *     authored bridge (trap 13d — write the predicate against the spec, not
+ *     against the word you came in through).
+ *
+ *     ⚠ IT DOES NOT REROUTE THROUGH AN UNRELATED OUTCOME. Where the factor does
+ *     NOT already feed a bridge that reaches this goal, the repair still MINTS,
+ *     rather than attaching the factor to some other outcome that happens to
+ *     reach the goal. "<Factor> Impact" claims nothing about the world;
+ *     "this factor causes Customer Churn" is a causal claim nobody made.
+ *
+ *  2. *Whose node is this?* — the MARKER. Every node minted here carries
+ *     `provenance.provenance_class = "projector_structural"`, the projector's
+ *     EXISTING third class for "neither the user's nor the model's". Not a new
+ *     vocabulary: one axis, one authority, built through
+ *     `scaffoldingProvenance`.
+ *
+ * The repair is NOT removed and must not be. It is a legitimate safety net that
+ * became dominant only because the grammar starved it; with `outcome` now
+ * expressible it should catch a residue, and the marker is what lets anyone
+ * measure the residue instead of guessing at it.
  */
-export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs: Repair[]; splitCount: number } {
+export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): {
+  repairs: Repair[];
+  splitCount: number;
+  /** Shortcuts dropped because an authored bridge already carried that path. */
+  redundantCount: number;
+} {
   const repairs: Repair[] = [];
   const nodes = (graph as any).nodes as NodeT[];
   const edges = (graph as any).edges as EdgeT[];
@@ -965,6 +1024,37 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
   const keptEdges: EdgeT[] = [];
   const newNodes: NodeT[] = [];
   let splitCount = 0;
+  let redundantCount = 0;
+
+  /**
+   * The kinds `ALLOWED_EDGES` admits as a terminus into a goal — DERIVED from
+   * the validator's own matrix rather than restated, so a new bridge rule there
+   * widens this gate automatically instead of silently leaving it narrow.
+   */
+  const bridgeKinds = new Set(
+    ALLOWED_EDGES.filter((r) => r.toKind === "goal").map((r) => r.fromKind),
+  );
+
+  /**
+   * Does an AUTHORED bridge already carry `factorId → … → goalId`?
+   *
+   * Returns the bridge node's id, or `undefined`. Deterministic by
+   * construction: candidates are collected and the lexicographically first id
+   * wins, so the answer is a function of the graph's content and never of
+   * `edges[]` order.
+   */
+  const authoredBridgeFor = (factorId: string, goalId: string): string | undefined => {
+    const candidates: string[] = [];
+    for (const first of edges) {
+      if (first.from !== factorId) continue;
+      const midKind = nodeKindMap.get(first.to);
+      if (midKind === undefined || !bridgeKinds.has(midKind)) continue;
+      if (edges.some((second) => second.from === first.to && second.to === goalId)) {
+        candidates.push(first.to);
+      }
+    }
+    return candidates.sort()[0];
+  };
 
   // Mediating-outcome id resolved ONCE PER FACTOR, not per edge. Two reasons, and
   // the second only bites once collision handling exists:
@@ -1170,6 +1260,31 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
     const toKind = nodeKindMap.get(edge.to);
 
     if (fromKind === "factor" && toKind === "goal") {
+      // ── THE GAP GATE. An authored bridge already carries this path, so the
+      // shortcut is redundant, not missing structure. Drop it — leaving it
+      // would trade a scaffolding defect for an `INVALID_EDGE_TYPE` — and say
+      // so, because a suppression nobody can see is indistinguishable from a
+      // lost edge.
+      const authoredBridge = authoredBridgeFor(edge.from, edge.to);
+      if (authoredBridge !== undefined) {
+        redundantCount++;
+        repairs.push({
+          code: "FACTOR_GOAL_SHORTCUT_REDUNDANT",
+          path: `edges[${edge.from}→${edge.to}]`,
+          action:
+            `Removed a direct link from "${displayName(edge.from)}" to "${displayName(edge.to)}": ` +
+            `the drafted model already connects them through "${displayName(authoredBridge)}", and ` +
+            `a duplicate route stops the analysis running.`,
+        });
+        log.info({
+          event: "cee.deterministic_sweep.factor_goal_shortcut_redundant",
+          from: edge.from,
+          to: edge.to,
+          bridge: authoredBridge,
+        }, `Dropped redundant factor→goal shortcut ${edge.from}→${edge.to} (authored bridge ${authoredBridge})`);
+        continue;
+      }
+
       const factorLabel = nodeLabelMap.get(edge.from) ?? edge.from;
 
       let outcomeId = resolvedOutcomeId.get(edge.from);
@@ -1198,6 +1313,11 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
           id: outcomeId,
           kind: "outcome",
           label: outcomeLabel,
+          // THE MARKER. Machine-readable, on the projector's existing third
+          // axis. Without it a measurement cannot tell this node from one the
+          // model authored — which is exactly how 100 % of a live outcome layer
+          // came to be ours with nothing saying so.
+          provenance: scaffoldingProvenance("Mediating outcome minted to split a factor→goal edge"),
         } as NodeT);
         nodeKindMap.set(outcomeId, "outcome");
         // Register the label too: repair copy is USER-VISIBLE (the UI renders
@@ -1245,12 +1365,17 @@ export function fixFactorGoalEdges(graph: GraphT, format: EdgeFormat): { repairs
     }
   }
 
-  if (splitCount > 0) {
+  // ⚠ `redundantCount` IS PART OF THIS CONDITION, AND MUST BE. A run that only
+  // dropped redundant shortcuts has `splitCount === 0`, and the old condition
+  // would have discarded `keptEdges` entirely — leaving every dropped shortcut
+  // on the graph while the repair record said it had gone. A disclosure that
+  // describes an edit which never landed is worse than no gate at all.
+  if (splitCount > 0 || redundantCount > 0) {
     (graph as any).nodes = [...nodes, ...newNodes];
     (graph as any).edges = keptEdges;
   }
 
-  return { repairs, splitCount };
+  return { repairs, splitCount, redundantCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -1699,6 +1824,10 @@ export function fixOptionGoalShortcut(graph: GraphT, format: EdgeFormat): {
             id: outcomeId,
             kind: "outcome",
             label: `${factorLabel} Impact`,
+            // THE MARKER — same axis, same constructor as the other two mint
+            // sites. Three sites minting one class through one function is what
+            // keeps a later reader from finding two of them marked and one not.
+            provenance: scaffoldingProvenance("Mediating outcome minted to reroute an option→goal edge"),
           } as NodeT);
           nodeKindMap.set(outcomeId, "outcome");
         }

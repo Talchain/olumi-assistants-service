@@ -324,6 +324,12 @@ describe('REPAIR_CODE_TO_ADJUSTMENT drift guard', () => {
     // member is `category_reclassified`, which neither of these is. They reach
     // the user via `deterministic_repairs[]` instead. See boundary.ts.
     'DUPLICATE_CAUSAL_EDGE_SUPPRESSED', 'CONFLICTING_CAUSAL_DIRECTION',
+    // Same adjudication, same reason (added 2026-08-14 with the scaffolding gap
+    // gate): dropping a `factor → goal` shortcut that an authored bridge already
+    // carries is an EDGE SUPPRESSION, not a category reclassification, so the
+    // closed `ModelAdjustment.code` enum has no member for it. It reaches the
+    // user through `deterministic_repairs[]` with the bridge named in its copy.
+    'FACTOR_GOAL_SHORTCUT_REDUNDANT',
     // Not a Repair at all — a VALIDATION code the sweep raises as a violation
     // (`violationCodes` / `remainingErrors`). It can never reach the repair
     // allowlist, and is listed only because the derivation below deliberately

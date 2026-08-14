@@ -85,6 +85,52 @@ import type {
 export type RecordProvenanceClass = "stated" | "ai_inferred" | "projector_structural";
 
 /**
+ * ⭐⭐ THE THIRD CLASS, AS A VALUE — the ONE authority for "the machine put this
+ * here", shared with the repair stages.
+ *
+ * The deterministic sweep and the terminal-bridge repair mint nodes the user
+ * never wrote and the model never claimed. Before this constant existed they
+ * minted them UNMARKED, and a live measurement could not tell a scaffolded
+ * outcome from an authored one — which is how 100 % of the outcome layer came to
+ * be machine-made without anything saying so.
+ *
+ * ⚠ IT IS DELIBERATELY NOT A NEW VOCABULARY. `projector_structural` is the class
+ * this projector already mints its decision node under, `sidecar.ts` already
+ * counts, and `completion.ts` already skips. A second axis meaning the same
+ * thing would be two authorities for one fact — the estate's dominant defect —
+ * and a two-class reader would score the new one as `stated` by omission.
+ *
+ * Exported as a VALUE (not just a type) so the repair modules bind to this
+ * literal rather than retyping the string: a rename then moves every mint site
+ * and every reader at once.
+ */
+export const PROJECTOR_STRUCTURAL_CLASS: RecordProvenanceClass = "projector_structural";
+
+/**
+ * ⭐ THE ONE CONSTRUCTOR for the scaffolding badge.
+ *
+ * Every site that mints machine topology — this projector's decision node, and
+ * the two sweep repairs and the terminal bridge downstream — builds its badge
+ * here, so the class, the `source` and the shape of the disclosure cannot drift
+ * between them. `quote` is the CALLER's, because what the machine did differs
+ * per site and a shared quote would be false at three of the four.
+ *
+ * ⚠ `source: "synthetic"` is DERIVED, not chosen. `mapToV3ProvenanceSource`
+ * (`cee/transforms/schema-v3.ts`) is a lowercased SUBSTRING matcher: anything
+ * containing "brief"/"document"/"evidence" becomes `from_brief` on the user's
+ * badge, and "user"/"specified"/"manual" becomes `user_set`. `"synthetic"` hits
+ * none of them and is what every other CEE structural edge already carries.
+ *
+ * ⚠ `quote` must stay under 100 characters: `StructuredProvenance.quote` is
+ * `z.string().max(100)` at the consumer, and although node provenance is not
+ * validated today, a badge that could not survive the edge validator is one
+ * nobody should copy onto an edge later.
+ */
+export function scaffoldingProvenance(quote: string): RecordProvenance {
+  return { provenance_class: PROJECTOR_STRUCTURAL_CLASS, source: "synthetic", quote };
+}
+
+/**
  * ⭐ THE TWO FIELDS THE CONSUMER REQUIRES, AND WHY THESE VALUES.
  *
  * The first build of this projector had every edge-bearing draft rejected at the
@@ -529,6 +575,16 @@ const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | n
   factor: "factor",
   option_refinement: "option",
   prior: "factor",
+  // ⭐ ADDED 2026-08-14 with the grammar widening. Both map STRAIGHT THROUGH:
+  // `risk` and `outcome` are canonical node kinds in `NodeKindV3`
+  // (`schemas/cee-v3.ts`), in `@talchain/schemas` 0.39.0, and in
+  // `NODE_KIND_MAP` (where they map to themselves), and both are first-class in
+  // `ALLOWED_EDGES` — `factor → outcome`, `factor → risk`, `outcome → goal`,
+  // `risk → goal`. No translation is needed anywhere, which is the point: the
+  // vocabulary existed at every hop downstream and only the DRAFT grammar
+  // refused to speak it.
+  risk: "risk",
+  outcome: "outcome",
   // Produces an EDGE, never a node.
   causal_link: null,
 };
@@ -586,6 +642,14 @@ export const PROJECTED_KIND_AFTER_NORMALISATION: Readonly<Record<string, string>
   option: "option",
   factor: "factor",
   decision: "decision",
+  // ⭐ ADDED 2026-08-14. `NODE_KIND_MAP` carries both as canonical pass-throughs
+  // (`'risk': 'risk'`, `'outcome': 'outcome'`). `projectedKindAfterNormalisation`
+  // would have fallen back to identity and got the same answer — they are listed
+  // anyway because this table's own comment says it is "the kinds this projector
+  // can mint", and a table whose comment has quietly stopped being true is the
+  // defect class this file spends most of its length avoiding.
+  risk: "risk",
+  outcome: "outcome",
 };
 
 /**
@@ -624,6 +688,27 @@ export const UNRESCUABLE_EDGE_SHAPES: ReadonlySet<string> = new Set([
   "risk->decision",
   "factor->decision",
   "option->decision",
+  // ⭐ ADDED 2026-08-14, when `outcome` became emittable. These three are
+  // admitted ONLY because each falls under a derivation ALREADY WRITTEN ABOVE
+  // and applied to every other source kind — they are the same three rules, not
+  // three new judgements:
+  //   · nothing may point INTO an option (`decision → option` is the only
+  //     inbound rule, and the decision is projector-structural);
+  //   · nothing may leave a goal (`fixGoalHasOutgoing` deletes it — pure loss);
+  //   · nothing may point at the decision.
+  "outcome->option",
+  "goal->outcome",
+  "outcome->decision",
+  // ⚠ AND THE ONES DELIBERATELY LEFT OUT, because this set is the PROVABLY
+  // UNRESCUABLE set and not a second copy of `ALLOWED_EDGES`: `outcome→factor`,
+  // `outcome→outcome`, `outcome→risk` and `risk→outcome` are NOT listed. Adding
+  // them would require an exhaustive sweep audit this lane did not perform, and
+  // over-rejecting here DELETES REAL CAUSALITY — a lie by omission, which is
+  // strictly worse than the loud `INVALID_EDGE_TYPE` a wrong acceptance
+  // produces. They meet the real validator instead. (The served graph prompt
+  // already tells the model not to draw them: "Do not connect outcome→outcome,
+  // outcome→risk, risk→outcome, or risk→risk", `defaults-v187`
+  // BRIDGE TERMINALITY — an instruction, not a claim about the pipeline.)
 ]);
 
 /**
@@ -1683,10 +1768,11 @@ function projectOnce(
     // the decision node and its edges share it. The two consumer-required fields
     // are load-bearing on the EDGES (nodes are not validated); carrying them on
     // the node too is honest of a scaffold node and keeps the class to one site.
-    const structuralProv: RecordProvenance = {
-      provenance_class: "projector_structural",
-      ...EDGE_ATTRIBUTION.projector_structural,
-    };
+    // Built through the shared constructor so this site, the two sweep mint
+    // sites and the terminal bridge cannot drift on the class or the `source`.
+    const structuralProv: RecordProvenance = scaffoldingProvenance(
+      EDGE_ATTRIBUTION.projector_structural.quote,
+    );
     // Identity is derived from the option ids it joins, so the decision node is
     // stable across runs and distinct across different option sets.
     const decisionId = mintUnique(sha8("decision", ...optionNodes.map((n) => n.id)), usedIds);
