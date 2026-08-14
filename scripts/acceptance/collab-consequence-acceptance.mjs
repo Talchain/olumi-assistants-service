@@ -25,6 +25,16 @@
  *
  * Exit 0 = every gate passed. Exit 1 = a gate failed, named. Exit 2 = COULD NOT
  * MEASURE, which is a FAILURE and never a pass.
+ *
+ * ⚠ PREREQUISITE: `pnpm build` first. This imports the COMPILED tree
+ * (`dist/src/...`, gitignored) rather than the source, deliberately — it should
+ * witness the bytes that would actually be deployed, not a transpile-on-the-fly
+ * approximation of them. Without a build the import fails before any gate runs,
+ * which reads as a module-resolution error rather than as a test failure; that
+ * is the honest signal (nothing was measured), but run the build first and it
+ * will not arise.
+ *
+ *   pnpm build && node scripts/acceptance/collab-consequence-acceptance.mjs
  */
 
 import { applyFactorValueEdit } from '../../dist/src/orchestrator-v5/system-events/factor-value-edit.js';
