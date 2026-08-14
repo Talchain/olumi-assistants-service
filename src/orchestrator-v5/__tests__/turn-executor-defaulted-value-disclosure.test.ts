@@ -49,7 +49,11 @@ import { DEFAULTED_DISCLOSURE_TAIL } from '../coaching/pick-defaulted-assumption
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
+  ToolResponseBlock,
 } from '../../adapters/llm/types.js';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
+import type { HandlerFn, HandlerRegistry } from '../tools/registry.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -162,6 +166,7 @@ vi.mock('../session/index.js', () => ({
 }));
 
 const { runTurnExecutor } = await import('../turn-executor.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 function mkTextResult(text: string): ChatWithToolsResult {
   return {
@@ -298,6 +303,150 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
     );
 
     expect(response.assistant_text).toBe(receipt);
+    expect(egressEvent()).toBeUndefined();
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE TWO DISCRIMINATORS THE FIRST ROUND OF THIS SUITE LACKED.
+ *
+ * The mutant kit is what exposed the gap, and it is worth stating plainly: with
+ * only the tests above, reverting the guard to bare `context.prior_facts`, or
+ * deleting the same-run condition, left this suite fully GREEN. Both fixes were
+ * real and neither was observable — the same shape as the defect this whole
+ * lane exists to close, and exactly the criticism the review made of the first
+ * mutant kit.
+ *
+ * A fix whose test cannot see it is not tested (CLAUDE.md trap 11).
+ */
+
+const HEADLINE = 'Launch now came out ahead in 62% of runs of this model.';
+
+const GRAPH_WITH_OPTIONS: GraphStateIngress = {
+  nodes: [
+    { id: 'goal_1', kind: 'goal', label: 'Profit' },
+    { id: 'opt_a', kind: 'option', label: 'A' },
+    { id: 'opt_b', kind: 'option', label: 'B' },
+  ],
+  edges: [],
+  options: [
+    { id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } },
+    { id: 'opt_b', status: 'ready', interventions: { f1: { value: 0 } } },
+  ],
+} as GraphStateIngress;
+
+const PROPOSAL_RUN_ANALYSIS = {
+  intent_class: 'execute',
+  action: {
+    handler_id: 'run_analysis',
+    entity: {
+      id: 'opt_a',
+      kind: 'option',
+      resolution_status: 'resolved',
+      resolution_method: 'id_match',
+    },
+    parameters: [],
+    cited_context_fields: [],
+  },
+};
+
+function mkToolUseResult(input: unknown): ChatWithToolsResult {
+  const content: ToolResponseBlock[] = [
+    { type: 'text', text: 'Routing…' },
+    { type: 'tool_use', id: 'tu-1', name: OLUMI_ACTION_TOOL_NAME, input: input as Record<string, unknown> },
+  ];
+  return {
+    content,
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 50,
+  };
+}
+
+/** A handler that produces THIS TURN's analysis, carrying the real defaults. */
+function registryProducingDefaults(): HandlerRegistry {
+  const handler: HandlerFn = async () => ({
+    assistant_text: HEADLINE,
+    handler_facts: [
+      {
+        fact_type: 'run_analysis',
+        fact_version: 1,
+        noop: false,
+        result: {
+          scenario_id: SCENARIO_ID,
+          leading_option_id: 'opt_a',
+          summary: 'Ran the analysis.',
+          graph_hash_at_run: READY_GRAPH_HASH,
+          computed_at: new Date().toISOString(),
+          constraint_verdict: {
+            may_name_leading_option: true,
+            constraint_verdict_state: 'not_applicable',
+          },
+          enrichment: { ...REAL_ENRICHMENT, analysis_status: 'completed' },
+        },
+      } as unknown as HandlerFact,
+    ],
+    llm_calls_used: 0,
+  });
+  return new Map([['run_analysis', handler]]);
+}
+
+describe('turn-executor F6 — the fact basis and the same-run guard', () => {
+  /**
+   * ⭐⭐ THE EXECUTE-TURN BLIND SPOT. `context.prior_facts` is never mutated, so
+   * a turn that RUNS the analysis has its own fact only in
+   * `handlerFactsForCommit`. Here prior_facts deliberately carries an analysis
+   * with NO defaults while THIS turn produces one WITH defaults: reading the
+   * bare array would disclose nothing (a first analysis) or describe the wrong
+   * run (a rerun).
+   */
+  it('discloses THIS turn’s defaults, not the previous run’s', async () => {
+    // prior_facts: same capture, defaults REMOVED — so any disclosure that
+    // appears can only have come from this turn's own fact.
+    enrichmentForTurn = enrichmentWithoutDefaults();
+
+    const { response } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'run the analysis', turn_class: 'decide', stage: 'analyse' },
+      'req-f6-fact-basis',
+      {
+        routingAdapter: {
+          chatWithTools: vi
+            .fn<(a: ChatWithToolsArgs, o: { requestId: string }) => Promise<ChatWithToolsResult>>()
+            .mockImplementation((async () => mkToolUseResult(PROPOSAL_RUN_ANALYSIS)) as never),
+        },
+        handlerRegistry: registryProducingDefaults(),
+        graphState: GRAPH_WITH_OPTIONS,
+      },
+    );
+
+    expect(occurrences(response.assistant_text ?? '', DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
+  });
+
+  /**
+   * ⭐ THE SAME-RUN GUARD. When the request body carries `analysis_state`, the
+   * numbers on screen describe the REQUEST run while any fact-sourced signal
+   * describes a PRIOR one. Pairing them would let the disclosure qualify a
+   * different run than the numbers beside it — or invent a caveat about a run
+   * that defaulted nothing. The four existing selector call sites all carry
+   * this condition; so must this one.
+   */
+  it('stands down when the analysis came from the request body', async () => {
+    enrichmentForTurn = REAL_ENRICHMENT; // prior facts DO carry defaults
+
+    const { response } = await runTurnExecutor(
+      { ...BASE_PAYLOAD, message: 'how solid is this?' },
+      'req-f6-same-run-guard',
+      {
+        routingAdapter: mockRoutingAdapter(STABILITY_LEAK),
+        // Request-sourced analysis ⇒ analysisStateSource === 'request'.
+        analysisState: { analysis_status: 'completed' } as never,
+      },
+    );
+
+    const text = response.assistant_text ?? '';
+    expect(text).not.toContain(DEFAULTED_DISCLOSURE_TAIL);
     expect(egressEvent()).toBeUndefined();
   });
 });

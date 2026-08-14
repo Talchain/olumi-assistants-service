@@ -468,3 +468,64 @@ describe('F6 egress — the splitter’s two measured hazards (review round 2)',
     expect(applyDefaultedValueEgress(bulleted, null).text).toBe(bulleted);
   });
 });
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * TWO MUTANTS SURVIVED THE FIRST ROUND OF THIS SUITE, AND BOTH SURVIVORS WERE
+ * REAL GAPS RATHER THAN EQUIVALENT MUTANTS. An equivalent mutant must be
+ * DEMONSTRATED, never assumed (CLAUDE.md trap 13c) — the demonstration attempt
+ * is what showed these two were not.
+ */
+describe('F6 egress — the survivors, now discriminated', () => {
+  /**
+   * The floor has TWO conditions and they are not redundant. The ratio
+   * backstop masks the `kept.length === 0` condition on ordinary text, because
+   * removing every segment usually removes ~100% of the characters. It stops
+   * masking it once the SEPARATORS carry enough of the text — a markdown answer
+   * of stability bullets with blank lines between them.
+   *
+   * Deliberately a boundary probe: its job is to prove the two conditions are
+   * independent, so a later tidy-up cannot delete one as dead.
+   */
+  it('the kept-empty condition fires where the ratio backstop does not', () => {
+    const allStability =
+      'This result looks stable.'
+      + '\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n'
+      + 'The picture appears fragile.';
+
+    const suppressibleChars = 'This result looks stable.'.length
+      + 'The picture appears fragile.'.length;
+    // PRECONDITION: the ratio is genuinely BELOW the backstop, so a pass here
+    // can only be the kept-empty condition's doing.
+    expect(suppressibleChars / allStability.length).toBeLessThan(0.8);
+
+    const out = applyDefaultedValueEgress(allStability, SIGNAL);
+    expect(out.floorTripped).toBe(true);
+    expect(out.suppressed).toHaveLength(0);
+    expect(out.text).toContain('This result looks stable');
+  });
+
+  /**
+   * MARKDOWN IS NOT FLATTENED — the discriminating case. The earlier test used
+   * a bullet list whose lines are not sentence boundaries (a `-` is not a
+   * sentence start), so it was ONE segment and never exercised the join at all.
+   * This one has two real sentences separated by a blank line, which is exactly
+   * where normalising the separator to a space would destroy the paragraph.
+   */
+  it('preserves a paragraph break between two real sentences', () => {
+    // ⚠ THE FIXTURE MUST BE ANALYSIS-BEARING OR THIS TEST PROVES NOTHING. The
+    // first version used two neutral sentences, so `applyDefaultedValueEgress`
+    // returned at the gate and the join was never executed — a separator-
+    // normalising mutant survived it. `leads` puts the text through the layer.
+    const twoParagraphs = 'Launch now leads.\n\nPrice matters least.';
+    expect(isAnalysisBearing(twoParagraphs)).toBe(true);
+    // PRECONDITION: this really IS two segments with a newline separator —
+    // otherwise the assertion below would pass on a single unsplit string.
+    expect(segmentSentences(twoParagraphs)).toHaveLength(2);
+    expect(segmentSentences(twoParagraphs)[0]!.sep).toBe('\n\n');
+
+    const out = applyDefaultedValueEgress(twoParagraphs, SIGNAL);
+    expect(out.text).toContain('Launch now leads.\n\nPrice matters least.');
+    expect(out.text).not.toContain('Launch now leads. Price matters least.');
+  });
+});
