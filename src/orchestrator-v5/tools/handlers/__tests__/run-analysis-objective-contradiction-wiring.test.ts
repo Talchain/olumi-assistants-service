@@ -92,6 +92,28 @@ function composeSummaryAsHandlerDoes(disclosure: string): string {
   return `${RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT}${''}${''}${''}${disclosure}`;
 }
 
+/**
+ * ⚠⚠ THE PRODUCTION SHAPE, AND THE ONE THE TEMPLATE HELPER ABOVE CANNOT REACH.
+ *
+ * Added because a mutant SURVIVED: deleting the `TAIL_PATTERN` slot changed
+ * nothing, and the reason is that every egress assertion here composed
+ * `template + disclosure`, which the allowlist admits through
+ * `TEMPLATE_SUFFIX_ONLY_REGEX`. But this disclosure only ships when
+ * `headline !== null` — so **in production the summary is always
+ * `headline + tails`, the `TAIL_PATTERN` path, which nothing here exercised.**
+ * The tests were passing on a composition the handler can never emit
+ * (CLAUDE.md trap 16's inverse: a path can be executable and unreachable, and a
+ * fixture the author wrote is not evidence about the wire).
+ *
+ * The headline text is the module's own Case-E shape — `{label} came out ahead
+ * in N% of runs of this model.` — which is what `buildAnalysisResultHeadline`
+ * emits when the stronger cases do not qualify.
+ */
+function composeSummaryWithRealHeadline(disclosure: string, label = 'Hold at £49 Per Seat'): string {
+  const headline = `${label} came out ahead in 71% of runs of this model.`;
+  return `${headline}${''}${''}${''}${disclosure}`;
+}
+
 // ============================================================================
 // 1. THE HANDLER ACTUALLY CALLS IT
 // ============================================================================
@@ -178,6 +200,55 @@ describe('egress — the sentence actually reaches the user', () => {
         ' “Raise to £59 Per Seat” came out ahead in 28% of runs.',
     );
     expect(isAllowedRunAnalysisAssistantText(composeSummaryAsHandlerDoes(disclosure))).toBe(true);
+  });
+
+  /**
+   * ⚠ ADDED BY A SURVIVING MUTANT. Removing the `TAIL_PATTERN` slot left every
+   * egress assertion GREEN, because they all rode the template path. This one
+   * rides the path the handler actually produces — a real headline plus the
+   * tail — so the slot is genuinely load-bearing.
+   */
+  it('⭐ THE PRODUCTION SHAPE: a real HEADLINE + the tail is admitted (kills the TAIL_PATTERN mutant)', () => {
+    const disclosure = composeObjectiveContradictionDisclosure(
+      PRICING_GRAPH,
+      RECORDS_WITH_GOAL_PROBABILITY,
+      true,
+    );
+    // Precondition pinned in-test: there IS a tail to admit.
+    expect(disclosure).not.toBe('');
+    expect(isAllowedRunAnalysisAssistantText(composeSummaryWithRealHeadline(disclosure))).toBe(
+      true,
+    );
+  });
+
+  /**
+   * ⚠ ALSO ADDED BY A SURVIVING MUTANT. Zeroing this tail's contribution to
+   * `MAX_ASSISTANT_TEXT_CHARS` changed nothing, because every fixture above is
+   * comfortably short. The budget only bites at the worst case — a headline near
+   * its own cap plus labels at the label cap — which is exactly the shape a real
+   * scenario with long option names produces, and exactly where an honest
+   * disclosure would otherwise be silently swapped for the locked template.
+   */
+  it('⭐ WORST CASE: a long headline + max-length labels still fits the budget (kills the budget mutant)', () => {
+    const longLabelA = 'Hold at £49 Per Seat Across All Enterprise And Mid-Market Tiers';
+    const longLabelB = 'Raise to £59 Per Seat With Ninety-Day Grandfathering For All';
+    const disclosure = composeObjectiveContradictionDisclosure(
+      PRICING_GRAPH,
+      [
+        { option_id: 'opt_hold', option_label: longLabelA.slice(0, 60), win_probability: 0.7067, probability_of_goal: 0 },
+        { option_id: 'opt_raise', option_label: longLabelB.slice(0, 60), win_probability: 0.2782, probability_of_goal: 0.48 },
+      ],
+      true,
+    );
+    expect(disclosure).not.toBe('');
+    const summary = composeSummaryWithRealHeadline(
+      disclosure,
+      'Hold at £49 Per Seat Across All Enterprise And Mid-Market Tiers Worldwide',
+    );
+    // Positive control on the premise: this really is a long summary, so the
+    // budget is doing work rather than being trivially satisfied.
+    expect(summary.length).toBeGreaterThan(300);
+    expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 
   it('ARM B WINS when both arms would fire — exactly one sentence ships', () => {
