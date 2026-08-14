@@ -2280,24 +2280,37 @@ function projectOnce(
   // every upstream verdict — the connectivity prune, the option budget, the
   // intervention resolution — reading exactly the edge set it read before.
   //
-  // ⚠ SCOPE: this collapses only what the projector itself minted from parallel
-  // claims, all of which are `ai_inferred` by construction (edge provenance is
-  // hardcoded at the mint site). NO USER-AUTHORED EDGE PASSES THROUGH HERE.
+  // ⚠ SCOPE: this collapses only what the PROJECTOR minted. NO USER-AUTHORED
+  // EDGE PASSES THROUGH HERE — this function's only input is the model's record
+  // set, and edge provenance is hardcoded at each mint site.
+  //
+  // ⚠ Precisely: pass 3's `causal_link` edges are `ai_inferred`, and pass 4's
+  // decision→option edges are `projector_structural`. BOTH traverse this pass.
+  // The structural ones are unaffected because they are singletons — one per
+  // option, minted once — so no group ever holds two. That is a property of pass
+  // 4's construction, NOT something this pass checks: were pass 4 ever to mint a
+  // second edge into one option, this pass would collapse it silently. Stated so
+  // the guarantee is inherited deliberately rather than assumed.
   //
   // THE RULE, and it is CANONICAL rather than correct — nothing here can know
   // which claim the model meant:
-  //   · a claim that STATES a strength outranks one that is silent about it. A
-  //     silent claim is not a contradictory claim about magnitude, so it never
-  //     wins over an explicit one and never counts as a conflict.
+  //   · a claim that STATES a strength outranks one that is silent about it —
+  //     silence is not a competing magnitude, so it never wins over an explicit
+  //     claim. ⚠ It is still DISCLOSED when discarded: the silent claim differs
+  //     from the survivor, and a reader who is not told loses the fact that a
+  //     second claim about this relationship existed at all.
   //   · among explicit ones the SMALLEST MAGNITUDE wins — the least extravagant
   //     claim, on 2(c)'s stated ground that over-claiming an effect is the harm
   //     that matters here.
   //   · ties break by signed value, then by edge id, so the rule is TOTAL and
-  //     any permutation of the same claims yields the same projection. That
-  //     matters more than it looks: order-dependence here would make the wire a
-  //     function of the model's emission order, which carries no meaning.
-  // Only genuine DIVERGENCE is disclosed; exact duplicates are coalesced in
-  // silence, because nothing was discarded and there is no decision to report.
+  //     any permutation of the same claims yields the same GRAPH. That matters
+  //     more than it looks: order-dependence here would make the wire a function
+  //     of the model's emission order, which carries no meaning. (The disclosure
+  //     SIGNATURE lists the discarded terms in edge-id order, so its ordering is
+  //     stable per claim SET but is not itself a permutation invariant.)
+  // Only genuine DIVERGENCE is disclosed — a difference in strength OR in
+  // direction; an exact duplicate is coalesced in silence, because nothing was
+  // discarded and there is no decision to report.
   {
     const byPair = new Map<string, ProjectedEdge[]>();
     for (const edge of edges) {
@@ -2321,14 +2334,30 @@ function projectOnce(
       });
       const chosen = ordered[0]!;
       for (const edge of group) if (edge.id !== chosen.id) discarded.add(edge.id);
-      // A discard is only a CONFLICT where the strength actually differs; a
-      // duplicate carrying the same number took nothing away from the user.
+      // A discard is only a CONFLICT where the claim actually differed; a
+      // duplicate carrying the same content took nothing away from the user.
+      //
+      // ⭐⭐ BOTH SEMANTIC FIELDS, NOT JUST STRENGTH. `effect_direction` is minted
+      // from the grammar's `effect` independently of `strength`, and nothing
+      // couples them. A predicate that reads only `strength_mean` therefore
+      // absorbs the SHARPEST contradiction available in silence: "churn RAISES
+      // revenue" and "churn LOWERS revenue", both silent on strength, collapse to
+      // one edge whose direction is decided by an id sort, with ZERO disclosures.
+      // That is precisely the absorption this pass exists to refuse — the harm
+      // being larger, not smaller, than a strength disagreement. Widened after
+      // review proved both cases by execution.
       const divergent = group.filter(
-        (e) => e.id !== chosen.id && e.strength_mean !== chosen.strength_mean,
+        (e) =>
+          e.id !== chosen.id &&
+          (e.strength_mean !== chosen.strength_mean ||
+            e.effect_direction !== chosen.effect_direction),
       );
       if (divergent.length === 0) continue;
+      const render = (e: ProjectedEdge): string =>
+        `${typeof e.strength_mean === "number" ? e.strength_mean : "unset"}` +
+        `${e.effect_direction ? `(${e.effect_direction})` : ""}`;
       const signature = `${chosen.from}->${chosen.to}:${[chosen, ...divergent]
-        .map((e) => (typeof e.strength_mean === "number" ? e.strength_mean : "unset"))
+        .map(render)
         .join("|")}`;
       for (const edge of divergent) {
         const origin = claimOriginByEdgeId.get(edge.id);

@@ -99,7 +99,11 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     expect(conflicts[0]!.label).toBe("the price rise lifts the average seat price");
     expect(conflicts[0]!.claim_kind).toBe("causal_link");
     // Chosen first, then what was discarded — the reader re-derives the decision.
-    expect(conflicts[0]!.strength_signature).toBe(`${factor}->${goal}:0.5|0.8`);
+    // Both semantic fields are rendered: strength, and the direction that a
+    // strength-only signature would have hidden (F1).
+    expect(conflicts[0]!.strength_signature).toBe(
+      `${factor}->${goal}:0.5(positive)|0.8(positive)`,
+    );
   });
 
   it("leaves no divergent duplicate anywhere on the graph — the consumer's own predicate", () => {
@@ -176,10 +180,11 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     expect(divergentDuplicatePairs(graph)).toEqual([]);
   });
 
-  it("an EXPLICIT strength outranks a SILENT claim, and silence is not a conflict", () => {
-    // A claim that states nothing about magnitude is not a contradictory claim
-    // about magnitude. It must neither win nor be reported as a discarded
-    // disagreement — reporting it would manufacture a conflict the model never had.
+  it("an EXPLICIT strength outranks a SILENT claim, and the discard is still disclosed", () => {
+    // Silence is not a competing magnitude, so the silent claim never wins. It
+    // IS still disclosed when discarded: it differs from the survivor, and a
+    // reader who is not told loses the fact that a second claim about this
+    // relationship existed at all.
     const RECORDS: DraftRecordSet = {
       stated_items: [{ kind: "goal", source_quote: "decide the hiring plan" }],
       claims: [
@@ -199,6 +204,82 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     const conflicts = dropped.filter((d) => d.reason === "parallel_causal_link_conflict");
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]!.label).toBe("leadership bears on the aim");
+  });
+
+  /**
+   * ⭐⭐ F1 — DIRECTION IS THE SECOND SEMANTIC FIELD, AND IT CARRIES THE SHARPEST
+   * CONTRADICTION. `effect_direction` is minted from the grammar's `effect`
+   * independently of `strength`, with no coherence coupling anywhere. A
+   * divergence predicate reading only `strength_mean` absorbs an outright
+   * contradiction in silence — the survivor's direction settled by an id sort.
+   * Both cases below were proven by execution in review before this guard existed.
+   */
+  it("F1: opposite directions, BOTH SILENT on strength — collapsed, and DISCLOSED", () => {
+    const RECORDS: DraftRecordSet = {
+      stated_items: [{ kind: "goal", source_quote: "grow revenue this year" }],
+      claims: [
+        { claim_kind: "factor", label: "Customer Churn" },
+        { claim_kind: "factor", label: "Revenue" },
+        { claim_kind: "causal_link", label: "churn raises revenue", from_claim: 0, to_claim: 1, effect: "positive" },
+        { claim_kind: "causal_link", label: "churn lowers revenue", from_claim: 0, to_claim: 1, effect: "negative" },
+        { claim_kind: "causal_link", label: "revenue bears on the aim", from_claim: 1, to_stated: 0, effect: "positive" },
+      ],
+    };
+    const { graph, dropped } = projectRecordsToGraph(RECORDS);
+    const churn = idOf(graph, "Customer Churn");
+    const revenue = idOf(graph, "Revenue");
+
+    expect(edgesBetween(graph, churn, revenue)).toHaveLength(1);
+    // The contradiction must not vanish: equal strengths would hide it from any
+    // strength-only predicate, which is exactly the hole this pins.
+    const conflicts = dropped.filter((d) => d.reason === "parallel_causal_link_conflict");
+    expect(conflicts).toHaveLength(1);
+    // The signature must carry the DIRECTIONS, or a reader cannot re-derive the
+    // decision — both terms would otherwise render identically as "unset".
+    expect(conflicts[0]!.strength_signature).toMatch(/\(positive\)/);
+    expect(conflicts[0]!.strength_signature).toMatch(/\(negative\)/);
+  });
+
+  it("F1: opposite directions with EQUAL strengths — collapsed, and DISCLOSED", () => {
+    const RECORDS: DraftRecordSet = {
+      stated_items: [{ kind: "goal", source_quote: "grow revenue this year" }],
+      claims: [
+        { claim_kind: "factor", label: "Customer Churn" },
+        { claim_kind: "factor", label: "Revenue" },
+        { claim_kind: "causal_link", label: "churn raises revenue", from_claim: 0, to_claim: 1, effect: "positive", strength: 0.6 },
+        { claim_kind: "causal_link", label: "churn lowers revenue", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.6 },
+        { claim_kind: "causal_link", label: "revenue bears on the aim", from_claim: 1, to_stated: 0, effect: "positive" },
+      ],
+    };
+    const { graph, dropped } = projectRecordsToGraph(RECORDS);
+    const churn = idOf(graph, "Customer Churn");
+    const revenue = idOf(graph, "Revenue");
+
+    expect(edgesBetween(graph, churn, revenue)).toHaveLength(1);
+    const conflicts = dropped.filter((d) => d.reason === "parallel_causal_link_conflict");
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.strength_signature).toBe(`${churn}->${revenue}:0.6(positive)|0.6(negative)`);
+  });
+
+  it("F1 twin: SAME direction and same strength is still silent — the widening invented no conflict", () => {
+    // The opposite-direction guard must not turn every exact duplicate into a
+    // reported disagreement. Without this, F1's fix trades one silent failure
+    // for a noisy one and the suite applauds.
+    const RECORDS: DraftRecordSet = {
+      stated_items: [{ kind: "goal", source_quote: "grow revenue this year" }],
+      claims: [
+        { claim_kind: "factor", label: "Customer Churn" },
+        { claim_kind: "factor", label: "Revenue" },
+        { claim_kind: "causal_link", label: "churn lowers revenue", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.6 },
+        { claim_kind: "causal_link", label: "churn hurts revenue", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.6 },
+        { claim_kind: "causal_link", label: "revenue bears on the aim", from_claim: 1, to_stated: 0, effect: "positive" },
+      ],
+    };
+    const { graph, dropped } = projectRecordsToGraph(RECORDS);
+    const churn = idOf(graph, "Customer Churn");
+    const revenue = idOf(graph, "Revenue");
+    expect(edgesBetween(graph, churn, revenue)).toHaveLength(1);
+    expect(dropped.filter((d) => d.reason === "parallel_causal_link_conflict")).toHaveLength(0);
   });
 
   it("coalesces an EXACT duplicate in silence — nothing was discarded, so nothing is reported", () => {
