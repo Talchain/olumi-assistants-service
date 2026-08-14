@@ -238,6 +238,9 @@
                                     "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/observed_state/properties/elicited_from/properties/round_id"
                                   }
                                 ]
+                              },
+                              "evidence_event_id": {
+                                "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/observed_state/properties/elicited_from/properties/round_id"
                               }
                             },
                             "required": [
