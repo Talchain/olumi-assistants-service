@@ -180,7 +180,7 @@ function payload(message: string): MessageTurnPayload {
     turn_id: `t-${randomUUID()}`,
     scenario_id: SCENARIO_ID,
     message,
-    turn_class: 'converse',
+    turn_class: 'decide',
     stage: 'analyse',
   };
 }
