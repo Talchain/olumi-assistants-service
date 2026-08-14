@@ -207,6 +207,54 @@ describe('F2 — the subject resolves by WORD, not by substring (reviewer corpus
     expect(verdict!.pursuing_leader_label).toBe('Raise to £59 Per Seat');
   });
 
+  /**
+   * ⚠ ADDED BY A SURVIVING MUTANT, and it exposes that the reviewer's own decoy
+   * case stopped discriminating once the TOKEN fix landed.
+   *
+   * "Hourly Support Rate" now scores ZERO against "our subscription price", so
+   * a first-match-over-nonzero-scores rule picks the right factor anyway — the
+   * decoy case proves the token fix, not the best-match fix. To pin best-match
+   * the two candidates must BOTH score, with the correct one scoring HIGHER.
+   *
+   * Here "Price Index" shares one content word (`price`) and "Seat Price Level"
+   * shares two (`price`, `level`); the aim names the latter. First-match binds
+   * the decoy and reports a contradiction about the wrong lever — a claim about
+   * a factor the user did not name.
+   */
+  it('best-match beats first-match when BOTH candidates score (kills the first-match mutant)', () => {
+    const twoScoring: InterventionView[] = [
+      {
+        factor_id: 'fac_price_index',
+        factor_label: 'Price Index',
+        by_option: new Map([
+          ['opt_hold', 0.2],
+          ['opt_raise', 0.4],
+        ]),
+      },
+      {
+        factor_id: 'fac_price_level',
+        factor_label: 'Seat Price Level',
+        by_option: new Map([
+          ['opt_hold', 0.49],
+          ['opt_raise', 0.59],
+        ]),
+      },
+    ];
+    // Precondition pinned in-test: BOTH candidates really do score, so the
+    // outcome is the best-match rule's doing and not one candidate missing.
+    expect(
+      detectDirectionalContradiction('Increase the seat price level', TWO_OPTIONS, [
+        twoScoring[0]!,
+      ]),
+    ).not.toBeNull();
+    const verdict = detectDirectionalContradiction(
+      'Increase the seat price level',
+      TWO_OPTIONS,
+      twoScoring,
+    );
+    expect(verdict!.factor_label).toBe('Seat Price Level');
+  });
+
   /** TWIN — a genuine word match must still resolve. */
   it('TWIN — an honest subject still resolves to its factor', () => {
     const price: InterventionView[] = [decoyFirstInterventions()[1]!];
@@ -280,10 +328,29 @@ describe('F5 — a probability outside the unit interval is not a probability', 
     expect(verdict!.better_probability_of_goal).toBe(1);
   });
 
-  it('a leader whose OWN probability is out of range is refused too', () => {
+  /**
+   * ⚠ THE HIGH CASE PASSES FOR THE WRONG REASON, and a surviving mutant said
+   * so. With a leader at 1.5 the percentage gate alone returns null (90% is not
+   * greater than 150%), so this case stayed green even with the unit-interval
+   * guard removed from the leader.
+   *
+   * A NEGATIVE leader is what discriminates: −0.2 is finite and passes the
+   * percentage gate against 0.9 (90% > −20%), so without the unit-interval
+   * guard the surface FIRES and renders "(90% against -20%)" — a negative
+   * probability printed to a user.
+   */
+  it('a leader whose OWN probability is out of range is refused — BOTH ends', () => {
+    // High end: caught by the percentage gate even without the interval guard.
     expect(
       detectGoalAttainmentContradiction([
         { option_id: 'a', option_label: 'A', win_probability: 0.7, probability_of_goal: 1.5 },
+        { option_id: 'b', option_label: 'B', win_probability: 0.3, probability_of_goal: 0.9 },
+      ]),
+    ).toBeNull();
+    // Low end: ONLY the interval guard can catch this one.
+    expect(
+      detectGoalAttainmentContradiction([
+        { option_id: 'a', option_label: 'A', win_probability: 0.7, probability_of_goal: -0.2 },
         { option_id: 'b', option_label: 'B', win_probability: 0.3, probability_of_goal: 0.9 },
       ]),
     ).toBeNull();
