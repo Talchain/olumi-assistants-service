@@ -49,10 +49,20 @@ import type { TurnSelection } from '../build-turn-context.js';
  */
 export interface GroundedSelection {
   /**
-   * The canonical canvas ids of the elements the answer was grounded on, in
-   * the order the turn requested them. EMPTY is meaningful and honest: the
-   * turn pointed at something, and nothing resolvable came back — read
-   * `unresolved` to learn why.
+   * The canonical canvas ids of the elements the answer was grounded on.
+   *
+   * ⚠ ORDER IS PERSISTED-GRAPH ORDER, NOT REQUEST ORDER. `resolveTurnSelection`
+   * walks the persisted graph's node array and keeps those the turn asked for,
+   * so requesting `[option, factor]` against a graph storing `[factor, …,
+   * option]` yields `[factor, option]`. An earlier version of this comment
+   * claimed request order; it was wrong, and it is corrected rather than
+   * deleted because a consumer could reasonably have relied on it. The
+   * property that actually matters holds and is pinned: this order is
+   * IDENTICAL to the order the elements appear in the prompt's `focus`
+   * section, because both derive from the same `selection.elements` array.
+   *
+   * EMPTY is meaningful and honest: the turn pointed at something, and nothing
+   * resolvable came back — read `unresolved` to learn why.
    */
   readonly element_ids: readonly string[];
   /**

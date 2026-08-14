@@ -39,7 +39,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { parseDeliveredOlumiResponse } from '../helpers/parse-delivered-response.js';
 
 // Throwing routing adapter — if the LLM is called, the test fails
 // loudly. This is the strongest assertion that the deterministic
@@ -325,7 +325,7 @@ describe('POST /orchestrate/v2/turn — deterministic value-update HTTP boundary
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = parseDeliveredOlumiResponse(body);
 
     // Acceptance Gate 1: no LLM call. Strongest signal that the
     // deterministic pre-route fired.
@@ -371,7 +371,7 @@ describe('POST /orchestrate/v2/turn — deterministic value-update HTTP boundary
     expect(llmCallTracker.count).toBe(0);
 
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = parseDeliveredOlumiResponse(body);
 
     // No graph_patch — no mutation occurred.
     const patchBlock = parsed.blocks.find((b) => b.type === 'graph_patch');
@@ -398,7 +398,7 @@ describe('POST /orchestrate/v2/turn — deterministic value-update HTTP boundary
     expect(llmCallTracker.count).toBe(0);
 
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = parseDeliveredOlumiResponse(body);
 
     const patchBlock = parsed.blocks.find((b) => b.type === 'graph_patch');
     expect(patchBlock).toBeUndefined();

@@ -35,7 +35,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { parseDeliveredOlumiResponse } from '../helpers/parse-delivered-response.js';
 import type { PendingAction } from '../../src/orchestrator-v5/session/pending-action.js';
 
 // Throwing routing adapter — any LLM call fails the journey loudly.
@@ -269,7 +269,7 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
 
     expect(res.statusCode).toBe(200);
     expect(llmCallTracker.count).toBe(0);
-    const body = OlumiResponseSchema.parse(JSON.parse(res.body));
+    const body = parseDeliveredOlumiResponse(JSON.parse(res.body));
     const patch = body.blocks.find((b) => b.type === 'graph_patch');
     expect(patch).toBeDefined();
     expect((patch as { operation?: string }).operation).toBe('set_factor_value');
