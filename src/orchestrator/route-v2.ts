@@ -85,6 +85,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+// VALUE import, not type-only: the sidecar strip below derives its declared-key
+// set from `.shape` rather than mirroring a hand-written list of key names.
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
@@ -958,50 +961,51 @@ async function sendFinalised200(
     body: import('@talchain/schemas/boundary').OlumiResponse;
   } => {
     const asRecord = candidateFinalised as Record<string, unknown>;
-    const hasTimings = '_timings' in asRecord;
-    const hasTrace = '_diagnostic_trace' in asRecord;
-    // `_context_summary` is always built fresh from `ctx` at the re-attach
-    // gate below — never read off the body. We still strip any body-attached
-    // copy (defence-in-depth: the route's flag gate is the sole authority,
-    // and the strict OlumiResponseSchema must not see an unknown key).
-    const hasContextSummary = '_context_summary' in asRecord;
-    // ROADMAP 1.42 — `_reasoning` is threaded via `ctx`, never body-attached
-    // by any dispatch path today. Stripped defensively anyway (same
-    // defence-in-depth posture as `_context_summary`): the route's flag
-    // gate at the re-attach block below is the sole authority, and the
-    // strict `OlumiResponseSchema` must not see an unknown key.
-    const hasReasoning = '_reasoning' in asRecord;
-    // ROADMAP 1.132 — `_answer_shape` is threaded via `ctx`, never
-    // body-attached by any dispatch path today. Stripped defensively anyway
-    // (same defence-in-depth posture as `_reasoning`): the re-attach block
-    // below is the sole authority, and the strict `OlumiResponseSchema` must
-    // not see an unknown key.
-    const hasAnswerShape = '_answer_shape' in asRecord;
-    // Hop 4b — `_grounded_selection` is threaded via `ctx`, never body-attached
-    // by any dispatch path today. Stripped defensively anyway (same
-    // defence-in-depth posture as `_answer_shape`): the re-attach block below
-    // is the sole authority, and the strict `OlumiResponseSchema` must not see
-    // an unknown key.
-    const hasGroundedSelection = '_grounded_selection' in asRecord;
-    if (
-      !hasTimings &&
-      !hasTrace &&
-      !hasContextSummary &&
-      !hasReasoning &&
-      !hasAnswerShape &&
-      !hasGroundedSelection
-    ) {
+    // ═════════════════════════════════════════════════════════════════════
+    // THE SIDECAR STRIP — DERIVED FROM THE CONTRACT, NOT MIRRORED.
+    //
+    // This block used to enumerate six literal key names. That is the
+    // hand-maintained mirror this repo pays for repeatedly (CLAUDE.md trap
+    // 12): the seventh sidecar would have been silently un-stripped, failed
+    // the strict `OlumiResponseSchema`, and dropped the whole turn to the
+    // fallback envelope — and nothing would have gone red until it shipped.
+    // The UI already derives its twin set this way
+    // (`responseParser.ts:208-210`, `KNOWN_OLUMI_TOP_LEVEL_KEYS` from
+    // `OlumiResponseSchema.shape`), so deriving here also makes the two ends
+    // read the SAME authority and stops them drifting apart.
+    //
+    // ⚠ THE PREDICATE IS DELIBERATELY NOT "ANYTHING UNDECLARED". It is
+    // "undeclared AND underscore-prefixed", and the second conjunct is what
+    // preserves the current behaviour rather than quietly widening it: a
+    // NON-underscore unknown root key must still reach `validateEgress` and
+    // fail LOUDLY, exactly as it does today. Stripping it instead would
+    // convert a visible egress violation into a silent data loss — the wrong
+    // direction for a boundary. The underscore is not a convention here; it
+    // is the marker the re-attach sites and the UI's demotion sidecar are
+    // both built around.
+    //
+    // Derived at the 0.40.0 pin: the schema declares 14 keys and NONE is
+    // underscore-prefixed, so today this strips exactly the same set the six
+    // names did. The `!isDeclared` conjunct is what keeps that true if the
+    // contract ever declares one.
+    //
+    // Re-attach stays EXPLICIT and per-sidecar at the gates below. That is a
+    // deliberate decision, not a mirror: each sidecar has its own flag gate,
+    // its own authority (`ctx`, never the body) and its own honesty
+    // conditions, and a derived re-attach would erase all three.
+    // ═════════════════════════════════════════════════════════════════════
+    const isStrippableSidecar = (key: string): boolean =>
+      key.startsWith('_') && !(key in OlumiResponseSchema.shape);
+    const sidecarKeys = Object.keys(asRecord).filter(isStrippableSidecar);
+    if (sidecarKeys.length === 0) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
+    const hasTimings = sidecarKeys.includes('_timings');
+    const hasTrace = sidecarKeys.includes('_diagnostic_trace');
     const cloned = { ...asRecord };
     const timings = cloned._timings;
     const diagnosticTrace = cloned._diagnostic_trace;
-    delete cloned._timings;
-    delete cloned._diagnostic_trace;
-    delete cloned._context_summary;
-    delete cloned._reasoning;
-    delete cloned._answer_shape;
-    delete cloned._grounded_selection;
+    for (const key of sidecarKeys) delete cloned[key];
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -1418,17 +1422,26 @@ async function sendFinalised200(
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety — ENFORCEMENT AT THE WIRE. (ROADMAP 2.149.)
   //
-  // THE POPULATION. Eighteen of this file's nineteen `sendFinalised200` call
-  // sites return BEFORE `runTurnExecutor` (`:4427`), so eighteen never pass
+  // THE POPULATION. Nineteen of this file's twenty `sendFinalised200` call
+  // sites return BEFORE `runTurnExecutor`, so nineteen never pass
   // through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is
   // a function NESTED inside `runTurnExecutor`, closed over run-local state, and
-  // therefore not callable from here even deliberately. Three of the eighteen
+  // therefore not callable from here even deliberately. Three of the nineteen
   // can carry model-authored text (`chip_click` ok, `draft_graph`, and the MAIN
   // edit exit), and the main edit exit is where the 28 Jul live confirmation
   // caught a withheld leader claim shipping at HTTP 200.
   //
-  // WHY HERE AND NOT PER-EXIT. Eighteen per-exit edits is eighteen places for
-  // the nineteenth exit to be forgotten — the hand-maintained mirror
+  // ⚠ THESE COUNTS ARE A MIRROR AND HAD ALREADY DRIFTED — they read
+  // "eighteen of nineteen" until a sweep derived twenty. DERIVE, do not trust
+  // this sentence; the numbers are illustrative and the ARGUMENT below does not
+  // depend on them:
+  //   rg -n 'sendFinalised200\(' src/orchestrator/route-v2.ts \
+  //     | grep -v 'async function sendFinalised200' \
+  //     | awk -F: -v r="$(rg -n 'await runTurnExecutor\(' src/orchestrator/route-v2.ts \
+  //         | head -1 | cut -d: -f1)" '$1 < r' | wc -l
+  //
+  // WHY HERE AND NOT PER-EXIT. Nineteen per-exit edits is nineteen places for
+  // the twentieth exit to be forgotten — the hand-maintained mirror
   // (CLAUDE.md trap #12). This is the file's SOLE `reply.code(200).send`, it is
   // type-branded and grep-gated, and every exit already threads a REAL verdict
   // (#737 / ROADMAP 1.233 — no literal survives, pinned by
