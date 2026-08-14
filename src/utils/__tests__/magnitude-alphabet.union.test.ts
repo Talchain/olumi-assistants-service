@@ -410,6 +410,35 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // shared place rather than a third time.
     'orchestrator-v5/compose/defaulted-value-egress.ts':
       'incidental — comment only; spells no alphabet and parses no numbers',
+    // Objective-contradiction honesty surface — INCIDENTAL, and the SAME
+    // comment-only mention a third and fourth time: `£1.5 million` inside the
+    // note explaining why the subject window must not be cut at `[.!?]`,
+    // because that character is also the decimal point (CLAUDE.md trap 22 —
+    // the guard its own module called "the most important line here" could not
+    // fire, having been handed a truncated string).
+    //
+    // ⭐ THE ENTRY ABOVE PREDICTED THIS: "Two files now carry this identical
+    // comment-only mention, which is a signal the decimal-split hazard is
+    // worth stating once in a shared place rather than a third time." It is
+    // now THREE AND FOUR. Extracting it to one shared doc comment is
+    // deliberately NOT done here — it is unrelated to this lane's change and
+    // "while we're here" work is prohibited — but the prediction has come true
+    // and should be rowed rather than quietly absorbed again.
+    //
+    // ⚠ ONE ENTRY, NOT THREE — derived from `walk()` above, which SKIPS
+    // `__tests__`. The two sibling specs also spell `million` (in the cases
+    // pinning the decimal-safe subject window), but the scan never sees them,
+    // so listing them would have been a manifest entry for a file this guard
+    // does not scan. The stale-entry test below only asserts a listed file
+    // EXISTS on disk — and `relative(SRC_ROOT, ...)` is compared against the
+    // WALK's output, so a test-dir path fails it outright. Both were caught
+    // that way rather than by inspection.
+    //
+    // The module holds no magnitude list, parses no number and multiplies
+    // nothing: it reads probabilities and intervention values that arrive
+    // already numeric, and renders integer percentages via Math.round.
+    'orchestrator-v5/coaching/objective-contradiction.ts':
+      'incidental — comment only; spells no alphabet and parses no numbers',
     // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
     // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a
     // magnitude vocabulary (`hundreds?|thousands?|millions?|billions?`). It is

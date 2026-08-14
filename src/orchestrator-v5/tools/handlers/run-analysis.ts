@@ -67,6 +67,7 @@ import {
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
+import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
@@ -1651,7 +1652,30 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // exclusive: a turn can carry a scaffold disclosure, a constraint-gap
     // disclosure AND this one, and none of them may eat another.
     const intakeDisclosure = buildIntakeOptionDisclosure(intakeReconciliation);
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}`;
+    // Objective-contradiction honesty surface (pricing-objective FINDINGS fix
+    // 1), LAST of the four. The 14 Aug investigation measured, at the
+    // producers, that the comparison NEVER evaluates the user's stated
+    // objective: "wins" is argmax of the goal-node scalar per draw, so the
+    // leading option can carry `probability_of_goal = 0.0` while winning 70%.
+    // This does not fix the scoring rule — it says so where the product names
+    // a leader.
+    //
+    // ⚠ `headline !== null` IS THE LEADER PERMISSION, not a convenience. This
+    // tail NAMES options, so on a withheld turn it must ship nothing: appending
+    // it there would assert the leader the withhold had just denied, which is
+    // the G-CEE-1 defect class with five recorded producers. The builder
+    // enforces the same precondition internally; passing it here is what makes
+    // the handler's own intent legible.
+    //
+    // Fed from the RAW PERSISTED GRAPH (goal label + option interventions) and
+    // the SAME `resultRecords` every other seam on this path reads, so the
+    // sentence can never describe a different run than the summary it rides on.
+    const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
+      snapshot.rawPersistedGraph,
+      resultRecords,
+      headline !== null,
+    );
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
