@@ -475,7 +475,9 @@ describe("F2b — baseline tiering: an ambiguous label no longer INVENTS a basel
     ["keep the rollout on schedule", false, "an action, not a status quo"],
     ["migrate to Salesforce in Q3", false, "plain change"],
     ["raise enterprise pricing by 30%", false, "plain change"],
-  ] as const)("labelMatchesBaseline(%j) === %s — %s", (label, expected) => {
+    // The third element is the WHY, and it is a parameter rather than a comment so
+    // a failing row names its own provenance in the test output.
+  ] as const)("labelMatchesBaseline(%j) === %s — %s", (label, expected, _why) => {
     expect(labelMatchesBaseline(label)).toBe(expected);
   });
 
