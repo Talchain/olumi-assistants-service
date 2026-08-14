@@ -1041,7 +1041,23 @@ function matchByLabel<T>(
  *      stayed silent, and the option quietly collected the factor's influence
  *      phrase. A per-list check cannot see a collision spread ACROSS lists.
  *      It also covers factor-labelled lists this index cannot see: upstream
- *      `evidence_gaps` carries no factor id, so guard 1 is blind to it.
+ *      `EvidenceGapSignal.factor_id` is OPTIONAL and `projectAnalysis` strips
+ *      it regardless, so a VOI entry can exist with no id anywhere — invisible
+ *      to the index and to `idsPerLabel`. That id-less class is guard 2's ONLY
+ *      distinctive work: with guard 1 in place, every collision whose entities
+ *      BOTH carry ids is refused before guard 2 is consulted. It is therefore
+ *      also the only place guard 2 can honestly be pinned — see
+ *      `__tests__/context-pack-focus.spec.ts` (`GUARD 2 —`), whose
+ *      discriminator is the one test a minimal kind-scoping mutant turns red.
+ *
+ *      ⚠ RESIDUAL, AND IT IS IRREDUCIBLE AT THIS SEAM: kind scoping stops an
+ *      OPTION reading factor figures, but it CANNOT stop a FACTOR from
+ *      collecting a same-label VOI phrase belonging to a DIFFERENT factor that
+ *      exists only in the id-less list — both are factor-kind and there is no
+ *      id here to tell them apart. Pinned as a KNOWN RESIDUAL in that spec
+ *      rather than left silent. The honest exit is the premise already pinned
+ *      by `the identity index is built from UPSTREAM ids…`: carry `factor_id`
+ *      through `projectAnalysis` into the pack and this class closes with it.
  *
  *   3. PER-LIST AMBIGUITY (`many`) — the residual guard, for two entries
  *      sharing a label WITHIN one kind-scoped display list.
