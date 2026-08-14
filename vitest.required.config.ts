@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import {
   REQUIRED_GATE_INTEGRATION_EXCLUSIONS,
+  SERVER_BOOT_HOOK_TIMEOUT_MS,
   STANDALONE_TOOL_EXCLUSIONS,
 } from "./vitest.shared.js";
 
@@ -138,6 +139,11 @@ const REQUIRED_GATE_RED_EXCLUSIONS: string[] = [
 export default defineConfig({
   test: {
     setupFiles: ["./vitest.setup.ts"],
+    // ROADMAP 2.157 / 2.753 — vitest's UNDOCUMENTED default is 10s, which a
+    // full Fastify boot blows under worker CPU starvation, SKIPPING the file's
+    // tests silently. Set once here instead of hand-passed per hook (it had
+    // reached 3 of 81 server-booting files). Rationale on the constant.
+    hookTimeout: SERVER_BOOT_HOOK_TIMEOUT_MS,
     exclude: [
       ...BASE_EXCLUDE,
       ...REQUIRED_GATE_INTEGRATION_EXCLUSIONS,

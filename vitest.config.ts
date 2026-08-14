@@ -1,10 +1,15 @@
 import { defineConfig } from "vitest/config";
-import { STANDALONE_TOOL_EXCLUSIONS } from "./vitest.shared.js";
+import { SERVER_BOOT_HOOK_TIMEOUT_MS, STANDALONE_TOOL_EXCLUSIONS } from "./vitest.shared.js";
 
 export default defineConfig({
   test: {
     // Global setup file to reset config cache before each test
     setupFiles: ["./vitest.setup.ts"],
+    // ROADMAP 2.157 / 2.753 — vitest's UNDOCUMENTED default is 10s, which a
+    // full Fastify boot blows under worker CPU starvation, SKIPPING the file's
+    // tests silently. Set once here instead of hand-passed per hook (it had
+    // reached 3 of 81 server-booting files). Rationale on the constant.
+    hookTimeout: SERVER_BOOT_HOOK_TIMEOUT_MS,
     // Exclude live LLM tests from default run
     // Run these with: pnpm test:live
     exclude: [

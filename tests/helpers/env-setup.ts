@@ -43,8 +43,16 @@ export function cleanBaseUrl(): void {
  * trap 6), which multiplies wall time without meaning a hang. 60 s ≈ 15× the
  * isolated measurement — far above any starved-but-progressing boot, still
  * loud on a genuine hang.
+ *
+ * ⚠ 2026-08-14 — THE DEFINITION MOVED, AND PASSING IT BY HAND IS NO LONGER
+ * REQUIRED. It now lives in `vitest.shared.ts` and is applied as the GLOBAL
+ * `hookTimeout` in both vitest configs, because hand-passing it reached only
+ * 3 of the 81 files that boot the server in a hook (derived at `ae0b4af8`);
+ * `admin.routes.test.ts` was the instance that came due. This re-export keeps
+ * the three existing call sites working with ONE definition — they are now
+ * redundant-but-harmless, not load-bearing. New tests need do nothing.
  */
-export const SERVER_BOOT_HOOK_TIMEOUT_MS = 60_000;
+export { SERVER_BOOT_HOOK_TIMEOUT_MS } from "../../vitest.shared.js";
 
 /**
  * Clean common CEE feature flag env vars.
