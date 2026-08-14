@@ -1011,16 +1011,39 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             // generic blocked copy AND a loud tripwire.
             //
             // EXPLICIT DISPOSITION 3 of 3 — UNKNOWN CODES FAIL VISIBLE, and
-            // "visible" means visible in telemetry and on the wire, not "500 for
-            // the user". A 500 on a verdict PLoT deliberately typed is precisely
-            // the confident wrongness being fixed here, and it would re-open this
-            // P0 for the next code PLoT adds. So the honest refusal ships and
+            // "visible" means the warn log below plus the `v5.recovery_response`
+            // telemetry event, whose `template_used` separates generic
+            // `analysis_blocked` from `analysis_blocked_<code>`. NOT "500 for the
+            // user": a 500 on a verdict PLoT deliberately typed is precisely the
+            // confident wrongness being fixed here, and it would re-open this P0
+            // for the next code PLoT adds. So the honest refusal ships and
             // `plot_blocker_code_known: false` marks it — the same tripwire
             // pattern as `downstream_http_status_parsed: false` below, which
             // exists for the same reason (a cross-service coupling that can stop
             // working silently).
-            const knownCode = blockedCritiqueCodes.find((c) => isKnownPlotFailureCode(c));
-            if (knownCode === undefined) {
+            //
+            // ⚠ CORRECTED (review #949 F3): this comment used to say "visible in
+            // telemetry and ON THE WIRE". That was FALSE, and the review caught
+            // it. `diagnostics` ride the `handler_failure` (500) arm only; this
+            // branch RECOVERS to a 200, so the flag never reaches a wire body. It
+            // is a logs-and-telemetry tripwire. Saying otherwise would send the
+            // next reader hunting a field that is not there — the
+            // hand-maintained-mirror defect, in a comment.
+            //
+            // ⚠ F2 (review #949): KEY THE FLAG ON THE CODE THE USER ACTUALLY SAW.
+            // This used to be `codes.find(isKnownPlotFailureCode)` — "does ANY
+            // code have copy?" — while `composePlotCodeKeyedBody` keys on
+            // `plot_primary_code`, i.e. `codes[0]`. Two different questions under
+            // one flag name (trap 21). A blocked envelope whose FIRST code lacks
+            // copy but whose SECOND has it shipped GENERIC copy while the flag
+            // said `true` and the warn stayed silent — the tripwire blind exactly
+            // when it was needed. Both now read `codes[0]`, so the flag answers
+            // the only question worth asking: did the sentence this user was
+            // shown come from the code table?
+            const renderedCode = blockedCritiqueCodes[0];
+            const renderedCodeHasCopy =
+              renderedCode !== undefined && isKnownPlotFailureCode(renderedCode);
+            if (!renderedCodeHasCopy) {
               log.warn(
                 {
                   request_id: invocation.requestId,
@@ -1044,7 +1067,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                   ...errorDetailsBase,
                   ...extractPlotFailureDetails(v2Err),
                   downstream_http_status: 422,
-                  plot_blocker_code_known: knownCode !== undefined,
+                  plot_blocker_code_known: renderedCodeHasCopy,
                 },
                 cause: runError,
               },

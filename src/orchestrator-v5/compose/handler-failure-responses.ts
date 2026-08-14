@@ -229,7 +229,20 @@ export function composeHandlerFailureBody(
           body: {
             assistant_text:
               "The analysis engine isn't accepting new analyses at the moment. "
-              + 'Nothing is wrong with your model. Try again in a few seconds.',
+              // ⚠ "shortly", NOT "in a few seconds" (review #949, minor). Derived
+              // at PLoT `a5345a5e`: the circuit breaker's cooldown defaults to
+              // **30s** (`circuitBreaker.ts:39`, `RL_CB_COOLDOWN_MS || '30000'`),
+              // so "a few seconds" quietly promises a window the engine does not
+              // offer. The failure is soft — a premature retry re-lands on this
+              // same graceful message, not an error — but it is still the product
+              // telling the user something it cannot honour, and "shortly" costs
+              // nothing. It is also PLoT's own word for this state
+              // (`error-messages.ts:11`, BREAKER_OPEN: "please try again
+              // shortly"), so the two services now say the same thing.
+              //
+              // The 429 arm below keeps "in a few seconds": a concurrency window
+              // genuinely does clear that fast, and that claim is still true.
+              + 'Nothing is wrong with your model. Try again shortly.',
             suggested_actions: [retryActionChip()],
           },
           template_id: 'analysis_engine_unavailable',

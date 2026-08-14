@@ -290,6 +290,17 @@ describe('run_analysis — a PLoT 503 is ENGINE-UNAVAILABLE, not INTERNAL_ERROR'
     // Both must still say the true, load-bearing thing: the model is fine.
     expect(busy429.body.assistant_text).toContain('Nothing is wrong with your model');
     expect(unavailable503.body.assistant_text).toContain('Nothing is wrong with your model');
+
+    // ⚠ ADDED after a SURVIVING MUTANT (fast-follow): reverting "shortly" to "in
+    // a few seconds" left every assertion here green, so the copy fix was
+    // unguarded. Pinned as a CLAIM, not as prose — the 503 arm must not promise a
+    // seconds-scale window, because PLoT's breaker cooldown defaults to **30s**
+    // (`circuitBreaker.ts:39`, derived at `a5345a5e`). Any honest wording passes;
+    // only the over-promise fails. The 429 twin keeps the phrase and is asserted
+    // to keep it, so this is a DISCRIMINATION between the two arms rather than a
+    // blanket ban on the words.
+    expect(unavailable503.body.assistant_text).not.toContain('few seconds');
+    expect(busy429.body.assistant_text).toContain('few seconds');
     // Both offer a retry — the DISPOSITION is shared, only the cause differs.
     expect(unavailable503.chip_type).toBe('action');
     expect(busy429.chip_type).toBe('action');
@@ -528,6 +539,34 @@ describe('run_analysis — genuine breakage stays a VISIBLE 500 (the mirror lie 
     // Generic copy, honestly generic — no invented specifics.
     const composed = composeHandlerFailureBody(caught);
     expect(composed.template_id).toBe('analysis_blocked');
+  });
+
+  it('TRIPWIRE F2: the flag follows the RENDERED code, not "any code with copy"', async () => {
+    // Review #949 F2. The flag used to be `codes.find(isKnownPlotFailureCode)` —
+    // "does ANY code have copy?" — while the composer keys on
+    // `plot_primary_code = codes[0]`. Two different questions under one flag name
+    // (trap 21). This is the shape that exposed it: the FIRST code has no copy
+    // (so the user gets GENERIC prose), a LATER one does (so the old flag said
+    // `true` and the warn stayed silent) — the tripwire blind exactly when the
+    // copy was generic, which is the only situation it exists to report.
+    const input = make422Blocked('SOME_ISL_PASSTHROUGH_BLOCKER', 'passthrough blocker');
+    (input.v2RunError as { critiques: Array<{ code: string; message: string }> }).critiques.push({
+      code: 'GRAPH_TOO_COMPLEX',
+      message: 'graph exceeds complexity budget',
+    });
+    // PRECONDITION PINS (trap 13b): the fixture must actually be the two-code
+    // shape — a later code WITH copy behind a first code WITHOUT it. If either
+    // half stopped holding, this test would pass while testing nothing.
+    const codes = (input.v2RunError?.critiques ?? []).map((c) => c.code);
+    expect(codes).toEqual(['SOME_ISL_PASSTHROUGH_BLOCKER', 'GRAPH_TOO_COMPLEX']);
+
+    const caught = await invokeAndCatch(() => input);
+
+    expect(caught.cause_kind).toBe('analysis_blocked');
+    // The composer keys on codes[0], which has no copy → GENERIC prose...
+    expect(composeHandlerFailureBody(caught).template_id).toBe('analysis_blocked');
+    // ...so the flag must say so. Under the old predicate this read `true`.
+    expect(caught.details.plot_blocker_code_known).toBe(false);
   });
 
   it('OBSERVABILITY: an unknown non-2xx carries its status so the trigger is nameable', async () => {
