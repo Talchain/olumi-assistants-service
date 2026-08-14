@@ -484,7 +484,25 @@ export interface DroppedRecordRef {
      * option→factor pair to DIFFERENT levels. One was chosen canonically; the
      * others are named here rather than silently overwritten.
      */
-    | "parallel_intervention_conflict";
+    | "parallel_intervention_conflict"
+    /**
+     * ⭐ ROOT 2(d), THE EDGE-LEVEL TWIN OF 2(c). Two or more parallel
+     * `causal_link` claims assert the SAME `from → to` pair with DIFFERENT
+     * `strength`. Pass 3 mints one edge per claim and edge identity includes the
+     * claim LABEL, so differently-worded claims about one relationship survived
+     * as two edges on the wire carrying divergent strengths.
+     *
+     * ⚠ WHY THIS IS A DEFECT AND NOT A CURIOSITY: the consumer REFUSES the
+     * analysis on it. PLoT coalesces identical duplicates but blocks
+     * non-identical ones (`DUPLICATE_EDGE_CONFLICT`, 422 `blocked`), on the
+     * sound ground that it must not silently pick one of two contradictory
+     * claims. So the product drafted a model it then declined to analyse, and
+     * the user did nothing wrong.
+     *
+     * One is chosen canonically; the others are named here rather than silently
+     * absorbed — the same treatment 2(c) gives the intervention levels.
+     */
+    | "parallel_causal_link_conflict";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
@@ -538,6 +556,13 @@ export interface DroppedRecordRef {
    * decision from it rather than take the projector's word for it.
    */
   readonly intervention_signature?: string;
+  /**
+   * Present only on `parallel_causal_link_conflict`, where it IS the finding:
+   * `<from>-><to>:<chosen>|<discarded…>`, chosen first. A reader can re-derive
+   * the decision from it rather than take the projector's word for it — the
+   * same obligation `intervention_signature` carries for 2(c).
+   */
+  readonly strength_signature?: string;
 }
 
 export interface RecordProjection {
@@ -1152,6 +1177,14 @@ function projectOnce(
   const dropped: DroppedRecordRef[] = [];
   /** edge id → the model's stated option→factor intervention level (`sets_to`). */
   const setsToByEdgeId = new Map<string, number>();
+  /**
+   * The claim each `causal_link` edge came from, so ROOT 2(d)'s disclosure can
+   * name the DISCARDED claim by its own index and label rather than by `-1`.
+   * Keyed by edge id because the claim array and the surviving edge set diverge
+   * once the prune and the option budget have run — the same reason
+   * `setsToByEdgeId` is keyed this way.
+   */
+  const claimOriginByEdgeId = new Map<string, { index: number; label: string }>();
   const provenance: Record<string, RecordProvenance> = {};
   const usedIds = new Map<string, number>();
 
@@ -1812,6 +1845,7 @@ function projectOnce(
     // the edge that actually survived rather than re-deriving it from the claim
     // array — the two can diverge once the prune and the option budget have run.
     if (typeof claim.sets_to === "number") setsToByEdgeId.set(edgeId, claim.sets_to);
+    claimOriginByEdgeId.set(edgeId, { index, label });
     edges.push({
       id: edgeId,
       from: from.id,
@@ -2231,6 +2265,128 @@ function projectOnce(
       };
       const survivorNode = nodes.find((n) => n.id === survivor.id);
       if (survivorNode) survivorNode.provenance = provenance[survivor.id];
+    }
+  }
+
+  // ── Pass 6: ROOT 2(d) — ONE RELATIONSHIP, ONE EDGE. Canonical, and disclosed.
+  //
+  // ⭐ WHY THIS RUNS LAST, AND NOT AT THE MINT SITE. Pass 3c resolves the
+  // intervention levels by reading `setsToByEdgeId` per SURVIVING edge, and its
+  // own 2(c) conflict disclosure exists precisely because two edges can name one
+  // option→factor pair. Collapsing at the mint site would delete the candidates
+  // 3c is built to adjudicate, silently changing which `sets_to` wins AND
+  // suppressing `parallel_intervention_conflict` — two authorities answering
+  // different questions about the same pair (trap 21). Running after 3c leaves
+  // every upstream verdict — the connectivity prune, the option budget, the
+  // intervention resolution — reading exactly the edge set it read before.
+  //
+  // ⚠ SCOPE: this collapses only what the PROJECTOR minted. NO USER-AUTHORED
+  // EDGE PASSES THROUGH HERE — this function's only input is the model's record
+  // set, and edge provenance is hardcoded at each mint site.
+  //
+  // ⚠ Precisely: pass 3's `causal_link` edges are `ai_inferred`, and pass 4's
+  // decision→option edges are `projector_structural`. BOTH traverse this pass.
+  // The structural ones are unaffected because they are singletons — one per
+  // option, minted once — so no group ever holds two. That is a property of pass
+  // 4's construction, NOT something this pass checks: were pass 4 ever to mint a
+  // second edge into one option, this pass would collapse it silently. Stated so
+  // the guarantee is inherited deliberately rather than assumed.
+  //
+  // THE RULE, and it is CANONICAL rather than correct — nothing here can know
+  // which claim the model meant:
+  //   · a claim that STATES a strength outranks one that is silent about it —
+  //     silence is not a competing magnitude, so it never wins over an explicit
+  //     claim. ⚠ It is still DISCLOSED when discarded: the silent claim differs
+  //     from the survivor, and a reader who is not told loses the fact that a
+  //     second claim about this relationship existed at all.
+  //   · among explicit ones the SMALLEST MAGNITUDE wins — the least extravagant
+  //     claim, on 2(c)'s stated ground that over-claiming an effect is the harm
+  //     that matters here.
+  //   · ties break by signed value, then by edge id, so the rule is TOTAL and
+  //     any permutation of the same claims yields the same GRAPH — and, since the
+  //     discarded terms are sorted by edge id below, the same DISCLOSURE too:
+  //     identical signature, identical `dropped[]` append order. That matters more
+  //     than it looks: order-dependence anywhere here would make the wire a
+  //     function of the model's emission order, which carries no meaning.
+  // Only genuine DIVERGENCE is disclosed — a difference in strength OR in
+  // direction; an exact duplicate is coalesced in silence, because nothing was
+  // discarded and there is no decision to report.
+  {
+    const byPair = new Map<string, ProjectedEdge[]>();
+    for (const edge of edges) {
+      const key = `${edge.from} ${edge.to}`;
+      const list = byPair.get(key) ?? [];
+      list.push(edge);
+      byPair.set(key, list);
+    }
+    const discarded = new Set<string>();
+    for (const [, group] of [...byPair.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      if (group.length < 2) continue;
+      const explicit = group.filter((e) => typeof e.strength_mean === "number");
+      const ordered = (explicit.length > 0 ? explicit : group).slice().sort((a, b) => {
+        const am = Math.abs(a.strength_mean ?? 0);
+        const bm = Math.abs(b.strength_mean ?? 0);
+        return (
+          am - bm ||
+          (a.strength_mean ?? 0) - (b.strength_mean ?? 0) ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+        );
+      });
+      const chosen = ordered[0]!;
+      for (const edge of group) if (edge.id !== chosen.id) discarded.add(edge.id);
+      // A discard is only a CONFLICT where the claim actually differed; a
+      // duplicate carrying the same content took nothing away from the user.
+      //
+      // ⭐⭐ BOTH SEMANTIC FIELDS, NOT JUST STRENGTH. `effect_direction` is minted
+      // from the grammar's `effect` independently of `strength`, and nothing
+      // couples them. A predicate that reads only `strength_mean` therefore
+      // absorbs the SHARPEST contradiction available in silence: "churn RAISES
+      // revenue" and "churn LOWERS revenue", both silent on strength, collapse to
+      // one edge whose direction is decided by an id sort, with ZERO disclosures.
+      // That is precisely the absorption this pass exists to refuse — the harm
+      // being larger, not smaller, than a strength disagreement. Widened after
+      // review proved both cases by execution.
+      //
+      // ⭐ SORTED BY EDGE ID, and that is load-bearing rather than tidy. `group` is
+      // built by iterating `edges`, so the filtered result arrives in CLAIM-EMISSION
+      // order: three parallel claims permuted produced `0.5|0.9|0.7` against
+      // `0.5|0.7|0.9` for the SAME claim set, and the `dropped[]` append order
+      // flipped with it. The model's emission order carries no meaning, so it must
+      // not reach the disclosure any more than it reaches the graph. Ids are
+      // `sha8(label, from, to)` — CONTENT, not position — so sorting makes the
+      // signature a genuine permutation invariant.
+      const divergent = group
+        .filter(
+          (e) =>
+            e.id !== chosen.id &&
+            (e.strength_mean !== chosen.strength_mean ||
+              e.effect_direction !== chosen.effect_direction),
+        )
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      if (divergent.length === 0) continue;
+      const render = (e: ProjectedEdge): string =>
+        `${typeof e.strength_mean === "number" ? e.strength_mean : "unset"}` +
+        `${e.effect_direction ? `(${e.effect_direction})` : ""}`;
+      const signature = `${chosen.from}->${chosen.to}:${[chosen, ...divergent]
+        .map(render)
+        .join("|")}`;
+      for (const edge of divergent) {
+        const origin = claimOriginByEdgeId.get(edge.id);
+        dropped.push({
+          claim_index: origin?.index ?? -1,
+          claim_kind: "causal_link",
+          label: origin?.label ?? "",
+          reason: "parallel_causal_link_conflict",
+          strength_signature: signature,
+        });
+      }
+    }
+    if (discarded.size > 0) {
+      // Filtered in place: `edges` is the array the projection returns, and the
+      // meta derivation below reads it.
+      const kept = edges.filter((e) => !discarded.has(e.id));
+      edges.length = 0;
+      edges.push(...kept);
     }
   }
 
