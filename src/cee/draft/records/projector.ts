@@ -2303,11 +2303,11 @@ function projectOnce(
   //     claim, on 2(c)'s stated ground that over-claiming an effect is the harm
   //     that matters here.
   //   · ties break by signed value, then by edge id, so the rule is TOTAL and
-  //     any permutation of the same claims yields the same GRAPH. That matters
-  //     more than it looks: order-dependence here would make the wire a function
-  //     of the model's emission order, which carries no meaning. (The disclosure
-  //     SIGNATURE lists the discarded terms in edge-id order, so its ordering is
-  //     stable per claim SET but is not itself a permutation invariant.)
+  //     any permutation of the same claims yields the same GRAPH — and, since the
+  //     discarded terms are sorted by edge id below, the same DISCLOSURE too:
+  //     identical signature, identical `dropped[]` append order. That matters more
+  //     than it looks: order-dependence anywhere here would make the wire a
+  //     function of the model's emission order, which carries no meaning.
   // Only genuine DIVERGENCE is disclosed — a difference in strength OR in
   // direction; an exact duplicate is coalesced in silence, because nothing was
   // discarded and there is no decision to report.
@@ -2346,12 +2346,23 @@ function projectOnce(
       // That is precisely the absorption this pass exists to refuse — the harm
       // being larger, not smaller, than a strength disagreement. Widened after
       // review proved both cases by execution.
-      const divergent = group.filter(
-        (e) =>
-          e.id !== chosen.id &&
-          (e.strength_mean !== chosen.strength_mean ||
-            e.effect_direction !== chosen.effect_direction),
-      );
+      //
+      // ⭐ SORTED BY EDGE ID, and that is load-bearing rather than tidy. `group` is
+      // built by iterating `edges`, so the filtered result arrives in CLAIM-EMISSION
+      // order: three parallel claims permuted produced `0.5|0.9|0.7` against
+      // `0.5|0.7|0.9` for the SAME claim set, and the `dropped[]` append order
+      // flipped with it. The model's emission order carries no meaning, so it must
+      // not reach the disclosure any more than it reaches the graph. Ids are
+      // `sha8(label, from, to)` — CONTENT, not position — so sorting makes the
+      // signature a genuine permutation invariant.
+      const divergent = group
+        .filter(
+          (e) =>
+            e.id !== chosen.id &&
+            (e.strength_mean !== chosen.strength_mean ||
+              e.effect_direction !== chosen.effect_direction),
+        )
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       if (divergent.length === 0) continue;
       const render = (e: ProjectedEdge): string =>
         `${typeof e.strength_mean === "number" ? e.strength_mean : "unset"}` +

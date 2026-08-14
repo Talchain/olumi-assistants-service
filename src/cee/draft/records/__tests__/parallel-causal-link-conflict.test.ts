@@ -261,6 +261,50 @@ describe("ROOT 2(d): parallel causal_link claims on one pair collapse to one edg
     expect(conflicts[0]!.strength_signature).toBe(`${churn}->${revenue}:0.6(positive)|0.6(negative)`);
   });
 
+  /**
+   * ⭐ THE SIGNATURE IS A PERMUTATION INVARIANT, NOT MERELY THE GRAPH.
+   *
+   * `group` is built by iterating `edges`, so `divergent` arrived in CLAIM-EMISSION
+   * order: three parallel claims permuted produced `0.5|0.9|0.7` against
+   * `0.5|0.7|0.9` for the SAME claim set, and the `dropped[]` append order flipped
+   * with it. The model's emission order carries no meaning, so it must not reach
+   * the disclosure either — the same principle pass 6 already applies to the graph.
+   * Sorting `divergent` by edge id (`sha8(label, from, to)` — content, not position)
+   * makes it true rather than merely documenting the exception.
+   */
+  it("emits a BYTE-IDENTICAL signature across permutations of the same claim set", () => {
+    const goal = { kind: "goal", source_quote: "grow revenue this year" } as const;
+    const factors = [
+      { claim_kind: "factor", label: "Customer Churn" },
+      { claim_kind: "factor", label: "Revenue" },
+    ];
+    const parallel = [
+      { claim_kind: "causal_link", label: "churn hits revenue hard", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.9 },
+      { claim_kind: "causal_link", label: "churn hits revenue mildly", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.5 },
+      { claim_kind: "causal_link", label: "churn hits revenue moderately", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.7 },
+    ];
+    const bridge = { claim_kind: "causal_link", label: "revenue bears on the aim", from_claim: 1, to_stated: 0, effect: "positive" };
+
+    // All 6 permutations of the three parallel claims — the whole set, not a sample.
+    const perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    const signatures = new Set<string>();
+    const appendOrders = new Set<string>();
+    for (const p of perms) {
+      const records = {
+        stated_items: [goal],
+        claims: [...factors, ...p.map((i) => parallel[i]!), bridge],
+      } as unknown as DraftRecordSet;
+      const { dropped } = projectRecordsToGraph(records);
+      const conflicts = dropped.filter((d) => d.reason === "parallel_causal_link_conflict");
+      expect(conflicts).toHaveLength(2); // positive control: two discards to order
+      signatures.add(conflicts[0]!.strength_signature!);
+      appendOrders.add(conflicts.map((c) => c.label).join(","));
+    }
+    // One signature across all six orderings, and one dropped[] append order.
+    expect([...signatures]).toHaveLength(1);
+    expect([...appendOrders]).toHaveLength(1);
+  });
+
   it("F1 twin: SAME direction and same strength is still silent — the widening invented no conflict", () => {
     // The opposite-direction guard must not turn every exact duplicate into a
     // reported disagreement. Without this, F1's fix trades one silent failure
