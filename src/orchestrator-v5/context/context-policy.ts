@@ -141,7 +141,30 @@ export type ContextSource =
   | 'framing'
   | 'isl_results'
   | 'deterministic_coaching'
+  /**
+   * ⚠ EDIT-SCOPED. This is the V4 `## FOCUS` section of the edit_graph prompt
+   * (`serialiseEditContextForLLMWithMeta`), whose literal copy is *"The user
+   * has selected these elements. Prioritise changes to these"*. Its field
+   * (`ConversationContext.selected_elements`) has ZERO writers.
+   *
+   * It answers "WHAT SHOULD I CHANGE?" — NOT "what should I answer about?".
+   * Do not reuse it for selection-aware ANSWERING; see `turn_selection`.
+   */
   | 'focus'
+  /**
+   * Selection-aware ANSWERING (hop 4): the turn's canvas selection, resolved
+   * against canonical state by `buildTurnContext` and projected by
+   * `projectFocus` into `ContextPack.focus`.
+   *
+   * ⭐ DELIBERATELY A SEPARATE LITERAL FROM `focus` ABOVE, and the reason is
+   * trap #21 — two different questions must not sit under one word. The
+   * edit-scoped section asks what to CHANGE; this one asks what to ANSWER
+   * ABOUT. They share no producer, no consumer and no prompt: reusing `focus`
+   * here would have asserted a common source that does not exist. (Hop 3 made
+   * the same call one level down, naming `EnrichedTurnContext.selection` apart
+   * from the pre-existing `selected_elements`.)
+   */
+  | 'turn_selection'
   | 'attached_document'
   | 'aggregate'
   | 'none';
@@ -253,6 +276,15 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'scenario_id', source: 'identity', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'stage', source: 'identity', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'brief', source: 'brief', projection: 'projectBrief', char_budget: CONTEXT_PACK_BRIEF_CHAR_CAP, enforcement: 'enforced', cut_rank: null, model_facing: true },
+    // Selection-aware answering (hop 4): the user's resolved canvas selection.
+    // Serialised among the hard state — `buildUserMessage` keeps it in `...rest`
+    // where the assembler placed it (immediately after the graph, which is
+    // stripped and re-appended, so it lands here). CONDITIONAL: absent on every
+    // turn that carried no selection, so it is honestly `telemetry_only` rather
+    // than a false `always_expected`. ENFORCEMENT is real but structural rather
+    // than a char ceiling — `projectFocus` caps the element count
+    // (FOCUS_MAX_ELEMENTS) and every text field, with disclosed omission.
+    { name: 'focus', source: 'turn_selection', projection: 'projectFocus (element-capped + per-field text bounds, disclosed omission)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'conversation', source: 'conversation_window', projection: 'projectConversation', char_budget: T_ROUTING_CONVERSATION, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among

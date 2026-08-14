@@ -47,6 +47,10 @@ import { partitionInterventionControlledDrivers } from './intervention-controlle
 import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
+// Selection-aware answering (hop 4). TYPE-ONLY on purpose: the resolved
+// selection is produced by `buildTurnContext` and this module only PLACES it,
+// so there is no runtime edge from the assembler back to the context builder.
+import type { TurnSelection } from '../build-turn-context.js';
 import {
   formatAnalysisForContext,
   type DisplaySafeAnalysis,
@@ -440,6 +444,22 @@ export interface ContextPack {
    * separate path (`editCompactGraph()` over raw boundary state).
    */
   readonly display_graph: DisplaySafeGraph;
+  /**
+   * SELECTION-AWARE ANSWERING (hop 4): what the user currently has selected on
+   * the canvas, resolved against canonical state by `buildTurnContext` and
+   * projected here by {@link projectFocus}.
+   *
+   * Placed with the HARD STRUCTURED STATE (immediately after the graph, above
+   * `conversation`) so the model reads the focus as part of the model rather
+   * than as conversational colour.
+   *
+   * ABSENT (key missing, never `focus: null`) on every turn that carried no
+   * selection — the same byte-identity guarantee `conversation_summary` and
+   * `older_relevant_facts` carry. `buildUserMessage` spreads `...rest`, so the
+   * section reaches the routing prompt with no serialisation edit; the
+   * code-owned `FOCUS_INSTRUCTION` is appended by the SAME condition.
+   */
+  readonly focus?: ContextPackFocus;
   readonly conversation: ContextPackConversation;
   /**
    * Context v2 S4-INJECT (ROADMAP 1.73; design pack 01 §2, 04 §3): the
@@ -695,6 +715,296 @@ export interface AssembleContextPackInput {
    * key is absent → byte-identity for record-less scenarios.
    */
   readonly olderRelevantFacts?: string;
+  /**
+   * Selection-aware answering (hop 4): the turn's canvas selection, ALREADY
+   * resolved against canonical state by `buildTurnContext`. The assembler
+   * PLACES it and does not re-resolve — a second resolution would be a second
+   * authority on what the user selected, and the two would disagree the first
+   * time the graph read degrades.
+   */
+  readonly selection?: TurnSelection;
+}
+
+// ---------------------------------------------------------------------------
+// Selection-aware answering (hop 4) — the `focus` projection
+// ---------------------------------------------------------------------------
+
+/**
+ * Element cap. THE INGRESS HAS NO CAP OF ITS OWN: the widened
+ * `TurnSelection.requested_ids` / `unresolved_ids` are unbounded (the shared
+ * contract's `.max(20)` is absent on the CEE-side type), so this projection is
+ * the ONLY bound between a hostile or runaway selection and the routing prompt.
+ * 20 matches the contract's intent for the same concept.
+ */
+export const FOCUS_MAX_ELEMENTS = 20;
+/** Per-field text bounds — a hostile label must not balloon the prompt. */
+export const FOCUS_LABEL_MAX_CHARS = 120;
+export const FOCUS_DESCRIPTION_MAX_CHARS = 160;
+export const FOCUS_SHORT_TEXT_MAX_CHARS = 48;
+export const FOCUS_ID_MAX_CHARS = 96;
+
+/**
+ * The analysis outputs attached to a selected element — DISPLAY-SAFE STRINGS
+ * copied from the projection the model already receives (`display_analysis`),
+ * never re-derived here. Re-deriving would make this a second author of the
+ * same numbers, which is how two surfaces come to disagree.
+ */
+export interface ContextPackFocusAnalysis {
+  /** Display percent string, e.g. `"62%"`. Options only. */
+  readonly win_probability?: string;
+  /** Display percent string for goal fit. Options only. */
+  readonly target_fit?: string;
+  /** Decision-language sensitivity phrase, e.g. `"strong positive influence"`. */
+  readonly influence?: string;
+  /** Banded value-of-information phrase. */
+  readonly value_of_information?: string;
+  /** Banded flip-risk phrase for this factor. */
+  readonly tipping_point_risk?: string;
+}
+
+export interface ContextPackFocusElement {
+  readonly id: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly category?: string;
+  readonly value?: number;
+  readonly unit?: string;
+  readonly display_value?: string;
+  readonly value_source?: string;
+  /**
+   * How this element relates to the current analysis, as a CLOSED ENUM:
+   *   · `linked`          — matched exactly one analysis entry; `analysis` present.
+   *   · `not_in_analysis` — the analysis ran and scored nothing for this element.
+   *   · `ambiguous_label` — the label does not uniquely identify this element,
+   *                         so the join was REFUSED. See the note on
+   *                         {@link projectFocus}.
+   *   · `no_analysis`     — no analysis on this turn to join against.
+   */
+  readonly analysis_link: 'linked' | 'not_in_analysis' | 'ambiguous_label' | 'no_analysis';
+  /** Present IFF `analysis_link === 'linked'` and at least one value matched. */
+  readonly analysis?: ContextPackFocusAnalysis;
+}
+
+export interface ContextPackFocus {
+  readonly elements: readonly ContextPackFocusElement[];
+  /**
+   * Why some requested elements are missing — a CLOSED ENUM, never prose.
+   * Prose composed here would be a second place authoring user-facing
+   * language, and the REASON is a fact, not a phrasing.
+   *
+   * ⭐ `not_in_model` and `could_not_check` MUST NOT COLLAPSE. `graph_read`
+   * exists precisely so nothing downstream can tell a user their node is gone
+   * when the truth is that the model could not be read.
+   */
+  readonly unresolved: 'none' | 'not_in_model' | 'could_not_check';
+  /** How many elements the turn asked about, before any cap. */
+  readonly requested_count: number;
+  /** How many did not resolve. Read WITH `unresolved`, never without it. */
+  readonly unresolved_count: number;
+  /** Present ONLY when the element cap dropped entries — disclosed truncation. */
+  readonly elements_omitted?: number;
+}
+
+/** Bound a display string without letting a hostile value reach the prompt. */
+function boundText(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+/**
+ * Project the resolved selection into an LLM-facing focus section.
+ *
+ * ⚠ RETURNS `null` — key ABSENT, never `focus: null` — when there is nothing
+ * honest to say. Absence preserves byte-identity for every turn that carried no
+ * selection, exactly as `conversation_summary` and `older_relevant_facts` do.
+ *
+ * ⭐ THE HONESTY RULE, AND IT IS THE WHOLE POINT OF THE SECTION:
+ *   · elements resolved  → name them, with label/kind/value/unit and their
+ *                          analysis outputs;
+ *   · unresolved AND the graph WAS read (`ok_present` / `ok_absent`)
+ *       → `not_in_model`: the user is pointing at something this model does
+ *         not contain;
+ *   · unresolved AND `degraded`
+ *       → `could_not_check`: the user is pointing at something we could not
+ *         look up. NOT the same claim, and never collapsed into one.
+ *
+ * ⭐⭐ THE ANALYSIS JOIN IS ID-FIRST, AND FAILS CLOSED. This matters, and the
+ * reason is a defect this estate has already paid for twice.
+ *
+ * The PACK's analysis projection is LABEL-KEYED — `projectAnalysis` receives
+ * `option_id` on every upstream option and `factor_id` on every upstream driver
+ * and DISCARDS BOTH, five lines below a comment that calls the id load-bearing
+ * *precisely because* "labels collide". So a join written against the pack
+ * alone could only use the label, which is exactly the "value predicate another
+ * object could satisfy" defect (trap #19).
+ *
+ * The ids DO still exist on the assembler's UPSTREAM input, so the join is made
+ * there: {@link buildAnalysisLabelIndex} maps `node id → the analysis's own
+ * label for that node`, by IDENTITY. Only the second hop — from that label to
+ * the already-formatted display entry — is by label, and it is guarded: a label
+ * matching more than one display entry yields `ambiguous_label` with NO values
+ * attached. Nothing is ever guessed into a different node.
+ *
+ * Display-safe only: label, kind, unit, `display_value`, the value-source
+ * vocabulary, and display strings copied from `display_analysis` — never
+ * re-derived here, so `focus` cannot show a number that disagrees with the
+ * `analysis` section beside it. No raw internal coefficients.
+ */
+export function projectFocus(
+  selection: TurnSelection | undefined,
+  displayAnalysis: DisplaySafeAnalysis | null,
+  analysisLabelById: ReadonlyMap<string, string>,
+): ContextPackFocus | null {
+  if (selection === undefined) return null;
+  // An EMPTY selection is not a selection: a truthy object on every turn would
+  // make every turn look selection-aware.
+  if (selection.requested_ids.length === 0) return null;
+
+  const capped = selection.elements.slice(0, FOCUS_MAX_ELEMENTS);
+  const omitted = selection.elements.length - capped.length;
+
+  const elements: ContextPackFocusElement[] = capped.map((el) => {
+    const analysisLink = resolveAnalysisLink(el.id, displayAnalysis, analysisLabelById);
+    return {
+      id: boundText(el.id, FOCUS_ID_MAX_CHARS),
+      kind: boundText(el.kind, FOCUS_SHORT_TEXT_MAX_CHARS),
+      label: boundText(el.label, FOCUS_LABEL_MAX_CHARS),
+      ...(el.description !== undefined
+        ? { description: boundText(el.description, FOCUS_DESCRIPTION_MAX_CHARS) }
+        : {}),
+      ...(el.category !== undefined
+        ? { category: boundText(el.category, FOCUS_SHORT_TEXT_MAX_CHARS) }
+        : {}),
+      // Absence is meaningful: a defaulted 0 would be indistinguishable from a
+      // real observed value.
+      ...(el.value !== undefined ? { value: el.value } : {}),
+      ...(el.unit !== undefined ? { unit: boundText(el.unit, FOCUS_SHORT_TEXT_MAX_CHARS) } : {}),
+      ...(el.display_value !== undefined
+        ? { display_value: boundText(el.display_value, FOCUS_SHORT_TEXT_MAX_CHARS) }
+        : {}),
+      ...(el.value_source !== undefined
+        ? { value_source: boundText(el.value_source, FOCUS_SHORT_TEXT_MAX_CHARS) }
+        : {}),
+      analysis_link: analysisLink.link,
+      ...(analysisLink.analysis !== undefined ? { analysis: analysisLink.analysis } : {}),
+    };
+  });
+
+  return {
+    elements,
+    unresolved: deriveUnresolved(selection),
+    requested_count: selection.requested_ids.length,
+    unresolved_count: selection.unresolved_ids.length,
+    ...(omitted > 0 ? { elements_omitted: omitted } : {}),
+  };
+}
+
+/**
+ * The three-state discrimination, isolated so it can be read and mutated on its
+ * own. Nothing unresolved ⇒ nothing to disclose. Otherwise the reason depends
+ * ENTIRELY on whether the graph was actually read.
+ */
+function deriveUnresolved(selection: TurnSelection): ContextPackFocus['unresolved'] {
+  if (selection.unresolved_ids.length === 0) return 'none';
+  return selection.graph_read === 'degraded' ? 'could_not_check' : 'not_in_model';
+}
+
+/**
+ * Build `node id → the analysis's own label for that node` from the UPSTREAM
+ * analysis, where the structural ids still exist.
+ *
+ * This function is the whole reason the focus join is an identity join rather
+ * than a label join: `projectAnalysis` strips `option_id` and `factor_id` on
+ * the way into the pack, so by the time the display projection exists the ids
+ * are gone. Reading them HERE — from the same input `projectAnalysis` reads —
+ * costs nothing and removes an entire class of mis-attribution.
+ *
+ * Tolerant by construction: the assembler accepts hand-built and narrow
+ * analysis shapes (the chip-click dispatch supplies a partial projection), so
+ * every field is checked rather than assumed. A shape that carries no ids
+ * simply yields an empty index, and every element then reports
+ * `not_in_analysis` — honest, and never a wrong attachment.
+ */
+export function buildAnalysisLabelIndex(analysis: unknown): ReadonlyMap<string, string> {
+  const index = new Map<string, string>();
+  if (analysis === null || typeof analysis !== 'object') return index;
+  const a = analysis as {
+    options?: readonly unknown[];
+    top_drivers?: readonly unknown[];
+  };
+  const add = (id: unknown, label: unknown): void => {
+    if (typeof id === 'string' && id.length > 0 && typeof label === 'string' && label.length > 0) {
+      // First writer wins: a duplicate id is a producer defect, and silently
+      // overwriting would make the winner depend on array order.
+      if (!index.has(id)) index.set(id, label);
+    }
+  };
+  for (const o of a.options ?? []) {
+    add((o as { option_id?: unknown }).option_id, (o as { option_label?: unknown }).option_label);
+  }
+  for (const d of a.top_drivers ?? []) {
+    add((d as { factor_id?: unknown }).factor_id, (d as { factor_label?: unknown }).factor_label);
+  }
+  return index;
+}
+
+/** Exactly-one match, or a verdict. Never the first of several. */
+type Match<T> = { readonly kind: 'one'; readonly entry: T } | { readonly kind: 'none' } | { readonly kind: 'many' };
+
+function matchByLabel<T>(
+  entries: readonly T[] | undefined,
+  label: string,
+  labelOf: (entry: T) => string,
+): Match<T> {
+  if (entries === undefined) return { kind: 'none' };
+  const matches = entries.filter((e) => labelOf(e) === label);
+  if (matches.length === 1) return { kind: 'one', entry: matches[0]! };
+  return matches.length === 0 ? { kind: 'none' } : { kind: 'many' };
+}
+
+function resolveAnalysisLink(
+  elementId: string,
+  displayAnalysis: DisplaySafeAnalysis | null,
+  analysisLabelById: ReadonlyMap<string, string>,
+): { link: ContextPackFocusElement['analysis_link']; analysis?: ContextPackFocusAnalysis } {
+  if (displayAnalysis === null) return { link: 'no_analysis' };
+  // HOP 1 — IDENTITY. The analysis's own label for THIS node id.
+  const label = analysisLabelById.get(elementId);
+  if (label === undefined) return { link: 'not_in_analysis' };
+
+  // HOP 2 — that label into the already-formatted display entries, guarded.
+  const option = matchByLabel(displayAnalysis.options, label, (o) => o.label);
+  const driver = matchByLabel(displayAnalysis.top_drivers, label, (d) => d.label);
+  const gap = matchByLabel(displayAnalysis.value_of_information, label, (g) => g.label);
+  const tipping = matchByLabel(displayAnalysis.tipping_points, label, (t) => t.label);
+
+  // Any ambiguity anywhere ⇒ attach NOTHING. A partially-safe attachment is
+  // still a claim about which object the numbers belong to.
+  if ([option, driver, gap, tipping].some((m) => m.kind === 'many')) {
+    return { link: 'ambiguous_label' };
+  }
+
+  const analysis: ContextPackFocusAnalysis = {
+    ...(option.kind === 'one' && option.entry.win_probability !== undefined
+      ? { win_probability: option.entry.win_probability }
+      : {}),
+    ...(option.kind === 'one' && option.entry.target_fit !== undefined
+      ? { target_fit: option.entry.target_fit }
+      : {}),
+    ...(driver.kind === 'one' && driver.entry.influence !== undefined
+      ? { influence: driver.entry.influence }
+      : {}),
+    ...(gap.kind === 'one' && gap.entry.value_of_information !== undefined
+      ? { value_of_information: gap.entry.value_of_information }
+      : {}),
+    ...(tipping.kind === 'one' && tipping.entry.risk !== undefined
+      ? { tipping_point_risk: tipping.entry.risk }
+      : {}),
+  };
+
+  return Object.keys(analysis).length > 0
+    ? { link: 'linked', analysis }
+    : { link: 'not_in_analysis' };
 }
 
 /**
@@ -892,6 +1202,25 @@ export function assembleContextPackWithSummary(
           window: { ...projectedConversation.window, summarised: input.summarisedTurns },
         }
       : projectedConversation;
+  // Hoisted out of the literal below (it was inline) so the hop-4 focus
+  // projection can join against the SAME display-safe values the model
+  // receives. One computation, one authority — a second call here would be a
+  // second place formatting the same numbers.
+  const displayAnalysis = formatAnalysisForContext(rawAnalysis, {
+    analysisFreshness: input.coachingContext?.freshness,
+  });
+  // Selection-aware answering (hop 4). `buildTurnContext` already resolved the
+  // selection against canonical state; this only PLACES it.
+  // The identity index is built from the UPSTREAM analysis, where `option_id`
+  // and `factor_id` still exist — `projectAnalysis` strips both on the way into
+  // `rawAnalysis`, so reading them here is what keeps the focus join an
+  // IDENTITY join rather than a label join.
+  const projectedFocus = projectFocus(
+    input.selection,
+    displayAnalysis,
+    buildAnalysisLabelIndex(input.analysis),
+  );
+
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
@@ -909,15 +1238,24 @@ export function assembleContextPackWithSummary(
     // formatter treats undefined and null IDENTICALLY (both fail closed), so a
     // coalescing default would add a science-field fallback the
     // forbidden-boundary gate rightly flags, while changing nothing.
-    display_analysis: formatAnalysisForContext(rawAnalysis, {
-      analysisFreshness: input.coachingContext?.freshness,
-    }),
+    display_analysis: displayAnalysis,
     // Display-safe graph projection — what Sonnet actually sees in
     // place of the raw graph. Edge `strength` floats become decision-
     // language `relationship` phrases; `exists` and `plain_interpretation`
     // are dropped; node numeric fields stripped. Raw `graph` above is
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
+    // Selection-aware answering (hop 4). Placed with the HARD STRUCTURED STATE,
+    // immediately after the graph and above `conversation`, so the model reads
+    // the user's focus as part of the model rather than as conversational
+    // colour. Conditional spread — key ABSENT when the turn carried no
+    // selection, so a no-selection pack serialises byte-identically to pre-hop-4
+    // (pinned by a sha256 golden captured at the pre-change tip).
+    //
+    // The analysis join reads the SAME display-safe projection the model
+    // receives, so `focus` can never show a number that disagrees with the
+    // `analysis` section beside it.
+    ...(projectedFocus !== null ? { focus: projectedFocus } : {}),
     conversation,
     // Context v2 S4-INJECT: placed adjacent to `conversation` (01 §2).
     // Conditional spread — when the caller supplies nothing the key is

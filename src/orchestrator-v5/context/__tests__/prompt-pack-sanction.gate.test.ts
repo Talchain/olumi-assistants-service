@@ -52,6 +52,7 @@ import {
   buildUserMessage,
   COACHING_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
+  FOCUS_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
@@ -111,6 +112,10 @@ const MODEL_FACING_CORPUS = [
   SERVED_PROMPT,
   COACHING_CONTEXT_INSTRUCTION,
   SUMMARY_PRECEDENCE_INSTRUCTION,
+  // Hop 4 (selection-aware answering). Emitted by the SAME condition that puts
+  // `focus` on the pack, so a field sanctioned only here is genuinely
+  // sanctioned — the same reasoning as its two siblings above.
+  FOCUS_INSTRUCTION,
 ].join('\n\n');
 
 /** The same corpus composition, built from the v119 historical control prompt. */
@@ -262,6 +267,23 @@ function assembleMaximalPack(
     // state. Populating it with invented prose here manufactured a FALSE
     // POSITIVE on the first run of this gate — the fixture must be REALISTIC,
     // not maximal-in-the-abstract.
+    // Hop 4 — FIXTURE_COMPLETENESS: `focus` is a schema-declared key, so the
+    // maximal fixture must populate it or this gate narrows its own scope. A
+    // REALISTIC selection: one element that resolves against the fixture graph
+    // (so the projected labels are genuine prose the gate must see sanctioned),
+    // plus one that does not, so the `unresolved` disclosure is exercised too.
+    selection: {
+      requested_ids: ['dec_hire', 'ghost_node'],
+      elements: [
+        {
+          id: 'dec_hire',
+          kind: 'decision',
+          label: 'Hire two senior engineers locally',
+        },
+      ],
+      unresolved_ids: ['ghost_node'],
+      graph_read: 'ok_present',
+    } as never,
     coachingContext: {
       analysis_present: true,
       freshness: 'fresh',

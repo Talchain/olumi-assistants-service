@@ -2403,6 +2403,17 @@ export async function runTurnExecutor(
         // this, the brief reached no LLM after the draft turn. Null when no
         // brief has been persisted.
         brief: context.scenarioBriefText,
+        // SELECTION-AWARE ANSWERING (hop 4): the turn's canvas selection,
+        // resolved by buildTurnContext from the SAME canonical read every other
+        // projection here uses. Undefined on turns that carried no selection →
+        // the assembler emits no `focus` key → the routing prompt is
+        // byte-identical to pre-hop-4.
+        //
+        // ⚠ THIS LINE IS THE WIRE. The projection is defended by its own unit
+        // suite, but a defended pure function with a dark call site is this
+        // estate's chronic failure #1 — neutering this line is a mutant that
+        // MUST turn the route-level test red (selection-focus-route-level.test.ts).
+        selection: context.selection,
         graph: compactedGraph ? undefined : graphStateForTurn,
         compactedGraph,
         compactedConstraints,

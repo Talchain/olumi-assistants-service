@@ -1237,6 +1237,12 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.older_relevant_facts !== undefined) {
     parts.push('', OLDER_RELEVANT_FACTS_INSTRUCTION);
   }
+  // Selection-aware answering (hop 4) — CODE-OWNED, a sibling of the three
+  // instructions above, gated by the SAME condition that put the section on the
+  // pack. Absent selection → no section → no instruction → byte-identity.
+  if (contextPack.focus !== undefined) {
+    parts.push('', FOCUS_INSTRUCTION);
+  }
   parts.push('', '## User turn', message);
   return parts.join('\n');
 }
@@ -1392,6 +1398,41 @@ export const OLDER_RELEVANT_FACTS_INSTRUCTION = [
   '- With no such line, the entries shown are all the records held for this scenario, so if a decision is not listed say plainly that it is not among your records rather than inferring one.',
   '- Records that exist but are not shown must not be reconstructed, guessed at, or described by content. Say that an earlier record exists and is not in view.',
   '- Never quote the `[INCOMPLETE …]` line, the block’s internal field names, or record identifiers into user-facing text — state the substance in plain language.',
+].join('\n');
+
+/**
+ * SELECTION-AWARE ANSWERING (hop 4) — CODE-OWNED at this locus, a sibling of
+ * {@link OLDER_RELEVANT_FACTS_INSTRUCTION}, appended to the routing user
+ * message only when the `focus` section is on the pack. British English.
+ *
+ * **Why it lives in code, not in the served prompt.** The `focus` section and
+ * this sanction are emitted by the SAME condition, from the same repo and the
+ * same commit, so they cannot drift. The PMS-served prompt is re-pinnable with
+ * no deploy; a sanction kept in step BY HAND, in a different system, on a
+ * different release cadence, is this estate's dominant defect shape — it drifted
+ * from `older_relevant_facts` inside TWENTY MINUTES on 2026-07-25.
+ *
+ * It says four things, and the last two are what earn the section:
+ *  · the user is POINTING at something — answer about THAT, not the model at
+ *    large. The selection is a pointer, never an instruction to change anything;
+ *  · ground the answer in the values, links and ANALYSIS OUTPUTS already in the
+ *    pack — never a fresh estimate;
+ *  · when `unresolved` is `not_in_model`, say plainly it is not in the model;
+ *  · when it is `could_not_check`, say the model COULD NOT BE READ — never
+ *    assert the element is absent, because that is not known. These two must
+ *    never be spoken as the same sentence.
+ *
+ * Exported for the byte-level serialisation tests and for the prompt↔pack
+ * sanction gate's model-facing corpus.
+ */
+export const FOCUS_INSTRUCTION = [
+  '## Selected elements (what the user is pointing at)',
+  'The `focus` block above is what the user currently has selected on the canvas. Answer about those elements specifically, grounded in the values, links and analysis already in this pack — do not estimate a value that is not here.',
+  '- Each element carries an `analysis` block when the current analysis scored it (win probability, target fit, influence, value of information, tipping-point risk). Use those figures when explaining why the element matters; they are the same figures shown elsewhere in this pack, so never restate them differently.',
+  '- `analysis_link` says why an element has no figures: `not_in_analysis` (the analysis scored nothing for it), `ambiguous_label` (its name does not identify it uniquely, so no figures could be attached safely), or `no_analysis` (nothing has been analysed yet). Say which, rather than inventing a figure.',
+  '- If `focus.unresolved` is `not_in_model`, say plainly that what they selected is not in the model you can see.',
+  '- If `focus.unresolved` is `could_not_check`, say that you could not read the model to check — never say the element is missing, because you do not know that.',
+  '- A selection is what the user wants discussed. It is not an instruction to change the model: do not edit, add or remove anything on the strength of a selection alone.',
 ].join('\n');
 
 // -----------------------------------------------------------------------
