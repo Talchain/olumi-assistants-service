@@ -79,27 +79,69 @@ const FIELD_SCREEN_CODES = new Set<string>([FIELD_NOT_ALLOWED, PIPELINE_OWNED_FI
 // ---------------------------------------------------------------------------
 
 describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this repo derives from', () => {
-  it('the INSTALLED package version is 0.40.0 (read off the resolved install, not the declaration)', () => {
-    // The package's own `exports` map exposes neither ./package.json nor a CJS
-    // condition, so this reads the manifest of the INSTALLED module in
-    // node_modules — what `pnpm install` actually produced, never what
-    // package.json says it wanted. A vendored tarball whose bytes disagree with
-    // the pin fails here rather than silently supplying a shorter table. The
-    // digest test below binds this to the module the code actually imports.
+  it('the INSTALLED version matches the DECLARED pin — derived from the pin, not retyped', () => {
+    // ⚠ THIS ASSERTED THE LITERAL `'0.40.0'`, TWICE, AND THAT WAS A
+    // HAND-MAINTAINED MIRROR OF THE PIN INSIDE THE GUARD THAT EXISTS TO CATCH
+    // PIN SKEW. Bumping the literal to 0.41.0 would have recreated it and
+    // handed the next pin bump the same chore — and the chore is the defect:
+    // a list a human must remember to sync WILL drift, and the drift reads
+    // green (trap 12). The property actually worth asserting is AGREEMENT
+    // between the declaration and what `pnpm install` produced, and that is
+    // derivable from the pin itself.
+    const manifest = JSON.parse(
+      readFileSync(join(repoRoot, 'package.json'), 'utf8'),
+    ) as { dependencies?: Record<string, string> };
+    const pin = manifest.dependencies?.['@talchain/schemas'] ?? '';
+    const pinned = /^file:\.\/vendor\/talchain-schemas-(\d+\.\d+\.\d+)\.tgz$/.exec(pin);
+    // The pin's SHAPE is asserted, not just parsed: a switch to a registry spec
+    // is a real change to how this package resolves and must fail loud here
+    // rather than silently making the derivation below vacuous.
+    expect(pinned, `@talchain/schemas pin is not a vendored tarball: '${pin}'`).not.toBeNull();
+
     const pkg = JSON.parse(
       readFileSync(join(repoRoot, 'node_modules', '@talchain', 'schemas', 'package.json'), 'utf8'),
     ) as { name: string; version: string };
     expect(pkg.name).toBe('@talchain/schemas');
-    expect(pkg.version).toBe('0.40.0');
+    // The package's own `exports` map exposes neither ./package.json nor a CJS
+    // condition, so this reads the manifest of the INSTALLED module in
+    // node_modules — what `pnpm install` actually produced, never what
+    // package.json says it wanted. A vendored tarball whose bytes disagree with
+    // its own filename fails here rather than silently supplying a shorter
+    // table. The digest test below binds this to the module the code imports.
+    expect(pkg.version).toBe(pinned?.[1]);
   });
 
-  it('the DECLARED pin and the installed version agree (a stale vendor tarball fails loud)', () => {
-    const manifest = JSON.parse(
-      readFileSync(join(repoRoot, 'package.json'), 'utf8'),
-    ) as { dependencies?: Record<string, string> };
-    expect(manifest.dependencies?.['@talchain/schemas']).toBe(
-      'file:./vendor/talchain-schemas-0.40.0.tgz',
-    );
+  it('the installed version is at least the version this repo DERIVES from', () => {
+    // ⭐ THE OTHER HALF, AND IT MUST BE HAND-WRITTEN (trap 12d). The agreement
+    // check above is structurally blind to a DOWNGRADE: pin and install would
+    // move together and agree perfectly at 0.30.0, while every derivation in
+    // this file quietly lost the members it needs. Only a floor someone wrote
+    // down can see that — and it is the same shape as the table-revision floor
+    // asserted a few tests below, deliberately, because it answers the same
+    // question about a different axis.
+    //
+    // 0.41.0 is the floor because `RoundParticipantRefSchema.evidence_event_id`
+    // (the panel-apply citation) is declared there and is stamped by
+    // `system-events/factor-value-edit.ts`.
+    const MINIMUM_SCHEMAS_VERSION = '0.41.0';
+    const pkg = JSON.parse(
+      readFileSync(join(repoRoot, 'node_modules', '@talchain', 'schemas', 'package.json'), 'utf8'),
+    ) as { version: string };
+    const asTuple = (v: string): number[] => v.split('.').map((p) => Number.parseInt(p, 10));
+    const [maj, min, patch] = asTuple(pkg.version);
+    const [rMaj, rMin, rPatch] = asTuple(MINIMUM_SCHEMAS_VERSION);
+    const ordered =
+      (maj ?? 0) !== (rMaj ?? 0)
+        ? (maj ?? 0) > (rMaj ?? 0)
+        : (min ?? 0) !== (rMin ?? 0)
+          ? (min ?? 0) > (rMin ?? 0)
+          : (patch ?? 0) >= (rPatch ?? 0);
+    expect(
+      ordered,
+      `installed @talchain/schemas ${pkg.version} is BELOW the ${MINIMUM_SCHEMAS_VERSION} ` +
+        'this repo derives from — the pin and the install may agree perfectly and still ' +
+        'be missing members the code stamps',
+    ).toBe(true);
   });
 
   it('the resolved table CONTENT reproduces its own published digest (not a stale constant)', () => {
