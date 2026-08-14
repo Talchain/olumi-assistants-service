@@ -27,6 +27,37 @@
 export const STANDALONE_TOOL_EXCLUSIONS = ["tools/graph-evaluator/**"];
 
 /**
+ * ROADMAP 2.157 / 2.753 — the GLOBAL `hookTimeout` for both configs.
+ *
+ * ⚠ WHY THIS MOVED HERE (2026-08-14, test-reliability lane). This constant was
+ * introduced by ROADMAP 2.157 in `tests/helpers/env-setup.ts` and passed BY HAND
+ * as the second argument to `beforeAll` in the three files whose boots had been
+ * seen to blow vitest's UNDOCUMENTED 10 s default `hookTimeout`
+ * (`admin.models`, `admin.prompts.verify`, `auth.hmac-fallback`).
+ *
+ * That is a hand-maintained mirror, and it drifted exactly as this file's own
+ * header warns. Derived at `ae0b4af8`: **81 test files boot the full Fastify
+ * server in a hook (`await build()`), and 78 of them carry NO explicit boot
+ * timeout** — so 96% of the surface the 2.157 fix was written for never
+ * received it. `tests/integration/admin.routes.test.ts` is the instance that
+ * came due: it fails 3/3 deterministically under load with
+ * `Hook timed out in 10000ms`, then `Cannot read properties of undefined
+ * (reading 'close')` in `afterAll`, and reports `18 skipped` — the same
+ * SILENT-SKIP signature 2.157 documents, which reads as a collection failure
+ * rather than a timeout.
+ *
+ * Setting it once, globally, is the derive-don't-mirror fix: a new
+ * server-booting test cannot forget it, because there is nothing to remember.
+ * The VALUE is unchanged and not re-argued here — 60 s is the figure 2.157
+ * already sized to the measured boot (~3–4 s isolated, ~15× headroom), chosen
+ * to be far above any starved-but-progressing boot while staying loud on a
+ * genuine hang. `SERVER_BOOT_HOOK_TIMEOUT_MS` is re-exported from
+ * `tests/helpers/env-setup.ts` so the three existing call sites keep working
+ * and there is exactly ONE definition.
+ */
+export const SERVER_BOOT_HOOK_TIMEOUT_MS = 60_000;
+
+/**
  * External-service env vars — a `tests/integration` file that READS any of
  * these (literal `process.env.<VAR>` token) is classified as
  * external-dependent and belongs in REQUIRED_GATE_INTEGRATION_EXCLUSIONS
