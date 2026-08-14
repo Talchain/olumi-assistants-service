@@ -20,12 +20,14 @@
  * drifts silently and the drift reads as green).
  */
 
-import { describe, it, expect } from 'vitest';
-import { transformNodeToV3 } from '../schema-v3.js';
+import { describe, it, expect, vi } from 'vitest';
+import { transformNodeToV3, transformGraphToV3 } from '../schema-v3.js';
 import {
   buildFactorScaleMap,
   resolveRawInterventionValue,
 } from '../../../orchestrator-v5/tools/plot-intervention-scale.js';
+import { resolveExistingRawValue } from '../../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { log } from '../../../utils/telemetry.js';
 import { findUncorroboratedCapFactorIds } from '../observed-state-cap-corroboration.js';
 
 type Dict = Record<string, unknown>;
@@ -127,6 +129,80 @@ describe('the honest-absence domain: no raw_value is fabricated outside it', () 
   it('non-finite cap is not arithmetic', () => {
     const observed = observedOf(draftedFactor({ value: 0.6, unit: '£', cap: Number.NaN }));
     expect(observed!.raw_value).toBeUndefined();
+  });
+
+  it('a % factor with the canonical divisor (cap 100) IS corroborated', () => {
+    const observed = observedOf(draftedFactor({ value: 0.96, unit: '%', cap: 100 }));
+    expect(observed!.raw_value).toBe(96);
+  });
+
+  it('a % factor whose cap is NOT 100 has no reliable divisor — nothing written', () => {
+    // Delegated discipline: `resolveExistingRawValue` returns `ambiguous` here.
+    // A bare `value * cap` would have written 288 and invented a convention.
+    const observed = observedOf(draftedFactor({ value: 0.96, unit: '%', cap: 300 }));
+    expect(observed!.raw_value).toBeUndefined();
+  });
+});
+
+describe('the arithmetic is the CANONICAL inverse, not a local copy', () => {
+  it('the derived raw_value agrees with resolveExistingRawValue by construction', () => {
+    // Binds this writer to the estate's single owner of the convention. If that
+    // function's semantics move, this REDs rather than drifting silently.
+    for (const [value, cap, unit] of [
+      [0.6, 150000, '£'],
+      [0.25, 4000, 'customers'],
+      [0.96, 100, '%'],
+      [0, 150000, '£'],
+      [1, 24, 'months'],
+    ] as const) {
+      const observed = observedOf(draftedFactor({ value, unit, cap }));
+      const canonical = resolveExistingRawValue({ value, cap, unit });
+      expect(canonical.kind).toBe('resolved');
+      expect(observed!.raw_value).toBe(
+        canonical.kind === 'resolved' ? canonical.raw : undefined,
+      );
+    }
+  });
+});
+
+describe('THE LOUD ALARM — an unprovable cap is never silent', () => {
+  it('fires for a residue the writer could NOT truthfully corroborate', () => {
+    const spy = vi.spyOn(log, 'error').mockImplementation(() => undefined as never);
+    try {
+      // % with a non-100 cap: outside the derivable domain, so it survives the
+      // writer as a genuinely unprovable factor — exactly what must be loud.
+      transformGraphToV3({
+        nodes: [draftedFactor({ value: 0.96, unit: '%', cap: 300 })],
+        edges: [],
+      } as never);
+      const events = spy.mock.calls
+        .map((c) => (c[0] as Record<string, unknown> | undefined)?.event)
+        .filter(Boolean);
+      expect(events).toContain('cee.v3_transform.uncorroborated_cap');
+      const payload = spy.mock.calls.find(
+        (c) => (c[0] as Record<string, unknown>)?.event === 'cee.v3_transform.uncorroborated_cap',
+      )![0] as Record<string, unknown>;
+      expect(payload.factor_ids).toEqual(['fac_annual_cost']);
+      // Redaction-safe: ids and a count only, never a magnitude or a cap.
+      expect(JSON.stringify(payload)).not.toContain('300');
+      expect(JSON.stringify(payload)).not.toContain('0.96');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('stays SILENT for a factor the writer corroborated (no false alarm)', () => {
+    const spy = vi.spyOn(log, 'error').mockImplementation(() => undefined as never);
+    try {
+      transformGraphToV3({
+        nodes: [draftedFactor({ value: 0.6, unit: '£', cap: 150000 })],
+        edges: [],
+      } as never);
+      const events = spy.mock.calls.map((c) => (c[0] as Record<string, unknown> | undefined)?.event);
+      expect(events).not.toContain('cee.v3_transform.uncorroborated_cap');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

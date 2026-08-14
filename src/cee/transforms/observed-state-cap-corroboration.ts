@@ -34,6 +34,7 @@ import {
   buildFactorScaleMap,
   resolveRawInterventionValue,
 } from '../../orchestrator-v5/tools/plot-intervention-scale.js';
+import { resolveExistingRawValue } from '../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 function isFiniteNumber(x: unknown): x is number {
   return typeof x === 'number' && Number.isFinite(x);
@@ -75,12 +76,30 @@ export function deriveCorroboratingRawValue(
   value: unknown,
   cap: unknown,
   existingRawValue: unknown,
+  unit?: unknown,
 ): number | undefined {
   if (existingRawValue !== undefined && existingRawValue !== null) return undefined;
   if (!isFiniteNumber(value) || !isFiniteNumber(cap)) return undefined;
   if (cap <= 1) return undefined;
   if (value < 0 || value > 1) return undefined;
-  return value * cap;
+  // ⚠ THE ARITHMETIC IS NOT MINTED HERE. `resolveExistingRawValue` is the
+  // estate's canonical inverse of `normaliseFactorValue` (declared as such at
+  // `evaluate-factor-value-proposal.ts:223`, and `canonicalise-value-ops.ts:383`
+  // states the doctrine outright: "The inverse is NOT a second copy"). A local
+  // `value * cap` here would be a fourth copy of one convention — trap 12's
+  // hand-maintained mirror, whose drift always reads as green.
+  //
+  // Delegating also inherits its `%` discipline for free, which is STRICTER
+  // than a bare multiplication: a `%` factor whose cap is not 100 has no
+  // reliable divisor and resolves `ambiguous`, so nothing is written for it.
+  // This function's job is therefore only the WRITE DOMAIN (above); the number
+  // itself comes from the one place that owns it.
+  const resolution = resolveExistingRawValue({
+    value,
+    cap,
+    ...(typeof unit === 'string' ? { unit } : {}),
+  });
+  return resolution.kind === 'resolved' ? resolution.raw : undefined;
 }
 
 /**

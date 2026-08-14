@@ -24,7 +24,10 @@ import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
 import { readIsBaseline } from "../baseline-identity.js";
-import { deriveCorroboratingRawValue } from "./observed-state-cap-corroboration.js";
+import {
+  deriveCorroboratingRawValue,
+  findUncorroboratedCapFactorIds,
+} from "./observed-state-cap-corroboration.js";
 import {
   extractOptionsFromNodes,
   toOptionsV3,
@@ -324,6 +327,7 @@ export function transformNodeToV3(
       node.data.value,
       node.data.cap,
       node.data.raw_value,
+      node.data.unit,
     );
 
     v3Node.observed_state = {
@@ -906,6 +910,37 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
       count: labelCleaningTrace.length,
       entries: labelCleaningTrace,
     }, `Stripped normalisation annotations from ${labelCleaningTrace.length} node label(s)`);
+  }
+
+  // ⭐ LOUD, NEVER ASSUME-GOOD: a factor shipping a `cap` its own observed state
+  // cannot PROVE. The write above corroborates every case it can do so
+  // truthfully; what reaches here is the residue it could NOT — a degenerate
+  // `cap <= 1`, a `%` factor whose divisor is not 100, or a `raw_value` that
+  // DISAGREES with `value * cap` (a wrong number a presence-only check would
+  // bless). Each leaves the factor `ambiguous_no_evidence` at the analysis seam,
+  // so its interventions cannot be denormalised and the analysable-option gate
+  // cannot hold a status quo at it.
+  //
+  // An alarm rather than a repair: outside the derivable domain there is no
+  // truthful raw value to write, and fabricating one would launder the exact
+  // 100,000x corruption the `ambiguous_no_evidence` rule exists to stop. This
+  // is the same RUNTIME, at-the-boundary shape as the prior-distribution drift
+  // alarm above — the value is passed through unchanged, never 400'd.
+  //
+  // ⚠ MEASURED SCOPE, STATED SO IT IS NOT MISREAD (trap 20): across five banked
+  // real capture corpora (71 factors with observed_state, 50 capped) this class
+  // has ZERO incidence, and the probe discriminates (a contrast control with an
+  // injected uncorroborated factor reports it). So this is DEFENCE IN DEPTH
+  // against a writer that does not exist today — the draft path's records
+  // projector deliberately stores no cap, and the graph grammar that let a model
+  // author one is retired — not a fix for an observed production failure.
+  const uncorroborated = findUncorroboratedCapFactorIds(v3Nodes);
+  if (uncorroborated.length > 0) {
+    log.error({
+      event: "cee.v3_transform.uncorroborated_cap",
+      factor_ids: uncorroborated,
+      count: uncorroborated.length,
+    }, `[V3] ${uncorroborated.length} factor(s) ship an observed_state cap with no corroborating raw_value (or one that disagrees with value x cap). Such a factor cannot prove its scale convention: resolveRawInterventionValue returns ambiguous_no_evidence, its interventions are never denormalised, and the analysable-option gate cannot hold a status quo at it. Ids only — no magnitudes are logged.`);
   }
 
   return {
