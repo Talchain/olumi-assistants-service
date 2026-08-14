@@ -222,12 +222,29 @@ describe('egress — the sentence actually reaches the user', () => {
   });
 
   /**
-   * ⚠ ALSO ADDED BY A SURVIVING MUTANT. Zeroing this tail's contribution to
-   * `MAX_ASSISTANT_TEXT_CHARS` changed nothing, because every fixture above is
-   * comfortably short. The budget only bites at the worst case — a headline near
-   * its own cap plus labels at the label cap — which is exactly the shape a real
-   * scenario with long option names produces, and exactly where an honest
-   * disclosure would otherwise be silently swapped for the locked template.
+   * ⚠ ADDED BY A SURVIVING MUTANT, AND THE MUTANT IS STILL A SURVIVOR — which
+   * is recorded here rather than papered over with a test that cannot fail.
+   *
+   * Zeroing this tail's contribution to `MAX_ASSISTANT_TEXT_CHARS` changes
+   * nothing at any realistic composition. MEASURED at this tip:
+   *
+   *     MAX_ASSISTANT_TEXT_CHARS        2860
+   *     ...without this tail's share     2477
+   *     this tail's worst case            383  (both labels at the 60-char cap)
+   *     headline at its own cap           220
+   *     worst realistic summary           599
+   *
+   * 599 < 2477, so the contribution is slack, not a binding constraint. It
+   * becomes load-bearing only when ALL FOUR tails co-occur near their maxima —
+   * the scaffold, constraint-gap and intake disclosures together reserve most of
+   * that 2477 — which is a genuine but rare state.
+   *
+   * ⚠ CLAUDE.md trap 13c: an equivalent mutant must be DEMONSTRATED, never
+   * asserted. The demonstration is the arithmetic above. The contribution STAYS
+   * — deriving the budget from the builder's own worst case is the estate's rule
+   * precisely so nobody has to re-do this measurement when a fifth tail lands —
+   * but this test asserts what it can honestly assert (the worst realistic shape
+   * is admitted), and does not pretend to kill a mutant it does not kill.
    */
   it('⭐ WORST CASE: a long headline + max-length labels still fits the budget (kills the budget mutant)', () => {
     const longLabelA = 'Hold at £49 Per Seat Across All Enterprise And Mid-Market Tiers';
