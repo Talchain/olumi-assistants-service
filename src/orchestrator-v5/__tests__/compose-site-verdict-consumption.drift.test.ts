@@ -1418,8 +1418,25 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // a future reordering visible here — an intake disclosure appended BEFORE
     // the constraint gap would compose a summary the egress allowlist rejects,
     // and the user would silently receive the bare template.
+    // The objective-contradiction honesty surface (pricing-objective FINDINGS
+    // fix 1) adds a FOURTH disclosure slot, appended after the intake one. The
+    // `gated` stance is unaffected and the pin is UPDATED RATHER THAN LOOSENED,
+    // for the reason the 2.579 note above gives: `summary` is still
+    // "withheld-able headline, else a locked template", now with four additive
+    // suffixes in the order `analysis-result-headline.ts`'s TAIL_PATTERN admits
+    // them.
+    //
+    // ⚠ THIS PIN IS WHY THE FOURTH SLOT WAS REVIEWED AT ALL. It is a
+    // hand-maintained mirror of one expression, and it did exactly the job it
+    // exists for: the wiring lane's own local gate run reported the failure and
+    // the required CI check named this line, so an unreviewed change to the
+    // compose site could not land quietly. Keep re-pinning the EXACT expression
+    // — a paraphrase, or a substring of it, would stop catching a reordering,
+    // and a slot appended BEFORE the intake one composes a summary the egress
+    // allowlist rejects, leaving the user with the bare template and no error
+    // anywhere in the system.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather
