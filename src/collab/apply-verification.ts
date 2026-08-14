@@ -105,14 +105,22 @@ const APPLYABLE_ROUND_STATUSES: ReadonlySet<RoundStatus> = new Set<RoundStatus>(
  * a repaired result, and never falls back to the client's number. The caller
  * turns the refusal into honest user-facing copy and writes nothing.
  *
- * The five bindings, each a different question, checked in this order so the
- * refusal names the FIRST thing that is actually wrong:
+ * The five bindings, each a different question. THE EXECUTION ORDER BELOW IS
+ * (a) (d) (b) (c/e) — written out in the order the code actually runs, because
+ * a comment that lists them (a)(b)(c)(d)(e) while the code runs something else
+ * is a hand-maintained mirror of control flow, and the next reader debugging a
+ * refusal code will trust the comment:
  *
  *   (a) the round belongs to the same scenario as the turn;
+ *   (d) the round is in a state from which applying is permitted — checked
+ *       BEFORE the participant lookup, so an owner who simply has not closed
+ *       the round yet is told THAT, rather than something about participants;
  *   (b) the participant belongs to that round;
- *   (c) the belief targets the exact factor being edited;
- *   (d) the round is in a state from which applying is permitted;
- *   (e) the applied value IS the server-recorded participant belief.
+ *   (c) the belief targets the exact factor being edited, and
+ *   (e) the applied value IS the server-recorded participant belief
+ *       — (c) and (e) resolve together from one folded read, because "did this
+ *       person answer THIS factor?" and "what did they say?" are answered by
+ *       the same row.
  */
 export async function verifyAppliedFrom(
   store: CollabStore,

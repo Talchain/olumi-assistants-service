@@ -67,6 +67,47 @@ function buildPersistedGraph(): unknown {
   };
 }
 
+/**
+ * A graph whose target factor is ALREADY stamped with a panel attribution — i.e.
+ * the state the model is in after an apply, and the state a page reload loads.
+ *
+ * ⚠ THIS FIXTURE EXISTS BECAUSE ITS ABSENCE HID A REAL DEFECT. Every fixture in
+ * the first version of this file started with NO `elicited_from`, so the
+ * assertion `expect(elicited_from).toBeUndefined()` on the ordinary-edit path
+ * passed VACUOUSLY: it was reading a field that had never been set, not a field
+ * that had been correctly cleared. The corpus excluded the only class that could
+ * fail — CLAUDE.md trap 13d: check what your corpus EXCLUDES, not what it covers.
+ */
+function graphAlreadyStampedByGrace(): unknown {
+  return {
+    goal_node_id: 'g-revenue',
+    nodes: [
+      { id: 'g-revenue', kind: 'goal', label: 'Revenue' },
+      {
+        id: TARGET_ID,
+        kind: 'factor',
+        label: 'Churn risk after a price rise',
+        provenance: 'user_set',
+        observed_state: {
+          value: GRACE_VALUE,
+          source: 'panel_elicited',
+          elicited_from: { round_id: ROUND_ID, participant_id: GRACE_ID },
+        },
+      },
+      { id: 'o-hold', kind: 'option', label: 'Hold price' },
+    ],
+    edges: [
+      {
+        from: TARGET_ID,
+        to: 'g-revenue',
+        strength: { mean: 0.4, std: 0.1 },
+        exists_probability: 0.9,
+        effect_direction: 'negative',
+      },
+    ],
+  };
+}
+
 function payloadFor(event: Record<string, unknown>): SystemEventTurnPayload {
   return {
     kind: 'system_event',
@@ -334,6 +375,106 @@ describe('factor_value_edit — the verified panel apply', () => {
     expect(result.kind).toBe('refused');
     if (result.kind !== 'refused') return;
     expect(result.reason).toBe('collab_apply_value_mismatch');
+  });
+
+  it('⭐⭐ APPLY-THEN-EDIT: retyping by hand CLEARS the prior attribution', async () => {
+    // THE DEFECT THIS PINS, and it is the mirror of the one the slice exists to
+    // end. Apply Grace's 0.85, then retype 0.5 by hand. Before the fix the node
+    // kept `elicited_from: { participant_id: <Grace> }` alongside
+    // `source: 'user_override'` — the owner's OWN number still carrying Grace's
+    // identity, and the contract sanctions consumers keying identity off exactly
+    // that field. The original defect mislabelled a colleague's number as the
+    // owner's; this one mislabels the owner's number as a colleague's, and only
+    // this one invents a quote.
+    const applied = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: GRACE_VALUE }),
+      event: payloadFor({
+        target_id: TARGET_ID,
+        value: GRACE_VALUE,
+        field: 'value',
+        applied_from: { round_id: ROUND_ID, participant_id: GRACE_ID },
+      }).event as never,
+      requestId: 'req-seq-1',
+      persistedGraph: buildPersistedGraph(),
+      priorFacts: [],
+      collabStore: closedRoundStore(),
+    });
+    expect(applied.kind).toBe('mutated');
+    if (applied.kind !== 'mutated') return;
+    // PRECONDITION PINNED IN-TEST: the second edit is only meaningful if the
+    // first one really did stamp. Without this the test could pass by starting
+    // from an unstamped graph — the exact vacuity that hid the defect.
+    expect(observedStateOf(applied.graph)?.elicited_from).toEqual({
+      round_id: ROUND_ID,
+      participant_id: GRACE_ID,
+    });
+
+    // Now the owner retypes a different number by hand. No applied_from.
+    const retyped = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: 0.5 }),
+      event: payloadFor({ target_id: TARGET_ID, value: 0.5, field: 'value' }).event as never,
+      requestId: 'req-seq-2',
+      persistedGraph: applied.mutatedGraph,
+      priorFacts: [],
+      collabStore: {} as CollabStore,
+    });
+
+    expect(retyped.kind).toBe('mutated');
+    if (retyped.kind !== 'mutated') return;
+    const obs = observedStateOf(retyped.graph);
+    expect(obs?.value).toBe(0.5);
+    expect(obs?.source).toBe('user_override');
+    // The whole point: Grace's identity must be GONE, not merely overwritten.
+    expect(obs?.elicited_from).toBeUndefined();
+    expect('elicited_from' in (obs ?? {})).toBe(false);
+  });
+
+  it('⭐ RELOAD: an ordinary edit on an ALREADY-STAMPED persisted graph clears it', async () => {
+    // The same defect reached the other way — not within one session, but on a
+    // graph loaded from the store that was stamped on some earlier visit. This
+    // is the shape a real user hits: apply on Monday, edit on Tuesday.
+    const result = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: 0.3 }),
+      event: payloadFor({ target_id: TARGET_ID, value: 0.3, field: 'value' }).event as never,
+      requestId: 'req-reload-1',
+      persistedGraph: graphAlreadyStampedByGrace(),
+      priorFacts: [],
+      collabStore: {} as CollabStore,
+    });
+
+    expect(result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const obs = observedStateOf(result.graph);
+    expect(obs?.value).toBe(0.3);
+    expect(obs?.source).toBe('user_override');
+    expect(obs?.elicited_from).toBeUndefined();
+    expect('elicited_from' in (obs ?? {})).toBe(false);
+  });
+
+  it('a RE-APPLY on an already-stamped graph replaces the attribution, not merges it', async () => {
+    // Ada's answer applied over Grace's. The stamp must name Ada and ONLY Ada —
+    // a merge would leave a node claiming two authors for one number.
+    const result = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: ADA_VALUE }),
+      event: payloadFor({
+        target_id: TARGET_ID,
+        value: ADA_VALUE,
+        field: 'value',
+        applied_from: { round_id: ROUND_ID, participant_id: ADA_ID },
+      }).event as never,
+      requestId: 'req-reapply-1',
+      persistedGraph: graphAlreadyStampedByGrace(),
+      priorFacts: [],
+      collabStore: closedRoundStore(),
+    });
+
+    expect(result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const obs = observedStateOf(result.graph);
+    expect(obs?.value).toBe(ADA_VALUE);
+    expect(obs?.source).toBe('panel_elicited');
+    expect(obs?.elicited_from).toEqual({ round_id: ROUND_ID, participant_id: ADA_ID });
+    expect((obs?.elicited_from as { participant_id: string }).participant_id).not.toBe(GRACE_ID);
   });
 
   it('INERTNESS: an edit with NO applied_from still stamps user_override, unchanged', async () => {

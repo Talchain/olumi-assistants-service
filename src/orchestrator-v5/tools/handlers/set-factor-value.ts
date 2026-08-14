@@ -475,6 +475,34 @@ export function createSetFactorValueHandler(): HandlerFn {
           ? { elicited_from: appliedProvenance.elicited_from }
           : {}),
       };
+
+      // ⭐⭐ AND THE ABSENT BRANCH MUST *CLEAR* IT, NOT MERELY DECLINE TO SET IT.
+      //
+      // `merged` SPREADS the prior `observed_state`, so a node that already
+      // carries `elicited_from` keeps it unless this deletes it. Without this
+      // line the sequence "apply Grace's 0.85, then retype 0.5 by hand" leaves
+      // `{ source: 'user_override', elicited_from: { participant_id: <Grace> } }`
+      // — the owner's own typed number, still carrying Grace's identity. The
+      // contract explicitly sanctions consumers keying identity off
+      // `elicited_from` ("a consumer may key display off either, but only
+      // `elicited_from` carries the identity"), so this is not a cosmetic
+      // leftover: it attributes to a named colleague a number she never gave.
+      //
+      // That is the MIRROR of the untruth this whole slice exists to end, and
+      // shipping it inside the fix would have been worse than the original —
+      // the original mislabelled a colleague's number as the owner's, this
+      // mislabels the owner's number as a colleague's, and only this one
+      // invents a quote.
+      //
+      // `delete` rather than `elicited_from: undefined`: the key must be ABSENT,
+      // because absence is the contract's declared semantics ("absent means this
+      // value was not applied from a panel round"), and a present-but-undefined
+      // key survives structuredClone and object spreads while reading as present
+      // to `in` and `Object.keys`.
+      if (appliedProvenance === undefined) {
+        delete (merged as { elicited_from?: unknown }).elicited_from;
+      }
+
       node.observed_state = merged;
 
       // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
