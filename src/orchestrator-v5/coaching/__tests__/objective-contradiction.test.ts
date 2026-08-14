@@ -232,7 +232,7 @@ describe('ARM A — directional contradiction (arithmetic-gated)', () => {
     expect(suffix).toBe(
       ' “Hold at £49 Per Seat (Status Quo)” came out ahead most often without moving' +
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-        ' “Raise to £59 Per Seat” came out ahead in 28% of runs of this model.',
+        ' “Raise to £59 Per Seat” came out ahead in 28% of runs.',
     );
   });
 

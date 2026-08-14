@@ -101,6 +101,21 @@ import {
   INTAKE_OPTION_DISCLOSURE_RE_SRC,
   INTAKE_OPTION_DISCLOSURE_MAX_CHARS,
 } from './intake-option-disclosure.js';
+// The objective-contradiction honesty surface (pricing-objective FINDINGS fix
+// 1) — the fourth tail, and the same three pieces of plumbing for the same
+// reason as the three above. Without them the disclosure composes correctly,
+// is rejected here, and the user silently receives the locked template.
+//
+// ⚠ THIS TAIL WAS ONCE ADMITTED WITHOUT ITS SLOT, by accident. Its directional
+// arm originally ended in this module's own `LEAD_CLAUSE_RE_SRC`
+// ("came out ahead in N% of runs of this model."), so `^.+?` swallowed the
+// whole summary and the CASE-E HEADLINE grammar matched it — measured, with a
+// control. The copy was changed to end "…in N% of runs." so the slot below is
+// genuinely load-bearing. Keep those two clauses structurally distinct.
+import {
+  OBJECTIVE_CONTRADICTION_RE_SRC,
+  OBJECTIVE_CONTRADICTION_MAX_CHARS,
+} from './objective-contradiction.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -245,7 +260,12 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // set. Same rule: budgeted from the builder's own worst case, never
   // hand-estimated, so an honest disclosure cannot knock the summary back to
   // the locked template on length.
-  INTAKE_OPTION_DISCLOSURE_MAX_CHARS;
+  INTAKE_OPTION_DISCLOSURE_MAX_CHARS +
+  // The objective-contradiction tail rides LAST (matching the handler's append
+  // order) and can co-occur with all three above. Same rule: budgeted from the
+  // builder's own worst case, never hand-estimated, so an honest disclosure
+  // cannot knock the summary back to the locked template on length.
+  OBJECTIVE_CONTRADICTION_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -1875,7 +1895,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // constraint-gap disclosure — mirroring
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}` in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?`;
 
 /**
  * Anchored form of the DISCLOSURE grammars, for the locked-template branch of
@@ -1888,7 +1908,7 @@ const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${RED
  * template.length`), so an empty match cannot admit a bare template twice.
  */
 const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
-  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?$`,
+  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?$`,
 );
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three

@@ -527,8 +527,34 @@ const ATTAINMENT_TAIL_B =
 
 const DIRECTIONAL_MIDDLE = ' came out ahead most often without moving ';
 const DIRECTIONAL_TAIL_A = ' the way your goal asks. Among the options that do, ';
+/**
+ * ⚠⚠ THIS CLAUSE MUST NOT END IN THE HEADLINE'S OWN LEAD CLAUSE, and the first
+ * draft did — caught by a probe, not by inspection.
+ *
+ * `analysis-result-headline.ts` builds its Case-E grammar as
+ * `^.+? came out ahead in \d{1,3}% of runs of this model\.${TAIL_PATTERN}$`.
+ * The draft ended with exactly `came out ahead in 28% of runs of this model.`,
+ * so `^.+?` swallowed the template AND this whole disclosure, and the summary
+ * was ADMITTED BY THE HEADLINE GRAMMAR — measured `true` with no tail slot
+ * registered at all, against a control that read `false` once the clause was
+ * changed.
+ *
+ * TWO HARMS, and the second is worse than the first:
+ *   1. the egress test for this arm could not fail — it would have passed
+ *      whether or not the tail slot was ever added (trap 13b, a guard agreeing
+ *      with itself, reached through the GRAMMAR rather than through the test);
+ *   2. the response was being validated as a CASE-E LEADER HEADLINE whose
+ *      subject is the PURSUING option — i.e. the grammar read "Raise to £59
+ *      came out ahead in 28% of runs" as the turn's top-level claim, which is a
+ *      statement about the wrong option and precisely the misreading this
+ *      surface exists to prevent.
+ *
+ * Keep this clause structurally distinct from `LEAD_CLAUSE_RE_SRC`. The
+ * discriminating pair in the wiring spec pins it: the composed summary must be
+ * REJECTED with the slot removed and ADMITTED with it present.
+ */
 const DIRECTIONAL_TAIL_B = ' came out ahead in ';
-const DIRECTIONAL_TAIL_C = '% of runs of this model.';
+const DIRECTIONAL_TAIL_C = '% of runs.';
 
 function quote(label: string): string {
   return `“${label}”`;
@@ -763,3 +789,186 @@ export const OBJECTIVE_DISCLOSURE_SURVIVES_ITS_OWN_GRAMMAR: true = (() => {
   }
   return true as const;
 })();
+
+// ============================================================================
+// ADAPTERS — the wiring layer
+//
+// ⚠ THESE ARE THE PART THAT CAN BE SILENTLY WRONG. The detectors above are
+// pure and easy to test; an adapter that reads the wrong field, or reads the
+// right field off the wrong object, makes every one of those tests true and the
+// product silent. CLAUDE.md trap 16's inverse: reachability WITHIN a module is
+// not reachability in the system, and a fixture you wrote yourself is not
+// evidence about the wire.
+//
+// Every field read here is the SAME field, off the SAME object, that
+// `context/analysis-compact.ts:768-779` reads — the estate's existing
+// projection of `option_comparison[]`. Deliberately NOT imported from it (that
+// module pulls in the whole projection graph and would make this a non-leaf),
+// but deliberately IDENTICAL in field names and coercion rules, because a
+// second reader that drifts from the first is trap 12 in its purest form.
+// ============================================================================
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Project raw `option_comparison[]` records to the detector's view.
+ *
+ * Mirrors `analysis-compact.ts`'s reader exactly: `option_id` falls back to
+ * `option_label`, `option_label` falls back to the id, `win_probability`
+ * defaults to 0 when absent, and `probability_of_goal` / `status` are OMITTED
+ * when absent rather than defaulted — absence is meaningful for both (ISL
+ * fail-closes on the first; absent status means recommendable for the second).
+ */
+export function readObjectiveOptionViews(
+  records: ReadonlyArray<Record<string, unknown>>,
+): ObjectiveOptionView[] {
+  const views: ObjectiveOptionView[] = [];
+  for (const record of records) {
+    const optionId =
+      typeof record.option_id === 'string'
+        ? record.option_id
+        : typeof record.option_label === 'string'
+          ? record.option_label
+          : null;
+    if (optionId === null) continue;
+    const optionLabel =
+      typeof record.option_label === 'string' ? record.option_label : optionId;
+    const view: ObjectiveOptionView = {
+      option_id: optionId,
+      option_label: optionLabel,
+      win_probability: typeof record.win_probability === 'number' ? record.win_probability : 0,
+      ...(typeof record.probability_of_goal === 'number'
+        ? { probability_of_goal: record.probability_of_goal }
+        : {}),
+      ...(typeof record.status === 'string' ? { status: record.status } : {}),
+    };
+    views.push(view);
+  }
+  return views;
+}
+
+/** The goal node's label, or `null` when the graph carries no identifiable goal. */
+export function readGoalLabel(rawGraph: unknown): string | null {
+  const graph = asRecord(rawGraph);
+  if (graph === null) return null;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const goalNodeId = typeof graph.goal_node_id === 'string' ? graph.goal_node_id : null;
+  for (const raw of nodes) {
+    const node = asRecord(raw);
+    if (node === null) continue;
+    const isGoal = goalNodeId !== null ? node.id === goalNodeId : node.kind === 'goal';
+    if (!isGoal) continue;
+    return typeof node.label === 'string' ? node.label : null;
+  }
+  return null;
+}
+
+/**
+ * Build the per-factor intervention view from the persisted graph.
+ *
+ * Handles BOTH shapes the estate carries, because the handler's own fallback
+ * (`snapshot.rawPersistedGraph ?? { options: snapshot.options }`) can hand
+ * either one: options as `nodes[]` entries with `kind: 'option'` (the L60
+ * persisted row), or a separate top-level `options[]` array (cee-v3). An
+ * intervention value is either a bare number or `{ value: number }`.
+ *
+ * Factor LABELS come from the graph's factor nodes; a factor with no resolvable
+ * label is skipped rather than rendered by id — an id in prose is exactly what
+ * `ASSISTANT_TEXT_ID_REGEX` rejects at egress, and shipping one would silently
+ * downgrade the whole summary to the locked template.
+ */
+export function readInterventionViews(rawGraph: unknown): InterventionView[] {
+  const graph = asRecord(rawGraph);
+  if (graph === null) return [];
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+
+  const factorLabels = new Map<string, string>();
+  for (const raw of nodes) {
+    const node = asRecord(raw);
+    if (node === null) continue;
+    if (typeof node.id === 'string' && typeof node.label === 'string') {
+      factorLabels.set(node.id, node.label);
+    }
+  }
+
+  const optionSources: Array<Record<string, unknown>> = [];
+  for (const raw of nodes) {
+    const node = asRecord(raw);
+    if (node !== null && node.kind === 'option') optionSources.push(node);
+  }
+  if (Array.isArray(graph.options)) {
+    for (const raw of graph.options) {
+      const option = asRecord(raw);
+      if (option !== null) optionSources.push(option);
+    }
+  }
+
+  const byFactor = new Map<string, Map<string, number>>();
+  for (const option of optionSources) {
+    const optionId = typeof option.id === 'string' ? option.id : null;
+    if (optionId === null) continue;
+    const interventions = asRecord(option.interventions);
+    if (interventions === null) continue;
+    for (const [factorId, rawValue] of Object.entries(interventions)) {
+      const value =
+        typeof rawValue === 'number'
+          ? rawValue
+          : typeof asRecord(rawValue)?.value === 'number'
+            ? (asRecord(rawValue)!.value as number)
+            : null;
+      if (value === null || !Number.isFinite(value)) continue;
+      let entry = byFactor.get(factorId);
+      if (entry === undefined) {
+        entry = new Map<string, number>();
+        byFactor.set(factorId, entry);
+      }
+      entry.set(optionId, value);
+    }
+  }
+
+  const views: InterventionView[] = [];
+  for (const [factorId, byOption] of byFactor) {
+    const label = factorLabels.get(factorId);
+    if (label === undefined) continue;
+    views.push({ factor_id: factorId, factor_label: label, by_option: byOption });
+  }
+  return views;
+}
+
+/**
+ * ⭐ THE ONE ENTRY POINT THE HANDLER CALLS.
+ *
+ * Arm B is tried FIRST and wins when both fire: a goal-attainment contradiction
+ * is a statement about the user's actual TARGET, which is strictly more
+ * informative than a statement about lever direction, and only ONE tail may
+ * ship (the grammar admits one slot, and two sentences would double-count the
+ * same leader). Exactly one sentence, or none.
+ *
+ * `leaderWasNamed` is threaded straight through to the builder's hard
+ * precondition — on a withheld turn this returns `''`.
+ */
+export function composeObjectiveContradictionDisclosure(
+  rawGraph: unknown,
+  records: ReadonlyArray<Record<string, unknown>>,
+  leaderWasNamed: boolean,
+): string {
+  if (!leaderWasNamed) return '';
+  const options = readObjectiveOptionViews(records);
+  if (options.length < 2) return '';
+
+  const attainment = detectGoalAttainmentContradiction(options);
+  if (attainment !== null) {
+    return buildObjectiveContradictionDisclosure(attainment, leaderWasNamed);
+  }
+
+  const directional = detectDirectionalContradiction(
+    readGoalLabel(rawGraph),
+    options,
+    readInterventionViews(rawGraph),
+  );
+  return buildObjectiveContradictionDisclosure(directional, leaderWasNamed);
+}
