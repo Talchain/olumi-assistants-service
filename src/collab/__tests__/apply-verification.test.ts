@@ -94,6 +94,8 @@ function participant(overrides: Partial<CollabParticipant> = {}): CollabParticip
 
 function beliefEvent(args: {
   participant_id: string;
+  event_id?: string;
+  target_kind?: 'factor' | 'edge';
   target_id?: string;
   value: number | null;
   event_version?: number;
@@ -102,12 +104,14 @@ function beliefEvent(args: {
 }): ElicitationEventRow {
   const kind = args.kind ?? 'belief_submitted';
   return {
-    event_id: `evt-${args.participant_id}-${args.event_version ?? 1}-${args.target_id ?? TARGET_ID}`,
+    event_id:
+      args.event_id ??
+      `evt-${args.participant_id}-${args.event_version ?? 1}-${args.target_id ?? TARGET_ID}`,
     round_id: ROUND_ID,
     participant_id: args.participant_id,
     event_version: args.event_version ?? 1,
     kind,
-    target: { kind: 'factor', id: args.target_id ?? TARGET_ID },
+    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
     belief:
       kind === 'declined'
         ? null
@@ -314,6 +318,49 @@ describe('verifyAppliedFrom — the five server-side bindings', () => {
         claimed_value: GRACE_VALUE,
       }),
       'collab_apply_no_stated_value',
+    );
+  });
+
+  it('(c/e) binds beliefs by KIND + id — the factor stays positive and a newer same-id edge value refuses', async () => {
+    const edgeValue = 0.91;
+    const store = makeStore({
+      rounds: { [ROUND_ID]: round() },
+      participants: { [GRACE_ID]: participant() },
+      events: [
+        beliefEvent({
+          participant_id: GRACE_ID,
+          event_id: 'evt-factor-positive',
+          target_kind: 'factor',
+          value: GRACE_VALUE,
+          event_version: 1,
+        }),
+        beliefEvent({
+          participant_id: GRACE_ID,
+          event_id: 'evt-edge-same-id-forgery',
+          target_kind: 'edge',
+          value: edgeValue,
+          // Newer on purpose: an id-only fold selects this row.
+          event_version: 2,
+        }),
+      ],
+    });
+
+    const verifiedFactor = await verifyAppliedFrom(store, {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: { round_id: ROUND_ID, participant_id: GRACE_ID },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verifiedFactor.value).toBe(GRACE_VALUE);
+
+    await expectRefusal(
+      verifyAppliedFrom(store, {
+        scenario_id: SCENARIO_ID,
+        target_id: TARGET_ID,
+        claim: { round_id: ROUND_ID, participant_id: GRACE_ID },
+        claimed_value: edgeValue,
+      }),
+      'collab_apply_value_mismatch',
     );
   });
 

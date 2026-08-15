@@ -381,6 +381,41 @@ describe('factor_value_edit — the verified panel apply', () => {
     expect(result.reason).toBe('collab_apply_value_mismatch');
   });
 
+  it('refuses a same-id EDGE belief as the value for a FACTOR apply, and writes nothing', async () => {
+    const edgeValue = 0.91;
+    const edgeBelief: ElicitationEventRow = {
+      ...beliefEvent(GRACE_ID, edgeValue),
+      event_id: 'evt-edge-belief-sharing-factor-id',
+      target: { kind: 'edge', id: TARGET_ID },
+    };
+    const baseStore = closedRoundStore();
+    const edgeOnlyStore: CollabStore = {
+      ...baseStore,
+      listAllRoundEvents: async () => [{ ...edgeBelief }],
+    } as CollabStore;
+    const event = payloadFor({
+      target_id: TARGET_ID,
+      value: edgeValue,
+      field: 'value',
+      applied_from: { round_id: ROUND_ID, participant_id: GRACE_ID },
+    }).event as never;
+
+    const result = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: edgeValue }),
+      event,
+      requestId: 'req-apply-kind-forgery',
+      persistedGraph: buildPersistedGraph(),
+      priorFacts: [],
+      collabStore: edgeOnlyStore,
+    });
+
+    expect(result.kind).toBe('refused');
+    if (result.kind !== 'refused') return;
+    expect(result.reason).toBe('collab_apply_no_stated_value');
+    expect('mutatedGraph' in result).toBe(false);
+    expect(result.response.assistant_text).toContain("haven't changed anything");
+  });
+
   it('⭐⭐ APPLY-THEN-EDIT: retyping by hand CLEARS the prior attribution', async () => {
     // THE DEFECT THIS PINS, and it is the mirror of the one the slice exists to
     // end. Apply Grace's 0.85, then retype 0.5 by hand. Before the fix the node

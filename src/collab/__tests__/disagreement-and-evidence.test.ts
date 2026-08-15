@@ -313,6 +313,29 @@ describe('the answer fold survives a newer evidence row', () => {
     expect(grace?.value).toBe(0.4);
     expect(grace?.kind).toBe('belief_revised');
   });
+
+  it('binds an answer by KIND + id — a newer same-id edge belief cannot replace the factor belief', async () => {
+    const factorBelief = answer({
+      participant_id: GRACE_ID,
+      value: GRACE_VALUE,
+      event_version: 1,
+    });
+    const edgeBelief: ElicitationEventRow = {
+      ...answer({ participant_id: GRACE_ID, value: ADA_VALUE, event_version: 2 }),
+      event_id: 'evt-edge-belief-sharing-factor-id',
+      target: { kind: 'edge', id: TARGET_ID },
+    };
+    const view = await assembleRevealView(
+      makeStore({ events: [factorBelief, edgeBelief] }),
+      { round_id: ROUND_ID, requested_by: { kind: 'owner', user_id: 'owner-user' } },
+    );
+
+    const grace = view.per_target
+      .find((t) => t.target.kind === 'factor' && t.target.id === TARGET_ID)
+      ?.responses.find((r) => r.participant_id === GRACE_ID);
+    expect(grace?.value).toBe(GRACE_VALUE);
+    expect(grace?.value).not.toBe(ADA_VALUE);
+  });
 });
 
 describe('attaching evidence is not answering', () => {
@@ -554,6 +577,33 @@ describe('appending evidence', () => {
         },
       },
     );
+    expect(row.event_version).toBe(2);
+  });
+
+  it('same-id EDGE answers do not inflate the FACTOR answer sequence', async () => {
+    const factorBelief = answer({
+      participant_id: GRACE_ID,
+      value: GRACE_VALUE,
+      event_version: 1,
+    });
+    const edgeBelief: ElicitationEventRow = {
+      ...answer({ participant_id: GRACE_ID, value: ADA_VALUE, event_version: 1 }),
+      event_id: 'evt-edge-answer-sharing-factor-id',
+      target: { kind: 'edge', id: TARGET_ID },
+    };
+
+    const row = await appendParticipantEvent(openStore([factorBelief, edgeBelief]), {
+      round_id: ROUND_ID,
+      participant: participant(GRACE_ID, 'Grace'),
+      payload: {
+        kind: 'belief_revised',
+        target: { kind: 'factor', id: TARGET_ID },
+        belief: { value: 0.4, expression_raw: 'changed my mind', confidence: null },
+        evidence: null,
+      },
+    });
+
+    expect(row.target).toEqual({ kind: 'factor', id: TARGET_ID });
     expect(row.event_version).toBe(2);
   });
 

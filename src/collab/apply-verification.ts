@@ -212,13 +212,20 @@ export async function verifyAppliedFrom(
   // sanctioned reveal-time read and the round is closed, so this is not a
   // blindness violation — INV-A constrains the OPEN packet.
   const events = await store.listAllRoundEvents(claim.round_id);
-  const latestForTarget = foldLatestPerParticipant(events, target_id);
+  // `factor_value_edit` makes the target kind authoritative here. Passing the
+  // full identity prevents an edge belief with the same string id from being
+  // verified as the value for this factor.
+  const latestForTarget = foldLatestPerParticipant(events, {
+    kind: 'factor',
+    id: target_id,
+  });
   const own = latestForTarget.find((row) => row.participant_id === claim.participant_id);
 
-  // Bound by IDENTITY (participant_id + target_id), never by finding a row
-  // whose value happens to equal the claim — a value predicate would happily
-  // match a DIFFERENT participant who gave the same number, which is precisely
-  // how an attribution stamp becomes a lie (CLAUDE.md trap 19).
+  // Bound by IDENTITY (participant_id + target kind + target id), never by
+  // finding a row whose value happens to equal the claim — a value predicate
+  // would happily match a DIFFERENT participant who gave the same number,
+  // which is precisely how an attribution stamp becomes a lie (CLAUDE.md trap
+  // 19).
   if (own === undefined || own.belief === null || own.belief.value === null) {
     // Covers all three distinct absences with one honest sentence: never asked,
     // explicitly declined, or answered without a number. The refusal does not
