@@ -12,7 +12,7 @@
  *
  * This module is the readiness/coaching arm the type should reach. It consumes
  * the SAME readiness engine the coaching spine uses
- * (`computeStructuralReadiness` + `summariseReadiness`, which
+ * (the canonical graph readiness adapter + `summariseReadiness`, which
  * `coaching-state.ts`'s `evaluateReadiness` also wraps) — no new science — and
  * the SAME honest fresh-canvas answer (`composeProcessMetaIntakeResponse`), now
  * reached by the type. The string-mirror branch and the typed branch collapse
@@ -32,7 +32,7 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { summariseReadiness } from './readiness-summary.js';
 import { composeProcessMetaIntakeResponse } from './process-meta-intake.js';
 
@@ -119,7 +119,7 @@ function composeReadyResponse(stage: StageIndicator): OlumiResponse {
  *   - no graph / empty / unparseable  → the honest fresh-canvas checklist
  *     (`composeProcessMetaIntakeResponse`), now reached by the type. This is
  *     the unification with the string-mirror branch.
- *   - populated, no goal node         → `computeStructuralReadiness` returns
+ *   - populated, no goal node         → canonical projection returns
  *     undefined (its strongest "not ready" blocker) → name the missing goal.
  *   - populated, open readiness items → surface `summariseReadiness`'s prose.
  *   - populated, nothing open         → say the model looks ready to analyse.
@@ -138,7 +138,9 @@ export function composeReadinessIntakeResponse(
   if (!parsed.success || parsed.data.nodes.length === 0) {
     return { outcome: 'fresh_canvas', response: composeProcessMetaIntakeResponse() };
   }
-  const readiness = computeStructuralReadiness(parsed.data);
+  // Preserve canonical top-level options when present; GraphV3 parsing is the
+  // validity gate but its projection may intentionally omit those carriers.
+  const readiness = buildCanonicalAnalysisReadyFromGraph(persistedGraph);
   if (readiness === undefined) {
     return { outcome: 'goal_missing', response: composeGoalMissingResponse(stage) };
   }

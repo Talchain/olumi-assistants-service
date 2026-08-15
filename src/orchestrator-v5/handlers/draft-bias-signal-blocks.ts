@@ -178,6 +178,13 @@ function truncateBody(detail: string): string {
 
 export interface BuildDraftBiasSignalBlocksParams {
   /**
+   * Sole admission authority for model-authored card bodies. Bias detail is
+   * free-form coaching text, so it may reach a user-visible block only when
+   * the typed draft payload is exactly ready. Missing, unknown and every
+   * non-ready status fail closed.
+   */
+  readonly analysisReady?: { readonly status?: unknown } | null;
+  /**
    * The engine's raw `coachingBiasSignals`. The real wire shape is
    * `{type, detail}` (BiasSignalSchema is `.strict()`, no target); a `target`
    * is honoured for best-effort grounding when present but is not required.
@@ -199,7 +206,8 @@ export interface BuildDraftBiasSignalBlocksParams {
 export function buildDraftBiasSignalBlocks(
   params: BuildDraftBiasSignalBlocksParams,
 ): CoachingBlock[] {
-  const { biasSignals, graph, createdAt } = params;
+  const { analysisReady, biasSignals, graph, createdAt } = params;
+  if (analysisReady?.status !== 'ready') return [];
   if (!Array.isArray(biasSignals) || biasSignals.length === 0) return [];
 
   // One lookup for best-effort grounding. The graph is OPTIONAL now — a real

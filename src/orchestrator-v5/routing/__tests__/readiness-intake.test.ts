@@ -33,7 +33,29 @@ function optionNode(id: string, label: string, extra: Record<string, unknown> = 
   return { id, kind: 'option', label, ...extra };
 }
 
+function edge(from: string, to: string) {
+  return {
+    from,
+    to,
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 1,
+    effect_direction: 'positive' as const,
+  };
+}
+
 const READY_INTERVENTIONS = { interventions: { f1: 0.5 } };
+
+function readyGraph() {
+  return {
+    nodes: [
+      goalNode({ goal_threshold: 0.8 }),
+      optionNode('opt_1', 'Option A', READY_INTERVENTIONS),
+      optionNode('opt_2', 'Option B', READY_INTERVENTIONS),
+      { id: 'f1', kind: 'factor', label: 'Market response', category: 'controllable' },
+    ],
+    edges: [edge('opt_1', 'f1'), edge('opt_2', 'f1'), edge('f1', 'goal_1')],
+  };
+}
 
 describe('composeReadinessIntakeResponse — fresh canvas (unification)', () => {
   it('null persisted graph → the honest process-meta fresh-canvas answer', () => {
@@ -90,14 +112,7 @@ describe('composeReadinessIntakeResponse — populated canvas (NOT the fresh pat
   });
 
   it('goal with threshold + two configured options → ready to analyse (readiness_ready)', () => {
-    const graph = {
-      nodes: [
-        goalNode({ goal_threshold: 0.8 }),
-        optionNode('opt_1', 'Option A', READY_INTERVENTIONS),
-        optionNode('opt_2', 'Option B', READY_INTERVENTIONS),
-      ],
-      edges: [],
-    };
+    const graph = readyGraph();
     const { outcome, response } = composeReadinessIntakeResponse(graph, 'analyse');
     expect(outcome).toBe('readiness_ready');
     expect(response.assistant_text).toContain(READINESS_READY_MARKER);
@@ -113,14 +128,7 @@ describe('composeReadinessIntakeResponse — envelope invariants', () => {
       { nodes: [], edges: [] },
       { nodes: [optionNode('opt_1', 'A'), optionNode('opt_2', 'B')], edges: [] },
       { nodes: [goalNode(), optionNode('opt_1', 'A')], edges: [] },
-      {
-        nodes: [
-          goalNode({ goal_threshold: 0.8 }),
-          optionNode('opt_1', 'A', READY_INTERVENTIONS),
-          optionNode('opt_2', 'B', READY_INTERVENTIONS),
-        ],
-        edges: [],
-      },
+      readyGraph(),
     ];
     for (const g of graphs) {
       const { response } = composeReadinessIntakeResponse(g, 'frame');

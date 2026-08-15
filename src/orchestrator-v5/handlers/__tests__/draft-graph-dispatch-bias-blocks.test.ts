@@ -63,6 +63,11 @@ function makeResult(overrides: Partial<Record<string, unknown>> = {}): DraftGrap
     coachingBiasSignals: BIAS_SIGNALS,
     draftWarnings: [],
     graphOutput: GRAPH,
+    analysisReady: {
+      status: 'ready',
+      goal_node_id: 'goal_cost',
+      options: [],
+    },
     ...overrides,
   } as unknown as DraftGraphResult;
 }
@@ -101,5 +106,35 @@ describe('draftResultToOlumiResponse — bias_signal coaching blocks', () => {
   it('emits no blocks on the non-persisted (failure) path', () => {
     const res = draftResultToOlumiResponse(makeResult(), PAYLOAD, false, 'req-3', PAYLOAD.message);
     expect(res.blocks).toEqual([]);
+  });
+
+  it.each(['needs_user_input', 'needs_user_mapping', 'needs_encoding', 'blocked'])(
+    'quarantines valid free-form bias detail on the wire when readiness is %s',
+    (status) => {
+      const res = draftResultToOlumiResponse(
+        makeResult({
+          analysisReady: { status, goal_node_id: 'goal_cost', options: [] },
+        }),
+        PAYLOAD,
+        true,
+        `req-bias-${status}`,
+        PAYLOAD.message,
+      );
+      expect(res.blocks).toEqual([]);
+      expect(JSON.stringify(res)).not.toContain(BIAS_SIGNALS[0]!.detail);
+      expect(JSON.stringify(res)).not.toContain(BIAS_SIGNALS[1]!.detail);
+    },
+  );
+
+  it('quarantines bias detail when readiness is missing', () => {
+    const res = draftResultToOlumiResponse(
+      makeResult({ analysisReady: undefined }),
+      PAYLOAD,
+      true,
+      'req-bias-missing-readiness',
+      PAYLOAD.message,
+    );
+    expect(res.blocks).toEqual([]);
+    expect(JSON.stringify(res)).not.toContain(BIAS_SIGNALS[0]!.detail);
   });
 });

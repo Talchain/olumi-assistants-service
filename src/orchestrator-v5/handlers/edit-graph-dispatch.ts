@@ -68,7 +68,7 @@ import type {
 } from '../../orchestrator/types.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
 import {
@@ -1101,7 +1101,7 @@ export interface DispatchEditGraphResult {
   readonly response: OlumiResponse;
   readonly commitPerformed: boolean;
   /**
-   * V5 finaliser contract: pre-computed structural readiness from the
+   * V5 finaliser contract: pre-computed canonical readiness from the
    * post-edit `appliedGraph`. Surfaced so the response-finaliser in
    * route-v2.ts can stamp `analysis_ready` after composition. Undefined
    * when there is no `appliedGraph` — the canvas is unchanged so the UI's
@@ -1430,7 +1430,7 @@ function editResultToOlumiResponse(
   const fallback = composeEditFallbackText(result);
 
   // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
-  // dispatcher computes structural readiness from `editResult.appliedGraph`
+  // dispatcher computes canonical readiness from `editResult.appliedGraph`
   // and surfaces it on `DispatchEditGraphResult.analysisReady`; the
   // response-finaliser stamps it onto the wire envelope after composition.
   const assistantText = selectEditAssistantText(result, fallback);
@@ -2221,7 +2221,7 @@ export async function dispatchEditGraph(
   // The handler-threw path is covered by the catch above; the success/commit
   // returns are covered by the commit-try `finally` below. This outer `finally`
   // closes the remaining gap — an unexpected throw in the assembly region
-  // (editResultToOlumiResponse / no-op recovery / computeStructuralReadiness)
+  // (editResultToOlumiResponse / no-op recovery / canonical readiness projection)
   // before the commit-try runs — so a turn still emits exactly one event before
   // the exception propagates. There is intentionally NO catch here: the
   // original error is never caught or masked. `eventEmitted` makes the emit
@@ -3432,11 +3432,10 @@ export async function dispatchEditGraph(
     }
   }
 
-  // V5 finaliser contract: compute structural readiness from the post-edit
+  // V5 finaliser contract: compute canonical readiness from the post-edit
   // graph here so route-v2.ts can stamp it onto the wire envelope.
-  // computeStructuralReadiness is intervention-shape-tolerant
-  // (mergeInterventionSources handles the V3 shape that the UI legacy
-  // fallback could not read). Undefined when no successful mutation
+  // The graph adapter preserves the V3 intervention carriers, then delegates
+  // whole-status semantics to buildAnalysisReadyPayload. Undefined when no successful mutation
   // committed — gated by `successfulAppliedMutation` (Codex round-2
   // P1) so an impossible appliedGraph+empty-operations shape cannot
   // stamp analysis_ready from an unpersisted graph.
@@ -3480,9 +3479,9 @@ export async function dispatchEditGraph(
   // walk measured. This branch covers only the genuine non-apply outcomes the
   // walk actually witnessed: rejected, no-op, zero-ops.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
-    ? computeStructuralReadiness(editResult.appliedGraph!)
+    ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
     : !successfulAppliedMutation && graphStrictlyCanonical
-      ? computeStructuralReadiness(parsedGraph)
+      ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
 
   // V5 state-trust freshness derivation moved earlier in this function

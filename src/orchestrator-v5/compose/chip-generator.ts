@@ -30,15 +30,14 @@
  * `Run analysis` chip. Source order (correction 11):
  *   1. `input.analysisReady` — pre-computed payload threaded by the call
  *      site (from draft-graph-dispatch or turn-executor).
- *   2. Otherwise `computeStructuralReadiness(graph)` — not done here; the
+ *   2. Otherwise the canonical graph readiness adapter — not done here; the
  *      call site MUST do the computation and pass it in.
  *   3. If `analysisReady` is undefined, readiness is unknown and the
  *      executable chip MUST NOT render. Fall back to a conversational
  *      prompt. The `graphOptionCount` hint still drives fallback copy.
  *
  * The executable chip emits iff `analysisReady.status === 'ready'` — the
- * `computeStructuralReadiness` helper already verifies goal node +
- * ≥2 options + every non-baseline option having ≥1 numeric intervention.
+ * canonical producer already verifies the whole model.
  * See `src/orchestrator/tools/analysis-ready-helper.ts`.
  */
 
@@ -63,10 +62,7 @@ import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 // NO_MATCH at `detectConfigureOptionIntent` AND a hit on
 // EDIT_GRAPH_NEGATIVE_REGEX's "set up". `configure-option-product-copy-routes.test.ts`
 // pins `generateChips` OUTPUT, not just the constant.
-import {
-  SET_OPTION_VALUES_CHIP_LABEL,
-  SET_OPTION_VALUES_CHIP_MESSAGE,
-} from '../configure-option-chip-text.js';
+import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -82,9 +78,8 @@ export interface ChipGeneratorInput {
   /**
    * V5 alpha hardening Phase 2.4: full structural readiness payload. When
    * present with `status === 'ready'`, the executable `Run analysis` chip
-   * is safe to render — `computeStructuralReadiness` already verified the
-   * full set of preconditions (goal node present, ≥2 options with numeric
-   * interventions). When present with any other status (`needs_user_input`,
+   * is safe to render — canonical readiness already verified the full set of
+   * preconditions. When present with any other status (`needs_user_input`,
    * `needs_user_mapping`, `needs_encoding`), the chip falls back to a
    * conversational prompt. When undefined (graph absent or readiness not
    * computed), readiness is treated as unknown and the executable variant
@@ -92,7 +87,7 @@ export interface ChipGeneratorInput {
    *
    * Source order (correction 11 of the alpha hardening plan):
    *   1. Pre-computed payload threaded by the call site (preferred).
-   *   2. Fallback: the call site calls `computeStructuralReadiness(graph)`
+   *   2. Fallback: the call site projects canonical readiness from the graph
    *      and passes the result here.
    *   3. Neither available → leave this field undefined.
    */
@@ -442,25 +437,19 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
     ];
   }
 
-  // Priority 4: readiness needs user input → setup prompt.
-  if (
-    readyStatus === 'needs_user_input' ||
-    readyStatus === 'needs_user_mapping' ||
-    readyStatus === 'needs_encoding'
-  ) {
+  // Priority 4: a typed non-ready state → its canonical conversational
+  // recovery. Status classification is shared with the post-draft narrative;
+  // blocked/missing/mapping/encoding never collapse into one "Set values"
+  // guess, and no non-ready branch can emit executable Run.
+  if (readyStatus !== undefined && readyStatus !== 'ready') {
+    const recovery = buildReadinessRecoveryChip(input.analysisReady);
     emit(TelemetryEvents.V5ChipsFloorApplied, {
-      reason: 'needs_input',
+      reason: `readiness_${readyStatus}`,
       stage,
       analysis_ready_status: readyStatusLabel,
       has_run_analysis_fact: false,
     });
-    return [
-      promptChip(
-        'floor_set_option_values',
-        SET_OPTION_VALUES_CHIP_LABEL,
-        SET_OPTION_VALUES_CHIP_MESSAGE,
-      ),
-    ];
+    return recovery ? [recovery] : [];
   }
 
   // No safe floor applies. Empty is honest — emit telemetry so monitoring
@@ -810,21 +799,16 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label),
       ]);
     }
-    // Readiness unknown / not ready — surface a conversational prompt so
-    // the user has a visible next step. Mirrors the analyse-stage fallback.
-    return cap([
-      promptChip(
-        'set_option_values',
-        SET_OPTION_VALUES_CHIP_LABEL,
-        SET_OPTION_VALUES_CHIP_MESSAGE,
-      ),
-    ]);
+    // Readiness unknown / not ready — surface the same typed recovery used by
+    // the post-draft narrative. Missing status fails closed to model review.
+    const recovery = buildReadinessRecoveryChip(input.analysisReady);
+    return recovery ? cap([recovery]) : [];
   }
 
   // Rule: analyse stage, no analysis yet → run analysis.
   //
   // V5 alpha hardening Phase 2.4: the executable variant is gated on the
-  // FULL structural readiness signal — `computeStructuralReadiness`
+  // FULL canonical readiness signal
   // already verified goal node + ≥2 options + every non-baseline option
   // having ≥1 numeric intervention. This closes the gap where the old
   // `graphOptionCount > 0` gate would emit an executable chip on a graph
@@ -845,14 +829,18 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     if (runAnalysis && isReady) {
       return cap([executableChip(runAnalysis.handler_id as V5ActionType, runAnalysis.label)]);
     }
-    if (!hasOptions) {
+    if (isReady) {
       return cap([
         promptChip(
-          'set_option_values',
-          SET_OPTION_VALUES_CHIP_LABEL,
-          SET_OPTION_VALUES_CHIP_MESSAGE,
+          'describe_decision',
+          'Tell me about your decision',
+          'Tell me about this decision so I can help you work through it.',
         ),
       ]);
+    }
+    if (!hasOptions) {
+      const recovery = buildReadinessRecoveryChip(input.analysisReady);
+      return recovery ? cap([recovery]) : [];
     }
     // Follow-up review: when readiness is KNOWN but not ready (e.g.
     // needs_user_mapping / needs_encoding), the user's real next step
@@ -864,13 +852,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // (analysisReady undefined) is handled in the final branch below
     // with a distinct neutral decision-framing prompt.
     if (readyStatus != null && readyStatus !== 'ready') {
-      return cap([
-        promptChip(
-          'set_option_values',
-          SET_OPTION_VALUES_CHIP_LABEL,
-          SET_OPTION_VALUES_CHIP_MESSAGE,
-        ),
-      ]);
+      const recovery = buildReadinessRecoveryChip(input.analysisReady);
+      return recovery ? cap([recovery]) : [];
     }
     // Follow-up review: readiness is UNKNOWN (analysisReady undefined —
     // typically no graph / unparseable graph). Pre-follow-up this
@@ -881,13 +864,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // prompt keeps the user (and the model) focused on whatever
     // structural step is actually next — usually "tell me about the
     // decision" at frame stage.
-    return cap([
-      promptChip(
-        'describe_decision',
-        'Tell me about your decision',
-        'Tell me about this decision so I can help you work through it.',
-      ),
-    ]);
+    const recovery = buildReadinessRecoveryChip(input.analysisReady);
+    return recovery ? cap([recovery]) : [];
   }
 
   // Rule: decide stage with fragile robustness → prompt for pre-mortem + flip.

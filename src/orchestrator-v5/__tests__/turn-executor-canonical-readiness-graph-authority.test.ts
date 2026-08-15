@@ -8,11 +8,11 @@
  * report e.g. `ready` (from a stale client graph) against a persisted graph that
  * now needs input.
  *
- * This drives a real execute turn where the persisted graph (1 option →
- * needs_user_input) and the request graph (2 options → not needs_user_input)
- * disagree, and asserts ONLY the diagnostic canonical state reflects the
- * persisted graph; the wire `analysisReady` + prose + suggested_actions stay
- * request-driven (unchanged vs a persisted==request control).
+ * This drives a real execute turn where the persisted graph contains an
+ * unreachable controllable factor (`needs_user_mapping`) while the request
+ * graph has two fully configured options (`ready`). Both the diagnostic state
+ * and the served readiness must follow the persisted graph; the stale request
+ * must not reopen Run admission.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -69,29 +69,57 @@ const PROPOSAL_RUN_ANALYSIS = {
   },
 };
 
-// Request graph: 2 options → analysisReadyForTurn is NOT needs_user_input.
+const INTERVENTION_EDGE = {
+  strength: { mean: 0.5, std: 0.1 },
+  exists_probability: 1,
+  effect_direction: 'positive' as const,
+};
+
+function intervention(value: number) {
+  return {
+    value,
+    source: 'user_specified' as const,
+    target_match: {
+      node_id: 'f1',
+      match_type: 'exact_id' as const,
+      confidence: 'high' as const,
+    },
+  };
+}
+
+// Request graph: 2 configured options → canonical status is ready.
 const REQUEST_2OPT: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
     { id: 'opt_a', kind: 'option', label: 'A' },
     { id: 'opt_b', kind: 'option', label: 'B' },
+    { id: 'f1', kind: 'factor', label: 'Execution quality', category: 'controllable' },
   ],
-  edges: [],
+  edges: [
+    { from: 'opt_a', to: 'f1', ...INTERVENTION_EDGE },
+    { from: 'opt_b', to: 'f1', ...INTERVENTION_EDGE },
+    { from: 'f1', to: 'goal_1', ...INTERVENTION_EDGE },
+  ],
   options: [
-    { id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } },
-    { id: 'opt_b', status: 'ready', interventions: { f1: { value: 0 } } },
+    { id: 'opt_a', label: 'A', status: 'ready', interventions: { f1: intervention(1) } },
+    { id: 'opt_b', label: 'B', status: 'ready', interventions: { f1: intervention(0) } },
   ],
 } as GraphStateIngress;
 
-// Persisted graph (client lagged behind a delete): only 1 option →
-// computeStructuralReadiness → needs_user_input.
-const PERSISTED_1OPT: GraphStateIngress = {
+// Persisted graph advanced beyond the client: an additional controllable
+// factor reaches the goal but no option reaches it. The canonical producer
+// classifies this as needs_user_mapping; the legacy graph-only algorithm did
+// not, which is the load-bearing authority discriminator.
+const PERSISTED_UNREACHABLE_FACTOR: GraphStateIngress = {
+  ...REQUEST_2OPT,
   nodes: [
-    { id: 'goal_1', kind: 'goal', label: 'Profit' },
-    { id: 'opt_a', kind: 'option', label: 'A' },
+    ...REQUEST_2OPT.nodes,
+    { id: 'f2', kind: 'factor', label: 'Delivery capacity', category: 'controllable' },
   ],
-  edges: [],
-  options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
+  edges: [
+    ...REQUEST_2OPT.edges,
+    { from: 'f2', to: 'goal_1', ...INTERVENTION_EDGE },
+  ],
 } as GraphStateIngress;
 
 function runAnalysisFact(): HandlerFact {
@@ -158,29 +186,20 @@ describe('TurnExecutor — canonical readiness uses the freshness graph authorit
     vi.restoreAllMocks();
   });
 
-  it('stale client: canonical state reflects PERSISTED readiness; wire analysisReady stays request-driven', async () => {
-    const stale = await run(PERSISTED_1OPT, 'req-graph-authority-stale');
+  it('stale client: canonical state and wire readiness both follow the persisted graph', async () => {
+    const stale = await run(PERSISTED_UNREACHABLE_FACTOR, 'req-graph-authority-stale');
     const control = await run(REQUEST_2OPT, 'req-graph-authority-control');
 
-    // Wire/chip authority (request graph, 2 options) is NOT needs_user_input
-    // in BOTH runs — request graph is identical.
-    expect(stale.analysisReady?.status).not.toBe('needs_user_input');
-    expect(control.analysisReady?.status).not.toBe('needs_user_input');
-    expect(stale.analysisReady?.status).toBe(control.analysisReady?.status);
+    // Served readiness follows persisted bytes, not the identical request graph.
+    expect(stale.analysisReady?.status).toBe('needs_user_mapping');
+    expect(control.analysisReady?.status).toBe('ready');
 
     // Diagnostic canonical state: readiness comes from the PERSISTED graph.
-    // Stale run (1-option persisted) → needs_user_input; control (2-option
-    // persisted == request) → NOT needs_user_input. This is THE fix: the
-    // canonical state no longer pairs the persisted-graph hash with the
-    // request-derived readiness.
-    expect(stale.canonicalState?.status).toBe('needs_user_input');
-    expect(control.canonicalState?.status).not.toBe('needs_user_input');
+    // The same status authority now owns both diagnostic and wire projections.
+    expect(stale.canonicalState?.status).toBe('needs_user_mapping');
+    expect(control.canonicalState?.status).toBe('ready');
 
-    // Read-only: ONLY the diagnostic differs. Prose + actions (request-driven)
-    // are identical across the two runs.
-    expect(stale.response.assistant_text).toBe(control.response.assistant_text);
-    expect(JSON.stringify(stale.response.suggested_actions)).toBe(
-      JSON.stringify(control.response.suggested_actions),
-    );
+    // A stale request cannot reintroduce a user-visible Run action.
+    expect(JSON.stringify(stale.response.suggested_actions ?? [])).not.toMatch(/run(?: the)? analysis/i);
   });
 });

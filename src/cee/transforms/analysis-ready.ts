@@ -300,8 +300,8 @@ export const BASELINE_KEYWORDS = [...BASELINE_IDIOMS, ...AMBIGUOUS_CURRENT_STATE
  */
 /**
  * Test whether a single label matches any BASELINE_KEYWORD at a word boundary.
- * Shared between detectBaselineOptionIndex (CEE pipeline) and
- * computeStructuralReadiness (orchestrator action handlers).
+ * Shared between detectBaselineOptionIndex (CEE pipeline) and the persisted-
+ * graph canonical readiness adapter.
  */
 export function labelMatchesBaseline(label: string): boolean {
   const lower = label.toLowerCase();

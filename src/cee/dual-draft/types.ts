@@ -32,7 +32,7 @@ export interface EnrichmentInput {
   /**
    * The M1 pipeline's rich analysis-ready payload. CURRENTLY UNREAD inside
    * the dual-draft stage: the no-downgrade guard deliberately recomputes
-   * structural readiness for BOTH sides via computeStructuralReadiness so the
+   * canonical readiness projection for BOTH sides so the
    * comparison is apples-to-apples (the rich pipeline payload is derived
    * differently and would skew the rank compare). Kept on the contract as
    * M2-context/reserved input; typed `unknown` to keep this module decoupled

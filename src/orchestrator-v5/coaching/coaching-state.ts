@@ -43,7 +43,7 @@
 import type { DecisionContext, HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { selectRunAnalysisFact, type FreshnessDerivation } from '../context/freshness.js';
 import { summariseReadiness } from '../routing/readiness-summary.js';
 
@@ -301,10 +301,12 @@ export function evaluateReadiness(
     const parsed = GraphV3.safeParse(persistedGraph);
     // unparseable → cannot assess structural readiness
     if (!parsed.success) return { evaluable: false, signals: [] };
-    const readiness = computeStructuralReadiness(parsed.data);
+    // Preserve canonical top-level options when present; the parse above is a
+    // validity check, not a licence to strip producer-owned readiness inputs.
+    const readiness = buildCanonicalAnalysisReadyFromGraph(persistedGraph);
     if (readiness === undefined) {
       // No goal node — the strongest "not ready" structural blocker, which
-      // computeStructuralReadiness reports only by returning undefined.
+      // The canonical graph adapter reports only by returning undefined.
       return {
         evaluable: true,
         signals: [

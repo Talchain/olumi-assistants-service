@@ -27,7 +27,10 @@ function makeBase(): Dict {
       { id: 'dec_1', kind: 'decision', label: 'Choose approach' },
       { id: 'fac_annual_cost', kind: 'factor', label: 'Annual cost', observed_state: { value: 0.6, unit: '£', cap: 150000 } },
       { id: 'opt_hybrid', kind: 'option', label: 'Hybrid', interventions: { fac_annual_cost: { value: 0.8, source: 'user_specified' } } },
-      { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: {} },
+      // Canonical readiness does not invent a baseline lever from the
+      // factor's observed state. The fixture is genuinely ready only when the
+      // status-quo option explicitly carries that held value.
+      { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: { fac_annual_cost: { value: 0.6, source: 'user_specified' } } },
     ],
     edges: [
       { from: 'dec_1', to: 'opt_hybrid', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' },

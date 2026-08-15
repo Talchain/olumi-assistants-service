@@ -578,7 +578,7 @@ export interface OrchestratorResponseEnvelopeV2 {
   /**
    * Envelope-level analysis readiness computed from the current graph state.
    * The UI uses this to enable/disable the Analyse button.
-   * Absent when no graph exists. Computed via computeStructuralReadiness().
+   * Absent when no graph exists. Computed via the canonical graph readiness adapter.
    */
   analysis_ready?: GraphPatchBlockData['analysis_ready'];
 

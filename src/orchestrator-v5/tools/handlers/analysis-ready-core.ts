@@ -21,7 +21,7 @@
  *   - `GraphV3.safeParse` (baseline schema).
  *   - `validateGraphStructure` (cycle / orphan / no-path-to-goal /
  *     option-no-factor-edge / no-goal / no-decision / <2 options).
- *   - `computeStructuralReadiness` (goal_node_id + per-option configured status)
+ *   - canonical `buildAnalysisReadyPayload` projection (whole-model status)
  *     for the options_not_configured completeness check.
  *
  * VALUE-PRESERVATION INVARIANT: `repaired` is permitted ONLY for value-preserving
@@ -41,8 +41,9 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import type { StructuralViolationCode } from '../../../orchestrator/graph-structure-validator.js';
-import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { projectReadinessRecovery } from '../../coaching/readiness-recovery.js';
 
 // ============================================================================
 // Neutral verdict vocabulary
@@ -248,13 +249,21 @@ export function assessAnalysisReadiness(rawGraph: unknown): ReadinessResult {
       return unrecoverable([code], 'graph_structure', STRUCTURAL_NEXT_STEP[code] ?? 'Fix the graph structure before analysing.');
     }
 
-    // 4. Goal + option completeness (options_not_configured).
-    const readiness = computeStructuralReadiness(parsedGraph);
+    // 4. Canonical goal + whole-model completeness. The producer's payload
+    // status is authoritative here; in particular an unreachable controllable
+    // factor is `needs_user_mapping` even when every option already carries a
+    // numeric effect. The former "any ready option" test admitted that graph.
+    const readiness = buildCanonicalAnalysisReadyFromGraph(canonical);
     if (!readiness || !readiness.goal_node_id) {
       return unrecoverable(['NO_GOAL'], 'graph_structure', STRUCTURAL_NEXT_STEP.NO_GOAL);
     }
-    if (readiness.options.length > 0 && !readiness.options.some((o) => o.status === 'ready')) {
-      return unrecoverable(['OPTIONS_NOT_CONFIGURED'], 'option_values', 'Give at least one option a configured effect (intervention) before analysing.');
+    if (readiness.status !== 'ready') {
+      const recovery = projectReadinessRecovery(readiness, parsedGraph.nodes);
+      return unrecoverable(
+        ['OPTIONS_NOT_CONFIGURED'],
+        'option_values',
+        recovery.nextStep.replace(/^Next,\s*/i, ''),
+      );
     }
 
     // 5. Ready / repaired.

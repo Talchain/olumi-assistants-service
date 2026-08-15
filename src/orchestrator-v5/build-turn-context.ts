@@ -36,7 +36,7 @@ import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, NodeV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { config } from '../config/index.js';
 import {
-  computeStructuralReadiness,
+  buildCanonicalAnalysisReadyFromGraph,
   mergeInterventionSourceObjects,
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import { assessAnalysisReadiness, AnalysisNotReadyError, type ReadinessResult } from './tools/handlers/analysis-ready-core.js';
@@ -447,7 +447,7 @@ export interface RunAnalysisScenarioSnapshot {
      */
     readonly interventions: Record<string, unknown>;
     /**
-     * The status-quo verdict as settled by `computeStructuralReadiness`
+     * The status-quo verdict carried by the canonical readiness projection
      * (CEE-2): explicit node flag → label heuristic → explicit `false`.
      * Carried through the merge (it used to be dropped) so the PLoT
      * submission gate can distinguish the status quo — for which "hold every
@@ -2174,7 +2174,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
 
-  const readiness = computeStructuralReadiness(parsedGraph.data);
+  const readiness = buildCanonicalAnalysisReadyFromGraph(graphForSnapshot);
   if (!readiness?.goal_node_id) {
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
@@ -2250,8 +2250,8 @@ function mergeOptionInterventionObjects(
       label: option.label,
       interventions: rawObjects,
       // The status-quo verdict is settled ONCE, by
-      // `computeStructuralReadiness` (explicit node flag → label heuristic →
-      // `false` for the rest). It was DROPPED here, which is why the PLoT
+      // the canonical readiness projection (explicit node flag → label
+      // heuristic → `false` for the rest). It was DROPPED here, which is why the PLoT
       // submission seam could not tell the status quo from an option the user
       // simply has not configured — and why an unconfigured non-baseline
       // option was being scaffolded into "do nothing" and then RANKED.

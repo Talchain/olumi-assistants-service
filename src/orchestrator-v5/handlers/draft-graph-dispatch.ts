@@ -81,9 +81,9 @@ import {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
-import { SET_OPTION_VALUES_CHIP } from '../configure-option-chip-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
+import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import {
@@ -376,7 +376,11 @@ export function draftResultToOlumiResponse(
   //   - graph persisted + analysis_ready === "ready" → executable Run analysis
   //   - graph persisted + analysis not ready → conversational setup prompt
   //   - draft failed to persist → no chips (the route returns 500 anyway)
-  const suggestedActions = buildPostDraftChips({ graphPersisted, analysisReadyField });
+  const suggestedActions = buildPostDraftChips({
+    graphPersisted,
+    analysisReadyField,
+    graph: result.graphOutput,
+  });
 
   // Fix 4 (observability): forward the unified-pipeline's per-stage
   // timings onto the V5 wire under `_timings.draft_graph` so the replay
@@ -401,6 +405,7 @@ export function draftResultToOlumiResponse(
   // 'coaching'), exactly as for every other coaching block.
   const blocks: OlumiResponse['blocks'] = graphPersisted
     ? buildDraftBiasSignalBlocks({
+        analysisReady: result.analysisReady ?? null,
         biasSignals: result.coachingBiasSignals,
         graph: result.graphOutput,
         createdAt: new Date().toISOString(),
@@ -422,6 +427,7 @@ export function draftResultToOlumiResponse(
 function buildPostDraftChips(params: {
   readonly graphPersisted: boolean;
   readonly analysisReadyField: DraftGraphResult['analysisReady'] | undefined;
+  readonly graph: GraphV3T | null;
 }): readonly SuggestedAction[] {
   if (!params.graphPersisted) return [];
   const readyStatus =
@@ -455,13 +461,11 @@ function buildPostDraftChips(params: {
       },
     ];
   }
-  // ROADMAP 2.308 / S2(b) — derived from `configure-option-chip-text.ts`, the
-  // single source both the configure gate and every configure chip build from.
-  // The literal that used to sit here ("Help me set up the options …") was
-  // NO_MATCH at the gate AND blocked by EDIT_GRAPH_NEGATIVE_REGEX's "set up",
-  // so the product's own readiness chip could not reach the one chat path that
-  // writes option interventions.
-  return [{ ...SET_OPTION_VALUES_CHIP }];
+  const recovery = buildReadinessRecoveryChip(
+    params.analysisReadyField,
+    params.graph?.nodes ?? [],
+  );
+  return recovery ? [recovery] : [];
 }
 
 export async function dispatchDraftGraph(

@@ -144,9 +144,10 @@ function payload() {
 /**
  * A schema-valid GraphV3T carrying THREE options, one of which (the
  * just-added `opt_migrate`) has no encoded interventions — the shape the
- * witnessed T5_ADD_OPTION turn left behind. Structural readiness over this
- * graph is `needs_encoding`, which is the CONTROL: the fix must not collapse
- * the ordinary structural vocabulary into `blocked`.
+ * witnessed T5_ADD_OPTION turn left behind. Canonical readiness over this
+ * graph is `needs_user_input`: the new arm is connected but has no attested
+ * effect value. This is the CONTROL: the refusal fix must not collapse the
+ * ordinary typed readiness vocabulary into `blocked`.
  */
 const ADDED_OPTION_GRAPH: GraphV3T = {
   nodes: [
@@ -596,7 +597,7 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
     expect([...DETERMINISTIC_CHIP_ACTION_TYPES]).toEqual([ANALYSE_HANDLER_ID]);
   });
 
-  it('CONTROL: the ordinary admitted path is unchanged — structural readiness still reports needs_encoding, never blocked', async () => {
+  it('CONTROL: an incomplete added option retains canonical needs_user_input, never blocked', async () => {
     handlerFnMock.mockResolvedValueOnce(handlerOk());
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce(snapshotFor(ADDED_OPTION_GRAPH));
 
@@ -607,7 +608,7 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
 
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     const ar = out.analysisReady!;
-    expect(ar.status).toBe('needs_encoding');
+    expect(ar.status).toBe('needs_user_input');
     expect((ar as { blocked_reason?: string }).blocked_reason).toBeUndefined();
   });
 });

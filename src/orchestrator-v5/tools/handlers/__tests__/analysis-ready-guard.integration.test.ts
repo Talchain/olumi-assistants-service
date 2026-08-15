@@ -75,7 +75,10 @@ function makeBase(): Dict {
       // provenance.)
       { id: 'fac_annual_cost', kind: 'factor', label: 'Annual cost', observed_state: { value: 0.6, raw_value: 90000, unit: '£', cap: 150000 } },
       { id: 'opt_hybrid', kind: 'option', label: 'Hybrid', interventions: { fac_annual_cost: { value: 0.8, source: 'user_specified' } } },
-      { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: {} },
+      // A real admitted control must configure both comparison arms. The old
+      // empty baseline only passed because EP2 admitted "any ready option";
+      // canonical readiness correctly refuses that partial comparison.
+      { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: { fac_annual_cost: { value: 0.6, raw_value: 90000, unit: '£' } } },
     ],
     edges: [
       { from: 'dec_1', to: 'opt_hybrid', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' },

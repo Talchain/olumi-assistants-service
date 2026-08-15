@@ -113,10 +113,10 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Set values for options');
+    expect(chips[0].label).toBe('Configure an option');
   });
 
-  it('analyse stage with analysisReady=needs_user_mapping → "Set values for options" (not "Run the analysis")', () => {
+  it('analyse stage with analysisReady=needs_user_mapping → mapping recovery (not Run)', () => {
     // Follow-up review: when readiness is KNOWN but not ready, steer
     // the user toward the configuration they're missing. Pre-follow-up
     // this emitted "Run the analysis" which loop-baited Sonnet back
@@ -135,10 +135,10 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Set values for options');
+    expect(chips[0].label).toBe('Map an option to factors');
   });
 
-  it('analyse stage with analysisReady=needs_encoding → "Set values for options"', () => {
+  it('analyse stage with analysisReady=needs_encoding → configure recovery', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [],
@@ -153,10 +153,10 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Set values for options');
+    expect(chips[0].label).toBe('Configure an option');
   });
 
-  it('analyse stage with analysisReady=undefined + options present → neutral "Tell me about your decision" prompt', () => {
+  it('analyse stage with analysisReady=undefined + options present → fail-closed model review prompt', () => {
     // Follow-up review (P1-4 revisit): when readiness is UNKNOWN (no
     // graph / unparseable graph), do NOT nudge Sonnet toward an
     // analysis action whose graph precondition is structurally
@@ -173,7 +173,7 @@ describe('generateChips', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Tell me about your decision');
+    expect(chips[0].label).toBe('Review model gaps');
   });
 
   it('analyse stage with analysisReady=undefined (unknown readiness) → never executable', () => {
@@ -410,7 +410,7 @@ describe('generateChips — V5 0.9.0 facts_absent rule', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0].action_type).toBeUndefined();
-    expect(chips[0].label).toBe('Set values for options');
+    expect(chips[0].label).toBe('Review model gaps');
   });
 
   it('noop run_analysis fact does NOT satisfy facts_absent — still emits Run analysis', () => {
@@ -1334,7 +1334,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
     expect(floor[0].data.has_run_analysis_fact).toBe(false);
   });
 
-  it('decide stage + analysisReady needs_user_input → floor adds conversational Set values prompt (no action_type)', () => {
+  it('decide stage + analysisReady needs_user_input → floor adds typed configure prompt (no action_type)', () => {
     const chips = generateChips({
       stage: 'decide',
       handlerFacts: [],
@@ -1346,14 +1346,14 @@ describe('generateChips — V5 link-safe chip floor', () => {
     // Conversational prompt chip — no action_type so the upstream
     // readiness gate cannot reject it.
     expect(chips[0]).not.toHaveProperty('action_type');
-    expect(chips[0].label).toBe('Set values for options');
+    expect(chips[0].label).toBe('Configure an option');
     const floor = eventsNamed('v5.chips.floor_applied');
     expect(floor).toHaveLength(1);
-    expect(floor[0].data.reason).toBe('needs_input');
+    expect(floor[0].data.reason).toBe('readiness_needs_user_input');
     expect(floor[0].data.analysis_ready_status).toBe('needs_user_input');
   });
 
-  it('decide stage + analysisReady needs_encoding → floor adds Set values prompt (does NOT emit executable run_analysis)', () => {
+  it('decide stage + analysisReady needs_encoding → floor adds encoding recovery (does NOT emit executable run_analysis)', () => {
     const chips = generateChips({
       stage: 'decide',
       handlerFacts: [],
@@ -1366,10 +1366,11 @@ describe('generateChips — V5 link-safe chip floor', () => {
     // Safety: executable run_analysis chip MUST NOT be emitted when
     // readiness is not 'ready' — the upstream gate would reject it.
     expect(chips[0].action_type).toBeUndefined();
-    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('needs_input');
+    expect(chips[0].label).toBe('Configure an option');
+    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('readiness_needs_encoding');
   });
 
-  it('decide stage + analysisReady needs_user_mapping → floor adds Set values prompt', () => {
+  it('decide stage + analysisReady needs_user_mapping → floor adds mapping recovery', () => {
     const chips = generateChips({
       stage: 'decide',
       handlerFacts: [],
@@ -1379,7 +1380,8 @@ describe('generateChips — V5 link-safe chip floor', () => {
     });
     expect(chips).toHaveLength(1);
     expect(chips[0]).not.toHaveProperty('action_type');
-    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('needs_input');
+    expect(chips[0].label).toBe('Map an option to factors');
+    expect(eventsNamed('v5.chips.floor_applied')[0].data.reason).toBe('readiness_needs_user_mapping');
   });
 
   it('frame stage + prior run_analysis fact + no current handler → floor emits the EXECUTABLE what_would_flip chip (post_analysis_no_obvious_next)', () => {
@@ -1544,7 +1546,7 @@ describe('generateChips — V5 link-safe chip floor', () => {
       validationRegistry: REGISTRY,
       analysisReady: needsInputAnalysis('needs_encoding'),
     });
-    expect(needsInput[0].id).toBe('chip_prompt_floor_set_option_values');
+    expect(needsInput[0].id).toBe('chip_prompt_configure_option_generic');
 
     // Post-analysis explore path — V5 P0-B: now the executable what_would_flip
     // chip (deterministic dispatch) rather than a bare prompt.

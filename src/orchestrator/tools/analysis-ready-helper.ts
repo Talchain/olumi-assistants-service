@@ -1,18 +1,20 @@
 /**
- * Shared analysis_ready computation from graph structure.
+ * Shared graph adapters for analysis_ready.
  *
- * Single source of truth for computing GraphPatchBlockData.analysis_ready
- * from a GraphV3T. Used by both draft_graph (fallback) and edit_graph
- * (primary) to avoid implementation drift.
- *
- * Lighter than the full pipeline in src/cee/transforms/analysis-ready.ts —
- * checks structural readiness from graph nodes only, not pipeline context.
+ * `buildCanonicalAnalysisReadyFromGraph` is the sole whole-status projection:
+ * it adapts persisted/request graph carriers, then delegates semantics to the
+ * pipeline's `buildAnalysisReadyPayload`. The legacy structural helper below
+ * remains exported only for compatibility tests and per-option diagnostics.
  */
 
-import type { GraphV3T } from "../../schemas/cee-v3.js";
+import { GraphV3 } from "../../schemas/cee-v3.js";
+import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
-import { labelMatchesBaseline } from "../../cee/transforms/analysis-ready.js";
+import {
+  buildAnalysisReadyPayload,
+  labelMatchesBaseline,
+} from "../../cee/transforms/analysis-ready.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 
 // ============================================================================
@@ -43,16 +45,9 @@ export function extractNumericIntervention(v: unknown): number | undefined {
 /**
  * Merge intervention values from all known locations on an option node.
  *
- * Scope (post-2026-04-08): this helper is used by `computeStructuralReadiness`
- * which is now invoked ONLY by action handlers that compute their own readiness
- * payload from a synthetic graph (e.g. add_option's preview, edit_graph's
- * post-patch readiness). It is NOT used by envelope.ts anymore — the envelope
- * validates handler-produced analysis_ready instead of recomputing it. The
- * three-source merge below exists because each handler builds its synthetic
- * graph slightly differently and writes interventions to a different location.
- * Do not extend this helper for new envelope-time recomputation paths; the
- * canonical rule is "handlers produce analysis_ready, the envelope validates."
- * See: docs/intervention-lifecycle-and-health-audit-2026-04-08.md §6.
+ * Scope: the canonical graph adapter and the quarantined compatibility helper
+ * both need to read historical intervention carriers. Do not add whole-status
+ * policy here; the canonical rule lives in `buildAnalysisReadyPayload`.
  *
  * Sources (in precedence order — first write wins per factor_id):
  * 1. `node.data.interventions` — prompt-taught canonical edit location (wins on conflict)
@@ -205,11 +200,238 @@ export function mergeInterventionSourceObjects(
 }
 
 // ============================================================================
+// Canonical persisted-graph projection
+// ============================================================================
+
+type Dict = Record<string, unknown>;
+
+function isPlainObject(value: unknown): value is Dict {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readOptionStatus(value: unknown): OptionV3T['status'] | undefined {
+  return value === 'ready' || value === 'needs_user_mapping' || value === 'needs_encoding'
+    ? value
+    : undefined;
+}
+
+function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const out: NonNullable<OptionV3T['raw_interventions']> = {};
+  for (const [factorId, raw] of Object.entries(value)) {
+    if (typeof raw === 'number' || typeof raw === 'string' || typeof raw === 'boolean') {
+      out[factorId] = raw;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Adapt one persisted option carrier (canonical top-level option first,
+ * option-node fallback second) into the input shape consumed by
+ * `buildAnalysisReadyPayload`.
+ *
+ * Persisted option nodes sometimes carry only `{value}` rather than the full
+ * InterventionV3 provenance record. Readiness needs the value and the exact
+ * factor identity, not invented provenance. The adapter therefore adds only a
+ * transient exact-id target match so the canonical builder can consume the
+ * record; it deliberately omits `source`, and the outward projection below
+ * drops `extraction_metadata`. No synthetic provenance reaches the wire.
+ */
+function projectOptionForCanonicalBuilder(
+  candidate: unknown,
+  factorIds: ReadonlySet<string>,
+  connectedFactorIds: ReadonlySet<string> = new Set<string>(),
+): OptionV3T | null {
+  if (!isPlainObject(candidate)) return null;
+  const id = readNonEmptyString(candidate.id);
+  const label = readNonEmptyString(candidate.label);
+  if (!id || !label) return null;
+
+  const interventions: Record<string, unknown> = {};
+  const sourceBundle = isPlainObject(candidate.interventions)
+    ? candidate.interventions
+    : mergeInterventionSourceObjects(candidate);
+  for (const [factorId, raw] of Object.entries(sourceBundle)) {
+    if (!factorIds.has(factorId)) continue;
+    const value = extractNumericIntervention(raw);
+    if (value === undefined) continue;
+    const carried = isPlainObject(raw) ? raw : {};
+    interventions[factorId] = {
+      ...carried,
+      value,
+      target_match: isPlainObject(carried.target_match)
+        ? carried.target_match
+        : { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+    };
+  }
+
+  const rawInterventions = readRawInterventions(candidate.raw_interventions);
+  const explicitStatus = readOptionStatus(candidate.status);
+  const status: OptionV3T['status'] = explicitStatus
+    ?? (rawInterventions && Object.values(rawInterventions).some((value) => typeof value !== 'number')
+      ? 'needs_encoding'
+      : Object.keys(interventions).length > 0
+        ? 'ready'
+        : connectedFactorIds.size > 0
+          ? 'needs_encoding'
+          : 'needs_user_mapping');
+
+  return {
+    id,
+    label,
+    status,
+    interventions: interventions as OptionV3T['interventions'],
+    ...(rawInterventions ? { raw_interventions: rawInterventions } : {}),
+    ...(Array.isArray(candidate.unresolved_targets)
+      ? {
+          unresolved_targets: candidate.unresolved_targets.filter(
+            (value): value is string => typeof value === 'string',
+          ),
+        }
+      : {}),
+    ...(Array.isArray(candidate.user_questions)
+      ? {
+          user_questions: candidate.user_questions.filter(
+            (value): value is string => typeof value === 'string',
+          ),
+        }
+      : {}),
+    ...(candidate.is_baseline === true || candidate.is_baseline === false
+      ? { is_baseline: candidate.is_baseline }
+      : {}),
+  };
+}
+
+function projectCanonicalPayloadToWire(
+  payload: ReturnType<typeof buildAnalysisReadyPayload>,
+): AnalysisReadyPayload {
+  return {
+    options: payload.options.map((option) => {
+      const interventions: Record<string, number> = {};
+      for (const [factorId, raw] of Object.entries(option.interventions)) {
+        const value = extractNumericIntervention(raw);
+        if (value !== undefined) interventions[factorId] = value;
+      }
+      return {
+        option_id: option.id,
+        label: option.label,
+        status: option.status,
+        interventions,
+        ...(option.is_baseline !== undefined ? { is_baseline: option.is_baseline } : {}),
+        ...(option.intervention_details !== undefined
+          ? { intervention_details: option.intervention_details }
+          : {}),
+        ...(option.raw_interventions !== undefined
+          ? { raw_interventions: option.raw_interventions }
+          : {}),
+        ...(option.status_reason !== undefined ? { status_reason: option.status_reason } : {}),
+      };
+    }),
+    goal_node_id: payload.goal_node_id,
+    status: payload.status,
+    ...(payload.blockers !== undefined ? { blockers: payload.blockers } : {}),
+    ...(payload.model_adjustments !== undefined
+      ? { model_adjustments: payload.model_adjustments }
+      : {}),
+    ...(payload.goal_threshold !== undefined ? { goal_threshold: payload.goal_threshold } : {}),
+    ...pickGoalThresholdTrio(payload),
+    ...(payload.bias_findings !== undefined ? { bias_findings: payload.bias_findings } : {}),
+  };
+}
+
+/**
+ * Build the canonical whole-graph readiness payload from request, mutated, or
+ * persisted graph bytes.
+ *
+ * This is the sole graph-to-whole-status projection for V5 Run admission. It
+ * delegates the status decision to `buildAnalysisReadyPayload`, including its
+ * unreachable-controllable-factor rule, instead of maintaining a second
+ * graph-only status algorithm. Canonical top-level `options[]` wins when it is
+ * present; option nodes are a conservative persistence/legacy fallback.
+ */
+export function buildCanonicalAnalysisReadyFromGraph(
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
+  const parsed = GraphV3.safeParse(graph);
+  if (!parsed.success) return undefined;
+
+  const rawGraph = isPlainObject(graph) ? graph : parsed.data as unknown as Dict;
+  const goalNodes = parsed.data.nodes.filter((node) => node.kind === 'goal');
+  const suppliedGoalId = readNonEmptyString(rawGraph.goal_node_id);
+  const goalNodeId = suppliedGoalId && goalNodes.some((node) => node.id === suppliedGoalId)
+    ? suppliedGoalId
+    : goalNodes[0]?.id;
+  if (!goalNodeId) return undefined;
+
+  const factorIds = new Set(
+    parsed.data.nodes.filter((node) => node.kind === 'factor').map((node) => node.id),
+  );
+  const rawNodes = Array.isArray(rawGraph.nodes) ? rawGraph.nodes : parsed.data.nodes;
+  const optionNodeRecords = rawNodes.filter(
+    (node): node is Dict => isPlainObject(node) && node.kind === 'option',
+  );
+  const optionNodeIds = new Set(
+    optionNodeRecords
+      .map((node) => readNonEmptyString(node.id))
+      .filter((id): id is string => id !== null),
+  );
+  const optionConnectedFactorIds = new Map<string, Set<string>>();
+  for (const edge of parsed.data.edges) {
+    if (!optionNodeIds.has(edge.from) || !factorIds.has(edge.to)) continue;
+    const connected = optionConnectedFactorIds.get(edge.from) ?? new Set<string>();
+    connected.add(edge.to);
+    optionConnectedFactorIds.set(edge.from, connected);
+  }
+
+  const projectedTopLevel = Array.isArray(rawGraph.options)
+    ? rawGraph.options
+        .map((option) => {
+          const id = isPlainObject(option) ? readNonEmptyString(option.id) : null;
+          return projectOptionForCanonicalBuilder(
+            option,
+            factorIds,
+            id ? optionConnectedFactorIds.get(id) : undefined,
+          );
+        })
+        .filter(
+          (option): option is OptionV3T => option !== null && optionNodeIds.has(option.id),
+        )
+    : [];
+  const topLevelById = new Map(projectedTopLevel.map((option) => [option.id, option]));
+
+  // Preserve the producer's canonical option order when it completely covers
+  // the option-node set. A partial/stale mirror falls back to node order and
+  // fills each missing entry from that node, never silently dropping an arm.
+  const options = projectedTopLevel.length === optionNodeRecords.length
+    ? projectedTopLevel
+    : optionNodeRecords
+        .map((node) => {
+          const id = readNonEmptyString(node.id);
+          return id
+            ? topLevelById.get(id)
+              ?? projectOptionForCanonicalBuilder(node, factorIds, optionConnectedFactorIds.get(id))
+            : null;
+        })
+        .filter((option): option is OptionV3T => option !== null);
+
+  const canonical = buildAnalysisReadyPayload(options, goalNodeId, parsed.data);
+  return projectCanonicalPayloadToWire(canonical);
+}
+
+// ============================================================================
 // Readiness Computation
 // ============================================================================
 
 /**
- * Compute structural analysis readiness from a graph.
+ * Compute legacy structural option readiness from a graph.
+ *
+ * @deprecated Compatibility/test detail only. Production Run admission and
+ * whole-status consumers must use `buildCanonicalAnalysisReadyFromGraph`.
  *
  * Returns undefined if no goal node exists (cannot determine readiness).
  *
@@ -355,12 +577,9 @@ export const ANALYSIS_READY_BLOCKED_STATUS = 'blocked';
  * Absent and confidently-wrong are the two halves of one defect: the refusal
  * had no representation in the readiness vocabulary.
  *
- * ⚠ WHY THIS LIVES HERE AND NOWHERE ELSE (ROADMAP 2.1135). The readiness
- * vocabulary already has TWO writers — `src/cee/transforms/option-status.ts`
- * (which claims to be the single source of truth in its own header) and
- * `computeStructuralReadiness` above (which is the one on the live V5 wire
- * path). A refusal helper anywhere else would be a THIRD. It is deliberately
- * the same module so the two concepts cannot drift apart.
+ * ⚠ WHY THIS LIVES HERE AND NOWHERE ELSE (ROADMAP 2.1135). Refusal readiness
+ * shares the module that owns the canonical graph adapter, so a blocked turn
+ * cannot drift into a separate wire vocabulary.
  *
  * ⚠⚠ THE SHAPE IS A PRESENT-BUT-EMPTY CARRIER, AND THAT IS A CORRECTION.
  * The first version of this helper CARRIED the real structural options onto
@@ -407,4 +626,3 @@ export function buildAnalysisRefusalReadiness(
     blocked_reason: blockedReason,
   };
 }
-

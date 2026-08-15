@@ -93,8 +93,20 @@ const POST_EDIT_GRAPH = {
     },
   ],
   edges: [
-    { from: 'opt_launch', to: 'fac_marketing' },
-    { from: 'opt_status_quo', to: 'fac_marketing' },
+    {
+      from: 'opt_launch',
+      to: 'fac_marketing',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'opt_status_quo',
+      to: 'fac_marketing',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
     {
       from: 'fac_marketing',
       to: 'goal_revenue',

@@ -57,8 +57,17 @@ const ANCHORING = {
 const STATUS_QUO_TARGETED = { ...STATUS_QUO, target: 'fac_current_supplier' };
 const ANCHORING_TARGETED = { ...ANCHORING, target: 'fac_initial_quote' };
 
-function build(signals: unknown[], graph: GraphV3T | null = GRAPH) {
-  return buildDraftBiasSignalBlocks({ biasSignals: signals, graph, createdAt: CREATED_AT });
+function build(
+  signals: unknown[],
+  graph: GraphV3T | null = GRAPH,
+  analysisReady: { status?: unknown } | null = { status: 'ready' },
+) {
+  return buildDraftBiasSignalBlocks({
+    analysisReady,
+    biasSignals: signals,
+    graph,
+    createdAt: CREATED_AT,
+  });
 }
 
 describe('buildDraftBiasSignalBlocks — DGAI #356 producer contract', () => {
@@ -198,6 +207,27 @@ describe('wave-2 ask 1 (0.19.0) — bias blocks carry the producer guidance sign
       expect(b.category).toBe('should_fix');
       expect(b.priority).toBe(70);
     }
+  });
+});
+
+describe('exact-ready admission — free-form bias detail never bypasses readiness', () => {
+  it.each([
+    ['needs_user_input', { status: 'needs_user_input' }],
+    ['needs_user_mapping', { status: 'needs_user_mapping' }],
+    ['needs_encoding', { status: 'needs_encoding' }],
+    ['blocked', { status: 'blocked' }],
+    ['unknown', { status: 'future_status' }],
+    ['missing', {}],
+    ['absent', null],
+  ])('quarantines valid model-authored detail when readiness is %s', (_label, readiness) => {
+    const blocks = build([STATUS_QUO, ANCHORING], GRAPH, readiness);
+    expect(blocks).toEqual([]);
+    expect(JSON.stringify(blocks)).not.toContain(STATUS_QUO.detail);
+    expect(JSON.stringify(blocks)).not.toContain(ANCHORING.detail);
+  });
+
+  it('keeps the exact-ready control byte-identical', () => {
+    expect(build([STATUS_QUO], GRAPH, { status: 'ready' })[0]?.body).toBe(STATUS_QUO.detail);
   });
 });
 

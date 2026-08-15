@@ -923,7 +923,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     expect(typeof result.response.suggested_actions[2].message).toBe('string');
   });
 
-  it('emits a conversational setup chip when analysis_ready is absent', async () => {
+  it('fails closed to model review when analysis_ready is absent', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
@@ -938,14 +938,14 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
 
     expect(result.response.suggested_actions).toHaveLength(1);
     expect(result.response.suggested_actions[0]).toMatchObject({
-      id: 'chip_prompt_set_option_values',
-      label: 'Set values for options',
+      id: 'chip_prompt_review_model_gaps',
+      label: 'Review model gaps',
     });
     // Prompt chip — no action_type.
     expect(result.response.suggested_actions[0].action_type).toBeUndefined();
   });
 
-  it('emits a conversational setup chip when analysis_ready.status is not "ready"', async () => {
+  it('fails closed to model review when analysis_ready.status is unknown', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     const pending = { ...MINIMAL_ANALYSIS_READY, status: 'pending_values' } as unknown as typeof MINIMAL_ANALYSIS_READY;
@@ -960,7 +960,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     });
 
     expect(result.response.suggested_actions).toHaveLength(1);
-    expect(result.response.suggested_actions[0].label).toBe('Set values for options');
+    expect(result.response.suggested_actions[0].label).toBe('Review model gaps');
   });
 
   it('emits NO chips when graph persistence failed (route returns 500 anyway)', async () => {
@@ -1092,7 +1092,7 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
     expect(result.response.assistant_text).toContain('Phased price rise');
     expect(result.response.assistant_text).toContain('Monthly Subscription Price');
     expect(result.response.suggested_actions).toHaveLength(1);
-    expect(result.response.suggested_actions[0]?.label).toBe('Set values for options');
+    expect(result.response.suggested_actions[0]?.label).toBe('Configure Phased price rise');
     const sourceEvent = (emit as unknown as MockedFunction<typeof emit>).mock.calls
       .find((call) => call[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
     expect((sourceEvent?.[1] as Record<string, unknown>).coaching_summary_passed_gate).toBe(false);
