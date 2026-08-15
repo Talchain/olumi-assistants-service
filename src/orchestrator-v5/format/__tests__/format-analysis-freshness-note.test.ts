@@ -60,15 +60,6 @@ function rawAnalysis(overrides: Partial<ContextPackAnalysis> = {}): ContextPackA
 }
 
 /**
- * The full set of freshness verdicts `deriveAnalysisFreshness` can produce
- * (`context/freshness.ts`). `'fresh'` is the ONLY licensing value; everything
- * else — including absence — must be qualified. Derived from the producer's
- * enum rather than from the failure mode in hand: writing this as "stale only"
- * would be the same asymmetry that has bitten this estate before.
- */
-const NON_FRESH_VERDICTS = ['stale', 'unknown', 'none', undefined, null] as const;
-
-/**
  * VERDICT-SPLIT (PR #981 adversarial review, P0). 'stale' is the only verdict
  * where a prior run provably happened AND the rerun chip exists, so only it
  * may claim "an earlier analysis run" and prescribe a re-run. 'none' means NO
@@ -76,7 +67,8 @@ const NON_FRESH_VERDICTS = ['stale', 'unknown', 'none', undefined, null] as cons
  * COACHING_CONTEXT_INSTRUCTION's own "there is nothing to re-run" rule in the
  * same prompt. This table IS the invariant; deriving expectations per-verdict
  * from the spec, not from the failure mode in hand, is the trap-13d lesson
- * this file now embodies twice.
+ * this file now embodies twice. The table covers the producer's FULL verdict
+ * enum plus absence — `'fresh'` is the only licensing value.
  */
 const EXPECTED_NOTE: ReadonlyArray<[string | undefined | null, string]> = [
   ['stale', ANALYSIS_NOT_CURRENT_NOTE],
