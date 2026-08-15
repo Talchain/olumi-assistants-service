@@ -157,6 +157,31 @@ export interface AppliedValueProvenance {
   readonly elicited_from: {
     readonly round_id: string;
     readonly participant_id: string;
+    /**
+     * 0.41.0 — WHICH PIECE OF EVIDENCE MOTIVATED THIS EDIT, when the owner
+     * cited one. Present only after `verifyAppliedFrom`'s binding (f) has
+     * checked that the cited event exists, is an `evidence_attached` row, is on
+     * THAT round and is about THAT target — so, like the two ids beside it,
+     * this is a SERVER FACT and never a client assertion.
+     *
+     * ⚠ ABSENT MEANS "CITED NOTHING", never "the citation was lost". Every
+     * pre-0.41.0 apply and every ordinary one after it is uncited, and the
+     * stamp such an apply writes is byte-identical to what it wrote before.
+     *
+     * ⚠ AN ID, NOT THE EVIDENCE — same R-2 rule as the absent display name
+     * above it. The evidence BODY is a participant's own words and its author
+     * has a name; neither may be persisted into `scenarios.graph`, where the
+     * redaction routine cannot reach them. Both resolve at render from round
+     * data. An id is also the only VERIFIABLE form: a body copied onto the wire
+     * is an unfalsifiable assertion.
+     *
+     * ⚠⚠ THE AUTHOR OF THE EVIDENCE NEED NOT BE `participant_id`, AND THAT
+     * ASYMMETRY IS THE FEATURE. Applying Grace's number BECAUSE ADA CHALLENGED
+     * IT is the case this whole hop exists for. Do not "restore symmetry" here
+     * or in the verifier — a check tying the two together would forbid exactly
+     * the journey the capability is being built to deliver.
+     */
+    readonly evidence_event_id?: string;
   };
 }
 

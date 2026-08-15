@@ -347,6 +347,21 @@ export async function applyFactorValueEdit(
         elicited_from: {
           round_id: verified.round_id,
           participant_id: verified.participant_id,
+          // 0.41.0 — the CITATION, and every id here comes from `verified`,
+          // i.e. from the STORE, never from `event.applied_from`. Reading the
+          // claim's own string back out would make the stamp client-controlled
+          // the moment binding (f)'s lookup was ever weakened; taking the
+          // store's value means a weakening shows up as an absent stamp rather
+          // than as a forged one. Same reasoning as the two ids above it.
+          //
+          // Conditional, so an UNCITED apply's stamp stays byte-identical to
+          // what 0.40.0 wrote: the key must be ABSENT, because absence is the
+          // contract's declared semantics ("this apply cited no evidence"), and
+          // a present-but-undefined key survives structuredClone and object
+          // spreads while reading as present to `in` and `Object.keys`.
+          ...(verified.evidence_event_id !== undefined
+            ? { evidence_event_id: verified.evidence_event_id }
+            : {}),
         },
       };
       effectiveValue = verified.value;
@@ -361,6 +376,13 @@ export async function applyFactorValueEdit(
           target_id: event.target_id,
           round_id: verified.round_id,
           participant_id: verified.participant_id,
+          // Logged only when cited, so the log line distinguishes "cited
+          // nothing" from "citation dropped between verifier and writer" —
+          // the one question this seam's absence semantics make ambiguous to
+          // anyone reading the deployed logs during a witness run.
+          ...(verified.evidence_event_id !== undefined
+            ? { evidence_event_id: verified.evidence_event_id }
+            : {}),
         },
         'factor_value_edit — panel attribution verified against the collab store',
       );
