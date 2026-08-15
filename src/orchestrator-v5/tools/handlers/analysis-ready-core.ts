@@ -29,10 +29,10 @@
  * defaulted / guessed cap / unit / value → `unrecoverable`. (Enforced by #278's
  * `deriveValue`, which defers rather than invents.)
  *
- * TOTALITY: this function MUST NEVER throw — it runs inside freshness derivation
- * (Blocker 2 short-circuit) on EVERY turn, not only explicit run_analysis turns.
- * Any internal failure resolves to `unrecoverable` (INTERNAL_ERROR) with typed
- * telemetry, never an exception that breaks the turn.
+ * TOTALITY: this function MUST NEVER throw — it runs at the load-bearing Run
+ * admission boundary and at graph-management parity checks. Any internal failure
+ * resolves to `unrecoverable` (INTERNAL_ERROR) with a typed verdict, never an
+ * exception that bypasses the recoverable Run response.
  *
  * SCOPE: V5 `/orchestrate/v2/turn` only. Does NOT guard the V4 `/orchestrate/v1/turn`
  * seam (documented residual). No EP1 (write boundary), no EP3 (frontend), no CAS.

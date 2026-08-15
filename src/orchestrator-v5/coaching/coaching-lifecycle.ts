@@ -135,6 +135,7 @@ const VALID_REASON_CODES: ReadonlySet<string> = new Set<CoachingStateReasonCode>
   'too_few_options',
   'option_needs_mapping',
   'option_needs_encoding',
+  'model_needs_review',
   'goal_threshold_missing',
   'goal_node_missing',
   'edge_strength_defaulted',

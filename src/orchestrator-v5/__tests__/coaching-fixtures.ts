@@ -25,20 +25,27 @@ import type { GraphStateIngress } from '../boundary/request-extensions.js';
 
 export const CAP1_SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
-// A graph that is structurally analysable (fresh hash) but NOT fully ready:
-// the goal carries no measurable threshold and an option is unmapped, so
-// `summariseReadiness` surfaces open items → substantive safe-now content.
+// A structurally valid graph whose canonical whole-status is NOT ready: both
+// options are configured, but a controllable capacity risk reaches the goal
+// without being reachable from either option. This is the exact discriminator
+// the canonical producer reports as `needs_user_mapping`; absent goal threshold
+// is deliberately irrelevant (ready-without-threshold is valid).
 export const PARTIAL_GRAPH = {
   nodes: [
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
+    { id: 'dec_q3', kind: 'decision', label: 'Choose the Q3 route' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
+    { id: 'fac_delivery_risk', kind: 'factor', label: 'Delivery risk', category: 'controllable' as const },
     { id: 'opt_hire', kind: 'option', label: 'Hire', interventions: { fac_capacity: 1 } },
     { id: 'opt_status_quo', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
   ],
   edges: [
+    { from: 'dec_q3', to: 'opt_hire', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'dec_q3', to: 'opt_status_quo', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_hire', to: 'fac_capacity', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_status_quo', to: 'fac_capacity', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'fac_capacity', to: 'goal_q3', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'fac_delivery_risk', to: 'goal_q3', strength: { mean: -0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' as const },
   ],
   goal_node_id: 'goal_q3',
 };

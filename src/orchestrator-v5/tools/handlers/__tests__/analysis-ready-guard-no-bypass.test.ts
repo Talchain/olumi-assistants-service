@@ -76,10 +76,13 @@ describe('EP2 §11 — V5 graph→PLoT no-bypass', () => {
     expect(chip).toContain('loadScenarioSnapshotForRunAnalysis');
   });
 
-  it('the EP2 guard is invoked INSIDE that seam (assessAnalysisReadiness, behind analysisReadyGuardEnabled)', () => {
+  it('the EP2 guard is invoked UNCONDITIONALLY inside that seam', () => {
     const seam = stripComments(readFileSync(join(V5_ROOT, 'build-turn-context.ts'), 'utf8'));
     expect(seam).toContain('assessAnalysisReadiness');
-    expect(seam).toContain('analysisReadyGuardEnabled');
+    // The legacy config input is quarantined in config only. Its name in this
+    // executable seam would mean a deployment value can still disable Run
+    // admission, which is precisely the authority regression this gate owns.
+    expect(seam).not.toContain('analysisReadyGuardEnabled');
     // Ordering inside the seam: EP2 guard → sigma floor → GraphV3 parse.
     // The guard must wrap the run payload's graph BEFORE GraphV3.safeParse
     // strips node.data, and the W2E-2 round-4 sigma floor must sit BEFORE the
@@ -92,4 +95,12 @@ describe('EP2 §11 — V5 graph→PLoT no-bypass', () => {
     expect(floorIdx).toBeGreaterThan(guardIdx);
     expect(parseIdx).toBeGreaterThan(floorIdx);
   });
+
+  it('no V5 production source reads the quarantined flag-off input', () => {
+    const consumers = walkSrc(V5_ROOT)
+      .filter((file) => stripCommentsFile(file).includes('analysisReadyGuardEnabled'))
+      .map((file) => file.slice(V5_ROOT.length + 1))
+      .sort();
+    expect(consumers).toEqual([]);
+  }, GUARD_WALK_TIMEOUT_MS);
 });

@@ -1,8 +1,8 @@
 /**
  * V5 qualitative readiness summariser for the post-analysis advice gate.
  *
- * Projects the existing `computeStructuralReadiness` output into a short
- * prose list of "what is still open" before the graph can run cleanly.
+ * Projects the canonical whole-status payload through the shared readiness
+ * recovery authority into a short "what is still open" answer.
  *
  * Hard constraint: never echo, claim, or imply a numeric readiness
  * percentage. DGAI computes its own 0-100 score client-side
@@ -15,20 +15,29 @@
  */
 
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
+import {
+  projectReadinessRecovery,
+  type ReadinessRecoveryKind,
+} from '../coaching/readiness-recovery.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
-type AnalysisReadyOption = AnalysisReadyPayload['options'][number];
-
 /**
- * Single open item with a class so callers can group / count. `description`
- * is user-safe prose — quoted user labels and intervention names only.
+ * Single canonical recovery item. `description` is user-safe prose produced
+ * by `projectReadinessRecovery` from status + blockers.
+ *
+ * `too_few_options` and `goal_threshold_missing` are quarantined compatibility
+ * members for historical coaching-state/directive readers. This producer no
+ * longer emits them: option count and threshold presence are not independent
+ * whole-status authorities. Exact `analysis_ready.status === 'ready'` wins,
+ * including the valid ready-without-threshold case.
  */
 export interface ReadinessOpenItem {
   readonly kind:
     | 'too_few_options'
     | 'option_needs_mapping'
     | 'option_needs_encoding'
-    | 'goal_threshold_missing';
+    | 'goal_threshold_missing'
+    | 'model_needs_review';
   readonly description: string;
   readonly option_label?: string;
 }
@@ -44,57 +53,54 @@ export interface ReadinessSummary {
   readonly prose: string;
 }
 
-const MIN_OPTION_COUNT = 2;
+function recoveryKindToOpenItemKind(
+  recoveryKind: Exclude<ReadinessRecoveryKind, 'run'>,
+): ReadinessOpenItem['kind'] {
+  switch (recoveryKind) {
+    case 'map_option':
+    case 'connect_option':
+    case 'configure_option':
+      return 'option_needs_mapping';
+    case 'encode_option':
+    case 'provide_value':
+    case 'confirm_value':
+      return 'option_needs_encoding';
+    case 'resolve_model_issue':
+    case 'review_constraint':
+    case 'review_model':
+      return 'model_needs_review';
+  }
+}
 
-function describeOption(opt: AnalysisReadyOption): string {
-  const label = opt.label?.trim();
-  if (label && label.length > 0) return `"${label}"`;
-  return 'one of the options';
+function asDescription(nextStep: string): string {
+  return nextStep
+    .replace(/^Next,\s*/i, '')
+    .replace(/[.!?]+$/u, '');
 }
 
 /**
- * Project a `computeStructuralReadiness` payload into a qualitative
- * summary. Returns an empty `open_items` array (and empty prose) when
- * the payload status is `'ready'` — the caller should treat that as
- * "no readiness coaching to surface" and fall through rather than
- * emit a misleading "all set" message.
+ * Project canonical readiness into one qualitative recovery. Returns an empty
+ * `open_items` array (and empty prose) only when the shared projection admits
+ * Run from exact status `ready`.
+ *
+ * REPLACED legacy authority: this function used to independently infer
+ * readiness from `options.length`, per-option statuses, and goal-threshold
+ * presence. That reconstructed a second whole-model verdict and could both
+ * miss a canonical unreachable-factor blocker and invent a threshold blocker
+ * on a payload whose canonical status was ready. The shared projection owns
+ * both classification and copy now; this layer only maps its recovery family
+ * to the stable low-cardinality presentation tag consumed downstream.
  */
 export function summariseReadiness(
   analysisReady: AnalysisReadyPayload,
 ): ReadinessSummary {
-  const openItems: ReadinessOpenItem[] = [];
-
-  if (analysisReady.options.length < MIN_OPTION_COUNT) {
-    openItems.push({
-      kind: 'too_few_options',
-      description: `you need at least ${MIN_OPTION_COUNT} options before the analysis can compare them`,
-    });
-  }
-
-  for (const opt of analysisReady.options) {
-    if (opt.status === 'needs_user_mapping') {
-      openItems.push({
-        kind: 'option_needs_mapping',
-        description: `${describeOption(opt)} isn't connected to any factors yet`,
-        option_label: opt.label,
-      });
-    } else if (opt.status === 'needs_encoding') {
-      openItems.push({
-        kind: 'option_needs_encoding',
-        description: `${describeOption(opt)} is connected to factors but has no numeric values set`,
-        option_label: opt.label,
-      });
-    }
-  }
-
-  if (analysisReady.goal_threshold == null) {
-    openItems.push({
-      kind: 'goal_threshold_missing',
-      description:
-        "the goal node doesn't have a measurable success threshold set",
-    });
-  }
-
+  const recovery = projectReadinessRecovery(analysisReady);
+  if (recovery.kind === 'run') return { open_items: [], prose: '' };
+  const openItems: ReadinessOpenItem[] = [{
+    kind: recoveryKindToOpenItemKind(recovery.kind),
+    description: asDescription(recovery.nextStep),
+    ...(recovery.optionLabel ? { option_label: recovery.optionLabel } : {}),
+  }];
   return { open_items: openItems, prose: composeReadinessProse(openItems) };
 }
 

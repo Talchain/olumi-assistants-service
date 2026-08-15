@@ -1321,12 +1321,9 @@ export function tryPostAnalysisAdviceGate(
    * ROADMAP 2.640 §3.4 — THE SINGLE derivation of "which blocker is top",
    * shared by both matched-result construction sites below.
    *
-   * "Top" is the readiness projection's OWN ordering (`open_items[0]`), not a
-   * re-ranking here: `summariseReadiness` pushes too-few-options first, then
-   * per-option items in option order, then the goal threshold
-   * (readiness-summary.ts:65–98). The prose the user reads is composed from the
-   * same array in the same order, so the section that opens is the section for
-   * the first thing the sentence tells them to fix.
+   * `summariseReadiness` emits at most one canonical recovery family from the
+   * shared status/blocker projection. There is therefore no local ranking or
+   * reconstruction: the prose and the optional gesture consume the same item.
    *
    * Returns `undefined` for every non-readiness class and whenever the
    * projection lacks the data — the gesture is additive to the answer and never

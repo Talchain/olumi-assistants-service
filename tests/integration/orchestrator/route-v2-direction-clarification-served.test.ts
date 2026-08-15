@@ -198,11 +198,38 @@ const GRAPH = {
   edges: [{ id: 'e1', from: 'fac_support_cost', to: 'out_csat', belief: 0.6 }],
 };
 
+// The unified-pipeline producer contract includes analysis_ready beside the
+// graph. This route test deliberately uses a lightweight legacy edge fixture
+// for its unrelated narration concern, so asking draft-graph's graph fallback
+// to reconstruct readiness would make the test depend on an invalid carrier
+// it is not meant to exercise. Carry the exact producer field instead: the
+// served assertion below then proves producer → dispatcher → finaliser → wire.
+const ANALYSIS_READY = {
+  goal_node_id: 'goal_4day',
+  status: 'ready',
+  options: [
+    {
+      id: 'opt_four_day',
+      label: 'Move to a four-day week',
+      status: 'ready',
+      interventions: { fac_support_cost: 0.7 },
+    },
+    {
+      id: 'opt_status_quo',
+      label: 'Keep the current rota',
+      status: 'ready',
+      interventions: { fac_support_cost: 0.3 },
+    },
+  ],
+  bias_findings: [],
+} as const;
+
 function pipelineBody(strengthenItems: unknown[]) {
   return {
     statusCode: 200,
     body: {
       graph: GRAPH,
+      analysis_ready: ANALYSIS_READY,
       coaching: {
         summary: '',
         strengthen_items: strengthenItems,

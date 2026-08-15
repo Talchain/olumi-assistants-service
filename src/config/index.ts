@@ -1158,20 +1158,19 @@ const ConfigSchema = z.object({
     // now UNCONDITIONALLY canonicalises outbound option interventions to RAW
     // user-scale (evidence-gated) before they reach PLoT. The OFF branch sent
     // raw fractions where PLoT expects user-scale values (bad-scale class).
-    // EP2 (V5 Edit Safety Core, Phase 1): read-boundary analysis-ready guard at
-    // run_analysis (scoped to /orchestrate/v2/turn). Default OFF. When ON it gates
-    // the run-time canonicalisation AND the freshness-side canonicalise-before-hash
-    // + unrecoverable short-circuit ATOMICALLY (no split mode); flag OFF =>
-    // byte-identical to today on both sides. CEE_RUN_ANALYSIS_READY_GUARD.
+    // QUARANTINED compatibility input. CEE_RUN_ANALYSIS_READY_GUARD formerly
+    // controlled the V5 Run read-boundary guard. Canonical whole-status is now
+    // unconditional, so production code MUST NOT read this value; it remains in
+    // config temporarily only so an existing deployment env does not become an
+    // unexplained/unknown setting during rollout. Remove after env cleanup.
     analysisReadyGuardEnabled: booleanString.default(false),
     // NULL persisted-graph recovery kill-switch (CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE).
     // Default ON. When ON, run_analysis on a scenario whose persisted graph is NULL
     // returns a typed `analysis_not_ready` recoverable 200 (honest "draft a model
-    // first" + chip) instead of a raw `scenario_read_failed` 500. INDEPENDENT of EP2
-    // (`analysisReadyGuardEnabled`): the deployed V5 path runs EP2 OFF, so this fix
-    // must NOT be gated on it. Set to `false` for a code-free rollback to the legacy
+    // first" + chip) instead of a raw `scenario_read_failed` 500. Independent of
+    // the now-unconditional whole-model guard. Set to `false` for a code-free rollback to the legacy
     // raw-500 if typed recovery ever misbehaves. Only controls the NULL-graph branch;
-    // a present-but-broken graph is still EP2's (default-off) concern.
+    // a present-but-broken graph always reaches canonical whole-model admission.
     runAnalysisNullGraphRecoverable: booleanString.default(true),
     // Lane 28 — brief pipeline seam 3 (CEE_SEND_BRIEF_TO_PLOT). When true,
     // run_analysis forwards the persisted decision brief (scenarios.brief_text,

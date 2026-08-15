@@ -262,14 +262,12 @@ describe('deriveCoachingState — analysis freshness', () => {
 
 describe('deriveCoachingState — readiness blockers', () => {
   it('emits readiness_blocker signals from a parseable graph with open items', () => {
-    // buildD1Fixture: goal + 1 unmapped option, no goal_threshold → too_few_options,
-    // option_needs_mapping, goal_threshold_missing.
+    // Canonical whole-status is mapping. Raw option count and absent threshold
+    // no longer mint sibling whole-status blockers.
     const state = base({ freshness: FRESH, persistedGraph: buildD1Fixture() });
     const blockers = state.signals.filter((s) => s.kind === 'readiness_blocker');
     const reasons = blockers.map((s) => s.reason_code).sort();
-    expect(reasons).toContain('too_few_options');
-    expect(reasons).toContain('option_needs_mapping');
-    expect(reasons).toContain('goal_threshold_missing');
+    expect(reasons).toEqual(['option_needs_mapping']);
     for (const b of blockers) {
       expect(b.status).toBe('active');
       expect(b.source).toBe('analysis_readiness');

@@ -83,6 +83,7 @@ export type CoachingStateReasonCode =
   | 'too_few_options'
   | 'option_needs_mapping'
   | 'option_needs_encoding'
+  | 'model_needs_review'
   | 'goal_threshold_missing'
   | 'goal_node_missing'
   | 'edge_strength_defaulted'
@@ -154,9 +155,14 @@ const MAX_SIGNALS = 24;
 // Stable readiness-blocker ordering so the derived array is deterministic.
 const READINESS_REASON_ORDER: readonly CoachingStateReasonCode[] = [
   'goal_node_missing',
+  // `too_few_options` / `goal_threshold_missing` are retained below for
+  // historical snapshot compatibility only. The active readiness-summary
+  // producer delegates whole-status to canonical recovery and never derives
+  // either code from raw field presence.
   'too_few_options',
   'option_needs_mapping',
   'option_needs_encoding',
+  'model_needs_review',
   'goal_threshold_missing',
 ];
 

@@ -93,6 +93,94 @@ function unreachableFactorFixture(): {
 }
 
 describe('canonical persisted-graph readiness projection', () => {
+  it('merges intervention carriers per factor with data > slash-keyed > top-level precedence', () => {
+    const graph = {
+      goal_node_id: 'goal_growth',
+      nodes: [
+        { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+        {
+          id: 'opt_fast',
+          kind: 'option',
+          label: 'Move quickly',
+          interventions: { fac_primary: 0.11, fac_slash: 0.12, fac_top_only: 0.13 },
+        },
+        {
+          id: 'opt_careful',
+          kind: 'option',
+          label: 'Phase carefully',
+          interventions: { fac_primary: 0.4, fac_slash: 0.5, fac_top_only: 0.6 },
+        },
+        { id: 'fac_primary', kind: 'factor', label: 'Primary reach', category: 'controllable' },
+        { id: 'fac_slash', kind: 'factor', label: 'Slash reach', category: 'controllable' },
+        { id: 'fac_top_only', kind: 'factor', label: 'Top-only reach', category: 'controllable' },
+      ],
+      edges: [
+        edge('opt_fast', 'fac_primary'),
+        edge('opt_fast', 'fac_slash'),
+        edge('opt_fast', 'fac_top_only'),
+        edge('opt_careful', 'fac_primary'),
+        edge('opt_careful', 'fac_slash'),
+        edge('opt_careful', 'fac_top_only'),
+        edge('fac_primary', 'goal_growth'),
+        edge('fac_slash', 'goal_growth'),
+        edge('fac_top_only', 'goal_growth'),
+      ],
+      options: [
+        {
+          id: 'opt_fast',
+          label: 'Move quickly',
+          status: 'ready',
+          // Deliberately conflicting carriers. The assertion below must fail
+          // if this adapter ever selects the top-level bundle wholesale or
+          // reverses either documented precedence edge.
+          data: { interventions: { fac_primary: 0.91 } },
+          'data/interventions/fac_primary': 0.81,
+          'data/interventions/fac_slash': 0.82,
+          interventions: { fac_primary: 0.71, fac_slash: 0.72, fac_top_only: 0.73 },
+        },
+        {
+          id: 'opt_careful',
+          label: 'Phase carefully',
+          status: 'ready',
+          interventions: { fac_primary: 0.4, fac_slash: 0.5, fac_top_only: 0.6 },
+        },
+      ],
+    };
+
+    const projected = buildCanonicalAnalysisReadyFromGraph(graph);
+    expect(projected?.status).toBe('ready');
+    expect(projected?.options.find((option) => option.option_id === 'opt_fast')?.interventions)
+      .toEqual({ fac_primary: 0.91, fac_slash: 0.82, fac_top_only: 0.73 });
+  });
+
+  it('rejects a same-length duplicate top-level mirror unless it is an exact unique-ID bijection', () => {
+    const graph = {
+      goal_node_id: 'goal_growth',
+      nodes: [
+        { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+        { id: 'opt_fast', kind: 'option', label: 'Move quickly', interventions: { fac_reach: 0.2 } },
+        { id: 'opt_careful', kind: 'option', label: 'Phase carefully', interventions: { fac_reach: 0.4 } },
+        { id: 'fac_reach', kind: 'factor', label: 'Customer reach', category: 'controllable' },
+      ],
+      edges: [
+        edge('opt_fast', 'fac_reach'),
+        edge('opt_careful', 'fac_reach'),
+        edge('fac_reach', 'goal_growth'),
+      ],
+      // Same LENGTH as the node set, but opt_fast is duplicated and
+      // opt_careful is absent. Length-only coverage silently dropped an arm.
+      options: [
+        { id: 'opt_fast', label: 'Stale duplicate A', status: 'ready', interventions: { fac_reach: 0.8 } },
+        { id: 'opt_fast', label: 'Stale duplicate B', status: 'ready', interventions: { fac_reach: 0.9 } },
+      ],
+    };
+
+    const projected = buildCanonicalAnalysisReadyFromGraph(graph);
+    expect(projected?.options.map((option) => option.option_id)).toEqual(['opt_fast', 'opt_careful']);
+    expect(projected?.options.map((option) => option.label)).toEqual(['Move quickly', 'Phase carefully']);
+    expect(projected?.options.map((option) => option.interventions.fac_reach)).toEqual([0.2, 0.4]);
+  });
+
   it('preserves producer needs_user_mapping before and after persistence for an unreachable controllable factor', () => {
     const { graph, options } = unreachableFactorFixture();
     const producer = buildAnalysisReadyPayload(options, graph.goal_node_id, graph, {

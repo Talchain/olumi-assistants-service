@@ -472,7 +472,7 @@ import {
   PLOT_SLOW_LIKELY_MS,
 } from './telemetry/turn-timings.js';
 import { config } from '../config/index.js';
-import { assessAnalysisReadiness } from './tools/handlers/analysis-ready-core.js';
+import { canonicaliseForAnalysis } from './tools/handlers/analysis-ready-core.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -2215,20 +2215,12 @@ export async function runTurnExecutor(
         canonicalReadinessGraphForRun = graphStateForTurn ?? null; // M5 readiness authority
         return computeAnalysisAffectingGraphHash(graphStateForTurn);
       }
-      // EP2 (V5 Edit Safety Core), gated atomically with the run-time guard.
-      // When ON: an unrecoverable persisted graph short-circuits to null →
-      // freshness resolves as `unknown` (not fresh), so a prior result is never
-      // shown as current over an un-analysable graph (Blocker 2); a ready/repaired
-      // graph is canonicalised BEFORE hashing so this matches the run-time
-      // `graph_hash_at_run` (brief §6 consistency). Flag OFF ⇒ unchanged.
-      let graphForHash: unknown = persistedGraph;
-      if (config.cee.analysisReadyGuardEnabled) {
-        const verdict = assessAnalysisReadiness(persistedGraph);
-        if (verdict.status === 'unrecoverable') {
-          return null;
-        }
-        graphForHash = verdict.canonicalGraph ?? persistedGraph;
-      }
+      // Freshness is graph identity, not Run permission. Canonicalise carrier
+      // shape unconditionally so a repaired Run and its follow-up hash the same
+      // bytes, while leaving whole-status admission to the strict Run reader.
+      // A current prior result and a currently non-ready model can therefore be
+      // represented together without one verdict overwriting the other.
+      const graphForHash: unknown = canonicaliseForAnalysis(persistedGraph);
       const parsed = GraphStateIngressSchema.safeParse(graphForHash);
       if (parsed.success) {
         // M5 readiness authority: derive canonical readiness from the SAME

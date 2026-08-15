@@ -253,9 +253,13 @@ function projectOptionForCanonicalBuilder(
   if (!id || !label) return null;
 
   const interventions: Record<string, unknown> = {};
-  const sourceBundle = isPlainObject(candidate.interventions)
-    ? candidate.interventions
-    : mergeInterventionSourceObjects(candidate);
+  // Read every historical carrier through the documented per-factor
+  // precedence table. Selecting `candidate.interventions` as a whole bundle
+  // used to let a stale top-level mirror hide a newer data/slash-keyed value
+  // (and also dropped factors that existed only in those higher-priority
+  // carriers). `mergeInterventionSourceObjects` is the single source selector:
+  // data.interventions > data/interventions/<id> > top-level interventions.
+  const sourceBundle = mergeInterventionSourceObjects(candidate);
   for (const [factorId, raw] of Object.entries(sourceBundle)) {
     if (!factorIds.has(factorId)) continue;
     const value = extractNumericIntervention(raw);
@@ -402,12 +406,35 @@ export function buildCanonicalAnalysisReadyFromGraph(
           (option): option is OptionV3T => option !== null && optionNodeIds.has(option.id),
         )
     : [];
-  const topLevelById = new Map(projectedTopLevel.map((option) => [option.id, option]));
+  const topLevelIdCounts = new Map<string, number>();
+  for (const option of projectedTopLevel) {
+    topLevelIdCounts.set(option.id, (topLevelIdCounts.get(option.id) ?? 0) + 1);
+  }
+  const topLevelById = new Map(
+    projectedTopLevel
+      .filter((option) => topLevelIdCounts.get(option.id) === 1)
+      .map((option) => [option.id, option]),
+  );
+  const projectedTopLevelIds = new Set(projectedTopLevel.map((option) => option.id));
+
+  // A top-level options array owns order only when it is an exact UNIQUE-ID
+  // bijection with the option nodes. Length equality is insufficient: two
+  // copies of opt_a can have the same length as {opt_a,opt_b}, silently drop
+  // opt_b, and make the whole-status producer reason over the wrong choice
+  // set. Invalid/unknown rows were already filtered above, so equality of both
+  // unique sets plus both raw lengths proves the exact one-to-one cover.
+  const topLevelIsExactOptionNodeBijection =
+    projectedTopLevel.length === optionNodeRecords.length
+    && projectedTopLevelIds.size === projectedTopLevel.length
+    && optionNodeIds.size === optionNodeRecords.length
+    && projectedTopLevelIds.size === optionNodeIds.size
+    && [...optionNodeIds].every((id) => projectedTopLevelIds.has(id));
 
   // Preserve the producer's canonical option order when it completely covers
-  // the option-node set. A partial/stale mirror falls back to node order and
-  // fills each missing entry from that node, never silently dropping an arm.
-  const options = projectedTopLevel.length === optionNodeRecords.length
+  // the option-node set exactly once. A partial/stale/duplicated mirror falls
+  // back to node order and fills each missing entry from that node, never
+  // silently dropping an arm.
+  const options = topLevelIsExactOptionNodeBijection
     ? projectedTopLevel
     : optionNodeRecords
         .map((node) => {

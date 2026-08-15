@@ -581,8 +581,11 @@ const GATE_REMEDY_FACT_TAG = 'advice_gate_readiness';
  * kind is precisely the drift class this estate keeps paying for (trap 12); an
  * exhaustive record cannot go short without the compiler saying so.
  *
- * Producer semantics (CEE) — routing/readiness-summary.ts:67–96, and the status
- * enum's own doc comment at schemas/analysis-ready.ts:58–64.
+ * Producer semantics (CEE) — the canonical recovery projection in
+ * routing/readiness-summary.ts and the status enum's own doc comment at
+ * schemas/analysis-ready.ts:58–64. `too_few_options` and
+ * `goal_threshold_missing` remain quarantined compatibility rows; the active
+ * producer no longer reconstructs either from raw field presence.
  * Surface semantics (UI) — the five section ids are rendered by
  * ModelTabBody.tsx:780–845, one component per id.
  */
@@ -638,19 +641,21 @@ export const REMEDY_SECTION_BY_OPEN_ITEM_KIND: Record<
    * the builder must be able to decline.
    */
   goal_threshold_missing: null,
+
+  /**
+   * Canonical blocked/unknown/constraint recovery says only to review or
+   * resolve the model issue. No narrower surface is attested, so a gesture
+   * would add specificity the readiness authority did not provide.
+   */
+  model_needs_review: null,
 };
 
 /**
  * ROADMAP 2.640 §3.4 row 1 — build the readiness gate's remedy gesture.
  *
- * `openItemKind` is the kind of the TOP blocking item, i.e. `open_items[0]`.
- * "Top" is the PRODUCER's own ordering, not a re-ranking by this module:
- * `summariseReadiness` pushes too-few-options first, then per-option items in
- * option order, then the goal threshold (readiness-summary.ts:65–98). Choosing
- * the first item is what makes the gesture agree with the FIRST thing the prose
- * tells the user to fix; re-sorting here would let the sentence and the gesture
- * disagree about which blocker matters most, which is the two-authorities
- * defect (trap 21) waiting to happen.
+ * `openItemKind` is the canonical recovery family from `open_items[0]`.
+ * `summariseReadiness` now emits at most one item from the shared recovery
+ * authority, so this module neither ranks nor reconstructs blockers.
  *
  * Returns `null` (telemetered) when the kind has no mapped surface, or when the
  * built block fails strict boundary validation — never a partially-formed

@@ -119,6 +119,31 @@ describe('composeReadinessIntakeResponse — populated canvas (NOT the fresh pat
     expect(response.assistant_text).not.toContain(READINESS_OPEN_MARKER);
     expect(response.assistant_text).not.toContain(PROCESS_META_ANSWER_MARKER);
   });
+
+  it('canonical ready WITHOUT a goal threshold remains readiness_ready', () => {
+    const graph = readyGraph();
+    graph.nodes[0] = goalNode();
+    const { outcome, response } = composeReadinessIntakeResponse(graph, 'analyse');
+    expect(outcome).toBe('readiness_ready');
+    expect(response.assistant_text).toContain(READINESS_READY_MARKER);
+    expect(response.assistant_text).not.toContain('threshold');
+  });
+
+  it('unreachable controllable factor remains open even when both options are individually ready', () => {
+    const graph = readyGraph();
+    graph.nodes.push({
+      id: 'f2',
+      kind: 'factor',
+      label: 'Delivery capacity',
+      category: 'controllable',
+    });
+    graph.edges.push(edge('f2', 'goal_1'));
+    const { outcome, response } = composeReadinessIntakeResponse(graph, 'analyse');
+    expect(outcome).toBe('readiness_open');
+    expect(response.assistant_text).toContain(READINESS_OPEN_MARKER);
+    expect(response.assistant_text).toContain('unresolved mapping');
+    expect(response.assistant_text).not.toContain('missing effect value');
+  });
 });
 
 describe('composeReadinessIntakeResponse — envelope invariants', () => {
