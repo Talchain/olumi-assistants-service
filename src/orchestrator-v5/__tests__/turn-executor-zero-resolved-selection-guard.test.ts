@@ -32,11 +32,14 @@ type GraphReadMode = 'ok_present' | 'degraded';
 
 const harness = vi.hoisted(() => ({
   graphReadMode: 'ok_present' as GraphReadMode,
-  appendedRows: [] as Array<{
-    assistantMessage?: string | null;
-    graph?: unknown;
-    pending_actions?: readonly unknown[];
-  }>,
+  appendedRows: [] as Array<
+    Record<string, unknown> & {
+      assistantMessage?: string | null;
+      graph?: unknown;
+      pending_actions?: readonly unknown[];
+    }
+  >,
+  replayAppendedHistory: false,
 }));
 
 const SCENARIO_ID = '8e425d85-4fc7-4ab4-9d6e-2c77fd41dbb2';
@@ -155,8 +158,30 @@ vi.mock('../session/index.js', () => ({
       harness.appendedRows.push(row);
       return { id: `row-${randomUUID()}` };
     },
-    readRecent: async (_id: string, limit = 20) => [PRIOR_ANALYSIS_TURN].slice(0, limit),
-    countTurns: async () => 1,
+    readRecent: async (_id: string, limit = 20) => {
+      const replayed = harness.replayAppendedHistory
+        ? [...harness.appendedRows].reverse().map((row, index) => ({
+            id: `persisted-row-${index}`,
+            scenario_id: String(row['scenario_id'] ?? SCENARIO_ID),
+            user_id: null,
+            turn_id: String(row['turn_id'] ?? `persisted-turn-${index}`),
+            turn_class: String(row['turn_class'] ?? 'direct_answer'),
+            handler_id: row['handler_id'] ?? null,
+            request_hash: String(row['request_hash'] ?? `persisted-request-${index}`),
+            response_emitted: true,
+            llm_calls_used: Number(row['llm_calls_used'] ?? 1),
+            duration_ms: Number(row['duration_ms'] ?? 1),
+            created_at: new Date(Date.now() - index * 1_000).toISOString(),
+            user_message:
+              typeof row['userMessage'] === 'string' ? row['userMessage'] : null,
+            assistant_message:
+              typeof row.assistantMessage === 'string' ? row.assistantMessage : null,
+          }))
+        : [];
+      return [...replayed, PRIOR_ANALYSIS_TURN].slice(0, limit);
+    },
+    countTurns: async () =>
+      harness.replayAppendedHistory ? harness.appendedRows.length + 1 : 1,
     readFactsFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.includes(PRIOR_ANALYSIS_ROW_ID) ? [RUN_ANALYSIS_FACT] : [],
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
@@ -283,6 +308,7 @@ async function run(
 beforeEach(() => {
   harness.graphReadMode = 'ok_present';
   harness.appendedRows.length = 0;
+  harness.replayAppendedHistory = false;
   setTestSink(() => undefined);
 });
 
@@ -369,6 +395,27 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(result.response.suggested_actions).toEqual([]);
     expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
     expect(harness.appendedRows.at(-1)?.pending_actions).toEqual([]);
+  });
+
+  it('the next routed turn sees the refusal in history, never the discarded leader answer', async () => {
+    await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(shapedConverseResult()),
+      { node_ids: [GHOST_ID], edge_ids: [] },
+    );
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+
+    harness.replayAppendedHistory = true;
+    const followUpAdapter = resolvedAdapter(textOnlyResult('Let us inspect another assumption.'));
+    await run('What else should I inspect?', followUpAdapter);
+
+    expect(followUpAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const modelInput = String(
+      followUpAdapter.chatWithTools.mock.calls[0]![0].messages[0]?.content ?? '',
+    );
+    expect(modelInput).toContain(NOT_IN_MODEL_TEXT);
+    expect(modelInput).not.toContain(`${OPTION_LABEL} is ahead at 62%`);
+    expect(modelInput).not.toContain(LEADER_SHAPE.detail);
   });
 
   it('distinguishes a degraded graph read without claiming the element is absent', async () => {
