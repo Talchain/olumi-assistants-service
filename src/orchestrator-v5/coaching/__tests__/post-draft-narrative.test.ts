@@ -9,6 +9,7 @@ import {
   buildPostDraftNarrative,
   validateUncertaintyDriver,
 } from '../post-draft-narrative.js';
+import { NEXT_STEP_TOKENS_REGEX } from '../copy-quality-gate.js';
 import { sanitiseUserFacingText } from '../../compose/output-safety.js';
 import {
   findForbiddenPhraseHit,
@@ -862,6 +863,27 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     input: Omit<Parameters<typeof buildPostDraftNarrative>[0], 'analysisReady'>,
   ) => buildPostDraftNarrative({ ...input, analysisReady: { status: 'ready' } });
 
+  const needsInputReadiness = {
+    status: 'needs_user_input',
+    blockers: [{
+      option_id: OPTION_A.id,
+      option_label: OPTION_A.label,
+      factor_id: FACTOR_QUALITY.id,
+      factor_label: FACTOR_QUALITY.label,
+      blocker_type: 'missing_value',
+      suggested_action: 'add_value',
+    }],
+  } as const;
+  const summaryCore =
+    'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead.';
+  const typedRecovery =
+    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+  const withNeedsInputSummary = (coachingSummary: string) => buildPostDraftNarrative({
+    graph: baseGraph,
+    coachingSummary,
+    analysisReady: needsInputReadiness,
+  });
+
   it('replaces the whole response with coachingSummary when it passes the full-response gate', () => {
     // Summary intentionally does NOT use the builder's deterministic
     // opener "I've built a first decision model for …" — so any
@@ -997,6 +1019,21 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
   });
 
+  it('falls back when an accepted ready summary exceeds the 140-word narrative budget', () => {
+    const summary =
+      `Options weigh risk ${Array.from({ length: 135 }, () => 'risk').join(' ')}. Next, review the model.`;
+    expect(summary.length).toBeLessThanOrEqual(800);
+    expect(wordCount(summary)).toBeGreaterThan(140);
+
+    const result = withReadySummary({ graph: baseGraph, coachingSummary: summary });
+
+    expect(result.text).not.toBe(summary);
+    expect(result.text.startsWith("I've built a first decision model for")).toBe(true);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('too_long');
+  });
+
   it('telemetry reject_reason is null when the summary is missing entirely', () => {
     const result = withReadySummary({ graph: baseGraph, coachingSummary: null });
     expect(result.telemetry.coaching_summary_present).toBe(false);
@@ -1004,65 +1041,69 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   });
 
   it.each([
-    [
-      'Run analysis',
-      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead. Next, run the analysis to compare them.',
-    ],
-    [
-      'Run now',
-      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead. Next, run now to compare the options.',
-    ],
-  ])('withholds an otherwise accepted %s summary when readiness needs input', (_label, summary) => {
-    const result = buildPostDraftNarrative({
-      graph: baseGraph,
-      coachingSummary: summary,
-      analysisReady: {
-        status: 'needs_user_input',
-        blockers: [{
-          option_id: OPTION_A.id,
-          option_label: OPTION_A.label,
-          factor_id: FACTOR_QUALITY.id,
-          factor_label: FACTOR_QUALITY.label,
-          blocker_type: 'missing_value',
-          suggested_action: 'add_value',
-        }],
-      },
-    });
+    ['Run analysis', 'Next, run the analysis to compare them.'],
+    ['Run now', 'Next, run now to compare the options.'],
+    ['Explore', 'Next, explore how the options compare under stress.'],
+    ['Stress-test', 'Next, stress-test the options to see which route holds up.'],
+    ['Inspect', 'Next, compare the routes and inspect what shifts the outcome.'],
+  ])('replaces an accepted %s CTA with the typed recovery when non-ready', (_label, modelCta) => {
+    const result = withNeedsInputSummary(`${summaryCore} ${modelCta}`);
+    const [servedCore, servedNextStep] = result.text.split('\n\n');
 
-    expect(result.text).not.toContain(summary);
-    expect(result.text).not.toMatch(/\brun(?:ning)?\b/i);
-    expect(result.text).toContain(OPTION_A.label);
-    expect(result.text).toContain(FACTOR_QUALITY.label);
+    expect(servedCore).toBe(summaryCore);
+    expect(servedCore).not.toMatch(NEXT_STEP_TOKENS_REGEX);
+    expect(servedNextStep).toBe(typedRecovery);
+    expect(result.text).not.toContain(modelCta);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
+    expect(result.telemetry.fallback_reason).toBeNull();
+  });
+
+  it('preserves a safe summary core but replaces its generic review CTA', () => {
+    const reviewCta = 'Next, review the model before comparing the routes.';
+    const result = withNeedsInputSummary(`${summaryCore} ${reviewCta}`);
+
+    expect(result.text).toBe(`${summaryCore}\n\n${typedRecovery}`);
+    expect(result.text).not.toContain(reviewCta);
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
     expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
   });
 
-  it('keeps an accepted review summary and appends the typed non-ready recovery tail', () => {
-    const summary =
-      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead. Next, review the model before comparing the routes.';
-    const result = buildPostDraftNarrative({
-      graph: baseGraph,
-      coachingSummary: summary,
-      analysisReady: {
-        status: 'needs_user_input',
-        blockers: [{
-          option_id: OPTION_A.id,
-          option_label: OPTION_A.label,
-          factor_id: FACTOR_QUALITY.id,
-          factor_label: FACTOR_QUALITY.label,
-          blocker_type: 'missing_value',
-          suggested_action: 'add_value',
-        }],
-      },
-    });
+  it.each([
+    [
+      'first sentence',
+      `Next, explore how the options compare under stress. ${summaryCore}`,
+    ],
+    [
+      'middle line without terminal punctuation',
+      `The routes here weigh delivery speed against quality risk.\nThen stress-test the options\nOne assumption worth checking is whether the team can absorb extra coordination overhead.`,
+    ],
+    [
+      'quoted final sentence',
+      `${summaryCore} "Next, inspect what shifts the outcome."`,
+    ],
+    [
+      'colon lead-in',
+      `${summaryCore} Next: validate which route holds up under pressure.`,
+    ],
+    [
+      'em-dash lead-in after style repair',
+      `${summaryCore} Next — explore which route holds up under pressure.`,
+    ],
+  ])('replaces a next-step in the %s while retaining descriptive sentences', (_label, summary) => {
+    const result = withNeedsInputSummary(summary);
+    const blocks = result.text.split('\n\n');
+    const servedNextStep = blocks.pop();
+    const servedCore = blocks.join('\n\n');
 
-    expect(result.text).toContain(summary);
-    expect(result.text).toContain(OPTION_A.label);
-    expect(result.text).toContain(FACTOR_QUALITY.label);
-    expect(result.text).not.toMatch(/\brun(?:ning)?\b/i);
-    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
-    expect(result.telemetry.assumption_source).toBe('coaching_summary');
-    expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
+    expect(servedNextStep).toBe(typedRecovery);
+    expect(servedCore).toContain('The routes here weigh delivery speed against quality risk.');
+    expect(servedCore).toContain('One assumption worth checking');
+    expect(servedCore).not.toMatch(NEXT_STEP_TOKENS_REGEX);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
   });
 });
 
