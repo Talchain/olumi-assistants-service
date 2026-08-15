@@ -90,6 +90,7 @@ function bulkyCompactGraph(nodeCount: number, labelChars: number): GraphV3Compac
     from: `n${i}`,
     to: `n${i + 1}`,
     strength: 0.5,
+    exists: 0.9,
   }));
   return { nodes, edges, _node_count: nodes.length, _edge_count: edges.length };
 }
