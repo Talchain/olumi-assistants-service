@@ -604,10 +604,10 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'what_would_flip_free_text',
     pattern: /\bwhat\s+would\s+flip\b/i,
   },
-  // "what would change (the result|the outcome|things|the leading option|the analysis)"
+  // "what would change (the|this|that) (result|outcome|leading option|analysis)"
   {
     advice_class: 'what_would_flip_free_text',
-    pattern: /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
+    pattern: /\bwhat\s+would\s+change\s+(?:(?:the|this|that)\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
   },
   // "what would tip (this|the balance|the result)"
   {
@@ -658,7 +658,7 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
   // stay symmetric.
   {
     advice_class: 'what_would_flip_free_text',
-    pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+    pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:(?:the|this|that)\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
   },
   {
     advice_class: 'what_would_flip_free_text',

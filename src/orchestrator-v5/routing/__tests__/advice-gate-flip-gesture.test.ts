@@ -94,7 +94,10 @@ const ANALYSIS_IMMATERIAL_DRIVER: AdviceGateAnalysis = {
   fragile_edges: [],
 };
 
-const FLIP_QUESTION = 'What would flip this?';
+// Canonical overnight acceptance phrase. This demonstrative form was the
+// independent review's discriminator: the older grammar admitted "the result"
+// but fell through `no_advice_signal` on "this result".
+const FLIP_QUESTION = 'What would change this result?';
 
 function askFlip(analysis: AdviceGateAnalysis): AdviceGateMatched {
   const out = tryPostAnalysisAdviceGate({
@@ -273,7 +276,7 @@ describe('advice gate — the free-text flip answer gestures at what it named', 
    * directive, so a change that neuters the emission REDs here rather than only
    * in a unit row.
    */
-  it('END TO END — a natural "what would flip this?" ships an answer AND the section it is about', () => {
+  it('END TO END — a natural "what would change this result?" ships an answer AND the section it is about', () => {
     const matched = askFlip(ANALYSIS_FRAGILE_EDGE);
     expect(matched.flip_focus_section).toBeDefined();
 

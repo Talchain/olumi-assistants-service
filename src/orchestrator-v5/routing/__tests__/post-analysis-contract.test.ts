@@ -1029,6 +1029,7 @@ describe('Parity invariant — classifier ↔ advice gate alignment for what_wou
   const FLIP_PARITY_PHRASES: readonly string[] = [
     // Original 'would' patterns
     'What would flip this?',
+    'What would change this result?',
     'What would change the outcome?',
     'What would tip the balance?',
     'What would it take to flip the result?',
@@ -1101,6 +1102,9 @@ describe('Parity invariant — classifier ↔ advice gate alignment for what_wou
     'Would you change the pricing?',
     'Tell me about Apple pricing',
     'What could change my mind?',
+    // Demonstrative near-misses: noun and tense remain bounded.
+    'What would change this project?',
+    'What changed this result?',
     // Concrete mutations — mustn't get captured by analytical class
     'Set Pricing to £100',
     'Change Pricing from £80 to £100',
