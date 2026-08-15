@@ -1755,6 +1755,15 @@ export async function runTurnExecutor(
                     context.persistedGraph ?? graphStateForTurn ?? null,
                   )
                 : undefined,
+              // CONTEXT/MEMORY V5 defect 4 — the non-execute path has NO
+              // current-turn facts (`handlerFacts: []`), so `context.prior_facts`
+              // is the whole chain. That makes it precisely the path where a
+              // thrown prior-fact read is indistinguishable from a scenario that
+              // has never been analysed, and where `'none'` would be a positive
+              // claim we cannot support.
+              ...(context.prior_facts_read_ok === undefined
+                ? {}
+                : { priorFactsReadOk: context.prior_facts_read_ok }),
             });
     }
     return nonExecuteCanonicalMemo ?? undefined;
@@ -9462,6 +9471,15 @@ export async function runTurnExecutor(
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
         currentGraphOptionIds: currentGraphOptionIdsForPostHandler,
+        // Defect 4. Threaded here too for consistency, though it is nearly
+        // always inert on this path: the execute branch carries this turn's
+        // own `handlerFactsForCommit`, which are selected first. It matters
+        // only for an execute turn that produced no usable run_analysis fact
+        // AND could not read the prior chain — where `'none'` would again be
+        // an unsupported claim rather than an honest `'unknown'`.
+        ...(context.prior_facts_read_ok === undefined
+          ? {}
+          : { priorFactsReadOk: context.prior_facts_read_ok }),
       });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not
