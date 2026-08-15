@@ -40,6 +40,7 @@ import {
   SessionReadError,
   StateCommitFailedError,
   type GraphWriteFailureDisclosure,
+  type PendingActionReadOptions,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
@@ -1734,7 +1735,10 @@ export class SupabaseSessionStore implements SessionStore {
     return typeof userId === 'string' && userId.length > 0 ? userId : null;
   }
 
-  async readMostRecentPendingActions(scenarioId: string): Promise<readonly PendingAction[]> {
+  async readMostRecentPendingActions(
+    scenarioId: string,
+    options: PendingActionReadOptions = {},
+  ): Promise<readonly PendingAction[]> {
     // Narrow read: only the most recent prior turn. Older orphan pending
     // actions are ignored by design — "yes" resolves against the last
     // assistant turn's explicit offer only. See store.ts JSDoc.
@@ -1762,6 +1766,12 @@ export class SupabaseSessionStore implements SessionStore {
         turn_row_id: rows[0]!.id,
         reason: 'jsonb_not_array',
       });
+      if (options.validation === 'strict') {
+        throw new SessionReadError(
+          `readMostRecentPendingActions(${scenarioId}): newest row pending_actions is not an array`,
+          { code: 'pending_actions_corrupt' },
+        );
+      }
       return [];
     }
     const out: PendingAction[] = [];
@@ -1807,6 +1817,12 @@ export class SupabaseSessionStore implements SessionStore {
         },
         'V5 readMostRecentPendingActions — partial read; degraded entries dropped',
       );
+      if (options.validation === 'strict') {
+        throw new SessionReadError(
+          `readMostRecentPendingActions(${scenarioId}): newest row pending_actions failed lossless validation`,
+          { code: 'pending_actions_corrupt' },
+        );
+      }
     }
     return out;
   }

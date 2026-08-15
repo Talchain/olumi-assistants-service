@@ -56,8 +56,12 @@ These runtime rules are **not** captured in the exported schemas:
 
 1. **`OrchestratorTurnPayloadSchema` (LIVE V5)** — a union-level `superRefine`
    enforces `chip` only when `source` ∈ {chip, chip_click}, and `retry_of`
-   only when `source === 'retry'`. The exported `anyOf` allows either
-   sub-object regardless of `source`.
+   only when `source === 'retry'`. For system events it also enforces the
+   `edge_adjudication` verdict/value coupling, ordered `prior_range_edit`
+   bounds, and the 0.42 `edge_strength_edit` rules: non-zero expected mean and
+   direction agree; `confirm_current` preserves direction and carries exactly
+   `abs(expected.mean)`. The exported `anyOf` captures the strict field shapes
+   but not these cross-field relationships.
 2. **`SystemEventSchema` (`patch_accepted`)** — `superRefine` requires at
    least one of `patch_id` or `block_id` in `details`. The exported schema
    allows both to be absent.

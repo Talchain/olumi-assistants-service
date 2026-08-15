@@ -38,6 +38,18 @@ import type { TurnFenceHandle, TurnStopOutcome } from './turn-fence.js';
  */
 export type { HandlerFactWithTurn };
 
+/**
+ * Pending-action row validation posture.
+ *
+ * `tolerant` preserves the legacy resume-path behaviour: malformed entries are
+ * reported and dropped. `strict` is for callers that will append a new
+ * most-recent turn and therefore must prove the prior authoritative row was
+ * read losslessly before committing.
+ */
+export interface PendingActionReadOptions {
+  readonly validation?: 'tolerant' | 'strict';
+}
+
 export interface SessionTurnWrite {
   readonly scenario_id: string;
   readonly turn_id: string;
@@ -468,9 +480,15 @@ export interface SessionStore {
    *
    * Read failures throw `SessionReadError`; callers should log
    * `session.read_degraded` telemetry and fall through to the
-   * non-resume path rather than failing the turn.
+   * non-resume path rather than failing the turn. Legacy callers omit
+   * `options` and retain tolerant parsing. `validation: 'strict'` throws on a
+   * non-array column, any invalid entry, or any scenario mismatch so a caller
+   * cannot commit a lossy replacement for the newest authoritative row.
    */
-  readMostRecentPendingActions(scenarioId: string): Promise<readonly PendingAction[]>;
+  readMostRecentPendingActions(
+    scenarioId: string,
+    options?: PendingActionReadOptions,
+  ): Promise<readonly PendingAction[]>;
   /**
    * V5 Coaching State Spine — Stage 2B-1b: load the most recent NON-NULL
    * coaching-state snapshot for a scenario. Returns the parsed

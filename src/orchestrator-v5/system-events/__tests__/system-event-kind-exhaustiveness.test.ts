@@ -70,6 +70,16 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     expect(mutating).toEqual(['factor_value_edit']);
   });
 
+  it('the reader-only refusal set is exactly { edge_strength_edit } — parsing is not mutation permission', () => {
+    const readerOnly = Object.entries(SYSTEM_EVENT_HANDLING)
+      .filter(([, handling]) => handling === 'reader_only_refusal')
+      .map(([kind]) => kind);
+    // Mutation control: changing this entry to ack_and_commit, fact_and_commit
+    // or mutating REDs here. The later writer train must change this assertion
+    // consciously; reverting that train restores this safe floor.
+    expect(readerOnly).toEqual(['edge_strength_edit']);
+  });
+
   it('client-only kinds are exactly the ones that commit nothing', () => {
     const clientOnly = Object.entries(SYSTEM_EVENT_HANDLING)
       .filter(([, handling]) => handling === 'client_only')

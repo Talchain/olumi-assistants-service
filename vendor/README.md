@@ -7,7 +7,58 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.40.0.tgz`
+### `talchain-schemas-0.42.0.tgz`
+
+> **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE AND REPRODUCED TWICE.**
+> Packed from a fresh blobless clone of `olumi-schemas` after asserting both
+> `HEAD` and `git rev-list -n1 v0.42.0` equal
+> `bbfb7eb1e3f450598ff061a8651ce8c7e053468d`, and
+> `package.json.version == 0.42.0`, then `npm ci && npm run build && npm pack`.
+> A second independent `npm pack` produced byte-identical output.
+>
+> sha256 `1d5f2c7a7ee71b71d60f80b2e37db3e94f2f379a5741fd84c1099a4e13016ba0`
+> — 403,431 bytes.
+>
+> **✔ PUBLISHED-CONTENT IDENTITY ALSO PROVEN.** GitHub Packages reports SHA-1
+> `b784ebebe4c1b0a74e6880542018184fa3e3be23` and integrity
+> `sha512-ugZGl6CcPyIVPXuyBnwD8xjTp6h0oE+TDknP/jfj/orWDp8O6qfpXPOYkKvOufCGPnUyBh8tFoaaj/T0gODOyg==`.
+> Both were reproduced from the downloaded registry artifact. The registry and
+> source-packed tar envelopes differ, as npm repacks on publish, but unpacking
+> both and comparing every path produced zero content differences.
+
+**What CEE adopts here: one additive compatibility reader, and no writer.**
+0.42.0 adds the strict `edge_strength_edit` member to the root
+`OrchestratorTurnPayloadSchema`. CEE parses that ROOT schema at B1, including
+its cross-field rules, then deterministically returns a typed, non-retryable
+`FEATURE_NOT_ENABLED` refusal. The reader writes no graph or handler fact,
+derives no new pending action, preserves legitimate prior pendings through the
+canonical TTL/expiry/hash carry-forward, and does not call
+`adjust_edge_strength`. A degraded pending read fails the transcript commit
+closed rather than clearing state. Every pre-0.42 system event retains its
+prior handling and wire shape.
+
+> **⚠ READER-FIRST ORDER IS LOAD-BEARING.** A CEE pinned to 0.41 rejects the
+> new discriminator before dispatch. Rollout order is: schemas 0.42 publish →
+> this CEE reader deploys → the separate CEE writer may deploy → only then may
+> a UI emitter ship. This reader is the safe rollback floor for the writer: a
+> writer revert retains the 0.42 parse and returns the explicit no-write refusal
+> instead of mutating or failing opaquely.
+
+**Rollback path:** revert this whole PR and run `pnpm install`. Git restores
+the exact 0.41.0 tarball, checksum, pin, lockfile, generated live schema and
+dispatcher. This rollback is independent while no producer emits
+`edge_strength_edit`; after an emitter ships, revert the writer to this reader
+floor rather than reverting below 0.42. Reverting never unpublishes 0.42.0.
+
+### `talchain-schemas-0.41.0.tgz` (historical — no longer vendored)
+
+The exact prior CEE bytes were sha256
+`7054277fbc800c8ec8e63c280803466381d79eb3c570bf0ba6c848a85b979f6a`
+(398,468 bytes). Tag `v0.41.0` resolves to
+`81692c67a3e0e998c084d14895e494c5ec79b294`. They remain recoverable from the
+pre-change CEE commit and are restored by the rollback above.
+
+### `talchain-schemas-0.40.0.tgz` (historical — no longer vendored)
 
 > **✔ BYTE-IDENTITY PROVEN BY INDEPENDENT REPRODUCTION, NOT BY COMPARING RECORDED HASHES.**
 > Packed from a fresh blobless clone of `olumi-schemas` with **`HEAD` asserted equal to
