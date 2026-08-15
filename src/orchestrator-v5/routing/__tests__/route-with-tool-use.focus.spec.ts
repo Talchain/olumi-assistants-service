@@ -32,6 +32,7 @@ import { resolveTurnSelection, type TurnSelection } from '../../build-turn-conte
 import { assembleContextPack, type ContextPack } from '../../context/context-pack-assembler.js';
 import { buildUserMessage, FOCUS_INSTRUCTION } from '../route-with-tool-use.js';
 import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
+import { ANALYSIS_NOT_CURRENT_NOTE } from '../../format/format-analysis-for-context.js';
 
 const USER_MESSAGE = 'why does this matter?';
 const FACTOR_ID = 'factor_salary';
@@ -140,7 +141,34 @@ const PRISTINE_GOLDEN_SHA256 =
 
 describe('buildUserMessage — a turn with no selection is BYTE-IDENTICAL to pre-hop-4', () => {
   it('matches the sha256 golden captured at the pre-change tip', () => {
-    const msg = buildUserMessage(packWith(undefined), USER_MESSAGE);
+    // ⚠ THE GOLDEN IS NOT RE-CAPTURED — see this constant's docblock, which
+    // warns that pasting a value from the patched tree converts the guarantee
+    // into a tautology. Context/Memory V5 defect 2 added ONE key to the
+    // display-safe analysis projection (`analysis_not_current_note`), and this
+    // fixture triggers it because `packWith(undefined)` declares no currency
+    // verdict — a real production state (no canonical analysis state means no
+    // `coaching_context`) in which qualifying the figures is exactly the
+    // intended fail-closed behaviour.
+    //
+    // So the delta is SUBTRACTED STRUCTURALLY — the key is removed from the
+    // pack before serialisation, not spliced out of the rendered text, because
+    // JSON text surgery has to get indentation and trailing commas right and
+    // silently fails when it does not (it did, twice). Removing the key and
+    // re-serialising is exact by construction.
+    //
+    // This keeps hop-4's byte-identity evidence intact AND proves the new key
+    // is the whole delta: if any other byte moves, this REDs as it always has.
+    const pack = packWith(undefined);
+    const analysis = pack.display_analysis as Record<string, unknown> | null;
+    expect(
+      analysis?.analysis_not_current_note,
+      'precondition: this fixture declares no currency, so the fail-closed disclosure must be present — ' +
+        'if it is absent the subtraction is vacuous and this golden proves nothing',
+    ).toBeTypeOf('string');
+    delete analysis?.analysis_not_current_note;
+
+    const msg = buildUserMessage(pack, USER_MESSAGE);
+    expect(msg).not.toContain(ANALYSIS_NOT_CURRENT_NOTE);
     expect(createHash('sha256').update(msg).digest('hex')).toBe(PRISTINE_GOLDEN_SHA256);
   });
 

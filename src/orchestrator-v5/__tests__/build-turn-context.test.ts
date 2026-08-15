@@ -66,6 +66,14 @@ describe('buildTurnContext', () => {
       newest_analysis_fact: _naf,
       newest_analysis_fact_read_ok: _nafok,
       prior_facts: _pf,
+      // Context/Memory V5 defect 4 — same class as `newest_analysis_fact_read_ok`
+      // directly above: CEE-internal read state, never on the wire. It tells
+      // `deriveAnalysisFreshness` whether an empty `prior_facts` means "no
+      // analysis has been run" or "the store could not be read". Stripped here
+      // for the same reason its sibling is: `TurnContextSchema` describes the
+      // wire-facing subset and is `.strict()`, so this key is deliberately not
+      // added to it.
+      prior_facts_read_ok: _pfrok,
       prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,
       persistedGraph: _pg,
