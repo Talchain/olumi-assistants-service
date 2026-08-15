@@ -16,7 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 import {
   AUXILIARY_MODEL_DEFAULTS,
-  EXECUTABLE_DEDICATED_RUNTIME_TASKS,
+  EXECUTABLE_RUNTIME_TASKS,
   RUNTIME_AI_TASK_AUTHORITY,
   TASK_MODEL_DEFAULTS,
 } from "../../src/config/model-routing.js";
@@ -98,7 +98,7 @@ describe("GET /admin/models/routing", () => {
     }
   });
 
-  it("derives every executable dedicated runtime chain into the report", async () => {
+  it("derives every executable runtime path into the report", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/admin/models/routing",
@@ -108,18 +108,16 @@ describe("GET /admin/models/routing", () => {
     const body = res.json();
     const returnedTasks = body.tasks.map((row: { task: string }) => row.task);
 
-    expect(EXECUTABLE_DEDICATED_RUNTIME_TASKS).toEqual(
+    expect(EXECUTABLE_RUNTIME_TASKS).toEqual(
       Object.entries(RUNTIME_AI_TASK_AUTHORITY)
-        .filter(
-          ([, authority]) =>
-            authority.hasExecutablePath &&
-            authority.modelAuthority.startsWith("dedicated_"),
-        )
+        .filter(([, authority]) => authority.hasExecutablePath)
         .map(([task]) => task),
     );
-    for (const task of EXECUTABLE_DEDICATED_RUNTIME_TASKS) {
+    for (const task of EXECUTABLE_RUNTIME_TASKS) {
       expect(returnedTasks).toContain(task);
     }
+    expect(returnedTasks).toContain("clarify_brief");
+    expect(returnedTasks).toContain("explain_diff");
   });
 
   it("reports exact dedicated Anthropic default chains and gated availability", async () => {
@@ -180,7 +178,12 @@ describe("GET /admin/models/routing", () => {
       expect(entry).toHaveProperty("source_key");
       expect(entry).toHaveProperty("runtime_availability");
       expect(entry).toHaveProperty("has_executable_path");
-      expect(["env_override", "default"]).toContain(entry.source);
+      expect([
+        "env_override",
+        "default",
+        "global_model",
+        "provider_default",
+      ]).toContain(entry.source);
       expect(typeof entry.model).toBe("string");
       expect(entry.model.length).toBeGreaterThan(0);
     }

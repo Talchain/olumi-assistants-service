@@ -147,11 +147,11 @@ export function getMaxTokensFromConfig(task?: string): number | undefined {
 const DEFAULT_PROVIDER: 'anthropic' | 'openai' | 'fixtures' = 'openai';
 const DEFAULT_MODEL = 'auto'; // Let each adapter choose its default
 
-const PROVIDER_DEFAULT_MODELS = {
+export const PROVIDER_DEFAULT_MODELS = Object.freeze({
   openai: 'gpt-4o-mini',
   anthropic: FALLBACK_ANTHROPIC_MODEL,
   fixtures: 'fixture-v1',
-} as const;
+} as const);
 
 function resolveProviderModel(
   provider: 'anthropic' | 'openai' | 'fixtures',

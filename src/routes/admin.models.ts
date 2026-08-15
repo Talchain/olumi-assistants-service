@@ -4,12 +4,14 @@
  * Exposes the resolved model-per-task configuration so operators can see
  * exactly which model each task will use without digging through env vars.
  *
- * Resolution order (mirrors router.ts getAdapter logic):
- *   1. CEE_MODEL_* env var override — always applied regardless of provider
- *   2. checked-in task default — always applied; provider follows the winning model
+ * Resolution order mirrors each task's actual static runtime authority:
+ *   1. CEE_MODEL_* env override, when that task has one
+ *   2. checked-in task/dedicated default, when that task has one
+ *   3. LLM_MODEL or the selected LLM_PROVIDER's adapter default for router
+ *      tasks that intentionally have no checked-in task default
  *
  * Routes:
- * - GET /admin/models/routing  - Resolved model for every live task assignment
+ * - GET /admin/models/routing  - Resolved model for every reported task authority
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -17,7 +19,7 @@ import { verifyAdminKey } from '../middleware/admin-auth.js';
 import {
   AI_TASK_LIFECYCLE,
   AUXILIARY_MODEL_DEFAULTS,
-  EXECUTABLE_DEDICATED_RUNTIME_TASKS,
+  EXECUTABLE_RUNTIME_TASKS,
   getAiTaskRuntimeAvailability,
   hasAiTaskExecutablePath,
   RUNTIME_AI_TASK_AUTHORITY,
@@ -26,6 +28,7 @@ import {
 import type {
   CeeTask,
   ExecutableDedicatedRuntimeTask,
+  ExecutableRuntimeTask,
 } from '../config/model-routing.js';
 import {
   ModelAssignmentError,
@@ -35,10 +38,22 @@ import {
   type ResolvedModelAssignment,
 } from '../config/model-assignment.js';
 import { config } from '../config/index.js';
-import { TASK_TO_CONFIG_KEY } from '../adapters/llm/router.js';
+import {
+  PROVIDER_DEFAULT_MODELS,
+  TASK_TO_CONFIG_KEY,
+} from '../adapters/llm/router.js';
 
-type ModelSource = 'env_override' | 'default';
-type ReportedModelTask = CeeTask | ExecutableDedicatedRuntimeTask;
+type ModelSource =
+  | 'env_override'
+  | 'default'
+  | 'global_model'
+  | 'provider_default';
+type ReportedModelTask = CeeTask | ExecutableRuntimeTask;
+type RouterFallbackRuntimeTask = Exclude<
+  Exclude<ExecutableRuntimeTask, CeeTask>,
+  ExecutableDedicatedRuntimeTask
+>;
+type ConfiguredProvider = keyof typeof PROVIDER_DEFAULT_MODELS;
 
 interface TaskRouting {
   task: ReportedModelTask;
@@ -61,7 +76,7 @@ interface TaskRouting {
     | 'feature_gated_default_off'
     | 'not_executable';
   source: ModelSource;
-  /** Exact env/default authority that supplied `model`. */
+  /** Exact environment, checked-in, global, or provider authority for `model`. */
   source_key: string;
 }
 
@@ -110,11 +125,37 @@ const DEDICATED_MODEL_CHAINS: Record<
   },
 };
 
+interface RouterFallbackModelChain {
+  readonly configuredModel?: () => string | undefined;
+  readonly envKey?: string;
+  readonly requiredProvider?: 'anthropic';
+}
+
+/**
+ * Exact chains for executable router paths with no TASK_MODEL_DEFAULTS row.
+ * The type is the exhaustiveness guard: a new non-default, non-dedicated
+ * runtime path must declare its real static chain here.
+ */
+const ROUTER_FALLBACK_MODEL_CHAINS: Record<
+  RouterFallbackRuntimeTask,
+  RouterFallbackModelChain
+> = {
+  clarify_brief: {
+    configuredModel: () => config.cee.models.clarification,
+    envKey: 'CEE_MODEL_CLARIFICATION',
+  },
+  explain_diff: {
+    // The fixture adapter has an implementation; real provider execution is
+    // Anthropic-only until OpenAI implements explainDiff.
+    requiredProvider: 'anthropic',
+  },
+};
+
 /**
  * Resolve the effective LLM provider from config.
  * Returns 'openai' as the hard-coded default (matches router.ts DEFAULT_PROVIDER).
  */
-function resolveConfiguredProvider(): string {
+function resolveConfiguredProvider(): ConfiguredProvider {
   try {
     return config.llm.provider || 'openai';
   } catch {
@@ -139,11 +180,12 @@ function routingFromAssignment(
   source: ModelSource,
   sourceKey: string,
   requiredProvider?: 'anthropic',
+  fixtureExecution = false,
 ): TaskRouting {
   let assignment: ResolvedModelAssignment | undefined;
   try {
-    assignment = resolveModelAssignment(model);
-    if (requiredProvider) {
+    assignment = resolveModelAssignment(model, { fixtures: fixtureExecution });
+    if (requiredProvider && assignment.provider !== 'fixtures') {
       assignment = requireModelAssignmentProvider(
         assignment,
         requiredProvider,
@@ -187,8 +229,69 @@ function routingFromAssignment(
 function isExecutableDedicatedTask(
   task: ReportedModelTask,
 ): task is ExecutableDedicatedRuntimeTask {
-  return EXECUTABLE_DEDICATED_RUNTIME_TASKS.includes(
-    task as ExecutableDedicatedRuntimeTask,
+  return task in DEDICATED_MODEL_CHAINS;
+}
+
+function isRouterFallbackTask(
+  task: ReportedModelTask,
+): task is RouterFallbackRuntimeTask {
+  return task in ROUTER_FALLBACK_MODEL_CHAINS;
+}
+
+function isTaskWithCheckedInDefault(
+  task: ReportedModelTask,
+): task is CeeTask {
+  return task in TASK_MODEL_DEFAULTS;
+}
+
+function resolveRouterFallbackRouting(
+  task: RouterFallbackRuntimeTask,
+): TaskRouting {
+  const chain = ROUTER_FALLBACK_MODEL_CHAINS[task];
+  const configuredProvider = resolveConfiguredProvider();
+  let configuredModel: string | undefined;
+  if (chain.configuredModel) {
+    try {
+      configuredModel = chain.configuredModel();
+    } catch {
+      configuredModel = undefined;
+    }
+  }
+
+  // This matches router getModelFromConfig(): empty is unset, while non-empty
+  // whitespace reaches the shared resolver and fails as MODEL_ID_EMPTY.
+  if (configuredModel && chain.envKey) {
+    return routingFromAssignment(
+      task,
+      configuredModel,
+      'env_override',
+      chain.envKey,
+      chain.requiredProvider,
+      configuredProvider === 'fixtures',
+    );
+  }
+
+  let globalModel: string | undefined;
+  try {
+    globalModel = config.llm.model;
+  } catch {
+    globalModel = undefined;
+  }
+
+  const explicitGlobalModel =
+    globalModel && globalModel !== 'auto' ? globalModel : undefined;
+  const model =
+    explicitGlobalModel ?? PROVIDER_DEFAULT_MODELS[configuredProvider];
+
+  return routingFromAssignment(
+    task,
+    model,
+    explicitGlobalModel ? 'global_model' : 'provider_default',
+    explicitGlobalModel
+      ? 'LLM_MODEL'
+      : `PROVIDER_DEFAULT_MODELS.${configuredProvider}`,
+    chain.requiredProvider,
+    configuredProvider === 'fixtures',
   );
 }
 
@@ -221,6 +324,14 @@ export function resolveTaskRouting(task: ReportedModelTask): TaskRouting {
       chain.defaultKey,
       chain.requiredProvider,
     );
+  }
+
+  if (isRouterFallbackTask(task)) {
+    return resolveRouterFallbackRouting(task);
+  }
+
+  if (!isTaskWithCheckedInDefault(task)) {
+    throw new Error(`No static model-routing authority for task '${task}'.`);
   }
 
   // Consume the router's table directly. The former local copy omitted the
@@ -274,7 +385,7 @@ export async function adminModelRoutes(app: FastifyInstance): Promise<void> {
     const configuredProvider = resolveConfiguredProvider();
     const tasks = [...new Set<ReportedModelTask>([
       ...(Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[]),
-      ...EXECUTABLE_DEDICATED_RUNTIME_TASKS,
+      ...EXECUTABLE_RUNTIME_TASKS,
     ])];
     const taskList = tasks.map((task) => resolveTaskRouting(task));
 

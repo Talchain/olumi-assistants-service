@@ -648,6 +648,25 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
   Record<RuntimeAiTaskId, RuntimeAiTaskAuthority>
 >;
 
+export type ExecutableRuntimeTask = {
+  [Task in RuntimeAiTaskId]:
+    (typeof RUNTIME_AI_TASK_AUTHORITY)[Task]['hasExecutablePath'] extends true
+      ? Task
+      : never;
+}[RuntimeAiTaskId];
+
+/**
+ * Reporting and governance consumers derive the complete executable-path set
+ * from runtime authority. Compatibility/display rows may still be reported,
+ * but they cannot displace or hide an actual adapter path.
+ */
+export const EXECUTABLE_RUNTIME_TASKS = Object.freeze(
+  (Object.keys(RUNTIME_AI_TASK_AUTHORITY) as RuntimeAiTaskId[]).filter(
+    (task): task is ExecutableRuntimeTask =>
+      RUNTIME_AI_TASK_AUTHORITY[task].hasExecutablePath,
+  ),
+);
+
 export type ExecutableDedicatedRuntimeTask = {
   [Task in RuntimeAiTaskId]:
     (typeof RUNTIME_AI_TASK_AUTHORITY)[Task]['hasExecutablePath'] extends true
