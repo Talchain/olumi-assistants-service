@@ -38,6 +38,7 @@ import { TelemetryEvents } from '../../../utils/telemetry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { assembleContextPack, CONTEXT_PACK_RECENT_TURNS_CAP } from '../context-pack-assembler.js';
 import { applyContextBudgetToAssemblyInputs } from '../context-budget-enforcement.js';
+import { CONTEXT_POLICY } from '../context-policy.js';
 import type { DisplaySafeGraph } from '../../format/format-graph-for-context.js';
 import {
   analysisSummaryFixture,
@@ -240,9 +241,20 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(budgetCuts).toHaveLength(0);
   });
 
-  it('O-2 scope guard: the verbatim conversation window is untouched by an over-budget graph', () => {
-    // Feed cap+2 turns so the window is bounded by the memory cap, not by graph
-    // budget pressure (derive-don't-mirror: assertions read the constant).
+  it('O-2 scope guard: the O-3 graph/analysis seam never cuts the conversation window', () => {
+    // ⚠ RETARGETED 2026-08-15 (Context/Memory V5 defect 3), and the reason is
+    // the whole point of the guard. This test used to assert that the window
+    // still held CONTEXT_PACK_RECENT_TURNS_CAP turns after an over-budget
+    // graph. That assertion is no longer REACHABLE and could not be preserved
+    // by any fixture: the O-3 valve only fires above ~120,000 chars of graph,
+    // and any pack carrying that much graph is >2x the 55,000-char WHOLE-PACK
+    // ceiling, which `enforceContextPackCeiling` now enforces by trimming the
+    // conversation to its floor. The two conditions are mutually exclusive.
+    //
+    // So the guard is re-bound to the claim it always NAMED — the O-3 seam
+    // does not touch the window — by ATTRIBUTING every cut to its site, which
+    // is a stronger check than the count it replaces (a count passes for any
+    // reason, including nothing having run at all).
     const available = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
@@ -252,16 +264,69 @@ describe('context budget enforcement at assembly (O-3)', () => {
       compactedConstraints: null,
       analysis: null,
     });
-    expect(pack.conversation.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
-    // The two window counts are what this guard is about — assert them by
-    // name rather than by whole-object equality, so the additive disclosure
-    // string (`notice`, emitted whenever turns exist that the pack does not
-    // show) does not read as a budget cut. This call supplies no
-    // `priorTurnsTotal`, so the numbers stay the window's own length.
-    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+
+    // The O-3 seam ran (positive control — an absence claim over a seam that
+    // never executed is vacuous) and its disclosure names ONLY graph/analysis.
+    const o3Sections = (pack.context_budget?.truncations ?? []).map((t) => t.section);
+    expect(o3Sections).toContain('graph');
+    expect(o3Sections).not.toContain('conversation');
+    const o3Cuts = emitSpy.mock.calls
+      .filter(([event]) => event === TelemetryEvents.V5ContextTruncation)
+      .map(([, payload]) => payload as Record<string, unknown>)
+      .filter(
+        (p) => p.site === 'context-budget-enforcement.applyContextBudgetToAssemblyInputs',
+      );
+    expect(o3Cuts.length).toBeGreaterThan(0);
+    for (const cut of o3Cuts) expect(cut.section).not.toBe('conversation');
+
+    // The window IS shorter here — by the OTHER seam, and disclosed. Bind that
+    // to the ceiling site by identity so a future regression cannot smuggle a
+    // conversation cut into the O-3 seam and pass this test.
+    const ceilingCuts = emitSpy.mock.calls
+      .filter(([event]) => event === TelemetryEvents.V5ContextTruncation)
+      .map(([, payload]) => payload as Record<string, unknown>)
+      .filter((p) => p.site === 'context-pack-assembler.enforceContextPackCeiling');
+    expect(ceilingCuts).toHaveLength(1);
+    expect(ceilingCuts[0].section).toBe('conversation');
+    expect(ceilingCuts[0].floor_reached).toBe(true);
+
+    // …and the conversation's own TRUTH is untouched by either seam: these two
+    // count the conversation, not the window. This call supplies no
+    // `priorTurnsTotal`, so the numbers stay the read window's own length.
     expect(pack.conversation.window?.available).toBe(available);
-    expect(pack.conversation.window?.summarised).toBeUndefined();
     expect(pack.conversation.turn_count).toBe(available);
+    expect(pack.conversation.window?.summarised).toBeUndefined();
+    expect(pack.conversation.window?.shown).toBe(pack.conversation.recent_turns.length);
+    expect(pack.conversation.window?.notice).toBeTypeOf('string');
+  });
+
+  it('the whole-pack ceiling pass is byte-neutral on an under-budget pack', () => {
+    // Context/Memory V5 defect 3 — the same subtraction idiom as the positive
+    // control above, asserting the SAME base-commit golden. The ceiling pass
+    // must add ZERO keys, cut nothing, and emit nothing when it does not fire;
+    // the golden is what proves "zero keys" rather than "no key I thought of".
+    const pack = assembleUnderBudgetPack();
+
+    // Precondition (else this asserts byte-identity over a case the pass could
+    // never have touched for a different reason than the one claimed).
+    expect(
+      JSON.stringify(pack).length,
+      'precondition: this fixture must be UNDER the ceiling for the no-op claim to be about the ceiling',
+    ).toBeLessThanOrEqual(CONTEXT_POLICY.coach_converse.total_char_budget!);
+
+    expect(pack.conversation.recent_turns).toHaveLength(2);
+    const displayAnalysis = pack.display_analysis as Record<string, unknown> | null;
+    expect(displayAnalysis?.analysis_not_current_note).toBeTypeOf('string');
+    delete displayAnalysis?.analysis_not_current_note;
+    expect(sha256(JSON.stringify(pack))).toBe(UNDER_BUDGET_GOLDEN_SHA256);
+
+    const ceilingCuts = emitSpy.mock.calls.filter(
+      ([event, payload]) =>
+        event === TelemetryEvents.V5ContextTruncation &&
+        (payload as Record<string, unknown>).site ===
+          'context-pack-assembler.enforceContextPackCeiling',
+    );
+    expect(ceilingCuts).toHaveLength(0);
   });
 
   it('helper is a no-op returning the same references when both inputs are null', () => {

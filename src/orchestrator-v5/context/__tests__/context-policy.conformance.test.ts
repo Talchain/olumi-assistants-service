@@ -37,6 +37,7 @@ import {
   POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
   POLICY_EDIT_GRAPH_JSON_CAP,
   POLICY_EDIT_CONVERSATION_CAP,
+  CONTEXT_PACK_CEILING_CUT_ORDER,
   type ContextCallSite,
   type ContextPolicyTripwireLogger,
 } from '../context-policy.js';
@@ -932,5 +933,38 @@ describe('budget honesty — every `enforced` section is backed by an importable
         }
       }
     }
+  });
+
+  it('no section claims `enforced_by_total` without a WHOLE-PACK ceiling AND a place in the executed cut order', () => {
+    // Context/Memory V5 defect 3. `enforced_by_total` means "this section is
+    // cut when the ROW's total is blown" — two things must therefore be true,
+    // or the claim is the same false guarantee one level up: the row must
+    // declare a total, and the section must be one the enforcement pass
+    // actually iterates (CONTEXT_PACK_CEILING_CUT_ORDER — the array, not a
+    // sentence about it).
+    for (const site of Object.keys(CONTEXT_POLICY) as ContextCallSite[]) {
+      for (const s of CONTEXT_POLICY[site].sections) {
+        if (s.enforcement !== 'enforced_by_total') continue;
+        expect(
+          CONTEXT_POLICY[site].total_char_budget,
+          `${site}.${s.name} is enforced_by_total but its row declares no total ceiling`,
+        ).not.toBeNull();
+        expect(
+          CONTEXT_PACK_CEILING_CUT_ORDER as readonly string[],
+          `${site}.${s.name} is enforced_by_total but no ceiling cutter iterates it`,
+        ).toContain(s.name);
+        expect(
+          s.cut_rank,
+          `${site}.${s.name} must declare the cut_rank it is executed at`,
+        ).toBe((CONTEXT_PACK_CEILING_CUT_ORDER as readonly string[]).indexOf(s.name));
+      }
+    }
+  });
+
+  it('POSITIVE CONTROL — at least one section exercises `enforced_by_total` (else the invariant above is vacuous)', () => {
+    const all = (Object.keys(CONTEXT_POLICY) as ContextCallSite[]).flatMap(
+      (site) => CONTEXT_POLICY[site].sections,
+    );
+    expect(all.filter((s) => s.enforcement === 'enforced_by_total').length).toBeGreaterThan(0);
   });
 });
