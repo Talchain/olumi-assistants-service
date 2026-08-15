@@ -62,8 +62,9 @@ import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/prompt-loader.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
-import { MODEL_REGISTRY } from '../config/models.js';
-import { evaluateRuntimePromptPromotion } from '../prompts/runtime-promotion-gate.js';
+import { ModelAssignmentError, resolveModelAssignment } from '../config/model-assignment.js';
+import { PromptGovernanceError } from '../prompts/stores/governed.js';
+import { PromptMutationConflictError } from '../prompts/stores/interface.js';
 import {
   verifyAdminKey,
   getActorFromRequest,
@@ -100,6 +101,30 @@ function ensureStoreHealthy(reply: FastifyReply): boolean {
     return false;
   }
   return true;
+}
+
+function sendPromptMutationConflict(
+  error: unknown,
+  reply: FastifyReply,
+): boolean {
+  if (error instanceof PromptGovernanceError) {
+    reply.status(error.statusCode).send({
+      error: error.code.toLowerCase(),
+      message: error.message,
+      ...error.details,
+    });
+    return true;
+  }
+  if (error instanceof PromptMutationConflictError) {
+    reply.status(409).send({
+      error: error.code.toLowerCase(),
+      message: error.message,
+      promptId: error.promptId,
+      action: 'Reload the prompt and retry the complete mutation.',
+    });
+    return true;
+  }
+  return false;
 }
 
 // =========================================================================
@@ -204,7 +229,7 @@ const VersionParamsSchema = z.object({
 // =========================================================================
 
 /**
- * Validate modelConfig against MODEL_REGISTRY
+ * Validate modelConfig through the same exact model authority as runtime.
  * Returns validation errors if any model IDs are invalid
  */
 function validateModelConfig(
@@ -213,19 +238,17 @@ function validateModelConfig(
   const errors: string[] = [];
   if (!modelConfig) return errors;
 
-  if (modelConfig.staging) {
-    if (!MODEL_REGISTRY[modelConfig.staging]) {
-      errors.push(`Invalid staging model: '${modelConfig.staging}'. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`);
-    } else if (!MODEL_REGISTRY[modelConfig.staging].enabled) {
-      errors.push(`Staging model '${modelConfig.staging}' is disabled`);
-    }
-  }
-
-  if (modelConfig.production) {
-    if (!MODEL_REGISTRY[modelConfig.production]) {
-      errors.push(`Invalid production model: '${modelConfig.production}'. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`);
-    } else if (!MODEL_REGISTRY[modelConfig.production].enabled) {
-      errors.push(`Production model '${modelConfig.production}' is disabled`);
+  for (const environment of ['staging', 'production'] as const) {
+    const model = modelConfig[environment];
+    if (!model) continue;
+    try {
+      resolveModelAssignment(model);
+    } catch (error) {
+      errors.push(
+        error instanceof ModelAssignmentError
+          ? `${environment} model '${model}': ${error.message}`
+          : `${environment} model '${model}' could not be validated`,
+      );
     }
   }
 
@@ -389,6 +412,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(201).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('already exists')) {
         return reply.status(409).send({
           error: 'conflict',
@@ -497,111 +521,6 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       const actor = getActorFromRequest(request);
 
-      // A PMS pointer move can change the prompt served on the very next turn
-      // without any Git diff. For tasks with a real eval pack, require the same
-      // committed, current, hash-bound evidence as the CI promotion gate BEFORE
-      // the store update. The decision is made over `beforePrompt`, so a block
-      // is atomic: neither stagingVersion nor activeVersion has moved.
-      const pointerTargets: Array<{
-        environment: 'staging' | 'production';
-        version: number;
-      }> = [];
-      if (
-        typeof body.data.stagingVersion === 'number' &&
-        body.data.stagingVersion !== beforePrompt.stagingVersion
-      ) {
-        pointerTargets.push({
-          environment: 'staging',
-          version: body.data.stagingVersion,
-        });
-      }
-      if (
-        typeof body.data.activeVersion === 'number' &&
-        body.data.activeVersion !== beforePrompt.activeVersion
-      ) {
-        pointerTargets.push({
-          environment: 'production',
-          version: body.data.activeVersion,
-        });
-      }
-      if (
-        body.data.status === 'production' &&
-        beforePrompt.status !== 'production'
-      ) {
-        pointerTargets.push({
-          environment: 'production',
-          version: body.data.activeVersion ?? beforePrompt.activeVersion,
-        });
-      }
-
-      const seenTargets = new Set<string>();
-      for (const target of pointerTargets) {
-        const targetKey = `${target.environment}:${target.version}`;
-        if (seenTargets.has(targetKey)) continue;
-        seenTargets.add(targetKey);
-
-        const version = beforePrompt.versions.find(
-          (candidate) => candidate.version === target.version,
-        );
-        if (!version) {
-          return reply.status(400).send({
-            error: 'version_not_found',
-            message: `Version ${target.version} does not exist`,
-            promptId: beforePrompt.id,
-            taskId: beforePrompt.taskId,
-            target_environment: target.environment,
-          });
-        }
-
-        const promotion = evaluateRuntimePromptPromotion(
-          beforePrompt.taskId,
-          version.content,
-        );
-        if (promotion.decision === 'BLOCK') {
-          const payload = {
-            action: 'promotion_eval_blocked',
-            promptId: beforePrompt.id,
-            taskId: beforePrompt.taskId,
-            version: target.version,
-            target_environment: target.environment,
-            prompt_hash: promotion.promptSha16,
-            block_kind: promotion.blockKind,
-            reason: promotion.reason,
-            actor,
-          };
-          emit(AdminTelemetryEvents.AdminPromptAccess, payload);
-          log.warn(payload, 'Prompt pointer update blocked by evaluation gate');
-          return reply.status(409).send({
-            error: 'prompt_promotion_eval_required',
-            message:
-              `Cannot serve ${beforePrompt.taskId} version ${target.version} in ` +
-              `${target.environment}: ${promotion.reason}`,
-            promptId: beforePrompt.id,
-            taskId: beforePrompt.taskId,
-            version: target.version,
-            target_environment: target.environment,
-            prompt_hash: promotion.promptSha16,
-            block_kind: promotion.blockKind,
-            reason: promotion.reason,
-          });
-        }
-        if (promotion.decision === 'GATED_PASS') {
-          log.info(
-            {
-              event: 'prompt.promotion.eval_gate_pass',
-              promptId: beforePrompt.id,
-              taskId: beforePrompt.taskId,
-              version: target.version,
-              target_environment: target.environment,
-              prompt_hash: promotion.promptSha16,
-              report_generated_at: promotion.report.generatedAt,
-              actor,
-            },
-            'Prompt pointer update cleared evaluation gate',
-          );
-        }
-      }
-
       // Check for approval requirement when promoting to production
       const isPromotion = body.data.status === 'production' && beforePrompt.status !== 'production';
       if (isPromotion) {
@@ -689,6 +608,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(200).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('not found')) {
         return reply.status(404).send({
           error: 'not_found',
@@ -746,6 +666,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(204).send();
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('not found')) {
         return reply.status(404).send({
           error: 'not_found',
@@ -808,6 +729,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(201).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('not found')) {
         return reply.status(404).send({
           error: 'not_found',
@@ -889,6 +811,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(200).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       // Emit rollback failure telemetry
       emit(TelemetryEvents.PromptRollbackFailed, {
         promptId: params.data.id,
@@ -1241,6 +1164,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         message: 'Version approved successfully. You can now promote to production.',
       });
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       log.error({ error, promptId: params.data.id }, 'Prompt approval failed');
 
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1358,6 +1282,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         message: `Updated ${body.data.testCases.length} test cases for version ${body.data.version}`,
       });
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       if (errorMessage.includes('not found')) {

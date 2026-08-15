@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { resolveExtractionAssignment } from '../../src/adapters/llm/extraction.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  callLLMForExtraction,
+  resolveExtractionAssignment,
+} from '../../src/adapters/llm/extraction.js';
 import { AUXILIARY_MODEL_DEFAULTS } from '../../src/config/model-routing.js';
+import { _resetConfigCache } from '../../src/config/index.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  _resetConfigCache();
+});
 
 describe('extraction model authority', () => {
   it('lands on the checked-in GPT-4.1 assignment and its provider when env is absent', () => {
@@ -33,6 +42,17 @@ describe('extraction model authority', () => {
       provider: 'openai',
       source: 'per_call',
     });
+  });
+
+  it('rejects an unknown explicit override instead of silently serving a fallback', async () => {
+    vi.stubEnv('LLM_PROVIDER', 'openai');
+    _resetConfigCache();
+
+    await expect(
+      callLLMForExtraction('system', 'user', {
+        modelOverride: 'gpt-looking-but-unregistered',
+      }),
+    ).rejects.toMatchObject({ code: 'MODEL_NOT_REGISTERED' });
   });
 
   it('keeps the fixture adapter hermetic while preserving resolved-model evidence', () => {

@@ -18,7 +18,11 @@
 
 import { log } from '../utils/telemetry.js';
 import { config } from './index.js';
-import { TASK_MODEL_DEFAULTS, type CeeTask } from './model-routing.js';
+import {
+  AI_TASK_LIFECYCLE,
+  TASK_MODEL_DEFAULTS,
+  type CeeTask,
+} from './model-routing.js';
 
 type ModelSource = 'env_task_tier' | 'env_legacy_tier' | 'code_default';
 
@@ -85,11 +89,11 @@ function resolveTaskModel(task: CeeTask): { model: string; source: ModelSource }
 
 // Derived from TASK_MODEL_DEFAULTS so new tasks are automatically included.
 // TASK_MODEL_DEFAULTS is Record<CeeTask, string>, so Object.keys is exhaustive.
-// `routing` is excluded — its TASK_MODEL_DEFAULTS entry is display-only
-// (admin UI parity); the v5 routing call site controls its own model
-// selection independently and does not consume task_resolved logs.
+// Display-only, deterministic/external, gated-off and inert-compatibility rows
+// stay queryable through the lifecycle map but are not logged as resolved live
+// calls. This prevents repair_graph/routing/aliases from looking executable.
 const ALL_CEE_TASKS = (Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[]).filter(
-  (t) => t !== 'routing',
+  (task) => AI_TASK_LIFECYCLE[task].executable,
 );
 
 /**

@@ -199,32 +199,33 @@ describe("PATCH /admin/prompts/:id", () => {
   });
 
   it("atomically blocks unevaluated bytes for a gated task while allowing the exact evaluated version", async () => {
-    const id = "runtime-gate-decision-review";
+    const id = "decision_review_default";
     const canonical = readFileSync(
       join(process.cwd(), "Prompts", "canonical", "decision_review.txt"),
       "utf-8",
     );
 
-    const created = await app.inject({
+    const evaluatedVersion = await app.inject({
       method: "POST",
-      url: "/admin/prompts",
+      url: `/admin/prompts/${id}/versions`,
       headers: ADMIN_HEADERS,
       payload: {
-        id,
-        name: "Runtime gate decision review",
-        taskId: "decision_review",
         content: canonical,
         createdBy: "runtime-gate-test",
+        changeNote: "exact evaluated candidate",
       },
     });
-    expect([201, 409]).toContain(created.statusCode);
+    expect(evaluatedVersion.statusCode).toBe(201);
+    const evaluatedNumber = Math.max(
+      ...evaluatedVersion.json().versions.map((version: { version: number }) => version.version),
+    );
 
     // Exact, hash-matched v15 bytes clear the real committed report.
     const evaluated = await app.inject({
       method: "PATCH",
       url: `/admin/prompts/${id}`,
       headers: ADMIN_HEADERS,
-      payload: { stagingVersion: 1 },
+      payload: { stagingVersion: evaluatedNumber },
     });
     expect(evaluated.statusCode).toBe(200);
 
@@ -239,22 +240,32 @@ describe("PATCH /admin/prompts/:id", () => {
       },
     });
     expect(version.statusCode).toBe(201);
+    const mutantNumber = Math.max(
+      ...version.json().versions.map((entry: { version: number }) => entry.version),
+    );
+
+    const beforeBlocked = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(beforeBlocked.statusCode).toBe(200);
+    const beforeBlockedState = beforeBlocked.json();
 
     // One request tries to move BOTH live pointers. A reject must move neither.
     const blocked = await app.inject({
       method: "PATCH",
       url: `/admin/prompts/${id}`,
       headers: ADMIN_HEADERS,
-      payload: { stagingVersion: 2, activeVersion: 2, status: "production" },
+      payload: { stagingVersion: mutantNumber, activeVersion: mutantNumber, status: "production" },
     });
     expect(blocked.statusCode).toBe(409);
     expect(blocked.json()).toMatchObject({
-      error: "prompt_promotion_eval_required",
+      error: "prompt_promotion_evidence_required",
       taskId: "decision_review",
-      version: 2,
-      block_kind: "HASH_MISMATCH",
+      blockKind: "HASH_MISMATCH",
     });
-    expect(blocked.json().reason).toContain("do not match target prompt hash");
+    expect(blocked.json().message).toContain("do not match target prompt hash");
 
     const after = await app.inject({
       method: "GET",
@@ -263,32 +274,33 @@ describe("PATCH /admin/prompts/:id", () => {
     });
     expect(after.statusCode).toBe(200);
     expect(after.json()).toMatchObject({
-      activeVersion: 1,
-      stagingVersion: 1,
-      status: "draft",
+      activeVersion: beforeBlockedState.activeVersion,
+      stagingVersion: beforeBlockedState.stagingVersion,
+      status: beforeBlockedState.status,
     });
   });
 
   it("keeps reads available when current evidence is stale and only rejects the pointer mutation", async () => {
-    const id = "runtime-gate-stale-evidence";
+    const id = "decision_review_default";
     const canonical = readFileSync(
       join(process.cwd(), "Prompts", "canonical", "decision_review.txt"),
       "utf-8",
     );
 
-    const created = await app.inject({
+    const version = await app.inject({
       method: "POST",
-      url: "/admin/prompts",
+      url: `/admin/prompts/${id}/versions`,
       headers: ADMIN_HEADERS,
       payload: {
-        id,
-        name: "Runtime stale evidence read availability",
-        taskId: "decision_review",
         content: canonical,
         createdBy: "runtime-gate-test",
+        changeNote: "evaluated candidate for stale-evidence mutant",
       },
     });
-    expect([201, 409]).toContain(created.statusCode);
+    expect(version.statusCode).toBe(201);
+    const evaluatedNumber = Math.max(
+      ...version.json().versions.map((entry: { version: number }) => entry.version),
+    );
 
     const beforeRead = await app.inject({
       method: "GET",
@@ -305,12 +317,12 @@ describe("PATCH /admin/prompts/:id", () => {
         method: "PATCH",
         url: `/admin/prompts/${id}`,
         headers: ADMIN_HEADERS,
-        payload: { stagingVersion: 1 },
+        payload: { activeVersion: evaluatedNumber },
       });
       expect(blocked.statusCode).toBe(409);
       expect(blocked.json()).toMatchObject({
-        error: "prompt_promotion_eval_required",
-        block_kind: "EXPIRED",
+        error: "prompt_promotion_evidence_required",
+        blockKind: "EXPIRED",
       });
     } finally {
       vi.useRealTimers();
@@ -332,20 +344,7 @@ describe("PATCH /admin/prompts/:id", () => {
   });
 
   it("does not gate a task that has no real eval pack", async () => {
-    const id = "runtime-gate-ungated-draft";
-    const created = await app.inject({
-      method: "POST",
-      url: "/admin/prompts",
-      headers: ADMIN_HEADERS,
-      payload: {
-        id,
-        name: "Ungated draft prompt",
-        taskId: "draft_graph",
-        content: "Initial draft prompt with enough content for validation.",
-        createdBy: "runtime-gate-test",
-      },
-    });
-    expect([201, 409]).toContain(created.statusCode);
+    const id = "draft_graph_default";
 
     const version = await app.inject({
       method: "POST",
@@ -357,15 +356,18 @@ describe("PATCH /admin/prompts/:id", () => {
       },
     });
     expect(version.statusCode).toBe(201);
+    const versionNumber = Math.max(
+      ...version.json().versions.map((entry: { version: number }) => entry.version),
+    );
 
     const updated = await app.inject({
       method: "PATCH",
       url: `/admin/prompts/${id}`,
       headers: ADMIN_HEADERS,
-      payload: { stagingVersion: 2 },
+      payload: { stagingVersion: versionNumber },
     });
     expect(updated.statusCode).toBe(200);
-    expect(updated.json()).toMatchObject({ stagingVersion: 2 });
+    expect(updated.json()).toMatchObject({ stagingVersion: versionNumber });
   });
 });
 

@@ -45,10 +45,10 @@ describe("LLM Router", () => {
 
     it("respects LLM_MODEL env var for model selection", () => {
       process.env.LLM_PROVIDER = "anthropic";
-      process.env.LLM_MODEL = "claude-3-opus-20240229";
+      process.env.LLM_MODEL = "claude-opus-4-8";
       const adapter = getAdapter();
 
-      expect(adapter.model).toBe("claude-3-opus-20240229");
+      expect(adapter.model).toBe("claude-opus-4-8");
     });
 
     it("uses default model when LLM_MODEL is not set", () => {

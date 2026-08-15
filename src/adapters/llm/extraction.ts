@@ -11,7 +11,11 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
-import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import { isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+} from "../../config/model-assignment.js";
 import { AUXILIARY_MODEL_DEFAULTS } from "../../config/model-routing.js";
 import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 
@@ -75,12 +79,12 @@ export function resolveExtractionAssignment(
     : configuredExtractionModel
       ? "env_var"
       : "task_default";
-  if (configuredProvider === "fixtures") {
-    return { model, provider: "fixtures", source };
-  }
+  const assignment = resolveModelAssignment(model, {
+    fixtures: configuredProvider === "fixtures",
+  });
   return {
-    model,
-    provider: getModelProvider(model) ?? configuredProvider,
+    model: assignment.model,
+    provider: assignment.provider,
     source,
   };
 }
@@ -415,22 +419,19 @@ export async function callLLMForExtraction(
   const startTime = Date.now();
   const abortController = new AbortController();
 
-  // Validate and apply model override if specified
-  let effectiveModelOverride = options.modelOverride;
+  // Validate an explicit override before any provider call. Unknown, disabled
+  // or blocked ids fail deliberately; they never fall through to another model.
+  const effectiveModelOverride = options.modelOverride;
   if (effectiveModelOverride && provider !== "fixtures") {
-    // Validate model override against blocklist
+    resolveModelAssignment(effectiveModelOverride);
     const blockedModels = getClientBlockedModels();
     if (!isModelClientAllowed(effectiveModelOverride, blockedModels)) {
       const reason = getModelBlockReason(effectiveModelOverride, blockedModels);
-      log.warn(
-        {
-          event: "cee.extraction.model_override_rejected",
-          model_override: effectiveModelOverride,
-          reason,
-        },
-        "Model override rejected for extraction - using default"
+      throw new ModelAssignmentError(
+        'MODEL_CLIENT_BLOCKED',
+        effectiveModelOverride,
+        reason ?? `Model '${effectiveModelOverride}' is blocked for client use.`,
       );
-      effectiveModelOverride = undefined;
     }
   }
 

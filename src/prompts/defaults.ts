@@ -10,7 +10,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve as pathResolve } from 'node:path';
-import { registerDefaultPrompt } from './loader.js';
+import { registerDefaultPrompt } from './default-registry.js';
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from '../config/graphCaps.js';
 import { getDraftGraphPromptV8, DRAFT_GRAPH_PROMPT_V8, GRAPH_OUTPUT_SCHEMA_V8, OPENAI_STRUCTURED_CONFIG_V8 } from './defaults-v8.js';
 import { getDraftGraphPromptV12, DRAFT_GRAPH_PROMPT_V12 } from './defaults-v12.js';

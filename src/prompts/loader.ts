@@ -19,6 +19,9 @@ import {
   type TrackedKey,
 } from './tracked.js';
 import type { FallbackReason } from './resolution-policy.js';
+import { getRegisteredDefaultPrompt } from './default-registry.js';
+
+export { getDefaultPrompts, registerDefaultPrompt } from './default-registry.js';
 
 /** Source of a `loadPrompt()` call. Lets dashboards filter probe noise. */
 export type PromptResolveTrigger =
@@ -41,23 +44,6 @@ const LoaderTelemetryEvents = {
   PromptLoadedFromDefault: 'prompt.loader.default',
   PromptLoadError: 'prompt.loader.error',
 } as const;
-
-/**
- * Default prompts registry (hardcoded fallbacks)
- * These are used when the prompt management system is disabled
- * or no managed prompt is found for a task.
- */
-const DEFAULT_PROMPTS: Partial<Record<CeeTaskId, string>> = {
-  // Defaults will be populated during migration
-};
-
-/**
- * Register a default prompt for a task
- * Called during module initialization to register hardcoded prompts
- */
-export function registerDefaultPrompt(taskId: CeeTaskId, content: string): void {
-  DEFAULT_PROMPTS[taskId] = content;
-}
 
 /**
  * Options for loading a prompt
@@ -289,7 +275,7 @@ function loadDefaultPrompt(
   cache?: 'hit' | 'miss',
   reason: FallbackReason = 'none'
 ): LoadedPrompt {
-  const defaultContent = DEFAULT_PROMPTS[taskId];
+  const defaultContent = getRegisteredDefaultPrompt(taskId);
 
   if (!defaultContent) {
     throw new Error(`No default prompt registered for task: ${taskId}`);
@@ -330,7 +316,7 @@ export function loadPromptSync(
   taskId: CeeTaskId,
   variables: Record<string, string | number> = {}
 ): string {
-  const defaultContent = DEFAULT_PROMPTS[taskId];
+  const defaultContent = getRegisteredDefaultPrompt(taskId);
 
   if (!defaultContent) {
     throw new Error(`No default prompt registered for task: ${taskId}`);
@@ -354,11 +340,4 @@ export async function hasManagedPrompt(taskId: CeeTaskId): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Get all registered default prompts (for migration tooling)
- */
-export function getDefaultPrompts(): Partial<Record<CeeTaskId, string>> {
-  return { ...DEFAULT_PROMPTS };
 }

@@ -19,7 +19,6 @@ import {
 import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
-import { getModelProvider } from "../../../config/models.js";
 import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
 import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
 import { config, shouldUseStagingPrompts } from "../../../config/index.js";
@@ -243,7 +242,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   // with honest copy rather than pretend. The live DEFAULT draft model is Claude
   // (model-routing.ts), so this NEVER fires on the default journey — only on a
   // non-Anthropic override combined with an attachment.
-  if (draftAttachment && getModelProvider(draftAdapter.model) !== "anthropic") {
+  if (draftAttachment && draftResolution.provider !== "anthropic") {
     log.warn(
       {
         event: "cee.draft.attachment_model_incompatible",

@@ -6,6 +6,8 @@
  * to make intelligent routing decisions.
  */
 
+import { EXPLICIT_MODEL_ALIASES } from './model-aliases.js';
+
 export type ModelProvider = "openai" | "anthropic";
 export type ModelTier = "fast" | "quality" | "premium";
 
@@ -179,6 +181,7 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     qualityScore: 0.82,
     description: "GPT-5 Mini - fast generation, no reasoning",
     reasoning: false,
+    rejectsSamplingParams: true,
   },
   "gpt-5.2": {
     id: "gpt-5.2",
@@ -457,9 +460,10 @@ export function isModelEnabled(modelId: string): boolean {
  *
  * `label` names the call site (e.g. "task_default:orchestrator",
  * "rolling_summary_default") so a boot ERROR points at the exact drifted locus.
- * Returns fail-loud error strings — empty ONLY when `modelId` is a registered
- * AND enabled id. The check reads the registry directly, so it cannot silently
- * agree with a stale mirror (CLAUDE.md trap-12). Used batched at startup via
+ * Returns fail-loud error strings — empty ONLY when `modelId` is an enabled
+ * registry id or an explicit alias to one. The check reads the shared alias and
+ * registry authorities, so it cannot silently agree with a stale heuristic.
+ * Used batched at startup via
  * validateModelsRegistered so an unregistered/disabled model id ANYWHERE (a
  * checked-in default OR a router-bypass default) surfaces at boot rather than as
  * a 400/500 at the first request that touches that path.
@@ -477,58 +481,21 @@ export function validateModelRegistered(
     );
     return errors;
   }
-  // ⚠ A3 (review, 2026-07-31) — AN OPERATOR OVERRIDE GETS DIFFERENT, TRUE COPY.
-  //
-  // The checked-in-default wording below says "Requests routed to it would fail
-  // at the adapter". For an operator-supplied CEE_MODEL_* value that sentence is
-  // FALSE, and the live estate is the proof: `gpt-4.1` is unregistered and has
-  // been serving `decision_review` on staging without incident. Complete
-  // manifest behind that claim, scope `rg -a` over `src/` excluding `__tests__`:
-  // `isKnownModel` and `isModelEnabled` have exactly ONE caller each — this
-  // function — and `MODEL_REGISTRY` / `isKnownModel` / `isModelEnabled` return
-  // ZERO hits in `src/adapters/`. Registry membership is consulted at BOOT ONLY,
-  // by this guard. No adapter checks it.
-  //
-  // Printing a false failure claim three times per boot is how an alarm gets
-  // trained out of an operator's attention (CLAUDE.md trap 7; trap 7b is the
-  // same lesson one level up — a wrong label made a whole programme stop
-  // looking at a real security red). So this branch states only what is true,
-  // and every clause is verified: no registry metadata; `getModelProvider`
-  // returns undefined so the router's provider-match step silently no-ops
-  // (harmless while the provider already matches, a trap the day LLM_PROVIDER
-  // changes); `isModelClientAllowed` REJECTS the same id from a client while
-  // the server-side value is accepted (router.ts:818, extraction.ts:405 —
-  // genuinely asymmetric); and a floating alias can be repointed upstream at
-  // any time, silently changing the model behind an eval baseline.
-  if (kind === 'operator_override') {
-    if (!isKnownModel(modelId)) {
-      errors.push(
-        `The model "${modelId}" configured for "${label}" is NOT in the model registry (config/models.ts). ` +
-        `It may still serve — the adapters never consult the registry — but nothing validated it at boot, and no ` +
-        `registry metadata (tier, max tokens, client-allow, sampling-param rules) exists for it: getModelProvider() ` +
-        `returns undefined, so the router's provider-match step no-ops, and a CLIENT sending this same id would be ` +
-        `rejected while this server-side value is accepted. If it is a floating provider ALIAS it can be repointed ` +
-        `upstream at any time, silently changing the model. Pin ${label} to a dated registry member.`,
-      );
-    } else if (!isModelEnabled(modelId)) {
-      errors.push(
-        `The model "${modelId}" configured for "${label}" is registered but DISABLED in the model registry ` +
-        `(config/models.ts). It may still serve — the adapters never consult the registry — so this is a ` +
-        `contradiction between stated intent and live configuration, not an outage. Enable the model or point ` +
-        `${label} at an enabled one.`,
-      );
-    }
-    return errors;
-  }
-  if (!isKnownModel(modelId)) {
+  const aliasTarget = EXPLICIT_MODEL_ALIASES[
+    modelId as keyof typeof EXPLICIT_MODEL_ALIASES
+  ];
+  const registryId = aliasTarget ?? modelId;
+  if (!isKnownModel(registryId)) {
     errors.push(
-      `The resolved default model "${modelId}" for "${label}" is NOT in the model registry (config/models.ts). ` +
-      `Requests routed to it would fail at the adapter. Register the model or fix the ${label} model config.`,
+      `The ${kind === 'operator_override' ? 'configured' : 'resolved default'} model ` +
+        `"${modelId}" for "${label}" is neither an enabled registry id nor an explicit alias. ` +
+        'Runtime resolution will reject it before an adapter call.',
     );
-  } else if (!isModelEnabled(modelId)) {
+  } else if (!isModelEnabled(registryId)) {
     errors.push(
-      `The resolved default model "${modelId}" for "${label}" is registered but DISABLED in the model registry (config/models.ts). ` +
-      `Requests routed to it would fail. Enable the model or point ${label} at an enabled one.`,
+      `The ${kind === 'operator_override' ? 'configured' : 'resolved default'} model ` +
+        `"${modelId}" for "${label}" resolves to registry row "${registryId}", which is DISABLED. ` +
+        `Runtime resolution will reject it before an adapter call.`,
     );
   }
   return errors;
@@ -552,10 +519,10 @@ export function validateModelsRegistered(
 
 /**
  * What KIND of configuration produced this model id. It selects the failure
- * copy, because the two classes have genuinely different truths (see the A3
- * note on `validateModelRegistered`):
+ * copy, so diagnostics still identify whether source or deployment config
+ * needs correction:
  *   - `checked_in_default`  a value in this repo — drift/typo in our own source
- *   - `operator_override`   a live `CEE_MODEL_*` env value — may serve fine
+ *   - `operator_override`   a live `CEE_MODEL_*` env value
  */
 export type ModelRegistryCheckKind = 'checked_in_default' | 'operator_override';
 
@@ -774,10 +741,17 @@ export function anthropicTemperatureFor(
  * @param blockedModels - Optional list of blocked model IDs (from CLIENT_BLOCKED_MODELS)
  */
 export function isModelClientAllowed(modelId: string, blockedModels?: string[]): boolean {
-  const config = MODEL_REGISTRY[modelId];
+  const aliasTarget = EXPLICIT_MODEL_ALIASES[
+    modelId as keyof typeof EXPLICIT_MODEL_ALIASES
+  ];
+  const registryId = aliasTarget ?? modelId;
+  const config = MODEL_REGISTRY[registryId];
   if (!config) return false;
   if (!config.enabled) return false;
-  if (blockedModels && blockedModels.includes(modelId)) return false;
+  if (
+    blockedModels &&
+    (blockedModels.includes(modelId) || blockedModels.includes(registryId))
+  ) return false;
   return true;
 }
 
@@ -786,10 +760,17 @@ export function isModelClientAllowed(modelId: string, blockedModels?: string[]):
  * Returns undefined if the model is allowed.
  */
 export function getModelBlockReason(modelId: string, blockedModels?: string[]): string | undefined {
-  const config = MODEL_REGISTRY[modelId];
+  const aliasTarget = EXPLICIT_MODEL_ALIASES[
+    modelId as keyof typeof EXPLICIT_MODEL_ALIASES
+  ];
+  const registryId = aliasTarget ?? modelId;
+  const config = MODEL_REGISTRY[registryId];
   if (!config) return `Unknown model '${modelId}'`;
   if (!config.enabled) return `Model '${modelId}' is currently disabled`;
-  if (blockedModels && blockedModels.includes(modelId)) return `Model '${modelId}' is blocked for client use`;
+  if (
+    blockedModels &&
+    (blockedModels.includes(modelId) || blockedModels.includes(registryId))
+  ) return `Model '${modelId}' is blocked for client use`;
   return undefined;
 }
 

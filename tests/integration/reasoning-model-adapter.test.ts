@@ -7,7 +7,10 @@ import {
   DEFAULT_REASONING_MODEL_TIMEOUT_MS,
   DEFAULT_HTTP_CLIENT_TIMEOUT_MS,
 } from "../../src/config/timeouts.js";
-import { resetAdapterCache, getAdapterForProvider } from "../../src/adapters/llm/router.js";
+import {
+  getAdapterWithResolution,
+  resetAdapterCache,
+} from "../../src/adapters/llm/router.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("Reasoning Model Adapter Integration", () => {
@@ -75,7 +78,7 @@ describe("Reasoning Model Adapter Integration", () => {
       process.env.LLM_PROVIDER = "openai";
       process.env.LLM_MODEL = "gpt-5.2";
 
-      const adapter = getAdapterForProvider("openai");
+      const { adapter } = getAdapterWithResolution();
       expect(adapter.model).toBe("gpt-5.2");
       expect(isReasoningModel(adapter.model)).toBe(true);
     });
@@ -84,7 +87,7 @@ describe("Reasoning Model Adapter Integration", () => {
       process.env.LLM_PROVIDER = "openai";
       process.env.LLM_MODEL = "gpt-4o";
 
-      const adapter = getAdapterForProvider("openai");
+      const { adapter } = getAdapterWithResolution();
       expect(adapter.model).toBe("gpt-4o");
       expect(isReasoningModel(adapter.model)).toBe(false);
     });

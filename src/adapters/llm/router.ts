@@ -35,7 +35,13 @@ import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
 import { withUsageTracking } from "./usage-tracking.js";
 import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routing.js";
-import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import { isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+  type ModelAssignmentAvailability,
+} from "../../config/model-assignment.js";
+import { FALLBACK_ANTHROPIC_MODEL } from "./model-fallback.js";
 
 /**
  * Map task names to CEE model config keys — the router's env-override table.
@@ -80,10 +86,12 @@ export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> 
  *     appears nowhere in src/ (scope: rg "getAdapter\(['\"]validate" over src/,
  *     one hit, and it is 'validate_graph'). Giving a callerless alias a default
  *     would be decoration; declaring it env-only is the honest record.
- *   - 'clarify_brief': the standalone POST /assist/clarify-brief route. With
- *     CEE_MODEL_CLARIFICATION unset it currently resolves to the global model
- *     (a known pre-existing gap, distinct from the 'clarification' CeeTask which
- *     DOES have a checked-in default). Not fixed here — see PR notes.
+ *
+ * `clarify_brief` is intentionally represented in AI_TASK_LIFECYCLE as the
+ * executable route while the historical `clarification` default remains a
+ * display/compatibility name. Until that compatibility model row is retired,
+ * clarify_brief remains explicit env-or-global fallback rather than silently
+ * pretending the display row governs it.
  *
  * This list is the ONE hand-maintained exception to "every router task has a
  * default". The drift tripwire asserts it stays EXACT (disjoint from the
@@ -138,6 +146,36 @@ export function getMaxTokensFromConfig(task?: string): number | undefined {
 // Default configuration (OpenAI for cost-effectiveness)
 const DEFAULT_PROVIDER: 'anthropic' | 'openai' | 'fixtures' = 'openai';
 const DEFAULT_MODEL = 'auto'; // Let each adapter choose its default
+
+const PROVIDER_DEFAULT_MODELS = {
+  openai: 'gpt-4o-mini',
+  anthropic: FALLBACK_ANTHROPIC_MODEL,
+  fixtures: 'fixture-v1',
+} as const;
+
+function resolveProviderModel(
+  provider: 'anthropic' | 'openai' | 'fixtures',
+  model?: string,
+) {
+  if (!(provider in PROVIDER_DEFAULT_MODELS)) {
+    throw new Error(`Unknown provider: ${String(provider)}`);
+  }
+  const assignment = resolveModelAssignment(
+    model ?? PROVIDER_DEFAULT_MODELS[provider],
+    { fixtures: provider === 'fixtures' },
+  );
+  if (provider !== 'fixtures' && assignment.provider !== provider) {
+    log.info(
+      {
+        configured_provider: provider,
+        resolved_provider: assignment.provider,
+        model: assignment.model,
+      },
+      'Provider follows validated model assignment',
+    );
+  }
+  return assignment;
+}
 
 // Optional config file path (from centralized config or default)
 // Deferred to function to avoid triggering config validation at module load time
@@ -586,7 +624,11 @@ function createFailoverAdapter(task?: string): LLMAdapter | null {
   for (const providerName of providerNames) {
     try {
       const provider = providerName as 'anthropic' | 'openai' | 'fixtures';
-      const adapter = getAdapterInstance(provider);
+      const assignment = resolveProviderModel(provider);
+      const adapter = getAdapterInstance(
+        assignment.provider,
+        assignment.model,
+      );
       adapterList.push(adapter);
     } catch (error) {
       log.warn(
@@ -673,6 +715,9 @@ export interface ModelResolution {
    * not just the right model string.
    */
   readonly provider?: 'anthropic' | 'openai' | 'fixtures';
+  /** Checked-in configuration availability, never a remote API claim. */
+  readonly availability?: ModelAssignmentAvailability;
+  readonly registry_model_id?: string | null;
 }
 
 export interface AdapterWithResolution {
@@ -794,25 +839,21 @@ export function getAdapterWithResolution(
     // Validate model override against blocklist
     // Note: Route handlers should also validate before calling getAdapter, but this
     // provides a defensive fallback if an invalid model slips through
+    const overrideAssignment = resolveModelAssignment(modelOverride, {
+      fixtures: selectedProvider === 'fixtures',
+    });
     const blockedModels = getClientBlockedModels();
-    if (!isModelClientAllowed(modelOverride, blockedModels)) {
+    if (
+      overrideAssignment.provider !== 'fixtures' &&
+      !isModelClientAllowed(modelOverride, blockedModels)
+    ) {
       const reason = getModelBlockReason(modelOverride, blockedModels);
-      log.warn(
-        { task, model_override: modelOverride, reason, source: 'request_body' },
-        "Model override rejected - falling back to default model selection"
+      throw new ModelAssignmentError(
+        'MODEL_CLIENT_BLOCKED',
+        modelOverride,
+        reason ?? `Model '${modelOverride}' is blocked for client use.`,
       );
-      // Fall through to default model selection instead of using invalid override
     } else {
-      // Determine the correct provider for the model
-      // This ensures we don't create an OpenAI adapter with an Anthropic model (or vice versa)
-      const modelProvider = getModelProvider(modelOverride);
-      if (modelProvider && modelProvider !== selectedProvider) {
-        log.info(
-          { task, model_override: modelOverride, previous_provider: selectedProvider, new_provider: modelProvider, source: 'request_body' },
-          "Switching provider to match model override"
-        );
-        selectedProvider = modelProvider;
-      }
       log.info(
         { task, model_override: modelOverride, previous_model: selectedModel, provider: selectedProvider, source: 'request_body' },
         "Using request-time model override from client"
@@ -858,20 +899,14 @@ export function getAdapterWithResolution(
       }
     }
 
-    // After any model selection (CEE env or task default), ensure provider matches model
-    // This prevents "model does not exist" errors from using wrong provider for model
-    // Skip for fixtures provider (testing) - fixtures handles any model name
-    if (selectedModel && selectedProvider !== 'fixtures') {
-      const modelProvider = getModelProvider(selectedModel);
-      if (modelProvider && modelProvider !== selectedProvider) {
-        log.info(
-          { task, model: selectedModel, previous_provider: selectedProvider, new_provider: modelProvider, source: 'provider_switch' },
-          "Switching provider to match selected model"
-        );
-        selectedProvider = modelProvider;
-      }
-    }
   }
+
+  // One shared resolver is the only model→provider authority. It accepts an
+  // exact enabled registry row or a deliberately enumerated alias; an unknown
+  // string never borrows LLM_PROVIDER and never reaches an adapter by pattern.
+  const assignment = resolveProviderModel(selectedProvider, selectedModel);
+  selectedProvider = assignment.provider;
+  selectedModel = assignment.model;
 
   // Reuse cached wrapper to preserve cache state across requests
   const cacheKey = `single:${selectedProvider}:${selectedModel || "default"}`;
@@ -888,6 +923,8 @@ export function getAdapterWithResolution(
       resolution_source: winningSource,
       modelOverride,
       provider: selectedProvider,
+      availability: assignment.availability,
+      registry_model_id: assignment.registryModelId,
     },
   };
 }
@@ -899,7 +936,8 @@ export function getAdapterForProvider(
   provider: 'anthropic' | 'openai' | 'fixtures',
   model?: string
 ): LLMAdapter {
-  return getAdapterInstance(provider, model);
+  const assignment = resolveProviderModel(provider, model);
+  return getAdapterInstance(assignment.provider, assignment.model);
 }
 
 /**

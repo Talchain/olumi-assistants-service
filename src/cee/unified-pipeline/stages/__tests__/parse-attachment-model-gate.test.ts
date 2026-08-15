@@ -29,6 +29,7 @@ import type { StageContext } from '../../types.js';
 
 // ── Mock the adapter resolver so we control the resolved model/provider ─────
 let mockAdapterModel = 'gpt-4o';
+let mockAdapterProvider: 'openai' | 'anthropic' = 'openai';
 const draftGraphSpy = vi.fn(async () => {
   throw new Error('__reached_adapter_sentinel__');
 });
@@ -40,6 +41,7 @@ vi.mock('../../../../adapters/llm/router.js', () => ({
       task: 'draft_graph',
       resolved_model: mockAdapterModel,
       resolution_source: 'client_override',
+      provider: mockAdapterProvider,
     },
   }),
 }));
@@ -76,6 +78,7 @@ afterEach(() => {
 describe('parse Step 5b — attachment/adapter compatibility (F-1 honesty)', () => {
   it('openai override + attachment → FAIL CLOSED (typed 400, adapter never called) [RED on pre-fix]', async () => {
     mockAdapterModel = 'gpt-4o'; // non-Anthropic
+    mockAdapterProvider = 'openai';
     const ctx = makeCtx('gpt-4o');
 
     await runStageParse(ctx);
@@ -93,6 +96,7 @@ describe('parse Step 5b — attachment/adapter compatibility (F-1 honesty)', () 
 
   it('REFUTE — anthropic model + attachment → NOT gated; reaches the adapter (doc carried, default path intact)', async () => {
     mockAdapterModel = 'claude-sonnet-4-6'; // Anthropic → native block is read
+    mockAdapterProvider = 'anthropic';
     const ctx = makeCtx('claude-sonnet-4-6');
 
     // The adapter (mocked) throws a sentinel once reached; that is fine — we only

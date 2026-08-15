@@ -42,6 +42,7 @@ import type { EvalTaskKey } from './tasks.js';
 import type { EvalTaskAdapter, ExtractionMode, ScoredOutput } from './task-adapter.js';
 import { loadFixtures } from './run.js';
 import { finaliseScore, type DimensionResult, type OrchestratorEvalFixture, type ScoreResult } from './types.js';
+import { resolveModelAssignment } from '../../../src/config/model-assignment.js';
 
 /** sha256, first 16 hex chars — the same shape `Prompts/canonical/manifest.json` records. */
 function sha16(text: string): string {
@@ -543,10 +544,14 @@ export async function runCandidateEval<F = OrchestratorEvalFixture>(
  */
 export async function createLiveCandidateModel(modelId: string): Promise<CandidateModel> {
   const providers = await import('../../graph-evaluator/src/providers/index.js');
+  const assignment = resolveModelAssignment(modelId);
+  if (assignment.provider === 'fixtures') {
+    throw new Error('Live candidate evaluation cannot use the fixtures provider.');
+  }
   const config = {
     id: `orchestrator-eval-candidate:${modelId}`,
-    provider: (/claude/i.test(modelId) ? 'anthropic' : 'openai') as 'anthropic' | 'openai',
-    model: modelId,
+    provider: assignment.provider,
+    model: assignment.model,
   };
   const provider = providers.getProvider(config);
   return async (system, user) => {

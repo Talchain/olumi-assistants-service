@@ -10,6 +10,7 @@
 import { FilePromptStore } from './stores/file.js';
 import { PostgresPromptStore } from './stores/postgres.js';
 import { SupabasePromptStore } from './stores/supabase.js';
+import { governPromptStore } from './stores/governed.js';
 import type { IPromptStore, FileStoreConfig, PostgresStoreConfig } from './stores/interface.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
@@ -138,21 +139,21 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
       if (!url || !serviceRoleKey) {
         throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when PROMPTS_STORE_TYPE=supabase');
       }
-      defaultStore = new SupabasePromptStore({
+      defaultStore = governPromptStore(new SupabasePromptStore({
         url,
         serviceRoleKey,
-      });
+      }));
       log.info({ storeType: 'supabase', actualStoreType }, 'Using Supabase prompt store');
     } else if (storeType === 'postgres') {
       const connectionString = config.prompts?.postgresUrl;
       if (!connectionString) {
         throw new Error('PROMPTS_POSTGRES_URL is required when PROMPTS_STORE_TYPE=postgres');
       }
-      defaultStore = new PostgresPromptStore({
+      defaultStore = governPromptStore(new PostgresPromptStore({
         connectionString,
         poolSize: config.prompts?.postgresPoolSize ?? 10,
         ssl: config.prompts?.postgresSsl ?? false,
-      });
+      }));
       log.info({ storeType: 'postgres', actualStoreType }, 'Using PostgreSQL prompt store');
     } else {
       // Default to file store
@@ -161,7 +162,7 @@ export function getPromptStore(overrideConfig?: Partial<PromptStoreConfig>): IPr
         backupEnabled: (overrideConfig as Partial<Omit<FileStoreConfig, 'type'>>)?.backupEnabled ?? config.prompts?.backupEnabled ?? true,
         maxBackups: (overrideConfig as Partial<Omit<FileStoreConfig, 'type'>>)?.maxBackups ?? config.prompts?.maxBackups ?? 10,
       };
-      defaultStore = new FilePromptStore(storeConfig);
+      defaultStore = governPromptStore(new FilePromptStore(storeConfig));
       log.info({ storeType: 'file', actualStoreType, path: storeConfig.filePath }, 'Using file-based prompt store');
     }
   }

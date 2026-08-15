@@ -14,9 +14,17 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
-import { AUXILIARY_MODEL_DEFAULTS, TASK_MODEL_DEFAULTS } from '../config/model-routing.js';
+import {
+  AI_TASK_LIFECYCLE,
+  AUXILIARY_MODEL_DEFAULTS,
+  TASK_MODEL_DEFAULTS,
+} from '../config/model-routing.js';
 import type { AuxiliaryModelTask, CeeTask } from '../config/model-routing.js';
-import { getModelProvider } from '../config/models.js';
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+  type ModelAssignmentAvailability,
+} from '../config/model-assignment.js';
 import { config } from '../config/index.js';
 import { TASK_TO_CONFIG_KEY } from '../adapters/llm/router.js';
 
@@ -28,6 +36,14 @@ interface TaskRouting {
   model: string;
   /** Provider derived from the winning model. */
   provider: string;
+  availability: ModelAssignmentAvailability | 'configuration_error';
+  registry_model_id: string | null;
+  configuration_error?: {
+    code: string;
+    message: string;
+  };
+  executable: boolean;
+  lifecycle_state: string;
   source: ModelSource;
 }
 
@@ -64,8 +80,35 @@ function resolveTaskRouting(task: CeeTask | AuxiliaryModelTask): TaskRouting {
     try {
       const envModel = config.cee.models[ceeModelKey];
       if (envModel) {
-        const provider = getModelProvider(envModel) ?? 'unknown';
-        return { task, model: envModel, provider, source: 'env_override' };
+        try {
+          const assignment = resolveModelAssignment(envModel);
+          return {
+            task,
+            model: assignment.model,
+            provider: assignment.provider,
+            availability: assignment.availability,
+            registry_model_id: assignment.registryModelId,
+            executable: AI_TASK_LIFECYCLE[task].executable,
+            lifecycle_state: AI_TASK_LIFECYCLE[task].state,
+            source: 'env_override',
+          };
+        } catch (error) {
+          if (!(error instanceof ModelAssignmentError)) throw error;
+          return {
+            task,
+            model: envModel,
+            provider: 'invalid',
+            availability: 'configuration_error',
+            registry_model_id: null,
+            configuration_error: {
+              code: error.code,
+              message: error.message,
+            },
+            executable: AI_TASK_LIFECYCLE[task].executable,
+            lifecycle_state: AI_TASK_LIFECYCLE[task].state,
+            source: 'env_override',
+          };
+        }
       }
     } catch {
       // Config unavailable — fall through
@@ -77,10 +120,15 @@ function resolveTaskRouting(task: CeeTask | AuxiliaryModelTask): TaskRouting {
   const taskDefault = task === 'extraction'
     ? AUXILIARY_MODEL_DEFAULTS.extraction
     : TASK_MODEL_DEFAULTS[task];
+  const assignment = resolveModelAssignment(taskDefault);
   return {
     task,
-    model: taskDefault,
-    provider: getModelProvider(taskDefault) ?? 'unknown',
+    model: assignment.model,
+    provider: assignment.provider,
+    availability: assignment.availability,
+    registry_model_id: assignment.registryModelId,
+    executable: AI_TASK_LIFECYCLE[task].executable,
+    lifecycle_state: AI_TASK_LIFECYCLE[task].state,
     source: 'default',
   };
 }
@@ -114,6 +162,7 @@ export async function adminModelRoutes(app: FastifyInstance): Promise<void> {
       .status(200)
       .send({
         tasks: taskList,
+        task_lifecycle: AI_TASK_LIFECYCLE,
         default_provider: configuredProvider,
         timestamp: new Date().toISOString(),
       });

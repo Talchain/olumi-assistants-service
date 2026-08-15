@@ -16,7 +16,9 @@ import type { IPromptStore } from './stores/interface.js';
 import { PostgresPromptStore } from './stores/postgres.js';
 import { SupabasePromptStore } from './stores/supabase.js';
 import { FilePromptStore } from './stores/file.js';
+import { governPromptStore } from './stores/governed.js';
 import { getDefaultPrompts } from './loader.js';
+import { getPromptStore } from './store.js';
 import { log } from '../utils/telemetry.js';
 import { config, shouldUseStagingPrompts } from '../config/index.js';
 
@@ -152,6 +154,16 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
   }
 
   private createPrimaryStore(): IPromptStore {
+    // The production repository, runtime loader, status routes and admin
+    // mutations must share one governed store instance. Independent backend
+    // objects (especially FilePromptStore, which holds an in-memory snapshot)
+    // made startup seeding invisible to the runtime until process restart.
+    // Explicit constructor arguments remain isolated for repository tests and
+    // migration tools.
+    if (!this.connectionString && !this.fileStorePath) {
+      return getPromptStore();
+    }
+
     const storeType = this.getConfiguredStoreType();
 
     if (storeType === 'supabase') {
@@ -160,7 +172,7 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       if (!url || !serviceRoleKey) {
         throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when PROMPTS_STORE_TYPE=supabase');
       }
-      return new SupabasePromptStore({ url, serviceRoleKey });
+      return governPromptStore(new SupabasePromptStore({ url, serviceRoleKey }));
     }
 
     if (storeType === 'postgres') {
@@ -168,19 +180,19 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
       if (!connStr) {
         throw new Error('PROMPTS_POSTGRES_URL is required when PROMPTS_STORE_TYPE=postgres');
       }
-      return new PostgresPromptStore({
+      return governPromptStore(new PostgresPromptStore({
         connectionString: connStr,
         poolSize: config.prompts?.postgresPoolSize ?? 10,
         ssl: config.prompts?.postgresSsl ?? false,
-      });
+      }));
     }
 
     const filePath = this.fileStorePath ?? config.prompts?.storePath ?? 'data/prompts.json';
-    return new FilePromptStore({
+    return governPromptStore(new FilePromptStore({
       filePath,
       backupEnabled: config.prompts?.backupEnabled ?? true,
       maxBackups: config.prompts?.maxBackups ?? 10,
-    });
+    }));
   }
 
   private async initializeStore(): Promise<void> {
@@ -380,20 +392,19 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
     const useStaging = shouldUseStagingPrompts();
 
     try {
-      // In staging mode, load prompts with staging status; otherwise load production prompts
-      // Also load production prompts as fallback for tasks without staging prompts
-      const statusFilter = useStaging ? 'staging' : 'production';
-      const allPrompts = await this.store.list({ status: statusFilter });
+      // Status is metadata; it does not elect served bytes. Derive the task set
+      // from storage, then ask the governed boundary for each canonical row.
+      // Iterating raw rows and overwriting a Map made duplicate-task election
+      // depend on backend result order, bypassing the canonical authority.
+      const allPrompts = await this.store.list();
+      const taskIds = [
+        ...new Set(allPrompts.map((prompt) => prompt.taskId as CeeTaskId)),
+      ].sort();
 
-      // If in staging mode but no staging prompts found, fall back to production
-      const fallbackPrompts = useStaging && allPrompts.length === 0
-        ? await this.store.list({ status: 'production' })
-        : [];
-
-      const promptsToCache = [...allPrompts, ...fallbackPrompts];
-
-      for (const prompt of promptsToCache) {
-        const taskId = prompt.taskId as CeeTaskId;
+      for (const taskId of taskIds) {
+        const active = await this.store.getActivePromptForTask(taskId);
+        if (!active) continue;
+        const prompt = active.prompt;
 
         // In staging mode, prefer staging version; otherwise use active version
         const targetVersionNum = useStaging && prompt.stagingVersion
@@ -418,7 +429,6 @@ export class PromptRepository implements IPromptReader, IPromptWriter {
         event: 'prompt.cache.warmed',
         count: this.cache.size,
         useStaging,
-        statusFilter,
       }, useStaging ? 'Prompt cache warmed (staging mode)' : 'Prompt cache warmed (production mode)');
     } catch (error) {
       log.warn({

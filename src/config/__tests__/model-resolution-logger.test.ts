@@ -25,19 +25,21 @@ vi.mock('../../config/index.js', () => ({ config: mockConfig }));
 vi.mock('../../utils/telemetry.js', () => ({ log: mockLog }));
 
 const { logResolvedTaskModels } = await import('../model-resolution-logger.js');
-const { TASK_MODEL_DEFAULTS } = await import('../model-routing.js');
+const { AI_TASK_LIFECYCLE, TASK_MODEL_DEFAULTS } = await import('../model-routing.js');
 
 // DERIVED from TASK_MODEL_DEFAULTS, not re-listed (CLAUDE.md trap 12). The
 // hand-typed version of this array was a mirror of the implementation's own
-// `ALL_CEE_TASKS` and carried a hard-coded count in two assertions below; adding
-// a task (ROADMAP 2.146 added `validate_graph`) broke both for no product reason
-// while proving nothing about the product. What is actually worth pinning is the
-// ONE non-mechanical property of the implementation's filter — that `routing` is
-// excluded because its default is display-only — and that is asserted explicitly.
-const EXPECTED_EXCLUDED_FROM_STARTUP_LOG = ['routing'] as const;
-const ALL_TASKS = (Object.keys(TASK_MODEL_DEFAULTS) as string[]).filter(
-  (t) => !(EXPECTED_EXCLUDED_FROM_STARTUP_LOG as readonly string[]).includes(t),
+// `ALL_CEE_TASKS`. Derive the executable subset from the lifecycle authority.
+const ALL_TASKS = (Object.keys(TASK_MODEL_DEFAULTS) as Array<keyof typeof AI_TASK_LIFECYCLE>).filter(
+  (task) => AI_TASK_LIFECYCLE[task].executable,
 );
+const EXPECTED_EXCLUDED_FROM_STARTUP_LOG = [
+  'routing',
+  'repair_graph',
+  'm2_graph_review',
+  'clarification',
+  'explainer',
+] as const;
 
 describe('logResolvedTaskModels', () => {
   beforeEach(() => {
@@ -64,11 +66,7 @@ describe('logResolvedTaskModels', () => {
     );
   });
 
-  it('excludes display-only tasks from the startup log (routing)', () => {
-    // The one non-mechanical property of the implementation's ALL_CEE_TASKS
-    // filter. Positive control: `routing` really does have a default that would
-    // otherwise be logged, so this assertion can see the presence it denies.
-    expect(Object.keys(TASK_MODEL_DEFAULTS)).toContain('routing');
+  it('excludes display-only, gated-off and inert compatibility rows', () => {
     logResolvedTaskModels();
     const tasks = logInfoCalls
       .filter((c) => c.obj['event'] === 'model.task_resolved')
@@ -102,13 +100,13 @@ describe('logResolvedTaskModels', () => {
   });
 
   it('reports env_task_tier when CEE_MODEL_TASK_* is set', () => {
-    mockConfig.cee.modelSelection.taskModels = { clarification: 'gpt-custom-task' };
+    mockConfig.cee.modelSelection.taskModels = { draftGraph: 'gpt-custom-task' };
     logResolvedTaskModels();
-    const clarificationLine = logInfoCalls.find(
-      (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'clarification',
+    const draftLine = logInfoCalls.find(
+      (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'draft_graph',
     );
-    expect(clarificationLine?.obj['source']).toBe('env_task_tier');
-    expect(clarificationLine?.obj['model']).toBe('gpt-custom-task');
+    expect(draftLine?.obj['source']).toBe('env_task_tier');
+    expect(draftLine?.obj['model']).toBe('gpt-custom-task');
   });
 
   it('reports env_legacy_tier when CEE_MODEL_* (legacy) is set and task tier is absent', () => {

@@ -113,6 +113,8 @@ export const STORE_MODEL_CONFIG_NON_TASK_READERS: readonly string[] = [
  * CEE task types that can have model selection applied
  */
 export type CeeTask =
+  // Display-only compatibility name. The executable standalone route calls
+  // getAdapter('clarify_brief'); this row does not serve that call by itself.
   | "clarification"
   | "preflight"
   | "draft_graph"
@@ -122,8 +124,11 @@ export type CeeTask =
   | "sensitivity_coach"
   | "options"
   | "suggest_options"
+  // Display-only compatibility name. The executable route is explain_diff.
   | "explainer"
   | "orchestrator"
+  // Inert compatibility/PMS-readiness slot. LLMAdapter.repairGraph and every
+  // executable caller were removed; do not report this as a live AI call.
   | "repair_graph"
   | "critique_graph"
   | "decision_review"
@@ -260,6 +265,315 @@ export const AUXILIARY_MODEL_DEFAULTS = {
 } as const;
 
 export type AuxiliaryModelTask = keyof typeof AUXILIARY_MODEL_DEFAULTS;
+
+export type AiTaskLifecycleId =
+  | CeeTask
+  | AuxiliaryModelTask
+  | 'clarify_brief'
+  | 'explain_diff';
+
+export type AiTaskExecutionState =
+  | 'live_router'
+  | 'standalone_route'
+  | 'dedicated_adapter'
+  | 'feature_gated'
+  | 'deterministic_or_external'
+  | 'display_only'
+  | 'inert_compatibility';
+
+export interface AiTaskLifecycle {
+  /** True only when this exact task id can currently reach an LLM call. */
+  readonly executable: boolean;
+  readonly state: AiTaskExecutionState;
+  /** Executable task that supersedes a compatibility/display name. */
+  readonly executableTask?: AiTaskLifecycleId;
+  readonly gate?: string;
+  readonly note: string;
+}
+
+/**
+ * Truthful task lifecycle authority. This is deliberately separate from the
+ * historical model-default table: a row can remain visible to PMS/readiness
+ * without being misreported as an executable LLM capability.
+ */
+export const AI_TASK_LIFECYCLE: Readonly<
+  Record<AiTaskLifecycleId, AiTaskLifecycle>
+> = {
+  clarification: {
+    executable: false,
+    state: 'display_only',
+    executableTask: 'clarify_brief',
+    note: 'Compatibility/display name; the standalone route calls clarify_brief.',
+  },
+  clarify_brief: {
+    executable: true,
+    state: 'standalone_route',
+    note: 'POST /assist/clarify-brief calls getAdapter(clarify_brief).',
+  },
+  preflight: {
+    executable: false,
+    state: 'deterministic_or_external',
+    note: 'Brief readiness/preflight is deterministic; this model row is decorative.',
+  },
+  draft_graph: {
+    executable: true,
+    state: 'live_router',
+    note: 'Unified draft pipeline resolves draft_graph through the router.',
+  },
+  edit_graph: {
+    executable: true,
+    state: 'live_router',
+    note: 'V5 edit dispatch resolves edit_graph through the router.',
+  },
+  bias_check: {
+    executable: false,
+    state: 'deterministic_or_external',
+    note: 'Bias routes call deterministic detectBiases; the PMS prompt has no caller.',
+  },
+  evidence_helper: {
+    executable: false,
+    state: 'deterministic_or_external',
+    note: 'Capability is supplied by the analysis/ISL path, not this model default.',
+  },
+  sensitivity_coach: {
+    executable: false,
+    state: 'deterministic_or_external',
+    note: 'Capability is supplied by the analysis/ISL path, not this model default.',
+  },
+  options: {
+    executable: false,
+    state: 'display_only',
+    executableTask: 'suggest_options',
+    note: 'Compatibility name; the executable route calls suggest_options.',
+  },
+  suggest_options: {
+    executable: true,
+    state: 'standalone_route',
+    note: 'POST /assist/suggest-options resolves suggest_options through the router.',
+  },
+  explainer: {
+    executable: false,
+    state: 'display_only',
+    executableTask: 'explain_diff',
+    note: 'Compatibility/display name; the executable route calls explain_diff.',
+  },
+  explain_diff: {
+    executable: true,
+    state: 'standalone_route',
+    note: 'POST /assist/explain-diff calls getAdapter(explain_diff).',
+  },
+  orchestrator: {
+    executable: true,
+    state: 'live_router',
+    note: 'V5 routing resolves the executable model with task id orchestrator.',
+  },
+  routing: {
+    executable: false,
+    state: 'display_only',
+    executableTask: 'orchestrator',
+    note: 'PMS prompt/display name; its modelConfig/default is not consumed by the call.',
+  },
+  repair_graph: {
+    executable: false,
+    state: 'inert_compatibility',
+    note: 'Preserved for external PMS readiness; no LLM adapter capability or caller exists.',
+  },
+  critique_graph: {
+    executable: true,
+    state: 'standalone_route',
+    note: 'POST /assist/critique-graph resolves critique_graph through the router.',
+  },
+  decision_review: {
+    executable: true,
+    state: 'standalone_route',
+    note: 'Decision-review invoke path resolves decision_review through the router.',
+  },
+  validate_graph: {
+    executable: true,
+    state: 'live_router',
+    note: 'Pass-2 validation is enabled by default and resolves validate_graph.',
+  },
+  m2_graph_review: {
+    executable: false,
+    state: 'feature_gated',
+    gate: 'CEE_V6_DUAL_DRAFT_ENABLED + provisioned prompt + explicit CEE_MODEL_M2_REVIEW',
+    note: 'Code path exists but remains inert unless every activation gate passes.',
+  },
+  extraction: {
+    executable: true,
+    state: 'dedicated_adapter',
+    note: 'Factor extraction uses the dedicated extraction adapter/model authority.',
+  },
+};
+
+export type RuntimeAiTaskId =
+  | 'draft_graph'
+  | 'edit_graph'
+  | 'suggest_options'
+  | 'critique_graph'
+  | 'decision_review'
+  | 'validate_graph'
+  | 'orchestrator'
+  | 'clarify_brief'
+  | 'explain_diff'
+  | 'extraction'
+  | 'm2_graph_review';
+
+export interface RuntimeAiTaskAuthority {
+  readonly executable: boolean;
+  readonly modelAuthority:
+    | 'router_task_chain'
+    | 'router_env_or_global_fallback'
+    | 'router_global_fallback'
+    | 'dedicated_extraction_chain';
+  readonly checkedInModel: string | null;
+  readonly promptAuthority:
+    | 'pms_or_checked_in_default'
+    | 'provider_specific_pms_or_inline_constant'
+    | 'routing_snapshot_or_checked_in_default'
+    | 'code_constant'
+    | 'caller_supplied';
+  readonly promptTask: string | null;
+  readonly promptIdentity:
+    | 'runtime_source_version_hash'
+    | 'provider_specific_runtime_or_code_hash'
+    | 'code_hash'
+    | 'caller_owned';
+  readonly structuredContract: string;
+  readonly fallback: string;
+  readonly promotionGate: 'decision_review_hash_bound_eval' | 'none_no_real_pack';
+}
+
+/**
+ * The bounded runtime map: only actual LLM call tasks plus the separately
+ * gated M2 path. Exact prompt bytes/version/hash remain runtime facts exposed
+ * by prompt metadata; this map pins which authority must supply them.
+ */
+export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
+  Record<RuntimeAiTaskId, RuntimeAiTaskAuthority>
+> = {
+  draft_graph: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.draft_graph,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'draft_graph',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'DraftGraphResult + graph-schema validation/normalisation',
+    fallback: 'checked-in draft_graph prompt and registered task model',
+    promotionGate: 'none_no_real_pack',
+  },
+  edit_graph: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.edit_graph,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'edit_graph',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'Anthropic edit tool schema + deterministic patch validation',
+    fallback: 'checked-in edit_graph prompt and registered task model',
+    promotionGate: 'none_no_real_pack',
+  },
+  suggest_options: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.suggest_options,
+    promptAuthority: 'provider_specific_pms_or_inline_constant',
+    promptTask: 'suggest_options',
+    promptIdentity: 'provider_specific_runtime_or_code_hash',
+    structuredContract: 'SuggestOptionsOutput schema',
+    fallback: 'OpenAI serves its inline prompt; Anthropic serves PMS/default suggest_options bytes',
+    promotionGate: 'none_no_real_pack',
+  },
+  critique_graph: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.critique_graph,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'critique_graph',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'CritiqueGraphResult schema',
+    fallback: 'Anthropic serves PMS/default bytes; the checked-in OpenAI model lacks this adapter capability',
+    promotionGate: 'none_no_real_pack',
+  },
+  decision_review: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.decision_review,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'decision_review',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'decision-review output schema + deterministic readback validation',
+    fallback: 'checked-in decision_review prompt and registered task model',
+    promotionGate: 'decision_review_hash_bound_eval',
+  },
+  validate_graph: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.validate_graph,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'validate_graph',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'json_object response + Pass2Response parser/schema',
+    fallback: 'checked-in validate_graph prompt and independent registered model',
+    promotionGate: 'none_no_real_pack',
+  },
+  orchestrator: {
+    executable: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.orchestrator,
+    promptAuthority: 'routing_snapshot_or_checked_in_default',
+    promptTask: 'routing',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'Olumi action tool schema + routing validator',
+    fallback: 'checked-in routing prompt snapshot and registered orchestrator model',
+    promotionGate: 'none_no_real_pack',
+  },
+  clarify_brief: {
+    executable: true,
+    modelAuthority: 'router_env_or_global_fallback',
+    checkedInModel: null,
+    promptAuthority: 'provider_specific_pms_or_inline_constant',
+    promptTask: 'clarify_brief',
+    promptIdentity: 'provider_specific_runtime_or_code_hash',
+    structuredContract: 'ClarifyBriefResult schema',
+    fallback: 'OpenAI serves its inline prompt; Anthropic serves PMS/default clarify_brief bytes',
+    promotionGate: 'none_no_real_pack',
+  },
+  explain_diff: {
+    executable: true,
+    modelAuthority: 'router_global_fallback',
+    checkedInModel: null,
+    promptAuthority: 'code_constant',
+    promptTask: null,
+    promptIdentity: 'code_hash',
+    structuredContract: 'ExplainDiffResult rationales parser',
+    fallback: 'code-constant prompt; global model must resolve to Anthropic capability',
+    promotionGate: 'none_no_real_pack',
+  },
+  extraction: {
+    executable: true,
+    modelAuthority: 'dedicated_extraction_chain',
+    checkedInModel: AUXILIARY_MODEL_DEFAULTS.extraction,
+    promptAuthority: 'caller_supplied',
+    promptTask: null,
+    promptIdentity: 'caller_owned',
+    structuredContract: 'JSON extraction parser + caller schema',
+    fallback: 'dedicated registered extraction model; no drafting/global-model inheritance',
+    promotionGate: 'none_no_real_pack',
+  },
+  m2_graph_review: {
+    executable: false,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.m2_graph_review,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'm2_graph_review',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract: 'M2 outputSchema + deterministic review parser',
+    fallback: 'inert unless feature, prompt, explicit model and budget gates all pass',
+    promotionGate: 'none_no_real_pack',
+  },
+};
 
 /**
  * Tasks where quality-tier model is REQUIRED

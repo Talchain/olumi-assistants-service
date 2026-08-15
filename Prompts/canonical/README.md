@@ -93,7 +93,8 @@ A prompt change is a code change. It goes through review here first.
    Leave `activeVersion` alone — that is the production pointer.
    For a task with a real eval pack, the admin route now requires a current,
    hash-matched, floor-passing committed promotion report before either pointer
-   can move. A rejection is atomic and returns `prompt_promotion_eval_required`.
+   can move. A rejection is atomic and returns
+   `prompt_promotion_evidence_required` with the failed evidence kind and action.
 5. **Reload:** `POST /admin/prompts/reload`. *A re-pin without a reload silently no-ops.*
 6. **Verify the SERVED bytes, not the pointer.** `GET /admin/prompts/status` returns
    `content_hash` = `sha256(content).hex[:16]` (`src/prompts/loader.ts:33`). Confirm it
