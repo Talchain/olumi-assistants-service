@@ -169,7 +169,74 @@ export type ContextSource =
   | 'aggregate'
   | 'none';
 
-export type SectionEnforcement = 'enforced' | 'telemetry_only' | 'unpopulated';
+/**
+ * How a section's declared {@link ContextSectionPolicy.char_budget} relates to
+ * a LIVE cut.
+ *
+ * - `enforced` — a real cut site bounds THIS section at THIS number.
+ * - `enforced_by_total` — the section IS cut on live traffic, but the trigger
+ *   is the row's WHOLE-PACK {@link ContextPolicy.total_char_budget}, not the
+ *   section's own `char_budget` (which stays an honest measurement target).
+ *   Minted 2026-08-15 for Context/Memory V5 defect 3: `conversation` is now
+ *   trimmed by `enforceContextPackCeiling` when the assembled pack exceeds the
+ *   total, oldest-first, down to a retention floor. Declaring it `enforced`
+ *   would be a false guarantee (nothing cuts the conversation at 34,000 chars);
+ *   leaving it `telemetry_only` became false the other way the moment a live
+ *   cut existed. The runtime tripwire deliberately does NOT budget-check this
+ *   kind against its section number — that number is not the cut point.
+ * - `telemetry_only` — a measured target with no live cut.
+ * - `unpopulated` — a declared reservation nothing fills yet.
+ */
+export type SectionEnforcement =
+  | 'enforced'
+  | 'enforced_by_total'
+  | 'telemetry_only'
+  | 'unpopulated';
+
+// ---------------------------------------------------------------------------
+// Whole-pack ceiling (Context/Memory V5 defect 3) — the ONE cut order
+// ---------------------------------------------------------------------------
+
+/**
+ * The sections `enforceContextPackCeiling` (context-pack-assembler) may cut
+ * when an assembled coach_converse pack exceeds {@link T_ROUTING_TOTAL}, in
+ * CUT ORDER — index 0 is cut first.
+ *
+ * ⚠ This const is ITERATED by the enforcement pass and INDEXED by the policy
+ * rows below (`cut_rank`). It is not documentation sitting beside a separate
+ * hand-written list: the assembler's trimmer table is typed
+ * `Record<ContextPackCeilingCutSection, …>`, so adding a name here fails to
+ * COMPILE until a trimmer exists, and `cut_rank` moves with no edit to the
+ * row. (The estate's `DISPLAY_ANALYSIS_TRUNCATION_ORDER` is the shape being
+ * avoided — declared order, separate drops array, nothing binding them.)
+ *
+ * It lives HERE rather than in the assembler because the policy rows must
+ * derive `cut_rank` from it and the assembler already imports this module —
+ * the reverse import would be a cycle.
+ */
+export const CONTEXT_PACK_CEILING_CUT_ORDER = ['conversation'] as const;
+
+export type ContextPackCeilingCutSection = (typeof CONTEXT_PACK_CEILING_CUT_ORDER)[number];
+
+/**
+ * The verbatim-conversation retention floor: the ceiling pass never leaves
+ * fewer than this many turns, even when the pack is STILL over budget. A pack
+ * whose non-conversation content alone blows the ceiling is pathological and
+ * remains the graph/analysis valve's job (`orchestrator/context/budget.ts`) —
+ * stripping the conversation to nothing would trade an over-budget prompt for
+ * an amnesiac one, which is the worse failure.
+ */
+export const CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS = 2;
+
+/**
+ * A section's position in {@link CONTEXT_PACK_CEILING_CUT_ORDER}, or null when
+ * it is not ceiling-cut. DERIVED — `cut_rank` can never drift from the order
+ * the code actually iterates.
+ */
+function ceilingCutRank(section: string): number | null {
+  const index = (CONTEXT_PACK_CEILING_CUT_ORDER as readonly string[]).indexOf(section);
+  return index === -1 ? null : index;
+}
 
 export interface ContextSectionPolicy {
   /** Canonical section name — matches the `section_chars`/budget-table key. */
@@ -285,7 +352,13 @@ const COACH_CONVERSE: ContextPolicy = {
     // than a char ceiling — `projectFocus` caps the element count
     // (FOCUS_MAX_ELEMENTS) and every text field, with disclosed omission.
     { name: 'focus', source: 'turn_selection', projection: 'projectFocus (element-capped + per-field text bounds, disclosed omission)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-    { name: 'conversation', source: 'conversation_window', projection: 'projectConversation', char_budget: T_ROUTING_CONVERSATION, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // Context/Memory V5 defect 3: the whole-pack ceiling is now ENFORCED, and
+    // the conversation window is what it cuts (the largest section, and the
+    // only one the graph/analysis valve is forbidden to touch). The cut is
+    // driven by `total_char_budget`, NOT by the 34,000 below — hence
+    // `enforced_by_total` rather than a false `enforced`. `cut_rank` is derived
+    // from CONTEXT_PACK_CEILING_CUT_ORDER, the array the pass iterates.
+    { name: 'conversation', source: 'conversation_window', projection: 'projectConversation; whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among
     // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended
