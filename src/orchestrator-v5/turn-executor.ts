@@ -58,7 +58,11 @@ import {
   buildGateRemedySectionDirective,
   buildGateFlipSectionDirective,
 } from './compose/ui-directive.js';
-import { commitDirectAnswer, computeRequestHash } from './commit.js';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  graphWasProvided,
+} from './commit.js';
 import {
   buildTurnContext,
   loadPersistedGraphStrict,
@@ -839,6 +843,63 @@ function deriveCanonicalReadiness(
   return parsed.success ? computeStructuralReadiness(parsed.data) : undefined;
 }
 
+const ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT =
+  'What you selected is not in the model I can see, so I can’t answer about it without guessing. I have not substituted a different element.';
+
+const ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT =
+  'I could not read the model to check what you selected, so I can’t answer about it without guessing. I have not substituted a different element.';
+
+type ZeroResolvedSelectionProjection = {
+  readonly response: OlumiResponse;
+  readonly applied: boolean;
+};
+
+/**
+ * One projection for both durable history and wire egress.
+ *
+ * `commitTurn` applies it before `commitDirectAnswer` derives the stored
+ * assistant message; `finalizeRun` applies it again as the every-exit
+ * backstop. Keeping the decision and replacement bytes here prevents a turn
+ * from persisting the leader-shaped answer while shipping the refusal.
+ */
+function projectZeroResolvedSelectionResponse(
+  response: OlumiResponse,
+  focus: ContextPackFocus | undefined,
+  options: {
+    readonly preserveMutationReceipt: boolean;
+  },
+): ZeroResolvedSelectionProjection {
+  if (
+    options.preserveMutationReceipt ||
+    response.blocks.some((block) => block.type === 'error') ||
+    focus === undefined ||
+    focus.requested_count < 1 ||
+    focus.elements.length !== 0
+  ) {
+    return { response, applied: false };
+  }
+
+  // `none` is structurally inconsistent with requested>0/elements=0. Treat
+  // any future or malformed value as `could_not_check`: inability to prove
+  // absence must never become a claim that the selected element is missing.
+  const assistantText =
+    focus.unresolved === 'not_in_model'
+      ? ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT
+      : ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT;
+
+  return {
+    applied: true,
+    response: {
+      response_version: response.response_version,
+      assistant_text: assistantText,
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: response.stage_indicator,
+    },
+  };
+}
+
 /**
  * Run a single V5 turn end-to-end. Always returns a well-formed
  * OlumiResponse; internal runtime failures map to a typed response with an
@@ -1020,6 +1081,18 @@ export async function runTurnExecutor(
   // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
   // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
   let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
+  // True only after a commit persisted the zero-resolved projection. The
+  // finaliser then preserves any legitimate commit-layer adjustment (for
+  // example a held-change lapse notice) instead of re-projecting different
+  // bytes after durable history was written. The finaliser still validates
+  // the guarded shape and falls back to the projection if it diverged.
+  let zeroResolvedSelectionGuardAppliedAtCommit = false;
+  // True only when the same successful commit actually persisted a graph for
+  // the handler/draft/edit mutation receipt. A handler merely returning
+  // `mutated_graph` is not enough: the consent/warrant floor above may strip
+  // `meta.graph` before append. The finaliser must never preserve a success
+  // receipt for that rejected write.
+  let zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
 
   // ⭐⭐ WITHHELD CONSENT — evaluated ONCE, from the user's own words, BEFORE
   // any model call. Two layers hang off this one value:
@@ -1289,10 +1362,39 @@ export async function runTurnExecutor(
     // conflict thrown by THIS append before rethrowing to the call site's
     // own catch ladder.
     lastCommitConflictError = null;
+    zeroResolvedSelectionGuardAppliedAtCommit = false;
+    zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
     let result: Awaited<ReturnType<typeof commitDirectAnswer>>;
     try {
-      result = await commitDirectAnswer(
+      // The finaliser's zero-resolved-selection guard used to run only AFTER
+      // this append, which shipped honest copy while persisting the model's
+      // leader-substitution prose into recent-turn history. Project the SAME
+      // response here so durable history and wire egress cannot diverge. A
+      // genuine mutation receipt retains the existing commit-backed exception;
+      // current-turn explicit pendings are cleared whenever their carrier
+      // response is replaced, so no hidden action survives the bounded reply.
+      const mutationReceiptCandidate =
+        handlerEmittedMutatedGraph ||
+        proposedHandlerIdForOutcome === 'draft_graph' ||
+        proposedHandlerIdForOutcome === 'edit_graph';
+      // This is evaluated after both consent/warrant backstops have had their
+      // chance to remove `meta.graph`. `graphWasProvided` is the commit
+      // module's own writesGraph predicate, so the pre-append history choice
+      // cannot drift from CommitResult.graphPersisted's meaning.
+      const mutationReceiptWillBePersisted =
+        mutationReceiptCandidate && graphWasProvided(meta.graph);
+      const zeroSelectionProjection = projectZeroResolvedSelectionResponse(
         resp,
+        contextPackForLog?.focus,
+        {
+          preserveMutationReceipt: mutationReceiptWillBePersisted,
+        },
+      );
+      const commitMeta = zeroSelectionProjection.applied
+        ? { ...meta, pending_actions: [] }
+        : meta;
+      result = await commitDirectAnswer(
+        zeroSelectionProjection.response,
         {
           // Injected BEFORE ...meta so a call site could still override; no
           // current call site does (the wrapper's server-read derivation is
@@ -1305,7 +1407,7 @@ export async function runTurnExecutor(
           // meta) to exclude the proposal they just consumed / rejected, so it
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
-          ...meta,
+          ...commitMeta,
           coaching_state: context.coaching_state,
           userMessage: userMessageForTurn,
           // Lane 28 — brief pipeline seam 1: a call site's explicit briefText
@@ -1327,6 +1429,9 @@ export async function runTurnExecutor(
         },
         store,
       );
+      zeroResolvedSelectionGuardAppliedAtCommit = zeroSelectionProjection.applied;
+      zeroResolvedSelectionMutationReceiptPersistedAtCommit =
+        mutationReceiptCandidate && result.graphPersisted;
     } catch (error) {
       if (
         error instanceof TurnFenceRejectedError ||
@@ -2926,7 +3031,14 @@ export async function runTurnExecutor(
         // effectiveTurnGraph as contentGraph); reverted on commit failure
         // so a failed turn never advertises unpersisted state.
         const preApplyEffectiveTurnGraph = effectiveTurnGraph;
+        const handlerEmittedMutatedGraphBeforeHeldCommit = handlerEmittedMutatedGraph;
         effectiveTurnGraph = outcome.appliedGraph;
+        // The held executor has already produced a concrete mutated graph.
+        // Record that fact before commitTurn so its pre-append history
+        // projection can preserve the receipt iff the commit floor still
+        // carries a graph. The post-commit graphPersisted result remains the
+        // finaliser's authority; a rejected commit restores this observation.
+        handlerEmittedMutatedGraph = true;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -2963,7 +3075,6 @@ export async function runTurnExecutor(
           // accepts the receipt, readiness reflects the applied graph, and
           // wire freshness re-derives against the post-apply hash (an
           // applied substantive edit honestly reads stale).
-          handlerEmittedMutatedGraph = true;
           analysisReadyForTurn = gmReadiness;
           const postApplyHash = ((): string | null => {
             try {
@@ -2992,6 +3103,7 @@ export async function runTurnExecutor(
           });
         } catch (error) {
           effectiveTurnGraph = preApplyEffectiveTurnGraph;
+          handlerEmittedMutatedGraph = handlerEmittedMutatedGraphBeforeHeldCommit;
           log.error(
             {
               event: 'v5.state_commit_failed',
@@ -3149,7 +3261,12 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         const preApplyEffectiveTurnGraph = effectiveTurnGraph;
+        const handlerEmittedMutatedGraphBeforeHeldCommit = handlerEmittedMutatedGraph;
         effectiveTurnGraph = lastExecuted.appliedGraph;
+        // As in the single-resume path, expose the already-produced mutation
+        // to commitTurn before it chooses the durable assistant bytes. The
+        // actual graphPersisted result still gates the final wire exception.
+        handlerEmittedMutatedGraph = true;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3172,7 +3289,6 @@ export async function runTurnExecutor(
             ...committed.response,
             draft_graph: buildAppliedGraphWireField(lastExecuted.appliedGraph),
           };
-          handlerEmittedMutatedGraph = true;
           analysisReadyForTurn = gmReadiness;
           const postApplyHash = ((): string | null => {
             try {
@@ -3204,6 +3320,7 @@ export async function runTurnExecutor(
           }
         } catch (error) {
           effectiveTurnGraph = preApplyEffectiveTurnGraph;
+          handlerEmittedMutatedGraph = handlerEmittedMutatedGraphBeforeHeldCommit;
           log.error(
             {
               event: 'v5.state_commit_failed',
@@ -10786,6 +10903,14 @@ export async function runTurnExecutor(
       commitPerformed = committed.performed;
       stagesCompleted.push('commit');
       response = committed.response;
+      // `commitTurn` may accept the turn while its consent/warrant floor
+      // rejects only the graph write. In that case the pre-commit projection
+      // above describes bytes that were NOT stored: restore the prior graph
+      // authority and do not advertise a draft/readiness mutation below.
+      if (!committed.graphPersisted && effectiveTurnGraphSetPreCommit) {
+        effectiveTurnGraph = preCommitEffectiveTurnGraph;
+        effectiveTurnGraphSetPreCommit = false;
+      }
       // F3 (response projection, 1.16 run-3 diagnosis) — post-commit honesty
       // plumbing for the routed D1 execute path, parity with
       // `commitGmHeldResume` above. The commit just durably persisted
@@ -10804,7 +10929,7 @@ export async function runTurnExecutor(
       // correct renormalised values. Re-derive readiness AFTER the commit
       // succeeds — a failed commit (the catch below) never advertises
       // unpersisted state, same rule as the GM-held path.
-      if (committedGraphParse !== null) {
+      if (committed.graphPersisted && committedGraphParse !== null) {
         if (committedGraphParse.success) {
           analysisReadyForTurn = computeStructuralReadiness(
             committedGraphParse.data,
@@ -11638,6 +11763,88 @@ export async function runTurnExecutor(
     functionalAnswerText = projected.text;
   }
 
+  /**
+   * Selection-grounding honesty at the final executor chokepoint.
+   *
+   * The model already receives `ContextPack.focus.unresolved`, but the live
+   * witness showed that prompt compliance is not an honesty guarantee: when a
+   * fabricated selected id resolved to nothing, a successful answer could
+   * silently adopt the analysed leader instead. The final ContextPack is the
+   * single authority here — never the raw request and never a second graph
+   * lookup. The guard fires only when that pack says the turn requested at
+   * least one selection and resolved zero elements.
+   *
+   * User-visible failure envelopes are preserved byte-for-byte by their error
+   * block. Deliberately do NOT key this to `failureType`: bounded routing
+   * recovery keeps the upstream LLM failure there as operations metadata even
+   * when it intentionally commits a clean 200 deterministic answer. Treating
+   * that internal cause as a visible failure exempted exactly the leader-shaped
+   * fallback this guard must constrain. Mixed selections are deliberately left
+   * alone: one resolved element is enough to keep the answer anchored, while
+   * `focus.unresolved` already discloses the missing remainder.
+   *
+   * On a match, keep only the required response envelope plus bounded,
+   * code-owned copy. Answer-bearing blocks, chips, insights and optional
+   * result projections can all name a different model element, so preserving
+   * them would make the prose honest while the response remained dishonest.
+   * Captured reasoning and answer shape are dropped, and the replacement is
+   * marked functional so route-v2 cannot synthesise a substantive answer
+   * sidecar around a refusal to guess.
+   */
+  function enforceZeroResolvedSelectionGuard(): void {
+    if (!response) return;
+
+    // `commitDirectAnswer` returns the SAME object from which it derived the
+    // durable assistant message, possibly with a deterministic lapse notice
+    // appended. When this commit already persisted the guarded projection,
+    // preserve those exact bytes so history and wire remain identical. The
+    // shape checks keep this fail-closed: any answer carrier or unexpected
+    // text falls through to the projection below.
+    const persistedGuardPrefix =
+      response.assistant_text === ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT ||
+      response.assistant_text.startsWith(
+        `${ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT}\n\n`,
+      ) ||
+      response.assistant_text === ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT ||
+      response.assistant_text.startsWith(
+        `${ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT}\n\n`,
+      );
+    if (
+      zeroResolvedSelectionGuardAppliedAtCommit &&
+      persistedGuardPrefix &&
+      response.blocks.length === 0 &&
+      response.suggested_actions.length === 0 &&
+      response.insights.length === 0
+    ) {
+      capturedAnswerShape = undefined;
+      capturedReasoning = undefined;
+      functionalAnswerText = response.assistant_text;
+      return;
+    }
+
+    // This is an answer-grounding guard, not a mutation-receipt suppressor.
+    // A successful graph mutation has a stronger, commit-backed authority for
+    // its target than the turn-start focus projection. In particular, a
+    // degraded canonical store read can leave focus unresolved while the
+    // selected id is valid in the request graph and the mutation handler
+    // durably applies it. Preserve that receipt and graph payload exactly.
+    const committedGraphMutation =
+      commitPerformed && zeroResolvedSelectionMutationReceiptPersistedAtCommit;
+    const projected = projectZeroResolvedSelectionResponse(
+      response,
+      contextPackForLog?.focus,
+      {
+        preserveMutationReceipt: committedGraphMutation,
+      },
+    );
+    if (!projected.applied) return;
+
+    response = projected.response;
+    capturedAnswerShape = undefined;
+    capturedReasoning = undefined;
+    functionalAnswerText = projected.response.assistant_text;
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
@@ -11711,6 +11918,11 @@ export async function runTurnExecutor(
         );
       }
     }
+    // Ghost-selection honesty runs before every other prose guard. Its copy is
+    // therefore checked by the existing forbidden-phrase / false-success /
+    // leader-claim guards rather than bypassing them, and disabling this one
+    // call restores the witnessed leader-adoption defect.
+    enforceZeroResolvedSelectionGuard();
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
     // per-turn emission-rate telemetry that previously lived here moved to

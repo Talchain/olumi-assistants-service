@@ -90,6 +90,7 @@ const HELD_OPERATIONS = [
 
 let pendingActionsForRead: readonly PendingAction[] = [];
 const appendCalls: Array<Record<string, unknown>> = [];
+let replayAppendedHistory = false;
 
 function gmHeldPending(
   overrides: {
@@ -135,7 +136,26 @@ vi.mock('../session/index.js', () => ({
       appendCalls.push(write);
       return { id: `row-${appendCalls.length}` };
     },
-    readRecent: async () => [],
+    readRecent: async () =>
+      replayAppendedHistory
+        ? [...appendCalls].reverse().map((write, index) => ({
+            id: `persisted-row-${index}`,
+            scenario_id: String(write['scenario_id'] ?? SCENARIO_ID),
+            user_id: null,
+            turn_id: String(write['turn_id'] ?? `persisted-turn-${index}`),
+            turn_class: String(write['turn_class'] ?? 'direct_answer'),
+            handler_id: write['handler_id'] ?? null,
+            request_hash: String(write['request_hash'] ?? `persisted-request-${index}`),
+            response_emitted: true,
+            llm_calls_used: Number(write['llm_calls_used'] ?? 0),
+            duration_ms: Number(write['duration_ms'] ?? 1),
+            created_at: new Date(Date.now() - index * 1_000).toISOString(),
+            user_message:
+              typeof write['userMessage'] === 'string' ? write['userMessage'] : null,
+            assistant_message:
+              typeof write['assistantMessage'] === 'string' ? write['assistantMessage'] : null,
+          }))
+        : [],
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
@@ -173,6 +193,20 @@ function throwingRoutingAdapter() {
   };
 }
 
+function textRoutingAdapter(text: string) {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValue({
+        content: [{ type: 'text', text }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 20 } as ChatWithToolsResult['usage'],
+        model: 'claude-sonnet-4-6',
+        latencyMs: 20,
+      }),
+  };
+}
+
 function setGmMode(mode: string): void {
   vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode);
   _resetConfigCache();
@@ -186,6 +220,7 @@ function lastAppend(): Record<string, unknown> {
 beforeEach(() => {
   appendCalls.length = 0;
   pendingActionsForRead = [gmHeldPending()];
+  replayAppendedHistory = false;
 });
 
 afterEach(() => {
@@ -195,6 +230,41 @@ afterEach(() => {
 });
 
 describe('GM held-execute — live mode applies the confirmed hold (RED on base)', () => {
+  it('a ghost-selected confirmation persists and replays the durable mutation receipt, never the zero-selection refusal', async () => {
+    setGmMode('live');
+    const result = await runTurnExecutor(payload('yes'), 'req-gm-held-ghost-selection', {
+      routingAdapter: throwingRoutingAdapter(),
+      selectedElements: {
+        node_ids: ['ghost-not-in-canonical-model'],
+        edge_ids: [],
+      },
+    });
+
+    expect(appendCalls).toHaveLength(1);
+    const write = lastAppend();
+    const durableReceipt = String(write.assistantMessage ?? '');
+    expect(durableReceipt).toContain('Confirmed:');
+    expect(result.response.assistant_text).toBe(durableReceipt);
+    expect(result.response.draft_graph).toBeDefined();
+    expect(write.graph).toBeDefined();
+    expect(write.pending_actions).toEqual([]);
+
+    pendingActionsForRead = [];
+    replayAppendedHistory = true;
+    const followUpAdapter = textRoutingAdapter('Let us inspect another assumption.');
+    await runTurnExecutor(payload('What else should I inspect?'), 'req-gm-held-follow-up', {
+      routingAdapter: followUpAdapter,
+    });
+
+    expect(followUpAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const modelInput = String(
+      followUpAdapter.chatWithTools.mock.calls[0]![0].messages[0]?.content ?? '',
+    );
+    expect(modelInput).toContain(durableReceipt);
+    expect(modelInput).not.toContain('What you selected is not in the model I can see');
+    expect(appendCalls[0]?.pending_actions).toEqual([]);
+  });
+
   it('"yes" on a held pending with operations applies + persists the mutation with an edit_graph receipt fact', async () => {
     setGmMode('live');
     const adapter = throwingRoutingAdapter();
