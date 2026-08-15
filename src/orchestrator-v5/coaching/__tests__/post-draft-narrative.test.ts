@@ -9,7 +9,6 @@ import {
   buildPostDraftNarrative,
   validateUncertaintyDriver,
 } from '../post-draft-narrative.js';
-import { NEXT_STEP_TOKENS_REGEX } from '../copy-quality-gate.js';
 import { sanitiseUserFacingText } from '../../compose/output-safety.js';
 import {
   findForbiddenPhraseHit,
@@ -874,10 +873,12 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
       suggested_action: 'add_value',
     }],
   } as const;
-  const summaryCore =
-    'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead.';
+  const acceptedSummaryMarker =
+    'The review describes a trade-off between delivery speed and quality risk.';
   const typedRecovery =
     `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+  const gateAcceptedSummary = (modelAction: string) =>
+    `${acceptedSummaryMarker} ${modelAction}`;
   const withNeedsInputSummary = (coachingSummary: string) => buildPostDraftNarrative({
     graph: baseGraph,
     coachingSummary,
@@ -1041,33 +1042,32 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   });
 
   it.each([
-    ['Run analysis', 'Next, run the analysis to compare them.'],
-    ['Run now', 'Next, run now to compare the options.'],
+    ['Start', 'Start the analysis to compare the options under stress.'],
+    ['Begin', 'Begin the analysis to compare the options under stress.'],
+    ['Compare', 'Compare the options to see which assumptions matter.'],
+    ['Analyse', 'Analyse the options to see which route holds up.'],
+    ['Run', 'Next, run the analysis to compare the options.'],
     ['Explore', 'Next, explore how the options compare under stress.'],
     ['Stress-test', 'Next, stress-test the options to see which route holds up.'],
     ['Inspect', 'Next, compare the routes and inspect what shifts the outcome.'],
-  ])('replaces an accepted %s CTA with the typed recovery when non-ready', (_label, modelCta) => {
-    const result = withNeedsInputSummary(`${summaryCore} ${modelCta}`);
-    const [servedCore, servedNextStep] = result.text.split('\n\n');
+    ['Validate', 'Validate the options against the delivery assumptions.'],
+    ['Try', 'Try comparing the options under a tighter delivery constraint.'],
+    ['Check', 'Check how the options respond to the quality risk.'],
+    ['Review', 'Review the options before choosing a route.'],
+    ['Next', 'Next, compare the routes under stress.'],
+    ['Then', 'Then compare the routes under stress.'],
+  ])('drops a gate-accepted %s summary wholesale when non-ready', (_label, modelAction) => {
+    const summary = gateAcceptedSummary(modelAction);
+    const result = withNeedsInputSummary(summary);
 
-    expect(servedCore).toBe(summaryCore);
-    expect(servedCore).not.toMatch(NEXT_STEP_TOKENS_REGEX);
-    expect(servedNextStep).toBe(typedRecovery);
-    expect(result.text).not.toContain(modelCta);
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toContain(acceptedSummaryMarker);
+    expect(result.text).not.toContain(modelAction);
+    expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(result.text.match(/\bNext,/g) ?? []).toHaveLength(1);
     expect(wordCount(result.text)).toBeLessThanOrEqual(140);
-    expect(result.telemetry.assumption_source).toBe('coaching_summary');
-    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
-    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
-    expect(result.telemetry.fallback_reason).toBeNull();
-  });
-
-  it('preserves a safe summary core but replaces its generic review CTA', () => {
-    const reviewCta = 'Next, review the model before comparing the routes.';
-    const result = withNeedsInputSummary(`${summaryCore} ${reviewCta}`);
-
-    expect(result.text).toBe(`${summaryCore}\n\n${typedRecovery}`);
-    expect(result.text).not.toContain(reviewCta);
-    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_present).toBe(true);
     expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
     expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
   });
@@ -1075,34 +1075,84 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it.each([
     [
       'first sentence',
-      `Next, explore how the options compare under stress. ${summaryCore}`,
+      `Start the analysis to compare the options under stress. ${acceptedSummaryMarker}`,
     ],
     [
-      'middle line without terminal punctuation',
-      `The routes here weigh delivery speed against quality risk.\nThen stress-test the options\nOne assumption worth checking is whether the team can absorb extra coordination overhead.`,
+      'middle sentence',
+      'The review describes a trade-off in delivery speed. Compare the options under stress. Quality risk remains uncertain.',
     ],
     [
-      'quoted final sentence',
-      `${summaryCore} "Next, inspect what shifts the outcome."`,
+      'final sentence',
+      `${acceptedSummaryMarker} Begin the analysis to compare the options.`,
     ],
     [
-      'colon lead-in',
-      `${summaryCore} Next: validate which route holds up under pressure.`,
+      'quoted action',
+      `${acceptedSummaryMarker} "Analyse the options to see which route holds up."`,
     ],
     [
-      'em-dash lead-in after style repair',
-      `${summaryCore} Next — explore which route holds up under pressure.`,
+      'newline action',
+      `${acceptedSummaryMarker}\nTry comparing the options under stress.`,
     ],
-  ])('replaces a next-step in the %s while retaining descriptive sentences', (_label, summary) => {
+    [
+      'colon action',
+      `${acceptedSummaryMarker} Next: validate which route holds up under pressure.`,
+    ],
+    [
+      'em-dash action',
+      `${acceptedSummaryMarker} Next — inspect which route holds up under pressure.`,
+    ],
+    [
+      'one sentence',
+      'The review describes a trade-off between delivery speed and quality risk; start the analysis to compare the options under stress.',
+    ],
+  ])('drops the whole accepted summary for the %s form', (_label, summary) => {
     const result = withNeedsInputSummary(summary);
-    const blocks = result.text.split('\n\n');
-    const servedNextStep = blocks.pop();
-    const servedCore = blocks.join('\n\n');
 
-    expect(servedNextStep).toBe(typedRecovery);
-    expect(servedCore).toContain('The routes here weigh delivery speed against quality risk.');
-    expect(servedCore).toContain('One assumption worth checking');
-    expect(servedCore).not.toMatch(NEXT_STEP_TOKENS_REGEX);
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toContain('The review describes');
+    expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(result.text.match(/\bNext,/g) ?? []).toHaveLength(1);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
+  });
+
+  it.each([
+    [
+      'needs_user_mapping',
+      { status: 'needs_user_mapping' },
+      'Next, configure the unresolved option by choosing its factor and effect.',
+    ],
+    [
+      'needs_encoding',
+      { status: 'needs_encoding' },
+      'Next, choose how the unresolved option should be represented on the effect scale.',
+    ],
+    [
+      'needs_user_input',
+      { status: 'needs_user_input' },
+      'Next, configure the unresolved option by choosing its factor and effect.',
+    ],
+    [
+      'blocked',
+      { status: 'blocked' },
+      'Next, resolve the model issue shown before comparing the options.',
+    ],
+    [
+      'missing',
+      undefined,
+      'Next, review the model and fill any gaps before comparing the options.',
+    ],
+  ])('never serves an accepted summary for %s readiness', (_label, analysisReady, expectedRecovery) => {
+    const summary = gateAcceptedSummary('Start the analysis to compare the options under stress.');
+    const result = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: summary, analysisReady });
+
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toContain(acceptedSummaryMarker);
+    expect(result.text.split('\n\n').at(-1)).toBe(expectedRecovery);
+    expect(result.text.match(/\bNext,/g) ?? []).toHaveLength(1);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
     expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
   });
 });

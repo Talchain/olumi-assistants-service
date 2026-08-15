@@ -184,7 +184,7 @@ const TRADEOFF_OR_GAP_TOKENS_REGEX =
  * Tokens that signal a next-step nudge. At least one must be present
  * for {@link gateFullResponse} to accept.
  */
-export const NEXT_STEP_TOKENS_REGEX =
+const NEXT_STEP_TOKENS_REGEX =
   /\b(?:run|next|then|try|check|explore|review|inspect|validate|stress-?test)\b/i;
 
 /**

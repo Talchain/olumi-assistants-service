@@ -11,9 +11,9 @@
  *   1. coachingSummary replacement. When `coachingSummary` is present
  *      and passes the strict whole-response gate in
  *      {@link ../coaching/copy-quality-gate.ts}, readiness remains the final
- *      authority over its next step. A ready summary is used verbatim. For a
- *      non-ready summary, every model-authored next-step sentence is removed
- *      before the smallest typed recovery is appended.
+ *      authority over its next step. A ready, in-budget summary is used
+ *      verbatim. Every non-ready or readiness-missing summary is discarded;
+ *      the deterministic builder supplies the canonical typed recovery.
  *
  *   2. Sectioned narrative. When the summary is missing or rejected,
  *      the builder assembles up to four blocks separated by blank
@@ -75,7 +75,6 @@ import {
   gateAssumptionFragment,
   gateCoachingCardBody,
   gateFullResponse,
-  NEXT_STEP_TOKENS_REGEX,
   type GateRejectReason,
 } from './copy-quality-gate.js';
 
@@ -357,13 +356,12 @@ export type CoachingSummaryRejectReason = GateRejectReason | 'readiness_conflict
 export interface PostDraftNarrativeTelemetry {
   readonly assumption_source: AssumptionSource;
   readonly coaching_summary_present: boolean;
-  /** True only when the accepted whole response shipped without CTA replacement. */
+  /** True only when the accepted whole response shipped verbatim. */
   readonly coaching_summary_passed_gate: boolean;
   /**
-   * The first copy-gate failure, or `readiness_conflict` when an otherwise
-   * acceptable non-ready summary had its model-authored CTA replaced. The
-   * latter can coexist with delivery of the summary's descriptive core.
-   * `null` when missing or when the whole response shipped unchanged.
+   * The first copy-gate failure, or `readiness_conflict` when typed readiness
+   * prevents an otherwise acceptable summary from shipping. `null` when
+   * missing or when the whole response shipped unchanged.
    */
   readonly coaching_summary_reject_reason: CoachingSummaryRejectReason | null;
   /**
@@ -468,39 +466,28 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       : null;
 
   // The copy gate is necessary but not sufficient: typed readiness is the sole
-  // authority for the served next action. Ready summaries remain byte-for-byte
-  // replacements. For every accepted non-ready summary, remove every sentence
-  // carrying the copy gate's own next-step vocabulary, then append the canonical
-  // typed recovery. This preserves useful reasoning without serving a rival CTA.
-  // Always use the gate's sanitised text.
+  // authority for the whole-summary shortcut. Only an exact `ready` status may
+  // ship the gate's sanitised summary. Every non-ready or missing status drops
+  // all model-authored summary bytes and falls through to the deterministic
+  // builder, whose final action is derived only from typed readiness.
   if (summaryGateResult && summaryGateResult.accept) {
     const acceptedSummary = summaryGateResult.text ?? summaryCandidate;
     const isReady = analysisReady?.status === 'ready';
-    const readinessControlledSummary = isReady
-      ? acceptedSummary
-      : replaceModelAuthoredNextSteps(acceptedSummary, nextStep);
 
-    if (
-      readinessControlledSummary !== null
-      && countWords(readinessControlledSummary) <= MAX_WORDS
-    ) {
+    if (isReady && countWords(acceptedSummary) <= MAX_WORDS) {
       return {
-        text: readinessControlledSummary,
+        text: acceptedSummary,
         telemetry: {
           assumption_source: 'coaching_summary',
           coaching_summary_present: true,
-          // A non-ready summary passed the copy gate, but its whole-response
-          // shortcut did not: the model-authored CTA was replaced. Keep that
-          // distinction visible without discarding the useful summary core.
-          coaching_summary_passed_gate: isReady,
-          coaching_summary_reject_reason: isReady ? null : 'readiness_conflict',
+          coaching_summary_passed_gate: true,
+          coaching_summary_reject_reason: null,
           coaching_summary_style_rewritten: summaryGateResult.styleRewritten === true,
           fallback_reason: null,
           strengthen_items_count: strengthenItemsCount,
           bias_findings_count: biasFindingsCount,
           coaching_bias_signals_count: coachingBiasSignalsCount,
-          // Summary paths render no deterministic evidence blocks. Non-ready
-          // summaries append only the typed readiness tail above.
+          // Verbatim-summary paths render no deterministic evidence blocks.
           widening_log_present: wideningLogPresent,
           brief_completeness: briefCompleteness,
           brief_completeness_surfaced: false,
@@ -690,74 +677,6 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
 }
 
 // ----- readiness-controlled next step --------------------------------------
-
-/**
- * Replace every model-authored next-step sentence with the one typed recovery.
- *
- * The sentence classifier deliberately reuses `NEXT_STEP_TOKENS_REGEX`, the
- * same authority that admitted the full response. A second intent vocabulary
- * here would inevitably drift (the original Run-only check missed explore,
- * stress-test and inspect). The policy is conservative: if a sentence carries
- * any admitted next-step token, none of that sentence is served while non-ready.
- */
-function replaceModelAuthoredNextSteps(summary: string, canonicalNextStep: string): string | null {
-  const sentences = splitSummarySentences(summary);
-  const descriptiveCore = sentences.filter(
-    (sentence) => !NEXT_STEP_TOKENS_REGEX.test(sentence),
-  );
-
-  // An accepted full response must contain one of the gate's next-step tokens.
-  // Fail closed if that authority and the splitter ever disagree.
-  if (descriptiveCore.length === sentences.length || descriptiveCore.length === 0) return null;
-
-  // Keep as much useful reasoning as fits, in authored order. Only whole
-  // sentences are shed; truncating prose could turn a qualified statement into
-  // a stronger claim. The canonical recovery itself is never dropped.
-  while (descriptiveCore.length > 0) {
-    const candidate = `${descriptiveCore.join(' ')}\n\n${canonicalNextStep}`;
-    if (countWords(candidate) <= MAX_WORDS) return candidate;
-    descriptiveCore.pop();
-  }
-  return null;
-}
-
-/**
- * Split prose on terminal punctuation followed by whitespace/end, or on a
- * newline. Decimal points remain inside a sentence; closing quotes/brackets are
- * retained with the sentence they close. Output is normalised to trimmed prose
- * because the final block assembler owns layout.
- */
-function splitSummarySentences(text: string): string[] {
-  const sentences: string[] = [];
-  let start = 0;
-
-  const push = (end: number): void => {
-    const sentence = text.slice(start, end).trim();
-    if (sentence.length > 0) sentences.push(sentence);
-    start = end;
-  };
-
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    if (char === '\n') {
-      push(i);
-      start = i + 1;
-      continue;
-    }
-    if (char !== '.' && char !== '!' && char !== '?') continue;
-
-    let end = i + 1;
-    while (end < text.length && /[.!?]/.test(text[end] ?? '')) end += 1;
-    while (end < text.length && /[)\]}"'’]/.test(text[end] ?? '')) end += 1;
-    if (end < text.length && !/\s/.test(text[end] ?? '')) continue;
-
-    push(end);
-    i = end - 1;
-  }
-
-  push(text.length);
-  return sentences;
-}
 
 /**
  * Build the one load-bearing CTA from the typed analysis-ready payload.
