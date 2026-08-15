@@ -174,6 +174,10 @@ import {
   type TypedChipGraphView,
 } from './routing/typed-chip-mutation-proposal.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from './routing/answer-shape.js';
+import {
+  projectGroundedSelection,
+  type GroundedSelection,
+} from './context/grounded-selection.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
   composeStateQueryChip,
@@ -267,6 +271,7 @@ import {
   assembleContextPackWithSummary,
   CONTEXT_PACK_RECENT_TURNS_CAP,
   type ContextPack,
+  type ContextPackFocus,
 } from './context/context-pack-assembler.js';
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
@@ -630,6 +635,23 @@ export interface TurnExecutorRunResult {
    * the shape, so the sidecar can never contradict what the user reads.
    */
   answerShape?: AnswerShape;
+  /**
+   * SELECTION-AWARE ANSWERING (hop 4b) — WHICH MODEL ELEMENTS THIS TURN'S
+   * ANSWER WAS GROUNDED ON, surfaced for route-v2's `_grounded_selection`
+   * wire sidecar (same strip → validate → re-attach mechanic as
+   * `answerShape` above; never attached to `response` here).
+   *
+   * Projected from `ContextPack.focus` — the SAME object hop 4 put in the
+   * routing prompt — so the wire cannot disagree with what the model was
+   * given. Captured only after the real routing call consumes that pack;
+   * deterministic post-pack exits never attach merely because a focus was
+   * assembled. Also absent when the pack carried no focus and whenever the
+   * turn FAILED: neither path produced a successful focus-grounded answer.
+   *
+   * See `context/grounded-selection.ts` for the question this field answers
+   * and, just as importantly, the one it does not.
+   */
+  groundedSelection?: GroundedSelection;
   /**
    * ROADMAP 1.132 (F1) — the SUBSTANTIVE/FUNCTIONAL classification of this
    * turn's answer, for route-v2's egress answer-shape synthesiser (see
@@ -1810,6 +1832,13 @@ export async function runTurnExecutor(
   // clarify / text_only turns, and whenever a post-capture rewrite diverges
   // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
+  // SELECTION-AWARE ANSWERING (hop 4b) — the `focus` section of the pack the
+  // REAL routing call consumed, hoisted for the same reason as
+  // `capturedAnswerShape` above (finalizeRun, declared outside the try, reads
+  // it). Set at ONE place: only after `routeWithToolUse` returns successfully.
+  // Pack assembly alone is not evidence of answer grounding: 22 deterministic
+  // exits sit between assembly and routing and do not consume the focus.
+  let capturedFocus: ContextPackFocus | undefined;
   // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). The composed
   // text of the turn's FUNCTIONAL answer (clarify question / add-option or edit
   // receipt / decline / deterministic recovery), captured at EACH functional
@@ -7151,6 +7180,13 @@ export async function runTurnExecutor(
             ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
             : {}),
         });
+        // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE.
+        // Capture only after the real router successfully consumed the FINAL
+        // pack. Merely assembling `focus` is not authority to claim that a
+        // deterministic pre-route answer was grounded on it. Moving this back
+        // above the pre-route gates is a mutant killed by the selected advice-
+        // gate negative control; removing it is killed by the routed positive.
+        capturedFocus = contextPack.focus;
         // ROADMAP 1.42 — stash VERBATIM reasoning immediately after the real
         // LLM call. Undefined when the flag was off or no thinking blocks
         // were emitted (see ChatWithToolsResult.reasoning jsdoc).
@@ -11972,6 +12008,21 @@ export async function runTurnExecutor(
       // re-verified against the FINAL assistant_text just above — absent
       // whenever a post-capture rewriter diverged the text from the shape.
       ...(answerShapeForRun ? { answerShape: answerShapeForRun } : {}),
+      // SELECTION-AWARE ANSWERING (hop 4b) — which elements THIS answer was
+      // grounded on, for route-v2's `_grounded_selection` wire sidecar (never
+      // attached to `response` here).
+      //
+      // Two conditions. `capturedFocus` means the real router consumed the
+      // focused pack; mere pack presence is deliberately insufficient because
+      // deterministic post-pack exits bypass that call. `failureType === null`
+      // means the user is reading the resulting answer rather than error copy.
+      // Both are pinned by discriminating controls.
+      ...(capturedFocus !== undefined && failureType === null
+        ? (() => {
+            const grounded = projectGroundedSelection(capturedFocus, context.selection);
+            return grounded !== null ? { groundedSelection: grounded } : {};
+          })()
+        : {}),
       // ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification for route-v2's
       // egress answer-shape synthesiser (see above + TurnExecutorRunResult.answerKind).
       // Always surfaced when a response was composed; route synthesises a shape

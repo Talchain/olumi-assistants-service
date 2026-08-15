@@ -33,6 +33,7 @@ import type { TurnTimingsBlock } from '../orchestrator-v5/telemetry/turn-timings
 import type { V5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import type { V5ContextSummary } from '../orchestrator-v5/context/build-context-summary.js';
 import type { AnswerShape } from '../orchestrator-v5/routing/answer-shape.js';
+import type { GroundedSelection } from '../orchestrator-v5/context/grounded-selection.js';
 
 const DEBUG_HEADER_NAME = 'x-olumi-debug';
 
@@ -155,6 +156,26 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    * two-gate `X-Olumi-Debug` header model does NOT apply.
    */
   readonly _answer_shape?: AnswerShape;
+  /**
+   * SELECTION-AWARE ANSWERING (hop 4b) — PRODUCT sidecar (same class as
+   * `_reasoning` / `_answer_shape` above, NOT a debug/diagnostic surface):
+   * the model elements THIS turn's answer was grounded on, so the canvas can
+   * point at them instead of leaving the user to find the node the answer
+   * names. Threaded from `TurnExecutorRunResult.groundedSelection`, itself
+   * projected from the `ContextPack.focus` the routing prompt carried — one
+   * authority, never re-derived at the wire.
+   *
+   * UNCONDITIONAL: no flag, no `X-Olumi-Debug` token. Absent whenever the
+   * turn was not grounded on a selection, which keeps every pre-hop-4b turn
+   * byte-identical on the wire. Stripped before strict `OlumiResponseSchema`
+   * validation, re-attached after — same mechanic as `_answer_shape`.
+   *
+   * Pending formalisation as a named field on the shared @talchain/schemas
+   * contract (the `reasoning` precedent: sidecar first, schema field once the
+   * consumer surface lands). Intended to reach the client UI, which reads it
+   * off `responseParser`'s `__additive__` demotion sidecar.
+   */
+  readonly _grounded_selection?: GroundedSelection;
 };
 
 /**
