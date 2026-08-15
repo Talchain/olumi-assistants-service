@@ -79,12 +79,48 @@ describe('SupabaseRollingSummaryStore.loadSummary', () => {
     const { client, spy } = clientWith(() => ({ data: summary(), error: null }));
     const loaded = await new SupabaseRollingSummaryStore(client).loadSummary('sc-1');
     expect(spy).toHaveBeenCalledWith('get_rolling_summary', { p_scenario_id: 'sc-1' });
-    expect(loaded?.updated_turn_id).toBe('turn-7');
+    // Reload is semantically equivalent, not merely parseable: every slot,
+    // provenance id, watermark and generator field survives the durable JSON
+    // boundary. Deep equality kills a loader that reconstructs only metadata.
+    expect(loaded).toEqual(summary());
   });
 
   it('returns null for an absent summary', async () => {
     const { client } = clientWith(() => ({ data: null, error: null }));
     expect(await new SupabaseRollingSummaryStore(client).loadSummary('sc-1')).toBeNull();
+  });
+
+  it('binds every reload to its scenario id and does not reuse another scenario’s memory', async () => {
+    const forScenario = (label: string): RollingSummary => ({
+      ...summary(),
+      text: `DECISION FRAME: ${label}`,
+      slots: [{ slot: 'FRAME', entries: [{ text: label, source_turn_ids: [] }] }],
+    });
+    const { client, spy } = clientWith((_name, rawArgs) => {
+      const args = rawArgs as { p_scenario_id?: unknown };
+      return {
+        data:
+          args.p_scenario_id === 'scenario-a'
+            ? forScenario('Alpha')
+            : forScenario('Beta'),
+        error: null,
+      };
+    });
+    const store = new SupabaseRollingSummaryStore(client);
+
+    const a = await store.loadSummary('scenario-a');
+    const b = await store.loadSummary('scenario-b');
+
+    expect(a!.text).toContain('Alpha');
+    expect(a!.text).not.toContain('Beta');
+    expect(b!.text).toContain('Beta');
+    expect(b!.text).not.toContain('Alpha');
+    expect(spy).toHaveBeenNthCalledWith(1, 'get_rolling_summary', {
+      p_scenario_id: 'scenario-a',
+    });
+    expect(spy).toHaveBeenNthCalledWith(2, 'get_rolling_summary', {
+      p_scenario_id: 'scenario-b',
+    });
   });
 
   it('returns null (never throws) for an unparseable stored summary', async () => {

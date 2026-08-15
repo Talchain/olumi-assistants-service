@@ -1412,11 +1412,13 @@ export const OLDER_RELEVANT_FACTS_INSTRUCTION = [
  * different release cadence, is this estate's dominant defect shape — it drifted
  * from `older_relevant_facts` inside TWENTY MINUTES on 2026-07-25.
  *
- * It says four things, and the last two are what earn the section:
+ * It says five things, and the last two are what earn the section:
  *  · the user is POINTING at something — answer about THAT, not the model at
  *    large. The selection is a pointer, never an instruction to change anything;
  *  · ground the answer in the values, links and ANALYSIS OUTPUTS already in the
  *    pack — never a fresh estimate;
+ *  · `analysis_not_current` forbids reconstructing a selected element's figures
+ *    from the broader display-safe analysis by a matching label;
  *  · when `unresolved` is `not_in_model`, say plainly it is not in the model;
  *  · when it is `could_not_check`, say the model COULD NOT BE READ — never
  *    assert the element is absent, because that is not known. These two must
@@ -1429,7 +1431,8 @@ export const FOCUS_INSTRUCTION = [
   '## Selected elements (what the user is pointing at)',
   'The `focus` block above is what the user currently has selected on the canvas. Answer about those elements specifically, grounded in the values, links and analysis already in this pack — do not estimate a value that is not here.',
   '- Each element carries an `analysis` block when the current analysis scored it (win probability, target fit, influence, value of information, tipping-point risk). Use those figures when explaining why the element matters; they are the same figures shown elsewhere in this pack, so never restate them differently.',
-  '- `analysis_link` says why an element has no figures: `not_in_analysis` (the analysis scored nothing for it), `ambiguous_label` (its name does not identify it uniquely, so no figures could be attached safely), or `no_analysis` (nothing has been analysed yet). Say which, rather than inventing a figure.',
+  '- `analysis_link` says why an element has no figures: `analysis_not_current` (the available analysis is not current enough to bind to this selected element), `not_in_analysis` (the current analysis scored nothing for it), `ambiguous_label` (its name does not identify it uniquely, so no figures could be attached safely), or `no_analysis` (nothing has been analysed yet). Say which, rather than inventing a figure.',
+  '- When `analysis_link` is `analysis_not_current`, do not recover, infer or rejoin figures from the broader `analysis` section by label, even if a name matches. Those figures are not licensed for this selected element; say that current figures are unavailable and suggest rerunning analysis when useful.',
   '- If `focus.unresolved` is `not_in_model`, say plainly that what they selected is not in the model you can see.',
   '- If `focus.unresolved` is `could_not_check`, say that you could not read the model to check — never say the element is missing, because you do not know that.',
   '- A selection is what the user wants discussed. It is not an instruction to change the model: do not edit, add or remove anything on the strength of a selection alone.',

@@ -197,7 +197,7 @@ describe('projectFocus — elements are bound by IDENTITY', () => {
     // The producer copies out of the persisted node; a client label that
     // disagrees cannot reach the pack because it is never an input to the
     // projection. Asserting the persisted value is what pins that.
-    const focus = projectFocus(selectionFor([OPTION_ID]), DISPLAY, LABEL_INDEX)!;
+    const focus = projectFocus(selectionFor([OPTION_ID]), DISPLAY, LABEL_INDEX, true)!;
     expect(focus.elements[0]!.label).toBe(OPTION_LABEL);
   });
 });
@@ -337,7 +337,7 @@ describe('projectFocus — display-safe only', () => {
   ];
 
   it('the projected element carries ONLY declared keys (an extra key is how a raw value leaks)', () => {
-    const focus = projectFocus(selectionFor([FACTOR_ID]), DISPLAY, LABEL_INDEX)!;
+    const focus = projectFocus(selectionFor([FACTOR_ID]), DISPLAY, LABEL_INDEX, true)!;
     for (const el of focus.elements) {
       // EQUALITY against the declared set, not `toContain` — containment
       // cannot see an extra key, which is exactly the leak shape.
@@ -426,7 +426,7 @@ describe('projectFocus — everything serialised into a prompt is bounded', () =
 
 describe('projectFocus — the selected element carries its ANALYSIS context', () => {
   it('an OPTION element carries its win probability from the display-safe analysis', () => {
-    const focus = projectFocus(selectionFor([OPTION_ID]), DISPLAY, LABEL_INDEX)!;
+    const focus = projectFocus(selectionFor([OPTION_ID]), DISPLAY, LABEL_INDEX, true)!;
     const el = focus.elements.find((e) => e.id === OPTION_ID)!;
     expect(el.analysis_link).toBe('linked');
     expect(el.analysis).toBeDefined();
@@ -436,7 +436,7 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
   });
 
   it('a FACTOR element carries its influence phrase from the display-safe analysis', () => {
-    const focus = projectFocus(selectionFor([FACTOR_ID]), DISPLAY, LABEL_INDEX)!;
+    const focus = projectFocus(selectionFor([FACTOR_ID]), DISPLAY, LABEL_INDEX, true)!;
     const el = focus.elements.find((e) => e.id === FACTOR_ID)!;
     expect(el.analysis_link).toBe('linked');
     expect(el.analysis!.influence).toBeDefined();
@@ -448,8 +448,8 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
   it('DISCRIMINATING PAIR — two selected factors carry DIFFERENT influence phrases', () => {
     // +0.42 vs -0.11: the projection must reach the entry for THIS factor, not
     // simply the first driver in the list.
-    const a = projectFocus(selectionFor([FACTOR_ID]), DISPLAY, LABEL_INDEX)!.elements[0]!;
-    const b = projectFocus(selectionFor([OTHER_FACTOR_ID]), DISPLAY, LABEL_INDEX)!.elements[0]!;
+    const a = projectFocus(selectionFor([FACTOR_ID]), DISPLAY, LABEL_INDEX, true)!.elements[0]!;
+    const b = projectFocus(selectionFor([OTHER_FACTOR_ID]), DISPLAY, LABEL_INDEX, true)!.elements[0]!;
     expect(a.analysis!.influence).toBeDefined();
     expect(b.analysis!.influence).toBeDefined();
     expect(a.analysis!.influence).not.toBe(b.analysis!.influence);
@@ -469,7 +469,12 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
         { rank: '2', label: OPTION_LABEL, win_probability: '38%' },
       ],
     } as unknown as typeof DISPLAY;
-    const focus = projectFocus(selectionFor([OPTION_ID]), collidingDisplay, LABEL_INDEX)!;
+    const focus = projectFocus(
+      selectionFor([OPTION_ID]),
+      collidingDisplay,
+      LABEL_INDEX,
+      true,
+    )!;
     const el = focus.elements[0]!;
     expect(el.analysis_link).toBe('ambiguous_label');
     expect('analysis' in el).toBe(false);
@@ -479,7 +484,7 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
     // Without this pair, the test above could pass because the element never
     // links at all. The pair is what proves the guard DISCRIMINATES rather than
     // simply never attaching anything.
-    const focus = projectFocus(selectionFor([OPTION_ID]), DISPLAY, LABEL_INDEX)!;
+    const focus = projectFocus(selectionFor([OPTION_ID]), DISPLAY, LABEL_INDEX, true)!;
     expect(focus.elements[0]!.analysis_link).toBe('linked');
   });
 
@@ -511,7 +516,7 @@ describe('projectFocus — the selected element carries its ANALYSIS context', (
   });
 
   it('reports not_in_analysis for an element the analysis never scored', () => {
-    const focus = projectFocus(selectionFor(['goal_rev']), DISPLAY, LABEL_INDEX)!;
+    const focus = projectFocus(selectionFor(['goal_rev']), DISPLAY, LABEL_INDEX, true)!;
     expect(focus.elements[0]!.analysis_link).toBe('not_in_analysis');
     expect('analysis' in focus.elements[0]!).toBe(false);
   });
@@ -595,7 +600,12 @@ describe('F1 — the analysis join never attaches another node’s figures', () 
   ) {
     const selection = resolveTurnSelection(ids, graph, 'ok_present');
     if (selection === null) throw new Error('fixture: no selection');
-    const focus = projectFocus(selection, displayFor(analysis, graph), buildAnalysisIdentityIndex(analysis));
+    const focus = projectFocus(
+      selection,
+      displayFor(analysis, graph),
+      buildAnalysisIdentityIndex(analysis),
+      true,
+    );
     if (focus === null) throw new Error('fixture: no focus');
     return focus;
   }
@@ -759,7 +769,7 @@ describe('GUARD 2 — kind scoping, pinned on the id-less lists guard 1 cannot s
   function p4Focus(id: string) {
     const selection = resolveTurnSelection([id], P4_GRAPH, 'ok_present');
     if (selection === null) throw new Error('fixture: no selection');
-    const focus = projectFocus(selection, P4_DISPLAY, P4_INDEX);
+    const focus = projectFocus(selection, P4_DISPLAY, P4_INDEX, true);
     if (focus === null) throw new Error('fixture: no focus');
     return focus.elements[0]!;
   }
@@ -831,7 +841,12 @@ describe('GUARD 2 — kind scoping, pinned on the id-less lists guard 1 cannot s
       priorTurns: [], priorFacts: [], analysis, graph: graph as never,
     });
     const selection = resolveTurnSelection(['fac_a'], graph, 'ok_present')!;
-    const el = projectFocus(selection, formatAnalysisForContext(pack.analysis), buildAnalysisIdentityIndex(analysis))!.elements[0]!;
+    const el = projectFocus(
+      selection,
+      formatAnalysisForContext(pack.analysis),
+      buildAnalysisIdentityIndex(analysis),
+      true,
+    )!.elements[0]!;
     // Documented, not endorsed: this asserts the CURRENT honest limit. It REDs
     // if the residual is closed (good — close it and delete this test) and REDs
     // if it silently widens.

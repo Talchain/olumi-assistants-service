@@ -129,6 +129,35 @@ function derivingModel(): SummariserModel {
   };
 }
 
+/**
+ * Incremental supersession control: choose the LAST user constraint in the
+ * actual summariser input. On an update pass that input contains the prior
+ * summary first and the newly committed turn last, so this fake models the
+ * contract's "only change what the new turns actually changed" rule without
+ * hard-coding either location. If the new turn is not threaded, the old value
+ * wins and the supersession assertion below goes red.
+ */
+function latestConstraintModel(): SummariserModel {
+  return {
+    summarise: vi.fn(async (userMessage: string) => {
+      const matches = [
+        ...userMessage.matchAll(/\[(t\d+)\]\s*USER: ([^\n]*must be[^\n]*)/g),
+      ];
+      const latest = matches.at(-1);
+      return {
+        text: [
+          'DECISION FRAME: Choosing a venue for the product launch.',
+          latest
+            ? `CONSTRAINTS & PREFERENCES: ${latest[2]} [${latest[1]}]`
+            : 'CONSTRAINTS & PREFERENCES: (none)',
+          'RESOLVED: (none)',
+          'OPEN: (none)',
+        ].join('\n'),
+      };
+    }),
+  };
+}
+
 function reader(turnsNewestFirst: readonly SessionTurnWithContent[]): ConversationHistoryReader {
   return { readRecent: async () => turnsNewestFirst };
 }
@@ -217,6 +246,48 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
 
     // The code-owned facts-beat-summary precedence instruction rides along.
     expect(prompt).toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
+
+    // CONTEXT-FAMILY ABLATION: remove ONLY the durable summary family while
+    // keeping the same scenario, history window and user turn. The turn-1
+    // truth disappears from the exact routing prompt. This proves the memory
+    // layer contributes material context rather than decorative bytes.
+    const { contextPack: summaryAblated } = assembleContextPackWithSummary({
+      payload: makeMessagePayload({ message: 'So where should we hold it?', scenario_id: SCENARIO }),
+      priorTurns: history,
+      priorFacts: [],
+    });
+    const ablatedPrompt = buildUserMessage(summaryAblated, 'So where should we hold it?');
+    expect(ablatedPrompt).not.toContain(EARLY_FACT);
+    expect(ablatedPrompt).not.toBe(prompt);
+  });
+
+  it('a later explicit replacement supersedes the turn-1 constraint in durable memory and after reload', async () => {
+    const store = new MonotonicRollingSummaryStoreFake();
+    const initial = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
+    await maintain(initial, store, derivingModel());
+    expect(store.stored!.text).toContain(EARLY_FACT);
+
+    // One later turn explicitly replaces the location constraint. This is an
+    // incremental pass: the summariser sees the prior summary plus only the
+    // new turn. A retention guard that blindly resurrected the old non-empty
+    // slot would leave Manchester in the durable prompt.
+    const replacementTurnNumber = CONTEXT_PACK_RECENT_TURNS_CAP + 4;
+    const updated = [
+      turn(
+        replacementTurnNumber,
+        'The venue must be in Leeds; replace the earlier location constraint.',
+      ),
+      ...initial,
+    ];
+    await maintain(updated, store, latestConstraintModel());
+
+    const reloaded = await store.loadSummary();
+    expect(reloaded!.text).toContain('Leeds');
+    expect(reloaded!.text).not.toContain(EARLY_FACT);
+
+    const { prompt } = await assembleLive(updated, store, 'Where is the venue now?');
+    expect(prompt).toContain('Leeds');
+    expect(prompt).not.toContain(EARLY_FACT);
   });
 
   it('the summary is byte-bounded and passes the budget seam untouched (precedence: never trimmed)', async () => {
