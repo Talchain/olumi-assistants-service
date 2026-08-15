@@ -50,7 +50,9 @@ describe('runtime prompt-promotion gate', () => {
       { now: NOW, repoRoot: REPO_ROOT },
     );
     expect(decision.decision).toBe('GATED_PASS');
-    if (decision.decision !== 'GATED_PASS') throw new Error(decision.reason);
+    if (decision.decision !== 'GATED_PASS') {
+      throw new Error(`expected GATED_PASS, received ${decision.decision}`);
+    }
     expect(decision.promptSha16).toBe(currentReport().promptSha16);
     expect(decision.report.sampleSize).toBeGreaterThanOrEqual(
       MIN_CERTIFYING_SAMPLE_SIZE,
