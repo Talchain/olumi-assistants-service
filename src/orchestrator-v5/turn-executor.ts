@@ -2286,6 +2286,13 @@ export async function runTurnExecutor(
       context.prior_facts,
       currentAnalysisGraphHashForTurn,
       currentGraphOptionIdsForTurn,
+      // PR #981 review P1b: ONE authority for one question. Threading the
+      // degraded-read flag only into the canonical selector made a single turn
+      // emit pack 'unknown' and turn_outcome 'none' simultaneously. Every raw
+      // derivation over context.prior_facts now threads the same flag.
+      context.prior_facts_read_ok === undefined
+        ? undefined
+        : { priorFactsReadOk: context.prior_facts_read_ok },
     );
     // Until the post-dispatch re-derivation runs, the wire-bound
     // `freshness` defaults to the routing view — this covers exit paths
@@ -3101,6 +3108,11 @@ export async function runTurnExecutor(
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(outcome.mutatedGraph)
               : undefined,
+          
+            // PR #981 review P1b: same flag, same question (see routingFreshness).
+            context.prior_facts_read_ok === undefined
+              ? undefined
+              : { priorFactsReadOk: context.prior_facts_read_ok },
           );
           emit(TelemetryEvents.PendingActionConsumed, {
             request_id: requestId,
@@ -3315,6 +3327,11 @@ export async function runTurnExecutor(
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(lastExecuted.mutatedGraph)
               : undefined,
+          
+            // PR #981 review P1b: same flag, same question (see routingFreshness).
+            context.prior_facts_read_ok === undefined
+              ? undefined
+              : { priorFactsReadOk: context.prior_facts_read_ok },
           );
           for (const ref of consumedRefs) {
             const consumedHold = holds.find((h) => h.chip_id === ref)!;
@@ -9368,6 +9385,13 @@ export async function runTurnExecutor(
         unifiedFactsForPostHandler,
         hashForPostHandlerFreshness,
         currentGraphOptionIdsForPostHandler,
+        // PR #981 review P1b: same flag, same question. Nearly always inert
+        // here (this turn's own facts are first in the unified chain) — it
+        // matters only when the handler produced no usable fact AND the prior
+        // read degraded, where 'none' would again be an unsupported claim.
+        context.prior_facts_read_ok === undefined
+          ? undefined
+          : { priorFactsReadOk: context.prior_facts_read_ok },
       );
       // T1 claim safety — REFINE the turn-entry read (ROADMAP 1.233, see the
       // declaration) over the SAME fact array and via the SAME canonical

@@ -243,6 +243,26 @@ export const ANALYSIS_NOT_CURRENT_NOTE =
   're-run the analysis before quoting or reasoning from them';
 
 /**
+ * The NON-STALE variant, and why two constants exist (adversarial review of
+ * PR #981, P0): on `freshness: 'none'` NO analysis has ever run — a note
+ * claiming "an earlier analysis run" asserts a run that never happened, and
+ * directly contradicts COACHING_CONTEXT_INSTRUCTION's own r2 rule ("when
+ * freshness is none … there is nothing to re-run") in the SAME serialised
+ * prompt. `'unknown'` cannot safely claim a prior run either
+ * (`derivation_failed` on an empty chain implies none). And the re-run remedy
+ * is licensed only where the rerun chip actually exists — chip-generator fires
+ * it on `'stale'` alone — so a remedy here would instruct an action the turn
+ * offers no affordance for.
+ *
+ * So: `'stale'` (a run provably happened; the chip exists) keeps the specific
+ * note above; every OTHER non-fresh verdict gets this one, which claims only
+ * what is true of all of them — the figures are not confirmed as current —
+ * names no prior run, and prescribes nothing.
+ */
+export const ANALYSIS_UNVERIFIED_NOTE =
+  'these figures have not been confirmed as current for this model — do not present them as settled results';
+
+/**
  * Relative-distance thresholds for the tipping-risk band phrases
  * (presentation bands, not science): |flip − current| / |current|
  * below `small` reads as a small shift, below `moderate` as a moderate
@@ -1049,7 +1069,14 @@ export function formatAnalysisForContext(
   // expensive recurring defect; if the licence rule ever changes, both the
   // digits and their disclosure move together by construction.
   if (!flipLicenceOpen) {
-    out.analysis_not_current_note = ANALYSIS_NOT_CURRENT_NOTE;
+    // Verdict-split (PR #981 review, P0): 'stale' is the only verdict that
+    // licenses BOTH the "earlier analysis run" claim and the re-run remedy
+    // (the rerun chip fires on 'stale' alone). Everything else non-fresh —
+    // 'unknown', 'none', absent — gets the weaker, universally-true note.
+    out.analysis_not_current_note =
+      options.analysisFreshness === 'stale'
+        ? ANALYSIS_NOT_CURRENT_NOTE
+        : ANALYSIS_UNVERIFIED_NOTE;
   }
 
   // Lane 30 fix 4 — runtime char-budget guard (graceful, disclosed).

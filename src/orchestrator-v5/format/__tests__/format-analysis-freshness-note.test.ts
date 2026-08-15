@@ -43,6 +43,7 @@ import {
   formatAnalysisForContext,
   DISPLAY_ANALYSIS_CHAR_BUDGET,
   ANALYSIS_NOT_CURRENT_NOTE,
+  ANALYSIS_UNVERIFIED_NOTE,
 } from '../format-analysis-for-context.js';
 
 function rawAnalysis(overrides: Partial<ContextPackAnalysis> = {}): ContextPackAnalysis {
@@ -67,6 +68,24 @@ function rawAnalysis(overrides: Partial<ContextPackAnalysis> = {}): ContextPackA
  */
 const NON_FRESH_VERDICTS = ['stale', 'unknown', 'none', undefined, null] as const;
 
+/**
+ * VERDICT-SPLIT (PR #981 adversarial review, P0). 'stale' is the only verdict
+ * where a prior run provably happened AND the rerun chip exists, so only it
+ * may claim "an earlier analysis run" and prescribe a re-run. 'none' means NO
+ * run ever happened — the original single note asserted one, contradicting
+ * COACHING_CONTEXT_INSTRUCTION's own "there is nothing to re-run" rule in the
+ * same prompt. This table IS the invariant; deriving expectations per-verdict
+ * from the spec, not from the failure mode in hand, is the trap-13d lesson
+ * this file now embodies twice.
+ */
+const EXPECTED_NOTE: ReadonlyArray<[string | undefined | null, string]> = [
+  ['stale', ANALYSIS_NOT_CURRENT_NOTE],
+  ['unknown', ANALYSIS_UNVERIFIED_NOTE],
+  ['none', ANALYSIS_UNVERIFIED_NOTE],
+  [undefined, ANALYSIS_UNVERIFIED_NOTE],
+  [null, ANALYSIS_UNVERIFIED_NOTE],
+];
+
 describe('display_analysis — freshness disclosure on the figures themselves', () => {
   /**
    * VACUITY GUARD, and it caught a real defect in this file's first draft.
@@ -78,24 +97,33 @@ describe('display_analysis — freshness disclosure on the figures themselves', 
    * the constant is a non-empty string first makes the whole file fail loudly
    * at pristine instead of certifying the absence it is hunting.
    */
-  it('the disclosure constant exists (vacuity guard for every test below)', () => {
+  it('the disclosure constants exist and differ (vacuity guard for every test below)', () => {
     expect(typeof ANALYSIS_NOT_CURRENT_NOTE).toBe('string');
     expect((ANALYSIS_NOT_CURRENT_NOTE ?? '').length).toBeGreaterThan(0);
+    expect(typeof ANALYSIS_UNVERIFIED_NOTE).toBe('string');
+    expect((ANALYSIS_UNVERIFIED_NOTE ?? '').length).toBeGreaterThan(0);
+    expect(ANALYSIS_UNVERIFIED_NOTE).not.toBe(ANALYSIS_NOT_CURRENT_NOTE);
   });
 
-  it('attaches the note for EVERY non-fresh verdict, not just "stale"', () => {
-    for (const verdict of NON_FRESH_VERDICTS) {
+  it('attaches the VERDICT-CORRECT note for every non-fresh verdict', () => {
+    for (const [verdict, expected] of EXPECTED_NOTE) {
       const out = formatAnalysisForContext(rawAnalysis(), { analysisFreshness: verdict });
       expect(out, `verdict=${String(verdict)}`).not.toBeNull();
       expect(
-        typeof out?.analysis_not_current_note,
-        `verdict=${String(verdict)} must be qualified with a string note`,
-      ).toBe('string');
-      expect(
         out?.analysis_not_current_note,
-        `verdict=${String(verdict)} must carry the canonical note`,
-      ).toBe(ANALYSIS_NOT_CURRENT_NOTE);
+        `verdict=${String(verdict)} must carry its verdict's note`,
+      ).toBe(expected);
     }
+  });
+
+  it('the non-stale note claims NO prior run and prescribes NOTHING', () => {
+    // The P0's wording arm, pointed at the claim the first draft never
+    // guarded. On 'none' no run happened; on 'unknown' none may have. The
+    // remedy is banned because the rerun chip fires on 'stale' alone — text
+    // telling the user to re-run with no affordance is a dead instruction.
+    expect(ANALYSIS_UNVERIFIED_NOTE).not.toMatch(/earlier analysis run/i);
+    expect(ANALYSIS_UNVERIFIED_NOTE).not.toMatch(/re-?run/i);
+    expect(ANALYSIS_UNVERIFIED_NOTE).not.toMatch(/you (edited|changed)|since you/i);
   });
 
   it('emits NOTHING on a fresh verdict — byte-identical to the pre-fix projection', () => {
