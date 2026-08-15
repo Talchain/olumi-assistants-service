@@ -63,6 +63,7 @@ import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { MODEL_REGISTRY } from '../config/models.js';
+import { evaluateRuntimePromptPromotion } from '../prompts/runtime-promotion-gate.js';
 import {
   verifyAdminKey,
   getActorFromRequest,
@@ -494,6 +495,113 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      const actor = getActorFromRequest(request);
+
+      // A PMS pointer move can change the prompt served on the very next turn
+      // without any Git diff. For tasks with a real eval pack, require the same
+      // committed, current, hash-bound evidence as the CI promotion gate BEFORE
+      // the store update. The decision is made over `beforePrompt`, so a block
+      // is atomic: neither stagingVersion nor activeVersion has moved.
+      const pointerTargets: Array<{
+        environment: 'staging' | 'production';
+        version: number;
+      }> = [];
+      if (
+        typeof body.data.stagingVersion === 'number' &&
+        body.data.stagingVersion !== beforePrompt.stagingVersion
+      ) {
+        pointerTargets.push({
+          environment: 'staging',
+          version: body.data.stagingVersion,
+        });
+      }
+      if (
+        typeof body.data.activeVersion === 'number' &&
+        body.data.activeVersion !== beforePrompt.activeVersion
+      ) {
+        pointerTargets.push({
+          environment: 'production',
+          version: body.data.activeVersion,
+        });
+      }
+      if (
+        body.data.status === 'production' &&
+        beforePrompt.status !== 'production'
+      ) {
+        pointerTargets.push({
+          environment: 'production',
+          version: body.data.activeVersion ?? beforePrompt.activeVersion,
+        });
+      }
+
+      const seenTargets = new Set<string>();
+      for (const target of pointerTargets) {
+        const targetKey = `${target.environment}:${target.version}`;
+        if (seenTargets.has(targetKey)) continue;
+        seenTargets.add(targetKey);
+
+        const version = beforePrompt.versions.find(
+          (candidate) => candidate.version === target.version,
+        );
+        if (!version) {
+          return reply.status(400).send({
+            error: 'version_not_found',
+            message: `Version ${target.version} does not exist`,
+            promptId: beforePrompt.id,
+            taskId: beforePrompt.taskId,
+            target_environment: target.environment,
+          });
+        }
+
+        const promotion = evaluateRuntimePromptPromotion(
+          beforePrompt.taskId,
+          version.content,
+        );
+        if (promotion.decision === 'BLOCK') {
+          const payload = {
+            action: 'promotion_eval_blocked',
+            promptId: beforePrompt.id,
+            taskId: beforePrompt.taskId,
+            version: target.version,
+            target_environment: target.environment,
+            prompt_hash: promotion.promptSha16,
+            block_kind: promotion.blockKind,
+            reason: promotion.reason,
+            actor,
+          };
+          emit(AdminTelemetryEvents.AdminPromptAccess, payload);
+          log.warn(payload, 'Prompt pointer update blocked by evaluation gate');
+          return reply.status(409).send({
+            error: 'prompt_promotion_eval_required',
+            message:
+              `Cannot serve ${beforePrompt.taskId} version ${target.version} in ` +
+              `${target.environment}: ${promotion.reason}`,
+            promptId: beforePrompt.id,
+            taskId: beforePrompt.taskId,
+            version: target.version,
+            target_environment: target.environment,
+            prompt_hash: promotion.promptSha16,
+            block_kind: promotion.blockKind,
+            reason: promotion.reason,
+          });
+        }
+        if (promotion.decision === 'GATED_PASS') {
+          log.info(
+            {
+              event: 'prompt.promotion.eval_gate_pass',
+              promptId: beforePrompt.id,
+              taskId: beforePrompt.taskId,
+              version: target.version,
+              target_environment: target.environment,
+              prompt_hash: promotion.promptSha16,
+              report_generated_at: promotion.report.generatedAt,
+              actor,
+            },
+            'Prompt pointer update cleared evaluation gate',
+          );
+        }
+      }
+
       // Check for approval requirement when promoting to production
       const isPromotion = body.data.status === 'production' && beforePrompt.status !== 'production';
       if (isPromotion) {
@@ -521,8 +629,6 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const prompt = await store.update(params.data.id, body.data);
-      const actor = getActorFromRequest(request);
-
       // Audit log
       const auditLogger = getAuditLogger();
       await logPromptUpdated(

@@ -16,9 +16,9 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promptContentHash16 } from '../../../../src/prompts/promotion-evidence.js';
 import type { ManifestPromptEntry } from './types.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,7 @@ export const CANONICAL_MANIFEST_PATH = join(
  * function, not a rule mirror: the algorithm is fixed by the runtime loader.
  */
 export function promptHash16(text: string): string {
-  return createHash('sha256').update(text, 'utf-8').digest('hex').slice(0, 16);
+  return promptContentHash16(text);
 }
 
 /** Hash the canonical export at `path` the manifest's way. */

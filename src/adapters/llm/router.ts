@@ -1,15 +1,10 @@
 /**
  * Provider router for multi-provider LLM orchestration.
  *
- * Selects LLM adapter (Anthropic, OpenAI, Fixtures) based on:
- * 1. LLM_FAILOVER_PROVIDERS → FailoverAdapter (if configured)
- * 2. providers.json overrides → task-specific provider
- * 3. CEE_MODEL_* env vars → explicit operator override (e.g., CEE_MODEL_DRAFT)
- * 4. TASK_MODEL_DEFAULTS → code defaults (e.g., draft_graph → gpt-5.2)
- * 5. LLM_PROVIDER / LLM_MODEL → global defaults
- * 6. Adapter default → gpt-4o-mini
- *
- * Precedence: failover → providers.json → CEE_MODEL_* → TASK_MODEL_DEFAULTS → env → default
+ * Selects LLM adapter (Anthropic, OpenAI, Fixtures) using the canonical
+ * precedence documented in `src/config/model-routing.ts`. Provider follows
+ * the winning model: a task default is not discarded merely because the
+ * lower-precedence global `LLM_PROVIDER` names the other provider.
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -833,32 +828,33 @@ export function getAdapterWithResolution(
     // CEE tiered model selection: override model based on task if configured
     // Priority: CEE_MODEL_* env var > TASK_MODEL_DEFAULTS > LLM_MODEL
     const ceeModel = getModelFromConfig(task);
-    if (ceeModel && selectedModel !== ceeModel) {
-      log.info(
-        { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
-        "Using CEE task-specific model from environment"
-      );
+    if (ceeModel) {
+      if (selectedModel !== ceeModel) {
+        log.info(
+          { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
+          "Using CEE task-specific model from environment"
+        );
+      }
       selectedModel = ceeModel;
       winningSource = 'env_var';
     } else if (!ceeModel && task && isValidCeeTask(task)) {
       // No env override - use TASK_MODEL_DEFAULTS
       const taskDefault = getDefaultModelForTask(task);
-      const taskDefaultProvider = getModelProvider(taskDefault);
-      // Only use task default if its provider matches configured provider
-      // This ensures LLM_PROVIDER=anthropic doesn't try to use OpenAI models
-      if (taskDefault && selectedModel !== taskDefault &&
-          (selectedProvider === 'fixtures' || !taskDefaultProvider || taskDefaultProvider === selectedProvider)) {
-        log.info(
-          { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
-          "Using task default model from TASK_MODEL_DEFAULTS"
-        );
+      // TASK_MODEL_DEFAULTS outranks LLM_PROVIDER / LLM_MODEL. Always select
+      // the task default here; the provider reconciliation immediately below
+      // moves to the model's registered provider. The former provider-match
+      // condition silently skipped cross-provider defaults, so dropping e.g.
+      // CEE_MODEL_ORCHESTRATOR made the declared Sonnet default fall through
+      // to the global OpenAI model instead of serving the checked-in map.
+      if (taskDefault) {
+        if (selectedModel !== taskDefault) {
+          log.info(
+            { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
+            "Using task default model from TASK_MODEL_DEFAULTS"
+          );
+        }
         selectedModel = taskDefault;
         winningSource = 'task_default';
-      } else if (taskDefault && taskDefaultProvider !== selectedProvider) {
-        log.info(
-          { task, task_default: taskDefault, task_default_provider: taskDefaultProvider, configured_provider: selectedProvider, source: 'provider_mismatch' },
-          "Skipping task default - provider mismatch with LLM_PROVIDER"
-        );
       }
     }
 
@@ -914,4 +910,3 @@ export function resetAdapterCache(): void {
   wrappedAdapters.clear();
   configCache = undefined;
 }
-

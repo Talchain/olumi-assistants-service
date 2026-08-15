@@ -7,8 +7,11 @@
  * ─────────────────────────────────────────────────────────────────
  * Precedence
  * ─────────────────────────────────────────────────────────────────
- * The runtime model for a task is resolved via the following chain,
- * highest priority first:
+ * An explicitly configured `LLM_FAILOVER_PROVIDERS` wrapper is an outer
+ * availability policy: it is resolved before this single-provider chain and
+ * does not accept per-call/store overrides. With no failover wrapper (the
+ * shipped staging posture), the runtime model for a task is resolved via the
+ * following chain, highest priority first:
  *
  *   1. per_call              explicit modelOverride parameter passed to
  *                            getAdapter(task, modelOverride). Clients can
@@ -192,13 +195,10 @@ export type CeeTask =
  * log (model=claude-sonnet-5). When a model change does not take, check the
  * prompt store's modelConfig BEFORE suspecting the env or this map.
  *
- * ⚠ Provider-mismatch caveat: when LLM_PROVIDER is unset/openai (as on
- * staging), the router SKIPS an anthropic-provider task default rather
- * than switching providers (router.ts task_default branch). So if an
- * anthropic-model env var (draft/edit/orchestrator) is dropped, the task
- * falls through to the GLOBAL model, not the anthropic default listed
- * here. The startup WARN in model-resolution-logger.ts surfaces exactly
- * that "running on checked-in default" condition so the drop is visible.
+ * Provider follows the winning model. Since the task default outranks the
+ * global LLM_PROVIDER / LLM_MODEL fallback, a cross-provider task default
+ * switches adapters through MODEL_REGISTRY instead of being discarded. This
+ * makes an env-pin removal land on this map, as the precedence contract says.
  *
  * Model selection by task type:
  * - Fast tier (gpt-4.1): Simple, speed-sensitive tasks (gpt-5-mini deprecated - empty response issues)
@@ -234,11 +234,8 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // router.ts's env-only note. Overridable by CEE_MODEL_VALIDATION exactly like
   // every other row here (router precedence step 3 > step 4).
   //
-  // ⚠ Provider-mismatch caveat above applies IN OUR FAVOUR here: staging runs
-  // LLM_PROVIDER unset/openai, and this default is an openai model, so the
-  // router's task_default branch APPLIES it rather than skipping it. (An
-  // anthropic reviewer default would have been silently skipped on staging and
-  // fallen through to the global model — the exact failure this row closes.)
+  // Provider is derived from this winning model, so this remains cross-provider
+  // from the Anthropic drafter even if the global provider changes.
   validate_graph: "o4-mini",
   // V6 dual-draft M2 review — display default only (D3 recommendation).
   // NEVER governs a live call: the dual-draft gate requires the explicit

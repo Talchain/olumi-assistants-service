@@ -3,7 +3,7 @@
  *
  * Covers:
  * - GET /admin/models/routing — auth, response shape, all tasks present
- * - GET /admin/models/routing — provider-mismatch scenario (LLM_PROVIDER=anthropic)
+ * - GET /admin/models/routing — cross-provider task defaults
  * - GET /admin/dashboard — serves HTML (IP-only gate, no admin key needed for the page itself)
  * - GET /admin/dashboard/env — auth, response shape, feature flags present
  * - Read-only key (ADMIN_API_KEY_READ only) — routes registered and accessible
@@ -285,10 +285,10 @@ describe("Cache-Control headers on admin endpoints", () => {
 });
 
 // ============================================================================
-// Provider-mismatch scenario: LLM_PROVIDER=anthropic with OpenAI task defaults
+// Cross-provider scenario: task assignment outranks LLM_PROVIDER
 // ============================================================================
 
-describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropic)", () => {
+describe("GET /admin/models/routing — cross-provider defaults (LLM_PROVIDER=anthropic)", () => {
   let appAnthropicProvider: FastifyInstance;
 
   beforeAll(async () => {
@@ -338,7 +338,7 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     expect(body.default_provider).toBe("anthropic");
   });
 
-  it("OpenAI task defaults are reported as provider_mismatch with null model", async () => {
+  it("reports the OpenAI task default and provider instead of discarding it", async () => {
     const res = await appAnthropicProvider.inject({
       method: "GET",
       url: "/admin/models/routing",
@@ -346,16 +346,13 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     });
     const body = res.json();
 
-    // options defaults to gpt-5.2 (openai) and has no CEE_MODEL_* override key,
-    // so it stays an OpenAI default — should be skipped when provider=anthropic.
-    // (draft_graph is no longer a valid probe here: its default is now the
-    // anthropic model claude-sonnet-4-6, reconciled to live staging.)
+    // options defaults to gpt-5.2 (openai) and has no CEE_MODEL_* override.
+    // The task assignment outranks the lower-precedence global provider.
     const optionsRow = body.tasks.find((t: { task: string }) => t.task === "options");
     expect(optionsRow).toBeDefined();
-    expect(optionsRow.source).toBe("provider_mismatch");
-    expect(optionsRow.model).toBeNull();
-    expect(typeof optionsRow.resolution_note).toBe("string");
-    expect(optionsRow.resolution_note.length).toBeGreaterThan(0);
+    expect(optionsRow.source).toBe("default");
+    expect(optionsRow.model).toBe(TASK_MODEL_DEFAULTS.options);
+    expect(optionsRow.provider).toBe("openai");
   });
 
   it("bias_check (anthropic default) is still resolved when provider=anthropic", async () => {

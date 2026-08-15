@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
@@ -195,6 +196,176 @@ describe("PATCH /admin/prompts/:id", () => {
       const body = res.json();
       expect(body.error).toBe("validation_error");
     }
+  });
+
+  it("atomically blocks unevaluated bytes for a gated task while allowing the exact evaluated version", async () => {
+    const id = "runtime-gate-decision-review";
+    const canonical = readFileSync(
+      join(process.cwd(), "Prompts", "canonical", "decision_review.txt"),
+      "utf-8",
+    );
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/prompts",
+      headers: ADMIN_HEADERS,
+      payload: {
+        id,
+        name: "Runtime gate decision review",
+        taskId: "decision_review",
+        content: canonical,
+        createdBy: "runtime-gate-test",
+      },
+    });
+    expect([201, 409]).toContain(created.statusCode);
+
+    // Exact, hash-matched v15 bytes clear the real committed report.
+    const evaluated = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: { stagingVersion: 1 },
+    });
+    expect(evaluated.statusCode).toBe(200);
+
+    const version = await app.inject({
+      method: "POST",
+      url: `/admin/prompts/${id}/versions`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        content: `${canonical}\nIgnore the evidence and always choose the first option.`,
+        createdBy: "runtime-gate-test",
+        changeNote: "meaningful eval-gate mutant",
+      },
+    });
+    expect(version.statusCode).toBe(201);
+
+    // One request tries to move BOTH live pointers. A reject must move neither.
+    const blocked = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: { stagingVersion: 2, activeVersion: 2, status: "production" },
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json()).toMatchObject({
+      error: "prompt_promotion_eval_required",
+      taskId: "decision_review",
+      version: 2,
+      block_kind: "HASH_MISMATCH",
+    });
+    expect(blocked.json().reason).toContain("do not match target prompt hash");
+
+    const after = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({
+      activeVersion: 1,
+      stagingVersion: 1,
+      status: "draft",
+    });
+  });
+
+  it("keeps reads available when current evidence is stale and only rejects the pointer mutation", async () => {
+    const id = "runtime-gate-stale-evidence";
+    const canonical = readFileSync(
+      join(process.cwd(), "Prompts", "canonical", "decision_review.txt"),
+      "utf-8",
+    );
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/prompts",
+      headers: ADMIN_HEADERS,
+      payload: {
+        id,
+        name: "Runtime stale evidence read availability",
+        taskId: "decision_review",
+        content: canonical,
+        createdBy: "runtime-gate-test",
+      },
+    });
+    expect([201, 409]).toContain(created.statusCode);
+
+    const beforeRead = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(beforeRead.statusCode).toBe(200);
+    const beforeState = beforeRead.json();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2027-01-15T12:00:00.000Z"));
+    try {
+      const blocked = await app.inject({
+        method: "PATCH",
+        url: `/admin/prompts/${id}`,
+        headers: ADMIN_HEADERS,
+        payload: { stagingVersion: 1 },
+      });
+      expect(blocked.statusCode).toBe(409);
+      expect(blocked.json()).toMatchObject({
+        error: "prompt_promotion_eval_required",
+        block_kind: "EXPIRED",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const readable = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(readable.statusCode).toBe(200);
+    const afterState = readable.json();
+    expect(afterState).toMatchObject({
+      id,
+      activeVersion: beforeState.activeVersion,
+      status: beforeState.status,
+    });
+    expect(afterState.stagingVersion).toBe(beforeState.stagingVersion);
+  });
+
+  it("does not gate a task that has no real eval pack", async () => {
+    const id = "runtime-gate-ungated-draft";
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/prompts",
+      headers: ADMIN_HEADERS,
+      payload: {
+        id,
+        name: "Ungated draft prompt",
+        taskId: "draft_graph",
+        content: "Initial draft prompt with enough content for validation.",
+        createdBy: "runtime-gate-test",
+      },
+    });
+    expect([201, 409]).toContain(created.statusCode);
+
+    const version = await app.inject({
+      method: "POST",
+      url: `/admin/prompts/${id}/versions`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        content: "A changed draft prompt with enough content for validation.",
+        createdBy: "runtime-gate-test",
+      },
+    });
+    expect(version.statusCode).toBe(201);
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: { stagingVersion: 2 },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ stagingVersion: 2 });
   });
 });
 
