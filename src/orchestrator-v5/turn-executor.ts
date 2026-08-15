@@ -3031,7 +3031,14 @@ export async function runTurnExecutor(
         // effectiveTurnGraph as contentGraph); reverted on commit failure
         // so a failed turn never advertises unpersisted state.
         const preApplyEffectiveTurnGraph = effectiveTurnGraph;
+        const handlerEmittedMutatedGraphBeforeHeldCommit = handlerEmittedMutatedGraph;
         effectiveTurnGraph = outcome.appliedGraph;
+        // The held executor has already produced a concrete mutated graph.
+        // Record that fact before commitTurn so its pre-append history
+        // projection can preserve the receipt iff the commit floor still
+        // carries a graph. The post-commit graphPersisted result remains the
+        // finaliser's authority; a rejected commit restores this observation.
+        handlerEmittedMutatedGraph = true;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3068,7 +3075,6 @@ export async function runTurnExecutor(
           // accepts the receipt, readiness reflects the applied graph, and
           // wire freshness re-derives against the post-apply hash (an
           // applied substantive edit honestly reads stale).
-          handlerEmittedMutatedGraph = true;
           analysisReadyForTurn = gmReadiness;
           const postApplyHash = ((): string | null => {
             try {
@@ -3097,6 +3103,7 @@ export async function runTurnExecutor(
           });
         } catch (error) {
           effectiveTurnGraph = preApplyEffectiveTurnGraph;
+          handlerEmittedMutatedGraph = handlerEmittedMutatedGraphBeforeHeldCommit;
           log.error(
             {
               event: 'v5.state_commit_failed',
@@ -3254,7 +3261,12 @@ export async function runTurnExecutor(
         stagesCompleted.push('orient');
         stagesCompleted.push('compose');
         const preApplyEffectiveTurnGraph = effectiveTurnGraph;
+        const handlerEmittedMutatedGraphBeforeHeldCommit = handlerEmittedMutatedGraph;
         effectiveTurnGraph = lastExecuted.appliedGraph;
+        // As in the single-resume path, expose the already-produced mutation
+        // to commitTurn before it chooses the durable assistant bytes. The
+        // actual graphPersisted result still gates the final wire exception.
+        handlerEmittedMutatedGraph = true;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3277,7 +3289,6 @@ export async function runTurnExecutor(
             ...committed.response,
             draft_graph: buildAppliedGraphWireField(lastExecuted.appliedGraph),
           };
-          handlerEmittedMutatedGraph = true;
           analysisReadyForTurn = gmReadiness;
           const postApplyHash = ((): string | null => {
             try {
@@ -3309,6 +3320,7 @@ export async function runTurnExecutor(
           }
         } catch (error) {
           effectiveTurnGraph = preApplyEffectiveTurnGraph;
+          handlerEmittedMutatedGraph = handlerEmittedMutatedGraphBeforeHeldCommit;
           log.error(
             {
               event: 'v5.state_commit_failed',

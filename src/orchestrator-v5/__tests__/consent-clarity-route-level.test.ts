@@ -326,8 +326,12 @@ describe('consent-clarity — "all of them"', () => {
     setGmMode('live');
     pendingActionsForRead = [holdA(), holdB()];
     const adapter = throwingRoutingAdapter();
-    await runTurnExecutor(payload('all of them'), 'req-consent-all-gm', {
+    const result = await runTurnExecutor(payload('all of them'), 'req-consent-all-gm', {
       routingAdapter: adapter,
+      selectedElements: {
+        node_ids: ['ghost-not-in-canonical-model'],
+        edge_ids: [],
+      },
     });
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
     expect(appendCalls).toHaveLength(1);
@@ -346,6 +350,9 @@ describe('consent-clarity — "all of them"', () => {
     expect(facts.every((f) => f.fact_type === 'edit_graph')).toBe(true);
     // Named receipt for BOTH confirmations — never a bare "Done".
     const assistant = String(write.assistantMessage ?? '');
+    expect(assistant).toContain('Confirmed:');
+    expect(result.response.assistant_text).toBe(assistant);
+    expect(result.response.draft_graph).toBeDefined();
     expect(assistant).toContain("'Marketing'");
     expect(assistant).toContain("'Goal'");
     expect(assistant).not.toBe(
