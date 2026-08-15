@@ -217,6 +217,7 @@ vi.mock('../session/index.js', () => ({
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 const { deriveAnswerTextFromShape } = await import('../routing/answer-shape.js');
+const { getDefaultRegistry } = await import('../tools/registry.js');
 
 const NOT_IN_MODEL_TEXT =
   'What you selected is not in the model I can see, so I can’t answer about it without guessing. I have not substituted a different element.';
@@ -268,6 +269,76 @@ function shapedConverseResult(): ChatWithToolsResult {
     model: 'claude-sonnet-4-6',
     latencyMs: 20,
   };
+}
+
+function claimedRunAnalysisMutationResult(): ChatWithToolsResult {
+  const content: ToolResponseBlock[] = [
+    {
+      type: 'tool_use',
+      id: 'tool-use-claimed-run-analysis-mutation',
+      name: OLUMI_ACTION_TOOL_NAME,
+      input: {
+        intent_class: 'execute',
+        action: {
+          handler_id: 'run_analysis',
+          entity: {
+            id: OPTION_ID,
+            kind: 'option',
+            label: OPTION_LABEL,
+            resolution_status: 'resolved',
+            resolution_method: 'id_match',
+          },
+          parameters: [],
+          cited_context_fields: ['graph.options'],
+        },
+      },
+    },
+  ];
+  return {
+    content,
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 20, output_tokens: 20 } as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 20,
+  };
+}
+
+function schemaInvalidToolUseResult(intentClass: 'execute' | 'clarify'): ChatWithToolsResult {
+  return {
+    content: [
+      {
+        type: 'tool_use',
+        id: `tool-use-schema-invalid-${intentClass}`,
+        name: OLUMI_ACTION_TOOL_NAME,
+        input: { intent_class: intentClass },
+      },
+    ],
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 20, output_tokens: 20 } as ChatWithToolsResult['usage'],
+    model: 'claude-sonnet-4-6',
+    latencyMs: 20,
+  };
+}
+
+function claimedRunAnalysisMutationRegistry() {
+  const overridden = new Map(getDefaultRegistry());
+  overridden.set('run_analysis', (async () => ({
+    assistant_text: `${OPTION_LABEL} leads at 62%; analysis ran against the updated model.`,
+    handler_facts: [],
+    llm_calls_used: 0,
+    mutated_graph: {
+      ...PERSISTED_GRAPH,
+      nodes: PERSISTED_GRAPH.nodes.map((node) =>
+        node.id === FACTOR_ID
+          ? {
+              ...node,
+              observed_state: { value: 100000, unit: '£', source: 'user_edited' },
+            }
+          : node,
+      ),
+    },
+  })) as never);
+  return overridden;
 }
 
 function resolvedAdapter(result: ChatWithToolsResult) {
@@ -395,6 +466,106 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(result.response.suggested_actions).toEqual([]);
     expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
     expect(harness.appendedRows.at(-1)?.pending_actions).toEqual([]);
+  });
+
+  it('refuses a handler mutation claim whose graph is stripped before persistence', async () => {
+    const falseReceiptFragment = 'Ran analysis on your current scenario.';
+    const adapter = resolvedAdapter(claimedRunAnalysisMutationResult());
+    const result = await runTurnExecutor(payload(MODEL_PATH_MESSAGE), `request-${randomUUID()}`, {
+      routingAdapter: adapter,
+      graphState: PERSISTED_GRAPH as never,
+      selectedElements: { node_ids: [GHOST_ID], edge_ids: [] },
+      handlerRegistry: claimedRunAnalysisMutationRegistry() as never,
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
+    expect(result.response.assistant_text).not.toContain(falseReceiptFragment);
+    expect(result.response.assistant_text).not.toContain(OPTION_LABEL);
+    expect(result.response.assistant_text).not.toContain('62%');
+    expect(result.response.blocks).toEqual([]);
+    expect(result.response.suggested_actions).toEqual([]);
+    expect(result.response.insights).toEqual([]);
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.answerShape).toBeUndefined();
+    expect(result.reasoning).toBeUndefined();
+    expect(result.answerKind).toBe('functional');
+    expect(result.groundedSelection).toEqual({
+      element_ids: [],
+      unresolved: 'not_in_model',
+    });
+
+    const persisted = harness.appendedRows.at(-1);
+    expect(persisted?.graph).toBeUndefined();
+    expect(persisted?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+    expect(persisted?.assistantMessage).not.toContain(falseReceiptFragment);
+    expect(persisted?.pending_actions).toEqual([]);
+
+    harness.replayAppendedHistory = true;
+    const followUpAdapter = resolvedAdapter(textOnlyResult('Let us inspect another assumption.'));
+    await run('What else should I inspect?', followUpAdapter);
+
+    expect(followUpAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const modelInput = String(
+      followUpAdapter.chatWithTools.mock.calls[0]![0].messages[0]?.content ?? '',
+    );
+    expect(modelInput).toContain(NOT_IN_MODEL_TEXT);
+    expect(modelInput).not.toContain(falseReceiptFragment);
+  });
+
+  it('guards a clean bounded fallback even when internal failure telemetry remains set', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<
+          (args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>
+        >()
+        .mockResolvedValueOnce(schemaInvalidToolUseResult('execute'))
+        .mockResolvedValueOnce(schemaInvalidToolUseResult('clarify')),
+    };
+    const result = await runTurnExecutor(
+      { ...payload('What would flip this result?'), source: 'chip_click' },
+      `request-${randomUUID()}`,
+      {
+        routingAdapter: adapter,
+        graphState: PERSISTED_GRAPH as never,
+        selectedElements: { node_ids: [GHOST_ID], edge_ids: [] },
+        chipClickForcedIntent: 'what_would_flip',
+      },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+    // This remains useful OPERATIONS metadata for the schema-repair degrade;
+    // it is not a user-visible failure envelope and must not exempt the reply.
+    expect(result.telemetry.failure_type).toBe('LLM_UNAVAILABLE');
+    expect(result.response.blocks.some((block) => block.type === 'error')).toBe(false);
+    expect(result.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
+    expect(result.response.assistant_text).not.toContain('currently leads');
+    expect(result.response.assistant_text).not.toContain('62%');
+    expect(result.response.blocks).toEqual([]);
+    expect(result.response.suggested_actions).toEqual([]);
+    expect(result.response.insights).toEqual([]);
+    expect(result.answerShape).toBeUndefined();
+    expect(result.reasoning).toBeUndefined();
+    expect(result.answerKind).toBe('functional');
+
+    const persisted = harness.appendedRows.at(-1);
+    expect(persisted?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+    expect(persisted?.assistantMessage).not.toContain('currently leads');
+    expect(persisted?.assistantMessage).not.toContain('62%');
+    expect(persisted?.pending_actions).toEqual([]);
+    expect(persisted?.graph).toBeUndefined();
+
+    harness.replayAppendedHistory = true;
+    const followUpAdapter = resolvedAdapter(textOnlyResult('Let us inspect another assumption.'));
+    await run('What else should I inspect?', followUpAdapter);
+
+    expect(followUpAdapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const modelInput = String(
+      followUpAdapter.chatWithTools.mock.calls[0]![0].messages[0]?.content ?? '',
+    );
+    expect(modelInput).toContain(NOT_IN_MODEL_TEXT);
+    expect(modelInput).not.toContain('currently leads');
   });
 
   it('the next routed turn sees the refusal in history, never the discarded leader answer', async () => {
