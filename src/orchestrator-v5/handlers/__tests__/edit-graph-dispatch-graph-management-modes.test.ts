@@ -554,9 +554,11 @@ describe('mode=live', () => {
     const pending = parsePendingAction((metadata.pending_actions as unknown[])[0]);
     expect(pending).not.toBeNull();
     expect(pending!.preconditions.graph_hash).toBe(preEditHash);
-    const embedded = (
-      pending!.action as { inline_patch: { operations: readonly PatchOperation[] } }
-    ).inline_patch.operations;
+    expect(pending!.action.kind).toBe('apply_proposed_change');
+    if (pending!.action.kind !== 'apply_proposed_change') {
+      throw new Error('Expected held handoff to use an inline graph patch');
+    }
+    const embedded = pending!.action.inline_patch.operations;
     expect(embedded).toEqual(HANDOFF_OPS);
     expect((response as { suggested_actions: unknown[] }).suggested_actions).toHaveLength(1);
 
