@@ -839,6 +839,12 @@ function deriveCanonicalReadiness(
   return parsed.success ? computeStructuralReadiness(parsed.data) : undefined;
 }
 
+const ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT =
+  'What you selected is not in the model I can see, so I can’t answer about it without guessing. I have not substituted a different element.';
+
+const ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT =
+  'I could not read the model to check what you selected, so I can’t answer about it without guessing. I have not substituted a different element.';
+
 /**
  * Run a single V5 turn end-to-end. Always returns a well-formed
  * OlumiResponse; internal runtime failures map to a typed response with an
@@ -11638,6 +11644,80 @@ export async function runTurnExecutor(
     functionalAnswerText = projected.text;
   }
 
+  /**
+   * Selection-grounding honesty at the final executor chokepoint.
+   *
+   * The model already receives `ContextPack.focus.unresolved`, but the live
+   * witness showed that prompt compliance is not an honesty guarantee: when a
+   * fabricated selected id resolved to nothing, a successful answer could
+   * silently adopt the analysed leader instead. The final ContextPack is the
+   * single authority here — never the raw request and never a second graph
+   * lookup. The guard fires only when that pack says the turn requested at
+   * least one selection and resolved zero elements.
+   *
+   * Existing failures are preserved byte-for-byte. `failureType` is the
+   * executor's typed failure authority; the error-block check is a defensive
+   * second door for any composed failure whose caller forgot to set it. Mixed
+   * selections are deliberately left alone: one resolved element is enough to
+   * keep the answer anchored, while `focus.unresolved` already discloses the
+   * missing remainder.
+   *
+   * On a match, keep only the required response envelope plus bounded,
+   * code-owned copy. Answer-bearing blocks, chips, insights and optional
+   * result projections can all name a different model element, so preserving
+   * them would make the prose honest while the response remained dishonest.
+   * Captured reasoning and answer shape are dropped, and the replacement is
+   * marked functional so route-v2 cannot synthesise a substantive answer
+   * sidecar around a refusal to guess.
+   */
+  function enforceZeroResolvedSelectionGuard(): void {
+    if (!response) return;
+    if (
+      failureType !== null ||
+      response.blocks.some((block) => block.type === 'error')
+    ) return;
+
+    // This is an answer-grounding guard, not a mutation-receipt suppressor.
+    // A successful graph mutation has a stronger, commit-backed authority for
+    // its target than the turn-start focus projection. In particular, a
+    // degraded canonical store read can leave focus unresolved while the
+    // selected id is valid in the request graph and the mutation handler
+    // durably applies it. Preserve that receipt and graph payload exactly.
+    const committedGraphMutation =
+      commitPerformed &&
+      (handlerEmittedMutatedGraph ||
+        proposedHandlerIdForOutcome === 'draft_graph' ||
+        proposedHandlerIdForOutcome === 'edit_graph');
+    if (committedGraphMutation) return;
+
+    const focus = contextPackForLog?.focus;
+    if (
+      focus === undefined ||
+      focus.requested_count < 1 ||
+      focus.elements.length !== 0
+    ) return;
+
+    // `none` is structurally inconsistent with requested>0/elements=0. Treat
+    // any future or malformed value as `could_not_check`: inability to prove
+    // absence must never become a claim that the selected element is missing.
+    const assistantText =
+      focus.unresolved === 'not_in_model'
+        ? ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT
+        : ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT;
+
+    response = {
+      response_version: response.response_version,
+      assistant_text: assistantText,
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: response.stage_indicator,
+    };
+    capturedAnswerShape = undefined;
+    capturedReasoning = undefined;
+    functionalAnswerText = assistantText;
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
@@ -11711,6 +11791,11 @@ export async function runTurnExecutor(
         );
       }
     }
+    // Ghost-selection honesty runs before every other prose guard. Its copy is
+    // therefore checked by the existing forbidden-phrase / false-success /
+    // leader-claim guards rather than bypassing them, and disabling this one
+    // call restores the witnessed leader-adoption defect.
+    enforceZeroResolvedSelectionGuard();
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
     // per-turn emission-rate telemetry that previously lived here moved to
