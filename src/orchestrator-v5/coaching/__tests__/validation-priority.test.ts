@@ -35,7 +35,7 @@ describe('describeValidationPriority (in-flow gate variant — #256 byte-stabili
       VALIDATE_LINK_EVIDENCE,
     );
     expect(VALIDATE_LINK_EVIDENCE).toBe(
-      'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as sensitive.',
+      'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile.',
     );
   });
 
@@ -57,7 +57,7 @@ describe('composeStandaloneValidationPriority (append-after-LLM variant)', () =>
       variant: 'link',
       from_label: 'Local Senior Hire Programme',
       to_label: 'Q3 Roadmap Delivery Capacity',
-      text: "One useful confidence check is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since the robustness check flagged it as sensitive.",
+      text: "One useful confidence check is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since the robustness check flagged it as fragile.",
     });
     expect(beat!.text).not.toMatch(/\bthat link\b/);
   });

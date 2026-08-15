@@ -72,7 +72,7 @@ import {
 } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
-import { selectMostSensitiveRow } from '../../../orchestrator/shared/fragile-edge-authority.js';
+import { selectFragilityPriorityRow } from '../../../orchestrator/shared/fragile-edge-authority.js';
 import {
   composeStandaloneValidationPriority,
   decideValidationBeat,
@@ -97,7 +97,7 @@ function selectValidationSignals(
   fragileEdge: ValidationFragileEdge | null;
   topDriverLabel: string | null;
 } {
-  const fragileEdge = selectMostSensitiveRow(projection?.fragile_edges ?? []) ?? null;
+  const fragileEdge = selectFragilityPriorityRow(projection?.fragile_edges ?? []) ?? null;
   const rawDriverLabel = projection?.top_drivers?.[0]?.factor_label;
   return {
     fragileEdge,

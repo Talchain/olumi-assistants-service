@@ -56,7 +56,7 @@ import {
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
-import { orderMostSensitiveRows } from '../../orchestrator/shared/fragile-edge-authority.js';
+import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
 import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
 import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
@@ -1691,7 +1691,7 @@ function resolveCautionCandidate(
       ...resolveFragileEdgeParts(entry, labelMap),
     });
   }
-  const candidates = orderMostSensitiveRows(unresolvedCandidates);
+  const candidates = orderFragilityPriorityRows(unresolvedCandidates);
 
   const best = candidates.find((c) => c.namedLabel !== null);
   if (!best) return null; // legacy thin-data path: nothing resolvable at all

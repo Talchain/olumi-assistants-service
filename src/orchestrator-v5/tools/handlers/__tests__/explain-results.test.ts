@@ -662,7 +662,7 @@ const FRAGILE_PROJECTION: AnalysisProjectionSummary = {
 };
 
 const LINK_BEAT_TEXT =
-  "One useful confidence check is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since the robustness check flagged it as sensitive.";
+  "One useful confidence check is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since the robustness check flagged it as fragile.";
 
 describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => {
   function makeExecuteInvocation(overrides?: {

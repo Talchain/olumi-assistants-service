@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
-  readFiniteSwitchProbability,
-  orderMostSensitiveRows,
-  selectMostSensitiveRow,
-  selectionHasMetricProof,
+  hasFiniteConditionalSwitchProbability,
+  orderFragilityPriorityRows,
+  readFiniteConditionalSwitchProbability,
+  selectFragilityPriorityRow,
 } from '../fragile-edge-authority.js';
 
 describe('fragile-edge authority', () => {
@@ -16,7 +16,7 @@ describe('fragile-edge authority', () => {
       { id: 'middle', switch_probability: 0.4 },
     ] as const;
 
-    expect(selectMostSensitiveRow(rows)).toBe(rows[1]);
+    expect(selectFragilityPriorityRow(rows)).toBe(rows[1]);
     expect(rows.map((row) => row.id)).toEqual(['head', 'maximum', 'middle']);
   });
 
@@ -26,7 +26,7 @@ describe('fragile-edge authority', () => {
       { id: 'second', switch_probability: 0.5 },
     ] as const;
 
-    expect(selectMostSensitiveRow(rows)).toBe(rows[0]);
+    expect(selectFragilityPriorityRow(rows)).toBe(rows[0]);
   });
 
   it('uses the producer head only when every metric is missing or non-finite', () => {
@@ -37,8 +37,8 @@ describe('fragile-edge authority', () => {
       { id: 'string', switch_probability: '0.9' },
     ] as const;
 
-    expect(selectMostSensitiveRow(rows)).toBe(rows[0]);
-    expect(selectionHasMetricProof(rows[0])).toBe(false);
+    expect(selectFragilityPriorityRow(rows)).toBe(rows[0]);
+    expect(hasFiniteConditionalSwitchProbability(rows[0])).toBe(false);
   });
 
   it('does not let a non-finite head hide a later finite value', () => {
@@ -47,8 +47,8 @@ describe('fragile-edge authority', () => {
       { id: 'finite', switch_probability: -0.2 },
     ] as const;
 
-    expect(selectMostSensitiveRow(rows)).toBe(rows[1]);
-    expect(selectionHasMetricProof(rows[1])).toBe(true);
+    expect(selectFragilityPriorityRow(rows)).toBe(rows[1]);
+    expect(hasFiniteConditionalSwitchProbability(rows[1])).toBe(true);
   });
 
   it('orders every finite row by the same authority, with stable ties and fallback tail', () => {
@@ -60,7 +60,7 @@ describe('fragile-edge authority', () => {
       { id: 'tie-b', switch_probability: 0.7 },
     ] as const;
 
-    expect(orderMostSensitiveRows(rows).map((row) => row.id)).toEqual([
+    expect(orderFragilityPriorityRows(rows).map((row) => row.id)).toEqual([
       'tie-a',
       'tie-b',
       'low',
@@ -70,9 +70,9 @@ describe('fragile-edge authority', () => {
   });
 
   it('returns undefined for an empty array and never coerces invalid metrics', () => {
-    expect(selectMostSensitiveRow([])).toBeUndefined();
-    expect(readFiniteSwitchProbability({ switch_probability: '0.8' })).toBeNull();
-    expect(readFiniteSwitchProbability(null)).toBeNull();
+    expect(selectFragilityPriorityRow([])).toBeUndefined();
+    expect(readFiniteConditionalSwitchProbability({ switch_probability: '0.8' })).toBeNull();
+    expect(readFiniteConditionalSwitchProbability(null)).toBeNull();
   });
 
   it('SELECTOR-BYPASS MUTANT — every in-scope live single-edge consumer calls the shared authority', () => {
@@ -87,12 +87,13 @@ describe('fragile-edge authority', () => {
 
     for (const relativePath of consumers) {
       const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
-      expect(source, relativePath).toMatch(/(?:select|order)MostSensitiveRow/);
+      expect(source, relativePath).toMatch(/(?:select|order)FragilityPriorityRow/);
     }
   });
 
   it('COPY MUTANT — labels-only surfaces cannot restore arrival-order superlatives', () => {
     const sources = [
+      '../../../orchestrator-v5/coaching/grounded-counter-case.ts',
       '../../../orchestrator-v5/coaching/fragile-edge-offer-text.ts',
       '../../../orchestrator-v5/coaching/validation-priority.ts',
       '../../../orchestrator-v5/routing/post-analysis-advice-gate.ts',
@@ -107,6 +108,36 @@ describe('fragile-edge authority', () => {
       const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
       for (const claim of unsupportedClaims) {
         expect(source, `${relativePath}: ${claim}`).not.toContain(claim);
+      }
+    }
+
+    const groundedSource = readFileSync(
+      new URL('../../../orchestrator-v5/coaching/grounded-counter-case.ts', import.meta.url),
+      'utf8',
+    );
+    expect(groundedSource).not.toMatch(/most sensitive|sensitivityClaim/i);
+  });
+
+  it('SEMANTIC-ALIAS MUTANT — no consumer names conditional-switch priority as sensitivity', () => {
+    const productionSources = [
+      '../fragile-edge-authority.ts',
+      '../../../orchestrator-v5/coaching/grounded-counter-case.ts',
+      '../../../orchestrator-v5/coaching/select-fragile-edge.ts',
+      '../../deterministic/coaching-context-builder.ts',
+      '../../../orchestrator-v5/tools/handlers/explain-results.ts',
+      '../../../orchestrator-v5/routing/post-analysis-advice-gate.ts',
+      '../../../orchestrator-v5/coaching/analysis-result-headline.ts',
+    ] as const;
+    const semanticAliases = [
+      'selectMostSensitiveRow',
+      'orderMostSensitiveRows',
+      'selectionHasMetricProof',
+    ] as const;
+
+    for (const relativePath of productionSources) {
+      const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+      for (const alias of semanticAliases) {
+        expect(source, `${relativePath}: ${alias}`).not.toContain(alias);
       }
     }
   });

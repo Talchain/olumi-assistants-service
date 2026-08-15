@@ -50,7 +50,7 @@
  * another eligible relationship, but user copy makes no unsupported superlative.
  */
 
-import { orderMostSensitiveRows } from '../../orchestrator/shared/fragile-edge-authority.js';
+import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 
 /** Why no edge was selected. Closed enum — the telemetry payload's `refusal_reason`. */
 export type FragileEdgeRefusalReason =
@@ -298,7 +298,7 @@ export function selectFragileEdge(enrichment: unknown): FragileEdgeDecision {
   // Canonical producer-metric priority across every candidate. An ineligible
   // maximum does not unnecessarily darken a valid lower-priority action. The
   // copy is deliberately non-superlative.
-  const prioritised = orderMostSensitiveRows(fragileEdges);
+  const prioritised = orderFragilityPriorityRows(fragileEdges);
   for (const raw of prioritised) {
     const row = readRecord(raw);
     if (row === null) continue;

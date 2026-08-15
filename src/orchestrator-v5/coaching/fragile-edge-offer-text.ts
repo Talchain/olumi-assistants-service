@@ -91,7 +91,7 @@ export const FRAGILE_EDGE_ACTION_LABEL = 'Adjust this relationship';
  * relationship).
  */
 export function composeFragileEdgeNaming(fromLabel: string, toLabel: string): string {
-  return `On this run the link from ${fromLabel} to ${toLabel} is one relationship the robustness check found sensitive.`;
+  return `On this run the link from ${fromLabel} to ${toLabel} is one relationship the robustness check flagged as fragile.`;
 }
 
 /** Compose the acceptance turn — the EXACT string the block ships. */

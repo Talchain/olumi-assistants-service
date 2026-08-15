@@ -811,7 +811,7 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
       );
       // Beat 5 — validation priority points at the SAME named link.
       expect(out.assistant_text).toContain(
-        'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as sensitive',
+        'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile',
       );
       // Next action aligns to the SAME named link (not the top driver).
       expect(out.assistant_text).toMatch(
@@ -935,7 +935,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // fragile link) and why it matters, distinct from the diagnosis sentence
       // (beat 4) and the re-run action (beat 6).
       expect(out.assistant_text).toContain(
-        'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as sensitive',
+        'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile',
       );
       expect(out.assistant_text).toContain('What to check next');
       expect(out.assistant_text).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
@@ -1082,7 +1082,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
 // =========================================================================
 describe('tryPostAnalysisAdviceGate — validation-priority beat (what to validate)', () => {
   const VALIDATE_LINK =
-    'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as sensitive';
+    'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile';
 
   // Decision-style fixture so the prose reads as a real coaching answer.
   const FULL: AdviceGateAnalysis = {

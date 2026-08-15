@@ -83,7 +83,7 @@ describe('selectGroundedCounterCase — grounding', () => {
     expect(a!.counterCase).not.toContain('Automated Packing Investment');
   });
 
-  it('selects the producer MAXIMUM switch_probability, not merely the head', () => {
+  it('selects the producer MAXIMUM switch_probability as first fragility priority, not sensitivity', () => {
     // CEE #933 review: the "arrives sorted DESC" guarantee is absent — 3 of 28
     // committed arrays violate it. The copy claims a superlative, so the
     // superlative must be COMPUTED from the producer's own metric.
@@ -98,6 +98,10 @@ describe('selectGroundedCounterCase — grounding', () => {
     expect(result.grounded).not.toBeNull();
     expect(result.grounded!.fromLabel).toBe('Beta');
     expect(result.grounded!.counterCase).toContain('Beta Out');
+    expect(result.grounded!.counterCase).toContain(
+      'robustness check highlighted as a priority to challenge',
+    );
+    expect(result.grounded!.counterCase).not.toMatch(/most sensitive/i);
   });
 
   it('keeps producer order on ties', () => {
@@ -136,7 +140,7 @@ describe('selectGroundedCounterCase — grounding', () => {
     });
 
     expect(result.grounded?.fromId).toBe('fac_head');
-    expect(result.grounded?.counterCase).toContain('flagged as sensitive');
+    expect(result.grounded?.counterCase).toContain('flagged as fragile');
     expect(result.grounded?.counterCase).not.toContain('most sensitive');
   });
 });

@@ -361,7 +361,7 @@ describe('CEE #883 — a label that vetoes dispatch produces NO offer', () => {
     // ACTION_PROMPT_MAX would silently break it — and a truncation can re-cut a
     // word into a veto token ("Flipper" → "Flip").
     const half = 'A'.repeat(106);
-    const other = 'B'.repeat(106);
+    const other = 'B'.repeat(103);
     const naming = composeFragileEdgeNaming(half, other);
     expect(naming.length).toBe(300); // exactly BODY_MAX — the widest pair allowed
     const surface = buildLensSurface(makeFact(withSelectedEdgeLabels(half, other)), CTX, WINNING_PREV);
@@ -442,7 +442,7 @@ describe('2.989 the emitted coaching block', () => {
 
   it('COPY MUTANT — never promotes fragile-array arrival order into “leans on most”', () => {
     const naming = composeFragileEdgeNaming(edge.fromLabel, edge.toLabel);
-    expect(naming).toContain('robustness check found sensitive');
+    expect(naming).toContain('robustness check flagged as fragile');
     expect(naming).not.toMatch(/leans on most|most sensitive|most fragile/i);
   });
 

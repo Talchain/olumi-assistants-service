@@ -14,7 +14,7 @@ import type {
 } from "./types.js";
 import type { SessionState } from "./session-state.js";
 import { log } from "../../utils/telemetry.js";
-import { selectMostSensitiveRow } from "../shared/fragile-edge-authority.js";
+import { selectFragilityPriorityRow } from "../shared/fragile-edge-authority.js";
 
 // ============================================================================
 // Types
@@ -641,7 +641,7 @@ function computePosture(mode: CoachingMode): ResponsePosture {
 
 function computeTopFragile(analysis: AnalysisSummary | null): TopFragile | null {
   if (!analysis || analysis.fragile_edges.length === 0) return null;
-  const top = selectMostSensitiveRow(analysis.fragile_edges);
+  const top = selectFragilityPriorityRow(analysis.fragile_edges);
   if (top === undefined) return null;
   // Fragile edge label format: "Source → Target"
   const parts = top.label.split(/\s*[→\u2192]\s*/);

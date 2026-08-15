@@ -99,7 +99,7 @@ export function isCleanDisplayLabel(label: string | undefined | null): label is 
  * `needs_fragile_edges` stays false for `explain_results_free_text`.
  */
 export const VALIDATE_LINK_EVIDENCE =
-  'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as sensitive.';
+  'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile.';
 
 export function describeValidationPriority(
   hasNamedFragileEdge: boolean,
@@ -150,7 +150,7 @@ export function composeStandaloneValidationPriority(
       variant: 'link',
       from_label: from,
       to_label: to,
-      text: `One useful confidence check is real-world support for the link from ${quoteLabel(from)} to ${quoteLabel(to)} rather than the current model estimate, since the robustness check flagged it as sensitive.`,
+      text: `One useful confidence check is real-world support for the link from ${quoteLabel(from)} to ${quoteLabel(to)} rather than the current model estimate, since the robustness check flagged it as fragile.`,
     };
   }
   if (isCleanDisplayLabel(topDriverLabel)) {

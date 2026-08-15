@@ -34,7 +34,7 @@
  * target is an inert chip. None of those gates bear on a DISCONFIRMATION
  * EXERCISE, which mutates nothing and needs only a relationship a human can
  * name and dispute. Reusing the action-gated selector would silently withhold
- * the exercise on every run whose head edge is real but not mechanically
+ * the exercise on every run whose selected edge is real but not mechanically
  * adjustable — a refusal imported from a question nobody asked.
  *
  * Kept apart, deliberately, rather than "unified": aligning them would be
@@ -53,10 +53,12 @@
  * selected fragile edge can still carry a modest `switch_probability`: it is a
  * priority within the producer's set, not a statement that the result is close.
  *
- * The copy uses "most sensitive" only when a finite producer metric proves the
- * maximum. On the no-finite compatibility fallback it says only that the link
- * was flagged as sensitive. It NEVER says the link is "likely to" overturn
- * anything; that would import a magnitude claim the run does not support.
+ * A finite `switch_probability` orders fragility priority; it does NOT prove
+ * a sensitivity superlative. Metric-backed copy therefore says only that the
+ * robustness check highlighted the selected link as a priority to challenge.
+ * On the no-finite compatibility fallback it says only that the link was
+ * flagged as fragile. It NEVER says the link is "likely to" overturn anything;
+ * that would import a magnitude claim the run does not support.
  *
  * ── WHAT IS READ AS A STRUCTURED GATE AND NEVER SURFACED ────────────────────
  * `switch_probability` is read only for the shared structured priority and is
@@ -94,8 +96,8 @@
 
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import {
-  selectMostSensitiveRow,
-  selectionHasMetricProof,
+  hasFiniteConditionalSwitchProbability,
+  selectFragilityPriorityRow,
 } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-user-facing-phrases.js';
@@ -177,16 +179,16 @@ function nonEmptyString(value: unknown): string | null {
 export function composeGroundedCounterCase(
   fromLabel: string,
   toLabel: string,
-  metricProvesMaximum = false,
+  hasConditionalSwitchPriority = false,
 ): string {
-  const sensitivityClaim = metricProvesMaximum
-    ? 'is the one the robustness check found most sensitive'
-    : 'is one the robustness check flagged as sensitive';
+  const fragilityClaim = hasConditionalSwitchPriority
+    ? 'is one the robustness check highlighted as a priority to challenge'
+    : 'is one relationship the robustness check flagged as fragile';
   return (
     'Take the opposite view for a moment: assume the option in front turns out to be ' +
     'the wrong choice. Of everything this run tested, the link from ' +
     `${fromLabel} to ${toLabel} ` +
-    `${sensitivityClaim}. Make the strongest case ` +
+    `${fragilityClaim}. Make the strongest case ` +
     'that this link does not hold, and note what evidence would settle it either way.'
   );
 }
@@ -236,21 +238,20 @@ export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterC
     return { grounded: null, refusalReason: 'no_fragile_edges' };
   }
 
-  // ⚠ THE MAXIMUM, NOT THE HEAD (CEE #933 review).
+  // ⚠ CONDITIONAL-SWITCH MAXIMUM, NOT ARRAY HEAD (CEE #933 review).
   //
   // This module previously consumed `rows[0]` on the stated guarantee that
   // `fragile_edges` "arrives sorted by switch_probability DESCENDING". A sweep
   // of all 28 committed fragile-edge arrays found **3 violations**, one in a
   // staging capture. Head happened to equal max in every case examined, so no
-  // false sentence was ever witnessed — but the copy says "the one the
-  // robustness check found MOST SENSITIVE", and an unguaranteed ordering is not
-  // a basis for a superlative.
+  // false sentence was ever witnessed. The finite maximum establishes a
+  // conditional-switch priority, not a sensitivity ranking.
   //
   // Reading the maximum of the producer's OWN metric is not manufacturing
   // importance (the rule this module's header invokes) — it is declining to
   // infer that metric from arrival order. Ties keep producer order, so where
   // the array IS sorted the behaviour is byte-identical to before.
-  const selectedRaw = selectMostSensitiveRow(rows);
+  const selectedRaw = selectFragilityPriorityRow(rows);
   const head = readRecord(selectedRaw);
   const fromId = head !== null ? nonEmptyString(head.from_id) : null;
   const toId = head !== null ? nonEmptyString(head.to_id) : null;
@@ -269,7 +270,7 @@ export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterC
   const counterCase = composeGroundedCounterCase(
     fromLabel,
     toLabel,
-    selectionHasMetricProof(selectedRaw),
+    hasFiniteConditionalSwitchProbability(selectedRaw),
   );
   if (!isComposable(counterCase)) {
     return { grounded: null, refusalReason: 'not_composable' };

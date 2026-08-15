@@ -80,7 +80,7 @@ import {
   type RobustnessVerdictMode,
 } from '../tools/handlers/explanation-fallback.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
-import { selectMostSensitiveRow } from '../../orchestrator/shared/fragile-edge-authority.js';
+import { selectFragilityPriorityRow } from '../../orchestrator/shared/fragile-edge-authority.js';
 import {
   describeValidationPriority,
   isRenderableValidationEdge,
@@ -1085,7 +1085,7 @@ function renderableFragileEdges(
 function selectRenderableFragileEdge(
   analysis: AdviceGateAnalysis,
 ): AdviceGateAnalysisFragileEdge | undefined {
-  return selectMostSensitiveRow(renderableFragileEdges(analysis));
+  return selectFragilityPriorityRow(renderableFragileEdges(analysis));
 }
 
 /**
