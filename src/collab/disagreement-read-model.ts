@@ -235,9 +235,10 @@ export async function assembleDisagreementView(
     ).length;
 
     const evidence: DisagreementEvidence[] = allEvents
-      // Bound by IDENTITY — this target's id and the evidence kind — never by a
-      // predicate like "has an evidence member", which a future row could
-      // satisfy for another reason (CLAUDE.md trap 19).
+      // Bound by IDENTITY — this target's kind + id and the evidence kind —
+      // never by a predicate like "has an evidence member", which a future row
+      // could satisfy for another reason (CLAUDE.md trap 19). `kind` is
+      // load-bearing: an edge and a factor may carry the same string id.
       //
       // ⚠ The object check is not belt-and-braces: it also holds this read
       // together on a CEE deployed AHEAD of its migration, where the column
@@ -249,6 +250,7 @@ export async function assembleDisagreementView(
       .filter(
         (e): e is typeof e & { evidence: ElicitationEvidence } =>
           e.kind === 'evidence_attached' &&
+          e.target.kind === row.target.kind &&
           e.target.id === row.target.id &&
           typeof e.evidence === 'object' &&
           e.evidence !== null,
