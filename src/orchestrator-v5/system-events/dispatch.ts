@@ -37,7 +37,7 @@ import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestra
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import {
-  loadMostRecentPendingActionsStrict,
+  loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
   loadPriorFactsQuietly,
 } from '../build-turn-context.js';
@@ -389,11 +389,11 @@ export async function dispatchSystemEvent(
   // commit carry-forward owns normal TTL/expiry/hash rules; this seam neither
   // reimplements them nor treats the prior entries as newly-created actions.
   let readerPriorPendingActions:
-    | Awaited<ReturnType<typeof loadMostRecentPendingActionsStrict>>
+    | Awaited<ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>>
     | undefined;
   if (handling === 'reader_only_refusal') {
     try {
-      readerPriorPendingActions = await loadMostRecentPendingActionsStrict(
+      readerPriorPendingActions = await loadMostRecentPendingActionsIntegrityStrict(
         payload.scenario_id,
         requestId,
       );

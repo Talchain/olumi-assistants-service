@@ -20,9 +20,21 @@ import {
 } from '../store.js';
 import { EMPTY_COACHING_STATE } from '../../coaching/coaching-state.js';
 import { toPreDispatchSnapshot } from '../../coaching/coaching-state-snapshot.js';
+import type { PendingAction } from '../pending-action.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+const VALID_PENDING: PendingAction = {
+  id: 'pa-store-strict-1',
+  scenario_id: SCENARIO,
+  chip_id: 'chip-store-strict-1',
+  action: { kind: 'run_analysis' },
+  preconditions: {},
+  expires_at_turn_count: 3,
+  expires_at_iso: '2099-12-31T23:59:59.000Z',
+  emitted_at_iso: '2026-08-15T10:00:00.000Z',
+};
 
 function validRow(turnId: string, createdAt = '2026-04-17T10:00:00.000+00:00', userId: string | null = USER) {
   return {
@@ -564,6 +576,68 @@ describe('SupabaseSessionStore.readRecent', () => {
     const filters = selectCalls[0].filters as Record<string, unknown>;
     expect(filters['order:created_at']).toEqual({ ascending: false });
     expect(filters['order:turn_id']).toEqual({ ascending: false });
+  });
+});
+
+describe('SupabaseSessionStore.readMostRecentPendingActions — validation posture', () => {
+  function storeFor(raw: unknown): SupabaseSessionStore {
+    const { client } = makeClient({
+      selectResult: {
+        data: [{ id: 'turn-row-pending-1', pending_actions: raw }],
+        error: null,
+      },
+    });
+    return new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+  }
+
+  it('returns a healthy newest pending set losslessly in strict mode', async () => {
+    const store = storeFor([VALID_PENDING]);
+    await expect(
+      store.readMostRecentPendingActions(SCENARIO, { validation: 'strict' }),
+    ).resolves.toEqual([VALID_PENDING]);
+  });
+
+  it('preserves legacy tolerant non-array handling but strict mode refuses it', async () => {
+    const store = storeFor({ corrupt: 'not-an-array' });
+    await expect(store.readMostRecentPendingActions(SCENARIO)).resolves.toEqual([]);
+    await expect(
+      store.readMostRecentPendingActions(SCENARIO, { validation: 'strict' }),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'pending_actions_corrupt',
+    });
+  });
+
+  it('preserves the legacy valid subset but strict mode refuses a mixed valid/corrupt array', async () => {
+    const corrupt = { ...VALID_PENDING, expires_at_turn_count: 'three' };
+    const store = storeFor([VALID_PENDING, corrupt]);
+    await expect(store.readMostRecentPendingActions(SCENARIO)).resolves.toEqual([
+      VALID_PENDING,
+    ]);
+    await expect(
+      store.readMostRecentPendingActions(SCENARIO, { validation: 'strict' }),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'pending_actions_corrupt',
+    });
+  });
+
+  it('strict mode refuses a scenario-mismatched entry instead of returning a partial set', async () => {
+    const mismatched = {
+      ...VALID_PENDING,
+      scenario_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    };
+    const store = storeFor([VALID_PENDING, mismatched]);
+    await expect(
+      store.readMostRecentPendingActions(SCENARIO, { validation: 'strict' }),
+    ).rejects.toMatchObject({
+      name: 'SessionReadError',
+      code: 'pending_actions_corrupt',
+    });
   });
 });
 

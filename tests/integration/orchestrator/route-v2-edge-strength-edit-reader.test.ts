@@ -90,6 +90,7 @@ const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route
 
 const SCENARIO_ID = '22222222-2222-4222-8222-222222222222';
 const TURN_ID_BASE = '11111111-1111-4111-8111-1111111111';
+const STRICT_PENDING_READ = { validation: 'strict' } as const;
 
 const PRIOR_PENDING = {
   id: 'pa-reader-preserve-1',
@@ -197,7 +198,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit compatibility reader'
     expect(append.handler_facts).toEqual([]);
     expect(append.pending_actions).toEqual([]);
     expect(readMostRecentPendingActionsMock).toHaveBeenCalledTimes(1);
-    expect(readMostRecentPendingActionsMock).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(readMostRecentPendingActionsMock).toHaveBeenCalledWith(
+      SCENARIO_ID,
+      STRICT_PENDING_READ,
+    );
 
     expect(body).not.toHaveProperty('analysis_ready');
     expect(body).not.toHaveProperty('draft_graph');
@@ -248,39 +252,57 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit compatibility reader'
     expect(persisted.some((pending) => pending.action?.kind === 'proposed_concept')).toBe(false);
 
     expect(readMostRecentPendingActionsMock).toHaveBeenCalledTimes(1);
-    expect(loadGraphMock).not.toHaveBeenCalled();
-    expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
-    expect(readFactsForMock).not.toHaveBeenCalled();
-    expect(llmChatMock).not.toHaveBeenCalled();
-  });
-
-  it('fails the refusal commit closed when prior pending state cannot be read', async () => {
-    readMostRecentPendingActionsMock.mockRejectedValueOnce(
-      new Error('simulated pending read failure'),
+    expect(readMostRecentPendingActionsMock).toHaveBeenCalledWith(
+      SCENARIO_ID,
+      STRICT_PENDING_READ,
     );
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payloadFor(validEvent(), '95'),
-    });
-
-    expect(response.statusCode).toBe(500);
-    expect(JSON.parse(response.body)).toMatchObject({
-      boundary: 'B1',
-      direction: 'egress',
-      retryable: true,
-      details: {
-        reason: 'system_event_commit_failed',
-        event_kind: 'edge_strength_edit',
-      },
-    });
-    expect(appendMock).not.toHaveBeenCalled();
     expect(loadGraphMock).not.toHaveBeenCalled();
     expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
     expect(readFactsForMock).not.toHaveBeenCalled();
     expect(llmChatMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['non-array newest pending_actions', 'jsonb_not_array', '95'],
+    ['mixed valid/corrupt newest pending_actions', 'parse_failed', '96'],
+  ])(
+    'fails the refusal commit closed when the strict store refuses %s',
+    async (_label, reason, suffix) => {
+      readMostRecentPendingActionsMock.mockRejectedValueOnce(
+        Object.assign(new Error(`simulated strict pending read failure: ${reason}`), {
+          name: 'SessionReadError',
+          code: 'pending_actions_corrupt',
+        }),
+      );
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent(), suffix),
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body)).toMatchObject({
+        boundary: 'B1',
+        direction: 'egress',
+        retryable: true,
+        details: {
+          reason: 'system_event_commit_failed',
+          event_kind: 'edge_strength_edit',
+        },
+      });
+      expect(readMostRecentPendingActionsMock).toHaveBeenCalledTimes(1);
+      expect(readMostRecentPendingActionsMock).toHaveBeenCalledWith(
+        SCENARIO_ID,
+        STRICT_PENDING_READ,
+      );
+      expect(appendMock).not.toHaveBeenCalled();
+      expect(loadGraphMock).not.toHaveBeenCalled();
+      expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
+      expect(readFactsForMock).not.toHaveBeenCalled();
+      expect(llmChatMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('the response is independent of requested value — no payload is echoed as if applied', async () => {
     const first = await app.inject({

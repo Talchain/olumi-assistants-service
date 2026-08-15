@@ -1231,6 +1231,28 @@ export async function loadMostRecentPendingActionsStrict(
 }
 
 /**
+ * Lossless pending-state read for a caller that will become the newest turn.
+ *
+ * This is deliberately separate from {@link loadMostRecentPendingActionsStrict}:
+ * existing resume callers retain its legacy tolerant entry parsing, while the
+ * compatibility refusal must not append unless every entry in the prior
+ * authoritative row is readable and belongs to this scenario.
+ */
+export async function loadMostRecentPendingActionsIntegrityStrict(
+  scenarioId: string,
+  requestId: string,
+): Promise<readonly PendingAction[]> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store) {
+    throw new SessionReadError(
+      `loadMostRecentPendingActionsIntegrityStrict(${scenarioId}): session store unavailable`,
+      {},
+    );
+  }
+  return store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+}
+
+/**
  * V5 Signature Loop — bounded "does this scenario already have committed turns?"
  * read for the route-level refresh-continuation guard. Degrades to `false` on
  * a missing store, an unimplemented method (legacy mocks), or a read failure —
