@@ -292,6 +292,20 @@ export interface EnrichedTurnContext extends TurnContext {
    */
   readonly coaching_lifecycle: CoachingLifecycle;
   /**
+   * Fail-closed classification for the final zero-resolved-selection guard.
+   *
+   * This is deliberately separate from {@link selection}. `selection` is the
+   * node-only, answer-bearing projection that may enter `ContextPack.focus`;
+   * this summary answers only whether ANY requested node/edge identity exists
+   * in the canonical graph. Edge identities never become conversational
+   * context here, so counting a real edge cannot accidentally ship edge
+   * answering or a second grounded-selection wire authority.
+   *
+   * Optional so hand-built contexts remain source-compatible. Production
+   * `buildTurnContext` sets it only when the turn actually carried a selection.
+   */
+  readonly selectionHonesty?: SelectionHonesty;
+  /**
    * SELECTION-AWARE ANSWERING (hop 3): what the user had selected on the canvas
    * at send time, RESOLVED against the persisted graph into something an answer
    * can actually be grounded in.
@@ -381,6 +395,21 @@ export interface TurnSelection {
   readonly graph_read: CanonicalGraphReadState['status'];
 }
 
+/**
+ * Internal-only selection existence summary consumed by the deterministic
+ * zero-resolved guard. It is neither LLM-facing nor emitted on the wire.
+ */
+export interface SelectionHonesty {
+  /** Raw node refs + parseable composite edge refs, before de-duplication. */
+  readonly requested_count: number;
+  /** Canonical nodes + edges that resolved; the guard only branches on zero. */
+  readonly resolved_count: number;
+  /** Requested references that did not resolve. */
+  readonly unresolved_count: number;
+  /** Why an unresolved reference could not be used. */
+  readonly unresolved: 'none' | 'not_in_model' | 'could_not_check';
+}
+
 export interface BuildTurnContextOptions {
   /**
    * Override the default session store. Production code passes nothing and
@@ -393,9 +422,9 @@ export interface BuildTurnContextOptions {
    * (`parseRequestExtensions`). Threaded from `RunTurnExecutorOptions` so the
    * context builder can resolve it against canonical state.
    *
-   * `edge_ids` is accepted and deliberately NOT resolved in this slice: nothing
-   * reads an edge selection, and shipping a resolved field with no consumer is
-   * this estate's dominant defect. Edge answers are a separate slice.
+   * `edge_ids` is deliberately NOT projected into answer context in this
+   * slice. Exact composite identities participate only in the internal
+   * zero-resolved honesty counters; edge answers remain a separate slice.
    */
   readonly selectedElements?: {
     readonly node_ids: readonly string[];
@@ -714,6 +743,16 @@ export async function buildTurnContext(
     scenarioState.graph,
     scenarioState.read.status,
   );
+  // Edge selections participate ONLY in this existence classification. The
+  // node-only `turnSelection` above remains the sole answer-grounding input,
+  // so this closes the guard bypass without adding edge prose, fuzzy edge
+  // substitution, or a second graph read/authority.
+  const selectionHonesty = resolveSelectionHonesty(
+    options.selectedElements,
+    turnSelection,
+    scenarioState.graph,
+    scenarioState.read.status,
+  );
   if (turnSelection !== null) {
     try {
       emit(TelemetryEvents.V5TurnSelectionResolved, {
@@ -750,6 +789,7 @@ export async function buildTurnContext(
     coaching_state: coachingState,
     prior_coaching_state: priorCoachingState,
     coaching_lifecycle: coachingLifecycle,
+    ...(selectionHonesty !== null ? { selectionHonesty } : {}),
     // Spread conditionally: a turn with no selection carries NO key, so every
     // hand-constructed test context and the strict TurnContextSchema round-trip
     // stay exactly as they were.
@@ -824,6 +864,154 @@ export function resolveTurnSelection(
     unresolved_ids: nodeIds.filter((id) => !found.has(id)),
     graph_read: graphRead,
   };
+}
+
+type EdgeSelectionResolution = {
+  readonly resolved_count: number;
+  readonly unresolved_count: number;
+  readonly lookup_indeterminate: boolean;
+};
+
+/**
+ * Resolve/count node and edge references for honesty classification only.
+ *
+ * Node details reuse {@link resolveTurnSelection}; edge existence is checked
+ * against the SAME persisted graph read by exact `(from,to)` identity. The V3
+ * graph has no stable `edge.id`, and its existing edit authority therefore
+ * addresses relationships as `from→to` (accepting ASCII `from->to`). No label,
+ * endpoint, or neighbouring-edge fallback is permitted here.
+ */
+export function resolveSelectionHonesty(
+  selectedElements: {
+    readonly node_ids: readonly string[];
+    readonly edge_ids: readonly string[];
+  } | null | undefined,
+  nodeSelection: TurnSelection | null,
+  persistedGraph: unknown | null,
+  graphRead: CanonicalGraphReadState['status'],
+): SelectionHonesty | null {
+  const nodeIds = selectedElements?.node_ids ?? [];
+  // GraphV3 has no stable edge.id, so opaque producer-local tokens such as
+  // React Flow's `e5` cannot prove presence OR absence in canonical state.
+  // Preserve their prior no-focus behaviour; only the existing composite
+  // relationship grammar may enter this deterministic honesty authority.
+  const edgeIds = (selectedElements?.edge_ids ?? []).filter(
+    (id) => normaliseSelectedEdgeIdentity(id) !== null,
+  );
+  const requestedCount = nodeIds.length + edgeIds.length;
+  if (requestedCount === 0) return null;
+
+  // A non-empty node request always produces TurnSelection. The fallbacks keep
+  // this fail-closed if a future refactor violates that invariant.
+  const unresolvedNodeCount = nodeSelection?.unresolved_ids.length ?? nodeIds.length;
+  const resolvedNodeCount = nodeIds.length - unresolvedNodeCount;
+  const edgeResolution = resolveEdgeSelectionIds(edgeIds, persistedGraph, graphRead);
+  const unresolvedCount = unresolvedNodeCount + edgeResolution.unresolved_count;
+
+  return {
+    requested_count: requestedCount,
+    resolved_count: resolvedNodeCount + edgeResolution.resolved_count,
+    unresolved_count: unresolvedCount,
+    unresolved:
+      unresolvedCount === 0
+        ? 'none'
+        : graphRead === 'degraded' || edgeResolution.lookup_indeterminate
+          ? 'could_not_check'
+          : 'not_in_model',
+  };
+}
+
+/**
+ * Exact edge-identity lookup over canonical graph bytes. Identity-only parsing
+ * is intentional: classification needs to prove the relationship exists, not
+ * copy strength/provenance into an answer. An unreadable edge array/row makes
+ * an otherwise-unresolved lookup indeterminate rather than falsely absent.
+ */
+function resolveEdgeSelectionIds(
+  edgeIds: readonly string[],
+  persistedGraph: unknown | null,
+  graphRead: CanonicalGraphReadState['status'],
+): EdgeSelectionResolution {
+  if (edgeIds.length === 0) {
+    return { resolved_count: 0, unresolved_count: 0, lookup_indeterminate: false };
+  }
+  if (graphRead === 'degraded') {
+    return {
+      resolved_count: 0,
+      unresolved_count: edgeIds.length,
+      lookup_indeterminate: true,
+    };
+  }
+  if (graphRead === 'ok_absent') {
+    return {
+      resolved_count: 0,
+      unresolved_count: edgeIds.length,
+      lookup_indeterminate: false,
+    };
+  }
+
+  if (
+    persistedGraph === null ||
+    typeof persistedGraph !== 'object' ||
+    !Array.isArray((persistedGraph as { edges?: unknown }).edges)
+  ) {
+    return {
+      resolved_count: 0,
+      unresolved_count: edgeIds.length,
+      lookup_indeterminate: true,
+    };
+  }
+
+  const canonicalIdentities = new Set<string>();
+  let unreadableEdgePresent = false;
+  for (const raw of (persistedGraph as { edges: readonly unknown[] }).edges) {
+    if (raw === null || typeof raw !== 'object') {
+      unreadableEdgePresent = true;
+      continue;
+    }
+    const from = (raw as { from?: unknown }).from;
+    const to = (raw as { to?: unknown }).to;
+    if (
+      typeof from !== 'string' ||
+      from.trim().length === 0 ||
+      typeof to !== 'string' ||
+      to.trim().length === 0
+    ) {
+      unreadableEdgePresent = true;
+      continue;
+    }
+    canonicalIdentities.add(`${from.trim()}→${to.trim()}`);
+  }
+
+  let resolvedCount = 0;
+  let unresolvedCount = 0;
+  let unresolvedParseableId = false;
+  for (const id of edgeIds) {
+    const canonical = normaliseSelectedEdgeIdentity(id);
+    if (canonical !== null && canonicalIdentities.has(canonical)) {
+      resolvedCount += 1;
+    } else {
+      unresolvedCount += 1;
+      if (canonical !== null) unresolvedParseableId = true;
+    }
+  }
+
+  return {
+    resolved_count: resolvedCount,
+    unresolved_count: unresolvedCount,
+    lookup_indeterminate: unreadableEdgePresent && unresolvedParseableId,
+  };
+}
+
+/** Match the existing relationship-address grammar without guessing. */
+function normaliseSelectedEdgeIdentity(id: string): string | null {
+  const separator = id.includes('→') ? '→' : id.includes('->') ? '->' : null;
+  if (separator === null) return null;
+  const parts = id.split(separator);
+  if (parts.length !== 2) return null;
+  const from = parts[0]?.trim() ?? '';
+  const to = parts[1]?.trim() ?? '';
+  return from.length > 0 && to.length > 0 ? `${from}→${to}` : null;
 }
 
 /**

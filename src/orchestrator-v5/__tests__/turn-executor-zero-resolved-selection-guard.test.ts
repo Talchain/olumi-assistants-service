@@ -8,7 +8,7 @@
  *
  * Only stores and the routing adapter are faked. The exercised chain is:
  *
- *   runTurnExecutor → buildTurnContext/resolveTurnSelection
+ *   runTurnExecutor → buildTurnContext/resolveTurnSelection + selectionHonesty
  *     → ContextPack.focus → real compose/commit → finalizeRun guard
  *
  * The paired controls are load-bearing. Removing the single final-guard call
@@ -51,6 +51,9 @@ const OTHER_OPTION_LABEL = 'Use an offshore partner';
 const FACTOR_ID = 'factor_salary';
 const FACTOR_LABEL = 'Engineer salary';
 const GHOST_ID = 'node_fabricated_selected_id';
+const REAL_EDGE_ID = `${FACTOR_ID}→goal_growth`;
+const GHOST_EDGE_ID = `${GHOST_ID}→goal_growth`;
+const OPAQUE_REAL_EDGE_ID = 'e5';
 const MODEL_PATH_MESSAGE = 'help me think this through';
 
 const PERSISTED_GRAPH = {
@@ -389,6 +392,80 @@ afterEach(() => {
 });
 
 describe('TurnExecutor final guard — every requested selection resolved to nothing', () => {
+  it('refuses a fabricated selected edge instead of returning a real model edge', async () => {
+    const modelAnswer = deriveAnswerTextFromShape(LEADER_SHAPE);
+    const adapter = resolvedAdapter(shapedConverseResult());
+    const guarded = await run(
+      MODEL_PATH_MESSAGE,
+      adapter,
+      { node_ids: [], edge_ids: [GHOST_EDGE_ID] },
+    );
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(guarded.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
+    expect(guarded.response.assistant_text).not.toBe(modelAnswer);
+    expect(guarded.response.assistant_text).not.toContain(OPTION_LABEL);
+    expect(guarded.response.assistant_text).not.toContain(FACTOR_LABEL);
+    expect(guarded.response.blocks).toEqual([]);
+    expect(guarded.response.suggested_actions).toEqual([]);
+    expect(guarded.response.insights).toEqual([]);
+    expect(guarded.answerShape).toBeUndefined();
+    expect(guarded.reasoning).toBeUndefined();
+    expect(guarded.answerKind).toBe('functional');
+    // Edge-specific conversational grounding remains deliberately out of scope.
+    expect(guarded.groundedSelection).toBeUndefined();
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+  });
+
+  it('duplicate fabricated edge refs remain zero-resolved', async () => {
+    const guarded = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(shapedConverseResult()),
+      { node_ids: [], edge_ids: [GHOST_EDGE_ID, GHOST_EDGE_ID] },
+    );
+
+    expect(guarded.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
+    expect(guarded.response.assistant_text).not.toContain(OPTION_LABEL);
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+  });
+
+  it('refuses a mixed node/edge selection only when every requested identity is absent', async () => {
+    const original = deriveAnswerTextFromShape(LEADER_SHAPE);
+    const allGhost = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(shapedConverseResult()),
+      { node_ids: [GHOST_ID], edge_ids: [GHOST_EDGE_ID] },
+    );
+    const realEdge = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(shapedConverseResult()),
+      { node_ids: [GHOST_ID], edge_ids: [REAL_EDGE_ID] },
+    );
+    const realNode = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(shapedConverseResult()),
+      { node_ids: [OPTION_ID], edge_ids: [GHOST_EDGE_ID] },
+    );
+
+    expect(allGhost.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
+    expect(realEdge.response.assistant_text).toBe(original);
+    expect(realNode.response.assistant_text).toBe(original);
+  });
+
+  it('a canonical-read failure makes an edge lookup indeterminate, never absent', async () => {
+    harness.graphReadMode = 'degraded';
+    const guarded = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(shapedConverseResult()),
+      { node_ids: [], edge_ids: [REAL_EDGE_ID] },
+    );
+
+    expect(guarded.response.assistant_text).toBe(COULD_NOT_CHECK_TEXT);
+    expect(guarded.response.assistant_text).not.toContain('not in the model');
+    expect(guarded.response.assistant_text).not.toContain(OPTION_LABEL);
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(COULD_NOT_CHECK_TEXT);
+  });
+
   it('kills leader-grounded model prose and drops post-rewrite answer carriers', async () => {
     const modelAnswer = deriveAnswerTextFromShape(LEADER_SHAPE);
     const control = await run(
@@ -612,6 +689,48 @@ describe('TurnExecutor final guard — every requested selection resolved to not
 });
 
 describe('TurnExecutor final guard — byte-identical controls', () => {
+  it('preserves prior behaviour for an opaque real React Flow edge id', async () => {
+    const original =
+      'The salary-to-growth relationship is in the model; inspect it before changing it.';
+    const noSelection = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+    );
+    const opaqueRealEdge = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+      { node_ids: [], edge_ids: [OPAQUE_REAL_EDGE_ID] },
+    );
+
+    expect(JSON.stringify(opaqueRealEdge.response)).toBe(JSON.stringify(noSelection.response));
+    expect(opaqueRealEdge.response.assistant_text).toBe(original);
+    expect(opaqueRealEdge.groundedSelection).toBeUndefined();
+  });
+
+  it('leaves a real edge selection unchanged without claiming edge-grounded answering', async () => {
+    const original =
+      'The salary-to-growth relationship is in the model; inspect it before changing it.';
+    const noSelection = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+    );
+    const unicodeIdentity = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+      { node_ids: [], edge_ids: [REAL_EDGE_ID] },
+    );
+    const asciiIdentity = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+      { node_ids: [], edge_ids: [`${FACTOR_ID}->goal_growth`] },
+    );
+
+    expect(JSON.stringify(unicodeIdentity.response)).toBe(JSON.stringify(noSelection.response));
+    expect(JSON.stringify(asciiIdentity.response)).toBe(JSON.stringify(noSelection.response));
+    expect(unicodeIdentity.groundedSelection).toBeUndefined();
+    expect(asciiIdentity.groundedSelection).toBeUndefined();
+  });
+
   it('leaves no-selection, resolved-selection and mixed-selection answers unchanged', async () => {
     const original =
       'The trade-off is between local control and offshore flexibility; check the assumptions behind both.';

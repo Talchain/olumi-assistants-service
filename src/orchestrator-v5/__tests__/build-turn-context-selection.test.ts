@@ -47,6 +47,8 @@ const BASE = makeMessagePayload({
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   message: 'Why does this one matter?',
 });
+const REAL_EDGE_ID = 'factor_price→opt_build';
+const OPAQUE_REAL_EDGE_ID = 'e5';
 
 /**
  * A persisted graph in the shape `scenarios.graph` actually stores. Deep-frozen
@@ -74,7 +76,15 @@ function persistedGraph(): unknown {
       },
       { id: 'opt_build', kind: 'option', label: 'Build in-house' },
     ],
-    edges: [],
+    edges: [
+      {
+        from: 'factor_price',
+        to: 'opt_build',
+        strength: { mean: 0.4, std: 0.1 },
+        exists_probability: 0.8,
+        effect_direction: 'positive',
+      },
+    ],
   });
 }
 
@@ -294,6 +304,7 @@ describe('buildTurnContext — the selected element becomes groundable context',
     });
     expect(ctx.selection).toBeUndefined();
     expect('selection' in ctx).toBe(false);
+    expect('selectionHonesty' in ctx).toBe(false);
   });
 
   it('an empty selection is the same as no selection', async () => {
@@ -302,16 +313,36 @@ describe('buildTurnContext — the selected element becomes groundable context',
       selectedElements: selection([]),
     });
     expect('selection' in ctx).toBe(false);
+    expect('selectionHonesty' in ctx).toBe(false);
   });
 
-  it('edge ids are carried as requested but resolve to nothing in this slice', async () => {
+  it('counts an exact real edge for honesty without making it answer-bearing context', async () => {
     const ctx = await buildTurnContext(BASE, 'req-8', {
       sessionStore: storeWithGraph(persistedGraph()),
-      selectedElements: selection([], ['e1']),
+      selectedElements: selection([], [REAL_EDGE_ID]),
     });
-    // Deliberate: nothing reads an edge selection, so resolving one would ship
-    // a field with no consumer. The id is not silently forgotten either.
+    // Deliberate: edge existence can prevent a false refusal, but the edge is
+    // not put into node focus or any answer-grounding surface in this slice.
     expect('selection' in ctx).toBe(false);
+    expect(ctx.selectionHonesty).toEqual({
+      requested_count: 1,
+      resolved_count: 1,
+      unresolved_count: 0,
+      unresolved: 'none',
+    });
+  });
+
+  it('does not treat an opaque UI edge id as canonical honesty authority', async () => {
+    const ctx = await buildTurnContext(BASE, 'req-opaque-edge', {
+      sessionStore: storeWithGraph(persistedGraph()),
+      selectedElements: selection([], [OPAQUE_REAL_EDGE_ID]),
+    });
+
+    // React Flow can identify the real fixture edge as `e5`, but GraphV3 has
+    // no stable edge.id. Ignoring that opaque token preserves the prior
+    // behaviour without making it answer-bearing or falsely declaring it gone.
+    expect('selection' in ctx).toBe(false);
+    expect('selectionHonesty' in ctx).toBe(false);
   });
 
   it('STABLE MODEL: resolution does not mutate the persisted graph', async () => {

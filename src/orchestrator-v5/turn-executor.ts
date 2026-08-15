@@ -68,6 +68,7 @@ import {
   loadPersistedGraphStrict,
   GraphStaleWriteError,
   type CanonicalGraphReadState,
+  type SelectionHonesty,
 } from './build-turn-context.js';
 import { TurnFenceRejectedError } from './session/turn-fence.js';
 import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
@@ -864,7 +865,7 @@ type ZeroResolvedSelectionProjection = {
  */
 function projectZeroResolvedSelectionResponse(
   response: OlumiResponse,
-  focus: ContextPackFocus | undefined,
+  selectionHonesty: SelectionHonesty | undefined,
   options: {
     readonly preserveMutationReceipt: boolean;
   },
@@ -872,18 +873,18 @@ function projectZeroResolvedSelectionResponse(
   if (
     options.preserveMutationReceipt ||
     response.blocks.some((block) => block.type === 'error') ||
-    focus === undefined ||
-    focus.requested_count < 1 ||
-    focus.elements.length !== 0
+    selectionHonesty === undefined ||
+    selectionHonesty.requested_count < 1 ||
+    selectionHonesty.resolved_count !== 0
   ) {
     return { response, applied: false };
   }
 
-  // `none` is structurally inconsistent with requested>0/elements=0. Treat
+  // `none` is structurally inconsistent with requested>0/resolved=0. Treat
   // any future or malformed value as `could_not_check`: inability to prove
   // absence must never become a claim that the selected element is missing.
   const assistantText =
-    focus.unresolved === 'not_in_model'
+    selectionHonesty.unresolved === 'not_in_model'
       ? ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT
       : ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT;
 
@@ -1385,7 +1386,7 @@ export async function runTurnExecutor(
         mutationReceiptCandidate && graphWasProvided(meta.graph);
       const zeroSelectionProjection = projectZeroResolvedSelectionResponse(
         resp,
-        contextPackForLog?.focus,
+        context.selectionHonesty,
         {
           preserveMutationReceipt: mutationReceiptWillBePersisted,
         },
@@ -11766,22 +11767,26 @@ export async function runTurnExecutor(
   /**
    * Selection-grounding honesty at the final executor chokepoint.
    *
-   * The model already receives `ContextPack.focus.unresolved`, but the live
+   * The model already receives node-only `ContextPack.focus.unresolved`, but the live
    * witness showed that prompt compliance is not an honesty guarantee: when a
    * fabricated selected id resolved to nothing, a successful answer could
-   * silently adopt the analysed leader instead. The final ContextPack is the
-   * single authority here — never the raw request and never a second graph
-   * lookup. The guard fires only when that pack says the turn requested at
-   * least one selection and resolved zero elements.
+   * silently adopt the analysed leader instead. `selectionHonesty` is derived
+   * in `buildTurnContext` from the same canonical graph read as node focus —
+   * never from the request graph and never from a second lookup. The guard
+   * fires only when that summary says the turn requested at least one
+   * selection and resolved zero elements.
    *
    * User-visible failure envelopes are preserved byte-for-byte by their error
    * block. Deliberately do NOT key this to `failureType`: bounded routing
    * recovery keeps the upstream LLM failure there as operations metadata even
    * when it intentionally commits a clean 200 deterministic answer. Treating
    * that internal cause as a visible failure exempted exactly the leader-shaped
-   * fallback this guard must constrain. Mixed selections are deliberately left
-   * alone: one resolved element is enough to keep the answer anchored, while
-   * `focus.unresolved` already discloses the missing remainder.
+   * fallback this guard must constrain. The internal `selectionHonesty`
+   * summary extends that existence test to exact canonical edge identities
+   * without putting edges in the prompt or on `_grounded_selection`. Mixed
+   * selections are deliberately left alone: one resolved element is enough to
+   * avoid a zero-resolved refusal, while node focus still discloses any missing
+   * node remainder.
    *
    * On a match, keep only the required response envelope plus bounded,
    * code-owned copy. Answer-bearing blocks, chips, insights and optional
@@ -11832,7 +11837,7 @@ export async function runTurnExecutor(
       commitPerformed && zeroResolvedSelectionMutationReceiptPersistedAtCommit;
     const projected = projectZeroResolvedSelectionResponse(
       response,
-      contextPackForLog?.focus,
+      context.selectionHonesty,
       {
         preserveMutationReceipt: committedGraphMutation,
       },
