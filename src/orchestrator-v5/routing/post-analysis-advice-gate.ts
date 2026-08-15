@@ -80,6 +80,7 @@ import {
   type RobustnessVerdictMode,
 } from '../tools/handlers/explanation-fallback.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { selectFragilityPriorityRow } from '../../orchestrator/shared/fragile-edge-authority.js';
 import {
   describeValidationPriority,
   isRenderableValidationEdge,
@@ -1080,6 +1081,13 @@ function renderableFragileEdges(
   return analysis.fragile_edges?.filter(isRenderableFragileEdge) ?? [];
 }
 
+/** Canonical single-edge pick; projected rows without a metric retain their head. */
+function selectRenderableFragileEdge(
+  analysis: AdviceGateAnalysis,
+): AdviceGateAnalysisFragileEdge | undefined {
+  return selectFragilityPriorityRow(renderableFragileEdges(analysis));
+}
+
 /**
  * The SUBJECT `composeWhatWouldFlip`'s beat 2 names — a fragile link, or (when
  * no fragile edge is renderable) the single most influential factor.
@@ -1103,7 +1111,7 @@ type FlipFocusSelection =
   | { readonly kind: 'top_driver'; readonly driver: AdviceGateAnalysisDriver };
 
 function selectFlipFocus(analysis: AdviceGateAnalysis): FlipFocusSelection | null {
-  const edge = renderableFragileEdges(analysis)[0];
+  const edge = selectRenderableFragileEdge(analysis);
   if (edge) return { kind: 'fragile_edge', edge };
   const driver = nameableTopDrivers(analysis)[0];
   if (driver) return { kind: 'top_driver', driver };
@@ -1771,7 +1779,7 @@ function driverDirectionFragment(d: AdviceGateAnalysisDriver): string {
  * action block. Single source of truth so the three composers never drift.
  */
 function describeFragileAssumption(edge: AdviceGateAnalysisFragileEdge): string {
-  return `The most useful thing to check is the link from ${quoteLabel(edge.from_label)} to ${quoteLabel(edge.to_label)}: whether it holds as strongly as the model currently assumes.`;
+  return `One useful thing to check is the link from ${quoteLabel(edge.from_label)} to ${quoteLabel(edge.to_label)}: whether it holds as strongly as the model currently assumes.`;
 }
 
 /**
@@ -1962,7 +1970,7 @@ function composeMeaning(
   const probability = probabilityFragment(analysis.leading_option?.probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
-  const topEdge = renderableFragileEdges(analysis)[0];
+  const topEdge = selectRenderableFragileEdge(analysis);
   const sentences: string[] = [];
 
   const closeness = interpretationCloseness(leadingLabel, runnerLabel, tieReason);
@@ -2211,7 +2219,7 @@ function composeExplainResults(
   // shared verdict's `margin_clause`, which gates on the SAME finite-margin
   // decision internally — a second local read of the margin here is how this
   // composer came to render it.
-  const topEdge = renderableFragileEdges(analysis)[0];
+  const topEdge = selectRenderableFragileEdge(analysis);
   const topDriverLabel = hasNonEmptyLabel(driverA?.factor_label)
     ? driverA.factor_label
     : null;
@@ -2455,7 +2463,7 @@ function composeWhatWouldFlip(
   // `selectFlipFocus` holds the fragile-edge-then-top-driver precedence that
   // used to live inline here; `deriveFlipFocusSection` reads the SAME call to
   // choose which Model-tab section to open. Behaviour below is unchanged —
-  // `topEdge` is truthy on exactly the inputs `renderableFragileEdges(a)[0]` was
+  // `topEdge` is truthy on exactly the inputs the shared renderable-edge pick was
   // — but the sentence and the gesture can no longer disagree about what the
   // answer is about, because neither owns the choice (CLAUDE.md trap 21).
   // DGAI #341: "the factor with the most influence on the result" may only

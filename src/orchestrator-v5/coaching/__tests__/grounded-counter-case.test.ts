@@ -52,9 +52,8 @@ describe('selectGroundedCounterCase — grounding', () => {
     const grounded = result.grounded;
     expect(grounded).not.toBeNull();
 
-    // IDENTITY binding (trap 19): the exact producer ids and labels of the
-    // HEAD fragile edge — never "some edge whose probability is highest",
-    // which another row could satisfy after a producer re-order.
+    // IDENTITY binding (trap 19): the exact producer ids and labels selected by
+    // the canonical producer-metric authority.
     expect(grounded!.fromId).toBe('fac_partner_invest');
     expect(grounded!.toId).toBe('out_new_arr');
     expect(grounded!.fromLabel).toBe('Partner Channel Investment');
@@ -84,7 +83,7 @@ describe('selectGroundedCounterCase — grounding', () => {
     expect(a!.counterCase).not.toContain('Automated Packing Investment');
   });
 
-  it('selects the producer MAXIMUM switch_probability, not merely the head', () => {
+  it('selects the producer MAXIMUM switch_probability as first fragility priority, not sensitivity', () => {
     // CEE #933 review: the "arrives sorted DESC" guarantee is absent — 3 of 28
     // committed arrays violate it. The copy claims a superlative, so the
     // superlative must be COMPUTED from the producer's own metric.
@@ -99,21 +98,50 @@ describe('selectGroundedCounterCase — grounding', () => {
     expect(result.grounded).not.toBeNull();
     expect(result.grounded!.fromLabel).toBe('Beta');
     expect(result.grounded!.counterCase).toContain('Beta Out');
+    expect(result.grounded!.counterCase).toContain(
+      'robustness check highlighted as a priority to challenge',
+    );
+    expect(result.grounded!.counterCase).not.toMatch(/most sensitive/i);
   });
 
-  it('keeps producer order on ties, so a sorted array is unchanged', () => {
-    // session-a's rows arrive sorted by switch_probability DESC. The selection
-    // is the HEAD row, not a locally-recomputed maximum: re-ranking here would
-    // be a second opinion about importance computed from a subset of the
-    // producer's inputs (the "never manufacture importance" rule).
-    const raw = liveEnrichment('session-a') as {
-      robustness: { fragile_edges: readonly { from_id: string; to_id: string }[] };
-    };
-    const head = raw.robustness.fragile_edges[0]!;
-    const grounded = selectGroundedCounterCase(raw).grounded;
+  it('keeps producer order on ties', () => {
+    const grounded = selectGroundedCounterCase({
+      robustness: {
+        fragile_edges: [
+          { from_id: 'fac_first', to_id: 'out_first', from_label: 'First', to_label: 'First Out', switch_probability: 0.42 },
+          { from_id: 'fac_second', to_id: 'out_second', from_label: 'Second', to_label: 'Second Out', switch_probability: 0.42 },
+        ],
+      },
+    }).grounded;
 
-    expect(grounded!.fromId).toBe(head.from_id);
-    expect(grounded!.toId).toBe(head.to_id);
+    expect(grounded!.fromId).toBe('fac_first');
+    expect(grounded!.toId).toBe('out_first');
+  });
+
+  it('uses neutral copy when every switch_probability is missing or non-finite', () => {
+    const result = selectGroundedCounterCase({
+      robustness: {
+        fragile_edges: [
+          {
+            from_id: 'fac_head',
+            to_id: 'out_head',
+            from_label: 'Head factor',
+            to_label: 'Head outcome',
+            switch_probability: Number.NaN,
+          },
+          {
+            from_id: 'fac_second',
+            to_id: 'out_second',
+            from_label: 'Second factor',
+            to_label: 'Second outcome',
+          },
+        ],
+      },
+    });
+
+    expect(result.grounded?.fromId).toBe('fac_head');
+    expect(result.grounded?.counterCase).toContain('flagged as fragile');
+    expect(result.grounded?.counterCase).not.toContain('most sensitive');
   });
 });
 

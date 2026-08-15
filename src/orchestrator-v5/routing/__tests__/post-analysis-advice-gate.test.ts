@@ -807,11 +807,11 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain(
-        "The most useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity': whether it holds as strongly as the model currently assumes",
+        "One useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity': whether it holds as strongly as the model currently assumes",
       );
       // Beat 5 — validation priority points at the SAME named link.
       expect(out.assistant_text).toContain(
-        'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome',
+        'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile',
       );
       // Next action aligns to the SAME named link (not the top driver).
       expect(out.assistant_text).toMatch(
@@ -834,7 +834,7 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain(
-        "The most useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity'",
+        "One useful thing to check is the link from 'Local Senior Hire' to 'Q3 Roadmap Delivery Capacity'",
       );
     }
   });
@@ -848,7 +848,7 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
     expect(out.matched).toBe(true);
     if (out.matched) {
       // No fragile-link sentence.
-      expect(out.assistant_text).not.toContain('The most useful thing to check is the link from');
+      expect(out.assistant_text).not.toContain('One useful thing to check is the link from');
       // Beat 5 — validation falls back to the most-weighted factor, not the
       // fragile-link phrasing.
       expect(out.assistant_text).not.toContain('real-world support for that link');
@@ -873,7 +873,7 @@ describe('tryPostAnalysisAdviceGate — fragile-edge branch from real staging la
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).not.toContain('The most useful thing to check is the link from');
+      expect(out.assistant_text).not.toContain('One useful thing to check is the link from');
       expect(out.assistant_text).toMatch(/the factor with the most influence here/);
     }
   });
@@ -923,7 +923,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).toMatch(/moderately weakens the lead/);
       // Names the specific fragile assumption from fragile_edges[0] (parity
       // with what_would_flip) — no sign/causal claim.
-      expect(out.assistant_text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
+      expect(out.assistant_text).toContain("One useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
       // Humanised moderate-band copy — plain language, no "robustness band" jargon.
       expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
       expect(out.assistant_text).not.toMatch(/robustness band/i);
@@ -935,7 +935,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // fragile link) and why it matters, distinct from the diagnosis sentence
       // (beat 4) and the re-run action (beat 6).
       expect(out.assistant_text).toContain(
-        'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome',
+        'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile',
       );
       expect(out.assistant_text).toContain('What to check next');
       expect(out.assistant_text).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
@@ -963,7 +963,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(text).toContain("'Hire one senior engineer overseas' is the most likely contender to overtake it, with a probability of 38%");
       expect(text).not.toMatch(/percentage points?/i);
       // Names the specific fragile assumption from fragile_edges[0] — no sign/causal claim.
-      expect(text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
+      expect(text).toContain("One useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
       // No decision_review.flip_thresholds present → no flip claim, no "favoured option"/"best".
       expect(text).not.toMatch(/\bmost likely to flip\b/i);
       expect(text).not.toMatch(/favoured option|\bbest\b/i);
@@ -991,7 +991,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       expect(out.assistant_text).not.toMatch(/percentage points?/i);
       // Names the specific fragile assumption (parity with explain_results /
       // what_would_flip) — the sentence is itself the "what to check".
-      expect(out.assistant_text).toContain("The most useful thing to check is the link from 'Delivery risk' to 'Successful launch'");
+      expect(out.assistant_text).toContain("One useful thing to check is the link from 'Delivery risk' to 'Successful launch'");
       expect(out.assistant_text).toMatch(/reflects (?:your current setup|the model you've built so far)/);
       // Meaning stays interpretive — no `What to check next` action block.
       expect(out.assistant_text).not.toContain('What to check next');
@@ -1082,7 +1082,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
 // =========================================================================
 describe('tryPostAnalysisAdviceGate — validation-priority beat (what to validate)', () => {
   const VALIDATE_LINK =
-    'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome';
+    'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as fragile';
 
   // Decision-style fixture so the prose reads as a real coaching answer.
   const FULL: AdviceGateAnalysis = {
@@ -1114,15 +1114,15 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
       expect(text).toContain('Engineering capacity');
       // 4 — what is fragile (the named link)
       expect(text).toContain(
-        "The most useful thing to check is the link from 'Engineering capacity' to 'Delivery speed'",
+        "One useful thing to check is the link from 'Engineering capacity' to 'Delivery speed'",
       );
       // 5 — what to validate
       expect(text).toContain(VALIDATE_LINK);
       // 6 — next action
       expect(text).toMatch(/^• Strengthen the evidence behind that link, then re-run/m);
       // Ordering: fragility (4) → validation (5) → action block (6).
-      const iFragile = text.indexOf('The most useful thing to check');
-      const iValidate = text.indexOf('The evidence that would most improve confidence');
+      const iFragile = text.indexOf('One useful thing to check');
+      const iValidate = text.indexOf('One useful confidence check');
       const iAction = text.indexOf('What to check next');
       expect(iFragile).toBeGreaterThanOrEqual(0);
       expect(iValidate).toBeGreaterThan(iFragile);
@@ -1258,7 +1258,7 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
         // fragile link, no recap-stub deflection copy.
         expect(text).toContain("'Hire Two Senior Engineers Locally'");
         expect(text).toContain(
-          "The most useful thing to check is the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity'",
+          "One useful thing to check is the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity'",
         );
         expect(text).not.toMatch(/open the analysis view/i);
         // Beat 5 — fragile link present, so the LINK sentence wins (drivers
@@ -1266,8 +1266,8 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
         expect(text).toContain(VALIDATE_LINK);
         expect(text).not.toContain('firmer support for');
         // Ordering: fragility (4) → validation (5) → action block (6).
-        const iFragile = text.indexOf('The most useful thing to check');
-        const iValidate = text.indexOf('The evidence that would most improve confidence');
+        const iFragile = text.indexOf('One useful thing to check');
+        const iValidate = text.indexOf('One useful confidence check');
         const iAction = text.indexOf('What to check next');
         expect(iFragile).toBeGreaterThanOrEqual(0);
         expect(iValidate).toBeGreaterThan(iFragile);
@@ -2924,7 +2924,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain(
-        "The most useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk': whether it holds as strongly as the model currently assumes",
+        "One useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk': whether it holds as strongly as the model currently assumes",
       );
     }
   });
@@ -3091,7 +3091,7 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
       expect(out.matched).toBe(true);
       if (out.matched) {
         expect(out.assistant_text).toContain(
-          "The most useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk': whether it holds as strongly as the model currently assumes",
+          "One useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk': whether it holds as strongly as the model currently assumes",
         );
       }
     }
@@ -3117,7 +3117,7 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
     if (out.matched) {
       const t = out.assistant_text;
       expect(t).toContain(
-        "The most useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk'",
+        "One useful thing to check is the link from 'Hiring and Salary Cost' to 'Budget Overrun Risk'",
       );
       expect(t).toContain('What to check next');
       expect(t).toMatch(/^• Strengthen the evidence behind that link, then re-run to see whether the lead holds\.$/m);
@@ -3183,7 +3183,7 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
       expect(t).toContain("The order could shift with movement on 'Delivery risk'");
       // Fragile assumption composes coherently — named exactly once.
       expect(
-        (t.match(/The most useful thing to check is the link from/g) ?? []).length,
+        (t.match(/One useful thing to check is the link from/g) ?? []).length,
       ).toBe(1);
       // Exactly one caveat: meaning adds neither "treat as provisional" nor
       // "picture appears fragile" on top of the named assumption.

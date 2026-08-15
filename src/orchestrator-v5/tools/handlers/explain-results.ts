@@ -72,6 +72,7 @@ import {
 } from './no-op-helpers.js';
 import { composeExplainResultsFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
+import { selectFragilityPriorityRow } from '../../../orchestrator/shared/fragile-edge-authority.js';
 import {
   composeStandaloneValidationPriority,
   decideValidationBeat,
@@ -84,8 +85,9 @@ import {
  * Inputs for the "what to validate" beat, read from the projection the
  * turn-executor already threads in (same source the advice gate reads on
  * the deterministic J1b path). `fragile_edges` arrives pre-filtered to
- * renderable entries by `buildAnalysisProjectionSummary`; the first entry
- * mirrors the advice gate's "top edge" selection. The driver label gets the
+ * renderable entries by `buildAnalysisProjectionSummary`; selection goes
+ * through the shared producer-metric authority (and retains the projected head
+ * when this labels-only view carries no finite metric). The driver label gets the
  * standalone clean-label guard (non-empty, not ID-shaped) because this path
  * does not pass through the gate's availability checks.
  */
@@ -95,7 +97,7 @@ function selectValidationSignals(
   fragileEdge: ValidationFragileEdge | null;
   topDriverLabel: string | null;
 } {
-  const fragileEdge = projection?.fragile_edges?.[0] ?? null;
+  const fragileEdge = selectFragilityPriorityRow(projection?.fragile_edges ?? []) ?? null;
   const rawDriverLabel = projection?.top_drivers?.[0]?.factor_label;
   return {
     fragileEdge,

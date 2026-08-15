@@ -2137,8 +2137,8 @@ export function buildLensCompanionBlocks(
       // `CONSIDER_OPPOSITE_COUNTER_CASE` is fixed copy with no producer-content
       // dependency: byte-identical on every decision this product has analysed.
       // `selectGroundedCounterCase` names the relationship THIS run's
-      // robustness check found most sensitive, so two different decisions
-      // produce two different exercises.
+      // robustness output selected through the shared producer-metric authority,
+      // so two different decisions produce two different exercises.
       //
       // ⚠ THE FALLBACK IS LOAD-BEARING, NOT DEFENSIVE PADDING. The grounded
       // sentence interpolates PRODUCER LABELS, so — unlike the fixed copy — it
@@ -3442,4 +3442,3 @@ function validateProseAndSchemaOrDrop<TSchema extends z.ZodTypeAny>(
   }
   return parsed.data;
 }
-

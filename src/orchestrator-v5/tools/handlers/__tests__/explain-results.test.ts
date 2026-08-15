@@ -662,7 +662,7 @@ const FRAGILE_PROJECTION: AnalysisProjectionSummary = {
 };
 
 const LINK_BEAT_TEXT =
-  "The evidence that would most improve confidence is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since it is the assumption most likely to change the outcome.";
+  "One useful confidence check is real-world support for the link from 'Local Senior Hire Programme' to 'Q3 Roadmap Delivery Capacity' rather than the current model estimate, since the robustness check flagged it as fragile.";
 
 describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => {
   function makeExecuteInvocation(overrides?: {
@@ -694,6 +694,65 @@ describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => 
         text: LINK_BEAT_TEXT,
       },
     });
+  });
+
+  it('LABELS-ONLY FALLBACK — keeps producer head and emits no ranking superlative', async () => {
+    const labelsOnly: AnalysisProjectionSummary = {
+      ...ANALYSIS_PROJECTION,
+      fragile_edges: [
+        { from_label: 'Producer head', to_label: 'Head outcome' },
+        { from_label: 'Producer second', to_label: 'Second outcome' },
+      ],
+    };
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(makeExecuteInvocation({ analysisProjection: labelsOnly }));
+
+    expect(outcome.__validation_beat).toMatchObject({
+      mechanism: 'appended',
+      beat: {
+        variant: 'link',
+        from_label: 'Producer head',
+        to_label: 'Head outcome',
+      },
+    });
+    const validationBeat = outcome.__validation_beat;
+    if (validationBeat?.mechanism !== 'appended') {
+      throw new Error('expected an appended validation beat');
+    }
+    expect(validationBeat.beat.text).not.toMatch(
+      /\b(?:most|top|highest)\b|most likely to change|leans on most/i,
+    );
+    expect(outcome.assistant_text).not.toContain('Producer second');
+  });
+
+  it('HEAD-ONLY MUTANT — a metric-bearing unsorted projection selects its finite maximum', async () => {
+    const unsorted = {
+      ...ANALYSIS_PROJECTION,
+      fragile_edges: [
+        {
+          from_label: 'Head relationship',
+          to_label: 'Head outcome',
+          switch_probability: 0.12,
+        },
+        {
+          from_label: 'Maximum relationship',
+          to_label: 'Maximum outcome',
+          switch_probability: 0.83,
+        },
+      ],
+    } as unknown as AnalysisProjectionSummary;
+    const handler = createExplainResultsHandler();
+    const outcome = await handler(makeExecuteInvocation({ analysisProjection: unsorted }));
+
+    expect(outcome.__validation_beat).toMatchObject({
+      mechanism: 'appended',
+      beat: {
+        variant: 'link',
+        from_label: 'Maximum relationship',
+        to_label: 'Maximum outcome',
+      },
+    });
+    expect(outcome.assistant_text).not.toContain('Head relationship');
   });
 
   it('dedup: both endpoint labels WITHOUT validation vocabulary → still appends (labels alone are not enough)', async () => {

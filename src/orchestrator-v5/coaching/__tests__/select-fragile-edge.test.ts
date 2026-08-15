@@ -165,7 +165,7 @@ describe('A1-T13 fixture preconditions', () => {
     expect(bandOf(SESSION_B2, B2_EXPECTED_FROM, B2_EXPECTED_TO)).toBe('usable');
   });
 
-  it('producer order is switch_probability DESCENDING on both captures (so consuming it is correct)', () => {
+  it('these two captures happen to be descending; that is not a producer contract', () => {
     for (const enrichment of [SESSION_A, SESSION_B2]) {
       const probs = fragileEdges(enrichment).map((r) => r.switch_probability as number);
       for (let i = 1; i < probs.length; i++) expect(probs[i]!).toBeLessThanOrEqual(probs[i - 1]!);
@@ -184,11 +184,11 @@ describe('A1-T13 fixture preconditions', () => {
 });
 
 // ============================================================================
-// A1-T2 / A1-T5 — selection binds by IDENTITY, and consumes producer order
+// A1-T2 / A1-T5 — selection binds by IDENTITY and producer-metric priority
 // ============================================================================
 
-describe('A1-T2 selection consumes producer order and binds by identity', () => {
-  it('session-a selects the FIRST producer row that clears every gate, by id', () => {
+describe('A1-T2 selection consumes canonical metric order and binds by identity', () => {
+  it('session-a selects the first metric-prioritised row that clears every gate, by id', () => {
     const decision = selectFragileEdge(SESSION_A);
     expect(decision.selected).not.toBeNull();
     expect(decision.selected!.fromId).toBe(A_EXPECTED_FROM);
@@ -204,15 +204,55 @@ describe('A1-T2 selection consumes producer order and binds by identity', () => 
     expect(decision.selected!.toId).toBe(B2_EXPECTED_TO);
   });
 
-  it('MUTANT — re-sorting the producer array changes the answer (the order is load-bearing)', () => {
-    // Not a mutation of the code: this proves the SELECTOR reads position, so a
-    // future `.sort()` inserted before it cannot be silent.
+  it('HEAD-ONLY MUTANT — reversing rows cannot change a finite-metric answer', () => {
+    // A `fragileEdges[0]` implementation changes here; the shared selector does
+    // not. This is the regression witnessed on unsorted committed captures.
     const resorted = clone(SESSION_A);
     const robustness = resorted.robustness as Row;
     (robustness.fragile_edges as Row[]).reverse();
     const decision = selectFragileEdge(resorted);
     expect(decision.selected).not.toBeNull();
-    expect(decision.selected!.fromId).not.toBe(A_EXPECTED_FROM);
+    expect(decision.selected!.fromId).toBe(A_EXPECTED_FROM);
+    expect(decision.selected!.toId).toBe(A_EXPECTED_TO);
+  });
+
+  function actionableRows(
+    probabilities: readonly unknown[],
+  ): Enrichment {
+    const rows = probabilities.map((switch_probability, index) => ({
+      from_id: `fac_${index}`,
+      to_id: `out_${index}`,
+      from_label: `Factor ${index}`,
+      to_label: `Outcome ${index}`,
+      switch_probability,
+    }));
+    return {
+      robustness: { fragile_edges: rows },
+      edge_e_values: rows.map((row) => ({
+        from_id: row.from_id,
+        to_id: row.to_id,
+        current_mean: 0.5,
+        flip_mean: 0.25,
+        flip_direction: 'decrease',
+        stability: { n_seeds: 10, n_seeds_flipped: 5 },
+      })),
+      factor_sensitivity: [],
+    };
+  }
+
+  it('SELECTOR-BYPASS MUTANT — an unsorted actionable set selects its finite maximum', () => {
+    const decision = selectFragileEdge(actionableRows([0.1, 0.8, 0.4]));
+    expect(decision.selected?.fromId).toBe('fac_1');
+  });
+
+  it('ties retain producer order', () => {
+    const decision = selectFragileEdge(actionableRows([0.7, 0.7]));
+    expect(decision.selected?.fromId).toBe('fac_0');
+  });
+
+  it('the producer head is the compatibility fallback only when no metric is finite', () => {
+    const decision = selectFragileEdge(actionableRows([Number.NaN, undefined, Number.POSITIVE_INFINITY]));
+    expect(decision.selected?.fromId).toBe('fac_0');
   });
 
   it('DISCRIMINATING MUTANT PAIR — loosening a DIFFERENT edge leaves the answer unchanged', () => {
