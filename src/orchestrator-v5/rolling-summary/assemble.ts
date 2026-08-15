@@ -128,7 +128,30 @@ export function assembleSummaryFromParsed(args: {
     const priorEntries =
       priorBlock?.entries.filter((e) => !isEmptySlotText(e.text.trim())) ?? [];
     if (isEmpty && SLOT_RETENTION_REQUIRED[slot] && priorEntries.length > 0) {
-      const carried = priorEntries.map((e) => ({ ...e }));
+      // STAMP THE REPAIR (D1). The carry-forward itself is unchanged — it still
+      // guards the measured 57/57 erasure — but it is no longer SILENT. Until
+      // now a restored entry was byte-identical to a freshly-confirmed one, so
+      // the next prompt asserted prior record as current fact with no way for
+      // any reader to tell the two apart. `carried_forward` is what inject.ts
+      // reads to qualify the entry.
+      //
+      // HONEST BOUND, stated rather than hidden: this flag says the REPAIR
+      // fired, not that the repair was RIGHT. Emptying a retention-required
+      // slot has (at least) two causes — the summariser dropping durable fact
+      // under a user's challenge, and the user legitimately WITHDRAWING the
+      // constraint — and this module cannot distinguish them, because both
+      // arrive as the identical empty slot. The repair is the same in both
+      // cases and is WRONG in the second (it returns a withdrawn figure with
+      // its original provenance). Making a withdrawal expressible as TEXT
+      // rather than as an emptying is the summariser-prompt half of this
+      // slice (summariser.ts) — soft, because the summariser is an LLM.
+      //
+      // The stamp is deliberately NOT written into `textLines` below: the
+      // stored `text` is re-served to the summariser as the prior-summary
+      // block (build-input.ts's no-ordinal path), and a qualifier that enters
+      // the model's own input compounds across passes. The qualifier is
+      // rendered at INJECTION only, from this flag.
+      const carried = priorEntries.map((e) => ({ ...e, carried_forward: true as const }));
       textLines.push(
         `${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${carried.map((e) => e.text).join(' ')}`,
       );

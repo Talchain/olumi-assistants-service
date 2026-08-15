@@ -46,6 +46,24 @@ export const SUMMARISER_SYSTEM_PROMPT = [
   '- Each [tN] label marks ONE speaker\'s words — either the user\'s or the assistant\'s, never both. Attribute every statement to the speaker who actually made it, and cite that speaker\'s [tN]. A question, doubt, accusation or assertion made by the USER is never recorded as something the assistant said, acknowledged, admitted or agreed to.',
   // NON-ERASURE. Enforced by retention.ts (findErasedSlots), not by this line.
   '- A user questioning, doubting or challenging something already recorded does NOT delete it. Keep the recorded entry and put their challenge in OPEN. Never answer a challenge by emptying CONSTRAINTS or RESOLVED to "(none)" — "(none)" means you looked and there genuinely is nothing, and it will be read as a statement that no such history exists.',
+  // ── SUPERSESSION (D1) ────────────────────────────────────────────────────
+  // SOFT RULES. Unlike the two above, these have NO code-side enforcer and
+  // cannot have one at present: CONSTRAINTS stores at most ONE entry per slot
+  // per pass, so nothing downstream can compare a rewritten entry against what
+  // it replaced, and a correction that silently drops a fact is byte-identical
+  // to a correction that records it. What the code half DOES guarantee is that
+  // the marker survives: the parser's provenance regex matches only [tN]-shaped
+  // brackets, so "(was 500k; superseded)" passes through parse → assemble →
+  // inject as ordinary text with its citation still extracted.
+  //
+  // Both rules exist to make the RECORD distinguishable, which is the actual
+  // defect. Today a rewrite lands cleanly and leaves nothing that separates
+  // "the user corrected this" from "the summariser dropped it and invented a
+  // replacement" — and a genuine withdrawal is expressed by emptying the slot,
+  // which the carry-forward repair then OVERRIDES, returning the stale figure
+  // with its stale provenance.
+  '- When the user CORRECTS a constraint they stated earlier, rewrite the entry and keep the old value visible in it, in the form: "Budget is 350k (was 500k; superseded) [t12]" — citing the turn where the correction was made. Never silently swap the old value for the new one: a bare new number is indistinguishable from an invented one.',
+  '- When a constraint is WITHDRAWN or no longer applies, never express that by emptying the slot. Write it as text — "Constraint withdrawn: the 500k budget cap no longer applies [t14]" — and keep the other constraints. An emptied slot cannot be told apart from the failure mode above where durable memory is dropped, so it will be repaired by restoring the old entry and the withdrawal will be lost.',
 ].join('\n');
 
 export interface SummariserModelResult {
