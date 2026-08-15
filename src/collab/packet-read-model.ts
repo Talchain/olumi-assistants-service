@@ -37,6 +37,7 @@ import {
   refuse,
   type CollabStore,
   type ElicitationEventRow,
+  type ElicitationTarget,
   type OpenPacket,
   type RevealPerTargetRow,
   type RevealView,
@@ -144,11 +145,14 @@ export async function assembleOpenPacket(
  */
 export function foldLatestPerParticipant(
   events: readonly ElicitationEventRow[],
-  targetId: string,
+  target: ElicitationTarget,
 ): ElicitationEventRow[] {
   const latest = new Map<string, { row: ElicitationEventRow; index: number }>();
   events.forEach((row, index) => {
-    if (row.target.id !== targetId) return;
+    // Target identity is the pair. Factor and edge ids occupy different
+    // domains and may contain the same string; folding by id alone can surface
+    // an edge belief as the value for a factor (and vice versa).
+    if (row.target.kind !== target.kind || row.target.id !== target.id) return;
     // THE ANSWER FILTER. A non-answer row for this target is skipped entirely
     // rather than being allowed to win the recency contest.
     if (!isAnswerKind(row.kind)) return;
@@ -254,7 +258,7 @@ export async function assembleRevealView(
       // EXPLICIT six-key projection per response. `supabase_user_id` and
       // `token_hash` live on the participant row and must never reach here;
       // a spread would carry both the first time this is refactored.
-      responses: foldLatestPerParticipant(events, t.target.id).map(
+      responses: foldLatestPerParticipant(events, t.target).map(
         (row): RevealPerTargetRow => {
           // TWO DISTINCT ABSENCES, written out rather than collapsed into a
           // `?? null` fallback: a DECLINED event carries no belief at all, and

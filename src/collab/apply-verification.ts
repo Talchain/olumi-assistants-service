@@ -43,6 +43,8 @@
  * answering near-identical questions is CLAUDE.md trap 21.
  */
 
+import type { RoundParticipantRef } from '@talchain/schemas/boundary';
+
 import { foldLatestPerParticipant } from './packet-read-model.js';
 import {
   refuse,
@@ -51,15 +53,26 @@ import {
 } from './types.js';
 
 /**
- * The client's attribution claim, structurally identical to the contract's
- * `RoundParticipantRefSchema` (ids only, `.strict()` — a display name is
+ * The client's attribution claim — DERIVED FROM THE CONTRACT, not retyped.
+ *
+ * ⚠ THIS WAS A HAND-WRITTEN INTERFACE AND THE MIRROR HAD ALREADY BEEN CAUGHT
+ * DRIFTING ONE FIELD AWAY: 0.41.0 added `evidence_event_id` to
+ * `RoundParticipantRefSchema` and the `elicited_from` pin in
+ * `schemas/__tests__/observed-state-source-derivation.test.ts` stayed on two
+ * keys, fully green. A copy of a contract shape cannot fail loud — TypeScript
+ * accepts a value with MORE members than the interface declares, so the day the
+ * contract grows again a hand-written copy would go on typechecking while this
+ * verifier silently ignored the new member and the stamp silently lost it.
+ * Aliasing the published type means there is nothing left to keep in sync:
+ * a new member appears here the moment the pin bumps, and the `...` spread in
+ * `factor-value-edit.ts` is then the only place that has to decide about it.
+ *
+ * Semantics live at the contract (ids only, `.strict()` — a display name is
  * refused at parse, which is the PII rule made structural rather than
- * remembered).
+ * remembered; `evidence_event_id` is the owner's CITATION and is verified by
+ * binding (f) below, never trusted).
  */
-export interface AppliedFromClaim {
-  readonly round_id: string;
-  readonly participant_id: string;
-}
+export type AppliedFromClaim = Readonly<RoundParticipantRef>;
 
 /**
  * What the server is willing to stamp, after checking. `value` is the SERVER's
@@ -69,6 +82,8 @@ export interface VerifiedAppliedValue {
   readonly value: number;
   readonly round_id: string;
   readonly participant_id: string;
+  /** Present only when binding (f) verified a citation. */
+  readonly evidence_event_id?: string;
 }
 
 /**
@@ -105,8 +120,8 @@ const APPLYABLE_ROUND_STATUSES: ReadonlySet<RoundStatus> = new Set<RoundStatus>(
  * a repaired result, and never falls back to the client's number. The caller
  * turns the refusal into honest user-facing copy and writes nothing.
  *
- * The five bindings, each a different question. THE EXECUTION ORDER BELOW IS
- * (a) (d) (b) (c/e) — written out in the order the code actually runs, because
+ * The SIX bindings, each a different question. THE EXECUTION ORDER BELOW IS
+ * (a) (d) (b) (c/e) (f) — written out in the order the code actually runs, because
  * a comment that lists them (a)(b)(c)(d)(e) while the code runs something else
  * is a hand-maintained mirror of control flow, and the next reader debugging a
  * refusal code will trust the comment:
@@ -120,7 +135,13 @@ const APPLYABLE_ROUND_STATUSES: ReadonlySet<RoundStatus> = new Set<RoundStatus>(
  *   (e) the applied value IS the server-recorded participant belief
  *       — (c) and (e) resolve together from one folded read, because "did this
  *       person answer THIS factor?" and "what did they say?" are answered by
- *       the same row.
+ *       the same row;
+ *   (f) the CITED EVIDENCE, when the claim carries one, exists, is an
+ *       `evidence_attached` row, is on THAT round and is about THAT target.
+ *       Reuses the read (c)/(e) already made. Its three failures share ONE
+ *       refusal code, unlike (a)-(e), because differentiating them would make
+ *       the refusal an enumeration oracle over the round's event ids (F-4).
+ *       ⚠ NO author-equality check — see the block at the check itself.
  */
 export async function verifyAppliedFrom(
   store: CollabStore,
@@ -191,13 +212,20 @@ export async function verifyAppliedFrom(
   // sanctioned reveal-time read and the round is closed, so this is not a
   // blindness violation — INV-A constrains the OPEN packet.
   const events = await store.listAllRoundEvents(claim.round_id);
-  const latestForTarget = foldLatestPerParticipant(events, target_id);
+  // `factor_value_edit` makes the target kind authoritative here. Passing the
+  // full identity prevents an edge belief with the same string id from being
+  // verified as the value for this factor.
+  const latestForTarget = foldLatestPerParticipant(events, {
+    kind: 'factor',
+    id: target_id,
+  });
   const own = latestForTarget.find((row) => row.participant_id === claim.participant_id);
 
-  // Bound by IDENTITY (participant_id + target_id), never by finding a row
-  // whose value happens to equal the claim — a value predicate would happily
-  // match a DIFFERENT participant who gave the same number, which is precisely
-  // how an attribution stamp becomes a lie (CLAUDE.md trap 19).
+  // Bound by IDENTITY (participant_id + target kind + target id), never by
+  // finding a row whose value happens to equal the claim — a value predicate
+  // would happily match a DIFFERENT participant who gave the same number,
+  // which is precisely how an attribution stamp becomes a lie (CLAUDE.md trap
+  // 19).
   if (own === undefined || own.belief === null || own.belief.value === null) {
     // Covers all three distinct absences with one honest sentence: never asked,
     // explicitly declined, or answered without a number. The refusal does not
@@ -225,6 +253,56 @@ export async function verifyAppliedFrom(
     );
   }
 
+  // ── (f) the CITED EVIDENCE exists, is evidence, is on THIS round, and is
+  //        about THIS factor target (kind + id) ────────────────────────────
+  //
+  // 0.41.0. An unverified citation stamped into the graph would attribute a
+  // model change to a colleague's reasoning that never motivated it — the same
+  // fabrication class bindings (a)-(e) exist to stop, arriving one field to the
+  // right. So the citation is checked exactly as hard as the value was.
+  //
+  // ⚠ REUSES `events` — the read already made for (c)/(e). A second
+  // `listAllRoundEvents` could observe a different state, and then the row this
+  // check admitted would not be the row the fold saw.
+  //
+  // ⚠⚠ NO AUTHOR-EQUALITY CHECK, AND THAT ABSENCE IS THE FEATURE. The cited
+  // evidence need not be authored by `participant_id`: applying Grace's number
+  // BECAUSE ADA CHALLENGED IT is the most valuable case this whole feature has.
+  // A check tying the two together would read like tightening and would forbid
+  // precisely the journey the hop exists to deliver. The contract pins the same
+  // asymmetry at the schema layer; do not "restore symmetry" here.
+  let verifiedEvidenceEventId: string | undefined;
+  if (claim.evidence_event_id !== undefined) {
+    const cited = events.find((e) => e.event_id === claim.evidence_event_id);
+    // `target_id` names a factor because this verifier is reachable only from
+    // `factor_value_edit`. Kind is still part of target identity: factor and
+    // edge refs occupy different domains and may carry the same string id. An
+    // id-only match would launder evidence about an edge into the reason for a
+    // factor judgement.
+    if (
+      cited === undefined ||
+      cited.kind !== 'evidence_attached' ||
+      cited.target.kind !== 'factor' ||
+      cited.target.id !== target_id
+    ) {
+      // ONE code for all three failures, deliberately — unlike (a)-(e), which
+      // separate their questions. The distinctions here ("no such event" vs
+      // "that is a belief row" vs "that evidence is about another factor") are
+      // exactly the enumeration oracle F-4 warns about: the round's event ids
+      // are not otherwise visible to this caller, and a differentiated refusal
+      // would let one probe which ids exist and what kind each is.
+      refuse(
+        'collab_apply_evidence_not_found',
+        'That evidence is not on this round for this factor.',
+      );
+    }
+    // The STORE's id, not the claim's. They are equal here by construction —
+    // which is the point: returning the row's own id means the stamp comes from
+    // the store, so a future weakening of the lookup cannot become a
+    // client-controlled write. Same reasoning as `serverValue` below.
+    verifiedEvidenceEventId = cited.event_id;
+  }
+
   return {
     // The SERVER's number. Even though the equality check above has just proven
     // the two agree, returning `serverValue` rather than `claimed_value` is
@@ -234,5 +312,11 @@ export async function verifyAppliedFrom(
     value: serverValue,
     round_id: round.round_id,
     participant_id: participant.participant_id,
+    // Present ONLY when a citation was made AND verified. Absence means "this
+    // apply cited no evidence", never "the citation was lost" — the contract's
+    // stated absence semantics, carried through the verifier unchanged.
+    ...(verifiedEvidenceEventId !== undefined
+      ? { evidence_event_id: verifiedEvidenceEventId }
+      : {}),
   };
 }

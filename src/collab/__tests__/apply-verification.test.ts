@@ -94,6 +94,8 @@ function participant(overrides: Partial<CollabParticipant> = {}): CollabParticip
 
 function beliefEvent(args: {
   participant_id: string;
+  event_id?: string;
+  target_kind?: 'factor' | 'edge';
   target_id?: string;
   value: number | null;
   event_version?: number;
@@ -102,12 +104,14 @@ function beliefEvent(args: {
 }): ElicitationEventRow {
   const kind = args.kind ?? 'belief_submitted';
   return {
-    event_id: `evt-${args.participant_id}-${args.event_version ?? 1}-${args.target_id ?? TARGET_ID}`,
+    event_id:
+      args.event_id ??
+      `evt-${args.participant_id}-${args.event_version ?? 1}-${args.target_id ?? TARGET_ID}`,
     round_id: ROUND_ID,
     participant_id: args.participant_id,
     event_version: args.event_version ?? 1,
     kind,
-    target: { kind: 'factor', id: args.target_id ?? TARGET_ID },
+    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
     belief:
       kind === 'declined'
         ? null
@@ -317,6 +321,49 @@ describe('verifyAppliedFrom — the five server-side bindings', () => {
     );
   });
 
+  it('(c/e) binds beliefs by KIND + id — the factor stays positive and a newer same-id edge value refuses', async () => {
+    const edgeValue = 0.91;
+    const store = makeStore({
+      rounds: { [ROUND_ID]: round() },
+      participants: { [GRACE_ID]: participant() },
+      events: [
+        beliefEvent({
+          participant_id: GRACE_ID,
+          event_id: 'evt-factor-positive',
+          target_kind: 'factor',
+          value: GRACE_VALUE,
+          event_version: 1,
+        }),
+        beliefEvent({
+          participant_id: GRACE_ID,
+          event_id: 'evt-edge-same-id-forgery',
+          target_kind: 'edge',
+          value: edgeValue,
+          // Newer on purpose: an id-only fold selects this row.
+          event_version: 2,
+        }),
+      ],
+    });
+
+    const verifiedFactor = await verifyAppliedFrom(store, {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: { round_id: ROUND_ID, participant_id: GRACE_ID },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verifiedFactor.value).toBe(GRACE_VALUE);
+
+    await expectRefusal(
+      verifyAppliedFrom(store, {
+        scenario_id: SCENARIO_ID,
+        target_id: TARGET_ID,
+        claim: { round_id: ROUND_ID, participant_id: GRACE_ID },
+        claimed_value: edgeValue,
+      }),
+      'collab_apply_value_mismatch',
+    );
+  });
+
   it('(d) refuses while the round is still OPEN — nobody applies what nobody may see', async () => {
     await expectRefusal(
       verifyAppliedFrom(healthyStore({ status: 'open' }), {
@@ -503,5 +550,310 @@ describe('verifyAppliedFrom — the five server-side bindings', () => {
     // And no aggregate was invented anywhere: the midpoint must appear nowhere.
     const midpoint = (ADA_VALUE + GRACE_VALUE) / 2;
     expect(after.some((e) => e.belief?.value === midpoint)).toBe(false);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * BINDING (f), 0.41.0 — the CITED EVIDENCE.
+ *
+ * The hop's whole claim is that a model change can name the reasoning that
+ * moved it. That is only worth anything if the citation is CHECKED: an
+ * unverified one stamps a colleague's name onto a change their evidence never
+ * motivated — the fabrication class bindings (a)-(e) exist to stop, one field
+ * to the right.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+const ADA_EVIDENCE_ID = 'evt-ada-evidence-challenging-grace';
+
+/** An evidence row. Distinct factory: an answer row must never carry evidence. */
+function evidenceEvent(args: {
+  participant_id: string;
+  event_id?: string;
+  target_kind?: 'factor' | 'edge';
+  target_id?: string;
+  round_id?: string;
+}): ElicitationEventRow {
+  return {
+    event_id: args.event_id ?? ADA_EVIDENCE_ID,
+    round_id: args.round_id ?? ROUND_ID,
+    participant_id: args.participant_id,
+    event_version: 1,
+    kind: 'evidence_attached',
+    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
+    belief: null,
+    evidence: {
+      kind: 'note',
+      body: 'Renewals held at 12% after the last rise.',
+      url: null,
+      stance: 'challenges',
+      about_participant_id: null,
+    },
+    provenance: {
+      authored_by: args.participant_id,
+      method: 'elicited_nl',
+      elicitation_version: 'cee-belief-elicitation-v1',
+    },
+    created_at: '2026-08-14T11:00:00.000Z',
+  };
+}
+
+/** The healthy store, plus one piece of evidence Ada attached. */
+function storeWithAdaEvidence(extra: ElicitationEventRow[] = []): CollabStore {
+  return makeStore({
+    rounds: { [ROUND_ID]: round({}) },
+    participants: {
+      [GRACE_ID]: participant(),
+      [ADA_ID]: participant({
+        participant_id: ADA_ID,
+        display_name: 'Ada',
+        token_hash: 'hash-ada',
+      }),
+    },
+    events: [
+      beliefEvent({ participant_id: ADA_ID, value: ADA_VALUE }),
+      beliefEvent({ participant_id: GRACE_ID, value: GRACE_VALUE }),
+      evidenceEvent({ participant_id: ADA_ID }),
+      ...extra,
+    ],
+  });
+}
+
+describe('verifyAppliedFrom — binding (f), the cited evidence', () => {
+  /**
+   * ⭐⭐ THE ACCEPTANCE'S HEART. Grace's number, applied because ADA challenged
+   * it. The two identities differ on purpose: a fixture where the evidence
+   * author and the cited participant coincide would pass even if an
+   * author-equality check were added, and would therefore prove nothing about
+   * the case the feature exists for.
+   */
+  it('VERIFIES evidence authored by a DIFFERENT person from the value being applied', async () => {
+    const verified = await verifyAppliedFrom(storeWithAdaEvidence(), {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: {
+        round_id: ROUND_ID,
+        participant_id: GRACE_ID,
+        evidence_event_id: ADA_EVIDENCE_ID,
+      },
+      claimed_value: GRACE_VALUE,
+    });
+
+    expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
+    // Still Grace's value and Grace's attribution — the citation names why,
+    // never who the number belongs to.
+    expect(verified.value).toBe(GRACE_VALUE);
+    expect(verified.participant_id).toBe(GRACE_ID);
+    expect(ADA_ID).not.toBe(GRACE_ID); // the fixture is genuinely two people
+  });
+
+  /**
+   * ⭐ THE ADDITIVITY TWIN. An apply that cites nothing must behave exactly as
+   * it did at 0.40.0 — the path that is journey-witnessed.
+   */
+  it('leaves an UNCITED apply byte-identical, reporting absence as absence', async () => {
+    const verified = await verifyAppliedFrom(storeWithAdaEvidence(), {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: { round_id: ROUND_ID, participant_id: GRACE_ID },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verified.evidence_event_id).toBeUndefined();
+    expect('evidence_event_id' in verified).toBe(false);
+    expect(verified.value).toBe(GRACE_VALUE);
+  });
+
+  it('REFUSES a citation naming an event that does not exist', async () => {
+    await expectRefusal(
+      verifyAppliedFrom(storeWithAdaEvidence(), {
+          scenario_id: SCENARIO_ID,
+          target_id: TARGET_ID,
+          claim: {
+            round_id: ROUND_ID,
+            participant_id: GRACE_ID,
+            evidence_event_id: 'evt-nobody-wrote-this',
+          },
+        claimed_value: GRACE_VALUE,
+      }),
+      'collab_apply_evidence_not_found',
+    );
+  });
+
+  /** A BELIEF row is not evidence. Citing one would attribute a number as a reason. */
+  it('REFUSES a citation naming a belief row rather than an evidence row', async () => {
+    await expectRefusal(
+      verifyAppliedFrom(storeWithAdaEvidence(), {
+          scenario_id: SCENARIO_ID,
+          target_id: TARGET_ID,
+          claim: {
+            round_id: ROUND_ID,
+            participant_id: GRACE_ID,
+            // Ada's ANSWER row id, built by the answer factory.
+            evidence_event_id: `evt-${ADA_ID}-1-${TARGET_ID}`,
+          },
+        claimed_value: GRACE_VALUE,
+      }),
+      'collab_apply_evidence_not_found',
+    );
+  });
+
+  /** Evidence about the margin factor cannot justify a churn-risk edit. */
+  it('REFUSES a citation naming evidence about ANOTHER target', async () => {
+    const store = storeWithAdaEvidence([
+      evidenceEvent({
+        participant_id: ADA_ID,
+        event_id: 'evt-ada-evidence-other-target',
+        target_id: OTHER_TARGET_ID,
+      }),
+    ]);
+    await expectRefusal(
+      verifyAppliedFrom(store, {
+          scenario_id: SCENARIO_ID,
+          target_id: TARGET_ID,
+          claim: {
+            round_id: ROUND_ID,
+            participant_id: GRACE_ID,
+            evidence_event_id: 'evt-ada-evidence-other-target',
+          },
+        claimed_value: GRACE_VALUE,
+      }),
+      'collab_apply_evidence_not_found',
+    );
+  });
+
+  it('⭐ binds the cited target by KIND + id — factor evidence verifies; a same-id edge forgery refuses', async () => {
+    const edgeAliasId = 'evt-edge-evidence-sharing-factor-id';
+    const store = storeWithAdaEvidence([
+      evidenceEvent({
+        participant_id: ADA_ID,
+        event_id: edgeAliasId,
+        target_kind: 'edge',
+        // The alias is deliberate: an id-only check accepts this row as if it
+        // were evidence about the factor being edited.
+        target_id: TARGET_ID,
+      }),
+    ]);
+
+    const verified = await verifyAppliedFrom(store, {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: {
+        round_id: ROUND_ID,
+        participant_id: GRACE_ID,
+        evidence_event_id: ADA_EVIDENCE_ID,
+      },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
+
+    await expectRefusal(
+      verifyAppliedFrom(store, {
+        scenario_id: SCENARIO_ID,
+        target_id: TARGET_ID,
+        claim: {
+          round_id: ROUND_ID,
+          participant_id: GRACE_ID,
+          evidence_event_id: edgeAliasId,
+        },
+        claimed_value: GRACE_VALUE,
+      }),
+      'collab_apply_evidence_not_found',
+    );
+  });
+
+  /**
+   * ⚠ THE STAMP COMES FROM THE STORE. Equal to the claim here by construction —
+   * which is the point: a future weakening of the lookup must not turn into a
+   * client-controlled write, exactly as with `serverValue`.
+   */
+  it('stamps the STORE’s event id, not the claim’s string', async () => {
+    const verified = await verifyAppliedFrom(storeWithAdaEvidence(), {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: {
+        round_id: ROUND_ID,
+        participant_id: GRACE_ID,
+        evidence_event_id: ADA_EVIDENCE_ID,
+      },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
+  });
+
+  /**
+   * ⚠⚠ THE TEST ABOVE CANNOT DISCRIMINATE, AND THIS ONE IS WHY IT DOESN'T HAVE
+   * TO — recorded rather than glossed, because the gap is in the INSTRUMENT and
+   * not in the code.
+   *
+   * Its name asserts "the STORE's id, not the CLAIM's string". Under the exact
+   * `===` lookup above, those two values are necessarily EQUAL, so a mutant
+   * returning `claim.evidence_event_id` leaves it fully GREEN. Its own comment
+   * says as much ("equal to the claim here by construction") — which is true,
+   * and is exactly the shape CLAUDE.md trap 13b warns about: a guard whose
+   * discriminating power rests on a property nothing pins.
+   *
+   * The property that MATTERS is conditional: the store/claim distinction only
+   * becomes observable — and the client-controlled-write risk only becomes
+   * real — IF THE LOOKUP EVER STOPS BEING EXACT. A case-insensitive, trimming,
+   * or prefix-matching lookup would admit a claim string that DIFFERS from the
+   * stored id, and at that moment "which one gets stamped" is a live question
+   * with a wrong answer available.
+   *
+   * So this pins the precondition instead of the consequence: a near-miss id
+   * must be REFUSED. It REDs the moment the lookup is weakened in any of those
+   * directions — i.e. precisely when the test above would need to start
+   * discriminating and could not.
+   *
+   * It doubles as the enumeration-oracle guard: a near-miss must be
+   * indistinguishable from a wholly invented id, or the refusal leaks which
+   * prefixes exist.
+   */
+  it('⭐ refuses a NEAR-MISS event id — the lookup is EXACT, which is what makes the stamp safe', async () => {
+    const nearMisses = [
+      ADA_EVIDENCE_ID.toUpperCase(),
+      ` ${ADA_EVIDENCE_ID}`,
+      `${ADA_EVIDENCE_ID} `,
+      ADA_EVIDENCE_ID.slice(0, -1),
+      `${ADA_EVIDENCE_ID}x`,
+    ];
+    // The fixture is genuinely a near miss, not an unrelated string: each
+    // differs from the real id, and none IS it. Pinned so a future rename of
+    // ADA_EVIDENCE_ID cannot quietly turn these into unrelated inputs.
+    for (const nearMiss of nearMisses) {
+      expect(nearMiss).not.toBe(ADA_EVIDENCE_ID);
+      expect(nearMiss.trim().toLowerCase().replace(/x$/, '')).toContain(
+        ADA_EVIDENCE_ID.slice(0, 8),
+      );
+    }
+
+    for (const nearMiss of nearMisses) {
+      await expect(
+        verifyAppliedFrom(storeWithAdaEvidence(), {
+          scenario_id: SCENARIO_ID,
+          target_id: TARGET_ID,
+          claim: {
+            round_id: ROUND_ID,
+            participant_id: GRACE_ID,
+            evidence_event_id: nearMiss,
+          },
+          claimed_value: GRACE_VALUE,
+        }),
+        `a near-miss id was ACCEPTED: ${JSON.stringify(nearMiss)}`,
+      ).rejects.toMatchObject({ code: 'collab_apply_evidence_not_found' });
+    }
+
+    // POSITIVE CONTROL: the exact id still verifies, so the loop above is
+    // rejecting near-misses rather than rejecting everything — an absence
+    // assertion needs a demonstrated presence.
+    const verified = await verifyAppliedFrom(storeWithAdaEvidence(), {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: {
+        round_id: ROUND_ID,
+        participant_id: GRACE_ID,
+        evidence_event_id: ADA_EVIDENCE_ID,
+      },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
   });
 });
