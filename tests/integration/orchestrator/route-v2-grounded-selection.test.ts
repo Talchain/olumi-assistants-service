@@ -127,7 +127,11 @@ function mkRun(
   };
 }
 
-async function postTurn(app: FastifyInstance, turnId: string) {
+async function postTurn(
+  app: FastifyInstance,
+  turnId: string,
+  selectedElements?: { node_ids: readonly string[]; edge_ids: readonly string[] },
+) {
   const res = await app.inject({
     method: 'POST',
     url: '/orchestrate/v2/turn',
@@ -139,6 +143,7 @@ async function postTurn(app: FastifyInstance, turnId: string) {
       message: 'What should I do next?',
       turn_class: 'decide',
       source: 'composer',
+      ...(selectedElements !== undefined ? { selected_elements: selectedElements } : {}),
     },
   });
   return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, any> };
@@ -279,6 +284,26 @@ describe('route-v2 — `_grounded_selection` on the wire (hop 4b)', () => {
     // wire. Only `in` distinguishes all three.
     expect('_grounded_selection' in body).toBe(false);
     expect(JSON.stringify(body)).not.toContain('_grounded_selection');
+  });
+
+  it('selected ingress cannot make the route invent grounding the executor did not attest', async () => {
+    runTurnExecutorMock.mockResolvedValue(mkRun());
+    const { status, body } = await postTurn(
+      app,
+      'aaaaaaaa-4b00-4aaa-8aaa-aaaaaaaaaa16',
+      { node_ids: [FACTOR_ID], edge_ids: [] },
+    );
+    expect(status).toBe(200);
+    expect('_grounded_selection' in body).toBe(false);
+    expect(JSON.stringify(body)).not.toContain('_grounded_selection');
+
+    // PRECONDITION: the selection really reached the executor boundary. The
+    // route must still take grounding authority only from the executor result,
+    // never re-derive it from request ingress.
+    expect(runTurnExecutorMock).toHaveBeenCalledTimes(1);
+    expect(runTurnExecutorMock.mock.calls[0]![2]).toMatchObject({
+      selectedElements: { node_ids: [FACTOR_ID], edge_ids: [] },
+    });
   });
 
   it('an explicitly `undefined` `groundedSelection` is treated as absent, not as a null-valued key', async () => {

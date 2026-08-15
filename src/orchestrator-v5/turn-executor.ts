@@ -640,10 +640,10 @@ export interface TurnExecutorRunResult {
    *
    * Projected from `ContextPack.focus` — the SAME object hop 4 put in the
    * routing prompt — so the wire cannot disagree with what the model was
-   * given. Absent whenever the pack carried no focus (no selection, or an
-   * empty one) and whenever the turn FAILED: error copy is not an answer
-   * about the user's selected element, and a consumer highlighting the
-   * canvas off a failure turn would be claiming otherwise.
+   * given. Captured only after the real routing call consumes that pack;
+   * deterministic post-pack exits never attach merely because a focus was
+   * assembled. Also absent when the pack carried no focus and whenever the
+   * turn FAILED: neither path produced a successful focus-grounded answer.
    *
    * See `context/grounded-selection.ts` for the question this field answers
    * and, just as importantly, the one it does not.
@@ -1829,12 +1829,12 @@ export async function runTurnExecutor(
   // clarify / text_only turns, and whenever a post-capture rewrite diverges
   // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
-  // SELECTION-AWARE ANSWERING (hop 4b) — the `focus` section of the pack this
-  // turn's routing prompt actually carried, hoisted for the same reason as
+  // SELECTION-AWARE ANSWERING (hop 4b) — the `focus` section of the pack the
+  // REAL routing call consumed, hoisted for the same reason as
   // `capturedAnswerShape` above (finalizeRun, declared outside the try, reads
-  // it). Set at ONE place: immediately after the final ContextPack is built.
-  // Stays undefined on every early exit that never assembled a pack — which is
-  // the honest answer there, because no answer was grounded on anything.
+  // it). Set at ONE place: only after `routeWithToolUse` returns successfully.
+  // Pack assembly alone is not evidence of answer grounding: 22 deterministic
+  // exits sit between assembly and routing and do not consume the focus.
   let capturedFocus: ContextPackFocus | undefined;
   // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). The composed
   // text of the turn's FUNCTIONAL answer (clarify question / add-option or edit
@@ -2595,15 +2595,6 @@ export async function runTurnExecutor(
                   ),
                 }),
           };
-      // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE.
-      //
-      // Captured off the FINAL pack (the one `buildUserMessage` serialises),
-      // not off `assembledContextPack`, so a future withheld-claim projection
-      // that touched `focus` could never leave the sidecar describing a
-      // section the model was not given. Neutering this line is a mutant that
-      // MUST turn `grounded-selection-route-level.test.ts` red — a defended
-      // pure function with a dark call site is chronic failure #1.
-      capturedFocus = contextPack.focus;
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
         request_id: requestId,
@@ -7177,6 +7168,13 @@ export async function runTurnExecutor(
             ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
             : {}),
         });
+        // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE.
+        // Capture only after the real router successfully consumed the FINAL
+        // pack. Merely assembling `focus` is not authority to claim that a
+        // deterministic pre-route answer was grounded on it. Moving this back
+        // above the pre-route gates is a mutant killed by the selected advice-
+        // gate negative control; removing it is killed by the routed positive.
+        capturedFocus = contextPack.focus;
         // ROADMAP 1.42 — stash VERBATIM reasoning immediately after the real
         // LLM call. Undefined when the flag was off or no thinking blocks
         // were emitted (see ChatWithToolsResult.reasoning jsdoc).
@@ -12002,12 +12000,11 @@ export async function runTurnExecutor(
       // grounded on, for route-v2's `_grounded_selection` wire sidecar (never
       // attached to `response` here).
       //
-      // Two conditions, and the second one is the honesty condition. The pack
-      // having a `focus` says the prompt was grounded; `failureType !== null`
-      // says the user is reading ERROR COPY, which is not an answer about the
-      // element they selected. Emitting on a failure turn would have the
-      // canvas point at a node and say "this answer is about that" while the
-      // answer says the turn broke. Pinned as a discriminating pair.
+      // Two conditions. `capturedFocus` means the real router consumed the
+      // focused pack; mere pack presence is deliberately insufficient because
+      // deterministic post-pack exits bypass that call. `failureType === null`
+      // means the user is reading the resulting answer rather than error copy.
+      // Both are pinned by discriminating controls.
       ...(capturedFocus !== undefined && failureType === null
         ? (() => {
             const grounded = projectGroundedSelection(capturedFocus, context.selection);

@@ -246,7 +246,16 @@ afterEach(() => {
 
 describe('hop 4b executor wire — the selection the answer was grounded on reaches the run result', () => {
   it('a selected FACTOR arrives on `run.groundedSelection` with its CANONICAL id', async () => {
-    const run = await runTurn(QUESTION, { node_ids: [FACTOR_ID], edge_ids: [] });
+    const routed = textOnlyAdapter();
+    const run = await runTurn(
+      QUESTION,
+      { node_ids: [FACTOR_ID], edge_ids: [] },
+      routed.adapter,
+    );
+    // PRECONDITION: this is a genuinely routed answer. The focus-bearing pack
+    // reached the model adapter rather than merely being assembled before a
+    // deterministic gate returned.
+    expect(routed.calls).toHaveLength(1);
     expect(
       run.groundedSelection,
       'no `groundedSelection` on the run result — the turn-executor capture is cut',
@@ -319,11 +328,11 @@ describe('hop 4b executor wire — NEGATIVE CONTROL: the same question without a
 /**
  * ⭐ THE `failureType === null` CONJUNCT, PINNED.
  *
- * `capturedFocus` is set when the ContextPack is assembled, which happens
- * BEFORE the routing call. So a turn can be fully grounded and then FAIL — and
- * on that turn the user reads error copy, not an answer about the element they
- * selected. A consumer highlighting the canvas off it would be told "this
- * answer is about that node" while the answer says the turn broke.
+ * `capturedFocus` is set after the routing call consumes the ContextPack. A
+ * turn can therefore route with a real focus and then fail — and on that turn
+ * the user reads error copy, not an answer about the element they selected. A
+ * consumer highlighting the canvas off it would be told "this answer is about
+ * that node" while the answer says the turn broke.
  *
  * Both preconditions are pinned IN-TEST (trap #13b), because without them this
  * test passes just as happily on a turn that never failed and never grounded:

@@ -394,6 +394,42 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
     });
   }
 
+  it('selected deterministic advice stays ungrounded: pack focus is not answer authority', async () => {
+    const message = 'What would need to change for another option to look better?';
+    const adapter = throwingRoutingAdapter();
+
+    const withoutSelection = await runTurnExecutor(
+      mkPayload(message),
+      'req-advice-ownership-grounding-control',
+      { routingAdapter: adapter, graphState: READY_GRAPH as never },
+    );
+    const withSelection = await runTurnExecutor(
+      mkPayload(message),
+      'req-advice-ownership-grounding-selected',
+      {
+        routingAdapter: adapter,
+        graphState: READY_GRAPH as never,
+        selectedElements: { node_ids: ['fac_capacity'], edge_ids: [] },
+      },
+    );
+
+    // The advice gate, not the focus-bearing model prompt, owns both answers.
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(withoutSelection.telemetry.llm_calls_used).toBe(0);
+    expect(withSelection.telemetry.llm_calls_used).toBe(0);
+    expect(withSelection.response.assistant_text).toBe(
+      withoutSelection.response.assistant_text,
+    );
+    expect(withSelection.response.assistant_text ?? '').toContain('Market demand');
+    expect(withSelection.response.assistant_text ?? '').not.toContain('Capacity');
+
+    // A selected id at ingress is not itself evidence that this deterministic
+    // answer used it. Absence is the fail-closed wire contract; moving the
+    // capture back to pack assembly makes this assertion fail.
+    expect(withSelection.groundedSelection).toBeUndefined();
+    expect('groundedSelection' in withSelection).toBe(false);
+  });
+
   // -------------------------------------------------------------------------
   // Mutation precedence regression — a concrete edit paired with any of the
   // new analytical patterns must NOT be captured by the advice gate.
