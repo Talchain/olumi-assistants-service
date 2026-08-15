@@ -2,10 +2,8 @@
  * V5 deterministic system-event dispatch.
  *
  * v0.7.0 introduced `kind: 'system_event'` on OrchestratorTurnPayload. System
- * events (patch_accepted, patch_dismissed, direct_graph_edit, chip_click,
- * undo, redo, selection_change) are deterministic Layer 0 operations — no
- * LLM routing, no handler dispatch. The route (route-v2.ts) intercepts them
- * BEFORE calling runTurnExecutor because:
+ * events are deterministic Layer 0 operations — no LLM routing. The route
+ * (route-v2.ts) intercepts them BEFORE calling runTurnExecutor because:
  *   (1) system-event payloads have no `message` field, so TurnExecutor's
  *       ORIENT step (which needs a user message) cannot fire.
  *   (2) these events map to UI state changes the server records without
@@ -19,10 +17,13 @@
  *     recognises this reason and still returns 200 — the skip is honest,
  *     not a fake success. See src/orchestrator/route-v2.ts for the
  *     skip-reason allowlist.
+ *   - edge_strength_edit (0.42 compatibility reader) → commit a typed refusal
+ *     transcript with no graph, handler facts or pending actions. Writer
+ *     behaviour is a separate train.
  *
- * Response envelope: empty assistant_text, no blocks, no actions — the UI
- * renders the state change visually. Mirrors the silent-acknowledgement
- * pattern in src/orchestrator/deterministic/system-event-handler.ts.
+ * Response envelope: existing kinds retain their prior silent acknowledgement;
+ * the reader-only event returns a typed non-retryable FEATURE_NOT_ENABLED
+ * response that says the model was not changed.
  */
 
 import type {
@@ -50,7 +51,8 @@ export interface DispatchSystemEventResult {
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
-   *   undo / redo / selection_change / chip_click / patch_dismissed
+   *   undo / redo / selection_change / chip_click / patch_dismissed /
+   *   edge_strength_edit (reader-only refusal)
    *     No server-side graph state to inspect. analysisReady stays
    *     undefined; the finaliser stamps no analysis_ready, and the UI's
    *     prior `ceeAnalysisReady` remains the truth (it was correct before
@@ -80,8 +82,9 @@ export interface DispatchSystemEventResult {
   /**
    * Graph for the central egress sanitiser.
    *
-   * `null` for the acknowledgement kinds — their `assistant_text` is empty
-   * and they carry no blocks, so the sanitiser has nothing to scrub.
+   * `null` for the acknowledgement kinds and the reader-only refusal. The
+   * acknowledgements carry no prose; the refusal copy is fixed and contains no
+   * graph entity ids, so a graph-free scrub is sufficient.
    *
    * NON-NULL FOR `factor_value_edit`. That kind ships real prose ("Updated
    * Marketing budget from £40,000 to £50,000.") through
@@ -139,6 +142,11 @@ export type SystemEventHandling =
   /** Silent acknowledgement, committed as a turn row. No graph write. */
   | 'ack_and_commit'
   /**
+   * Known additive wire event whose writer is deliberately not deployed yet.
+   * Commit an explicit typed refusal, never a graph/fact/pending mutation.
+   */
+  | 'reader_only_refusal'
+  /**
    * Silent acknowledgement committed WITH a typed handler fact — the event
    * carries a human judgement the server must PERSIST, never a graph write
    * (P4 transport, 2026-08-05: carry the signal; whether it feeds compute is
@@ -168,6 +176,10 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // browser (no wire shape existed at all).
   edge_adjudication: 'fact_and_commit',
   prior_range_edit: 'fact_and_commit',
+  // 0.42.0 Train B — compatibility reader ONLY. The later writer train may
+  // reclassify this kind after it has its own mutation and stale-base proof.
+  // Reverting that writer must land back on this explicit no-write refusal.
+  edge_strength_edit: 'reader_only_refusal',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -265,12 +277,49 @@ function buildAcknowledgementResponse(
   };
 }
 
+/**
+ * Reader-first response for the 0.42 `edge_strength_edit` wire member.
+ *
+ * The new discriminator must be understood before any producer emits it, but
+ * understanding is not permission to mutate. This response is intentionally
+ * explicit and non-retryable: the request parsed, this deployment has no
+ * writer for it, and the model was not changed. The stable reason lets a
+ * client distinguish this rollout floor from a malformed payload (B1/422).
+ */
+function buildEdgeStrengthEditReaderRefusal(
+  payload: SystemEventTurnPayload,
+): OlumiResponse {
+  return {
+    response_version: 2,
+    assistant_text:
+      "I can't apply this link-strength change in this version, so I haven't changed the model.",
+    blocks: [
+      {
+        type: 'error',
+        error_code: 'FEATURE_NOT_ENABLED',
+        severity: 'warn',
+        details: {
+          reason: 'edge_strength_edit_reader_only',
+          retryable: false,
+        },
+      },
+    ],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: payload.stage,
+  };
+}
+
 export async function dispatchSystemEvent(
   params: DispatchSystemEventParams,
 ): Promise<DispatchSystemEventResult> {
   const { payload, requestId } = params;
   const startedAt = Date.now();
-  const response = buildAcknowledgementResponse(payload);
+  const handling = SYSTEM_EVENT_HANDLING[payload.event.kind];
+  const response =
+    handling === 'reader_only_refusal'
+      ? buildEdgeStrengthEditReaderRefusal(payload)
+      : buildAcknowledgementResponse(payload);
 
   if (CLIENT_ONLY_EVENT_KINDS.has(payload.event.kind)) {
     log.info(
@@ -289,14 +338,13 @@ export async function dispatchSystemEvent(
     };
   }
 
-  // ── the one VALUE-CARRYING kind ──────────────────────────────────────────
-  // Everything above and below this block is unchanged for every other kind:
-  // a value-less event still gets the byte-identical silent acknowledgement it
-  // got before. That is the reader-first compatibility guarantee — a CEE on
-  // this version behaves exactly as before for every client that has not yet
-  // learned to send `factor_value_edit`.
+  // ── the one VALUE-CARRYING writer ─────────────────────────────────────────
+  // Everything above and below this block is unchanged for every pre-0.42
+  // kind: value-less events retain their byte-identical acknowledgement, and
+  // factor_value_edit retains its existing writer. The new value-carrying
+  // edge event is deliberately classified as a reader-only refusal above.
   if (
-    SYSTEM_EVENT_HANDLING[payload.event.kind] === 'mutating' &&
+    handling === 'mutating' &&
     payload.event.kind === 'factor_value_edit'
   ) {
     return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
@@ -309,7 +357,7 @@ export async function dispatchSystemEvent(
   // close — so the commit is refused (route maps that to a typed 500, the
   // client retries) rather than quietly degraded.
   let judgementFacts: readonly HandlerFact[] = [];
-  if (SYSTEM_EVENT_HANDLING[payload.event.kind] === 'fact_and_commit') {
+  if (handling === 'fact_and_commit') {
     const fact = buildJudgementFact(payload.event);
     const check = fact === null ? null : HandlerFactSchema.safeParse(fact);
     if (fact === null || check === null || !check.success) {
@@ -337,6 +385,10 @@ export async function dispatchSystemEvent(
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
       handler_facts: judgementFacts,
+      // The compatibility reader is a hard no-write floor. Supplying this
+      // explicitly prevents a future response-chip edit from deriving a
+      // resumable pending action at commit time.
+      ...(handling === 'reader_only_refusal' ? { pending_actions: [] } : {}),
       // V5 Stage 2B-1b: system-event turns have no user turn / coaching context
       // (no buildTurnContext) — persist NULL explicitly. The most-recent read
       // filters non-null, so this never resets a prior coaching snapshot.
@@ -348,7 +400,9 @@ export async function dispatchSystemEvent(
         event_kind: payload.event.kind,
         scenario_id: payload.scenario_id,
       },
-      'V5 system event committed',
+      handling === 'reader_only_refusal'
+        ? 'V5 system event refused by compatibility reader — no graph, fact or pending write'
+        : 'V5 system event committed',
     );
     return { response, commitPerformed: true, graph: null };
   } catch (err) {

@@ -723,6 +723,80 @@
                     "range_max"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "edge_strength_edit"
+                    },
+                    "from": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact canonical source node id (edge identity, half 1)."
+                    },
+                    "to": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical target node id (edge identity, half 2)."
+                    },
+                    "magnitude": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "Requested absolute strength in [0, 1]. Direction is carried separately so a strength change cannot reverse an edge accidentally."
+                    },
+                    "direction_intent": {
+                      "type": "string",
+                      "enum": [
+                        "preserve",
+                        "positive",
+                        "negative"
+                      ],
+                      "description": "`preserve` uses the server-persisted direction; positive/negative are explicit user choices."
+                    },
+                    "expected": {
+                      "type": "object",
+                      "properties": {
+                        "mean": {
+                          "type": "number",
+                          "minimum": -1,
+                          "maximum": 1,
+                          "description": "The exact signed mean last read from the canonical persisted edge. This is an optimistic-concurrency assertion, not the requested value."
+                        },
+                        "effect_direction": {
+                          "type": "string",
+                          "enum": [
+                            "positive",
+                            "negative"
+                          ],
+                          "description": "The exact direction last read from the canonical persisted edge. Required even when mean is zero, where sign cannot recover direction."
+                        }
+                      },
+                      "required": [
+                        "mean",
+                        "effect_direction"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "intent": {
+                      "type": "string",
+                      "enum": [
+                        "set",
+                        "confirm_current"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "from",
+                    "to",
+                    "magnitude",
+                    "direction_intent",
+                    "expected",
+                    "intent"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
