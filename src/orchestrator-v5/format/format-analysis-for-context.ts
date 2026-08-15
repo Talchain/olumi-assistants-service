@@ -228,6 +228,21 @@ export const DISPLAY_ANALYSIS_TRUNCATION_ORDER = [
 export const DISPLAY_ANALYSIS_MIN_OPTIONS = 2;
 
 /**
+ * CONTEXT/MEMORY V5 defect 2 — the in-band staleness disclosure attached to
+ * {@link DisplaySafeAnalysis.analysis_not_current_note}.
+ *
+ * TRUTH BOUND, and it is why this is a single constant rather than composed
+ * prose: the formatter receives a freshness TOKEN, not a reason. It may say the
+ * figures are not licensed as current and that re-running updates them. It may
+ * NOT say the model changed or that the user edited anything — `'unknown'` and
+ * `'none'` are also non-fresh and neither implies an edit. A note that guessed
+ * the cause would be the fabrication this whole component exists to prevent.
+ */
+export const ANALYSIS_NOT_CURRENT_NOTE =
+  'these figures are from an earlier analysis run and are not licensed as current for this model — ' +
+  're-run the analysis before quoting or reasoning from them';
+
+/**
  * Relative-distance thresholds for the tipping-risk band phrases
  * (presentation bands, not science): |flip − current| / |current|
  * below `small` reads as a small shift, below `moderate` as a moderate
@@ -311,6 +326,40 @@ export interface DisplaySafeAnalysis {
    * infers "no tipping points exist" from a truncated section).
    */
   readonly truncation_note?: string;
+  /**
+   * CONTEXT/MEMORY V5 defect 2 — DISCLOSED STALENESS, on the figures themselves.
+   *
+   * Present exactly when this turn's canonical freshness verdict is anything
+   * other than the literal `'fresh'` (stale / unknown / none / absent — the
+   * same fail-closed rule as the flip-point licence). Absent on a fresh turn,
+   * so a fresh projection is byte-identical to the pre-fix one.
+   *
+   * WHY IT EXISTS. Before this, `display_analysis` rendered IDENTICALLY fresh
+   * or stale: the only thing `analysisFreshness` gated was the tipping-point
+   * digits. Freshness was therefore the one qualifying condition in this pack
+   * with no in-band marker, while `truncation_note`,
+   * `value_of_information_note`, `constraint_infeasible_note`,
+   * `conversation.window.notice` and `brief.truncated` all have one — an idiom
+   * this estate adopted precisely BECAUSE a sibling field is not a disclosure.
+   * The verdict lived only in the sibling `coaching_context.freshness` enum.
+   *
+   * CEE #978 made the gap sharper rather than closing it: it gated the
+   * per-element `focus` join on `usable_for_chips` and instructed the model not
+   * to "recover, infer or rejoin figures from the broader `analysis` section by
+   * label" — so the model is told those figures are unlicensed for the SELECTED
+   * element, while this block still presented them unqualified.
+   *
+   * NEVER DROPPED by the char-budget guard (deliberately absent from
+   * {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}): a truncated projection that
+   * loses its staleness marker presents stale figures as current exactly when
+   * the pack is most crowded. Same doctrine as `goal_fit` and
+   * `constraint_infeasible_note` — truthfulness outranks breadth.
+   *
+   * QUALIFIES, never withholds. The figures stay: the coach still needs the
+   * prior run to explain what re-running would update, and a silently missing
+   * analysis block would be a larger and less honest change.
+   */
+  readonly analysis_not_current_note?: string;
   /**
    * Trust-spine board #1 (CEE half) — the honest constraint note, verbatim
    * from `compactAnalysis` (via the raw projection). Present exactly when
@@ -987,6 +1036,20 @@ export function formatAnalysisForContext(
     raw.constraint_infeasible_note.length > 0
   ) {
     out.constraint_infeasible_note = raw.constraint_infeasible_note;
+  }
+
+  // CONTEXT/MEMORY V5 defect 2 — in-band staleness disclosure. Set BEFORE the
+  // budget guard so its own length is inside the budget arithmetic, and never
+  // droppable by it (absent from DISPLAY_ANALYSIS_TRUNCATION_ORDER).
+  //
+  // ONE AUTHORITY: this reuses `flipLicenceOpen` — the same fail-closed
+  // `=== 'fresh'` predicate that already gates the tipping-point digits —
+  // rather than re-deriving "is this current?" a second way. Two predicates
+  // answering the same question under different names is this estate's most
+  // expensive recurring defect; if the licence rule ever changes, both the
+  // digits and their disclosure move together by construction.
+  if (!flipLicenceOpen) {
+    out.analysis_not_current_note = ANALYSIS_NOT_CURRENT_NOTE;
   }
 
   // Lane 30 fix 4 — runtime char-budget guard (graceful, disclosed).

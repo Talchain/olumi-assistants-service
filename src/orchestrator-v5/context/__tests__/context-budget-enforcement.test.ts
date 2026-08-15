@@ -201,7 +201,32 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(pack.analysis!.top_drivers).toHaveLength(5);
 
     // Byte-identity against the base-commit golden (same fixture, no wiring).
-    expect(sha256(JSON.stringify(assembleUnderBudgetPack()))).toBe(
+    //
+    // ⚠ THE GOLDEN IS NOT RE-CAPTURED, DELIBERATELY. Context/Memory V5
+    // defect 2 added ONE key to the display-safe analysis projection
+    // (`analysis_not_current_note`), which this fixture triggers because it
+    // wires no freshness verdict and the disclosure is fail-closed. Swapping
+    // the hash for a fresh capture would retire the only evidence that the
+    // budget wiring is byte-neutral — and would do so silently, which is
+    // exactly what a golden exists to prevent.
+    //
+    // Instead the delta is SUBTRACTED and the ORIGINAL hash still asserted.
+    // That proves two things at once, where a re-capture proved neither:
+    // everything except the intended key is unchanged from the base commit,
+    // and the intended key is genuinely the whole delta. If a later change
+    // touches anything else in this pack, this line REDs as it always has.
+    const withoutFreshnessDisclosure = assembleUnderBudgetPack();
+    const displayAnalysis = withoutFreshnessDisclosure.display_analysis as
+      | Record<string, unknown>
+      | null;
+    expect(
+      displayAnalysis?.analysis_not_current_note,
+      'precondition: this fixture wires no freshness, so the fail-closed disclosure must be present — ' +
+        'if it is absent the subtraction below is vacuous and proves nothing',
+    ).toBeTypeOf('string');
+    delete displayAnalysis?.analysis_not_current_note;
+
+    expect(sha256(JSON.stringify(withoutFreshnessDisclosure))).toBe(
       UNDER_BUDGET_GOLDEN_SHA256,
     );
 
