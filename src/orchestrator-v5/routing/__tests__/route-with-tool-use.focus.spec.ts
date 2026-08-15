@@ -80,7 +80,7 @@ const ANALYSIS = {
   analysis_status: 'computed',
 } as unknown as Parameters<typeof assembleContextPack>[0]['analysis'];
 
-function packWith(selection?: TurnSelection): ContextPack {
+function packWith(selection?: TurnSelection, analysisCurrent = true): ContextPack {
   return assembleContextPack({
     payload: makeMessagePayload({ scenario_id: 'scen-focus-golden', message: USER_MESSAGE }),
     priorTurns: [],
@@ -95,11 +95,11 @@ function packWith(selection?: TurnSelection): ContextPack {
           // permission to attach analysis figures to a selected node.
           coachingContext: {
             analysis_present: true,
-            freshness: 'fresh',
+            freshness: analysisCurrent ? 'fresh' : 'stale',
             readiness_status: 'ready',
-            rerun_required: false,
+            rerun_required: !analysisCurrent,
             usable_for_prose: true,
-            usable_for_chips: true,
+            usable_for_chips: analysisCurrent,
             blocked: false,
             actionable_blocker_count: 0,
           } as never,
@@ -198,6 +198,39 @@ describe('the serialised prompt carries the SELECTED element', () => {
     };
     const el = focus.elements.find((e) => e.id === OPTION_ID)!;
     expect(el.analysis?.win_probability).toBe('62%');
+  });
+
+  it('forbids rejoining stale selected figures from the broader analysis by label', () => {
+    const msg = buildUserMessage(
+      packWith(selectionFor([OPTION_ID]), false),
+      USER_MESSAGE,
+    );
+    const serialised = observeSerialisedPack(msg);
+    const focus = serialised.focus as {
+      elements: {
+        id: string;
+        analysis_link: string;
+        analysis?: { win_probability?: string };
+      }[];
+    };
+    const selected = focus.elements.find((element) => element.id === OPTION_ID)!;
+
+    // The temptation is real: display_analysis is serialised under the
+    // model-facing `analysis` key and still contains the same label + 62%.
+    const broaderAnalysis = JSON.stringify(serialised.analysis);
+    expect(broaderAnalysis).toContain(OPTION_LABEL);
+    expect(broaderAnalysis).toContain('62%');
+
+    // Focus refuses the stale attachment, and the code-owned instruction
+    // explicitly forbids the model from reconstructing it by label.
+    expect(selected.analysis_link).toBe('analysis_not_current');
+    expect(selected.analysis).toBeUndefined();
+    expect(msg).toContain(FOCUS_INSTRUCTION);
+    const notCurrentClause = FOCUS_INSTRUCTION.split('\n').find((line) =>
+      line.includes('do not recover, infer or rejoin'),
+    );
+    expect(notCurrentClause).toContain('analysis_not_current');
+    expect(notCurrentClause).toContain('`analysis` section by label');
   });
 });
 

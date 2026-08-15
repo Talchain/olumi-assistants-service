@@ -281,7 +281,7 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
     ];
     await maintain(updated, store, latestConstraintModel());
 
-    const reloaded = await store.loadSummary(SCENARIO);
+    const reloaded = await store.loadSummary();
     expect(reloaded!.text).toContain('Leeds');
     expect(reloaded!.text).not.toContain(EARLY_FACT);
 
