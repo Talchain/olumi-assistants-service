@@ -53,6 +53,7 @@ const FACTOR_LABEL = 'Engineer salary';
 const GHOST_ID = 'node_fabricated_selected_id';
 const REAL_EDGE_ID = `${FACTOR_ID}→goal_growth`;
 const GHOST_EDGE_ID = `${GHOST_ID}→goal_growth`;
+const OPAQUE_REAL_EDGE_ID = 'e5';
 const MODEL_PATH_MESSAGE = 'help me think this through';
 
 const PERSISTED_GRAPH = {
@@ -688,6 +689,24 @@ describe('TurnExecutor final guard — every requested selection resolved to not
 });
 
 describe('TurnExecutor final guard — byte-identical controls', () => {
+  it('preserves prior behaviour for an opaque real React Flow edge id', async () => {
+    const original =
+      'The salary-to-growth relationship is in the model; inspect it before changing it.';
+    const noSelection = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+    );
+    const opaqueRealEdge = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(original)),
+      { node_ids: [], edge_ids: [OPAQUE_REAL_EDGE_ID] },
+    );
+
+    expect(JSON.stringify(opaqueRealEdge.response)).toBe(JSON.stringify(noSelection.response));
+    expect(opaqueRealEdge.response.assistant_text).toBe(original);
+    expect(opaqueRealEdge.groundedSelection).toBeUndefined();
+  });
+
   it('leaves a real edge selection unchanged without claiming edge-grounded answering', async () => {
     const original =
       'The salary-to-growth relationship is in the model; inspect it before changing it.';

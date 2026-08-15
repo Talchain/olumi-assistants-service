@@ -48,6 +48,7 @@ const BASE = makeMessagePayload({
   message: 'Why does this one matter?',
 });
 const REAL_EDGE_ID = 'factor_price→opt_build';
+const OPAQUE_REAL_EDGE_ID = 'e5';
 
 /**
  * A persisted graph in the shape `scenarios.graph` actually stores. Deep-frozen
@@ -329,6 +330,19 @@ describe('buildTurnContext — the selected element becomes groundable context',
       unresolved_count: 0,
       unresolved: 'none',
     });
+  });
+
+  it('does not treat an opaque UI edge id as canonical honesty authority', async () => {
+    const ctx = await buildTurnContext(BASE, 'req-opaque-edge', {
+      sessionStore: storeWithGraph(persistedGraph()),
+      selectedElements: selection([], [OPAQUE_REAL_EDGE_ID]),
+    });
+
+    // React Flow can identify the real fixture edge as `e5`, but GraphV3 has
+    // no stable edge.id. Ignoring that opaque token preserves the prior
+    // behaviour without making it answer-bearing or falsely declaring it gone.
+    expect('selection' in ctx).toBe(false);
+    expect('selectionHonesty' in ctx).toBe(false);
   });
 
   it('STABLE MODEL: resolution does not mutate the persisted graph', async () => {

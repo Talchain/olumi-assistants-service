@@ -400,7 +400,7 @@ export interface TurnSelection {
  * zero-resolved guard. It is neither LLM-facing nor emitted on the wire.
  */
 export interface SelectionHonesty {
-  /** Raw node + edge references carried by the turn, before de-duplication. */
+  /** Raw node refs + parseable composite edge refs, before de-duplication. */
   readonly requested_count: number;
   /** Canonical nodes + edges that resolved; the guard only branches on zero. */
   readonly resolved_count: number;
@@ -891,7 +891,13 @@ export function resolveSelectionHonesty(
   graphRead: CanonicalGraphReadState['status'],
 ): SelectionHonesty | null {
   const nodeIds = selectedElements?.node_ids ?? [];
-  const edgeIds = selectedElements?.edge_ids ?? [];
+  // GraphV3 has no stable edge.id, so opaque producer-local tokens such as
+  // React Flow's `e5` cannot prove presence OR absence in canonical state.
+  // Preserve their prior no-focus behaviour; only the existing composite
+  // relationship grammar may enter this deterministic honesty authority.
+  const edgeIds = (selectedElements?.edge_ids ?? []).filter(
+    (id) => normaliseSelectedEdgeIdentity(id) !== null,
+  );
   const requestedCount = nodeIds.length + edgeIds.length;
   if (requestedCount === 0) return null;
 
