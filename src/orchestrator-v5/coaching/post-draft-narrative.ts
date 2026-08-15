@@ -10,9 +10,10 @@
  *
  *   1. coachingSummary replacement. When `coachingSummary` is present
  *      and passes the strict whole-response gate in
- *      {@link ../coaching/copy-quality-gate.ts}, the summary is used
- *      verbatim as the entire assistant_text. No deterministic opener
- *      is prepended — the summary stands alone or it does not run.
+ *      {@link ../coaching/copy-quality-gate.ts}, readiness remains the final
+ *      authority over its next step. A ready summary is used verbatim. A
+ *      non-ready summary is withheld when it tells the user to run analysis;
+ *      otherwise the smallest typed recovery is appended.
  *
  *   2. Sectioned narrative. When the summary is missing or rejected,
  *      the builder assembles up to four blocks separated by blank
@@ -37,8 +38,9 @@
  *          quality gate before being adopted. The block is omitted
  *          entirely when no factor / risk / assumption survives.
  *
- *        Block 4 — Run-analysis nudge
- *          A short call-to-action.
+ *        Block 4 — Readiness-derived next step
+ *          Run analysis only when the typed payload is ready; otherwise name
+ *          one typed blocker/recovery without choosing a value for the user.
  *
  * Style invariants enforced by construction and by the gate:
  *   - British English ("summarise", "favour", "behaviour").
@@ -94,6 +96,16 @@ const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
 const MAX_NAMED_OPTIONS = 4;
 const MAX_LISTED_WHEN_OVER = 3;
+
+/**
+ * A coaching summary is LLM-authored and its next-step token is not typed.
+ * When readiness is not `ready`, any standalone run/rerun token or start/begin
+ * instruction tied to analysis is a contradiction and the whole-summary
+ * shortcut is withheld. The deterministic readiness tail then supplies the
+ * authoritative next step.
+ */
+const RUN_INSTRUCTION_REGEX =
+  /(?:\b(?:run|rerun|re-run)\b|\b(?:start|begin)\b[^.!?\n]{0,80}\banalysis\b|\banalysis\b[^.!?\n]{0,80}\b(?:start|begin)\b)/i;
 
 /**
  * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
@@ -289,15 +301,38 @@ interface NodeLite {
   };
 }
 
+interface PostDraftBlockerLite {
+  readonly option_id?: string;
+  readonly option_label?: string;
+  readonly factor_id?: string;
+  readonly factor_label?: string;
+  readonly blocker_type?: 'missing_value' | 'ambiguous_value' | 'missing_connection' | 'constraint_dropped';
+  readonly suggested_action?: 'add_value' | 'confirm_value' | 'add_edge' | 'review_constraint';
+}
+
+interface PostDraftOptionLite {
+  readonly id?: string;
+  readonly option_id?: string;
+  readonly label?: string;
+  readonly status?: 'ready' | 'needs_user_mapping' | 'needs_encoding';
+}
+
 /**
  * Structural subset of the analysis_ready payload that this builder
  * actually reads. Declared locally so callers can pass either the V5
  * `AnalysisReadyPayloadT` (from `src/schemas/analysis-ready.ts`) or the
  * `GraphPatchBlockData['analysis_ready']` shape — whose `options[]`
  * entries use `option_id` instead of `id` — without a type-cast at the
- * call site. Neither `options` nor any option-keyed field is read here.
+ * call site. The narrative reads status as the sole Run authority, then at
+ * most one typed blocker (or one non-ready option fallback) for its CTA.
  */
 export interface PostDraftAnalysisReadyLite {
+  /** Sole authority for whether a Run instruction may be served. */
+  readonly status?: string | undefined;
+  /** Ordered typed recovery candidates; the narrative names at most one. */
+  readonly blockers?: ReadonlyArray<unknown> | undefined;
+  /** Used only for a named fallback when a non-ready payload has no blocker. */
+  readonly options?: ReadonlyArray<unknown> | undefined;
   readonly model_adjustments?: ReadonlyArray<unknown> | undefined;
   readonly bias_findings?: ReadonlyArray<unknown> | undefined;
 }
@@ -325,17 +360,19 @@ export type AssumptionSource =
  */
 export type FallbackReason = 'gate_rejected' | 'no_candidate' | null;
 
+/** Copy-gate failures plus a typed-readiness contradiction after acceptance. */
+export type CoachingSummaryRejectReason = GateRejectReason | 'readiness_conflict';
+
 export interface PostDraftNarrativeTelemetry {
   readonly assumption_source: AssumptionSource;
   readonly coaching_summary_present: boolean;
   readonly coaching_summary_passed_gate: boolean;
   /**
-   * When `coachingSummary` was present but rejected by
-   * {@link gateFullResponse}, the category of the first failing rule.
-   * `null` when the summary was missing or accepted. Category-only —
-   * never carries raw user or coaching text.
+   * When `coachingSummary` was withheld, the category of the first copy-gate
+   * failure or `readiness_conflict` when otherwise acceptable copy contradicts
+   * the typed readiness CTA. `null` when missing or shipped. Category-only.
    */
-  readonly coaching_summary_reject_reason: GateRejectReason | null;
+  readonly coaching_summary_reject_reason: CoachingSummaryRejectReason | null;
   /**
    * RC4 proportionate remedies: true when the accepted coachingSummary was
    * shipped with a deterministic STYLE rewrite applied in place (em/en
@@ -423,6 +460,8 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const summaryCandidate =
     typeof coachingSummary === 'string' ? coachingSummary.trim() : '';
   const coachingSummaryPresent = summaryCandidate.length > 0;
+  const nodes = (graph?.nodes ?? []) as readonly NodeLite[];
+  const nextStep = buildReadinessNextStep(analysisReady, nodes);
 
   // Run the full-response gate once so we can capture both the
   // pass/fail and (on fail) the categorical reject reason for ops
@@ -430,45 +469,58 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const summaryGateResult = coachingSummaryPresent
     ? gateFullResponse(summaryCandidate)
     : null;
-  const summaryRejectReason: GateRejectReason | null =
+  let summaryRejectReason: CoachingSummaryRejectReason | null =
     summaryGateResult && !summaryGateResult.accept
       ? (summaryGateResult.rejectReason ?? null)
       : null;
 
-  // Short-circuit: coachingSummary may replace the WHOLE response when
-  // it passes the strict full-response gate. No deterministic opener is
-  // prepended — the summary stands alone or it does not run.
-  // RC4: render the gate's SANITISED text (style offences such as em/en
-  // dashes are rewritten in place), never the raw candidate.
+  // The copy gate is necessary but not sufficient: typed readiness is the sole
+  // authority for a Run instruction. Ready summaries may replace the whole
+  // response. A safe non-ready summary keeps its prose but receives the typed
+  // recovery tail; a contradictory or over-budget summary falls back to the
+  // deterministic builder. Always use the gate's sanitised text.
   if (summaryGateResult && summaryGateResult.accept) {
-    return {
-      text: summaryGateResult.text ?? summaryCandidate,
-      telemetry: {
-        assumption_source: 'coaching_summary',
-        coaching_summary_present: true,
-        coaching_summary_passed_gate: true,
-        coaching_summary_reject_reason: null,
-        coaching_summary_style_rewritten: summaryGateResult.styleRewritten === true,
-        fallback_reason: null,
-        strengthen_items_count: strengthenItemsCount,
-        bias_findings_count: biasFindingsCount,
-        coaching_bias_signals_count: coachingBiasSignalsCount,
-        // Verbatim-summary path renders no deterministic blocks.
-        widening_log_present: wideningLogPresent,
-        brief_completeness: briefCompleteness,
-        brief_completeness_surfaced: false,
-        additional_checks_surfaced: 0,
-        additional_check_source: null,
-        direction_clarifications_surfaced: 0,
-      },
-    };
-  }
+    const acceptedSummary = summaryGateResult.text ?? summaryCandidate;
+    const isReady = analysisReady?.status === 'ready';
+    const contradictsReadiness =
+      !isReady && RUN_INSTRUCTION_REGEX.test(acceptedSummary);
+    const readinessControlledSummary = isReady
+      ? acceptedSummary
+      : `${acceptedSummary}\n\n${nextStep}`;
 
-  const nodes = (graph?.nodes ?? []) as readonly NodeLite[];
+    if (!contradictsReadiness && countWords(readinessControlledSummary) <= MAX_WORDS) {
+      return {
+        text: readinessControlledSummary,
+        telemetry: {
+          assumption_source: 'coaching_summary',
+          coaching_summary_present: true,
+          coaching_summary_passed_gate: true,
+          coaching_summary_reject_reason: null,
+          coaching_summary_style_rewritten: summaryGateResult.styleRewritten === true,
+          fallback_reason: null,
+          strengthen_items_count: strengthenItemsCount,
+          bias_findings_count: biasFindingsCount,
+          coaching_bias_signals_count: coachingBiasSignalsCount,
+          // Summary paths render no deterministic evidence blocks. Non-ready
+          // summaries append only the typed readiness tail above.
+          widening_log_present: wideningLogPresent,
+          brief_completeness: briefCompleteness,
+          brief_completeness_surfaced: false,
+          additional_checks_surfaced: 0,
+          additional_check_source: null,
+          direction_clarifications_surfaced: 0,
+        },
+      };
+    }
+
+    summaryRejectReason = 'readiness_conflict';
+  }
 
   if (nodes.length === 0) {
     return {
-      text: 'Your decision model is ready to explore.',
+      text: analysisReady?.status === 'ready'
+        ? 'Your decision model is ready to explore.'
+        : nextStep,
       telemetry: {
         assumption_source: 'deterministic_fallback',
         coaching_summary_present: coachingSummaryPresent,
@@ -555,9 +607,6 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // it is mapped to a calm advisory phrase and never emitted verbatim.
   const completenessBlock = buildBriefCompletenessLine(wideningLog, briefText);
 
-  const nextStep =
-    'Next, run the analysis to see how the options compare and what could shift the outcome.';
-
   const sectioned = assembleSectionedNarrative({
     confirm: confirmSentence,
     optionsBlock,
@@ -640,6 +689,167 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
   });
   if (pick.source === 'deterministic_fallback') return null;
   return pick.text;
+}
+
+// ----- readiness-controlled next step --------------------------------------
+
+/**
+ * Build the one load-bearing CTA from the typed analysis-ready payload.
+ * `ready` is the only status that permits Run copy. Every other status names
+ * at most the first typed recovery, without generating an effect magnitude or
+ * flattening a temporal/categorical option on the user's behalf.
+ */
+function buildReadinessNextStep(
+  analysisReady: PostDraftAnalysisReadyLite | null | undefined,
+  nodes: readonly NodeLite[],
+): string {
+  if (analysisReady?.status === 'ready') {
+    return 'Next, run the analysis to see how the options compare and what could shift the outcome.';
+  }
+
+  const blocker = asPostDraftBlocker(analysisReady?.blockers?.[0]);
+  if (blocker) {
+    const option = resolveReadinessLabel(nodes, 'option', blocker.option_id, blocker.option_label);
+    const factor = resolveReadinessLabel(nodes, 'factor', blocker.factor_id, blocker.factor_label);
+    const pair = describeOptionFactorPair(option, factor);
+
+    switch (blocker.blocker_type ?? blocker.suggested_action) {
+      case 'missing_value':
+      case 'add_value':
+        return `Next, choose the missing effect value${pair} so the comparison can be prepared.`;
+      case 'ambiguous_value':
+      case 'confirm_value':
+        return `Next, confirm the effect value${pair} so the comparison can be prepared.`;
+      case 'missing_connection':
+      case 'add_edge':
+        return `Next, connect${describeOptionToFactor(option, factor)} so the comparison can be prepared.`;
+      case 'constraint_dropped':
+      case 'review_constraint':
+        return `Next, review the constraint${describeConstraintContext(option, factor)} before comparing the options.`;
+      default:
+        return `Next, resolve the input needed${pair} before comparing the options.`;
+    }
+  }
+
+  const nonReadyOption = analysisReady?.options
+    ?.map(asPostDraftOption)
+    .find((option): option is PostDraftOptionLite => option !== null && option.status !== 'ready');
+  if (nonReadyOption) {
+    const option = resolveReadinessLabel(
+      nodes,
+      'option',
+      nonReadyOption.id ?? nonReadyOption.option_id,
+      nonReadyOption.label,
+    );
+    const namedOption = option ? ` "${option}"` : ' this option';
+
+    if (nonReadyOption.status === 'needs_encoding' || analysisReady?.status === 'needs_encoding') {
+      return `Next, choose how${namedOption} should be represented on the effect scale before comparing the options.`;
+    }
+    return `Next, configure${namedOption} by choosing which factor it changes and by how much.`;
+  }
+
+  if (analysisReady?.status === 'blocked') {
+    return 'Next, resolve the model issue shown before comparing the options.';
+  }
+  if (analysisReady?.status === 'needs_encoding') {
+    return 'Next, choose how the unresolved option should be represented on the effect scale.';
+  }
+  if (analysisReady?.status === 'needs_user_mapping' || analysisReady?.status === 'needs_user_input') {
+    return 'Next, configure the unresolved option by choosing its factor and effect.';
+  }
+  return 'Next, review the model and fill any gaps before comparing the options.';
+}
+
+function asPostDraftBlocker(value: unknown): PostDraftBlockerLite | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const blockerType = readString(candidate.blocker_type);
+  const suggestedAction = readString(candidate.suggested_action);
+  return {
+    option_id: readString(candidate.option_id) ?? undefined,
+    option_label: readString(candidate.option_label) ?? undefined,
+    factor_id: readString(candidate.factor_id) ?? undefined,
+    factor_label: readString(candidate.factor_label) ?? undefined,
+    blocker_type: isPostDraftBlockerType(blockerType) ? blockerType : undefined,
+    suggested_action: isPostDraftBlockerAction(suggestedAction) ? suggestedAction : undefined,
+  };
+}
+
+function asPostDraftOption(value: unknown): PostDraftOptionLite | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const status = readString(candidate.status);
+  return {
+    id: readString(candidate.id) ?? undefined,
+    option_id: readString(candidate.option_id) ?? undefined,
+    label: readString(candidate.label) ?? undefined,
+    status: isPostDraftOptionStatus(status) ? status : undefined,
+  };
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isPostDraftBlockerType(
+  value: string | null,
+): value is NonNullable<PostDraftBlockerLite['blocker_type']> {
+  return value === 'missing_value'
+    || value === 'ambiguous_value'
+    || value === 'missing_connection'
+    || value === 'constraint_dropped';
+}
+
+function isPostDraftBlockerAction(
+  value: string | null,
+): value is NonNullable<PostDraftBlockerLite['suggested_action']> {
+  return value === 'add_value'
+    || value === 'confirm_value'
+    || value === 'add_edge'
+    || value === 'review_constraint';
+}
+
+function isPostDraftOptionStatus(
+  value: string | null,
+): value is NonNullable<PostDraftOptionLite['status']> {
+  return value === 'ready' || value === 'needs_user_mapping' || value === 'needs_encoding';
+}
+
+function resolveReadinessLabel(
+  nodes: readonly NodeLite[],
+  kind: 'option' | 'factor',
+  id: string | undefined,
+  suppliedLabel: string | undefined,
+): string | null {
+  if (id) {
+    const graphLabel = nodes.find(
+      (node) => node.id === id && node.kind === kind && typeof node.label === 'string',
+    )?.label;
+    if (graphLabel?.trim()) return truncate(graphLabel, MAX_LABEL_CHARS);
+  }
+  return suppliedLabel?.trim() ? truncate(suppliedLabel, MAX_LABEL_CHARS) : null;
+}
+
+function describeOptionFactorPair(option: string | null, factor: string | null): string {
+  if (option && factor) return ` for "${option}" on "${factor}"`;
+  if (option) return ` for "${option}"`;
+  if (factor) return ` for "${factor}"`;
+  return '';
+}
+
+function describeOptionToFactor(option: string | null, factor: string | null): string {
+  if (option && factor) return ` "${option}" to "${factor}"`;
+  if (option) return ` "${option}" to the factor it changes`;
+  if (factor) return ` the relevant option to "${factor}"`;
+  return ' the unresolved option to the factor it changes';
+}
+
+function describeConstraintContext(option: string | null, factor: string | null): string {
+  if (option && factor) return ` for "${option}" involving "${factor}"`;
+  if (option) return ` for "${option}"`;
+  if (factor) return ` involving "${factor}"`;
+  return '';
 }
 
 // ----- sentence builders ----------------------------------------------------

@@ -66,7 +66,14 @@ function makeGraph(nodes: GraphV3T['nodes']): GraphV3T {
  * remain readable.
  */
 function textOf(input: Parameters<typeof buildPostDraftNarrative>[0]): string {
-  return buildPostDraftNarrative(input).text;
+  // Most historical builder tests exercise the ready path. Production always
+  // supplies the terminal analysis_ready payload on a persisted draft; make
+  // that premise explicit here so a missing payload can be tested separately
+  // instead of silently meaning "ready" in every fixture.
+  const withExplicitReadiness = Object.prototype.hasOwnProperty.call(input, 'analysisReady')
+    ? input
+    : { ...input, analysisReady: { status: 'ready' as const } };
+  return buildPostDraftNarrative(withExplicitReadiness).text;
 }
 
 const GOAL_NODE = {
@@ -280,12 +287,68 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('always ends with a run-analysis nudge', () => {
+  it('ends with a run-analysis nudge only when the typed readiness authority says ready', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toMatch(/run the analysis/);
     expect(text).toMatch(/\.$/);
+  });
+
+  it.each(['needs_user_mapping', 'needs_encoding', 'needs_user_input', 'blocked'] as const)(
+    '%s never receives a Run instruction',
+    (status) => {
+      const text = buildPostDraftNarrative({
+        graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
+        analysisReady: { status },
+      }).text;
+      expect(text).not.toMatch(/\brun(?:ning)?\b/i);
+      expect(text).toMatch(/Next,/);
+    },
+  );
+
+  it('missing readiness is unknown, never silently promoted to ready', () => {
+    const text = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
+    }).text;
+    expect(text).not.toMatch(/\brun(?:ning)?\b/i);
+    expect(text).toContain('review the model');
+  });
+
+  it('names only the first typed blocker and leaves the value for the user to choose', () => {
+    const text = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+      analysisReady: {
+        status: 'needs_user_input',
+        blockers: [
+          {
+            option_id: OPTION_A.id,
+            option_label: OPTION_A.label,
+            factor_id: FACTOR_QUALITY.id,
+            factor_label: FACTOR_QUALITY.label,
+            blocker_type: 'missing_value',
+            suggested_action: 'add_value',
+          },
+          {
+            option_id: OPTION_B.id,
+            option_label: OPTION_B.label,
+            factor_id: FACTOR_CAPACITY.id,
+            factor_label: FACTOR_CAPACITY.label,
+            blocker_type: 'missing_value',
+            suggested_action: 'add_value',
+          },
+        ],
+      },
+    }).text;
+
+    const blocks = text.split('\n\n');
+    const nextStep = blocks[blocks.length - 1] ?? '';
+    expect(nextStep).toContain(OPTION_A.label);
+    expect(nextStep).toContain(FACTOR_QUALITY.label);
+    expect(nextStep).not.toContain(OPTION_B.label);
+    expect(nextStep).not.toContain(FACTOR_CAPACITY.label);
+    expect(nextStep).not.toMatch(/\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b/);
+    expect(nextStep).not.toMatch(/\brun(?:ning)?\b/i);
   });
 
   it('does not exceed 140 words even with long inputs and a long adjustment reason', () => {
@@ -795,6 +858,10 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
 describe('buildPostDraftNarrative — coachingSummary whole-response replacement', () => {
   const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
 
+  const withReadySummary = (
+    input: Omit<Parameters<typeof buildPostDraftNarrative>[0], 'analysisReady'>,
+  ) => buildPostDraftNarrative({ ...input, analysisReady: { status: 'ready' } });
+
   it('replaces the whole response with coachingSummary when it passes the full-response gate', () => {
     // Summary intentionally does NOT use the builder's deterministic
     // opener "I've built a first decision model for …" — so any
@@ -804,6 +871,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     // Exact pass-through — no deterministic opener was prepended.
     expect(result.text).toBe(summary);
@@ -822,6 +890,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     // Five-sentence builder ran — text starts with our deterministic confirm.
     expect(result.text.startsWith("I've built a first decision model for")).toBe(true);
@@ -836,7 +905,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('ignores coachingSummary missing a next-step token', () => {
     const summary =
       "I've built a decision model for the launch. The options weigh delivery speed against quality risk, with assumptions to consider. One assumption is whether the team can absorb extra overhead under load conditions in the coordination flow.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -848,7 +917,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('ignores coachingSummary leaking an internal id prefix', () => {
     const summary =
       "I've built a first decision model for your launch. The routes weigh delivery against risk in fac_cost. Next, run the analysis to validate the assumptions across the comparison routes.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -859,9 +928,9 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   });
 
   it('ignores empty / missing coachingSummary cleanly', () => {
-    const r1 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: '' });
-    const r2 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: null });
-    const r3 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: '   \n\t  ' });
+    const r1 = withReadySummary({ graph: baseGraph, coachingSummary: '' });
+    const r2 = withReadySummary({ graph: baseGraph, coachingSummary: null });
+    const r3 = withReadySummary({ graph: baseGraph, coachingSummary: '   \n\t  ' });
     for (const r of [r1, r2, r3]) {
       expect(r.telemetry.coaching_summary_present).toBe(false);
       expect(r.telemetry.coaching_summary_passed_gate).toBe(false);
@@ -875,7 +944,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     const items = [
       { id: 's', label: 'L', detail: 'detail to consider as an assumption worth checking later', action_type: 'x' },
     ];
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
       strengthenItems: items,
@@ -888,7 +957,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry surfaces coaching_summary_reject_reason when the summary is rejected', () => {
     const summary =
       "I've built a decision model with seven nodes and eight edges. The options weigh cost against risk. Next, run the analysis to validate.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -900,7 +969,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry surfaces premature_recommendation as the reject reason', () => {
     const summary =
       "I've built a decision model. The best route here is to hire a tech lead. The options weigh cost against risk. Next, run the analysis.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -910,7 +979,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry surfaces internal_id as the reject reason for factor_* leaks', () => {
     const summary =
       "I've built a decision model. The options weigh delivery speed against risk in factor_delivery_cost. Next, run the analysis to compare the routes.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -920,7 +989,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry reject_reason is null when the summary passes the gate', () => {
     const summary =
       'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare.';
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -929,9 +998,71 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   });
 
   it('telemetry reject_reason is null when the summary is missing entirely', () => {
-    const result = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: null });
+    const result = withReadySummary({ graph: baseGraph, coachingSummary: null });
     expect(result.telemetry.coaching_summary_present).toBe(false);
     expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
+  });
+
+  it.each([
+    [
+      'Run analysis',
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead. Next, run the analysis to compare them.',
+    ],
+    [
+      'Run now',
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead. Next, run now to compare the options.',
+    ],
+  ])('withholds an otherwise accepted %s summary when readiness needs input', (_label, summary) => {
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+      analysisReady: {
+        status: 'needs_user_input',
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toMatch(/\brun(?:ning)?\b/i);
+    expect(result.text).toContain(OPTION_A.label);
+    expect(result.text).toContain(FACTOR_QUALITY.label);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
+  });
+
+  it('keeps an accepted review summary and appends the typed non-ready recovery tail', () => {
+    const summary =
+      'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead. Next, review the model before comparing the routes.';
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      coachingSummary: summary,
+      analysisReady: {
+        status: 'needs_user_input',
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+
+    expect(result.text).toContain(summary);
+    expect(result.text).toContain(OPTION_A.label);
+    expect(result.text).toContain(FACTOR_QUALITY.label);
+    expect(result.text).not.toMatch(/\brun(?:ning)?\b/i);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+    expect(result.telemetry.assumption_source).toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
   });
 });
 
@@ -1303,6 +1434,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
@@ -1321,6 +1453,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_style_rewritten).toBe(false);
