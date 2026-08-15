@@ -23,9 +23,11 @@
  * changes (CLAUDE.md trap 12). If the transform changes, this changes with it.
  *
  * ── WHAT IS GUARANTEED, AND WHAT IS NOT ─────────────────────────────────────
- * GUARANTEED: node IDENTITY — `id`, `label` and `kind`/`type` — is byte-equal to
- * the terminal frame's corresponding nodes. That is the property reconciliation
- * needs, and it is pinned by test.
+ * GUARANTEED: node IDENTITY — `id`, `label` and `kind`/`type` — plus the
+ * user-visible authorship badge and option baseline identity are byte-equal to
+ * the terminal frame's corresponding nodes. Those are structural facts the
+ * canvas must not revise while reconciling the same node ids, and they are
+ * pinned from typed records through both projections.
  *
  * NOT guaranteed: numeric VALUES. `graph-data-integrity` runs AFTER the schema
  * transform in Stage 6 (factor scale consistency, edge field defaults, the
@@ -57,7 +59,10 @@
  */
 
 import type { GraphV1 } from "../../contracts/plot/engine.js";
-import { transformGraphToV3 } from "../transforms/schema-v3.js";
+import {
+  applyBriefBoundNodeProvenance,
+  transformGraphToV3,
+} from "../transforms/schema-v3.js";
 import { transformGraphToV2 } from "../transforms/schema-v2.js";
 import {
   VALIDATION_EDGE_METADATA_KEY,
@@ -122,9 +127,10 @@ export function projectGraphForStagedFrame(
   graph: GraphV1 | undefined,
   schemaVersion: StagedSchemaVersion,
   requestId?: string,
+  brief?: string,
 ): unknown {
   if (!graph) return graph;
-  return stripValidationMetadata(projectByVersion(graph, schemaVersion, requestId));
+  return stripValidationMetadata(projectByVersion(graph, schemaVersion, requestId, brief));
 }
 
 /** The version dispatch, strip-free by construction — see the caller's wrap. */
@@ -132,10 +138,16 @@ function projectByVersion(
   graph: GraphV1,
   schemaVersion: StagedSchemaVersion,
   requestId?: string,
+  brief?: string,
 ): unknown {
   try {
     if (schemaVersion === "v3") {
-      return transformGraphToV3(graph as never).graph;
+      const projected = transformGraphToV3(graph as never).graph;
+      // The terminal V3 response applies this same authority before it emits
+      // nodes/options. Without the brief here, GRAPH_READY under-claims every
+      // user-authored goal and option as AI-inferred until COMPLETE replaces it.
+      applyBriefBoundNodeProvenance(projected.nodes, brief);
+      return projected;
     }
     if (schemaVersion === "v2") {
       return transformGraphToV2(graph as never);

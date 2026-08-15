@@ -114,6 +114,30 @@ export interface V3TransformContext {
 /** V3 valid node kinds (option is included for graph connectivity) */
 const V3_VALID_KINDS = new Set(["goal", "factor", "outcome", "decision", "risk", "action", "option"]);
 
+/** Node kinds whose value-free labels may earn a brief-bound provenance claim. */
+const LABEL_BOUND_PROVENANCE_KINDS: ReadonlySet<string> = new Set([
+  "goal",
+  "risk",
+  "outcome",
+  "decision",
+]);
+
+/**
+ * Resolve an option's baseline flag from its two accepted V1 carriers.
+ *
+ * The terminal response and the staged graph both consume this function. The
+ * truth table itself remains owned by `readIsBaseline`; this wrapper only
+ * prevents the two projection sites from presenting different option identity.
+ */
+function resolveOptionIsBaseline(node: V1Node): boolean | undefined {
+  const dataBaseline = isOptionData(node.data) ? node.data.is_baseline : undefined;
+  const nodeBaseline = (node as V1Node & { is_baseline?: boolean }).is_baseline;
+  return readIsBaseline({
+    is_baseline: nodeBaseline,
+    data: { is_baseline: dataBaseline },
+  });
+}
+
 /**
  * Map V1 node kind to V3 kind.
  * Options remain in graph for connectivity; also extracted to options[] array.
@@ -230,6 +254,14 @@ export function transformNodeToV3(
         goal_threshold_frame: node.goal_threshold_frame,
       }),
   };
+
+  // Option identity is structural, not a value that may settle after
+  // GRAPH_READY. Preserve it in the graph transform so staged and terminal
+  // nodes expose the same status-quo choice from the same typed record.
+  if (node.kind === "option") {
+    const isBaseline = resolveOptionIsBaseline(node);
+    if (isBaseline !== undefined) v3Node.is_baseline = isBaseline;
+  }
 
   // Transform data to observed_state.
   // OptionData (with interventions) is handled separately in options extraction.
@@ -1021,6 +1053,55 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   };
 }
 
+/**
+ * Apply the response boundary's brief-binding provenance rules to V3 graph
+ * nodes.
+ *
+ * This is deliberately a graph-level authority rather than response packaging
+ * logic. The same projected graph is shown first in the staged GRAPH_READY
+ * frame and later inside the terminal response; deciding authorship in only the
+ * terminal transform makes those two wire surfaces contradict one another for
+ * the user's own goals and options.
+ *
+ * Factors keep the value-aware provenance decided by `transformNodeToV3`.
+ * Label binding is allowed only for non-value-bearing goal/risk/outcome/
+ * decision nodes, and only for multi-token labels. Options retain their
+ * existing phrase-level rule. This is the exact fail-closed policy previously
+ * embedded in `transformResponseToV3`, moved without widening it.
+ */
+export function applyBriefBoundNodeProvenance(
+  nodes: NodeV3T[],
+  brief?: string,
+): void {
+  for (const node of nodes) {
+    if (node.kind === "option") {
+      const binding = bindOptionLabelToBrief(node.label, brief);
+      node.provenance = bindingEarnsBriefClaim(binding) ? "from_brief" : "ai_inferred";
+      continue;
+    }
+
+    if (!LABEL_BOUND_PROVENANCE_KINDS.has(node.kind)) continue;
+
+    const carriesValue =
+      node.observed_state !== undefined ||
+      node.prior !== undefined ||
+      node.display_value !== undefined ||
+      typeof node.intercept === "number" ||
+      typeof node.goal_threshold === "number" ||
+      typeof node.goal_threshold_raw === "number";
+    if (carriesValue) continue;
+
+    const tokenCount =
+      typeof node.label === "string" ? node.label.trim().split(/\s+/).filter(Boolean).length : 0;
+    if (tokenCount < 2) continue;
+
+    const binding = bindOptionLabelToBrief(node.label, brief);
+    if (bindingEarnsBriefClaim(binding)) {
+      node.provenance = "from_brief";
+    }
+  }
+}
+
 // ============================================================================
 // Response Transformation
 // ============================================================================
@@ -1096,15 +1177,15 @@ export function transformResponseToV3(
 
   const extractedOptions = extractOptionsFromNodes(
     optionNodes.map((n) => {
-      const dataBaseline = isOptionData(n.data) ? (n.data as any).is_baseline : undefined;
-      const nodeBaseline = (n as any).is_baseline;
+      const dataBaseline = isOptionData(n.data) ? n.data.is_baseline : undefined;
+      const nodeBaseline = (n as V1Node & { is_baseline?: boolean }).is_baseline;
       // SINGLE SOURCE OF TRUTH (ROADMAP 2.55 / F3): reconcile the two flag
       // surfaces via the shared reader so DISPLAY/analysis-ready agree with the
       // #456 auto-baseline-dedup truth table. An explicit `true` on EITHER
       // surface wins — the old `dataBaseline ?? nodeBaseline` let a split-field
       // `data:false` MASK an explicit `node:true`, mis-rendering the status-quo
       // option as "not the current arrangement".
-      const resolved = readIsBaseline({ is_baseline: nodeBaseline, data: { is_baseline: dataBaseline } });
+      const resolved = resolveOptionIsBaseline(n);
       // Log when node-level fallback is used (data-level was undefined but node-level had a value)
       if (dataBaseline === undefined && nodeBaseline !== undefined) {
         log.debug({ event: 'cee.v3_transform.is_baseline_fallback', node_id: n.id, value: nodeBaseline }, 'cee.v3_transform.is_baseline_fallback');
@@ -1134,6 +1215,11 @@ export function transformResponseToV3(
   // intervention labels).
   // NodeV3 declares interventions and is_baseline as optional fields (CIL Phase 1).
   const optionById = new Map(v3Options.map((o) => [o.id, o]));
+  // ONE graph-level provenance authority, shared with GRAPH_READY. Applying it
+  // before the option projection makes `nodes[].provenance` the source for the
+  // matching `options[].provenance.source`, so the two terminal carriers and
+  // the staged carrier cannot decide authorship independently.
+  applyBriefBoundNodeProvenance(v3NodesTyped, context.brief);
   for (const node of v3NodesTyped) {
     if (node.kind !== "option") continue;
     const opt = optionById.get(node.id);
@@ -1162,9 +1248,7 @@ export function transformResponseToV3(
     // now derive HERE, from the brief bytes, through the same authority the
     // projector binds stated items with — so they cannot disagree, and neither
     // can claim the brief without it saying so.
-    const optionBinding = bindOptionLabelToBrief(node.label, context.brief);
-    const earned = bindingEarnsBriefClaim(optionBinding);
-    node.provenance = earned ? "from_brief" : "ai_inferred";
+    const earned = node.provenance === "from_brief";
     opt.provenance = {
       ...(opt.provenance ?? {}),
       source: earned ? "brief_extraction" : "cee_hypothesis",
@@ -1172,6 +1256,10 @@ export function transformResponseToV3(
     };
   }
 
+  // The derivation below documents the policy executed by
+  // `applyBriefBoundNodeProvenance` above. The executable predicate was moved
+  // to graph scope so GRAPH_READY and COMPLETE consume one authority; the
+  // evidence and fail-closed rulings remain here beside the terminal carrier.
   // ⭐⭐ ROW 2.1205 — THE BADGE WAS REACHABLE FOR EXACTLY ONE NODE KIND.
   //
   // ── MEASURED, ON BANKED CAPTURES ─────────────────────────────────────────
@@ -1231,14 +1319,6 @@ export function transformResponseToV3(
   // node with the user's own quote (`projector.ts:1614`) and `NODE_KIND_MAP`
   // maps `constraint → risk`. Before this loop that path could not earn the
   // badge either.
-  const LABEL_BOUND_KINDS: ReadonlySet<string> = new Set([
-    "goal",
-    "risk",
-    "outcome",
-    "decision",
-  ]);
-  for (const node of v3NodesTyped) {
-    if (!LABEL_BOUND_KINDS.has(node.kind)) continue;
     // ⚠ THE FIELD NAMES HERE WERE WRONG ON THE FIRST WRITE, AND A TEST CAUGHT
     // IT — worth recording, because the guard was PRESENT and CORRECT and
     // pointed at bytes that do not exist (trap 22: verify what a guard actually
@@ -1265,14 +1345,6 @@ export function transformResponseToV3(
     // derived is the schema's KEY SET, so a completeness twin pins it and REDs
     // when a new node field lands, forcing the question "is this value-bearing?"
     // rather than letting the next `intercept` arrive silently.
-    const carriesValue =
-      node.observed_state !== undefined ||
-      node.prior !== undefined ||
-      node.display_value !== undefined ||
-      typeof node.intercept === "number" ||
-      typeof node.goal_threshold === "number" ||
-      typeof node.goal_threshold_raw === "number";
-    if (carriesValue) continue;
 
     // ⭐⭐ ELIGIBILITY — A SINGLE WORD IS NOT EVIDENCE OF AUTHORSHIP.
     //
@@ -1313,15 +1385,6 @@ export function transformResponseToV3(
     // one whitespace token and declines despite being specific. That is the safe
     // direction, and the class ends the same way the floor's does — with span
     // binding into the brief, where no token counting is needed at all.
-    const tokenCount =
-      typeof node.label === "string" ? node.label.trim().split(/\s+/).filter(Boolean).length : 0;
-    if (tokenCount < 2) continue;
-
-    const binding = bindOptionLabelToBrief(node.label, context.brief);
-    if (bindingEarnsBriefClaim(binding)) {
-      node.provenance = "from_brief";
-    }
-  }
 
   // ⭐⭐ REPHRASE ABSORPTION — an obvious restatement of the user's own option may
   // not become a second canonical option (Paul's ruling, 14 Aug 2026).
