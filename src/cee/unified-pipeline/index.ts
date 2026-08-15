@@ -1138,7 +1138,12 @@ async function runUnifiedPipelineAttempt(
     if (ctx.opts.onStage) {
       emitStageEvent(ctx, {
         kind: "GRAPH_READY",
-        graph: projectGraphForStagedFrame(ctx.graph, ctx.opts.schemaVersion, ctx.requestId),
+        graph: projectGraphForStagedFrame(
+          ctx.graph,
+          ctx.opts.schemaVersion,
+          ctx.requestId,
+          ctx.input.brief,
+        ),
         schema_version: ctx.opts.schemaVersion,
         elapsed_ms: Date.now() - ctx.start,
       });
