@@ -35,13 +35,18 @@ import { FailoverAdapter } from "./failover.js";
 import { withCaching } from "./caching.js";
 import { withUsageTracking } from "./usage-tracking.js";
 import { isValidCeeTask, getDefaultModelForTask } from "../../config/model-routing.js";
-import { isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
 import {
-  ModelAssignmentError,
   resolveModelAssignment,
   type ModelAssignmentAvailability,
+  type ResolvedModelAssignment,
 } from "../../config/model-assignment.js";
 import { FALLBACK_ANTHROPIC_MODEL } from "./model-fallback.js";
+import {
+  resolveRouterResolution,
+  type ProviderConfig,
+  type RouterResolutionOutcome,
+  type RouterResolutionSource,
+} from "./router-resolution.js";
 
 /**
  * Map task names to CEE model config keys — the router's env-override table.
@@ -66,6 +71,28 @@ export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> 
   'edit_graph': 'edit_graph',
   'm2_graph_review': 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
 };
+
+const CONFIG_KEY_TO_MODEL_ENV_KEY: Partial<
+  Record<keyof typeof config.cee.models, string>
+> = {
+  draft: 'config.cee.models.draft',
+  options: 'CEE_MODEL_OPTIONS',
+  repair: 'CEE_MODEL_REPAIR',
+  clarification: 'CEE_MODEL_CLARIFICATION',
+  critique: 'CEE_MODEL_CRITIQUE',
+  validation: 'CEE_MODEL_VALIDATION',
+  decision_review: 'CEE_MODEL_DECISION_REVIEW',
+  orchestrator: 'CEE_MODEL_ORCHESTRATOR',
+  edit_graph: 'CEE_MODEL_EDIT_GRAPH',
+  m2_review: 'CEE_MODEL_M2_REVIEW',
+};
+
+function getTaskModelSourceKey(
+  configKey: keyof typeof config.cee.models | undefined,
+): string | undefined {
+  if (!configKey) return undefined;
+  return CONFIG_KEY_TO_MODEL_ENV_KEY[configKey] ?? `config.cee.models.${configKey}`;
+}
 
 /**
  * Router tasks that route a CEE_MODEL_* override (they appear in
@@ -181,20 +208,6 @@ function resolveProviderModel(
 // Deferred to function to avoid triggering config validation at module load time
 function getConfigPath(): string {
   return config.llm.providersConfigPath || join(process.cwd(), 'config', 'providers.json');
-}
-
-/**
- * Provider configuration schema
- */
-interface ProviderConfig {
-  defaults?: {
-    provider: 'anthropic' | 'openai' | 'fixtures';
-    model?: string;
-  };
-  overrides?: Record<string, {
-    provider: 'anthropic' | 'openai' | 'fixtures';
-    model?: string;
-  }>;
 }
 
 /**
@@ -595,62 +608,48 @@ function getAdapterInstance(provider: 'anthropic' | 'openai' | 'fixtures', model
   return adapter;
 }
 
-/**
- * Create a failover-enabled adapter from environment configuration
- *
- * Reads LLM_FAILOVER_PROVIDERS env var (comma-separated list, e.g., "anthropic,openai,fixtures")
- * Returns FailoverAdapter that tries providers in sequence, or null if not configured
- */
-function createFailoverAdapter(task?: string): LLMAdapter | null {
-  const failoverProviders = config.llm.failoverProviders;
+function logFailoverAttempt(outcome: RouterResolutionOutcome): void {
+  const attempt = outcome.failoverAttempt;
+  if (!attempt) return;
 
-  if (!failoverProviders || failoverProviders.length === 0) {
-    return null;
-  }
-
-  // failoverProviders is already parsed as array by config
-  const providerNames = failoverProviders;
-
-  if (providerNames.length < 2) {
+  for (const rejection of attempt.rejectedProviders) {
     log.warn(
-      { LLM_FAILOVER_PROVIDERS: providerNames.join(',') },
-      "LLM_FAILOVER_PROVIDERS must specify at least 2 providers, ignoring"
+      {
+        provider: rejection.provider,
+        task: outcome.task,
+        error: rejection.error,
+      },
+      "Failover provider is invalid or lacks the task capability; skipping",
     );
-    return null;
   }
 
-  // Create adapter for each provider
-  const adapterList: LLMAdapter[] = [];
-  for (const providerName of providerNames) {
-    try {
-      const provider = providerName as 'anthropic' | 'openai' | 'fixtures';
-      const assignment = resolveProviderModel(provider);
-      const adapter = getAdapterInstance(
-        assignment.provider,
-        assignment.model,
-      );
-      adapterList.push(adapter);
-    } catch (error) {
-      log.warn(
-        { provider: providerName, error },
-        "Failed to create adapter for failover provider, skipping"
-      );
-    }
-  }
-
-  if (adapterList.length < 2) {
+  if (attempt.requestedProviders.length < 2) {
     log.warn(
-      { valid_adapters: adapterList.length },
-      "Not enough valid adapters for failover, disabling"
+      { LLM_FAILOVER_PROVIDERS: attempt.requestedProviders.join(',') },
+      "LLM_FAILOVER_PROVIDERS must specify at least 2 providers, ignoring",
     );
-    return null;
+  } else if (!attempt.active) {
+    log.warn(
+      {
+        valid_adapters: attempt.acceptedAssignments.length,
+        task: outcome.task,
+      },
+      "Not enough task-capable adapters for failover, disabling",
+    );
   }
+}
 
-  log.info(
-    { providers: adapterList.map(a => a.name), task },
-    "Failover enabled - will try providers in sequence"
+function createFailoverAdapter(
+  task: string | undefined,
+  assignments: readonly ResolvedModelAssignment[],
+): LLMAdapter {
+  const adapterList = assignments.map((assignment) =>
+    getAdapterInstance(assignment.provider, assignment.model),
   );
-
+  log.info(
+    { providers: adapterList.map((adapter) => adapter.name), task },
+    "Failover enabled - will try providers in sequence",
+  );
   return new FailoverAdapter(adapterList, task || "unknown");
 }
 
@@ -658,11 +657,11 @@ function createFailoverAdapter(task?: string): LLMAdapter | null {
  * Get the appropriate LLM adapter for a given task.
  *
  * Selection precedence:
- * 1. Request-time model override (from client API body parameter) - highest priority
- * 2. Failover configuration (LLM_FAILOVER_PROVIDERS) - wraps multiple providers
- * 3. Task-specific override from config file
- * 4. CEE_MODEL_* environment variables
- * 5. TASK_MODEL_DEFAULTS code defaults
+ * 1. Failover configuration (LLM_FAILOVER_PROVIDERS) - outer availability policy
+ * 2. Request-time model override (from client API body parameter)
+ * 3. CEE_MODEL_* environment variables
+ * 4. TASK_MODEL_DEFAULTS code defaults
+ * 5. Task-specific/default model from providers config
  * 6. LLM_PROVIDER / LLM_MODEL global env vars
  * 7. Adapter default (gpt-4o-mini)
  *
@@ -695,13 +694,7 @@ export function getAdapter(task?: string, modelOverride?: string): LLMAdapter {
  * - llm_model_fallback: LLM_PROVIDER/LLM_MODEL env vars, adapter default,
  *   or failover (failover controls its own model internally).
  */
-export type ResolutionSource =
-  | 'per_call'
-  | 'store_model_config'
-  | 'env_var'
-  | 'task_default'
-  | 'providers_json'
-  | 'llm_model_fallback';
+export type ResolutionSource = RouterResolutionSource;
 
 export interface ModelResolution {
   readonly task?: string;
@@ -726,6 +719,37 @@ export interface AdapterWithResolution {
 }
 
 /**
+ * Resolve the router's exact configured plan without constructing an adapter.
+ * Runtime execution and `/admin/models/routing` both consume this boundary.
+ */
+export function resolveConfiguredRouterPlan(
+  task?: string,
+  modelOverride?: string,
+  origin?: 'per_call' | 'store_model_config',
+): RouterResolutionOutcome {
+  const taskConfigKey = task ? TASK_TO_CONFIG_KEY[task] : undefined;
+  const configuredTaskModel = getModelFromConfig(task);
+  const taskDefault =
+    task && isValidCeeTask(task) ? getDefaultModelForTask(task) : undefined;
+
+  return resolveRouterResolution({
+    task,
+    modelOverride,
+    origin,
+    failoverProviders: config.llm.failoverProviders,
+    providersConfig: getConfig(),
+    configuredProvider: config.llm.provider || DEFAULT_PROVIDER,
+    globalModel: config.llm.model || DEFAULT_MODEL,
+    configuredTaskModel,
+    configuredTaskModelSourceKey: getTaskModelSourceKey(taskConfigKey),
+    taskDefault,
+    taskDefaultSourceKey: task ? `TASK_MODEL_DEFAULTS.${task}` : undefined,
+    providerDefaultModels: PROVIDER_DEFAULT_MODELS,
+    clientBlockedModels: getClientBlockedModels(),
+  });
+}
+
+/**
  * Get an adapter along with metadata describing which precedence step
  * delivered the model. Prefer this over getAdapter at any site where the
  * caller has request/turn context and can log or record the resolution.
@@ -740,178 +764,50 @@ export function getAdapterWithResolution(
   modelOverride?: string,
   origin?: 'per_call' | 'store_model_config',
 ): AdapterWithResolution {
-  // Check for cached failover adapter first (before creating new objects)
-  const failoverCacheKey = `failover:${task || "default"}`;
-  if (wrappedAdapters.has(failoverCacheKey)) {
-    // Model override is not supported with failover configuration
+  const outcome = resolveConfiguredRouterPlan(task, modelOverride, origin);
+  if (outcome.kind === 'configuration_error') {
+    logFailoverAttempt(outcome);
+    throw outcome.error;
+  }
+
+  if (outcome.kind === 'failover') {
     if (modelOverride) {
       log.warn(
         { task, model_override: modelOverride, reason: 'failover_configured' },
-        "Model override ignored: failover configuration takes precedence"
+        "Model override ignored: failover configuration takes precedence",
+      );
+    }
+
+    const failoverCacheKey = `failover:${task || "default"}`;
+    if (!wrappedAdapters.has(failoverCacheKey)) {
+      logFailoverAttempt(outcome);
+      const failoverAdapter = createFailoverAdapter(task, outcome.assignments);
+      wrappedAdapters.set(
+        failoverCacheKey,
+        withUsageTracking(withCaching(failoverAdapter)),
       );
     }
     const adapter = wrappedAdapters.get(failoverCacheKey)!;
+    const primary = outcome.assignments[0]!;
     return {
       adapter,
       resolution: {
         task,
-        resolved_model: adapter.model,
-        resolution_source: 'llm_model_fallback',
+        resolved_model: primary.model,
+        resolution_source: outcome.resolutionSource,
         modelOverride,
-        provider: adapter.name as 'anthropic' | 'openai' | 'fixtures',
+        provider: primary.provider,
+        availability: primary.availability,
+        registry_model_id: primary.registryModelId,
       },
     };
   }
 
-  // Check for failover configuration (only if not cached)
-  const failoverAdapter = createFailoverAdapter(task);
-  if (failoverAdapter) {
-    // Model override is not supported with failover configuration
-    // (failover involves multiple providers with pre-configured models)
-    if (modelOverride) {
-      log.warn(
-        { task, model_override: modelOverride, reason: 'failover_configured' },
-        "Model override ignored: failover configuration takes precedence"
-      );
-    }
-    // Cache the wrapped failover adapter
-    wrappedAdapters.set(failoverCacheKey, withUsageTracking(withCaching(failoverAdapter)));
-    const adapter = wrappedAdapters.get(failoverCacheKey)!;
-    return {
-      adapter,
-      resolution: {
-        task,
-        resolved_model: adapter.model,
-        resolution_source: 'llm_model_fallback',
-        modelOverride,
-        provider: adapter.name as 'anthropic' | 'openai' | 'fixtures',
-      },
-    };
-  }
-  const providersConfig = getConfig();
-
-  // Read from centralized config (handles environment variables)
-  const envProvider = config.llm.provider || DEFAULT_PROVIDER;
-  const envModel = config.llm.model || DEFAULT_MODEL;
-
-  let selectedProvider: 'anthropic' | 'openai' | 'fixtures' = envProvider;
-  let selectedModel: string | undefined = envModel === 'auto' ? undefined : envModel;
-  // Track which precedence branch most recently assigned selectedModel.
-  // Start as llm_model_fallback (LLM_MODEL env / DEFAULT_MODEL).
-  let winningSource: ResolutionSource = 'llm_model_fallback';
-
-  // Check for task-specific override in config file (providers.json)
-  if (providersConfig && task && providersConfig.overrides?.[task]) {
-    const override = providersConfig.overrides[task];
-    selectedProvider = override.provider;
-    if (override.model) {
-      selectedModel = override.model;
-      winningSource = 'providers_json';
-    }
-    log.info(
-      { task, provider: selectedProvider, model: selectedModel, source: 'config_override' },
-      "Using task-specific provider override"
-    );
-  }
-  // Check for config file defaults
-  else if (providersConfig?.defaults) {
-    selectedProvider = providersConfig.defaults.provider;
-    if (providersConfig.defaults.model) {
-      selectedModel = providersConfig.defaults.model;
-      winningSource = 'providers_json';
-    }
-    log.info(
-      { provider: selectedProvider, model: selectedModel, source: 'config_default' },
-      "Using provider from config defaults"
-    );
-  }
-  // Use environment variables (already set above)
-  else {
-    log.info(
-      { provider: selectedProvider, model: selectedModel, source: 'environment' },
-      "Using provider from environment"
-    );
-  }
-
-  // Request-time model override takes highest priority (after failover)
-  // This is used when client specifies model in request body
-  if (modelOverride) {
-    // Validate model override against blocklist
-    // Note: Route handlers should also validate before calling getAdapter, but this
-    // provides a defensive fallback if an invalid model slips through
-    const overrideAssignment = resolveModelAssignment(modelOverride, {
-      fixtures: selectedProvider === 'fixtures',
-    });
-    const blockedModels = getClientBlockedModels();
-    if (
-      overrideAssignment.provider !== 'fixtures' &&
-      !isModelClientAllowed(modelOverride, blockedModels)
-    ) {
-      const reason = getModelBlockReason(modelOverride, blockedModels);
-      throw new ModelAssignmentError(
-        'MODEL_CLIENT_BLOCKED',
-        modelOverride,
-        reason ?? `Model '${modelOverride}' is blocked for client use.`,
-      );
-    } else {
-      log.info(
-        { task, model_override: modelOverride, previous_model: selectedModel, provider: selectedProvider, source: 'request_body' },
-        "Using request-time model override from client"
-      );
-      selectedModel = modelOverride;
-      // Caller annotates origin: store_model_config or per_call (default).
-      winningSource = origin === 'store_model_config' ? 'store_model_config' : 'per_call';
-    }
-  }
-
-  // If no valid model override, use CEE tiered model selection
-  if (!modelOverride || selectedModel !== modelOverride) {
-    // CEE tiered model selection: override model based on task if configured
-    // Priority: CEE_MODEL_* env var > TASK_MODEL_DEFAULTS > LLM_MODEL
-    const ceeModel = getModelFromConfig(task);
-    if (ceeModel) {
-      if (selectedModel !== ceeModel) {
-        log.info(
-          { task, previous_model: selectedModel, cee_model: ceeModel, source: 'cee_env_override' },
-          "Using CEE task-specific model from environment"
-        );
-      }
-      selectedModel = ceeModel;
-      winningSource = 'env_var';
-    } else if (!ceeModel && task && isValidCeeTask(task)) {
-      // No env override - use TASK_MODEL_DEFAULTS
-      const taskDefault = getDefaultModelForTask(task);
-      // TASK_MODEL_DEFAULTS outranks LLM_PROVIDER / LLM_MODEL. Always select
-      // the task default here; the provider reconciliation immediately below
-      // moves to the model's registered provider. The former provider-match
-      // condition silently skipped cross-provider defaults, so dropping e.g.
-      // CEE_MODEL_ORCHESTRATOR made the declared Sonnet default fall through
-      // to the global OpenAI model instead of serving the checked-in map.
-      if (taskDefault) {
-        if (selectedModel !== taskDefault) {
-          log.info(
-            { task, previous_model: selectedModel, task_default: taskDefault, source: 'task_default' },
-            "Using task default model from TASK_MODEL_DEFAULTS"
-          );
-        }
-        selectedModel = taskDefault;
-        winningSource = 'task_default';
-      }
-    }
-
-  }
-
-  // One shared resolver is the only model→provider authority. It accepts an
-  // exact enabled registry row or a deliberately enumerated alias; an unknown
-  // string never borrows LLM_PROVIDER and never reaches an adapter by pattern.
-  const assignment = resolveProviderModel(selectedProvider, selectedModel);
-  selectedProvider = assignment.provider;
-  selectedModel = assignment.model;
-
-  // Reuse cached wrapper to preserve cache state across requests
-  const cacheKey = `single:${selectedProvider}:${selectedModel || "default"}`;
+  logFailoverAttempt(outcome);
+  const assignment = outcome.assignment;
+  const cacheKey = `single:${assignment.provider}:${assignment.model}`;
   if (!wrappedAdapters.has(cacheKey)) {
-    const adapter = getAdapterInstance(selectedProvider, selectedModel);
+    const adapter = getAdapterInstance(assignment.provider, assignment.model);
     wrappedAdapters.set(cacheKey, withUsageTracking(withCaching(adapter)));
   }
   const adapter = wrappedAdapters.get(cacheKey)!;
@@ -919,10 +815,10 @@ export function getAdapterWithResolution(
     adapter,
     resolution: {
       task,
-      resolved_model: selectedModel ?? adapter.model,
-      resolution_source: winningSource,
+      resolved_model: assignment.model,
+      resolution_source: outcome.resolutionSource,
       modelOverride,
-      provider: selectedProvider,
+      provider: assignment.provider,
       availability: assignment.availability,
       registry_model_id: assignment.registryModelId,
     },

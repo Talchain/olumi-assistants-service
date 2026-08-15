@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getAdapter, resetAdapterCache } from "../../src/adapters/llm/router.js";
+import {
+  getAdapter,
+  getAdapterWithResolution,
+  resetAdapterCache,
+} from "../../src/adapters/llm/router.js";
+import { ModelAssignmentError } from "../../src/config/model-assignment.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router - Failover Configuration", () => {
@@ -99,6 +104,24 @@ describe("LLM Router - Failover Configuration", () => {
     expect(adapter.name).toBe("fixtures-failover");
   });
 
+  it("keeps failover outside even an explicit model override", () => {
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "fixtures,fixtures");
+    vi.stubEnv("LLM_PROVIDER", "openai");
+
+    const { adapter, resolution } = getAdapterWithResolution(
+      "draft_graph",
+      "unregistered-model-that-must-be-ignored",
+    );
+
+    expect(adapter.name).toBe("fixtures-failover");
+    expect(resolution).toMatchObject({
+      provider: "fixtures",
+      resolved_model: "fixture-v1",
+      resolution_source: "llm_model_fallback",
+      modelOverride: "unregistered-model-that-must-be-ignored",
+    });
+  });
+
   it("should work with different provider combinations", () => {
     // Test anthropic -> fixtures failover (both should work in test env)
     vi.stubEnv("LLM_FAILOVER_PROVIDERS", "fixtures,fixtures");
@@ -106,5 +129,32 @@ describe("LLM Router - Failover Configuration", () => {
 
     expect(adapter).toBeDefined();
     expect(adapter.name).toBe("fixtures-failover");
+  });
+
+  it("filters unsupported critique providers before constructing the failover chain", () => {
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic,fixtures");
+
+    const { adapter, resolution } = getAdapterWithResolution("critique_graph");
+
+    expect(adapter.name).toBe("anthropic-failover");
+    expect(resolution).toMatchObject({
+      provider: "anthropic",
+      resolution_source: "llm_model_fallback",
+    });
+  });
+
+  it("does not pretend one task-capable member is an active failover chain", () => {
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic");
+    vi.stubEnv("LLM_PROVIDER", "openai");
+
+    let caught: unknown;
+    try {
+      getAdapterWithResolution("critique_graph");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ModelAssignmentError);
+    if (!(caught instanceof ModelAssignmentError)) return;
+    expect(caught.code).toBe("MODEL_PROVIDER_MISMATCH");
   });
 });

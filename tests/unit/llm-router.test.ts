@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getAdapter, getAdapterForProvider, getAdapterWithResolution, resetAdapterCache } from "../../src/adapters/llm/router.js";
 import { TASK_MODEL_DEFAULTS, type CeeTask } from "../../src/config/model-routing.js";
 import { _resetConfigCache } from "../../src/config/index.js";
+import { ModelAssignmentError } from "../../src/config/model-assignment.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router", () => {
@@ -203,6 +204,88 @@ describe("LLM Router", () => {
       expect(() => {
         getAdapterForProvider("unknown" as any);
       }).toThrow("Unknown provider");
+    });
+  });
+
+  describe("Task/provider capability authority", () => {
+    function expectProviderMismatch(run: () => unknown): void {
+      let caught: unknown;
+      try {
+        run();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(ModelAssignmentError);
+      if (!(caught instanceof ModelAssignmentError)) return;
+      expect(caught.code).toBe("MODEL_PROVIDER_MISMATCH");
+      expect(caught.message).toContain("does not implement task 'critique_graph'");
+    }
+
+    beforeEach(() => {
+      delete process.env.LLM_FAILOVER_PROVIDERS;
+      delete process.env.CEE_MODEL_CRITIQUE;
+      process.env.LLM_PROVIDER = "openai";
+      _resetConfigCache();
+      resetAdapterCache();
+    });
+
+    it("fails the unsupported critique default before constructing a serving adapter", () => {
+      expectProviderMismatch(() => getAdapterWithResolution("critique_graph"));
+    });
+
+    it("accepts an Anthropic critique env override and rejects an OpenAI override", () => {
+      process.env.CEE_MODEL_CRITIQUE = "claude-sonnet-4-6";
+      _resetConfigCache();
+      resetAdapterCache();
+
+      const valid = getAdapterWithResolution("critique_graph");
+      expect(valid.adapter.name).toBe("anthropic");
+      expect(valid.resolution).toMatchObject({
+        provider: "anthropic",
+        resolved_model: "claude-sonnet-4-6",
+        resolution_source: "env_var",
+      });
+
+      process.env.CEE_MODEL_CRITIQUE = "gpt-4o";
+      _resetConfigCache();
+      resetAdapterCache();
+      expectProviderMismatch(() => getAdapterWithResolution("critique_graph"));
+    });
+
+    it("applies the same guard to store pins while preserving valid Anthropic pins", () => {
+      expectProviderMismatch(() =>
+        getAdapterWithResolution(
+          "critique_graph",
+          "gpt-4o",
+          "store_model_config",
+        ),
+      );
+
+      const valid = getAdapterWithResolution(
+        "critique_graph",
+        "claude-sonnet-4-6",
+        "store_model_config",
+      );
+      expect(valid.adapter.name).toBe("anthropic");
+      expect(valid.resolution).toMatchObject({
+        provider: "anthropic",
+        resolved_model: "claude-sonnet-4-6",
+        resolution_source: "store_model_config",
+      });
+    });
+
+    it("preserves the implemented Fixtures critique path", () => {
+      process.env.LLM_PROVIDER = "fixtures";
+      _resetConfigCache();
+      resetAdapterCache();
+
+      const resolved = getAdapterWithResolution("critique_graph");
+      expect(resolved.adapter.name).toBe("fixtures");
+      expect(resolved.resolution).toMatchObject({
+        provider: "fixtures",
+        resolved_model: TASK_MODEL_DEFAULTS.critique_graph,
+        availability: "fixture_only",
+      });
     });
   });
 

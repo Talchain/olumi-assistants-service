@@ -155,6 +155,18 @@ describe("GET /admin/models/routing", () => {
       lifecycle_state: "feature_gated",
       runtime_availability: "feature_gated_default_off",
     });
+    expect(byTask.get("extraction")).toMatchObject({
+      provider: "fixtures",
+      availability: "fixture_only",
+      lifecycle_state: "dedicated_adapter",
+      runtime_availability: "available",
+    });
+    expect(byTask.get("critique_graph")).toMatchObject({
+      provider: "fixtures",
+      availability: "fixture_only",
+      lifecycle_state: "standalone_route",
+      runtime_availability: "available",
+    });
     expect(byTask.get("m2_graph_review")).toMatchObject({
       executable: false,
       has_executable_path: true,
@@ -183,6 +195,10 @@ describe("GET /admin/models/routing", () => {
         "default",
         "global_model",
         "provider_default",
+        "providers_config",
+        "failover",
+        "per_call",
+        "store_model_config",
       ]).toContain(entry.source);
       expect(typeof entry.model).toBe("string");
       expect(entry.model.length).toBeGreaterThan(0);

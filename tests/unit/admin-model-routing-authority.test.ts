@@ -1,23 +1,36 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { _resetConfigCache } from '../../src/config/index.js';
 import {
   EXECUTABLE_RUNTIME_TASKS,
+  ROUTER_TASK_PROVIDER_CAPABILITIES,
   RUNTIME_AI_TASK_AUTHORITY,
+  TASK_MODEL_DEFAULTS,
 } from '../../src/config/model-routing.js';
 import { resolveTaskRouting } from '../../src/routes/admin.models.js';
-import { PROVIDER_DEFAULT_MODELS } from '../../src/adapters/llm/router.js';
+import {
+  PROVIDER_DEFAULT_MODELS,
+  resetAdapterCache,
+} from '../../src/adapters/llm/router.js';
 
 const MANAGED_ENV = [
   'CEE_MODEL_SUMMARY',
   'CEE_MODEL_DECISION_REVIEW_HAIKU',
   'CEE_MODEL_CLARIFICATION',
+  'CEE_MODEL_CRITIQUE',
+  'CEE_MODEL_EXTRACTION',
+  'LLM_FAILOVER_PROVIDERS',
   'LLM_MODEL',
   'LLM_PROVIDER',
+  'PROVIDERS_CONFIG_PATH',
 ];
 
 afterEach(() => {
   for (const key of MANAGED_ENV) delete process.env[key];
   _resetConfigCache();
+  resetAdapterCache();
 });
 
 describe('admin runtime model-routing authority', () => {
@@ -29,6 +42,154 @@ describe('admin runtime model-routing authority', () => {
     );
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('clarify_brief');
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('explain_diff');
+    expect(ROUTER_TASK_PROVIDER_CAPABILITIES).toEqual({
+      critique_graph: ['anthropic', 'fixtures'],
+      explain_diff: ['anthropic', 'fixtures'],
+    });
+  });
+
+  it('reports the unsupported critique default before runtime without changing it', () => {
+    process.env.LLM_PROVIDER = 'openai';
+    _resetConfigCache();
+
+    expect(resolveTaskRouting('critique_graph')).toMatchObject({
+      model: TASK_MODEL_DEFAULTS.critique_graph,
+      provider: 'openai',
+      availability: 'configuration_error',
+      registry_model_id: 'gpt-5.2',
+      source: 'default',
+      source_key: 'TASK_MODEL_DEFAULTS.critique_graph',
+      configuration_error: {
+        code: 'MODEL_PROVIDER_MISMATCH',
+      },
+    });
+  });
+
+  it('reports critique env overrides through the shared provider capability', () => {
+    process.env.CEE_MODEL_CRITIQUE = 'claude-sonnet-4-6';
+    _resetConfigCache();
+
+    expect(resolveTaskRouting('critique_graph')).toMatchObject({
+      model: 'claude-sonnet-4-6',
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+      source: 'env_override',
+      source_key: 'CEE_MODEL_CRITIQUE',
+    });
+
+    process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
+    _resetConfigCache();
+
+    expect(resolveTaskRouting('critique_graph')).toMatchObject({
+      model: 'gpt-4o',
+      provider: 'openai',
+      availability: 'configuration_error',
+      source: 'env_override',
+      source_key: 'CEE_MODEL_CRITIQUE',
+      configuration_error: { code: 'MODEL_PROVIDER_MISMATCH' },
+    });
+  });
+
+  it('gives failover precedence and reports only task-capable members in order', () => {
+    process.env.LLM_FAILOVER_PROVIDERS = 'openai,anthropic,fixtures';
+    process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
+    _resetConfigCache();
+
+    expect(resolveTaskRouting('critique_graph')).toMatchObject({
+      model: PROVIDER_DEFAULT_MODELS.anthropic,
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+      source: 'failover',
+      source_key: 'LLM_FAILOVER_PROVIDERS',
+      failover_chain: [
+        {
+          model: PROVIDER_DEFAULT_MODELS.anthropic,
+          provider: 'anthropic',
+          availability: 'registry_enabled',
+        },
+        {
+          model: PROVIDER_DEFAULT_MODELS.fixtures,
+          provider: 'fixtures',
+          availability: 'fixture_only',
+        },
+      ],
+    });
+  });
+
+  it('consumes the real providers config for router fallback tasks', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'olumi-provider-routing-'));
+    const configPath = join(directory, 'providers.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        overrides: {
+          explain_diff: {
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-6',
+          },
+        },
+      }),
+    );
+
+    try {
+      process.env.PROVIDERS_CONFIG_PATH = configPath;
+      process.env.LLM_PROVIDER = 'openai';
+      _resetConfigCache();
+      resetAdapterCache();
+
+      expect(resolveTaskRouting('explain_diff')).toMatchObject({
+        model: 'claude-sonnet-4-6',
+        provider: 'anthropic',
+        availability: 'registry_enabled',
+        source: 'providers_config',
+        source_key: 'providers.json.overrides.explain_diff.model',
+      });
+
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          defaults: {
+            provider: 'anthropic',
+            model: 'claude-sonnet-4-20250514',
+          },
+        }),
+      );
+      _resetConfigCache();
+      resetAdapterCache();
+
+      expect(resolveTaskRouting('explain_diff')).toMatchObject({
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        availability: 'registry_enabled',
+        source: 'providers_config',
+        source_key: 'providers.json.defaults.model',
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('applies fixtures only to router/extraction chains while direct Anthropic chains stay Anthropic', () => {
+    process.env.LLM_PROVIDER = 'fixtures';
+    _resetConfigCache();
+
+    expect(resolveTaskRouting('critique_graph')).toMatchObject({
+      model: TASK_MODEL_DEFAULTS.critique_graph,
+      provider: 'fixtures',
+      availability: 'fixture_only',
+    });
+    expect(resolveTaskRouting('extraction')).toMatchObject({
+      provider: 'fixtures',
+      availability: 'fixture_only',
+    });
+    expect(resolveTaskRouting('rolling_summary')).toMatchObject({
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+    });
+    expect(resolveTaskRouting('decision_review_decompose')).toMatchObject({
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+    });
   });
 
   it('reports valid explicit overrides with exact served model bytes and sources', () => {

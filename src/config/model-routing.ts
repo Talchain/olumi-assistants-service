@@ -1,3 +1,8 @@
+import {
+  ModelAssignmentError,
+  type ResolvedModelAssignment,
+} from './model-assignment.js';
+
 /**
  * Task-to-Model Routing Configuration
  *
@@ -16,7 +21,7 @@
  *   1. per_call              explicit modelOverride parameter passed to
  *                            getAdapter(task, modelOverride). Clients can
  *                            supply via request body.
- *                            Source: src/adapters/llm/router.ts:688-719
+ *                            Source: src/adapters/llm/router-resolution.ts
  *
  *   2. store_model_config    prompt-store modelConfig.{staging,production},
  *                            read BY THE CALL SITE and handed to
@@ -54,17 +59,17 @@
  *                            divergence in either direction.
  *
  *   3. env_var               CEE_MODEL_* env vars via config.cee.models.*
- *                            Source: src/adapters/llm/router.ts:725-731
+ *                            Source: src/adapters/llm/router-resolution.ts
  *
  *   4. task_default          TASK_MODEL_DEFAULTS (this file) via
  *                            getDefaultModelForTask.
- *                            Source: src/adapters/llm/router.ts:732-750
+ *                            Source: src/adapters/llm/router-resolution.ts
  *
  *   5. providers_json        providers.json task-override or config_default.
- *                            Source: src/adapters/llm/router.ts:658-679
+ *                            Source: src/adapters/llm/router-resolution.ts
  *
  *   6. llm_model_fallback    LLM_PROVIDER / LLM_MODEL env or adapter default.
- *                            Source: src/adapters/llm/router.ts:650-656, 681-686
+ *                            Source: src/adapters/llm/router-resolution.ts
  *
  * The final resolution is observable per-LLM-call via debug-level log
  * "model.resolution" in callers that use getAdapterWithResolution, and
@@ -666,6 +671,57 @@ export const EXECUTABLE_RUNTIME_TASKS = Object.freeze(
       RUNTIME_AI_TASK_AUTHORITY[task].hasExecutablePath,
   ),
 );
+
+/**
+ * Explicit adapter-capability exceptions for routed tasks.
+ *
+ * Most LLMAdapter operations are implemented by every real provider. These
+ * two are deliberately different: OpenAI exposes compatibility stubs that
+ * throw before making a call, while Anthropic and the deterministic Fixtures
+ * adapter implement the operation. Keeping the exception beside runtime task
+ * authority lets both router execution and admin reporting consume one fact.
+ */
+export const ROUTER_TASK_PROVIDER_CAPABILITIES = Object.freeze({
+  critique_graph: Object.freeze(['anthropic', 'fixtures'] as const),
+  explain_diff: Object.freeze(['anthropic', 'fixtures'] as const),
+} as const satisfies Partial<
+  Record<
+    ExecutableRuntimeTask,
+    readonly ResolvedModelAssignment['provider'][]
+  >
+>);
+
+export type RouterTaskWithProviderConstraint =
+  keyof typeof ROUTER_TASK_PROVIDER_CAPABILITIES;
+
+/**
+ * Fail closed before adapter construction when a task's resolved provider has
+ * no executable implementation. Fixtures remain a first-class test provider
+ * only for tasks whose FixturesAdapter limb genuinely exists.
+ */
+export function requireTaskModelAssignmentCapability(
+  task: string | undefined,
+  assignment: ResolvedModelAssignment,
+): ResolvedModelAssignment {
+  if (!(task && task in ROUTER_TASK_PROVIDER_CAPABILITIES)) {
+    return assignment;
+  }
+
+  const supportedProviders = ROUTER_TASK_PROVIDER_CAPABILITIES[
+    task as RouterTaskWithProviderConstraint
+  ] as readonly ResolvedModelAssignment['provider'][];
+  if (supportedProviders.includes(assignment.provider)) {
+    return assignment;
+  }
+
+  throw new ModelAssignmentError(
+    'MODEL_PROVIDER_MISMATCH',
+    assignment.model,
+    `Model '${assignment.model}' resolves to provider '${assignment.provider}', ` +
+      `which does not implement task '${task}'. Supported providers: ` +
+      `${supportedProviders.join(', ')}.`,
+  );
+}
 
 export type ExecutableDedicatedRuntimeTask = {
   [Task in RuntimeAiTaskId]:
