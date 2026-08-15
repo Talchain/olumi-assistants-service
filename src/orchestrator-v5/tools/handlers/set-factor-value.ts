@@ -209,19 +209,7 @@ interface ObservedSnapshot {
    * pre-edit provenance is not what this event is reporting.
    */
   readonly source?: string;
-  /**
-   * ⚠ 0.41.0 — `evidence_event_id` IS DECLARED HERE DELIBERATELY, EVEN THOUGH
-   * NOTHING WOULD HAVE FAILED WITHOUT IT. The stamp sites below SPREAD
-   * `appliedProvenance.elicited_from` wholesale, so the member already reaches
-   * the wire at runtime whatever this type says; a narrower declaration would
-   * simply have been a lie that typechecked, and the next reader would have
-   * concluded from it that the citation does not travel on this hop.
-   */
-  readonly elicited_from?: {
-    readonly round_id: string;
-    readonly participant_id: string;
-    readonly evidence_event_id?: string;
-  };
+  readonly elicited_from?: { readonly round_id: string; readonly participant_id: string };
 }
 
 function snapshotObservedState(node: GraphV3T['nodes'][number]): ObservedSnapshot {

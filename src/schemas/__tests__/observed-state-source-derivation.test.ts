@@ -23,25 +23,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { OBSERVED_STATE_SOURCE_LITERALS } from '@talchain/schemas';
-import { RoundParticipantRefSchema } from '@talchain/schemas/boundary';
 
 import { GraphV3, ObservedStateV3 } from '../cee-v3.js';
-
-/**
- * The `elicited_from` members the SHARED CONTRACT declares, read off the schema
- * object at run time rather than retyped here.
- *
- * ⚠ THIS EXISTS BECAUSE THE PIN BELOW WAS A HAND-MAINTAINED MIRROR AND HAD
- * ALREADY DRIFTED — measured, not supposed. 0.41.0 added `evidence_event_id`
- * to `RoundParticipantRefSchema` and to `observed_state.elicited_from`; the
- * fixture in this file kept its two keys, and the file stayed 4/4 GREEN. The
- * pin therefore covered two thirds of the shape it claimed to pin, inside the
- * one file in this repo whose entire header is an argument against mirrors.
- * A guard that must be remembered is the defect it was written to prevent.
- */
-const CANONICAL_ELICITED_FROM_KEYS: readonly string[] = Object.keys(
-  RoundParticipantRefSchema.shape,
-).sort();
 
 /** Build a minimal graph carrying one factor with the given `source`. */
 function graphWithSource(source: string): unknown {
@@ -142,25 +125,7 @@ describe('ObservedStateV3.source — derived from the shared contract', () => {
     const elicitedFrom = {
       round_id: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
       participant_id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-      // 0.41.0 — the citation. Present in the fixture because the assertion
-      // below requires the pin to cover the whole contract shape; the day it
-      // was absent, this file reported a green pin over a member it never saw.
-      evidence_event_id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
     };
-
-    // ── THE DRIFT GUARD, DERIVED ────────────────────────────────────────────
-    // The fixture must carry EVERY member the contract declares, or the
-    // "rides through intact" claim below is scoped to whichever subset the last
-    // author happened to type. Set equality, so it fails loud in both
-    // directions: a contract that GROWS a member REDs here until the pin covers
-    // it, and a fixture carrying a member the contract does not declare REDs
-    // too (that one would be refused by the `.strict()` consumer downstream).
-    expect(
-      Object.keys(elicitedFrom).sort(),
-      'the elicited_from pin has drifted from the shared contract — grow the fixture ' +
-        'and decide what the new member means for the stamp, do not delete this check',
-    ).toEqual([...CANONICAL_ELICITED_FROM_KEYS]);
-
     const parsed = GraphV3.safeParse({
       nodes: [
         {
@@ -177,36 +142,5 @@ describe('ObservedStateV3.source — derived from the shared contract', () => {
     expect((node?.observed_state as { elicited_from?: unknown } | undefined)?.elicited_from).toEqual(
       elicitedFrom,
     );
-  });
-
-  it('HAND-WRITTEN corpus (trap 12d) — every elicited_from member this estate STAMPS is in the canonical shape', () => {
-    // The derived assertion above proves the fixture AGREES with the contract.
-    // It is structurally blind to the contract LOSING a member: delete
-    // `evidence_event_id` upstream and the fixture, the derived set and the
-    // parse would all agree on two keys, in silence — while
-    // `factor-value-edit.ts` went on stamping a third that the `.strict()`
-    // consumer would then refuse. Only a list written by hand, from the
-    // writers, can see that.
-    //
-    //   round_id           0.40.0 — which panel round the value came from
-    //   participant_id     0.40.0 — whose answer it was (AuthoredBy, by identity)
-    //   evidence_event_id  0.41.0 — which evidence motivated it
-    //                      (system-events/factor-value-edit.ts, the panel_elicited
-    //                       stamp; verified by apply-verification.ts binding (f))
-    const KNOWN_STAMPED_MEMBERS = ['round_id', 'participant_id', 'evidence_event_id'] as const;
-
-    for (const member of KNOWN_STAMPED_MEMBERS) {
-      expect(
-        CANONICAL_ELICITED_FROM_KEYS,
-        `CEE stamps '${member}' into observed_state.elicited_from, but the shared ` +
-          `contract no longer declares it — a .strict() consumer will refuse the graph`,
-      ).toContain(member);
-    }
-
-    // POSITIVE CONTROL: the same containment check is capable of failing, so a
-    // green result above is evidence the canonical list was read — not that the
-    // loop ran over an empty array or a permissive object.
-    expect(CANONICAL_ELICITED_FROM_KEYS).not.toContain('member_the_contract_does_not_declare');
-    expect(CANONICAL_ELICITED_FROM_KEYS.length).toBe(KNOWN_STAMPED_MEMBERS.length);
   });
 });

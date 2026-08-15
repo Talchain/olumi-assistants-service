@@ -64,13 +64,6 @@ export const COLLAB_REFUSAL_CODES = [
   'collab_apply_round_not_applyable',
   'collab_apply_no_stated_value',
   'collab_apply_value_mismatch',
-  /* ── 0.41.0: the CITATION (`applied_from.evidence_event_id`) ─────────────
-   * A FIFTH distinct question, for the same reason the four above are not one
-   * code: the owner who cited a piece of evidence needs to know that THE
-   * CITATION was rejected, not that their round or their colleague's number
-   * was. Collapsing it into `collab_apply_invalid` would tell them to re-read
-   * the panel results when the panel results are fine. */
-  'collab_apply_evidence_not_found',
 ] as const;
 
 export type CollabRefusalCode = (typeof COLLAB_REFUSAL_CODES)[number];

@@ -402,10 +402,7 @@ export async function appendParticipantEvent(
   // byte-identical to before this line changed.
   const ownEvents = await store.listOwnEvents(args.round_id, participantId);
   const sameFamily = ownEvents.filter(
-    (e) =>
-      e.target.kind === payload.target.kind &&
-      e.target.id === payload.target.id &&
-      isAnswerKind(e.kind) === isAnswerKind(payload.kind),
+    (e) => e.target.id === payload.target.id && isAnswerKind(e.kind) === isAnswerKind(payload.kind),
   );
 
   const row: ElicitationEventRow = {
