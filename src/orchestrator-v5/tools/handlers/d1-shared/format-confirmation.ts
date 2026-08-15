@@ -265,6 +265,9 @@ export interface EdgeAdjustmentInput {
   readonly toLabel: string;
   readonly beforeMean: number;
   readonly afterMean: number;
+  /** Explicit persisted directions are required to describe zero honestly. */
+  readonly beforeDirection?: 'positive' | 'negative';
+  readonly afterDirection?: 'positive' | 'negative';
 }
 
 /**
@@ -276,13 +279,33 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
   const beforeBand = describeBandWithDirection(input.beforeMean);
   const afterBand = describeBandWithDirection(input.afterMean);
 
-  const directionFlipped =
-    Math.sign(input.beforeMean) !== 0 &&
-    Math.sign(input.afterMean) !== 0 &&
-    Math.sign(input.beforeMean) !== Math.sign(input.afterMean);
+  const beforeDirection =
+    input.beforeDirection ?? (input.beforeMean < 0 ? 'negative' : 'positive');
+  const afterDirection =
+    input.afterDirection ?? (input.afterMean < 0 ? 'negative' : 'positive');
+  const directionFlipped = beforeDirection !== afterDirection;
+
+  // A zero mean has no numeric sign, but the canonical model deliberately
+  // retains direction for a later non-zero adjustment. Do not narrate a
+  // meaningless "no influence → no influence" band change or infer positive.
+  if (
+    input.beforeMean === 0 &&
+    input.afterMean === 0 &&
+    directionFlipped
+  ) {
+    return (
+      `Adjusted the direction of the link between ${input.fromLabel} and ` +
+      `${input.toLabel} to ${afterDirection}. Its strength remains zero, so ` +
+      `it currently has no material influence.`
+    );
+  }
 
   const tail = directionFlipped
-    ? ` Direction reversed: now ${input.afterMean < 0 ? 'negative' : 'positive'}.`
+    ? input.afterMean === 0
+      ? ` Its strength is now zero; the stored direction is ${afterDirection}.`
+      : input.beforeMean === 0
+        ? ''
+        : ` Direction reversed: now ${afterDirection}.`
     : '';
 
   return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
@@ -311,6 +334,25 @@ export function formatEdgeStrengthUnchanged(input: {
     return `${link} already has no material influence.`;
   }
   return `${link} is already ${describeBandWithDirection(input.mean)}.`;
+}
+
+/**
+ * Receipt for an explicit `confirm_current` edge-strength act. Unlike an
+ * ordinary numeric no-op, confirmation changes provenance: the human has
+ * adopted the current model value as their judgement. It deliberately repeats
+ * neither a number nor a direction; the strict expected-before check proves
+ * which current value was confirmed, and omitting both avoids reconstructing
+ * either one from display state (especially at zero, whose direction is not
+ * recoverable from sign).
+ */
+export function formatEdgeStrengthConfirmed(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+}): string {
+  return (
+    `Confirmed the current strength of the link between ${input.fromLabel} ` +
+    `and ${input.toLabel} as your judgement.`
+  );
 }
 
 function describeBandWithDirection(mean: number): string {

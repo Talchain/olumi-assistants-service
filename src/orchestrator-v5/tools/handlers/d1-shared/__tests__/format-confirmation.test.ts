@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatConstraintAdded,
   formatEdgeAdjustment,
+  formatEdgeStrengthConfirmed,
   formatFactorChange,
   formatGoalTargetUnchanged,
   formatValueWithUnit,
@@ -161,6 +162,50 @@ describe('formatEdgeAdjustment', () => {
     expect(text).toContain('moderate (negative)');
     expect(text).toContain('strong (negative)');
     expect(text).not.toMatch(RAW_DECIMAL);
+  });
+
+  it('describes a direction-only change at zero without inventing influence', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'churn',
+      toLabel: 'revenue',
+      beforeMean: 0,
+      afterMean: 0,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    expect(text).toContain('direction');
+    expect(text).toContain('negative');
+    expect(text).toContain('strength remains zero');
+    expect(text).toContain('no material influence');
+    expect(text).not.toContain('Direction reversed');
+  });
+
+  it('does not call a move away from zero an influence reversal', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'churn',
+      toLabel: 'revenue',
+      beforeMean: 0,
+      afterMean: 0.5,
+      beforeDirection: 'negative',
+      afterDirection: 'positive',
+    });
+    expect(text).toContain('moderate');
+    expect(text).not.toContain('Direction reversed');
+  });
+});
+
+describe('formatEdgeStrengthConfirmed', () => {
+  it('names the provenance act without fabricating a number or direction', () => {
+    const text = formatEdgeStrengthConfirmed({
+      fromLabel: 'Demand',
+      toLabel: 'Growth',
+    });
+    expect(text).toBe(
+      'Confirmed the current strength of the link between Demand and Growth as your judgement.',
+    );
+    expect(text).not.toMatch(RAW_DECIMAL);
+    expect(text).not.toMatch(/positive|negative/i);
+    expect(text).not.toContain('Adjusted');
   });
 });
 

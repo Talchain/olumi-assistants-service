@@ -1957,19 +1957,31 @@ export async function loadPersistedGraph(
  * logs rather than throwing. It must never be used where a fact read is
  * load-bearing for a decision — for that, read through a path that fails closed.
  */
-export async function loadPriorFactsQuietly(
+export type PriorFactsReadResult =
+  | { readonly status: 'ok'; readonly facts: readonly HandlerFact[] }
+  | { readonly status: 'degraded'; readonly facts: readonly [] };
+
+/**
+ * Observational prior-fact read with explicit degradation state.
+ *
+ * Freshness consumers must distinguish "there are no prior analysis facts"
+ * from "the fact store could not be read": the former is canonical `none`,
+ * while the latter is `unknown`. This remains non-authoritative for mutation;
+ * graph and pending reads own the fail-closed write gates.
+ */
+export async function loadPriorFactsWithReadState(
   scenarioId: string,
   requestId: string,
   sessionStore?: SessionStore,
-): Promise<readonly HandlerFact[]> {
+): Promise<PriorFactsReadResult> {
   try {
     const store = sessionStore ?? getSessionStore();
     const recent = await store.readRecent(scenarioId);
     const rowIds = recent
       .map((t) => t.id)
       .filter((id): id is string => typeof id === 'string');
-    if (rowIds.length === 0) return [];
-    return await store.readFactsFor(rowIds);
+    if (rowIds.length === 0) return { status: 'ok', facts: [] };
+    return { status: 'ok', facts: await store.readFactsFor(rowIds) };
   } catch (err) {
     log.warn(
       {
@@ -1980,8 +1992,18 @@ export async function loadPriorFactsQuietly(
       },
       'Prior-fact read failed; proceeding without prior facts',
     );
-    return [];
+    return { status: 'degraded', facts: [] };
   }
+}
+
+export async function loadPriorFactsQuietly(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<readonly HandlerFact[]> {
+  return (
+    await loadPriorFactsWithReadState(scenarioId, requestId, sessionStore)
+  ).facts;
 }
 
 export async function loadPersistedGraphStrict(

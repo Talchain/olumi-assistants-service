@@ -60,24 +60,27 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     expect(unionKinds).toEqual([...SystemEventKind.options].sort());
   });
 
-  it('the mutating set is exactly { factor_value_edit } — a graph write is never incidental', () => {
+  it('the declared mutating set is exactly the two value-carrying writers', () => {
     const mutating = Object.entries(SYSTEM_EVENT_HANDLING)
       .filter(([, handling]) => handling === 'mutating')
       .map(([kind]) => kind);
     // Pinned deliberately narrow. Anything that writes `scenarios.graph` moves
     // `graph_hash` and invalidates the user's analysis, so a second kind joining
-    // this set must be a conscious act with a RED to justify it.
-    expect(mutating).toEqual(['factor_value_edit']);
+    // this set must be a conscious act with a RED to justify it. Train C adds
+    // edge_strength_edit deliberately; dispatch still resolves it back onto
+    // the reader-only floor unless the boot-validated CAS capability is in
+    // enforce mode.
+    expect(mutating).toEqual(['factor_value_edit', 'edge_strength_edit']);
   });
 
-  it('the reader-only refusal set is exactly { edge_strength_edit } — parsing is not mutation permission', () => {
+  it('has no permanently reader-only kind after Train C writer declaration', () => {
     const readerOnly = Object.entries(SYSTEM_EVENT_HANDLING)
       .filter(([, handling]) => handling === 'reader_only_refusal')
       .map(([kind]) => kind);
-    // Mutation control: changing this entry to ack_and_commit, fact_and_commit
-    // or mutating REDs here. The later writer train must change this assertion
-    // consciously; reverting that train restores this safe floor.
-    expect(readerOnly).toEqual(['edge_strength_edit']);
+    // Runtime activation is intentionally stricter than this declaration:
+    // edge_strength_edit still executes the deployed reader refusal under CAS
+    // off/shadow. Reverting Train C restores the explicit map entry as well.
+    expect(readerOnly).toEqual([]);
   });
 
   it('client-only kinds are exactly the ones that commit nothing', () => {

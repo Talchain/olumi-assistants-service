@@ -17,14 +17,11 @@
  *     recognises this reason and still returns 200 — the skip is honest,
  *     not a fake success. See src/orchestrator/route-v2.ts for the
  *     skip-reason allowlist.
- *   - edge_strength_edit (0.42 compatibility reader) → commit a typed refusal
- *     transcript with no graph, handler facts or newly-derived pending action.
- *     Legitimate prior pendings follow the canonical carry-forward lifecycle;
- *     writer behaviour is a separate train.
+ *   - factor_value_edit, edge_strength_edit → run the existing canonical D1
+ *     handler, then atomically persist graph + fact with a trusted-base CAS.
  *
- * Response envelope: existing kinds retain their prior silent acknowledgement;
- * the reader-only event returns a typed non-retryable FEATURE_NOT_ENABLED
- * response that says the model was not changed.
+ * Response envelope: acknowledgement kinds retain their prior silent response;
+ * value-carrying writers return the canonical handler receipt.
  */
 
 import type {
@@ -35,16 +32,32 @@ import type {
 import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { config } from '../../config/index.js';
 import { log } from '../../utils/telemetry.js';
 import {
+  GraphStaleWriteError,
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
   loadPriorFactsQuietly,
+  loadPriorFactsWithReadState,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import {
+  deriveAnalysisFreshness,
+  emitFreshnessTelemetry,
+  type FreshnessDerivation,
+} from '../context/freshness.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
+import {
+  applyEdgeStrengthEdit,
+  isExactCommittedEdgeReadback,
+  isProvenanceOnlyEdgeConfirmation,
+  type EdgeStrengthEditAuthorityConflict,
+} from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
 
 export type SystemEventCommitSkipReason = 'client_only_event';
@@ -56,8 +69,7 @@ export interface DispatchSystemEventResult {
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
-   *   undo / redo / selection_change / chip_click / patch_dismissed /
-   *   edge_strength_edit (reader-only refusal)
+   *   undo / redo / selection_change / chip_click / patch_dismissed
    *     No server-side graph state to inspect. analysisReady stays
    *     undefined; the finaliser stamps no analysis_ready, and the UI's
    *     prior `ceeAnalysisReady` remains the truth (it was correct before
@@ -71,10 +83,9 @@ export interface DispatchSystemEventResult {
    *     events (per `invalidateAnalysisReady()` in DecisionGuideAI canvas
    *     store).
    *
-   *   factor_value_edit
-   *     Graph-mutating ON THE SERVER, and the one kind that populates this
-   *     field. It carries the VALUE, so the dispatch can run the real
-   *     `set_factor_value` mutation, commit the graph, and re-derive
+   *   factor_value_edit / edge_strength_edit
+   *     Graph-mutating ON THE SERVER. Each carries the VALUE, so dispatch can
+   *     run the corresponding canonical D1 mutation, commit the graph, and re-derive
    *     readiness from the COMMITTED bytes via `computeStructuralReadiness`
    *     — which is exactly the "future change" the paragraph above
    *     anticipated. Readiness is derived post-commit, never pre-, so it can
@@ -87,12 +98,10 @@ export interface DispatchSystemEventResult {
   /**
    * Graph for the central egress sanitiser.
    *
-   * `null` for the acknowledgement kinds and the reader-only refusal. The
-   * acknowledgements carry no prose; the refusal copy is fixed and contains no
-   * graph entity ids, so a graph-free scrub is sufficient.
+   * `null` for acknowledgement kinds and refusals without a usable graph.
    *
-   * NON-NULL FOR `factor_value_edit`. That kind ships real prose ("Updated
-   * Marketing budget from £40,000 to £50,000.") through
+   * NON-NULL FOR successful value-carrying writers. They ship real prose
+   * ("Updated Marketing budget from £40,000 to £50,000.") through
    * `sanitiseOlumiResponseForEgress`, whose entity-id leak scrub resolves ids
    * to labels AGAINST THIS GRAPH. Passing `null` does not SKIP the scrub — it
    * runs graph-free, and a graph-free scrub cannot tell an ambiguous
@@ -112,6 +121,23 @@ export interface DispatchSystemEventResult {
    * this field to `null` and that test REDs.
    */
   readonly graph: GraphV3T | null;
+  /**
+   * Canonical analysis currency against the graph this turn actually wrote.
+   * Present on the edge writer only after a successful atomic commit; omitted
+   * on the reader floor so its deployed response remains byte-compatible.
+   */
+  readonly freshness?: FreshnessDerivation;
+  /**
+   * Recoverable canonical-state divergence. The route maps this outcome to
+   * HTTP 409 + GRAPH_DIVERGED; generic integrity/infra failures omit it and
+   * remain retryable 500. No graph or turn write lands for this outcome.
+   */
+  readonly graphConflict?: {
+    readonly recovery_action: 'refresh_and_reconfirm';
+    readonly conflict_category: string;
+    readonly expected_base_graph_hash: string | null;
+    readonly edge?: EdgeStrengthEditAuthorityConflict['edge'];
+  };
 }
 
 export interface DispatchSystemEventParams {
@@ -181,10 +207,10 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // browser (no wire shape existed at all).
   edge_adjudication: 'fact_and_commit',
   prior_range_edit: 'fact_and_commit',
-  // 0.42.0 Train B — compatibility reader ONLY. The later writer train may
-  // reclassify this kind after it has its own mutation and stale-base proof.
-  // Reverting that writer must land back on this explicit no-write refusal.
-  edge_strength_edit: 'reader_only_refusal',
+  // 0.42.0 Train C — canonical writer. Reverting THIS writer commit lands on
+  // Train B's deployed explicit no-write refusal and its integrity-strict
+  // pending carry-forward; reader and writer rollback remain independent.
+  edge_strength_edit: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -320,7 +346,18 @@ export async function dispatchSystemEvent(
 ): Promise<DispatchSystemEventResult> {
   const { payload, requestId } = params;
   const startedAt = Date.now();
-  const handling = SYSTEM_EVENT_HANDLING[payload.event.kind];
+  const declaredHandling = SYSTEM_EVENT_HANDLING[payload.event.kind];
+  // Writer activation is the existing atomic-RPC config, not a second flag.
+  // Under off/shadow we deliberately execute Train B's deployed reader floor:
+  // typed FEATURE_NOT_ENABLED, strict newest-pending carry, no graph read/fact/
+  // writer effect. Enabling the emitter is therefore insufficient on its own;
+  // the service must be objectively running the RPC in enforce mode.
+  const handling =
+    payload.event.kind === 'edge_strength_edit' &&
+    declaredHandling === 'mutating' &&
+    config.features.graphCas.rpcEnforce !== true
+      ? 'reader_only_refusal'
+      : declaredHandling;
   const response =
     handling === 'reader_only_refusal'
       ? buildEdgeStrengthEditReaderRefusal(payload)
@@ -343,16 +380,21 @@ export async function dispatchSystemEvent(
     };
   }
 
-  // ── the one VALUE-CARRYING writer ─────────────────────────────────────────
-  // Everything above and below this block is unchanged for every pre-0.42
-  // kind: value-less events retain their byte-identical acknowledgement, and
-  // factor_value_edit retains its existing writer. The new value-carrying
-  // edge event is deliberately classified as a reader-only refusal above.
+  // ── VALUE-CARRYING writers ────────────────────────────────────────────────
+  // Value-less events retain their byte-identical acknowledgement. Each
+  // writer below owns only its structured adapter + commit transaction; the
+  // canonical D1 handlers remain the sole graph mutators.
   if (
     handling === 'mutating' &&
     payload.event.kind === 'factor_value_edit'
   ) {
     return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'edge_strength_edit'
+  ) {
+    return await dispatchEdgeStrengthEdit(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -460,6 +502,338 @@ export async function dispatchSystemEvent(
     );
     return { response, commitPerformed: false, graph: null };
   }
+}
+
+/**
+ * `edge_strength_edit` — strict persisted-edge writer with atomic CAS.
+ *
+ * The 0.42 event is only intent. Authority stays server-side: read the graph
+ * and newest pending row losslessly, let the adapter resolve and validate the
+ * exact persisted edge through `adjust_edge_strength`, then hand the merged
+ * graph to the existing atomic commit chokepoint. No branch below writes a
+ * graph directly or carries pending JSONB around the canonical lifecycle.
+ */
+async function dispatchEdgeStrengthEdit(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'edge_strength_edit' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  try {
+    // Both reads are authoritative and required before ANY newest-turn append.
+    // The integrity-strict pending read rejects a non-array, any invalid entry,
+    // or a scenario mismatch. On either failure the prior row remains newest
+    // and therefore authoritative: no refusal transcript is appended.
+    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+      loadPersistedGraphStrict(payload.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(
+        payload.scenario_id,
+        requestId,
+      ),
+      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 edge_strength_edit — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: Awaited<ReturnType<typeof applyEdgeStrengthEdit>>;
+  try {
+    result = await applyEdgeStrengthEdit({
+      payload,
+      event,
+      requestId,
+      persistedGraph,
+    });
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 edge_strength_edit — canonical adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  // Honest domain refusal: record the attempt, but write no graph/fact/new
+  // pending. The exact valid newest pending set is fed into canonical
+  // carry-forward, which alone owns TTL, wall expiry and graph-hash survival.
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    // Missing/duplicate/stale endpoint authority is not a normal domain
+    // refusal and must never masquerade as 200 success. Append nothing: the
+    // strict prior pending row remains newest and untouched. The route turns
+    // this descriptor into 409 GRAPH_DIVERGED with exact edge reconciliation
+    // details. Other honest refusals still record a transcript below.
+    if (result.authorityConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.authorityConflict.recovery_action,
+          conflict_category: result.authorityConflict.conflict_category,
+          expected_base_graph_hash: null,
+          edge: result.authorityConflict.edge,
+        },
+      };
+    }
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions: priorPendingActions,
+        ...(currentAnalysisHash !== null
+          ? { graph_hash: currentAnalysisHash }
+          : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 edge_strength_edit — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    return {
+      response,
+      commitPerformed: true,
+      graph: contentGraph,
+    };
+  }
+
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    // The trusted expected base includes both edge mean and direction in its
+    // analysis projection and every persisted field in its identity projection.
+    // append_turn_atomic_v4/v3 checks the identity under the DB row lock when
+    // the deployed CAS RPC is enforcing, closing the read→write race.
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'handler',
+      handler_id: 'adjust_edge_strength',
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      priorPendingActions: priorPendingActions,
+      contentGraph: result.mutatedGraph,
+      ...(cas.expectedGraphIdentityHash !== null
+        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
+        : {}),
+      ...(cas.expectedGraphAnalysisHash !== null
+        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
+        : {}),
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 edge_strength_edit — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          expected_base_graph_hash: err.expected_base_graph_hash ?? null,
+        },
+      };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 edge_strength_edit — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const exactTargetReadback = isExactCommittedEdgeReadback({
+    projected: result.graph,
+    committed: persistedGraphBytes,
+    from: event.from,
+    to: event.to,
+  });
+  const confirmationStillProvenanceOnly =
+    event.intent !== 'confirm_current' ||
+    isProvenanceOnlyEdgeConfirmation({
+      before: result.baseGraph,
+      after: persistedGraphBytes,
+      from: event.from,
+      to: event.to,
+    });
+  // A successful append without a trustworthy graph receipt is an ambiguous
+  // transport outcome, never a 200 mutation success. Fail the route closed so
+  // the UI keeps its write barrier and reconciles; do not fabricate readback
+  // from the adapter's pre-commit copy.
+  if (
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !exactTargetReadback ||
+    !confirmationStillProvenanceOnly
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        exact_target_readback: exactTargetReadback,
+        confirmation_provenance_only: confirmationStillProvenanceOnly,
+      },
+      'V5 edge_strength_edit — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForReadiness = committedParse.data;
+  // The exact graph this commit projected and handed to the atomic store is
+  // the UI's authoritative readback. It is load-bearing for confirm_current:
+  // graph_patch honestly stays `noop` for the unchanged scientific tuple,
+  // while this receipt proves provenance was durably stamped.
+  const response: OlumiResponse = {
+    ...committedResponse,
+    ...(persistedAnalysisGraphHash !== null
+      ? { graph_hash: persistedAnalysisGraphHash }
+      : {}),
+    draft_graph: buildAppliedGraphWireField(committedParse.data),
+  };
+  // Fact history is observational only: it never authorises or blocks the
+  // write. A healthy empty read means canonical `none`; a degraded read must
+  // not fabricate that conclusion and therefore emits honest `unknown`.
+  const freshness: FreshnessDerivation =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(
+          priorFactsRead.facts,
+          persistedAnalysisGraphHash,
+        )
+      : {
+          freshness: 'unknown',
+          reason: 'derivation_failed',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: persistedAnalysisGraphHash,
+          computed_at: null,
+        };
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.edge_strength_edit',
+    },
+    {
+      prior_fact_count: priorFactsRead.facts.length,
+      prior_fact_read_status: priorFactsRead.status,
+      current_turn_fact_count: result.handlerFacts.length,
+      intent: event.intent,
+    },
+  );
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      intent: event.intent,
+    },
+    'V5 edge_strength_edit committed — canonical graph/fact written atomically',
+  );
+  return {
+    response,
+    commitPerformed: true,
+    analysisReady: computeStructuralReadiness(graphForReadiness),
+    freshness,
+    graph: graphForReadiness,
+  };
 }
 
 /**

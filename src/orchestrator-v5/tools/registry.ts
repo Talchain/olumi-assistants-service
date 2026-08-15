@@ -237,6 +237,31 @@ export interface HandlerInvocation {
    */
   readonly appliedProvenance?: AppliedValueProvenance;
   /**
+   * Trusted structured-adapter authority for `adjust_edge_strength` at
+   * numeric zero, where the sign cannot carry direction.
+   *
+   * Present only on the strict `edge_strength_edit` system-event path after
+   * it has matched one persisted `(from, to)` edge and resolved the public
+   * `direction_intent` against that edge. Natural-language proposals never
+   * populate this side band: a routing model cannot grant itself authority by
+   * inventing an `effect_direction` proposal parameter.
+   */
+  readonly edgeStrengthDirectionAuthority?: 'positive' | 'negative';
+  /**
+   * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
+   *
+   * The legacy natural-language lane addresses an edge with a composite
+   * `from→to` string whose parser trims each half. The structured adapter has
+   * already matched exact persisted endpoint bytes, so serialising and
+   * reparsing them would weaken that identity guarantee. This side band lets
+   * the same canonical handler mutate the verified pair without exposing an
+   * endpoint override to model-authored proposal parameters.
+   */
+  readonly edgeStrengthEndpointAuthority?: {
+    readonly from: string;
+    readonly to: string;
+  };
+  /**
    * Structural readiness payload for the current scenario. Carries the
    * authoritative `options[]` and `goal_node_id` per
    * `computeStructuralReadiness`. Used by the V5 no-op explanation handlers

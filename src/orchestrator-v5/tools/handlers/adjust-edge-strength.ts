@@ -10,8 +10,10 @@
  * the format is unrecognised.
  *
  * Operators: set, increase, decrease, multiply. All results clamped to
- * [-1, +1]. After clamp, `effect_direction` is recomputed to match the
- * sign of the new mean (positive when ≥ 0, negative when < 0).
+ * [-1, +1]. After clamp, `effect_direction` follows the sign of a non-zero
+ * mean. At exactly zero the strict structured adapter may supply direction on
+ * HandlerInvocation's trusted side band; natural-language callers retain the
+ * legacy positive default and cannot self-authorise by inventing a parameter.
  *
  * Confirmation language uses `bandFromMagnitude` so the user-visible
  * text says "moderate to strong" (not "0.4 to 0.7"). Sign reversal is
@@ -42,6 +44,13 @@ export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
 // GRAPH_INVARIANT_VIOLATED. Match the canonical schema's lower
 // bound here so the user-visible error is the right class.
 export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(0.5);
+/**
+ * Optional explicit direction for callers whose intent cannot be represented
+ * by the sign of the numeric strength — specifically a zero-strength edge.
+ * Natural-language proposals may omit it and retain the legacy sign-derived
+ * behaviour; strict structured adapters resolve and supply it.
+ */
+export const AdjustEdgeStrengthDirectionSchema = z.enum(['positive', 'negative']);
 
 const STRENGTH_CLAMP_MIN = -1;
 const STRENGTH_CLAMP_MAX = 1;
@@ -129,10 +138,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       }
       const graph = graphParse.data;
 
-      // Parse the edge id. The wire schema accepts opaque strings so we
-      // do this at execute-time. Both `→` (canonical) and `->` (ASCII
-      // fallback for environments that drop Unicode) are accepted.
-      const parsed = parseEdgeId(proposal.entity.id);
+      // The strict structured adapter has already resolved an exact persisted
+      // pair, so keep those bytes intact. Natural-language callers retain the
+      // legacy composite-id parser (including its whitespace trimming); they
+      // cannot populate this invocation-only authority through parameters.
+      const parsed =
+        invocation.edgeStrengthEndpointAuthority ??
+        parseEdgeId(proposal.entity.id);
       if (!parsed) {
         throw new D1HandlerError(
           'PARAMETER_INVALID',
@@ -225,7 +237,67 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         strength: { ...targetEdge.strength },
         effect_direction: targetEdge.effect_direction,
       };
-      const newDirection: 'positive' | 'negative' = newMean < 0 ? 'negative' : 'positive';
+      // Direction at numeric zero is authority-sensitive. It therefore rides
+      // the invocation side band stamped by the strict system-event adapter,
+      // never the model-authored proposal bag. Before this guard, exposing an
+      // `effect_direction` parameter would have let an inferred/default NL
+      // proposal choose a zero direction the user never stated.
+      const untrustedDirectionParam = proposal.parameters.find(
+        (p) => p.name === 'effect_direction',
+      );
+      if (untrustedDirectionParam !== undefined) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'adjust_edge_strength: effect direction is reserved for a verified structured edit.',
+          {
+            details: {
+              handler_id: 'adjust_edge_strength',
+              parameter: 'effect_direction',
+            },
+            userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+          },
+        );
+      }
+      const directionAuthority = invocation.edgeStrengthDirectionAuthority;
+      let newDirection: 'positive' | 'negative' =
+        newMean < 0 ? 'negative' : 'positive';
+      if (directionAuthority !== undefined) {
+        const directionParse = AdjustEdgeStrengthDirectionSchema.safeParse(
+          directionAuthority,
+        );
+        if (!directionParse.success) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: effect direction must be positive or negative.',
+            {
+              details: {
+                handler_id: 'adjust_edge_strength',
+                received: directionAuthority,
+              },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        const signDirection =
+          newMean < 0 ? 'negative' : newMean > 0 ? 'positive' : null;
+        if (
+          signDirection !== null &&
+          directionParse.data !== signDirection
+        ) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'adjust_edge_strength: non-zero strength and effect direction disagree.',
+            {
+              details: {
+                handler_id: 'adjust_edge_strength',
+                received: directionParse.data,
+              },
+              userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+            },
+          );
+        }
+        newDirection = directionParse.data;
+      }
       // EdgeStrengthV3 requires std > 0 (positive). When the existing
       // edge has std and we don't have a fresh one, preserve it.
       const finalStd = newStd ?? targetEdge.strength.std;
@@ -309,6 +381,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             toLabel,
             beforeMean,
             afterMean: newMean,
+            beforeDirection: beforeSnapshot.effect_direction,
+            afterDirection: afterSnapshot.effect_direction,
           });
 
       return {

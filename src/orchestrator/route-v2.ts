@@ -678,9 +678,8 @@ async function sendFinalised200(
      *  so the analysisReady payload carries freshness fields and
      *  computed_at reflects the selected fact's timestamp. Populated on
      *  every CEE dispatch path that produces an analysisReady payload
-     *  (turn_executor, chip_click, draft_graph, edit_graph). system_event
-     *  omits today; graph-mutating system events are scoped narrowly and
-     *  most do not ship the readiness field. */
+     *  (turn_executor, chip_click, draft_graph, edit_graph, and value-carrying
+     *  system-event writers). Reader/acknowledgement events omit it. */
     readonly freshness?: import('../orchestrator-v5/context/freshness.js').FreshnessDerivation;
     /**
      * V5 diagnostic trace (additive observability). Threaded in by paths
@@ -2462,6 +2461,36 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         payload: ingress,
         requestId,
       });
+      if (sysResult.graphConflict !== undefined) {
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
+          validator: 'turn_commit',
+          reason: 'graph_write_conflict',
+          retryable: false,
+          requestId,
+          stage: ingress.stage,
+          errorCode: 'GRAPH_DIVERGED',
+          preStageExtras: {
+            failure_type: 'GRAPH_DIVERGED',
+            event_kind: ingress.event.kind,
+            recovery_action: sysResult.graphConflict.recovery_action,
+            conflict_category: sysResult.graphConflict.conflict_category,
+            expected_base_graph_hash:
+              sysResult.graphConflict.expected_base_graph_hash,
+            ...(sysResult.graphConflict.edge !== undefined
+              ? { edge: sysResult.graphConflict.edge }
+              : {}),
+          },
+        });
+        log.warn(
+          {
+            request_id: requestId,
+            event_kind: ingress.event.kind,
+            conflict_category: sysResult.graphConflict.conflict_category,
+          },
+          'V5 system event graph conflict — returning 409 with refresh-reconfirm BoundaryError envelope',
+        );
+        return reply.code(409).send(boundaryError);
+      }
       if (!sysResult.commitPerformed && sysResult.commitSkippedReason !== 'client_only_event') {
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'turn_commit',
@@ -2484,6 +2513,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
         graph: sysResult.graph,
+        ...(sysResult.freshness !== undefined
+          ? { freshness: sysResult.freshness }
+          : {}),
         // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
         // the permission belongs to the fact this response DISPLAYS, not to
         // whether this turn ran an analysis. See turn-claim-safety.ts.
