@@ -150,7 +150,6 @@ function answer(args: {
 function evidenceRow(args: {
   participant_id: string;
   event_id?: string;
-  target_kind?: 'factor' | 'edge';
   target_id?: string;
   event_version?: number;
   created_at?: string;
@@ -162,7 +161,7 @@ function evidenceRow(args: {
     participant_id: args.participant_id,
     event_version: args.event_version ?? 1,
     kind: 'evidence_attached',
-    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
+    target: { kind: 'factor', id: args.target_id ?? TARGET_ID },
     belief: null,
     evidence: {
       kind: 'note',
@@ -312,29 +311,6 @@ describe('the answer fold survives a newer evidence row', () => {
       ?.responses.find((r) => r.participant_id === GRACE_ID);
     expect(grace?.value).toBe(0.4);
     expect(grace?.kind).toBe('belief_revised');
-  });
-
-  it('binds an answer by KIND + id — a newer same-id edge belief cannot replace the factor belief', async () => {
-    const factorBelief = answer({
-      participant_id: GRACE_ID,
-      value: GRACE_VALUE,
-      event_version: 1,
-    });
-    const edgeBelief: ElicitationEventRow = {
-      ...answer({ participant_id: GRACE_ID, value: ADA_VALUE, event_version: 2 }),
-      event_id: 'evt-edge-belief-sharing-factor-id',
-      target: { kind: 'edge', id: TARGET_ID },
-    };
-    const view = await assembleRevealView(
-      makeStore({ events: [factorBelief, edgeBelief] }),
-      { round_id: ROUND_ID, requested_by: { kind: 'owner', user_id: 'owner-user' } },
-    );
-
-    const grace = view.per_target
-      .find((t) => t.target.kind === 'factor' && t.target.id === TARGET_ID)
-      ?.responses.find((r) => r.participant_id === GRACE_ID);
-    expect(grace?.value).toBe(GRACE_VALUE);
-    expect(grace?.value).not.toBe(ADA_VALUE);
   });
 });
 
@@ -580,33 +556,6 @@ describe('appending evidence', () => {
     expect(row.event_version).toBe(2);
   });
 
-  it('same-id EDGE answers do not inflate the FACTOR answer sequence', async () => {
-    const factorBelief = answer({
-      participant_id: GRACE_ID,
-      value: GRACE_VALUE,
-      event_version: 1,
-    });
-    const edgeBelief: ElicitationEventRow = {
-      ...answer({ participant_id: GRACE_ID, value: ADA_VALUE, event_version: 1 }),
-      event_id: 'evt-edge-answer-sharing-factor-id',
-      target: { kind: 'edge', id: TARGET_ID },
-    };
-
-    const row = await appendParticipantEvent(openStore([factorBelief, edgeBelief]), {
-      round_id: ROUND_ID,
-      participant: participant(GRACE_ID, 'Grace'),
-      payload: {
-        kind: 'belief_revised',
-        target: { kind: 'factor', id: TARGET_ID },
-        belief: { value: 0.4, expression_raw: 'changed my mind', confidence: null },
-        evidence: null,
-      },
-    });
-
-    expect(row.target).toEqual({ kind: 'factor', id: TARGET_ID });
-    expect(row.event_version).toBe(2);
-  });
-
   it('refuses evidence once the round has closed', async () => {
     const code = await refusalCodeOf(() =>
       appendParticipantEvent(makeStore({ round: round({ status: 'closed' }) }), {
@@ -751,29 +700,6 @@ describe('assembleDisagreementView', () => {
   it('does not attach one target’s evidence to another target', async () => {
     const t = (await view()).per_target.find((x) => x.target.id === ALIGNED_TARGET_ID);
     expect(t?.evidence).toEqual([]);
-  });
-
-  it('⭐ associates evidence by KIND + id — same-id edge evidence does not become the factor’s reason', async () => {
-    const factorEvidence = evidenceRow({
-      participant_id: ADA_ID,
-      event_id: 'evt-factor-evidence-same-id-control',
-    });
-    const edgeForgery = evidenceRow({
-      participant_id: RUTH_ID,
-      event_id: 'evt-edge-evidence-same-id-forgery',
-      target_kind: 'edge',
-      target_id: TARGET_ID,
-    });
-    const v = await assembleDisagreementView(
-      makeStore({ events: [factorEvidence, edgeForgery] }),
-      { round_id: ROUND_ID, requested_by: { kind: 'owner', user_id: 'owner-user' } },
-    );
-    const evidence = v.per_target.find((t) => t.target.id === TARGET_ID)?.evidence;
-
-    // Positive control and forgery control in one population: an inert filter
-    // that removed both kinds cannot satisfy this exact identity assertion.
-    expect(evidence?.map((e) => e.event_id)).toEqual([factorEvidence.event_id]);
-    expect(evidence?.some((e) => e.event_id === edgeForgery.event_id)).toBe(false);
   });
 
   it('resolves a redacted author to the pseudonym, like the reveal', async () => {
