@@ -28,6 +28,11 @@ import { describe, expect, it } from 'vitest';
 import { ExerciseBlockSchema } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
+import { shouldSuppressEditDispatchForValueUpdate } from '../../../orchestrator/routing/value-update-gate.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 import {
   buildLensCompanionBlocks,
@@ -35,13 +40,30 @@ import {
   type GraphNodeLookup,
 } from '../../compose/phase3-blocks.js';
 import { selectLens } from '../../compose/lens-selector.js';
-import { selectGroundedCounterCase } from '../grounded-counter-case.js';
+import { isAnalyticalQuestion } from '../../routing/analytical-question-guard.js';
+import { isStateQueryQuestionShape } from '../../routing/state-query-guard.js';
+import {
+  composeGroundedCounterCaseHandoffTurn,
+  composeGroundedCounterCaseWithModelHandoff,
+  selectGroundedCounterCase,
+} from '../grounded-counter-case.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = join(HERE, '..', '..', 'compose', '__tests__', 'fixtures', 'dsk-walk');
 
 function liveEnrichment(name: 'session-a' | 'session-b2'): unknown {
   return JSON.parse(readFileSync(join(FIXTURE_DIR, `${name}.enrichment.json`), 'utf8'));
+}
+
+/** `route-v2`'s exact five-conjunct edit candidate, from its own authorities. */
+function editVerbCandidate(message: string): boolean {
+  return (
+    EDIT_GRAPH_POSITIVE_REGEX.test(message) &&
+    !EDIT_GRAPH_NEGATIVE_REGEX.test(message) &&
+    !shouldSuppressEditDispatchForValueUpdate(message) &&
+    !isAnalyticalQuestion(message) &&
+    !isStateQueryQuestionShape(message)
+  );
 }
 
 describe('selectGroundedCounterCase — grounding', () => {
@@ -232,6 +254,86 @@ describe('selectGroundedCounterCase — what it may not say', () => {
   });
 });
 
+describe('complete disconfirmation handoff — exact copy, route and authorship', () => {
+  const SESSION_A_COPY =
+    'Argue the opposite: assume the option in front is wrong. The run’s most sensitive link is ' +
+    'Partner Channel Investment → Net New ARR Generated. ' +
+    'Make the strongest case it fails and name evidence that would settle it. ' +
+    'If that reveals a missing driver, reply in your own words: “' +
+    'Add [your driver] as a factor affecting Net New ARR Generated.” ' +
+    'I’ll ask you to confirm before changing the model.';
+  const SESSION_B2_COPY =
+    'Argue the opposite: assume the option in front is wrong. The run’s most sensitive link is ' +
+    'Automated Packing Investment → Flour Cost Margin Squeeze. ' +
+    'Make the strongest case it fails and name evidence that would settle it. ' +
+    'If that reveals a missing driver, reply in your own words: “' +
+    'Add [your driver] as a factor affecting Flour Cost Margin Squeeze.” ' +
+    'I’ll ask you to confirm before changing the model.';
+
+  it('composes the exact approved copy for both live captures at 389/399 characters', () => {
+    const a = selectGroundedCounterCase(liveEnrichment('session-a')).grounded!;
+    const b = selectGroundedCounterCase(liveEnrichment('session-b2')).grounded!;
+    const aCopy = composeGroundedCounterCaseWithModelHandoff(a.fromLabel, a.toLabel);
+    const bCopy = composeGroundedCounterCaseWithModelHandoff(b.fromLabel, b.toLabel);
+
+    expect(aCopy).toBe(SESSION_A_COPY);
+    expect(aCopy).toHaveLength(389);
+    expect(bCopy).toBe(SESSION_B2_COPY);
+    expect(bCopy).toHaveLength(399);
+  });
+
+  it('routes both the displayed template and a human-authored reply through all five edit gates', () => {
+    const template = composeGroundedCounterCaseHandoffTurn('Net New ARR Generated');
+    const humanReply =
+      'Add supplier concentration as a factor affecting Net New ARR Generated.';
+
+    expect(template).toBe('Add [your driver] as a factor affecting Net New ARR Generated.');
+    for (const message of [template, humanReply]) {
+      expect(EDIT_GRAPH_POSITIVE_REGEX.test(message)).toBe(true);
+      expect(EDIT_GRAPH_NEGATIVE_REGEX.test(message)).toBe(false);
+      expect(shouldSuppressEditDispatchForValueUpdate(message)).toBe(false);
+      expect(isAnalyticalQuestion(message)).toBe(false);
+      expect(isStateQueryQuestionShape(message)).toBe(false);
+      expect(editVerbCandidate(message)).toBe(true);
+    }
+
+    // The human supplies the causal concept in place of the placeholder. The
+    // handoff does NOT ask them for a numeric or qualitative edge strength;
+    // any edge semantics proposed later remain held until confirmation.
+    expect(humanReply).not.toContain('[your driver]');
+    expect(template).not.toMatch(/\d|\b(?:strength|stronger|weaker|positive|negative)\b/i);
+  });
+
+  it('kills route and length mutants before copy can ship', () => {
+    // Negative-route vocabulary can arrive inside a canonical producer label.
+    expect(
+      composeGroundedCounterCaseWithModelHandoff(
+        'Partner Channel Investment',
+        'Why Customers Churn',
+      ),
+    ).toBeNull();
+    // This real producer-label shape triggers the value-update conjunct.
+    expect(
+      composeGroundedCounterCaseWithModelHandoff(
+        'Operating Profit Uplift',
+        'Raise Group Operating Profit by 8% Within 18 Months',
+      ),
+    ).toBeNull();
+    // An interrogative producer label can independently trip the analytical
+    // route guard even though the fixed prefix starts with an edit verb.
+    expect(
+      composeGroundedCounterCaseWithModelHandoff(
+        'Partner Channel Investment',
+        'What Could Change the Outcome',
+      ),
+    ).toBeNull();
+    // The prior grounded sentence is 366 chars; the handoff would be 401.
+    expect(
+      composeGroundedCounterCaseWithModelHandoff('A'.repeat(40), 'B'.repeat(20)),
+    ).toBeNull();
+  });
+});
+
 // ============================================================================
 // ⭐ THE WIRING PROOF — without this, the module above is unit-tested and
 // UNREACHED.
@@ -254,6 +356,21 @@ const CTX: BlockBuildCtx = {
 };
 const LOOKUP: GraphNodeLookup = new Map([
   ['opt_a', { id: 'opt_a', label: 'Option A', kind: 'option' as const }],
+]);
+const CANONICAL_OUTCOME_LOOKUP: GraphNodeLookup = new Map([
+  ...LOOKUP,
+  [
+    'fac_partner_invest',
+    {
+      id: 'fac_partner_invest',
+      label: 'Partner Channel Investment',
+      kind: 'factor' as const,
+    },
+  ],
+  [
+    'out_new_arr',
+    { id: 'out_new_arr', label: 'Net New ARR Generated', kind: 'outcome' as const },
+  ],
 ]);
 
 /** The fixed copy this lane replaces — inlined so the test fails if it moves. */
@@ -336,6 +453,154 @@ describe('wiring — the emitted exercise carries the GROUNDED counter-case', ()
     expect(block.counter_case).toContain('Net New ARR Generated');
     // …and it is NOT the template.
     expect(block.counter_case).not.toBe(FIXED_COPY);
+  });
+
+  it('ARM 1B — canonical outcome identity emits the complete loop with no chip or auto-send', () => {
+    const fact = considerOppositeFact(FRAGILE_ROWS);
+    const selection = selectLens(fact, { previousAnalysisLens: null })!;
+    const block = buildLensCompanionBlocks(
+      fact,
+      CTX,
+      selection,
+      [],
+      CANONICAL_OUTCOME_LOOKUP,
+    )[0]!;
+
+    expect(block.counter_case).toContain(
+      'reply in your own words: “Add [your driver] as a factor affecting Net New ARR Generated.”',
+    );
+    expect(block.counter_case).toContain('I’ll ask you to confirm before changing the model.');
+    expect(block.counter_case).toHaveLength(389);
+    // ExerciseBlock has no action fields: the user must author and send the
+    // sentence; merely rendering this card cannot write to the model.
+    expect(block).not.toHaveProperty('action_label');
+    expect(block).not.toHaveProperty('action_prompt');
+    expect(block).not.toHaveProperty('suggested_actions');
+  });
+
+  it('ARM 1C — a canonical risk target is also an eligible causal consequence', () => {
+    const riskRows = [
+      {
+        from_id: 'fac_vendor_health',
+        to_id: 'risk_supply_failure',
+        from_label: 'Vendor Financial Health',
+        to_label: 'Supply Failure',
+        switch_probability: 0.19,
+      },
+    ];
+    const lookup: GraphNodeLookup = new Map([
+      ...LOOKUP,
+      [
+        'fac_vendor_health',
+        { id: 'fac_vendor_health', label: 'Vendor Financial Health', kind: 'factor' as const },
+      ],
+      [
+        'risk_supply_failure',
+        { id: 'risk_supply_failure', label: 'Supply Failure', kind: 'risk' as const },
+      ],
+    ]);
+    const fact = considerOppositeFact(riskRows);
+    const selection = selectLens(fact, { previousAnalysisLens: null })!;
+    const block = buildLensCompanionBlocks(fact, CTX, selection, [], lookup)[0]!;
+
+    expect(block.counter_case).toContain(
+      'Add [your driver] as a factor affecting Supply Failure.',
+    );
+  });
+
+  it.each(['option', 'goal', 'factor', 'decision'] as const)(
+    'ARM 1D — target kind %s cannot receive the model-action handoff',
+    (kind) => {
+      const fact = considerOppositeFact(FRAGILE_ROWS);
+      const selection = selectLens(fact, { previousAnalysisLens: null })!;
+      const priorGroundedCopy = selectGroundedCounterCase(fact.result.enrichment).grounded!
+        .counterCase;
+      const lookup = new Map(CANONICAL_OUTCOME_LOOKUP) as Map<
+        string,
+        { id: string; label: string; kind: string }
+      >;
+      lookup.set('out_new_arr', {
+        id: 'out_new_arr',
+        label: 'Net New ARR Generated',
+        kind,
+      });
+
+      const block = buildLensCompanionBlocks(
+        fact,
+        CTX,
+        selection,
+        [],
+        lookup as unknown as GraphNodeLookup,
+      )[0]!;
+      expect(block.counter_case).toBe(priorGroundedCopy);
+      expect(block.counter_case).not.toContain('[your driver]');
+    },
+  );
+
+  it.each([
+    ['missing source identity', new Map([...CANONICAL_OUTCOME_LOOKUP].filter(([id]) => id !== 'fac_partner_invest'))],
+    ['missing target identity', new Map([...CANONICAL_OUTCOME_LOOKUP].filter(([id]) => id !== 'out_new_arr'))],
+    [
+      'source label drift',
+      new Map([
+        ...CANONICAL_OUTCOME_LOOKUP,
+        ['fac_partner_invest', { id: 'fac_partner_invest', label: 'Different source', kind: 'factor' as const }],
+      ]),
+    ],
+    [
+      'target label drift',
+      new Map([
+        ...CANONICAL_OUTCOME_LOOKUP,
+        ['out_new_arr', { id: 'out_new_arr', label: 'Different outcome', kind: 'outcome' as const }],
+      ]),
+    ],
+  ] as const)(
+    'ARM 1E — %s preserves the current grounded card byte-for-byte',
+    (_case, lookup) => {
+      const fact = considerOppositeFact(FRAGILE_ROWS);
+      const selection = selectLens(fact, { previousAnalysisLens: null })!;
+      const priorGroundedCopy = selectGroundedCounterCase(fact.result.enrichment).grounded!
+        .counterCase;
+      const block = buildLensCompanionBlocks(
+        fact,
+        CTX,
+        selection,
+        [],
+        lookup as GraphNodeLookup,
+      )[0]!;
+
+      expect(block.counter_case).toBe(priorGroundedCopy);
+    },
+  );
+
+  it.each([
+    ['route veto', 'Partner Channel Investment', 'Why Customers Churn'],
+    ['value-route veto', 'Operating Profit Uplift', 'Raise Group Operating Profit by 8% Within 18 Months'],
+    ['analytical-route veto', 'Partner Channel Investment', 'What Could Change the Outcome'],
+    ['length overflow', 'A'.repeat(40), 'B'.repeat(20)],
+  ])('ARM 1F — %s preserves the current grounded card byte-for-byte', (_case, from, to) => {
+    const rows = [
+      {
+        from_id: 'fac_source',
+        to_id: 'out_target',
+        from_label: from,
+        to_label: to,
+        switch_probability: 0.19,
+      },
+    ];
+    const fact = considerOppositeFact(rows);
+    const selection = selectLens(fact, { previousAnalysisLens: null })!;
+    const priorGroundedCopy = selectGroundedCounterCase(fact.result.enrichment).grounded!
+      .counterCase;
+    const lookup: GraphNodeLookup = new Map([
+      ...LOOKUP,
+      ['fac_source', { id: 'fac_source', label: from, kind: 'factor' as const }],
+      ['out_target', { id: 'out_target', label: to, kind: 'outcome' as const }],
+    ]);
+    const block = buildLensCompanionBlocks(fact, CTX, selection, [], lookup)[0]!;
+
+    expect(block.counter_case).toBe(priorGroundedCopy);
+    expect(block.counter_case).not.toContain('[your driver]');
   });
 
   it('ARM 2 — with no fragile edges, the block falls back and still ships', () => {

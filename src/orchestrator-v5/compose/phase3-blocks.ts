@@ -161,7 +161,10 @@ import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 // from `selectFragileEdge` above ("what should the team argue against?" vs
 // "what may we offer to adjust?") and is deliberately not unified with it —
 // see that module's header for why aligning them would be trap 21.
-import { selectGroundedCounterCase } from '../coaching/grounded-counter-case.js';
+import {
+  composeGroundedCounterCaseWithModelHandoff,
+  selectGroundedCounterCase,
+} from '../coaching/grounded-counter-case.js';
 // Lane C — the grounded sensitivity body (names the subject factor).
 import { selectGroundedSensitivityBody } from '../coaching/grounded-sensitivity-body.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
@@ -2148,9 +2151,42 @@ export function buildLensCompanionBlocks(
       // bite (the lesson `coaching/fragile-edge-offer-text.ts` exists to
       // encode). Grounding can fail; the exercise cannot vanish.
       const groundedCounterCase = selectGroundedCounterCase(fact.result.enrichment);
+      let counterCase =
+        groundedCounterCase.grounded?.counterCase ?? CONSIDER_OPPOSITE_COUNTER_CASE;
+      const grounded = groundedCounterCase.grounded;
+      if (grounded !== null) {
+        // The handoff creates a NEW factor affecting the named target, so the
+        // target must resolve by producer identity to the canonical graph and
+        // must be a causal consequence (outcome/risk), never an option, goal,
+        // decision or existing factor. Resolve BOTH endpoints and require their
+        // canonical labels to agree with the robustness row: otherwise the
+        // displayed relationship and the eventual edit could name different
+        // objects after graph drift.
+        const canonicalFrom = lookup.get(grounded.fromId);
+        const canonicalTo = lookup.get(grounded.toId);
+        const canonicalFromLabel = canonicalFrom?.label.trim() ?? '';
+        const canonicalToLabel = canonicalTo?.label.trim() ?? '';
+        const labelsAgree =
+          canonicalFromLabel.length > 0 &&
+          canonicalToLabel.length > 0 &&
+          canonicalFromLabel === grounded.fromLabel.trim() &&
+          canonicalToLabel === grounded.toLabel.trim();
+        const targetKindAllowsNewDriver =
+          canonicalTo?.kind === 'outcome' || canonicalTo?.kind === 'risk';
+
+        if (labelsAgree && targetKindAllowsNewDriver) {
+          // Null means one of the actual prose/route/length gates refused.
+          // Preserve the old grounded card byte-for-byte on every refusal.
+          counterCase =
+            composeGroundedCounterCaseWithModelHandoff(
+              canonicalFromLabel,
+              canonicalToLabel,
+            ) ?? counterCase;
+        }
+      }
       const block = buildDskExerciseBlock(
         'consider_opposite',
-        groundedCounterCase.grounded?.counterCase ?? CONSIDER_OPPOSITE_COUNTER_CASE,
+        counterCase,
         leadingOptionId,
         ctx,
         lookup,
@@ -3442,4 +3478,3 @@ function validateProseAndSchemaOrDrop<TSchema extends z.ZodTypeAny>(
   }
   return parsed.data;
 }
-
