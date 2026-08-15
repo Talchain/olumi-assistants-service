@@ -46,6 +46,10 @@ import {
 // own item taxonomy, imported as a type so the mapping cannot drift from it
 // (see REMEDY_SECTION_BY_OPEN_ITEM_KIND: a new kind becomes a type error).
 import type { ReadinessOpenItem } from '../routing/readiness-summary.js';
+// Type-only, exactly like `ReadinessOpenItem` above: the gate owns the vocabulary
+// for what it named, this module owns the mapping to a UI surface. A type import
+// cannot create a runtime cycle between routing and compose.
+import type { AdviceGateFlipFocusSection } from '../routing/post-analysis-advice-gate.js';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -669,6 +673,53 @@ export function buildGateRemedySectionDirective(
   );
   if (block === null) return suppressDirective(GATE_REMEDY_FACT_TAG, 'target_unresolved');
   return emitDirective(GATE_REMEDY_FACT_TAG, block);
+}
+
+/**
+ * Telemetry tag for the advice gate's FLIP gesture. Deliberately distinct from
+ * `GATE_REMEDY_FACT_TAG` and from the ladder's `what_would_flip` row: these are
+ * three different populations answering three different questions, and merging
+ * them would make it impossible to tell a gate answer that gestured from a
+ * routed handler turn that did — which is exactly the confusion that let §2.1
+ * row 4's standing false negative survive.
+ */
+const GATE_FLIP_FACT_TAG = 'advice_gate_what_would_flip';
+
+/**
+ * Open the Model-tab section the deterministic flip answer is ABOUT.
+ *
+ * ⭐ WHY THIS EXISTS AT ALL (measured 14 Aug 2026). The advice gate SHORT-CIRCUITS
+ * the turn and produces NO handler fact. The entire directive ladder is
+ * fact-keyed — rows 1-6 dispatch on `fact.fact_type` and row 7 is gated on
+ * `facts.length > 0` — so on the gate path EVERY row is structurally
+ * unreachable, and the fastest, best-grounded answer the product has was also
+ * the only one that could not gesture at anything. This is the gate path's own
+ * gesture, on the same seam and by the same precedent as
+ * `buildGateRemedySectionDirective` above.
+ *
+ * ⚠ WHAT IT CLAIMS, EXACTLY. Opening a section claims the answer's subject lives
+ * on that surface — nothing about which row, and nothing about what to do to it.
+ * That is the strongest honest claim available here: the gate cannot see node
+ * ids at all (see the ruling on `AdviceGateMatched.flip_focus_section`), so a
+ * `focus` on the named factor is not merely unimplemented, it is unsourceable
+ * from this seam without widening a deliberately label-only LLM-facing
+ * projection. A gesture that pointed at a node id derived from a label would be
+ * trap 19 wearing a directive's clothes.
+ *
+ * Not a mutation: opening a section proposes a place to look and changes no
+ * graph state, so it needs no consent warrant. Strictly ADDITIVE — every
+ * fail-closed arm still ships the prose.
+ */
+export function buildGateFlipSectionDirective(
+  section: AdviceGateFlipFocusSection,
+): UiDirectiveBlock | null {
+  const block = directiveFromUiTarget(
+    'open_section',
+    { kind: 'model_section', id: section },
+    GATE_SOURCE,
+  );
+  if (block === null) return suppressDirective(GATE_FLIP_FACT_TAG, 'target_unresolved');
+  return emitDirective(GATE_FLIP_FACT_TAG, block);
 }
 
 /**

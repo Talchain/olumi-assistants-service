@@ -416,6 +416,38 @@ export interface AdviceGateMatched {
    * questions under similar names).
    */
   readonly remedy_open_item_kind?: ReadinessOpenItem['kind'];
+  /**
+   * The Model-tab section the `what_would_flip_free_text` answer is ABOUT —
+   * `relationships` when it named a fragile link, `factors` when it named the
+   * most influential factor. Present ONLY on that class, and only when the
+   * projection named a subject.
+   *
+   * ⚠ CEE-INTERNAL. Never reaches the wire: it is consumed by
+   * `buildGateFlipSectionDirective` (compose/ui-directive.ts) and the DIRECTIVE
+   * is what ships — the same shape, and the same reasoning, as
+   * {@link AdviceGateMatched.remedy_open_item_kind} directly above.
+   *
+   * ⭐⭐ WHY A SECTION AND NOT THE NODE ITSELF (measured 14 Aug 2026 — read this
+   * before "improving" it to a focus). Pointing at the exact factor would be the
+   * better gesture, and it is NOT AVAILABLE FROM THIS GATE: the gate's whole
+   * view of the analysis is {@link AdviceGateAnalysis}, whose driver rows are
+   * `{factor_label, sensitivity_value}` and whose fragile edges are
+   * `{from_label, to_label}`. Both are label-only BY RULING, not by oversight —
+   * `projectTopDrivers` strips `factor_id` deliberately (context-pack-assembler
+   * .ts:1695-1698) and `FragileEdge.from_id` is documented "INTERNAL ONLY —
+   * never serialised onto the wire or the strict-validated ContextPack output"
+   * (orchestrator/context/analysis-compact.ts:96-105). The ContextPack is
+   * LLM-facing and `.strict()`; widening it to carry ids is a scope decision
+   * this seam may not take unilaterally.
+   *
+   * The two shortcuts are both banned and both have cost this estate real time:
+   * re-reading the raw enrichment here would re-derive "which factor"
+   * independently of the sentence (trap 21), and resolving the label the gate
+   * already carries back to a node id is label-binding (trap 19). So the honest
+   * gesture is the one that needs NO identity: open the surface the sentence is
+   * about. It claims exactly that much and no more.
+   */
+  readonly flip_focus_section?: AdviceGateFlipFocusSection;
 }
 
 export interface AdviceGateUnmatched {
@@ -572,10 +604,10 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     advice_class: 'what_would_flip_free_text',
     pattern: /\bwhat\s+would\s+flip\b/i,
   },
-  // "what would change (the result|the outcome|things|the leading option|the analysis)"
+  // "what would change (the|this|that) (result|outcome|leading option|analysis)"
   {
     advice_class: 'what_would_flip_free_text',
-    pattern: /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
+    pattern: /\bwhat\s+would\s+change\s+(?:(?:the|this|that)\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
   },
   // "what would tip (this|the balance|the result)"
   {
@@ -626,7 +658,7 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
   // stay symmetric.
   {
     advice_class: 'what_would_flip_free_text',
-    pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+    pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:(?:the|this|that)\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
   },
   {
     advice_class: 'what_would_flip_free_text',
@@ -1048,6 +1080,88 @@ function renderableFragileEdges(
   return analysis.fragile_edges?.filter(isRenderableFragileEdge) ?? [];
 }
 
+/**
+ * The SUBJECT `composeWhatWouldFlip`'s beat 2 names — a fragile link, or (when
+ * no fragile edge is renderable) the single most influential factor.
+ *
+ * ⭐ ONE DERIVATION, TWO READ POINTS. `composeWhatWouldFlip` calls this to decide
+ * which sentence to write, and `deriveFlipFocusSection` calls it to decide which
+ * Model-tab section to open. They cannot disagree about what the answer is ABOUT,
+ * because there is only one selection and both read it. A second precedence list
+ * next to the composer's would be the two-authorities defect (CLAUDE.md trap 21)
+ * — the same defect §2.1 row 4 was rebuilt to remove, one layer up.
+ *
+ * Returns the SELECTED OBJECT rather than a tag so the composer keeps using the
+ * very row this chose; returning a tag would leave the composer free to re-index
+ * the array and drift.
+ *
+ * `null` when neither is available — the composer then writes no beat-2 sentence
+ * and no gesture is offered. Additive throughout: absence costs the answer nothing.
+ */
+type FlipFocusSelection =
+  | { readonly kind: 'fragile_edge'; readonly edge: AdviceGateAnalysisFragileEdge }
+  | { readonly kind: 'top_driver'; readonly driver: AdviceGateAnalysisDriver };
+
+function selectFlipFocus(analysis: AdviceGateAnalysis): FlipFocusSelection | null {
+  const edge = renderableFragileEdges(analysis)[0];
+  if (edge) return { kind: 'fragile_edge', edge };
+  const driver = nameableTopDrivers(analysis)[0];
+  if (driver) return { kind: 'top_driver', driver };
+  return null;
+}
+
+/**
+ * Model-tab section ids this gate may ask the workspace to open on a flip answer.
+ *
+ * ⚠ CEE-INTERNAL — this never reaches the wire. It is consumed by
+ * `buildGateFlipSectionDirective` (compose/ui-directive.ts), and the DIRECTIVE is
+ * what ships. Deliberately the SUBJECT's section rather than a resolved node id:
+ * see the ruling recorded on {@link AdviceGateMatched.flip_focus_section}.
+ *
+ * A strict subset of the contract's `UiDirectiveModelSectionId` enum
+ * (`options | factors | relationships | risks | modelcard`); the builder's
+ * parameter type is what enforces the subset relationship at compile time.
+ */
+export type AdviceGateFlipFocusSection = 'relationships' | 'factors';
+
+/**
+ * `FlipFocusSelection` → the Model-tab section the named subject lives on.
+ *
+ * TOTALITY IS DELIBERATE (the `Record` over the closed union): adding a third
+ * subject kind becomes a TYPE ERROR here rather than a silent fall-through to
+ * "no gesture" — the same discipline, and for the same trap-12 reason, as
+ * `REMEDY_SECTION_BY_OPEN_ITEM_KIND` in the directive builder.
+ *
+ * Surface semantics: a fragile edge IS a relationship, and `RelationshipsSection`
+ * is the surface that renders `edges={causalEdges}`; a top driver IS a factor.
+ * The gesture therefore opens the surface the sentence is about — no more, and
+ * it claims no more.
+ */
+const FLIP_FOCUS_SECTION_BY_SUBJECT: Record<
+  FlipFocusSelection['kind'],
+  AdviceGateFlipFocusSection
+> = {
+  fragile_edge: 'relationships',
+  top_driver: 'factors',
+};
+
+/**
+ * The gate's answer to "which surface is this flip answer about?".
+ *
+ * `undefined` for every class other than `what_would_flip_free_text`, and
+ * whenever the projection named no subject — the gesture is strictly ADDITIVE to
+ * the answer and never a precondition for it, so every fail-closed arm still
+ * ships the prose.
+ */
+function deriveFlipFocusSection(
+  cls: AdviceClass,
+  analysis: AdviceGateAnalysis,
+): AdviceGateFlipFocusSection | undefined {
+  if (cls !== 'what_would_flip_free_text') return undefined;
+  const focus = selectFlipFocus(analysis);
+  return focus === null ? undefined : FLIP_FOCUS_SECTION_BY_SUBJECT[focus.kind];
+}
+
 function evaluateAvailability(
   cls: AdviceClass,
   analysis: AdviceGateAnalysis,
@@ -1217,6 +1331,14 @@ export function tryPostAnalysisAdviceGate(
     return items.length > 0 ? items[0].kind : undefined;
   })();
 
+  /**
+   * The gesture's subject, from the SAME `selectFlipFocus` call the composer
+   * uses for its beat-2 sentence. Derived here (rather than inside the composer)
+   * only because the composer returns a string; the SELECTION is shared, which
+   * is the property that matters.
+   */
+  const flipFocusSection = deriveFlipFocusSection(matchedClass, analysis);
+
   const composeInput: ComposeInput = {
     leadingLabel,
     topDriverLabel,
@@ -1242,6 +1364,10 @@ export function tryPostAnalysisAdviceGate(
     ...(remedyOpenItemKind !== undefined
       ? { remedy_open_item_kind: remedyOpenItemKind }
       : {}),
+    // Same conditional-spread discipline as `remedy_open_item_kind` above, and
+    // for the same `exactOptionalPropertyTypes` reason: callers distinguish "no
+    // gesture" by the key being ABSENT, not by an explicit `undefined`.
+    ...(flipFocusSection !== undefined ? { flip_focus_section: flipFocusSection } : {}),
     copy_source,
     coaching_fields_used,
   };
@@ -2325,10 +2451,19 @@ function composeWhatWouldFlip(
   // `composeExplainResults`. `closenessLead` below still receives the raw
   // `analysis.margin_pp` because the near-tie wording is a DIFFERENT,
   // separately-adjudicated surface (`robustness-honesty.ts`), untouched here.
-  const topEdge = renderableFragileEdges(analysis)[0];
+  // ⭐ THE SUBJECT OF BEAT 2, AND OF THE TURN'S GESTURE, FROM ONE SELECTION.
+  // `selectFlipFocus` holds the fragile-edge-then-top-driver precedence that
+  // used to live inline here; `deriveFlipFocusSection` reads the SAME call to
+  // choose which Model-tab section to open. Behaviour below is unchanged —
+  // `topEdge` is truthy on exactly the inputs `renderableFragileEdges(a)[0]` was
+  // — but the sentence and the gesture can no longer disagree about what the
+  // answer is about, because neither owns the choice (CLAUDE.md trap 21).
   // DGAI #341: "the factor with the most influence on the result" may only
-  // name a materially-influential driver.
-  const driverA = nameableTopDrivers(analysis)[0];
+  // name a materially-influential driver — `nameableTopDrivers` enforces that
+  // inside the shared selection.
+  const focus = selectFlipFocus(analysis);
+  const topEdge = focus?.kind === 'fragile_edge' ? focus.edge : undefined;
+  const driverA = focus?.kind === 'top_driver' ? focus.driver : undefined;
   const flip = deriveFlipStatus(decisionReview);
   const sentences: string[] = [];
 

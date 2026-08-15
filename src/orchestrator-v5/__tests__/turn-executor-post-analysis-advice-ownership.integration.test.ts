@@ -321,6 +321,7 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
     ['What drove this result?', 'explain_results_free_text'],
     ['Why is this option ahead?', 'explain_results_free_text'],
     ['Why is Option A leading?', 'explain_results_free_text'],
+    ['What would change this result?', 'what_would_flip_free_text'],
     [
       'What would need to change for another option to look better?',
       'what_would_flip_free_text',
@@ -373,6 +374,16 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
       // chip; what_would_flip_free_text turns carry none.
       if (expectedClass === 'what_would_flip_free_text') {
         expect(result.response.suggested_actions).toHaveLength(0);
+        const blocks =
+          (result.response as { blocks?: Array<Record<string, unknown>> }).blocks ?? [];
+        const directives = blocks.filter((b) => b.type === 'ui_directive');
+        expect(directives).toHaveLength(1);
+        expect(directives[0]).toMatchObject({
+          verb: 'open_section',
+          source: 'gate',
+          targets: [],
+          ui_target: { kind: 'model_section', id: 'factors' },
+        });
       } else {
         expect(result.response.suggested_actions).toHaveLength(1);
         const chip = result.response.suggested_actions[0]!;

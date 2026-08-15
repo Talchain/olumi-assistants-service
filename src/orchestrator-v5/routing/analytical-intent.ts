@@ -107,7 +107,7 @@ const VERB_TO_X_MUTATION_PATTERN =
  */
 const WHAT_WOULD_FLIP_STRIP_PATTERNS: readonly RegExp[] = [
   /\bwhat\s+would\s+flip\b/i,
-  /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
+  /\bwhat\s+would\s+change\s+(?:(?:the|this|that)\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i,
   /\bwhat\s+would\s+tip\b/i,
   /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i,
   // V5 post-analysis contract v1 (review round-4) — widened from
@@ -141,7 +141,7 @@ const WHAT_WOULD_FLIP_STRIP_PATTERNS: readonly RegExp[] = [
   // depends on this list covering every flip-shape pattern so a phrase
   // like "what could change the outcome — change pricing to 100" still
   // exposes the standalone mutation after the flip span is stripped.
-  /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
+  /\bwhat\s+(?:could|might|would)\s+change\s+(?:(?:the|this|that)\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i,
   /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i,
   /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i,
 ];
@@ -255,7 +255,7 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
 
   // ── what_would_flip ──────────────────────────────────────────────
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+flip\b/i },
-  { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+change\s+(?:the\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i },
+  { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+change\s+(?:(?:the|this|that)\s+(?:result|outcome|leading\s+option|analysis|ranking|order)|things)\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+tip\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+would\s+it\s+take\s+to\s+(?:change|flip|reverse|move)\b/i },
   // Round-4: broader need/have shape, mirrors the same pattern in
@@ -278,7 +278,7 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // full grammar in analytical-question-guard.ts. Mirrored shape with
   // WHAT_WOULD_FLIP_STRIP_PATTERNS above so mutation precedence stays
   // symmetric.
-  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:the\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i },
+  { cls: 'what_would_flip', pattern: /\bwhat\s+(?:could|might|would)\s+change\s+(?:(?:the|this|that)\s+(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|verdict|winner|winners)|things)\b/i },
   { cls: 'what_would_flip', pattern: /\bwhat\s+(?:might|could|would)\s+(?:shift|move|alter|affect|tip|change)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\b/i },
   { cls: 'what_would_flip', pattern: /\bhow\s+(?:could|might|can|would)\s+(?:the\s+)?(?:result|results|outcome|outcomes|leading\s+option|analysis|ranking|order|balance|things|verdict|winner|winners)\s+(?:change|shift|move|flip|differ|reverse)\b/i },
 

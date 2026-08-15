@@ -678,7 +678,8 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     { message: 'Why is this the favourite?', expectedClass: 'explain_results_free_text', label: 'why is this the favourite (en-GB)' },
     { message: 'Why is this the favorite?', expectedClass: 'explain_results_free_text', label: 'why is this the favorite (en-US)' },
 
-    // what_would_flip_free_text (4 new variants of "need to change")
+    // what_would_flip_free_text (canonical demonstrative + 4 "need to change" variants)
+    { message: 'What would change this result?', expectedClass: 'what_would_flip_free_text', label: 'what would change this result (canonical demonstrative)' },
     { message: 'What would need to change for another option to look better?', expectedClass: 'what_would_flip_free_text', label: 'what would need to change for another option' },
     { message: 'What does need to change here?', expectedClass: 'what_would_flip_free_text', label: 'what does need to change' },
     { message: 'What might need to happen to flip things?', expectedClass: 'what_would_flip_free_text', label: 'what might need to happen' },
@@ -716,6 +717,7 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     ['What drove this result, change the cost factor to 0.7?', 'what drove + set-to-numeric'],
     ['Why is this option ahead — set risk to 0.5?', 'why is X ahead + set-to-numeric'],
     ['Why is Option A leading? Set risk to 0.5.', 'why is X leading + set-to-numeric'],
+    ['What would change this result? Set Pricing to 0.7.', 'canonical demonstrative + numeric edit'],
     ['What would need to change? Set Pricing to 0.7.', 'what would need to change + numeric edit'],
     ['What drove the result then add a new option for staffing?', 'what drove + add-new'],
   ];
@@ -744,6 +746,7 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     'What drove this result?',
     'Why is this option ahead?',
     'Why is Option A leading?',
+    'What would change this result?',
     'What would need to change for another option to look better?',
   ];
   for (const message of newPatternMessages) {
