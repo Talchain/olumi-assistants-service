@@ -14,6 +14,7 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
+import { buildAnalysisReadyPayload } from '../../../cee/transforms/analysis-ready.js';
 import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
@@ -343,12 +344,198 @@ describe('buildPostDraftNarrative', () => {
 
     const blocks = text.split('\n\n');
     const nextStep = blocks[blocks.length - 1] ?? '';
+    expect(nextStep).toBe(
+      `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`,
+    );
     expect(nextStep).toContain(OPTION_A.label);
     expect(nextStep).toContain(FACTOR_QUALITY.label);
     expect(nextStep).not.toContain(OPTION_B.label);
     expect(nextStep).not.toContain(FACTOR_CAPACITY.label);
     expect(nextStep).not.toMatch(/\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b/);
     expect(nextStep).not.toMatch(/\brun(?:ning)?\b/i);
+  });
+
+  it('uses mapping recovery for a real producer-built unreachable factor blocker', () => {
+    const optionId = 'opt_existing_route';
+    const reachableFactorId = 'fac_reachable_capacity';
+    const unreachableFactorId = 'fac_unreachable_budget';
+    const producerGraph = {
+      nodes: [
+        { id: 'goal_real', kind: 'goal', label: 'Improve delivery confidence' },
+        { id: optionId, kind: 'option', label: 'Strengthen the current team' },
+        { id: reachableFactorId, kind: 'factor', label: 'Delivery capacity', category: 'controllable' },
+        { id: unreachableFactorId, kind: 'factor', label: 'Budget flexibility', category: 'controllable' },
+      ],
+      edges: [{ from: optionId, to: reachableFactorId }],
+    } as unknown as Parameters<typeof buildAnalysisReadyPayload>[2];
+    const producerOptions = [{
+      id: optionId,
+      label: 'Strengthen the current team',
+      status: 'ready',
+      interventions: {
+        [reachableFactorId]: {
+          value: 0.6,
+          source: 'brief_extraction',
+          target_match: {
+            node_id: reachableFactorId,
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    }] as unknown as Parameters<typeof buildAnalysisReadyPayload>[0];
+
+    const analysisReady = buildAnalysisReadyPayload(
+      producerOptions,
+      'goal_real',
+      producerGraph,
+      { requestId: 'post-draft-real-unreachable-factor' },
+    );
+    const unreachableBlocker = analysisReady.blockers?.find(
+      (blocker) => blocker.factor_id === unreachableFactorId,
+    );
+
+    expect(analysisReady.status).toBe('needs_user_mapping');
+    expect(analysisReady.options).toHaveLength(1);
+    expect(analysisReady.options[0]?.status).toBe('ready');
+    expect(unreachableBlocker).toEqual(expect.objectContaining({
+      factor_id: unreachableFactorId,
+      factor_label: 'Budget flexibility',
+      blocker_type: 'missing_value',
+      suggested_action: 'add_value',
+    }));
+    expect(unreachableBlocker?.option_id).toBeUndefined();
+
+    const result = buildPostDraftNarrative({
+      graph: producerGraph as unknown as GraphV3T,
+      analysisReady,
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.',
+    );
+    expect(nextStep).not.toContain('missing effect value');
+    expect(nextStep).not.toMatch(/\brun(?:ning)?\b/i);
+  });
+
+  it('blocked status cannot be overridden by an incidental precise blocker', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'blocked',
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe('Next, resolve the model issue shown before comparing the options.');
+    expect(nextStep).not.toContain('missing effect value');
+    expect(nextStep).not.toContain(OPTION_A.label);
+    expect(nextStep).not.toContain(FACTOR_QUALITY.label);
+  });
+
+  it.each([
+    [
+      'missing value without an option',
+      {
+        factor_id: FACTOR_QUALITY.id,
+        factor_label: FACTOR_QUALITY.label,
+        blocker_type: 'missing_value',
+        suggested_action: 'add_value',
+      },
+      /missing effect value/i,
+    ],
+    [
+      'ambiguous value without a factor',
+      {
+        option_id: OPTION_A.id,
+        option_label: OPTION_A.label,
+        blocker_type: 'ambiguous_value',
+        suggested_action: 'confirm_value',
+      },
+      /confirm the effect value/i,
+    ],
+    [
+      'missing connection without a factor',
+      {
+        option_id: OPTION_A.id,
+        option_label: OPTION_A.label,
+        blocker_type: 'missing_connection',
+        suggested_action: 'add_edge',
+      },
+      /\bconnect\b/i,
+    ],
+  ])('falls back to named option configuration for %s', (_label, blocker, forbiddenAction) => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'needs_user_input',
+        options: [{ id: OPTION_A.id, label: OPTION_A.label, status: 'needs_user_mapping' }],
+        blockers: [blocker],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      `Next, configure "${OPTION_A.label}" by choosing which factor it changes and by how much.`,
+    );
+    expect(nextStep).not.toMatch(forbiddenAction);
+  });
+
+  it('needs_encoding ignores an incidental value blocker and asks for representation', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'needs_encoding',
+        options: [{ id: OPTION_A.id, label: OPTION_A.label, status: 'needs_encoding' }],
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      `Next, choose how "${OPTION_A.label}" should be represented on the effect scale before comparing the options.`,
+    );
+    expect(nextStep).not.toContain('missing effect value');
+  });
+
+  it('needs_user_mapping ignores an incidental value blocker and names the non-ready option', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'needs_user_mapping',
+        options: [{ id: OPTION_A.id, label: OPTION_A.label, status: 'needs_user_mapping' }],
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      `Next, configure "${OPTION_A.label}" by choosing which factor it changes and by how much.`,
+    );
+    expect(nextStep).not.toContain('missing effect value');
   });
 
   it('does not exceed 140 words even with long inputs and a long adjustment reason', () => {
@@ -1121,7 +1308,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     [
       'needs_user_mapping',
       { status: 'needs_user_mapping' },
-      'Next, configure the unresolved option by choosing its factor and effect.',
+      'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.',
     ],
     [
       'needs_encoding',

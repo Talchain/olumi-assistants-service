@@ -680,45 +680,37 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
 
 /**
  * Build the one load-bearing CTA from the typed analysis-ready payload.
- * `ready` is the only status that permits Run copy. Every other status names
- * at most the first typed recovery, without generating an effect magnitude or
- * flattening a temporal/categorical option on the user's behalf.
+ * `ready` is the only status that permits Run copy. Status selects every other
+ * recovery class; only `needs_user_input` may refine that class from its first
+ * sufficiently specific blocker. No path generates an effect magnitude or
+ * flattens a temporal/categorical option on the user's behalf.
  */
 function buildReadinessNextStep(
   analysisReady: PostDraftAnalysisReadyLite | null | undefined,
   nodes: readonly NodeLite[],
 ): string {
-  if (analysisReady?.status === 'ready') {
+  const status = analysisReady?.status;
+  if (status === 'ready') {
     return 'Next, run the analysis to see how the options compare and what could shift the outcome.';
   }
 
-  const blocker = asPostDraftBlocker(analysisReady?.blockers?.[0]);
-  if (blocker) {
-    const option = resolveReadinessLabel(nodes, 'option', blocker.option_id, blocker.option_label);
-    const factor = resolveReadinessLabel(nodes, 'factor', blocker.factor_id, blocker.factor_label);
-    const pair = describeOptionFactorPair(option, factor);
-
-    switch (blocker.blocker_type ?? blocker.suggested_action) {
-      case 'missing_value':
-      case 'add_value':
-        return `Next, choose the missing effect value${pair} so the comparison can be prepared.`;
-      case 'ambiguous_value':
-      case 'confirm_value':
-        return `Next, confirm the effect value${pair} so the comparison can be prepared.`;
-      case 'missing_connection':
-      case 'add_edge':
-        return `Next, connect${describeOptionToFactor(option, factor)} so the comparison can be prepared.`;
-      case 'constraint_dropped':
-      case 'review_constraint':
-        return `Next, review the constraint${describeConstraintContext(option, factor)} before comparing the options.`;
-      default:
-        return `Next, resolve the input needed${pair} before comparing the options.`;
-    }
+  // Payload status owns the recovery class. Blockers can be informational and
+  // can describe a different class of gap (for example, an unreachable factor
+  // is emitted as a factor-only `missing_value` while the payload correctly
+  // says `needs_user_mapping`). Never let such an incidental blocker override
+  // a blocked, mapping or encoding status.
+  if (status === 'blocked') {
+    return 'Next, resolve the model issue shown before comparing the options.';
   }
 
-  const nonReadyOption = analysisReady?.options
+  const nonReadyOptions = analysisReady?.options
     ?.map(asPostDraftOption)
-    .find((option): option is PostDraftOptionLite => option !== null && option.status !== 'ready');
+    .filter((option): option is PostDraftOptionLite => option !== null && option.status !== 'ready')
+    ?? [];
+  const statusMatchedOption = status === 'needs_user_mapping' || status === 'needs_encoding'
+    ? nonReadyOptions.find((option) => option.status === status)
+    : undefined;
+  const nonReadyOption = statusMatchedOption ?? nonReadyOptions[0];
   if (nonReadyOption) {
     const option = resolveReadinessLabel(
       nodes,
@@ -728,21 +720,69 @@ function buildReadinessNextStep(
     );
     const namedOption = option ? ` "${option}"` : ' this option';
 
-    if (nonReadyOption.status === 'needs_encoding' || analysisReady?.status === 'needs_encoding') {
+    if (status === 'needs_encoding') {
       return `Next, choose how${namedOption} should be represented on the effect scale before comparing the options.`;
     }
-    return `Next, configure${namedOption} by choosing which factor it changes and by how much.`;
+    if (status === 'needs_user_mapping') {
+      return `Next, configure${namedOption} by choosing which factor it changes and by how much.`;
+    }
   }
 
-  if (analysisReady?.status === 'blocked') {
-    return 'Next, resolve the model issue shown before comparing the options.';
+  if (status === 'needs_user_mapping') {
+    return 'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.';
   }
-  if (analysisReady?.status === 'needs_encoding') {
+  if (status === 'needs_encoding') {
     return 'Next, choose how the unresolved option should be represented on the effect scale.';
   }
-  if (analysisReady?.status === 'needs_user_mapping' || analysisReady?.status === 'needs_user_input') {
+
+  // Only the explicit input-needed state may refine its recovery from a
+  // blocker. Value, confirmation and connection copy names a concrete action
+  // only when both human-labelled endpoints resolve; partial producer records
+  // fall back to the option/status-level configuration action.
+  if (status === 'needs_user_input') {
+    const blocker = asPostDraftBlocker(analysisReady?.blockers?.[0]);
+    if (blocker) {
+      const option = resolveReadinessLabel(nodes, 'option', blocker.option_id, blocker.option_label);
+      const factor = resolveReadinessLabel(nodes, 'factor', blocker.factor_id, blocker.factor_label);
+
+      switch (blocker.blocker_type ?? blocker.suggested_action) {
+        case 'missing_value':
+        case 'add_value':
+          if (option && factor) {
+            return `Next, choose the missing effect value${describeOptionFactorPair(option, factor)} so the comparison can be prepared.`;
+          }
+          break;
+        case 'ambiguous_value':
+        case 'confirm_value':
+          if (option && factor) {
+            return `Next, confirm the effect value${describeOptionFactorPair(option, factor)} so the comparison can be prepared.`;
+          }
+          break;
+        case 'missing_connection':
+        case 'add_edge':
+          if (option && factor) {
+            return `Next, connect${describeOptionToFactor(option, factor)} so the comparison can be prepared.`;
+          }
+          break;
+        case 'constraint_dropped':
+        case 'review_constraint':
+          return `Next, review the constraint${describeConstraintContext(option, factor)} before comparing the options.`;
+      }
+    }
+
+    if (nonReadyOption) {
+      const option = resolveReadinessLabel(
+        nodes,
+        'option',
+        nonReadyOption.id ?? nonReadyOption.option_id,
+        nonReadyOption.label,
+      );
+      const namedOption = option ? ` "${option}"` : ' this option';
+      return `Next, configure${namedOption} by choosing which factor it changes and by how much.`;
+    }
     return 'Next, configure the unresolved option by choosing its factor and effect.';
   }
+
   return 'Next, review the model and fill any gaps before comparing the options.';
 }
 
