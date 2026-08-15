@@ -141,34 +141,52 @@ function parseStageFrames(body: string): StageFrame[] {
   return frames;
 }
 
-function graphOf(value: unknown): { nodes: unknown[]; edges: unknown[] } | null {
-  if (!value || typeof value !== "object") return null;
-  const g = value as { nodes?: unknown; edges?: unknown };
-  if (!Array.isArray(g.nodes)) return null;
-  return { nodes: g.nodes, edges: Array.isArray(g.edges) ? g.edges : [] };
+interface PersistedGraphView {
+  readonly nodes: unknown[];
+  readonly edges: unknown[];
+  readonly options: unknown[];
+  readonly goal_node_id: unknown;
 }
 
-function persistentProjection(value: { nodes: unknown[]; edges: unknown[] }) {
+function graphOf(value: unknown): PersistedGraphView | null {
+  if (!value || typeof value !== "object") return null;
+  const g = value as {
+    nodes?: unknown;
+    edges?: unknown;
+    options?: unknown;
+    goal_node_id?: unknown;
+  };
+  if (!Array.isArray(g.nodes)) return null;
+  return {
+    nodes: g.nodes,
+    edges: Array.isArray(g.edges) ? g.edges : [],
+    options: Array.isArray(g.options) ? g.options : [],
+    goal_node_id: g.goal_node_id,
+  };
+}
+
+function interventionIdentity(value: unknown) {
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, intervention]) => {
+      const body = intervention as Record<string, unknown>;
+      const target = body.target_match as Record<string, unknown> | undefined;
+      return { key, target_node_id: target?.node_id };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function persistentProjection(value: PersistedGraphView) {
   const nodes = value.nodes
     .map((candidate) => {
       const node = candidate as Record<string, unknown>;
-      const interventions =
-        node.interventions && typeof node.interventions === "object"
-          ? Object.entries(node.interventions as Record<string, unknown>)
-              .map(([key, intervention]) => {
-                const body = intervention as Record<string, unknown>;
-                const target = body.target_match as Record<string, unknown> | undefined;
-                return { key, target_node_id: target?.node_id };
-              })
-              .sort((a, b) => a.key.localeCompare(b.key))
-          : [];
       return {
         id: node.id,
         label: node.label,
         kind: node.kind ?? node.type,
         provenance: node.provenance,
         is_baseline: node.is_baseline,
-        interventions,
+        interventions: interventionIdentity(node.interventions),
       };
     })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -178,7 +196,19 @@ function persistentProjection(value: { nodes: unknown[]; edges: unknown[] }) {
       return { id: edge.id, from: edge.from, to: edge.to };
     })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  return { nodes, edges };
+  const options = value.options
+    .map((candidate) => {
+      const option = candidate as Record<string, unknown>;
+      return {
+        id: option.id,
+        label: option.label,
+        provenance: option.provenance,
+        is_baseline: option.is_baseline,
+        interventions: interventionIdentity(option.interventions),
+      };
+    })
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  return { nodes, edges, options, goal_node_id: value.goal_node_id };
 }
 
 describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () => {
@@ -398,9 +428,14 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
     const frameGraph = frame!.graph as Record<string, unknown>;
     expect(Array.isArray(frameGraph.options), "GRAPH_READY did not carry canonical options").toBe(true);
     expect((frameGraph.options as unknown[]).length).toBeGreaterThan(0);
+    expect(early?.options.length ?? 0, "GRAPH_READY options were not projected").toBeGreaterThan(0);
+    expect(committed?.options.length ?? 0, "persisted options were lost").toBeGreaterThan(0);
+    expect(typeof early?.goal_node_id, "GRAPH_READY goal identity was lost").toBe("string");
+    expect(typeof committed?.goal_node_id, "persisted goal identity was lost").toBe("string");
 
     // Values may settle only in terminal graph-data-integrity; every durable
-    // identity/provenance relation must survive the streamed V5 commit exactly.
+    // graph/option/goal identity and provenance relation must survive the
+    // streamed V5 commit exactly.
     const projectedEarly = persistentProjection(early!);
     const projectedCommitted = persistentProjection(committed!);
     expect(projectedEarly.edges.length).toBeGreaterThan(0);

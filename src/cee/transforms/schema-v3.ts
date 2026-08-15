@@ -984,6 +984,9 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   const usedNodeIds = new Set<string>();
   const labelCleaningTrace: LabelCleaningEntry[] = [];
   const v3Nodes = graph.nodes.map((node) => transformNodeToV3(node, usedNodeIds, labelCleaningTrace));
+  const projectedNodeIdBySourceId = new Map(
+    graph.nodes.map((node, index) => [node.id, v3Nodes[index]?.id ?? node.id]),
+  );
 
   // Keep ALL valid edges (including decision→option and option→factor)
   const validEdges = graph.edges.filter(
@@ -991,9 +994,20 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   );
 
   // Transform edges, collecting defaults
-  const edgeResults = validEdges.map((edge, index) =>
-    transformEdgeToV3(edge, index, graph.nodes)
-  );
+  const edgeResults = validEdges.map((edge, index) => {
+    // Classification must continue to see the raw graph: decision→option and
+    // option→factor are structural even when their ids need canonicalising.
+    // Only the finished edge endpoints cross into the projected id space.
+    const result = transformEdgeToV3(edge, index, graph.nodes);
+    return {
+      ...result,
+      edge: {
+        ...result.edge,
+        from: projectedNodeIdBySourceId.get(edge.from) ?? result.edge.from,
+        to: projectedNodeIdBySourceId.get(edge.to) ?? result.edge.to,
+      },
+    };
+  });
   const v3Edges = edgeResults.map((r) => r.edge);
   const allDefaults = edgeResults.flatMap((r) => r.defaults);
   const edgesWithDefaults = new Set(allDefaults.map((d) => d.edge_id));

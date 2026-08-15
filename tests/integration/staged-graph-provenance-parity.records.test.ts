@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { DraftRecordSet } from "../../src/cee/draft/records/grammar.js";
 import { projectDraftRecords } from "../../src/cee/draft/records/seam.js";
 import {
+  transformGraphToV3,
   transformResponseToV3,
   type V3DraftGraphResponse,
 } from "../../src/cee/transforms/schema-v3.js";
@@ -372,7 +373,7 @@ describe("one terminal V3 graph/options projection authority", () => {
     }
   });
 
-  it("remaps source intervention and goal ids to the canonical V3 identities", () => {
+  it("remaps every edge, intervention and goal identity into one canonical V3 graph", () => {
     const seam = projectDraftRecords(TERMINAL_AUTHORITY_RECORDS, TERMINAL_AUTHORITY_BRIEF);
     expect(seam.ok).toBe(true);
     if (!seam.ok) throw new Error(seam.reason);
@@ -380,44 +381,95 @@ describe("one terminal V3 graph/options projection authority", () => {
     const factor = byLabel(source.nodes, "Developer Capacity");
     const option = byLabel(source.nodes, "two developers");
     const goal = byLabel(source.nodes, "Our revenue target is £3,000,000");
+    const decision = byLabel(source.nodes, "Decision");
+    const developerRefinement = byLabel(source.nodes, "Hire Two Developers Only");
+    const crmRefinement = byLabel(source.nodes, "Adopt Enterprise CRM Option");
     const renamed = new Map<string, string>([
       [String(factor.id), "Factor Target / A"],
       [String(option.id), "Option Choice / A"],
       [String(goal.id), "Goal Target / A"],
+      [String(decision.id), "Decision Root / A"],
+      [String(developerRefinement.id), "Refinement Developers / A"],
+      [String(crmRefinement.id), "Refinement CRM / A"],
     ]);
     const graph = {
       ...source,
-      nodes: source.nodes.map((node) => {
-        const nextId = renamed.get(node.id) ?? node.id;
-        if (!node.data || typeof node.data !== "object") {
-          return { ...node, id: nextId };
-        }
-        const data = node.data as Record<string, unknown>;
-        const interventions = data.interventions;
-        return {
-          ...node,
-          id: nextId,
-          data: {
-            ...data,
-            ...(interventions && typeof interventions === "object"
-              ? {
-                  interventions: Object.fromEntries(
-                    Object.entries(interventions).map(([id, value]) => [
-                      renamed.get(id) ?? id,
-                      value,
-                    ]),
-                  ),
-                }
-              : {}),
-          },
-        };
-      }),
-      edges: source.edges.map((edge) => ({
-        ...edge,
-        from: renamed.get(edge.from) ?? edge.from,
-        to: renamed.get(edge.to) ?? edge.to,
-      })),
+      nodes: [
+        ...source.nodes.map((node) => {
+          const nextId = renamed.get(node.id) ?? node.id;
+          if (!node.data || typeof node.data !== "object") {
+            return { ...node, id: nextId };
+          }
+          const data = node.data as Record<string, unknown>;
+          const interventions = data.interventions;
+          return {
+            ...node,
+            id: nextId,
+            data: {
+              ...data,
+              ...(interventions && typeof interventions === "object"
+                ? {
+                    interventions: Object.fromEntries(
+                      Object.entries(interventions).map(([id, value]) => [
+                        renamed.get(id) ?? id,
+                        value,
+                      ]),
+                    ),
+                  }
+                : {}),
+            },
+          };
+        }),
+        { id: "A B", kind: "factor", label: "Collision Factor One" },
+        { id: "A-B", kind: "factor", label: "Collision Factor Two" },
+      ],
+      edges: [
+        ...source.edges.map((edge) => ({
+          ...edge,
+          from: renamed.get(edge.from) ?? edge.from,
+          to: renamed.get(edge.to) ?? edge.to,
+        })),
+        { from: "A B", to: "A-B", weight: 0.3 },
+        { from: "A-B", to: "A-B", weight: 0.2 },
+        { from: "A B", to: "Missing Raw / Endpoint", weight: 0.1 },
+      ],
     };
+
+    const transformedOnly = transformGraphToV3(graph as never).graph;
+    const collisionOne = byLabel(transformedOnly.nodes, "Collision Factor One");
+    const collisionTwo = byLabel(transformedOnly.nodes, "Collision Factor Two");
+    expect(collisionOne.id).toBe("a_b");
+    expect(collisionTwo.id).toBe("a_b__2");
+    expect(
+      transformedOnly.edges.map(record).find(
+        (edge) => edge.from === collisionOne.id && edge.to === collisionTwo.id,
+      ),
+      "colliding source ids did not retain their exact projected endpoints",
+    ).toBeDefined();
+    expect(
+      transformedOnly.edges.map(record).find(
+        (edge) => edge.from === collisionTwo.id && edge.to === collisionTwo.id,
+      ),
+      "canonical self-loop was lost",
+    ).toBeDefined();
+    expect(
+      transformedOnly.edges.map(record).some(
+        (edge) => edge.id === "A B->Missing Raw / Endpoint",
+      ),
+      "source-dangling edge crossed the transform boundary",
+    ).toBe(false);
+
+    const projectedDecision = byLabel(transformedOnly.nodes, decision.label as string);
+    const projectedOption = byLabel(transformedOnly.nodes, option.label as string);
+    const structural = transformedOnly.edges.map(record).find(
+      (edge) => edge.from === projectedDecision.id && edge.to === projectedOption.id,
+    );
+    expect(structural, "decision→option edge was lost during endpoint projection").toBeDefined();
+    expect(structural?.exists_probability).toBe(1);
+
+    const absorbedIds = [developerRefinement, crmRefinement].map((node) =>
+      String(byLabel(transformedOnly.nodes, node.label as string).id),
+    );
 
     const staged = projectGraphForStagedFrame(
       graph as never,
@@ -440,8 +492,36 @@ describe("one terminal V3 graph/options projection authority", () => {
     expect(record(record(stagedInterventions[canonicalFactorId!]).target_match).node_id).toBe(
       canonicalFactorId,
     );
-    expect(staged.nodes).toEqual(final.nodes);
-    expect(staged.options).toEqual(final.options);
+    expect({
+      nodes: staged.nodes,
+      edges: staged.edges,
+      options: staged.options,
+      goal_node_id: staged.goal_node_id,
+    }).toEqual({
+      nodes: final.nodes,
+      edges: final.edges,
+      options: final.options,
+      goal_node_id: final.goal_node_id,
+    });
+
+    const nodeIds = new Set(staged.nodes.map((node) => String(record(node).id)));
+    for (const edge of staged.edges.map(record)) {
+      expect(nodeIds.has(String(edge.from)), `${String(edge.id)}: dangling from`).toBe(true);
+      expect(nodeIds.has(String(edge.to)), `${String(edge.id)}: dangling to`).toBe(true);
+    }
+    for (const absorbedId of absorbedIds) {
+      expect(nodeIds.has(absorbedId), `${absorbedId}: absorbed node survived`).toBe(false);
+      expect(
+        staged.options.map((candidate) => String(record(candidate).id)),
+        `${absorbedId}: absorbed option survived`,
+      ).not.toContain(absorbedId);
+      expect(
+        staged.edges.map(record).some(
+          (edge) => edge.from === absorbedId || edge.to === absorbedId,
+        ),
+        `${absorbedId}: absorbed incident edge survived`,
+      ).toBe(false);
+    }
   });
 
   it("honours typed provenance before label binding, including verified numeric and unverified controls", () => {
