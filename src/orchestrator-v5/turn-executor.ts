@@ -845,6 +845,59 @@ const ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT =
 const ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT =
   'I could not read the model to check what you selected, so I can’t answer about it without guessing. I have not substituted a different element.';
 
+type ZeroResolvedSelectionProjection = {
+  readonly response: OlumiResponse;
+  readonly applied: boolean;
+};
+
+/**
+ * One projection for both durable history and wire egress.
+ *
+ * `commitTurn` applies it before `commitDirectAnswer` derives the stored
+ * assistant message; `finalizeRun` applies it again as the every-exit
+ * backstop. Keeping the decision and replacement bytes here prevents a turn
+ * from persisting the leader-shaped answer while shipping the refusal.
+ */
+function projectZeroResolvedSelectionResponse(
+  response: OlumiResponse,
+  focus: ContextPackFocus | undefined,
+  options: {
+    readonly hasFailure: boolean;
+    readonly preserveMutationReceipt: boolean;
+  },
+): ZeroResolvedSelectionProjection {
+  if (
+    options.hasFailure ||
+    options.preserveMutationReceipt ||
+    response.blocks.some((block) => block.type === 'error') ||
+    focus === undefined ||
+    focus.requested_count < 1 ||
+    focus.elements.length !== 0
+  ) {
+    return { response, applied: false };
+  }
+
+  // `none` is structurally inconsistent with requested>0/elements=0. Treat
+  // any future or malformed value as `could_not_check`: inability to prove
+  // absence must never become a claim that the selected element is missing.
+  const assistantText =
+    focus.unresolved === 'not_in_model'
+      ? ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT
+      : ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT;
+
+  return {
+    applied: true,
+    response: {
+      response_version: response.response_version,
+      assistant_text: assistantText,
+      blocks: [],
+      suggested_actions: [],
+      insights: [],
+      stage_indicator: response.stage_indicator,
+    },
+  };
+}
+
 /**
  * Run a single V5 turn end-to-end. Always returns a well-formed
  * OlumiResponse; internal runtime failures map to a typed response with an
@@ -1026,6 +1079,12 @@ export async function runTurnExecutor(
   // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
   // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
   let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
+  // True only after a commit persisted the zero-resolved projection. The
+  // finaliser then preserves any legitimate commit-layer adjustment (for
+  // example a held-change lapse notice) instead of re-projecting different
+  // bytes after durable history was written. The finaliser still validates
+  // the guarded shape and falls back to the projection if it diverged.
+  let zeroResolvedSelectionGuardAppliedAtCommit = false;
 
   // ⭐⭐ WITHHELD CONSENT — evaluated ONCE, from the user's own words, BEFORE
   // any model call. Two layers hang off this one value:
@@ -1295,10 +1354,32 @@ export async function runTurnExecutor(
     // conflict thrown by THIS append before rethrowing to the call site's
     // own catch ladder.
     lastCommitConflictError = null;
+    zeroResolvedSelectionGuardAppliedAtCommit = false;
     let result: Awaited<ReturnType<typeof commitDirectAnswer>>;
     try {
-      result = await commitDirectAnswer(
+      // The finaliser's zero-resolved-selection guard used to run only AFTER
+      // this append, which shipped honest copy while persisting the model's
+      // leader-substitution prose into recent-turn history. Project the SAME
+      // response here so durable history and wire egress cannot diverge. A
+      // genuine mutation receipt retains the existing commit-backed exception;
+      // current-turn explicit pendings are cleared whenever their carrier
+      // response is replaced, so no hidden action survives the bounded reply.
+      const zeroSelectionProjection = projectZeroResolvedSelectionResponse(
         resp,
+        contextPackForLog?.focus,
+        {
+          hasFailure: failureType !== null,
+          preserveMutationReceipt:
+            handlerEmittedMutatedGraph ||
+            proposedHandlerIdForOutcome === 'draft_graph' ||
+            proposedHandlerIdForOutcome === 'edit_graph',
+        },
+      );
+      const commitMeta = zeroSelectionProjection.applied
+        ? { ...meta, pending_actions: [] }
+        : meta;
+      result = await commitDirectAnswer(
+        zeroSelectionProjection.response,
         {
           // Injected BEFORE ...meta so a call site could still override; no
           // current call site does (the wrapper's server-read derivation is
@@ -1311,7 +1392,7 @@ export async function runTurnExecutor(
           // meta) to exclude the proposal they just consumed / rejected, so it
           // can never carry forward and reappear as a zombie.
           priorPendingActions: context.most_recent_pending_actions ?? [],
-          ...meta,
+          ...commitMeta,
           coaching_state: context.coaching_state,
           userMessage: userMessageForTurn,
           // Lane 28 — brief pipeline seam 1: a call site's explicit briefText
@@ -1333,6 +1414,7 @@ export async function runTurnExecutor(
         },
         store,
       );
+      zeroResolvedSelectionGuardAppliedAtCommit = zeroSelectionProjection.applied;
     } catch (error) {
       if (
         error instanceof TurnFenceRejectedError ||
@@ -11672,10 +11754,34 @@ export async function runTurnExecutor(
    */
   function enforceZeroResolvedSelectionGuard(): void {
     if (!response) return;
+
+    // `commitDirectAnswer` returns the SAME object from which it derived the
+    // durable assistant message, possibly with a deterministic lapse notice
+    // appended. When this commit already persisted the guarded projection,
+    // preserve those exact bytes so history and wire remain identical. The
+    // shape checks keep this fail-closed: any answer carrier or unexpected
+    // text falls through to the projection below.
+    const persistedGuardPrefix =
+      response.assistant_text === ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT ||
+      response.assistant_text.startsWith(
+        `${ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT}\n\n`,
+      ) ||
+      response.assistant_text === ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT ||
+      response.assistant_text.startsWith(
+        `${ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT}\n\n`,
+      );
     if (
-      failureType !== null ||
-      response.blocks.some((block) => block.type === 'error')
-    ) return;
+      zeroResolvedSelectionGuardAppliedAtCommit &&
+      persistedGuardPrefix &&
+      response.blocks.length === 0 &&
+      response.suggested_actions.length === 0 &&
+      response.insights.length === 0
+    ) {
+      capturedAnswerShape = undefined;
+      capturedReasoning = undefined;
+      functionalAnswerText = response.assistant_text;
+      return;
+    }
 
     // This is an answer-grounding guard, not a mutation-receipt suppressor.
     // A successful graph mutation has a stronger, commit-backed authority for
@@ -11688,34 +11794,20 @@ export async function runTurnExecutor(
       (handlerEmittedMutatedGraph ||
         proposedHandlerIdForOutcome === 'draft_graph' ||
         proposedHandlerIdForOutcome === 'edit_graph');
-    if (committedGraphMutation) return;
+    const projected = projectZeroResolvedSelectionResponse(
+      response,
+      contextPackForLog?.focus,
+      {
+        hasFailure: failureType !== null,
+        preserveMutationReceipt: committedGraphMutation,
+      },
+    );
+    if (!projected.applied) return;
 
-    const focus = contextPackForLog?.focus;
-    if (
-      focus === undefined ||
-      focus.requested_count < 1 ||
-      focus.elements.length !== 0
-    ) return;
-
-    // `none` is structurally inconsistent with requested>0/elements=0. Treat
-    // any future or malformed value as `could_not_check`: inability to prove
-    // absence must never become a claim that the selected element is missing.
-    const assistantText =
-      focus.unresolved === 'not_in_model'
-        ? ZERO_RESOLVED_SELECTION_NOT_IN_MODEL_TEXT
-        : ZERO_RESOLVED_SELECTION_COULD_NOT_CHECK_TEXT;
-
-    response = {
-      response_version: response.response_version,
-      assistant_text: assistantText,
-      blocks: [],
-      suggested_actions: [],
-      insights: [],
-      stage_indicator: response.stage_indicator,
-    };
+    response = projected.response;
     capturedAnswerShape = undefined;
     capturedReasoning = undefined;
-    functionalAnswerText = assistantText;
+    functionalAnswerText = projected.response.assistant_text;
   }
 
   function finalizeRun(): TurnExecutorRunResult {

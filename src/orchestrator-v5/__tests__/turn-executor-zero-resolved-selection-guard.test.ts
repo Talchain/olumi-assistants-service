@@ -32,6 +32,11 @@ type GraphReadMode = 'ok_present' | 'degraded';
 
 const harness = vi.hoisted(() => ({
   graphReadMode: 'ok_present' as GraphReadMode,
+  appendedRows: [] as Array<{
+    assistantMessage?: string | null;
+    graph?: unknown;
+    pending_actions?: readonly unknown[];
+  }>,
 }));
 
 const SCENARIO_ID = '8e425d85-4fc7-4ab4-9d6e-2c77fd41dbb2';
@@ -146,7 +151,10 @@ vi.mock('../rolling-summary/index.js', () => ({
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (row: (typeof harness.appendedRows)[number]) => {
+      harness.appendedRows.push(row);
+      return { id: `row-${randomUUID()}` };
+    },
     readRecent: async (_id: string, limit = 20) => [PRIOR_ANALYSIS_TURN].slice(0, limit),
     countTurns: async () => 1,
     readFactsFor: async (turnRowIds: readonly string[]) =>
@@ -274,6 +282,7 @@ async function run(
 
 beforeEach(() => {
   harness.graphReadMode = 'ok_present';
+  harness.appendedRows.length = 0;
   setTestSink(() => undefined);
 });
 
@@ -311,6 +320,17 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(guarded.answerShape).toBeUndefined();
     expect(guarded.reasoning).toBeUndefined();
     expect(guarded.answerKind).toBe('functional');
+    expect(guarded.groundedSelection).toEqual({
+      element_ids: [],
+      unresolved: 'not_in_model',
+    });
+
+    const persisted = harness.appendedRows.at(-1);
+    expect(persisted?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+    expect(persisted?.assistantMessage).not.toContain(OPTION_LABEL);
+    expect(persisted?.assistantMessage).not.toContain('62%');
+    expect(persisted?.pending_actions).toEqual([]);
+    expect(persisted?.graph).toBeUndefined();
 
     const shipped = JSON.stringify(guarded.response);
     expect(shipped).not.toContain(GHOST_ID);
@@ -331,6 +351,24 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(result.response.blocks).toEqual([]);
     expect(result.response.suggested_actions).toEqual([]);
     expect(result.answerKind).toBe('functional');
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+    expect(harness.appendedRows.at(-1)?.pending_actions).toEqual([]);
+    expect(harness.appendedRows.at(-1)?.graph).toBeUndefined();
+  });
+
+  it('does not persist a resumable proposal captured from the discarded answer', async () => {
+    const discardedProposal = 'Would you like me to add team morale as a factor?';
+    const result = await run(
+      MODEL_PATH_MESSAGE,
+      resolvedAdapter(textOnlyResult(discardedProposal)),
+      { node_ids: [GHOST_ID], edge_ids: [] },
+    );
+
+    expect(result.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
+    expect(result.response.assistant_text).not.toContain('team morale');
+    expect(result.response.suggested_actions).toEqual([]);
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
+    expect(harness.appendedRows.at(-1)?.pending_actions).toEqual([]);
   });
 
   it('distinguishes a degraded graph read without claiming the element is absent', async () => {
@@ -349,6 +387,9 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(result.response.assistant_text).not.toContain('not in the model');
     expect(result.response.assistant_text).not.toContain(OPTION_LABEL);
     expect(result.response.blocks).toEqual([]);
+    expect(harness.appendedRows.at(-1)?.assistantMessage).toBe(COULD_NOT_CHECK_TEXT);
+    expect(harness.appendedRows.at(-1)?.pending_actions).toEqual([]);
+    expect(harness.appendedRows.at(-1)?.graph).toBeUndefined();
   });
 });
 
@@ -372,6 +413,11 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     expect(noSelection.response.assistant_text).toBe(original);
     expect(JSON.stringify(resolved.response)).toBe(JSON.stringify(noSelection.response));
     expect(JSON.stringify(mixed.response)).toBe(JSON.stringify(noSelection.response));
+    expect(harness.appendedRows.slice(-3).map((row) => row.assistantMessage)).toEqual([
+      original,
+      original,
+      original,
+    ]);
   });
 
   it('preserves a committed selected-mutation receipt when the canonical read is degraded', async () => {
@@ -392,6 +438,9 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
     });
     expect(result.response.assistant_text).not.toBe(NOT_IN_MODEL_TEXT);
     expect(result.response.assistant_text).not.toBe(COULD_NOT_CHECK_TEXT);
+    expect(harness.appendedRows.at(-1)?.graph).toBeDefined();
+    expect(harness.appendedRows.at(-1)?.assistantMessage).not.toBe(NOT_IN_MODEL_TEXT);
+    expect(harness.appendedRows.at(-1)?.assistantMessage).not.toBe(COULD_NOT_CHECK_TEXT);
   });
 
   it('does not hide or reshape an existing failure response', async () => {
