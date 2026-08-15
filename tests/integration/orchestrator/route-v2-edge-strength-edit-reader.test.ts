@@ -3,8 +3,10 @@
  *
  * Train B is intentionally NOT the writer. A valid event crosses the real B1
  * root parser and deterministic route, but the only durable effect is the
- * refusal transcript: no graph, handler fact, or pending action is handed to
- * the atomic append. Malformed or contradictory events stop at B1 with 422.
+ * refusal transcript: no graph, handler fact, or newly-derived pending action
+ * is handed to the atomic append; legitimate prior pendings use the canonical
+ * carry-forward lifecycle. Malformed or contradictory events stop at B1 with
+ * 422.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -16,12 +18,14 @@ const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 const loadGraphMock = vi.fn();
 const loadGraphAndBriefTextMock = vi.fn();
 const readFactsForMock = vi.fn().mockResolvedValue([]);
+const readMostRecentPendingActionsMock = vi.fn().mockResolvedValue([]);
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: readFactsForMock,
+    readMostRecentPendingActions: readMostRecentPendingActionsMock,
     loadGraph: loadGraphMock,
     loadGraphAndBriefText: loadGraphAndBriefTextMock,
     invalidateScoped: async (_scenarioId: string, scope: unknown) => ({
@@ -87,6 +91,17 @@ const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route
 const SCENARIO_ID = '22222222-2222-4222-8222-222222222222';
 const TURN_ID_BASE = '11111111-1111-4111-8111-1111111111';
 
+const PRIOR_PENDING = {
+  id: 'pa-reader-preserve-1',
+  scenario_id: SCENARIO_ID,
+  chip_id: 'chip-run-analysis-prior',
+  action: { kind: 'run_analysis' },
+  preconditions: {},
+  expires_at_turn_count: 3,
+  expires_at_iso: '2099-12-31T23:59:59.000Z',
+  emitted_at_iso: '2026-08-15T10:00:00.000Z',
+} as const;
+
 function payloadFor(event: Record<string, unknown>, suffix: string) {
   return {
     kind: 'system_event',
@@ -140,10 +155,12 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit compatibility reader'
     loadGraphMock.mockClear();
     loadGraphAndBriefTextMock.mockClear();
     readFactsForMock.mockClear();
+    readMostRecentPendingActionsMock.mockReset();
+    readMostRecentPendingActionsMock.mockResolvedValue([]);
     llmChatMock.mockClear();
   });
 
-  it('returns a typed non-retryable refusal and writes no graph, fact, or pending action', async () => {
+  it('returns a typed non-retryable refusal and creates no graph, fact, or pending action', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -179,9 +196,86 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit compatibility reader'
     expect(append.graph).toBeUndefined();
     expect(append.handler_facts).toEqual([]);
     expect(append.pending_actions).toEqual([]);
+    expect(readMostRecentPendingActionsMock).toHaveBeenCalledTimes(1);
+    expect(readMostRecentPendingActionsMock).toHaveBeenCalledWith(SCENARIO_ID);
+
+    expect(body).not.toHaveProperty('analysis_ready');
+    expect(body).not.toHaveProperty('draft_graph');
+    expect(body).not.toHaveProperty('graph_hash');
 
     // Positive route controls: if the event were accidentally wired to the
     // existing mutation path, it would need the canonical graph/fact reads.
+    expect(loadGraphMock).not.toHaveBeenCalled();
+    expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
+    expect(readFactsForMock).not.toHaveBeenCalled();
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
+  it('carries the prior legitimate pending through the real commit lifecycle and derives none from refusal prose', async () => {
+    readMostRecentPendingActionsMock.mockResolvedValueOnce([PRIOR_PENDING]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(validEvent(), '94'),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    expect(body.assistant_text).toBe(
+      "I can't apply this link-strength change in this version, so I haven't changed the model.",
+    );
+    expect(body.suggested_actions).toEqual([]);
+
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    const append = lastAppend();
+    expect(append.graph).toBeUndefined();
+    expect(append.handler_facts).toEqual([]);
+    expect(append.pending_actions).toEqual([
+      { ...PRIOR_PENDING, expires_at_turn_count: 2 },
+    ]);
+
+    const persisted = append.pending_actions as ReadonlyArray<{
+      action?: { kind?: string };
+      chip_id?: string;
+    }>;
+    expect(persisted.map((pending) => pending.chip_id)).toEqual([
+      PRIOR_PENDING.chip_id,
+    ]);
+    expect(persisted.map((pending) => pending.action?.kind)).toEqual([
+      'run_analysis',
+    ]);
+    expect(persisted.some((pending) => pending.action?.kind === 'proposed_concept')).toBe(false);
+
+    expect(readMostRecentPendingActionsMock).toHaveBeenCalledTimes(1);
+    expect(loadGraphMock).not.toHaveBeenCalled();
+    expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
+    expect(readFactsForMock).not.toHaveBeenCalled();
+    expect(llmChatMock).not.toHaveBeenCalled();
+  });
+
+  it('fails the refusal commit closed when prior pending state cannot be read', async () => {
+    readMostRecentPendingActionsMock.mockRejectedValueOnce(
+      new Error('simulated pending read failure'),
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(validEvent(), '95'),
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(JSON.parse(response.body)).toMatchObject({
+      boundary: 'B1',
+      direction: 'egress',
+      retryable: true,
+      details: {
+        reason: 'system_event_commit_failed',
+        event_kind: 'edge_strength_edit',
+      },
+    });
+    expect(appendMock).not.toHaveBeenCalled();
     expect(loadGraphMock).not.toHaveBeenCalled();
     expect(loadGraphAndBriefTextMock).not.toHaveBeenCalled();
     expect(readFactsForMock).not.toHaveBeenCalled();

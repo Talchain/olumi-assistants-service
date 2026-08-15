@@ -30,9 +30,12 @@ identically from a normal clone, a CI checkout, and any worktree.
 0.42.0 adds the strict `edge_strength_edit` member to the root
 `OrchestratorTurnPayloadSchema`. CEE parses that ROOT schema at B1, including
 its cross-field rules, then deterministically returns a typed, non-retryable
-`FEATURE_NOT_ENABLED` refusal. The reader writes no graph, handler fact or
-pending action and does not call `adjust_edge_strength`. Every pre-0.42 system
-event retains its prior handling and wire shape.
+`FEATURE_NOT_ENABLED` refusal. The reader writes no graph or handler fact,
+derives no new pending action, preserves legitimate prior pendings through the
+canonical TTL/expiry/hash carry-forward, and does not call
+`adjust_edge_strength`. A degraded pending read fails the transcript commit
+closed rather than clearing state. Every pre-0.42 system event retains its
+prior handling and wire shape.
 
 > **⚠ READER-FIRST ORDER IS LOAD-BEARING.** A CEE pinned to 0.41 rejects the
 > new discriminator before dispatch. Rollout order is: schemas 0.42 publish →

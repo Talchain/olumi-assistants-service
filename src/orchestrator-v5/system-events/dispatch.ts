@@ -18,8 +18,9 @@
  *     not a fake success. See src/orchestrator/route-v2.ts for the
  *     skip-reason allowlist.
  *   - edge_strength_edit (0.42 compatibility reader) → commit a typed refusal
- *     transcript with no graph, handler facts or pending actions. Writer
- *     behaviour is a separate train.
+ *     transcript with no graph, handler facts or newly-derived pending action.
+ *     Legitimate prior pendings follow the canonical carry-forward lifecycle;
+ *     writer behaviour is a separate train.
  *
  * Response envelope: existing kinds retain their prior silent acknowledgement;
  * the reader-only event returns a typed non-retryable FEATURE_NOT_ENABLED
@@ -35,7 +36,11 @@ import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestra
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
-import { loadPersistedGraphStrict, loadPriorFactsQuietly } from '../build-turn-context.js';
+import {
+  loadMostRecentPendingActionsStrict,
+  loadPersistedGraphStrict,
+  loadPriorFactsQuietly,
+} from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
@@ -143,7 +148,7 @@ export type SystemEventHandling =
   | 'ack_and_commit'
   /**
    * Known additive wire event whose writer is deliberately not deployed yet.
-   * Commit an explicit typed refusal, never a graph/fact/pending mutation.
+   * Commit an explicit typed refusal, never a graph/fact/new-pending mutation.
    */
   | 'reader_only_refusal'
   /**
@@ -375,6 +380,40 @@ export async function dispatchSystemEvent(
     judgementFacts = [check.data];
   }
 
+  // A reader-only refusal is a committed assistant turn. Pending-action
+  // authority is deliberately "most recent turn only", so committing an empty
+  // row without threading the prior set would make a legitimate offer
+  // unreachable even though this refusal neither consumed nor superseded it.
+  // Read STRICTLY: on degradation we cannot prove preservation, so fail the
+  // commit closed and leave the previous row authoritative. The canonical
+  // commit carry-forward owns normal TTL/expiry/hash rules; this seam neither
+  // reimplements them nor treats the prior entries as newly-created actions.
+  let readerPriorPendingActions:
+    | Awaited<ReturnType<typeof loadMostRecentPendingActionsStrict>>
+    | undefined;
+  if (handling === 'reader_only_refusal') {
+    try {
+      readerPriorPendingActions = await loadMostRecentPendingActionsStrict(
+        payload.scenario_id,
+        requestId,
+      );
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: payload.event.kind,
+          scenario_id: payload.scenario_id,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 system event compatibility refusal — pending read failed; refusing commit to preserve prior state',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+  }
+
   try {
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
@@ -385,10 +424,14 @@ export async function dispatchSystemEvent(
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
       handler_facts: judgementFacts,
-      // The compatibility reader is a hard no-write floor. Supplying this
-      // explicitly prevents a future response-chip edit from deriving a
-      // resumable pending action at commit time.
+      // The compatibility reader is a hard no-new-action floor. Supplying this
+      // explicitly prevents refusal copy/chips from deriving a resumable
+      // pending at commit time; priorPendingActions below is a distinct input
+      // owned by the canonical carry-forward lifecycle.
       ...(handling === 'reader_only_refusal' ? { pending_actions: [] } : {}),
+      ...(handling === 'reader_only_refusal'
+        ? { priorPendingActions: readerPriorPendingActions }
+        : {}),
       // V5 Stage 2B-1b: system-event turns have no user turn / coaching context
       // (no buildTurnContext) — persist NULL explicitly. The most-recent read
       // filters non-null, so this never resets a prior coaching snapshot.
@@ -401,7 +444,7 @@ export async function dispatchSystemEvent(
         scenario_id: payload.scenario_id,
       },
       handling === 'reader_only_refusal'
-        ? 'V5 system event refused by compatibility reader — no graph, fact or pending write'
+        ? 'V5 system event refused by compatibility reader — no graph/fact write or new pending action'
         : 'V5 system event committed',
     );
     return { response, commitPerformed: true, graph: null };
