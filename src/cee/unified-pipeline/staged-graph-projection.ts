@@ -16,22 +16,22 @@
  * and re-renders — destroying the exact latency win this lane exists to deliver.
  *
  * ── DERIVED, NOT MIRRORED ───────────────────────────────────────────────────
- * This calls `transformGraphToV3` / `transformGraphToV2` — the SAME exported
- * functions the boundary stage uses (`transformResponseToV3` calls
- * `transformGraphToV3` internally). Re-implementing the id/label rules here
+ * V3 calls `projectGraphAndOptionsToV3` — the SAME exported authority the
+ * boundary stage uses — while V2 calls its existing graph transformer.
+ * Re-implementing the id/label rules here
  * would be a hand-maintained mirror that drifts the first time the transform
  * changes (CLAUDE.md trap 12). If the transform changes, this changes with it.
  *
  * ── WHAT IS GUARANTEED, AND WHAT IS NOT ─────────────────────────────────────
- * GUARANTEED: node IDENTITY — `id`, `label` and `kind`/`type` — plus the
- * user-visible authorship badge and option baseline identity are byte-equal to
- * the terminal frame's corresponding nodes. Those are structural facts the
- * canvas must not revise while reconciling the same node ids, and they are
- * pinned from typed records through both projections.
+ * GUARANTEED: canonical node/edge ids, incident edges, typed provenance,
+ * options, baseline identity and intervention target/key identity are produced
+ * by the same projector the terminal response consumes. Rephrase absorption
+ * therefore happens before either phase can expose an absorbed id.
  *
- * NOT guaranteed: numeric VALUES. `graph-data-integrity` runs AFTER the schema
- * transform in Stage 6 (factor scale consistency, edge field defaults, the
- * observed-root intercept doctrine — see stages/boundary.ts), so an
+ * NOT guaranteed: numeric VALUES. `runGraphDataIntegrityChecks` is the sole
+ * documented late numeric authority and runs AFTER the shared projection in
+ * Stage 6 (factor scale consistency, edge field defaults, the observed-root
+ * intercept doctrine — see stages/boundary.ts), so an
  * `observed_state.value` or an edge default may be refined between GRAPH_READY
  * and COMPLETE. This is honest and is exactly why the frame is `in_progress`:
  * the terminal frame is always the authority. Identity is stable; values settle.
@@ -59,10 +59,7 @@
  */
 
 import type { GraphV1 } from "../../contracts/plot/engine.js";
-import {
-  applyBriefBoundNodeProvenance,
-  transformGraphToV3,
-} from "../transforms/schema-v3.js";
+import { projectGraphAndOptionsToV3 } from "../transforms/schema-v3.js";
 import { transformGraphToV2 } from "../transforms/schema-v2.js";
 import {
   VALIDATION_EDGE_METADATA_KEY,
@@ -142,12 +139,12 @@ function projectByVersion(
 ): unknown {
   try {
     if (schemaVersion === "v3") {
-      const projected = transformGraphToV3(graph as never).graph;
-      // The terminal V3 response applies this same authority before it emits
-      // nodes/options. Without the brief here, GRAPH_READY under-claims every
-      // user-authored goal and option as AI-inferred until COMPLETE replaces it.
-      applyBriefBoundNodeProvenance(projected.nodes, brief);
-      return projected;
+      const projected = projectGraphAndOptionsToV3(graph as never, { brief });
+      return {
+        ...projected.graph,
+        options: projected.options,
+        goal_node_id: projected.goal_node_id,
+      };
     }
     if (schemaVersion === "v2") {
       return transformGraphToV2(graph as never);

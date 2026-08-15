@@ -34,6 +34,7 @@ import {
   getExtractionStatistics,
   hasPriceRelatedUnresolvedTargets,
   type EdgeHint,
+  type ExtractedOption,
 } from "../extraction/intervention-extractor.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
 import { PriorDistribution, isKnownPriorDistribution } from "../../schemas/graph.js";
@@ -54,7 +55,10 @@ import { mayClaimFromBrief } from "../provenance/factor-value-provenance.js";
 // restated — `nodes[].provenance` and `options[].provenance.source` describe one
 // fact and must not be able to disagree about it (trap 12).
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from "../provenance/brief-binding.js";
-import { mergeRephrasedOptions } from "./option-rephrase-merge.js";
+import {
+  mergeRephrasedOptions,
+  type RephraseMergeResult,
+} from "./option-rephrase-merge.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 
 // ============================================================================
@@ -254,14 +258,6 @@ export function transformNodeToV3(
         goal_threshold_frame: node.goal_threshold_frame,
       }),
   };
-
-  // Option identity is structural, not a value that may settle after
-  // GRAPH_READY. Preserve it in the graph transform so staged and terminal
-  // nodes expose the same status-quo choice from the same typed record.
-  if (node.kind === "option") {
-    const isBaseline = resolveOptionIsBaseline(node);
-    if (isBaseline !== undefined) v3Node.is_baseline = isBaseline;
-  }
 
   // Transform data to observed_state.
   // OptionData (with interventions) is handled separately in options extraction.
@@ -1053,27 +1049,70 @@ export function transformGraphToV3(graph: V1Graph): GraphTransformResult {
   };
 }
 
+type TypedRecordProvenanceClass = "stated" | "ai_inferred" | "projector_structural";
+type TypedRecordBriefBinding = "verified" | "unverified" | "unchecked";
+
+interface RecognizedTypedRecordProvenance {
+  readonly provenance_class: TypedRecordProvenanceClass;
+  readonly brief_binding?: TypedRecordBriefBinding;
+}
+
 /**
- * Apply the response boundary's brief-binding provenance rules to V3 graph
- * nodes.
- *
- * This is deliberately a graph-level authority rather than response packaging
- * logic. The same projected graph is shown first in the staged GRAPH_READY
- * frame and later inside the terminal response; deciding authorship in only the
- * terminal transform makes those two wire surfaces contradict one another for
- * the user's own goals and options.
- *
- * Factors keep the value-aware provenance decided by `transformNodeToV3`.
- * Label binding is allowed only for non-value-bearing goal/risk/outcome/
- * decision nodes, and only for multi-token labels. Options retain their
- * existing phrase-level rule. This is the exact fail-closed policy previously
- * embedded in `transformResponseToV3`, moved without widening it.
+ * Read only the closed typed-record provenance vocabulary. Other provenance
+ * objects belong to legacy graph paths and deliberately fall through to their
+ * existing extraction/label rules.
  */
-export function applyBriefBoundNodeProvenance(
-  nodes: NodeV3T[],
+function readTypedRecordProvenance(node: V1Node): RecognizedTypedRecordProvenance | undefined {
+  const candidate = (node as V1Node & { provenance?: unknown }).provenance;
+  if (!candidate || typeof candidate !== "object") return undefined;
+  const value = candidate as Record<string, unknown>;
+  const provenanceClass = value.provenance_class;
+  if (
+    provenanceClass !== "stated" &&
+    provenanceClass !== "ai_inferred" &&
+    provenanceClass !== "projector_structural"
+  ) {
+    return undefined;
+  }
+
+  const binding = value.brief_binding;
+  return {
+    provenance_class: provenanceClass,
+    ...(binding === "verified" || binding === "unverified" || binding === "unchecked"
+      ? { brief_binding: binding }
+      : {}),
+  };
+}
+
+/**
+ * Project node authorship once, from the source node and its transformed twin.
+ *
+ * Typed records are authoritative: only `stated + verified` earns the user's
+ * badge; inferred/structural records and unverified/unchecked stated records do
+ * not. This is intentionally evaluated before label containment, otherwise an
+ * inferred label that happens to repeat brief text is falsely re-attributed to
+ * the user. Graphs without a recognized typed record retain the legacy,
+ * fail-closed label/value behaviour.
+ */
+function projectNodeProvenance(
+  sourceNodes: readonly V1Node[],
+  projectedNodes: NodeV3T[],
   brief?: string,
 ): void {
-  for (const node of nodes) {
+  for (let index = 0; index < projectedNodes.length; index += 1) {
+    const node = projectedNodes[index];
+    const sourceNode = sourceNodes[index];
+    if (!node || !sourceNode) continue;
+
+    const typed = readTypedRecordProvenance(sourceNode);
+    if (typed) {
+      node.provenance =
+        typed.provenance_class === "stated" && typed.brief_binding === "verified"
+          ? "from_brief"
+          : "ai_inferred";
+      continue;
+    }
+
     if (node.kind === "option") {
       const binding = bindOptionLabelToBrief(node.label, brief);
       node.provenance = bindingEarnsBriefClaim(binding) ? "from_brief" : "ai_inferred";
@@ -1091,15 +1130,102 @@ export function applyBriefBoundNodeProvenance(
       typeof node.goal_threshold_raw === "number";
     if (carriesValue) continue;
 
-    const tokenCount =
-      typeof node.label === "string" ? node.label.trim().split(/\s+/).filter(Boolean).length : 0;
+    const tokenCount = node.label.trim().split(/\s+/).filter(Boolean).length;
     if (tokenCount < 2) continue;
 
     const binding = bindOptionLabelToBrief(node.label, brief);
-    if (bindingEarnsBriefClaim(binding)) {
-      node.provenance = "from_brief";
-    }
+    if (bindingEarnsBriefClaim(binding)) node.provenance = "from_brief";
   }
+}
+
+/** The one deterministic graph/options projection consumed by both wire phases. */
+export interface V3GraphOptionsProjection extends GraphTransformResult {
+  readonly options: OptionV3T[];
+  readonly goal_node_id: string;
+  readonly extracted_options: ExtractedOption[];
+  readonly rephrase_merge: RephraseMergeResult;
+}
+
+/**
+ * Project a V1 graph into its canonical V3 graph and options view.
+ *
+ * This function owns every structural operation that must agree between
+ * GRAPH_READY and COMPLETE: node/edge transformation, canonical ids, typed
+ * provenance, option extraction, interventions, the three-state baseline flag,
+ * option provenance, and conservative rephrase absorption. It never packages a
+ * terminal response and never mutates the supplied graph.
+ */
+export function projectGraphAndOptionsToV3(
+  graph: V1Graph,
+  context: Pick<V3TransformContext, "brief"> = {},
+): V3GraphOptionsProjection {
+  const transformed = transformGraphToV3(graph);
+  const projectedNodes = transformed.graph.nodes as NodeV3T[];
+  const projectedEdges = transformed.graph.edges as EdgeV3T[];
+  const projectedIdBySourceId = new Map(
+    graph.nodes.map((node, index) => [node.id, projectedNodes[index]?.id ?? node.id]),
+  );
+
+  const sourceGoal = findGoalNode(graph.nodes);
+  const goalNodeId = sourceGoal
+    ? projectedIdBySourceId.get(sourceGoal.id) ?? sourceGoal.id
+    : "goal";
+  const edgeHints = extractEdgeHints(graph).map((hint) => ({
+    ...hint,
+    from_option_id: projectedIdBySourceId.get(hint.from_option_id) ?? hint.from_option_id,
+    to_factor_id: projectedIdBySourceId.get(hint.to_factor_id) ?? hint.to_factor_id,
+  }));
+
+  const extractedOptions = extractOptionsFromNodes(
+    extractOptionNodes(graph.nodes).map((node) => ({
+      id: projectedIdBySourceId.get(node.id) ?? node.id,
+      label: node.label ?? node.id,
+      description: node.body,
+      v4Interventions: isOptionData(node.data) ? node.data.interventions : undefined,
+      is_baseline: resolveOptionIsBaseline(node),
+    })),
+    projectedNodes,
+    projectedEdges,
+    goalNodeId,
+    edgeHints,
+    context.brief,
+  );
+  const options = toOptionsV3(extractedOptions);
+
+  projectNodeProvenance(graph.nodes, projectedNodes, context.brief);
+  const optionById = new Map(options.map((option) => [option.id, option]));
+  for (const node of projectedNodes) {
+    if (node.kind !== "option") continue;
+    const option = optionById.get(node.id);
+    if (!option) continue;
+
+    // The top-level option is canonical for analysis; the graph node carries
+    // the exact same target keys/identities for canvas and staged consumers.
+    node.interventions = option.interventions;
+    if (option.is_baseline !== undefined) node.is_baseline = option.is_baseline;
+
+    const fromBrief = node.provenance === "from_brief";
+    option.provenance = {
+      ...(option.provenance ?? {}),
+      source: fromBrief ? "brief_extraction" : "cee_hypothesis",
+      ...(fromBrief ? { brief_quote: node.label } : {}),
+    };
+  }
+
+  // One absorption authority, before either consumer observes graph/options.
+  const rephraseMerge = mergeRephrasedOptions({
+    nodes: projectedNodes,
+    edges: projectedEdges,
+    options,
+  });
+
+  return {
+    ...transformed,
+    options,
+    goal_node_id: goalNodeId,
+    extracted_options: extractedOptions,
+    rephrase_merge: rephraseMerge,
+  };
 }
 
 // ============================================================================
@@ -1134,21 +1260,20 @@ export function transformResponseToV3(
     }, "[V3-CAT-INPUT] V1 input category status at transform entry");
   }
 
-  // Find goal node
-  const goalNode = findGoalNode(graph.nodes);
-  if (!goalNode) {
+  if (!findGoalNode(graph.nodes)) {
     log.warn({ requestId: context.requestId }, "No goal node found in graph");
   }
-  const goalNodeId = goalNode?.id ?? "goal";
-
-  // Extract option nodes for conversion
-  const optionNodes = extractOptionNodes(graph.nodes);
-
-  // Extract edge hints from V1 graph (option→factor edges)
-  const edgeHints = extractEdgeHints(graph);
-
-  // Transform graph (without option nodes)
-  const { graph: v3Graph, transform_defaults: transformDefaults, defaulted_edge_count: defaultedEdgeCount, label_cleaning: labelCleaning } = transformGraphToV3(graph);
+  const projection = projectGraphAndOptionsToV3(graph, { brief: context.brief });
+  const {
+    graph: v3Graph,
+    options: v3Options,
+    goal_node_id: goalNodeId,
+    extracted_options: extractedOptions,
+    rephrase_merge: rephraseMerge,
+    transform_defaults: transformDefaults,
+    defaulted_edge_count: defaultedEdgeCount,
+    label_cleaning: labelCleaning,
+  } = projection;
 
   // [V3-CAT-TRACE] Log category field status through V3 transform
   // Gated behind CEE_DEBUG_CATEGORY_TRACE feature flag
@@ -1167,99 +1292,8 @@ export function transformResponseToV3(
     }, "[V3-CAT-TRACE] Category field status in V3 transform");
   }
 
-  const v3NodeIdByV1Id = new Map(
-    graph.nodes.map((node, index) => [node.id, v3Graph.nodes[index]?.id ?? node.id])
-  );
-
-  // Convert option nodes to V3 options with intervention extraction
-  const v3NodesTyped = v3Graph.nodes as NodeV3T[];
-  const v3EdgesTyped = v3Graph.edges as EdgeV3T[];
-
-  const extractedOptions = extractOptionsFromNodes(
-    optionNodes.map((n) => {
-      const dataBaseline = isOptionData(n.data) ? n.data.is_baseline : undefined;
-      const nodeBaseline = (n as V1Node & { is_baseline?: boolean }).is_baseline;
-      // SINGLE SOURCE OF TRUTH (ROADMAP 2.55 / F3): reconcile the two flag
-      // surfaces via the shared reader so DISPLAY/analysis-ready agree with the
-      // #456 auto-baseline-dedup truth table. An explicit `true` on EITHER
-      // surface wins — the old `dataBaseline ?? nodeBaseline` let a split-field
-      // `data:false` MASK an explicit `node:true`, mis-rendering the status-quo
-      // option as "not the current arrangement".
-      const resolved = resolveOptionIsBaseline(n);
-      // Log when node-level fallback is used (data-level was undefined but node-level had a value)
-      if (dataBaseline === undefined && nodeBaseline !== undefined) {
-        log.debug({ event: 'cee.v3_transform.is_baseline_fallback', node_id: n.id, value: nodeBaseline }, 'cee.v3_transform.is_baseline_fallback');
-      }
-      return {
-        id: v3NodeIdByV1Id.get(n.id) ?? n.id,
-        label: n.label ?? n.id,
-        description: n.body,
-        v4Interventions: isOptionData(n.data) ? n.data.interventions : undefined,
-        is_baseline: resolved,
-      };
-    }),
-    v3NodesTyped,
-    v3EdgesTyped,
-    goalNodeId,
-    edgeHints,
-    // ROADMAP 2.972 — the text the user submitted, as read-only evidence for the
-    // intervention provenance claim. Never a source of values.
-    context.brief
-  );
-
-  const v3Options = toOptionsV3(extractedOptions);
-
-  // Display-only enrichment: copy interventions and is_baseline from options[] onto
-  // the matching option nodes in nodes[]. options[] remains the canonical intervention
-  // source for analysis; graph nodes carry the data for canvas display (ConnRow,
-  // intervention labels).
-  // NodeV3 declares interventions and is_baseline as optional fields (CIL Phase 1).
-  const optionById = new Map(v3Options.map((o) => [o.id, o]));
-  // ONE graph-level provenance authority, shared with GRAPH_READY. Applying it
-  // before the option projection makes `nodes[].provenance` the source for the
-  // matching `options[].provenance.source`, so the two terminal carriers and
-  // the staged carrier cannot decide authorship independently.
-  applyBriefBoundNodeProvenance(v3NodesTyped, context.brief);
-  for (const node of v3NodesTyped) {
-    if (node.kind !== "option") continue;
-    const opt = optionById.get(node.id);
-    if (!opt) continue;
-    node.interventions = opt.interventions;
-    if (opt.is_baseline !== undefined) {
-      node.is_baseline = opt.is_baseline;
-    }
-    // ⭐⭐ ROOT 4 — ONE AUTHORITY, TWO READERS.
-    //
-    // These two fields describe THE SAME FACT about THE SAME OPTION — where it
-    // came from — and until now each was decided independently:
-    //   • `nodes[].provenance` fell out of `extractionType`, which an option
-    //     node never carries, so every option read `ai_inferred`;
-    //   • `options[].provenance.source` was the HARDCODED literal
-    //     `"brief_extraction"` at both construction sites in
-    //     `intervention-extractor.ts`, with no branch at all.
-    // So a stated option came off the wire `ai_inferred` in `nodes[]` and
-    // `brief_extraction` in `options[]` — the response contradicting itself
-    // about the user's own words — and an option the model invented ("Launch
-    // through secret agents", absent from the brief) came off as
-    // `brief_extraction` because the literal cannot be anything else. One of
-    // those two answers was always wrong, whichever way the brief actually read.
-    //
-    // Two mirrors of one fact is this estate's dominant defect (trap 12). Both
-    // now derive HERE, from the brief bytes, through the same authority the
-    // projector binds stated items with — so they cannot disagree, and neither
-    // can claim the brief without it saying so.
-    const earned = node.provenance === "from_brief";
-    opt.provenance = {
-      ...(opt.provenance ?? {}),
-      source: earned ? "brief_extraction" : "cee_hypothesis",
-      ...(earned && typeof node.label === "string" ? { brief_quote: node.label } : {}),
-    };
-  }
-
-  // The derivation below documents the policy executed by
-  // `applyBriefBoundNodeProvenance` above. The executable predicate was moved
-  // to graph scope so GRAPH_READY and COMPLETE consume one authority; the
-  // evidence and fail-closed rulings remain here beside the terminal carrier.
+  // Historical evidence for the provenance policy executed by the shared
+  // graph/options projector above. Response packaging does not re-project it.
   // ⭐⭐ ROW 2.1205 — THE BADGE WAS REACHABLE FOR EXACTLY ONE NODE KIND.
   //
   // ── MEASURED, ON BANKED CAPTURES ─────────────────────────────────────────
@@ -1300,11 +1334,11 @@ export function transformResponseToV3(
   // `Annual Support Cost` and `Seat Price` are verbatim brief text in the corpus
   // above and deliberately do NOT flip here.
   //
-  // ⚠ AND A VALUE-BEARING NODE OF ANY KIND DECLINES, derived from the node
-  // rather than assumed from its kind, so a goal that acquires a threshold or an
-  // outcome that acquires a prior cannot quietly start claiming the user's
-  // authorship for a number they never gave. Fail-closed, and it fails closed on
-  // a fact about the node, not on a list someone must remember to update.
+  // ⚠ On the LEGACY label-only path, a value-bearing node declines: a goal that
+  // merely acquires a threshold cannot claim authorship for a number the user
+  // never gave. Typed records are stronger evidence and are handled first: a
+  // stated numeric record earns the badge only when its quote AND value were
+  // already verified against the brief by the records projector.
   //
   // ⚠⚠ WHAT THIS DOES **NOT** DO, and the row was written from that case.
   // DOM-3 witnessed the user's stated risk surfacing as `Revenue Lost During
@@ -1386,38 +1420,9 @@ export function transformResponseToV3(
     // direction, and the class ends the same way the floor's does — with span
     // binding into the brief, where no token counting is needed at all.
 
-  // ⭐⭐ REPHRASE ABSORPTION — an obvious restatement of the user's own option may
-  // not become a second canonical option (Paul's ruling, 14 Aug 2026).
-  //
-  // PLACED EXACTLY HERE, AND THE POSITION IS LOAD-BEARING:
-  //   • AFTER the provenance loop above, because authorship is the gate's first
-  //     conjunct and `node.provenance` does not exist until that loop runs. The
-  //     capture proves no earlier field can stand in for it —
-  //     `extraction_metadata.source` reads `cee_hypothesis` for 34 of 39 banked
-  //     options, including every brief-borne one in the A/B/C scenarios.
-  //   • BEFORE `getOptionIdMismatchSummary`, `generateValidationWarnings` and
-  //     `buildAnalysisReadyPayload`, so the graph, `options[]`, the warnings and
-  //     the analysis payload all describe the SAME, post-merge option set. A
-  //     merge after any of them would leave the response disagreeing with itself
-  //     about how many options exist.
-  //
-  //     ⚠ NARROWED after review MEASURED an over-claim in the earlier wording
-  //     ("every downstream summary"): the `transform_complete` TELEMETRY below
-  //     derives `options_total`/`options_needs_mapping` from `extractedOptions`,
-  //     which is captured BEFORE this merge, so one event read
-  //     `optionCount: 3, options_total: 4`. That is internal-only and left as
-  //     is deliberately — the pre-merge count is the honest answer to "how many
-  //     options did extraction produce". The claim above is about the RESPONSE,
-  //     not about telemetry, and now says so.
-  //
-  // The existing intervention-signature dedup cannot see this defect: on the
-  // witnessed draw the model's twin carried `interventions: {}` and the user's
-  // carried one, so their signatures differ by construction.
-  const rephraseMerge = mergeRephrasedOptions({
-    nodes: v3Graph.nodes as NodeV3T[],
-    edges: v3Graph.edges as EdgeV3T[],
-    options: v3Options,
-  });
+  // Absorption already happened inside the shared graph/options projection,
+  // before GRAPH_READY or terminal summaries could observe the option set.
+  // Response packaging only records its diagnostics here.
   if (rephraseMerge.absorbedOptionIds.length > 0) {
     log.info(
       {

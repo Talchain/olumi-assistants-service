@@ -104,10 +104,14 @@ const CASES: readonly RecordCase[] = [
         { claim_kind: "causal_link", label: "ARR reaches target", from_claim: 1, to_stated: 0, effect: "positive" },
       ],
     },
-    expectedFromBrief: ["raise enterprise pricing by 30%", "hold price and push volume instead"],
-    // Label containment alone must not certify authorship of a value-bearing
-    // node. Its number keeps the existing value-aware, fail-closed path.
-    expectedAiInferred: ["Our target for next year is £3,000,000", "Decision"],
+    // The typed projector has already verified the quote AND its number. That
+    // stronger evidence wins before the legacy value-bearing label fallback.
+    expectedFromBrief: [
+      "Our target for next year is £3,000,000",
+      "raise enterprise pricing by 30%",
+      "hold price and push volume instead",
+    ],
+    expectedAiInferred: ["Decision"],
   },
 ];
 
@@ -140,32 +144,104 @@ function comparableNodes(nodes: readonly unknown[]): ComparableNode[] {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-function compile(recordCase: RecordCase): {
-  readonly staged: { readonly nodes: readonly unknown[] };
+interface StagedV3Graph {
+  readonly nodes: readonly unknown[];
+  readonly edges: readonly unknown[];
+  readonly options: readonly unknown[];
+  readonly goal_node_id: string;
+}
+
+function compileRecords(
+  records: DraftRecordSet,
+  brief: string | undefined,
+  name: string,
+): {
+  readonly sourceGraph: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] };
+  readonly staged: StagedV3Graph;
   readonly final: V3DraftGraphResponse;
 } {
-  const seam = projectDraftRecords(recordCase.records, recordCase.brief);
-  expect(seam.ok, `${recordCase.name}: record seam rejected fixture`).toBe(true);
+  const seam = projectDraftRecords(records, brief);
+  expect(seam.ok, `${name}: record seam rejected fixture`).toBe(true);
   if (!seam.ok) throw new Error(seam.reason);
 
   const graph = seam.projection.graph;
   const staged = projectGraphForStagedFrame(
     graph as never,
     "v3",
-    `parity-${recordCase.name}`,
-    recordCase.brief,
-  ) as { readonly nodes: readonly unknown[] };
+    `parity-${name}`,
+    brief,
+  ) as StagedV3Graph;
   const response = {
     graph,
     quality: { overall: 8, structure: 8, coverage: 8, structural_proxy: 8 },
-    trace: { request_id: `parity-${recordCase.name}`, correlation_id: "records-replay" },
+    trace: { request_id: `parity-${name}`, correlation_id: "records-replay" },
   } as unknown as V1DraftGraphResponse;
   const final = transformResponseToV3(response, {
-    brief: recordCase.brief,
-    requestId: `parity-${recordCase.name}`,
+    brief,
+    requestId: `parity-${name}`,
   });
 
-  return { staged, final };
+  return { sourceGraph: graph, staged, final };
+}
+
+function compile(recordCase: RecordCase): {
+  readonly staged: StagedV3Graph;
+  readonly final: V3DraftGraphResponse;
+} {
+  return compileRecords(recordCase.records, recordCase.brief, recordCase.name);
+}
+
+const TERMINAL_AUTHORITY_BRIEF = [
+  "Our revenue target is £3,000,000.",
+  "Compare two developers with enterprise CRM while monitoring Operational Effectiveness and Delivery Risk.",
+].join(" ");
+
+const TERMINAL_AUTHORITY_RECORDS = {
+  stated_items: [
+    {
+      kind: "goal",
+      source_quote: "Our revenue target is £3,000,000",
+      value: 3_000_000,
+      unit: "£",
+      role: "target",
+    },
+    { kind: "option", source_quote: "two developers", is_baseline: false },
+    { kind: "option", source_quote: "enterprise CRM", is_baseline: true },
+    // Deliberately absent from the brief and with no baseline field: this is
+    // the unverified + absent branch of both three-state contracts.
+    { kind: "option", source_quote: "Invented Backdoor Control" },
+  ],
+  claims: [
+    { claim_kind: "factor", label: "Developer Capacity", basis: [1] }, // 0
+    { claim_kind: "factor", label: "CRM Adoption", basis: [2] }, // 1
+    // Exact brief labels, but model-inferred: typed provenance must win over
+    // the legacy containment fallback.
+    { claim_kind: "outcome", label: "Operational Effectiveness", basis: [0] }, // 2
+    { claim_kind: "risk", label: "Delivery Risk", basis: [0] }, // 3
+    // Valid grammar records with no parent link. They therefore become model
+    // option nodes and exercise the one conservative terminal absorption.
+    { claim_kind: "option_refinement", label: "Hire Two Developers Only" }, // 4
+    { claim_kind: "option_refinement", label: "Adopt Enterprise CRM Option" }, // 5
+    { claim_kind: "causal_link", label: "developers set capacity", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 12 },
+    { claim_kind: "causal_link", label: "CRM sets adoption", from_stated: 2, to_claim: 1, effect: "positive", sets_to: 1 },
+    { claim_kind: "causal_link", label: "unverified control sets capacity", from_stated: 3, to_claim: 0, effect: "positive", sets_to: 6 },
+    { claim_kind: "causal_link", label: "developer rephrase sets capacity", from_claim: 4, to_claim: 0, effect: "positive" },
+    { claim_kind: "causal_link", label: "CRM rephrase sets adoption", from_claim: 5, to_claim: 1, effect: "positive" },
+    { claim_kind: "causal_link", label: "capacity improves operations", from_claim: 0, to_claim: 2, effect: "positive" },
+    { claim_kind: "causal_link", label: "adoption improves operations", from_claim: 1, to_claim: 2, effect: "positive" },
+    { claim_kind: "causal_link", label: "operations reaches revenue target", from_claim: 2, to_stated: 0, effect: "positive" },
+    { claim_kind: "causal_link", label: "delivery risk threatens target", from_claim: 3, to_stated: 0, effect: "negative" },
+  ],
+} satisfies DraftRecordSet;
+
+function record(value: unknown): Record<string, unknown> {
+  return value as Record<string, unknown>;
+}
+
+function byLabel(values: readonly unknown[], label: string): Record<string, unknown> {
+  const found = values.map(record).find((value) => value.label === label);
+  expect(found, `missing ${label}`).toBeDefined();
+  return found!;
 }
 
 describe("typed records → GRAPH_READY → COMPLETE provenance parity", () => {
@@ -226,5 +302,134 @@ describe("typed records → GRAPH_READY → COMPLETE provenance parity", () => {
     expect(draws[1]).toBe(draws[0]);
     expect(draws[2]).toBe(draws[0]);
     expect(draws[0].length).toBeGreaterThan(500);
+  });
+});
+
+describe("one terminal V3 graph/options projection authority", () => {
+  it("projects exact graph/options semantics and absorbs two rephrases before both wire phases", () => {
+    const { sourceGraph, staged, final } = compileRecords(
+      TERMINAL_AUTHORITY_RECORDS,
+      TERMINAL_AUTHORITY_BRIEF,
+      "terminal-authority",
+    );
+
+    // Non-vacuity: both model rephrases existed before the V3 authority ran.
+    const absorbedIds = ["Hire Two Developers Only", "Adopt Enterprise CRM Option"].map(
+      (label) => String(byLabel(sourceGraph.nodes, label).id),
+    );
+    expect(absorbedIds).toHaveLength(2);
+    expect(new Set(absorbedIds).size).toBe(2);
+
+    // Exact same-input agreement, not an edge-count proxy.
+    expect(staged.nodes).toEqual(final.nodes);
+    expect(staged.edges).toEqual(final.edges);
+    expect(staged.options).toEqual(final.options);
+    expect(staged.goal_node_id).toBe(final.goal_node_id);
+
+    for (const absorbedId of absorbedIds) {
+      expect(staged.nodes.map((node) => record(node).id)).not.toContain(absorbedId);
+      expect(final.nodes.map((node) => record(node).id)).not.toContain(absorbedId);
+      for (const edge of [...staged.edges, ...final.edges].map(record)) {
+        expect([edge.from, edge.to], `incident edge survived for ${absorbedId}`).not.toContain(absorbedId);
+      }
+      expect(staged.options.map((option) => record(option).id)).not.toContain(absorbedId);
+      expect(final.options.map((option) => option.id)).not.toContain(absorbedId);
+    }
+  });
+
+  it("carries false/true/absent baseline and full intervention target identity on nodes and options", () => {
+    const { staged, final } = compileRecords(
+      TERMINAL_AUTHORITY_RECORDS,
+      TERMINAL_AUTHORITY_BRIEF,
+      "baseline-intervention",
+    );
+
+    const expectedBaselines = new Map<string, boolean | undefined>([
+      ["two developers", false],
+      ["enterprise CRM", true],
+      ["Invented Backdoor Control", undefined],
+    ]);
+    for (const [label, expected] of expectedBaselines) {
+      const node = byLabel(staged.nodes, label);
+      const option = final.options.find((candidate) => candidate.id === node.id);
+      expect(option, `${label}: missing option carrier`).toBeDefined();
+      expect(node.is_baseline, `${label}: staged node`).toBe(expected);
+      expect(option?.is_baseline, `${label}: terminal option`).toBe(expected);
+      expect(Object.hasOwn(node, "is_baseline"), `${label}: node presence`).toBe(
+        expected !== undefined,
+      );
+      expect(Object.hasOwn(option ?? {}, "is_baseline"), `${label}: option presence`).toBe(
+        expected !== undefined,
+      );
+
+      const nodeInterventions = record(node.interventions);
+      const optionInterventions = record(option?.interventions);
+      expect(nodeInterventions).toEqual(optionInterventions);
+      expect(Object.keys(nodeInterventions).length, `${label}: intervention non-vacuity`).toBeGreaterThan(0);
+      for (const [key, intervention] of Object.entries(nodeInterventions)) {
+        expect(record(record(intervention).target_match).node_id).toBe(key);
+      }
+    }
+  });
+
+  it("honours typed provenance before label binding, including verified numeric and unverified controls", () => {
+    const { staged, final } = compileRecords(
+      TERMINAL_AUTHORITY_RECORDS,
+      TERMINAL_AUTHORITY_BRIEF,
+      "typed-provenance",
+    );
+    const expected = new Map<string, "from_brief" | "ai_inferred">([
+      ["Our revenue target is £3,000,000", "from_brief"],
+      ["two developers", "from_brief"],
+      ["enterprise CRM", "from_brief"],
+      ["Operational Effectiveness", "ai_inferred"],
+      ["Delivery Risk", "ai_inferred"],
+      ["Invented Backdoor Control", "ai_inferred"],
+    ]);
+
+    for (const [label, provenance] of expected) {
+      expect(byLabel(staged.nodes, label).provenance, `${label}: staged`).toBe(provenance);
+      expect(byLabel(final.nodes, label).provenance, `${label}: terminal`).toBe(provenance);
+    }
+
+    for (const option of final.options) {
+      const node = final.nodes.find((candidate) => candidate.id === option.id);
+      expect(option.provenance?.source).toBe(
+        node?.provenance === "from_brief" ? "brief_extraction" : "cee_hypothesis",
+      );
+    }
+  });
+
+  it("declines unchecked typed controls when no brief is available", () => {
+    const { staged, final } = compileRecords(
+      TERMINAL_AUTHORITY_RECORDS,
+      undefined,
+      "typed-provenance-unchecked",
+    );
+    for (const label of ["two developers", "enterprise CRM", "Invented Backdoor Control"]) {
+      expect(byLabel(staged.nodes, label).provenance, `${label}: staged`).toBe("ai_inferred");
+      const terminalNode = byLabel(final.nodes, label);
+      expect(terminalNode.provenance, `${label}: terminal`).toBe("ai_inferred");
+      const option = final.options.find((candidate) => candidate.id === terminalNode.id);
+      expect(option?.provenance?.source, `${label}: option`).toBe("cee_hypothesis");
+    }
+  });
+
+  it("keeps legacy label binding only when typed record provenance is absent", () => {
+    const seam = projectDraftRecords(TERMINAL_AUTHORITY_RECORDS, TERMINAL_AUTHORITY_BRIEF);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) throw new Error(seam.reason);
+    const legacyGraph = structuredClone(seam.projection.graph);
+    for (const node of legacyGraph.nodes) delete (node as { provenance?: unknown }).provenance;
+
+    const staged = projectGraphForStagedFrame(
+      legacyGraph as never,
+      "v3",
+      "legacy-fallback",
+      TERMINAL_AUTHORITY_BRIEF,
+    ) as StagedV3Graph;
+    expect(byLabel(staged.nodes, "Operational Effectiveness").provenance).toBe("from_brief");
+    expect(byLabel(staged.nodes, "Delivery Risk").provenance).toBe("from_brief");
+    expect(byLabel(staged.nodes, "two developers").provenance).toBe("from_brief");
   });
 });

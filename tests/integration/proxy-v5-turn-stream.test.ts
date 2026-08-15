@@ -148,6 +148,39 @@ function graphOf(value: unknown): { nodes: unknown[]; edges: unknown[] } | null 
   return { nodes: g.nodes, edges: Array.isArray(g.edges) ? g.edges : [] };
 }
 
+function persistentProjection(value: { nodes: unknown[]; edges: unknown[] }) {
+  const nodes = value.nodes
+    .map((candidate) => {
+      const node = candidate as Record<string, unknown>;
+      const interventions =
+        node.interventions && typeof node.interventions === "object"
+          ? Object.entries(node.interventions as Record<string, unknown>)
+              .map(([key, intervention]) => {
+                const body = intervention as Record<string, unknown>;
+                const target = body.target_match as Record<string, unknown> | undefined;
+                return { key, target_node_id: target?.node_id };
+              })
+              .sort((a, b) => a.key.localeCompare(b.key))
+          : [];
+      return {
+        id: node.id,
+        label: node.label,
+        kind: node.kind ?? node.type,
+        provenance: node.provenance,
+        is_baseline: node.is_baseline,
+        interventions,
+      };
+    })
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const edges = value.edges
+    .map((candidate) => {
+      const edge = candidate as Record<string, unknown>;
+      return { id: edge.id, from: edge.from, to: edge.to };
+    })
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  return { nodes, edges };
+}
+
 describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () => {
   let app: FastifyInstance;
 
@@ -344,7 +377,7 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
     ).toBe(0);
   }, 120_000);
 
-  it("the GRAPH_READY frame's node identity equals the committed graph's", async () => {
+  it("persists the GRAPH_READY frame's canonical graph, provenance and option identity", async () => {
     const scenarioId = nextScenarioId();
     const res = await app.inject({
       method: "POST",
@@ -362,12 +395,16 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
     expect(early?.nodes.length ?? 0).toBeGreaterThan(0);
     expect(committed?.nodes.length ?? 0).toBeGreaterThan(0);
 
-    const ids = (g: { nodes: unknown[] }) =>
-      g.nodes.map((node) => {
-        const nd = node as Record<string, unknown>;
-        return { id: nd.id, label: nd.label, kind: nd.kind ?? nd.type };
-      });
-    expect(ids(early!)).toEqual(ids(committed!));
+    const frameGraph = frame!.graph as Record<string, unknown>;
+    expect(Array.isArray(frameGraph.options), "GRAPH_READY did not carry canonical options").toBe(true);
+    expect((frameGraph.options as unknown[]).length).toBeGreaterThan(0);
+
+    // Values may settle only in terminal graph-data-integrity; every durable
+    // identity/provenance relation must survive the streamed V5 commit exactly.
+    const projectedEarly = persistentProjection(early!);
+    const projectedCommitted = persistentProjection(committed!);
+    expect(projectedEarly.edges.length).toBeGreaterThan(0);
+    expect(projectedEarly).toEqual(projectedCommitted);
   }, 90_000);
 
   // ═══════════════════════════════════════════════════════════════════════════
