@@ -270,7 +270,9 @@ export type AiTaskLifecycleId =
   | CeeTask
   | AuxiliaryModelTask
   | 'clarify_brief'
-  | 'explain_diff';
+  | 'explain_diff'
+  | 'rolling_summary'
+  | 'decision_review_decompose';
 
 export type AiTaskExecutionState =
   | 'live_router'
@@ -404,6 +406,19 @@ export const AI_TASK_LIFECYCLE: Readonly<
     state: 'dedicated_adapter',
     note: 'Factor extraction uses the dedicated extraction adapter/model authority.',
   },
+  rolling_summary: {
+    executable: true,
+    state: 'dedicated_adapter',
+    note:
+      'The post-commit rolling-summary maintainer calls the shared Anthropic chat boundary with its code-constant four-slot prompt.',
+  },
+  decision_review_decompose: {
+    executable: true,
+    state: 'feature_gated',
+    gate: 'CEE_DECISION_REVIEW_DECOMPOSE',
+    note:
+      'When its explicit experiment gate is enabled, decision review fans out four provider-specific code-constant Anthropic calls.',
+  },
 };
 
 export type RuntimeAiTaskId =
@@ -417,6 +432,8 @@ export type RuntimeAiTaskId =
   | 'clarify_brief'
   | 'explain_diff'
   | 'extraction'
+  | 'rolling_summary'
+  | 'decision_review_decompose'
   | 'm2_graph_review';
 
 export interface RuntimeAiTaskAuthority {
@@ -425,13 +442,15 @@ export interface RuntimeAiTaskAuthority {
     | 'router_task_chain'
     | 'router_env_or_global_fallback'
     | 'router_global_fallback'
-    | 'dedicated_extraction_chain';
+    | 'dedicated_extraction_chain'
+    | 'dedicated_anthropic_chain';
   readonly checkedInModel: string | null;
   readonly promptAuthority:
     | 'pms_or_checked_in_default'
     | 'provider_specific_pms_or_inline_constant'
     | 'routing_snapshot_or_checked_in_default'
     | 'code_constant'
+    | 'provider_specific_code_constant'
     | 'caller_supplied';
   readonly promptTask: string | null;
   readonly promptIdentity:
@@ -560,6 +579,32 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promptIdentity: 'caller_owned',
     structuredContract: 'JSON extraction parser + caller schema',
     fallback: 'dedicated registered extraction model; no drafting/global-model inheritance',
+    promotionGate: 'none_no_real_pack',
+  },
+  rolling_summary: {
+    executable: true,
+    modelAuthority: 'dedicated_anthropic_chain',
+    checkedInModel: 'claude-haiku-4-5',
+    promptAuthority: 'code_constant',
+    promptTask: null,
+    promptIdentity: 'code_hash',
+    structuredContract:
+      'exact DECISION FRAME / CONSTRAINTS & PREFERENCES / RESOLVED / OPEN slots + deterministic parser and retention gates',
+    fallback:
+      'CEE_MODEL_SUMMARY then DEFAULT_SUMMARY_MODEL; invalid or non-Anthropic assignments fail before the shared network boundary',
+    promotionGate: 'none_no_real_pack',
+  },
+  decision_review_decompose: {
+    executable: true,
+    modelAuthority: 'dedicated_anthropic_chain',
+    checkedInModel: 'claude-haiku-4-5',
+    promptAuthority: 'provider_specific_code_constant',
+    promptTask: null,
+    promptIdentity: 'code_hash',
+    structuredContract:
+      'four JSON fragment schemas + deterministic composer and composed-consistency check',
+    fallback:
+      'CEE_MODEL_DECISION_REVIEW_HAIKU then DEFAULT_DECOMPOSE_MODEL; failed/inconsistent fan-out falls back to the governed monolith',
     promotionGate: 'none_no_real_pack',
   },
   m2_graph_review: {

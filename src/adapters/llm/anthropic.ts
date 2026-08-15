@@ -8,6 +8,10 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { anthropicTemperatureFor } from "../../config/models.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getDefaultModelForTask } from "../../config/model-routing.js";
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+} from '../../config/model-assignment.js';
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
@@ -3421,7 +3425,23 @@ interface ChatWithAnthropicArgs {
 export async function chatWithAnthropic(
   args: ChatWithAnthropicArgs
 ): Promise<ChatResult> {
-  const model = resolveAnthropicModel(args.model);
+  // This is the shared network boundary for dedicated Anthropic callers as
+  // well as router-backed chat. Resolve the final fallback string through the
+  // same registry authority immediately here: unknown/disabled ids and models
+  // assigned to another provider must fail before a client or request exists.
+  const fallbackModel = resolveAnthropicModel(args.model);
+  const assignment = resolveModelAssignment(fallbackModel);
+  if (assignment.provider !== 'anthropic') {
+    throw new ModelAssignmentError(
+      'MODEL_PROVIDER_MISMATCH',
+      assignment.model,
+      `Model '${assignment.model}' resolves to provider '${assignment.provider}', ` +
+        'so it cannot be sent through the Anthropic client.',
+    );
+  }
+  // resolveModelAssignment deliberately preserves exact explicit model/alias
+  // bytes; never substitute the registry target in the provider request.
+  const model = assignment.model;
   const thinkingRequested = args.thinking?.type === 'enabled';
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'chat');
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum

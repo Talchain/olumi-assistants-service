@@ -37,6 +37,7 @@ export type ModelAssignmentErrorCode =
   | 'MODEL_NOT_REGISTERED'
   | 'MODEL_DISABLED'
   | 'MODEL_ALIAS_TARGET_INVALID'
+  | 'MODEL_PROVIDER_MISMATCH'
   | 'MODEL_CLIENT_BLOCKED';
 
 export class ModelAssignmentError extends Error {

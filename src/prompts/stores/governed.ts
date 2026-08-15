@@ -33,6 +33,12 @@ import {
   type RuntimePromotionDecision,
 } from '../runtime-promotion-gate.js';
 import { getRegisteredDefaultPrompt } from '../default-registry.js';
+import {
+  providesPromptObservationCapability,
+  PROMPT_OBSERVATION_CAPABILITY,
+  type PromptObservation,
+  type PromptObservationCapability,
+} from './observations.js';
 
 export type PromptGovernanceErrorCode =
   | 'PROMPT_ID_NOT_CANONICAL'
@@ -212,6 +218,7 @@ class TaskMutationLock {
 
 export class GovernedPromptStore implements IPromptStore {
   private readonly locks = new TaskMutationLock();
+  private readonly observations: PromptObservationCapability | null;
 
   constructor(
     private readonly store: IPromptStore,
@@ -219,7 +226,30 @@ export class GovernedPromptStore implements IPromptStore {
       evaluateRuntimePromptPromotion,
     private readonly resolveFallback: PromptFallbackResolver =
       getRegisteredDefaultPrompt,
-  ) {}
+  ) {
+    const backendObservations = providesPromptObservationCapability(store)
+      ? store[PROMPT_OBSERVATION_CAPABILITY]
+      : null;
+    this.observations = backendObservations
+      ? Object.freeze({
+          listObservations: (promptId: string) =>
+            backendObservations.listObservations(promptId),
+          getObservationVersion: (promptId: string, version: number) =>
+            backendObservations.getObservationVersion(promptId, version),
+          addObservation: (
+            observation: Omit<PromptObservation, 'id' | 'createdAt'>,
+          ) =>
+            backendObservations.addObservation(observation),
+          deleteObservation: (id: string) =>
+            backendObservations.deleteObservation(id),
+        })
+      : null;
+  }
+
+  /** Narrow side-channel only; the underlying IPromptStore is never exposed. */
+  getObservationCapability(): PromptObservationCapability | null {
+    return this.observations;
+  }
 
   initialize(): Promise<void> {
     return this.store.initialize();
@@ -564,4 +594,17 @@ export function governPromptStore(store: IPromptStore): IPromptStore {
   return store instanceof GovernedPromptStore
     ? store
     : new GovernedPromptStore(store);
+}
+
+/**
+ * Route-safe observation lookup. Raw backends are deliberately rejected even
+ * if they implement the backend symbol: production access must pass through
+ * the governed store boundary.
+ */
+export function getGovernedPromptObservationCapability(
+  store: IPromptStore,
+): PromptObservationCapability | null {
+  return store instanceof GovernedPromptStore
+    ? store.getObservationCapability()
+    : null;
 }

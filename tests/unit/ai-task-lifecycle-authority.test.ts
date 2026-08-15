@@ -52,7 +52,40 @@ function literalRouterTasks(): string[] {
   return [...tasks].sort();
 }
 
+function directAnthropicChatCallers(): string[] {
+  const callers = new Set<string>();
+  for (const file of sourceFiles(SRC)) {
+    if (file.endsWith('/adapters/llm/anthropic.ts')) continue;
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    let importsSharedBoundary = false;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isImportDeclaration(node) &&
+        node.importClause?.namedBindings &&
+        ts.isNamedImports(node.importClause.namedBindings) &&
+        node.importClause.namedBindings.elements.some(
+          (element) => element.name.text === 'chatWithAnthropic',
+        )
+      ) {
+        importsSharedBoundary = true;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    if (importsSharedBoundary && source.text.includes('chatWithAnthropic(')) {
+      callers.add(file.slice(SRC.length + 1));
+    }
+  }
+  return [...callers].sort();
+}
+
 const LITERAL_ROUTER_TASKS = literalRouterTasks();
+const DIRECT_ANTHROPIC_CHAT_CALLERS = directAnthropicChatCallers();
 
 describe('AI task lifecycle authority', () => {
   it('matches every literal production router call site without calling compatibility rows live', () => {
@@ -119,7 +152,54 @@ describe('AI task lifecycle authority', () => {
     expect(Object.keys(RUNTIME_AI_TASK_AUTHORITY).sort()).toEqual([
       ...LITERAL_ROUTER_TASKS,
       'extraction',
+      'rolling_summary',
+      'decision_review_decompose',
     ].sort());
+  });
+
+  it('derives every dedicated shared-Anthropic caller and gives each an executable authority row', () => {
+    expect(DIRECT_ANTHROPIC_CHAT_CALLERS).toEqual([
+      'cee/decision-review/decompose.ts',
+      'orchestrator-v5/rolling-summary/summariser.ts',
+    ]);
+    expect(RUNTIME_AI_TASK_AUTHORITY.rolling_summary).toMatchObject({
+      executable: true,
+      modelAuthority: 'dedicated_anthropic_chain',
+      promptAuthority: 'code_constant',
+      promptIdentity: 'code_hash',
+    });
+    expect(RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose).toMatchObject({
+      executable: true,
+      modelAuthority: 'dedicated_anthropic_chain',
+      promptAuthority: 'provider_specific_code_constant',
+      promptIdentity: 'code_hash',
+    });
+  });
+
+  it('pins dedicated checked-in models to the actual source constants', async () => {
+    const [{ DEFAULT_SUMMARY_MODEL }, { DEFAULT_DECOMPOSE_MODEL }] =
+      await Promise.all([
+        import(
+          '../../src/orchestrator-v5/rolling-summary/summary-types.js'
+        ),
+        import('../../src/cee/decision-review/decompose.js'),
+      ]);
+
+    expect(RUNTIME_AI_TASK_AUTHORITY.rolling_summary.checkedInModel).toBe(
+      DEFAULT_SUMMARY_MODEL,
+    );
+    expect(
+      RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose.checkedInModel,
+    ).toBe(DEFAULT_DECOMPOSE_MODEL);
+    expect(RUNTIME_AI_TASK_AUTHORITY.rolling_summary.fallback).toContain(
+      'CEE_MODEL_SUMMARY',
+    );
+    expect(
+      RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose.fallback,
+    ).toContain('CEE_MODEL_DECISION_REVIEW_HAIKU');
+    expect(
+      RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose.fallback,
+    ).not.toContain('CEE_MODEL_DECISION_REVIEW_DECOMPOSE');
   });
 
   it('pins a structured contract, prompt identity, fallback and promotion posture for every runtime row', () => {

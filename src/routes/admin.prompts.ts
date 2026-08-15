@@ -56,14 +56,16 @@ import {
   logExperimentEnded,
   interpolatePrompt,
 } from '../prompts/index.js';
-import type { ObservationType } from '../prompts/stores/supabase.js';
-import { SupabasePromptStore } from '../prompts/stores/supabase.js';
+import type { ObservationType } from '../prompts/stores/observations.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/prompt-loader.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { ModelAssignmentError, resolveModelAssignment } from '../config/model-assignment.js';
-import { PromptGovernanceError } from '../prompts/stores/governed.js';
+import {
+  getGovernedPromptObservationCapability,
+  PromptGovernanceError,
+} from '../prompts/stores/governed.js';
 import { PromptMutationConflictError } from '../prompts/stores/interface.js';
 import {
   verifyAdminKey,
@@ -1563,16 +1565,9 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   // Observation Routes
   // =========================================================================
 
-  /**
-   * Helper to get Supabase store with observation methods
-   * Returns null if store is not Supabase
-   */
-  function getSupabaseStore(): SupabasePromptStore | null {
-    const store = getPromptStore();
-    if (store instanceof SupabasePromptStore) {
-      return store;
-    }
-    return null;
+  /** Resolve only the governed observation facet; never unwrap IPromptStore. */
+  function getObservationCapability() {
+    return getGovernedPromptObservationCapability(getPromptStore());
   }
 
   /**
@@ -1593,8 +1588,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1610,7 +1605,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await supabaseStore.getObservations(params.data.id);
+      const result = await observations.listObservations(params.data.id);
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'list_observations',
@@ -1648,8 +1643,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1665,7 +1660,10 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await supabaseStore.getObservations(params.data.id, params.data.version);
+      const result = await observations.getObservationVersion(
+        params.data.id,
+        params.data.version,
+      );
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'list_version_observations',
@@ -1705,8 +1703,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1730,7 +1728,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const observation = await supabaseStore.addObservation({
+      const observation = await observations.addObservation({
         promptId: params.data.id,
         version: body.data.version,
         observationType: body.data.observationType as ObservationType,
@@ -1785,8 +1783,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1802,7 +1800,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      await supabaseStore.deleteObservation(params.data.obsId);
+      await observations.deleteObservation(params.data.obsId);
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'delete_observation',

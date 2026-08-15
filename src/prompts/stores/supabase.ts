@@ -32,6 +32,20 @@ import type {
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  PROMPT_OBSERVATION_CAPABILITY,
+  type ObservationType,
+  type ObservationsResult,
+  type PromptObservation,
+  type PromptObservationCapability,
+  type ProvidesPromptObservationCapability,
+} from './observations.js';
+
+export type {
+  ObservationType,
+  ObservationsResult,
+  PromptObservation,
+} from './observations.js';
 
 function getJwtClaim(token: string, claim: string): string | undefined {
   const parts = token.split('.');
@@ -103,40 +117,29 @@ interface ObservationRow {
 }
 
 /**
- * Observation types for prompt feedback
- */
-export type ObservationType = 'note' | 'rating' | 'failure' | 'success';
-
-/**
- * Prompt observation for tracking feedback and issues
- */
-export interface PromptObservation {
-  id?: string;
-  promptId: string;
-  version: number;
-  observationType: ObservationType;
-  content?: string;
-  rating?: number; // 1-5
-  payloadHash?: string;
-  createdBy?: string;
-  createdAt?: string;
-}
-
-/**
- * Result of getObservations including aggregated rating
- */
-export interface ObservationsResult {
-  observations: PromptObservation[];
-  averageRating: number | null;
-  totalCount: number;
-}
-
-/**
  * Supabase-backed prompt store
  */
-export class SupabasePromptStore implements IPromptStore {
+export class SupabasePromptStore
+  implements IPromptStore, ProvidesPromptObservationCapability
+{
   private client: SupabaseClient | null = null;
   private config: SupabaseStoreConfig;
+
+  /**
+   * Publish only the observation operations to the governance boundary. The
+   * frozen closures cannot be used to recover this store or its prompt
+   * mutation methods.
+   */
+  readonly [PROMPT_OBSERVATION_CAPABILITY]: PromptObservationCapability =
+    Object.freeze({
+      listObservations: (promptId: string) => this.getObservations(promptId),
+      getObservationVersion: (promptId: string, version: number) =>
+        this.getObservations(promptId, version),
+      addObservation: (
+        observation: Omit<PromptObservation, 'id' | 'createdAt'>,
+      ) => this.addObservation(observation),
+      deleteObservation: (id: string) => this.deleteObservation(id),
+    });
 
   constructor(config: Omit<SupabaseStoreConfig, 'type'>) {
     this.config = { ...config, type: 'supabase' };
