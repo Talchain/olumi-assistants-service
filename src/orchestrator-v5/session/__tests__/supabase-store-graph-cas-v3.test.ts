@@ -126,10 +126,18 @@ function makeStatefulClient(initial: {
   currentHash: string | null;
 }): {
   client: SupabaseClient;
-  state: { currentGraph: unknown; currentHash: string | null };
+  state: {
+    currentGraph: unknown;
+    currentHash: string | null;
+    committedTurnRowIds: string[];
+  };
   rpcCalls: Array<{ fn: string; args: Record<string, unknown> }>;
 } {
-  const state = { currentGraph: initial.currentGraph, currentHash: initial.currentHash };
+  const state = {
+    currentGraph: initial.currentGraph,
+    currentHash: initial.currentHash,
+    committedTurnRowIds: [] as string[],
+  };
   const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   let rowSeq = 0;
 
@@ -158,12 +166,16 @@ function makeStatefulClient(initial: {
           state.currentHash = incoming;
         }
         rowSeq += 1;
-        return { data: `row-${rowSeq}`, error: null };
+        const rowId = `row-${rowSeq}`;
+        state.committedTurnRowIds.push(rowId);
+        return { data: rowId, error: null };
       }
       // v2 — unconditional UPDATE (the clobber the CAS exists to prevent).
       if (pGraph !== null) state.currentGraph = pGraph;
       rowSeq += 1;
-      return { data: `row-${rowSeq}`, error: null };
+      const rowId = `row-${rowSeq}`;
+      state.committedTurnRowIds.push(rowId);
+      return { data: rowId, error: null };
     }),
     from: vi.fn(() => {
       const chain: Record<string, unknown> = {};
@@ -410,6 +422,7 @@ describe('graph CAS RPC — two edits from the same base (concurrency dead-end r
     );
     expect(a.id).toBe('row-1');
     expect(state.currentHash).toBe(idHash(EDIT_A));
+    expect(state.committedTurnRowIds).toEqual(['row-1']);
 
     // Turn B: SAME (now stale) expected base, a DIFFERENT edit → must be
     // rejected atomically, leaving the committed graph as EDIT_A.
@@ -427,6 +440,10 @@ describe('graph CAS RPC — two edits from the same base (concurrency dead-end r
     expect(thrown).toBeInstanceOf(GraphStaleWriteError);
     expect(state.currentGraph).toBe(EDIT_A); // NOT clobbered by B
     expect(state.currentHash).toBe(idHash(EDIT_A));
+    // OLGC1 aborts the whole transaction: neither scenarios.graph nor the
+    // second turn row lands. This is the exact atomic property the structured
+    // edge writer's 409 mapping relies on.
+    expect(state.committedTurnRowIds).toEqual(['row-1']);
     expect(rpcCalls.every((c) => c.fn === 'append_turn_atomic_v3')).toBe(true);
   });
 

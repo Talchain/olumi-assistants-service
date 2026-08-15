@@ -149,6 +149,13 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
     // frame-consumer audit, do not add more.
     'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
+    // 2026-08-15 Train C: +2 (import + one call) — edge_strength_edit commits
+    // mid-turn, then derives wire freshness against the authoritative analysis
+    // hash returned by that atomic commit. The pre-write context frame cannot
+    // represent those post-write bytes. Prior facts are observational only:
+    // a degraded read yields unknown and never authorises or blocks the write.
+    // Deliberate new post-commit seam; migrate with the frame-consumer audit.
+    'src/orchestrator-v5/system-events/dispatch.ts': 2,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`

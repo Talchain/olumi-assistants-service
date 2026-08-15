@@ -150,6 +150,8 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
     }),
   formatEdgeStrengthUnchanged: () =>
     receipts.formatEdgeStrengthUnchanged({ fromLabel: SLOT, toLabel: SLOT2, mean: 0.5 }),
+  formatEdgeStrengthConfirmed: () =>
+    receipts.formatEdgeStrengthConfirmed({ fromLabel: SLOT, toLabel: SLOT2 }),
 };
 
 /** Exported helpers that are NOT user-facing receipts, with the reason. */

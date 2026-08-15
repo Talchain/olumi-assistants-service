@@ -143,6 +143,11 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
   ),
   // ROADMAP 1.346 — the value-carrying inspector edit's compose site.
   'system-events/factor-value-edit.ts': resolve(HERE, '../system-events/factor-value-edit.ts'),
+  // Train C — the deterministic canonical edge-strength writer receipt.
+  'system-events/edge-strength-edit.ts': resolve(
+    HERE,
+    '../system-events/edge-strength-edit.ts',
+  ),
   // L16 / walk finding N16 — the bare configure-option deterministic remedy.
   // Caught by `derivedComposeFileDomain()` on the commit that created the file,
   // which is the mechanism working exactly as its header promises.
@@ -661,6 +666,24 @@ const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
 };
 
 /**
+ * `src/orchestrator-v5/system-events/edge-strength-edit.ts` — the Train C
+ * canonical edge-strength writer. The derived domain caught its compose site
+ * on the commit that introduced it.
+ */
+const EDGE_STRENGTH_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
+  "event.intent === 'confirm_current'": {
+    stance: 'structural',
+    why:
+      'ONE site. Both branches are deterministic mutation receipts: explicit confirmation uses ' +
+      '`formatEdgeStrengthConfirmed`, while changed sets use the reused `adjust_edge_strength` ' +
+      'handler receipt assembled by `formatEdgeAdjustment`. They name only the edited ordered ' +
+      'endpoint pair and its influence-band change; neither branch reads an analysis result, ' +
+      'selects an option by rank, or can assert a leading option. Unchanged set requests are ' +
+      'refused before the handler and never reach this compose site.',
+  },
+};
+
+/**
  * `src/orchestrator-v5/compose/configure-option-clarify-response.ts` — brought
  * into scope by L16 (walk finding N16), on the commit that created the file.
  * The derived domain test caught it on its first CI run; the file was NOT
@@ -706,6 +729,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'compose/edit-clarify-response.ts': EDIT_CLARIFY_SITES,
   'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
   'system-events/factor-value-edit.ts': FACTOR_VALUE_EDIT_SITES,
+  'system-events/edge-strength-edit.ts': EDGE_STRENGTH_EDIT_SITES,
   'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
 };
 
@@ -950,7 +974,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // ⚠ ELICITED REFERENCE CLASS (ROADMAP 2.688 slice 1): 38 -> 39. ONE compose
     // site added in turn-executor.ts — the reference-class pre-route. Explicit
     // `assistant_text:` form, so keyable by the same regex and in scope here.
-    expect(compared, 'the re-key comparison compared nothing').toBe(39);
+    expect(compared, 'the re-key comparison compared nothing').toBe(40);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1137,14 +1161,15 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // found the omission rather than a human remembering it. Fourth instance
     // of the mechanism working; the note stays because the next author will
     // not remember either.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(41);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(37);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(42);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(38);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
       'routing/post-analysis-label-intercept.ts',
+      'system-events/edge-strength-edit.ts',
       'system-events/factor-value-edit.ts',
       'turn-executor.ts',
     ]);

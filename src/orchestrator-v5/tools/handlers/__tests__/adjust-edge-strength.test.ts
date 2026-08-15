@@ -11,7 +11,12 @@ import { buildD1Fixture } from '../d1-shared/__tests__/fixtures.js';
 import type { ProposalAction } from '../../../routing/types.js';
 import type { GraphV3T } from '../../../../schemas/cee-v3.js';
 
-function buildInvocation(graph: GraphV3T, proposal: ProposalAction): HandlerInvocation {
+function buildInvocation(
+  graph: GraphV3T,
+  proposal: ProposalAction,
+  edgeStrengthDirectionAuthority?: 'positive' | 'negative',
+  edgeStrengthEndpointAuthority?: { readonly from: string; readonly to: string },
+): HandlerInvocation {
   return {
     context: {
       session_id: 'scn-1',
@@ -34,6 +39,12 @@ function buildInvocation(graph: GraphV3T, proposal: ProposalAction): HandlerInvo
     orientationText: '',
     proposal,
     graphForTurn: graph,
+    ...(edgeStrengthDirectionAuthority !== undefined
+      ? { edgeStrengthDirectionAuthority }
+      : {}),
+    ...(edgeStrengthEndpointAuthority !== undefined
+      ? { edgeStrengthEndpointAuthority }
+      : {}),
   };
 }
 
@@ -125,6 +136,44 @@ describe('adjust_edge_strength handler', () => {
     expect(mutated.edges[0].strength.mean).toBe(0.7);
   });
 
+  it('uses trusted exact endpoint bytes instead of retargeting through the trimming composite parser', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    const canonical = graph.edges.find(
+      (edge) => edge.from === 'f-budget' && edge.to === 'g-revenue',
+    )!;
+    const exactWhitespaceEdge = structuredClone(canonical);
+    exactWhitespaceEdge.from = ' f-budget ';
+    exactWhitespaceEdge.strength.mean = 0.2;
+    graph.edges.unshift(exactWhitespaceEdge);
+
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({
+          // The legacy parser would trim this and select the OTHER edge.
+          entityId: ' f-budget →g-revenue',
+          strength: 0.8,
+          operator: 'set',
+        }),
+        'positive',
+        { from: ' f-budget ', to: 'g-revenue' },
+      ),
+    );
+    const mutated = outcome.mutated_graph as GraphV3T;
+    expect(mutated.edges.find(
+      (edge) => edge.from === ' f-budget ' && edge.to === 'g-revenue',
+    )?.strength.mean).toBe(0.8);
+    expect(mutated.edges.find(
+      (edge) => edge.from === 'f-budget' && edge.to === 'g-revenue',
+    )?.strength.mean).toBe(0.4);
+    expect(outcome.handler_facts[0]).toMatchObject({
+      result: {
+        after: { from: ' f-budget ', to: 'g-revenue' },
+      },
+    });
+  });
+
   it('clamps an over-range increase to 1.0', async () => {
     const handler = createAdjustEdgeStrengthHandler();
     const graph = buildD1Fixture();
@@ -189,6 +238,100 @@ describe('adjust_edge_strength handler', () => {
     expect(outcome.assistant_text).toContain('no material influence');
     expect(outcome.assistant_text).not.toMatch(/[0-9]+\.[0-9]+/);
   });
+
+  it.each(['positive', 'negative'] as const)(
+    'retains explicit %s direction when strength is exactly zero',
+    async (effectDirection) => {
+      const handler = createAdjustEdgeStrengthHandler();
+      const graph = buildD1Fixture();
+      const outcome = await handler(
+        buildInvocation(
+          graph,
+          makeProposal({
+            entityId: 'f-budget→g-revenue',
+            strength: 0,
+            operator: 'set',
+          }),
+          effectDirection,
+        ),
+      );
+      const edge = (outcome.mutated_graph as GraphV3T).edges.find(
+        (candidate) => candidate.from === 'f-budget' && candidate.to === 'g-revenue',
+      );
+      expect(edge?.strength.mean).toBe(0);
+      expect(edge?.effect_direction).toBe(effectDirection);
+    },
+  );
+
+  it('treats a zero-strength direction change as analysis-affecting and describes it honestly', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    const baseEdge = graph.edges.find(
+      (edge) => edge.from === 'f-budget' && edge.to === 'g-revenue',
+    )!;
+    baseEdge.strength.mean = 0;
+    baseEdge.effect_direction = 'positive';
+
+    const outcome = await handler(
+      buildInvocation(
+        graph,
+        makeProposal({
+          entityId: 'f-budget→g-revenue',
+          strength: 0,
+          operator: 'set',
+        }),
+        'negative',
+      ),
+    );
+
+    expect(outcome.handler_facts[0]).toMatchObject({ noop: false });
+    expect(outcome.assistant_text).toContain('strength remains zero');
+    expect(outcome.assistant_text).toContain('direction');
+    expect(outcome.assistant_text).toContain('negative');
+    expect(computeAnalysisAffectingGraphHash(graph)).not.toBe(
+      computeAnalysisAffectingGraphHash(outcome.mutated_graph as GraphV3T),
+    );
+  });
+
+  it('rejects an explicit direction that contradicts a non-zero strength', async () => {
+    const handler = createAdjustEdgeStrengthHandler();
+    const graph = buildD1Fixture();
+    await expect(
+      handler(
+        buildInvocation(
+          graph,
+          makeProposal({
+            entityId: 'f-budget→g-revenue',
+            strength: 0.5,
+            operator: 'set',
+          }),
+          'negative',
+        ),
+      ),
+    ).rejects.toMatchObject({ cause_kind: 'parameter_invalid_at_execute' });
+  });
+
+  it.each(['user_explicit', 'inferred', 'default'] as const)(
+    'rejects an untrusted %s proposal parameter that tries to set zero direction',
+    async (source) => {
+      const handler = createAdjustEdgeStrengthHandler();
+      const graph = buildD1Fixture();
+      const proposal = makeProposal({
+        entityId: 'f-budget→g-revenue',
+        strength: 0,
+        operator: 'set',
+      });
+      proposal.parameters.push({
+        name: 'effect_direction',
+        value: 'negative',
+        source,
+      });
+
+      await expect(handler(buildInvocation(graph, proposal))).rejects.toMatchObject({
+        cause_kind: 'parameter_invalid_at_execute',
+      });
+    },
+  );
 
   it('rejects out-of-range strength (>1)', async () => {
     const handler = createAdjustEdgeStrengthHandler();
