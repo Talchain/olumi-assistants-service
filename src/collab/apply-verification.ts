@@ -247,7 +247,7 @@ export async function verifyAppliedFrom(
   }
 
   // ── (f) the CITED EVIDENCE exists, is evidence, is on THIS round, and is
-  //        about THIS target ───────────────────────────────────────────────
+  //        about THIS factor target (kind + id) ────────────────────────────
   //
   // 0.41.0. An unverified citation stamped into the graph would attribute a
   // model change to a colleague's reasoning that never motivated it — the same
@@ -267,9 +267,15 @@ export async function verifyAppliedFrom(
   let verifiedEvidenceEventId: string | undefined;
   if (claim.evidence_event_id !== undefined) {
     const cited = events.find((e) => e.event_id === claim.evidence_event_id);
+    // `target_id` names a factor because this verifier is reachable only from
+    // `factor_value_edit`. Kind is still part of target identity: factor and
+    // edge refs occupy different domains and may carry the same string id. An
+    // id-only match would launder evidence about an edge into the reason for a
+    // factor judgement.
     if (
       cited === undefined ||
       cited.kind !== 'evidence_attached' ||
+      cited.target.kind !== 'factor' ||
       cited.target.id !== target_id
     ) {
       // ONE code for all three failures, deliberately — unlike (a)-(e), which

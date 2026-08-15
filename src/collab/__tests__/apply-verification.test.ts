@@ -522,6 +522,7 @@ const ADA_EVIDENCE_ID = 'evt-ada-evidence-challenging-grace';
 function evidenceEvent(args: {
   participant_id: string;
   event_id?: string;
+  target_kind?: 'factor' | 'edge';
   target_id?: string;
   round_id?: string;
 }): ElicitationEventRow {
@@ -531,7 +532,7 @@ function evidenceEvent(args: {
     participant_id: args.participant_id,
     event_version: 1,
     kind: 'evidence_attached',
-    target: { kind: 'factor', id: args.target_id ?? TARGET_ID },
+    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
     belief: null,
     evidence: {
       kind: 'note',
@@ -666,6 +667,46 @@ describe('verifyAppliedFrom — binding (f), the cited evidence', () => {
             participant_id: GRACE_ID,
             evidence_event_id: 'evt-ada-evidence-other-target',
           },
+        claimed_value: GRACE_VALUE,
+      }),
+      'collab_apply_evidence_not_found',
+    );
+  });
+
+  it('⭐ binds the cited target by KIND + id — factor evidence verifies; a same-id edge forgery refuses', async () => {
+    const edgeAliasId = 'evt-edge-evidence-sharing-factor-id';
+    const store = storeWithAdaEvidence([
+      evidenceEvent({
+        participant_id: ADA_ID,
+        event_id: edgeAliasId,
+        target_kind: 'edge',
+        // The alias is deliberate: an id-only check accepts this row as if it
+        // were evidence about the factor being edited.
+        target_id: TARGET_ID,
+      }),
+    ]);
+
+    const verified = await verifyAppliedFrom(store, {
+      scenario_id: SCENARIO_ID,
+      target_id: TARGET_ID,
+      claim: {
+        round_id: ROUND_ID,
+        participant_id: GRACE_ID,
+        evidence_event_id: ADA_EVIDENCE_ID,
+      },
+      claimed_value: GRACE_VALUE,
+    });
+    expect(verified.evidence_event_id).toBe(ADA_EVIDENCE_ID);
+
+    await expectRefusal(
+      verifyAppliedFrom(store, {
+        scenario_id: SCENARIO_ID,
+        target_id: TARGET_ID,
+        claim: {
+          round_id: ROUND_ID,
+          participant_id: GRACE_ID,
+          evidence_event_id: edgeAliasId,
+        },
         claimed_value: GRACE_VALUE,
       }),
       'collab_apply_evidence_not_found',

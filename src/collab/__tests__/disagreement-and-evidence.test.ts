@@ -150,6 +150,7 @@ function answer(args: {
 function evidenceRow(args: {
   participant_id: string;
   event_id?: string;
+  target_kind?: 'factor' | 'edge';
   target_id?: string;
   event_version?: number;
   created_at?: string;
@@ -161,7 +162,7 @@ function evidenceRow(args: {
     participant_id: args.participant_id,
     event_version: args.event_version ?? 1,
     kind: 'evidence_attached',
-    target: { kind: 'factor', id: args.target_id ?? TARGET_ID },
+    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
     belief: null,
     evidence: {
       kind: 'note',
@@ -700,6 +701,29 @@ describe('assembleDisagreementView', () => {
   it('does not attach one target’s evidence to another target', async () => {
     const t = (await view()).per_target.find((x) => x.target.id === ALIGNED_TARGET_ID);
     expect(t?.evidence).toEqual([]);
+  });
+
+  it('⭐ associates evidence by KIND + id — same-id edge evidence does not become the factor’s reason', async () => {
+    const factorEvidence = evidenceRow({
+      participant_id: ADA_ID,
+      event_id: 'evt-factor-evidence-same-id-control',
+    });
+    const edgeForgery = evidenceRow({
+      participant_id: RUTH_ID,
+      event_id: 'evt-edge-evidence-same-id-forgery',
+      target_kind: 'edge',
+      target_id: TARGET_ID,
+    });
+    const v = await assembleDisagreementView(
+      makeStore({ events: [factorEvidence, edgeForgery] }),
+      { round_id: ROUND_ID, requested_by: { kind: 'owner', user_id: 'owner-user' } },
+    );
+    const evidence = v.per_target.find((t) => t.target.id === TARGET_ID)?.evidence;
+
+    // Positive control and forgery control in one population: an inert filter
+    // that removed both kinds cannot satisfy this exact identity assertion.
+    expect(evidence?.map((e) => e.event_id)).toEqual([factorEvidence.event_id]);
+    expect(evidence?.some((e) => e.event_id === edgeForgery.event_id)).toBe(false);
   });
 
   it('resolves a redacted author to the pseudonym, like the reveal', async () => {

@@ -547,10 +547,12 @@ describe('factor_value_edit — the verified panel apply', () => {
 
 /** Ada's evidence row. A UUID, because the real mint site produces one. */
 const ADA_EVIDENCE_ID = '88888888-8888-4888-8888-888888888888';
+const EDGE_ALIAS_EVIDENCE_ID = '99999999-9999-4999-8999-999999999998';
 
 function evidenceEvent(args: {
   participant_id: string;
   event_id?: string;
+  target_kind?: 'factor' | 'edge';
   target_id?: string;
 }): ElicitationEventRow {
   return {
@@ -559,7 +561,7 @@ function evidenceEvent(args: {
     participant_id: args.participant_id,
     event_version: 1,
     kind: 'evidence_attached',
-    target: { kind: 'factor', id: args.target_id ?? TARGET_ID },
+    target: { kind: args.target_kind ?? 'factor', id: args.target_id ?? TARGET_ID },
     belief: null,
     evidence: {
       kind: 'note',
@@ -764,6 +766,30 @@ describe('factor_value_edit — 0.41.0, the CITED evidence reaches the graph', (
     expect(result.reason).toBe('collab_apply_evidence_not_found');
     // "Writes nothing" asserted as the SHAPE that carries a write being absent,
     // never as the reason string merely looking right.
+    expect('mutatedGraph' in result).toBe(false);
+    expect(result.response.assistant_text).toContain("haven't changed anything");
+  });
+
+  it('⭐ REFUSES same-id EDGE evidence for a factor apply, and writes NOTHING', async () => {
+    const result = await applyFactorValueEdit({
+      payload: payloadFor({ target_id: TARGET_ID, value: GRACE_VALUE }),
+      event: citedApplyEvent(EDGE_ALIAS_EVIDENCE_ID),
+      requestId: 'req-cite-kind-refuse',
+      persistedGraph: buildPersistedGraph(),
+      priorFacts: [],
+      collabStore: closedRoundStoreWithAdaEvidence([
+        evidenceEvent({
+          participant_id: ADA_ID,
+          event_id: EDGE_ALIAS_EVIDENCE_ID,
+          target_kind: 'edge',
+          target_id: TARGET_ID,
+        }),
+      ]),
+    });
+
+    expect(result.kind).toBe('refused');
+    if (result.kind !== 'refused') return;
+    expect(result.reason).toBe('collab_apply_evidence_not_found');
     expect('mutatedGraph' in result).toBe(false);
     expect(result.response.assistant_text).toContain("haven't changed anything");
   });
