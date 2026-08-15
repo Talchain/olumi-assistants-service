@@ -16,6 +16,8 @@ import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 import {
   AUXILIARY_MODEL_DEFAULTS,
+  EXECUTABLE_DEDICATED_RUNTIME_TASKS,
+  RUNTIME_AI_TASK_AUTHORITY,
   TASK_MODEL_DEFAULTS,
 } from "../../src/config/model-routing.js";
 
@@ -96,6 +98,73 @@ describe("GET /admin/models/routing", () => {
     }
   });
 
+  it("derives every executable dedicated runtime chain into the report", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/admin/models/routing",
+      headers: ADMIN_HEADERS,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const returnedTasks = body.tasks.map((row: { task: string }) => row.task);
+
+    expect(EXECUTABLE_DEDICATED_RUNTIME_TASKS).toEqual(
+      Object.entries(RUNTIME_AI_TASK_AUTHORITY)
+        .filter(
+          ([, authority]) =>
+            authority.hasExecutablePath &&
+            authority.modelAuthority.startsWith("dedicated_"),
+        )
+        .map(([task]) => task),
+    );
+    for (const task of EXECUTABLE_DEDICATED_RUNTIME_TASKS) {
+      expect(returnedTasks).toContain(task);
+    }
+  });
+
+  it("reports exact dedicated Anthropic default chains and gated availability", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/admin/models/routing",
+      headers: ADMIN_HEADERS,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const byTask = new Map(
+      body.tasks.map((row: { task: string }) => [row.task, row]),
+    );
+
+    expect(byTask.get("rolling_summary")).toMatchObject({
+      model: RUNTIME_AI_TASK_AUTHORITY.rolling_summary.checkedInModel,
+      provider: "anthropic",
+      availability: "registry_enabled",
+      source: "default",
+      source_key: "DEFAULT_SUMMARY_MODEL",
+      executable: true,
+      has_executable_path: true,
+      lifecycle_state: "dedicated_adapter",
+      runtime_availability: "available",
+    });
+    expect(byTask.get("decision_review_decompose")).toMatchObject({
+      model:
+        RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose.checkedInModel,
+      provider: "anthropic",
+      availability: "registry_enabled",
+      source: "default",
+      source_key: "DEFAULT_DECOMPOSE_MODEL",
+      executable: false,
+      has_executable_path: true,
+      lifecycle_state: "feature_gated",
+      runtime_availability: "feature_gated_default_off",
+    });
+    expect(byTask.get("m2_graph_review")).toMatchObject({
+      executable: false,
+      has_executable_path: true,
+      lifecycle_state: "feature_gated",
+      runtime_availability: "feature_gated_default_off",
+    });
+  });
+
   it("each task entry has required fields", async () => {
     const res = await app.inject({
       method: "GET",
@@ -108,6 +177,9 @@ describe("GET /admin/models/routing", () => {
       expect(entry).toHaveProperty("model");
       expect(entry).toHaveProperty("provider");
       expect(entry).toHaveProperty("source");
+      expect(entry).toHaveProperty("source_key");
+      expect(entry).toHaveProperty("runtime_availability");
+      expect(entry).toHaveProperty("has_executable_path");
       expect(["env_override", "default"]).toContain(entry.source);
       expect(typeof entry.model).toBe("string");
       expect(entry.model.length).toBeGreaterThan(0);

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   ActivePromptResult,
   GetCompiledOptions,
@@ -28,6 +31,7 @@ import {
   selectCanonicalPrompt,
   type RuntimePromotionEvaluator,
 } from '../../src/prompts/stores/governed.js';
+import { FilePromptStore } from '../../src/prompts/stores/file.js';
 import type { RuntimePromotionDecision } from '../../src/prompts/runtime-promotion-gate.js';
 
 const APPROVED = 'Approved decision review prompt bytes.';
@@ -103,6 +107,36 @@ function evaluator(): RuntimePromotionEvaluator {
         }
       : { decision: 'UNGATED', task, promptSha16 };
   });
+}
+
+function attemptCallerMutation(mutate: () => void): void {
+  try {
+    mutate();
+  } catch (error) {
+    expect(error).toBeInstanceOf(TypeError);
+  }
+}
+
+async function withActualFileStore(
+  run: (
+    store: GovernedPromptStore,
+    raw: FilePromptStore,
+  ) => Promise<void>,
+): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), 'governed-prompt-store-'));
+  try {
+    const raw = new FilePromptStore({
+      filePath: join(directory, 'prompts.json'),
+      backupEnabled: false,
+    });
+    await raw.initialize();
+    await run(
+      new GovernedPromptStore(raw, evaluator(), () => undefined),
+      raw,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 class MemoryStore implements IPromptStore {
@@ -305,6 +339,199 @@ class MemoryStore implements IPromptStore {
 }
 
 describe('governed prompt store', () => {
+  it('deep-detaches and freezes every read surface over the actual FilePromptStore', async () => {
+    await withActualFileStore(async (store) => {
+      await store.create({
+        id: 'decision_review_default',
+        taskId: 'decision_review',
+        name: 'Decision review',
+        content: APPROVED,
+        variables: [],
+        modelConfig: {
+          staging: 'claude-haiku-4-5',
+          production: 'claude-sonnet-5',
+        },
+        tags: ['governed'],
+        createdBy: 'test',
+      });
+
+      const byId = await store.get('decision_review_default');
+      expect(byId).not.toBeNull();
+      expect(Object.isFrozen(byId)).toBe(true);
+      expect(Object.isFrozen(byId!.versions)).toBe(true);
+      expect(Object.isFrozen(byId!.versions[0])).toBe(true);
+      expect(Object.isFrozen(byId!.modelConfig)).toBe(true);
+      attemptCallerMutation(() => {
+        byId!.versions[0].content = MUTANT;
+      });
+      attemptCallerMutation(() => {
+        byId!.modelConfig!.staging = 'attacker-model';
+      });
+
+      const listed = await store.list({ taskId: 'decision_review' });
+      expect(Object.isFrozen(listed)).toBe(true);
+      attemptCallerMutation(() => {
+        listed[0].versions[0].content = MUTANT;
+      });
+      attemptCallerMutation(() => {
+        listed[0].tags.push('attacker');
+      });
+
+      const active = await store.getActivePromptForTask('decision_review');
+      expect(active).not.toBeNull();
+      expect(Object.isFrozen(active)).toBe(true);
+      attemptCallerMutation(() => {
+        active!.prompt.versions[0].content = MUTANT;
+      });
+      attemptCallerMutation(() => {
+        active!.prompt.modelConfig!.production = 'attacker-model';
+      });
+
+      const variables = { company: 'Olumi' };
+      const compiled = await store.getCompiled('decision_review', variables);
+      expect(compiled).not.toBeNull();
+      expect(Object.isFrozen(compiled)).toBe(true);
+      expect(Object.isFrozen(compiled!.modelConfig)).toBe(true);
+      attemptCallerMutation(() => {
+        compiled!.modelConfig!.staging = 'attacker-model';
+      });
+      attemptCallerMutation(() => {
+        compiled!.variables!.company = 'Attacker';
+      });
+      variables.company = 'Changed after compile';
+
+      const stored = await store.get('decision_review_default');
+      expect(stored).toMatchObject({
+        tags: ['governed'],
+        modelConfig: {
+          staging: 'claude-haiku-4-5',
+          production: 'claude-sonnet-5',
+        },
+      });
+      expect(stored!.versions[0].content).toBe(APPROVED);
+      await expect(
+        store.getCompiled('decision_review', { company: 'Fresh' }),
+      ).resolves.toMatchObject({
+        variables: { company: 'Fresh' },
+        modelConfig: {
+          staging: 'claude-haiku-4-5',
+          production: 'claude-sonnet-5',
+        },
+      });
+    });
+  });
+
+  it('deep-detaches every FilePromptStore mutator return and preserves the served-byte gate', async () => {
+    await withActualFileStore(async (store) => {
+      const created = await store.create({
+        id: 'decision_review_default',
+        taskId: 'decision_review',
+        name: 'Decision review',
+        content: APPROVED,
+        variables: [],
+        modelConfig: {
+          staging: 'claude-haiku-4-5',
+          production: 'claude-sonnet-5',
+        },
+        tags: [],
+        createdBy: 'test',
+      });
+      attemptCallerMutation(() => {
+        created.versions[0].content = MUTANT;
+      });
+      attemptCallerMutation(() => {
+        created.modelConfig!.staging = 'attacker-model';
+      });
+
+      const updated = await store.update('decision_review_default', {
+        name: 'Detached metadata',
+        tags: ['governed'],
+      });
+      attemptCallerMutation(() => {
+        updated.tags.push('attacker');
+      });
+      attemptCallerMutation(() => {
+        updated.versions[0].content = MUTANT;
+      });
+
+      const versioned = await store.createVersion('decision_review_default', {
+        content: MUTANT,
+        variables: [],
+        createdBy: 'test',
+        requiresApproval: true,
+      });
+      const returnedVersion = versioned.versions.find(
+        (version) => version.version === 2,
+      )!;
+      attemptCallerMutation(() => {
+        returnedVersion.content = APPROVED;
+      });
+      attemptCallerMutation(() => {
+        returnedVersion.contentHash = computeContentHash(APPROVED);
+      });
+
+      const approved = await store.approveVersion('decision_review_default', {
+        version: 2,
+        approvedBy: 'reviewer',
+      });
+      attemptCallerMutation(() => {
+        approved.versions[1].approvedBy = 'attacker';
+      });
+
+      const testCases = await store.updateTestCases(
+        'decision_review_default',
+        2,
+        [
+          {
+            id: 'gate-case',
+            name: 'Gate case',
+            input: 'The original test input.',
+            variables: {},
+            enabled: true,
+          },
+        ],
+      );
+      attemptCallerMutation(() => {
+        testCases.versions[1].testCases[0].input = 'Attacker input';
+      });
+
+      const rolledBack = await store.rollback('decision_review_default', {
+        targetVersion: 1,
+        rolledBackBy: 'test',
+        reason: 'Exercise the detached rollback return.',
+      });
+      attemptCallerMutation(() => {
+        rolledBack.versions[0].content = MUTANT;
+      });
+
+      const stored = await store.get('decision_review_default');
+      expect(stored).toMatchObject({
+        name: 'Detached metadata',
+        tags: ['governed'],
+        activeVersion: 1,
+        stagingVersion: undefined,
+      });
+      expect(stored!.versions[0].content).toBe(APPROVED);
+      expect(stored!.versions[1]).toMatchObject({
+        content: MUTANT,
+        approvedBy: 'reviewer',
+        testCases: [{ input: 'The original test input.' }],
+      });
+
+      await expect(
+        store.update('decision_review_default', { stagingVersion: 2 }),
+      ).rejects.toMatchObject({
+        code: 'PROMPT_PROMOTION_EVIDENCE_REQUIRED',
+      });
+      await expect(
+        store.get('decision_review_default'),
+      ).resolves.toMatchObject({
+        activeVersion: 1,
+        stagingVersion: undefined,
+      });
+    });
+  });
+
   it('elects immutable canonical id, never newest updatedAt, and never promotes an archived rival', async () => {
     const canonical = prompt({ updatedAt: '2026-01-01T00:00:00.000Z' });
     const rival = prompt({

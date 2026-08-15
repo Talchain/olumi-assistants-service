@@ -9,7 +9,7 @@ import { anthropicTemperatureFor } from "../../config/models.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getDefaultModelForTask } from "../../config/model-routing.js";
 import {
-  ModelAssignmentError,
+  requireModelAssignmentProvider,
   resolveModelAssignment,
 } from '../../config/model-assignment.js';
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
@@ -3430,15 +3430,10 @@ export async function chatWithAnthropic(
   // same registry authority immediately here: unknown/disabled ids and models
   // assigned to another provider must fail before a client or request exists.
   const fallbackModel = resolveAnthropicModel(args.model);
-  const assignment = resolveModelAssignment(fallbackModel);
-  if (assignment.provider !== 'anthropic') {
-    throw new ModelAssignmentError(
-      'MODEL_PROVIDER_MISMATCH',
-      assignment.model,
-      `Model '${assignment.model}' resolves to provider '${assignment.provider}', ` +
-        'so it cannot be sent through the Anthropic client.',
-    );
-  }
+  const assignment = requireModelAssignmentProvider(
+    resolveModelAssignment(fallbackModel),
+    'anthropic',
+  );
   // resolveModelAssignment deliberately preserves exact explicit model/alias
   // bytes; never substitute the registry target in the provider request.
   const model = assignment.model;

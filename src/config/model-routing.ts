@@ -284,13 +284,40 @@ export type AiTaskExecutionState =
   | 'inert_compatibility';
 
 export interface AiTaskLifecycle {
-  /** True only when this exact task id can currently reach an LLM call. */
+  /** True only when the task is available without a default-off feature gate. */
   readonly executable: boolean;
   readonly state: AiTaskExecutionState;
   /** Executable task that supersedes a compatibility/display name. */
   readonly executableTask?: AiTaskLifecycleId;
   readonly gate?: string;
   readonly note: string;
+}
+
+export type AiTaskRuntimeAvailability =
+  | 'available'
+  | 'feature_gated_default_off'
+  | 'not_executable';
+
+/**
+ * Keep static capability separate from default runtime availability. A
+ * feature-gated row can have a real, tested call path without being live by
+ * default; display/compatibility rows have no call path at all.
+ */
+export function getAiTaskRuntimeAvailability(
+  task: AiTaskLifecycleId,
+): AiTaskRuntimeAvailability {
+  const lifecycle = AI_TASK_LIFECYCLE[task];
+  if (lifecycle.state === 'feature_gated') {
+    return 'feature_gated_default_off';
+  }
+  if (!lifecycle.executable) return 'not_executable';
+  return 'available';
+}
+
+/** Static code capability, independent of default-off activation state. */
+export function hasAiTaskExecutablePath(task: AiTaskLifecycleId): boolean {
+  const lifecycle = AI_TASK_LIFECYCLE[task];
+  return lifecycle.executable || lifecycle.state === 'feature_gated';
 }
 
 /**
@@ -413,7 +440,7 @@ export const AI_TASK_LIFECYCLE: Readonly<
       'The post-commit rolling-summary maintainer calls the shared Anthropic chat boundary with its code-constant four-slot prompt.',
   },
   decision_review_decompose: {
-    executable: true,
+    executable: false,
     state: 'feature_gated',
     gate: 'CEE_DECISION_REVIEW_DECOMPOSE',
     note:
@@ -437,7 +464,8 @@ export type RuntimeAiTaskId =
   | 'm2_graph_review';
 
 export interface RuntimeAiTaskAuthority {
-  readonly executable: boolean;
+  /** Static production code path; current availability lives in lifecycle. */
+  readonly hasExecutablePath: boolean;
   readonly modelAuthority:
     | 'router_task_chain'
     | 'router_env_or_global_fallback'
@@ -468,11 +496,9 @@ export interface RuntimeAiTaskAuthority {
  * gated M2 path. Exact prompt bytes/version/hash remain runtime facts exposed
  * by prompt metadata; this map pins which authority must supply them.
  */
-export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
-  Record<RuntimeAiTaskId, RuntimeAiTaskAuthority>
-> = {
+export const RUNTIME_AI_TASK_AUTHORITY = {
   draft_graph: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.draft_graph,
     promptAuthority: 'pms_or_checked_in_default',
@@ -483,7 +509,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   edit_graph: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.edit_graph,
     promptAuthority: 'pms_or_checked_in_default',
@@ -494,7 +520,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   suggest_options: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.suggest_options,
     promptAuthority: 'provider_specific_pms_or_inline_constant',
@@ -505,7 +531,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   critique_graph: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.critique_graph,
     promptAuthority: 'pms_or_checked_in_default',
@@ -516,7 +542,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   decision_review: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.decision_review,
     promptAuthority: 'pms_or_checked_in_default',
@@ -527,7 +553,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'decision_review_hash_bound_eval',
   },
   validate_graph: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.validate_graph,
     promptAuthority: 'pms_or_checked_in_default',
@@ -538,7 +564,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   orchestrator: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.orchestrator,
     promptAuthority: 'routing_snapshot_or_checked_in_default',
@@ -549,7 +575,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   clarify_brief: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_env_or_global_fallback',
     checkedInModel: null,
     promptAuthority: 'provider_specific_pms_or_inline_constant',
@@ -560,7 +586,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   explain_diff: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'router_global_fallback',
     checkedInModel: null,
     promptAuthority: 'code_constant',
@@ -571,7 +597,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   extraction: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'dedicated_extraction_chain',
     checkedInModel: AUXILIARY_MODEL_DEFAULTS.extraction,
     promptAuthority: 'caller_supplied',
@@ -582,7 +608,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   rolling_summary: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'dedicated_anthropic_chain',
     checkedInModel: 'claude-haiku-4-5',
     promptAuthority: 'code_constant',
@@ -595,7 +621,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   decision_review_decompose: {
-    executable: true,
+    hasExecutablePath: true,
     modelAuthority: 'dedicated_anthropic_chain',
     checkedInModel: 'claude-haiku-4-5',
     promptAuthority: 'provider_specific_code_constant',
@@ -608,7 +634,7 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     promotionGate: 'none_no_real_pack',
   },
   m2_graph_review: {
-    executable: false,
+    hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.m2_graph_review,
     promptAuthority: 'pms_or_checked_in_default',
@@ -618,7 +644,35 @@ export const RUNTIME_AI_TASK_AUTHORITY: Readonly<
     fallback: 'inert unless feature, prompt, explicit model and budget gates all pass',
     promotionGate: 'none_no_real_pack',
   },
-};
+} as const satisfies Readonly<
+  Record<RuntimeAiTaskId, RuntimeAiTaskAuthority>
+>;
+
+export type ExecutableDedicatedRuntimeTask = {
+  [Task in RuntimeAiTaskId]:
+    (typeof RUNTIME_AI_TASK_AUTHORITY)[Task]['hasExecutablePath'] extends true
+      ? (typeof RUNTIME_AI_TASK_AUTHORITY)[Task]['modelAuthority'] extends `dedicated_${string}`
+        ? Task
+        : never
+      : never;
+}[RuntimeAiTaskId];
+
+/**
+ * Admin/reporting consumers derive this set from runtime authority instead of
+ * maintaining a second list that can silently omit a newly executable
+ * dedicated chain.
+ */
+export const EXECUTABLE_DEDICATED_RUNTIME_TASKS = Object.freeze(
+  (Object.keys(RUNTIME_AI_TASK_AUTHORITY) as RuntimeAiTaskId[]).filter(
+    (task): task is ExecutableDedicatedRuntimeTask => {
+      const authority = RUNTIME_AI_TASK_AUTHORITY[task];
+      return (
+        authority.hasExecutablePath &&
+        authority.modelAuthority.startsWith('dedicated_')
+      );
+    },
+  ),
+);
 
 /**
  * Tasks where quality-tier model is REQUIRED

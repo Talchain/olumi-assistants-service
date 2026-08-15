@@ -130,3 +130,22 @@ export function resolveModelAssignment(
     `Model '${model}' is neither an enabled registry entry nor an explicit alias.`,
   );
 }
+
+/**
+ * Enforce a provider-specific network boundary after the shared registry/alias
+ * resolution. The exact caller-supplied model bytes remain unchanged.
+ */
+export function requireModelAssignmentProvider(
+  assignment: ResolvedModelAssignment,
+  provider: ModelProvider,
+): ResolvedModelAssignment {
+  if (assignment.provider !== provider) {
+    throw new ModelAssignmentError(
+      'MODEL_PROVIDER_MISMATCH',
+      assignment.model,
+      `Model '${assignment.model}' resolves to provider '${assignment.provider}', ` +
+        `so it cannot be sent through the ${provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} client.`,
+    );
+  }
+  return assignment;
+}

@@ -24,6 +24,7 @@ import type {
   UpdatePromptRequest,
 } from '../schema.js';
 import {
+  CompiledPromptSchema,
   computeContentHash,
   interpolatePrompt,
   PromptDefinitionSchema,
@@ -93,6 +94,37 @@ export type PromptFallbackResolver = (taskId: string) => string | undefined;
 
 export function canonicalPromptId(taskId: string): string {
   return `${taskId}_default`;
+}
+
+/**
+ * Backend implementations are allowed to retain and return their in-memory
+ * objects. The governed boundary must never let those references escape: a
+ * caller mutation could otherwise rewrite stored prompt bytes/model routing
+ * without passing the promotion evaluator or backend CAS.
+ */
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== 'object') return value;
+
+  const object = value as object;
+  if (seen.has(object)) return value;
+  seen.add(object);
+
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    deepFreeze(child, seen);
+  }
+  return Object.freeze(value);
+}
+
+function detachPromptDefinition(prompt: PromptDefinition): PromptDefinition {
+  return deepFreeze(
+    PromptDefinitionSchema.parse(structuredClone(prompt)),
+  );
+}
+
+function detachCompiledPrompt(prompt: CompiledPrompt): CompiledPrompt {
+  return deepFreeze(
+    CompiledPromptSchema.parse(structuredClone(prompt)),
+  );
 }
 
 /**
@@ -255,12 +287,14 @@ export class GovernedPromptStore implements IPromptStore {
     return this.store.initialize();
   }
 
-  get(id: string): Promise<PromptDefinition | null> {
-    return this.store.get(id);
+  async get(id: string): Promise<PromptDefinition | null> {
+    const prompt = await this.store.get(id);
+    return prompt ? detachPromptDefinition(prompt) : null;
   }
 
-  list(filter?: PromptListFilter): Promise<PromptDefinition[]> {
-    return this.store.list(filter);
+  async list(filter?: PromptListFilter): Promise<PromptDefinition[]> {
+    const prompts = await this.store.list(filter);
+    return deepFreeze(prompts.map(detachPromptDefinition));
   }
 
   private async rowsForTask(taskId: string): Promise<PromptDefinition[]> {
@@ -434,7 +468,7 @@ export class GovernedPromptStore implements IPromptStore {
       this.assertServedChangeAllowed(request.taskId, request.id, null, after);
       // The canonical id is also the primary key, so cross-process races fail
       // atomically at the backend even without a task-id uniqueness migration.
-      return this.store.create(request);
+      return detachPromptDefinition(await this.store.create(request));
     });
   }
 
@@ -458,11 +492,11 @@ export class GovernedPromptStore implements IPromptStore {
     });
   }
 
-  update(
+  async update(
     id: string,
     request: UpdatePromptRequest,
   ): Promise<PromptDefinition> {
-    return this.mutateExisting(
+    const updated = await this.mutateExisting(
       id,
       (before) => cloneUpdatedPrompt(before, request),
       (before) =>
@@ -470,13 +504,14 @@ export class GovernedPromptStore implements IPromptStore {
           expectedUpdatedAt: before.updatedAt,
         }),
     );
+    return detachPromptDefinition(updated);
   }
 
-  createVersion(
+  async createVersion(
     id: string,
     request: CreateVersionRequest,
   ): Promise<PromptDefinition> {
-    return this.mutateExisting(
+    const updated = await this.mutateExisting(
       id,
       (before) => {
         const version = Math.max(...before.versions.map((entry) => entry.version)) + 1;
@@ -500,10 +535,14 @@ export class GovernedPromptStore implements IPromptStore {
       },
       () => this.store.createVersion(id, request),
     );
+    return detachPromptDefinition(updated);
   }
 
-  rollback(id: string, request: RollbackRequest): Promise<PromptDefinition> {
-    return this.mutateExisting(
+  async rollback(
+    id: string,
+    request: RollbackRequest,
+  ): Promise<PromptDefinition> {
+    const updated = await this.mutateExisting(
       id,
       (before) =>
         PromptDefinitionSchema.parse({
@@ -515,29 +554,32 @@ export class GovernedPromptStore implements IPromptStore {
           expectedUpdatedAt: before.updatedAt,
         }),
     );
+    return detachPromptDefinition(updated);
   }
 
-  approveVersion(
+  async approveVersion(
     id: string,
     request: ApprovalRequest,
   ): Promise<PromptDefinition> {
-    return this.mutateExisting(
+    const updated = await this.mutateExisting(
       id,
       (before) => before,
       () => this.store.approveVersion(id, request),
     );
+    return detachPromptDefinition(updated);
   }
 
-  updateTestCases(
+  async updateTestCases(
     id: string,
     version: number,
     testCases: PromptTestCase[],
   ): Promise<PromptDefinition> {
-    return this.mutateExisting(
+    const updated = await this.mutateExisting(
       id,
       (before) => before,
       () => this.store.updateTestCases(id, version, testCases),
     );
+    return detachPromptDefinition(updated);
   }
 
   delete(id: string, hard = false): Promise<void> {
@@ -571,14 +613,14 @@ export class GovernedPromptStore implements IPromptStore {
     if (!version) {
       throw new Error(`Version ${versionNumber} not found for prompt '${prompt.id}'`);
     }
-    return {
+    return detachCompiledPrompt({
       promptId: prompt.id,
       version: version.version,
       content: interpolatePrompt(version.content, variables, version.variables),
       compiledAt: new Date().toISOString(),
       variables,
       modelConfig: prompt.modelConfig,
-    };
+    });
   }
 
   async getActivePromptForTask(
@@ -586,7 +628,10 @@ export class GovernedPromptStore implements IPromptStore {
   ): Promise<ActivePromptResult | null> {
     const prompt = selectCanonicalPrompt(taskId, await this.rowsForTask(taskId));
     if (!prompt || prompt.status === 'archived') return null;
-    return { prompt, version: prompt.activeVersion };
+    return deepFreeze({
+      prompt: detachPromptDefinition(prompt),
+      version: prompt.activeVersion,
+    });
   }
 }
 

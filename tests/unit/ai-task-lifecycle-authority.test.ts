@@ -4,6 +4,9 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import {
   AI_TASK_LIFECYCLE,
+  EXECUTABLE_DEDICATED_RUNTIME_TASKS,
+  getAiTaskRuntimeAvailability,
+  hasAiTaskExecutablePath,
   RUNTIME_AI_TASK_AUTHORITY,
 } from '../../src/config/model-routing.js';
 import { resolveModelAssignment } from '../../src/config/model-assignment.js';
@@ -142,6 +145,27 @@ describe('AI task lifecycle authority', () => {
     });
   });
 
+  it('separates static executable paths from default-off feature availability', () => {
+    expect(AI_TASK_LIFECYCLE.m2_graph_review).toMatchObject({
+      executable: false,
+      state: 'feature_gated',
+    });
+    expect(AI_TASK_LIFECYCLE.decision_review_decompose).toMatchObject({
+      executable: false,
+      state: 'feature_gated',
+    });
+    expect(hasAiTaskExecutablePath('m2_graph_review')).toBe(true);
+    expect(hasAiTaskExecutablePath('decision_review_decompose')).toBe(true);
+    expect(getAiTaskRuntimeAvailability('m2_graph_review')).toBe(
+      'feature_gated_default_off',
+    );
+    expect(getAiTaskRuntimeAvailability('decision_review_decompose')).toBe(
+      'feature_gated_default_off',
+    );
+    expect(getAiTaskRuntimeAvailability('rolling_summary')).toBe('available');
+    expect(getAiTaskRuntimeAvailability('repair_graph')).toBe('not_executable');
+  });
+
   it('retains repair_graph external PMS readiness without inventing an executable call', () => {
     expect(CeeTaskIdSchema.options).toContain('repair_graph');
     expect(LITERAL_ROUTER_TASKS).not.toContain('repair_graph');
@@ -163,17 +187,31 @@ describe('AI task lifecycle authority', () => {
       'orchestrator-v5/rolling-summary/summariser.ts',
     ]);
     expect(RUNTIME_AI_TASK_AUTHORITY.rolling_summary).toMatchObject({
-      executable: true,
+      hasExecutablePath: true,
       modelAuthority: 'dedicated_anthropic_chain',
       promptAuthority: 'code_constant',
       promptIdentity: 'code_hash',
     });
     expect(RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose).toMatchObject({
-      executable: true,
+      hasExecutablePath: true,
       modelAuthority: 'dedicated_anthropic_chain',
       promptAuthority: 'provider_specific_code_constant',
       promptIdentity: 'code_hash',
     });
+  });
+
+  it('derives the executable dedicated reporting set from runtime authority', () => {
+    expect(EXECUTABLE_DEDICATED_RUNTIME_TASKS).toEqual([
+      'extraction',
+      'rolling_summary',
+      'decision_review_decompose',
+    ]);
+    for (const task of EXECUTABLE_DEDICATED_RUNTIME_TASKS) {
+      expect(RUNTIME_AI_TASK_AUTHORITY[task].hasExecutablePath).toBe(true);
+      expect(RUNTIME_AI_TASK_AUTHORITY[task].modelAuthority).toMatch(
+        /^dedicated_/,
+      );
+    }
   });
 
   it('pins dedicated checked-in models to the actual source constants', async () => {
