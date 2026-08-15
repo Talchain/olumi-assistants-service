@@ -261,11 +261,35 @@ export function canonicaliseValueOps(
   currentGraph: unknown,
 ): { readonly operations: PatchOperation[]; readonly translatedCount: number } {
   let translatedCount = 0;
+  // `operations` is an ordered transaction. Keep the observed-state view for
+  // each target in step with earlier ops so a later unit/std leaf cannot
+  // replay the graph's pre-batch value over an already-canonicalised value
+  // write (and vice versa). This mirrors the applier's sequential semantics
+  // without mutating the graph or inventing a second patch engine.
+  const observedByTarget = new Map<string, Record<string, unknown>>();
+  const observedBefore = (path: string): Record<string, unknown> => {
+    const tracked = observedByTarget.get(path);
+    if (tracked !== undefined) return tracked;
+    const initial = asRecord(findNode(currentGraph, path)?.observed_state) ?? {};
+    const snapshot = { ...initial };
+    observedByTarget.set(path, snapshot);
+    return snapshot;
+  };
   const out = operations.map((op) => {
     if (op.op !== 'update_node') return op;
     const value = asRecord(op.value);
     if (value === null) return op;
-    const canonical = canonicaliseUpdateNodeValue(value, findNode(currentGraph, op.path));
+    const before = observedBefore(op.path);
+    const canonical = canonicaliseUpdateNodeValue(value, { observed_state: before });
+    const effectiveValue = canonical ?? value;
+    const observedWrite = asRecord(effectiveValue[OBSERVED_ROOT]);
+    if (observedWrite !== null) {
+      // The local node applier replaces optional `observed_state` objects.
+      // Canonicalised leaf ops already carry the complete merged object, so
+      // tracking the exact outgoing object mirrors the real sequential write
+      // without duplicating any wider patch semantics here.
+      observedByTarget.set(op.path, { ...observedWrite });
+    }
     if (canonical === null) return op;
     translatedCount += 1;
     return { ...op, value: canonical };
@@ -354,16 +378,22 @@ export function stampUserEditProvenance(
   operations: readonly PatchOperation[],
   valueWriteOperations: readonly PatchOperation[] = operations,
 ): PatchOperation[] {
+  // A later observed-state leaf on the same target replaces the whole object
+  // in the local applier. Once this batch has explicitly authored a value, its
+  // user authority must therefore be carried into later canonical leaf ops;
+  // otherwise a unit/std write can resurrect the pre-batch panel citation.
+  const userValueTargets = new Set<string>();
   return operations.map((op, index) => {
     // Canonicalisation merges stored observed-state siblings into leaf writes.
     // Bind the authorship stamp to the PRE-merge operation so a unit/std-only
     // edit cannot inherit `value` and masquerade as a user-authored value.
-    if (!operationWritesObservedValue(valueWriteOperations[index])) return op;
     if (op.op !== 'update_node') return op;
     const value = asRecord(op.value);
     if (value === null) return op;
     const observed = asRecord(value[OBSERVED_ROOT]);
     if (observed === null) return op;
+    const writesValue = operationWritesObservedValue(valueWriteOperations[index]);
+    if (!writesValue && !userValueTargets.has(op.path)) return op;
     if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
     const stampedObserved: Record<string, unknown> = {
       ...observed,
@@ -375,6 +405,7 @@ export function stampUserEditProvenance(
     // old participant/evidence citation survives beside `user_override`.
     // Absence is the shared contract's meaning for "not panel-elicited".
     delete stampedObserved.elicited_from;
+    if (writesValue) userValueTargets.add(op.path);
     return {
       ...op,
       value: {

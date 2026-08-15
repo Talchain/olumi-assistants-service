@@ -475,6 +475,87 @@ describe('executeGmHeldResume', () => {
     });
   });
 
+  it.each([
+    [
+      'value → unit → std',
+      [
+        { op: 'update_node', path: 'fac_setup', value: { 'data/value': 0.42 } },
+        { op: 'update_node', path: 'fac_setup', value: { 'data/unit': 'USD' } },
+        { op: 'update_node', path: 'fac_setup', value: { 'data/std': 0.2 } },
+      ],
+      3,
+    ],
+    [
+      'std → unit → value',
+      [
+        { op: 'update_node', path: 'fac_setup', value: { 'data/std': 0.2 } },
+        { op: 'update_node', path: 'fac_setup', value: { 'data/unit': 'USD' } },
+        { op: 'update_node', path: 'fac_setup', value: { 'data/value': 0.42 } },
+      ],
+      3,
+    ],
+    [
+      'one combined observed-state op',
+      [
+        {
+          op: 'update_node',
+          path: 'fac_setup',
+          value: { observed_state: { value: 0.42, unit: 'USD', std: 0.2 } },
+        },
+      ],
+      1,
+    ],
+  ])('held apply lands every same-target leaf independent of order (%s)', (_label, operations, expectedCount) => {
+    const attributedGraph = {
+      ...VALUE_GRAPH,
+      nodes: VALUE_GRAPH.nodes.map((node) =>
+        node.id === 'fac_setup'
+          ? {
+              ...node,
+              observed_state: {
+                value: 0.1,
+                unit: 'GBP',
+                std: 0.1,
+                source: 'panel_elicited',
+                elicited_from: {
+                  round_id: 'round-prior',
+                  participant_id: 'participant-prior',
+                  evidence_event_id: 'evidence-prior',
+                },
+              },
+            }
+          : node,
+      ),
+    };
+    const outcome = executeGmHeldResume(
+      executeInput({
+        operations: operations as never,
+        currentGraph: attributedGraph,
+        currentGraphHash: hashOf(attributedGraph),
+      }),
+    );
+
+    expect(outcome.status).toBe('executed');
+    if (outcome.status !== 'executed') return;
+    const node = (
+      outcome.mutatedGraph.nodes as Array<{
+        id: string;
+        provenance?: string;
+        observed_state?: Record<string, unknown>;
+      }>
+    ).find((candidate) => candidate.id === 'fac_setup')!;
+    expect(node.observed_state).toMatchObject({
+      value: 0.42,
+      unit: 'USD',
+      std: 0.2,
+      source: 'user_override',
+    });
+    expect('elicited_from' in node.observed_state!).toBe(false);
+    expect(node.provenance).toBe('user_set');
+    expect(outcome.fact.result.operations_count).toBe(expectedCount);
+    expect(outcome.fact.noop).toBe(false);
+  });
+
   it('a "yes" never overrides integrity: unknown op kind re-referees rejected → referee_blocked', () => {
     // Bypass the read-side Zod (defence-in-depth pin on the referee layer).
     const outcome = executeGmHeldResume(
