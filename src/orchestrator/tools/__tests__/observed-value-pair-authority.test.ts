@@ -417,7 +417,7 @@ describe('2.1033 — the COMPOSED chain: an edit that never moved the value keep
   /** EXACTLY the composition both apply seams run (edit-graph.ts, gm-held-execute.ts). */
   function chain(ops: PatchOperation[], graph: unknown): PatchOperation[] {
     return reconcileObservedValuePair(
-      stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations),
+      stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations, ops),
       graph,
     );
   }

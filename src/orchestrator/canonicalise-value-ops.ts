@@ -298,8 +298,9 @@ export function canonicaliseValueOps(
 //   · ONE function, called by BOTH seams — the same no-second-copy rule as
 //     `canonicaliseValueOps` itself (see the module header).
 //
-// Scope: ONLY `update_node` ops whose (post-canonicalisation) `observed_state`
-// payload carries a `value` member — the pill is a claim about the VALUE.
+// Scope: ONLY `update_node` ops whose PRE-canonicalisation payload authors a
+// `value` leaf — the pill is a claim about the VALUE. Canonicalisation merges
+// stored siblings, so the post-canonical payload alone is not proof of a write.
 // Unit-only edits, label edits, structural ops and intervention writes are
 // returned BY REFERENCE, untouched. An explicit LLM-claimed producer source on
 // a value write is OVERRIDDEN: the user consented to this write, and letting a
@@ -309,7 +310,7 @@ export function canonicaliseValueOps(
 // This deliberately does NOT ride inside `canonicaliseValueOps`: that module's
 // pinned contract is spelling-only ("byte-identical for canonical batches"),
 // and folding a semantic stamp into it would break that pin. Compose them:
-//   stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations)
+//   stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations, ops)
 // ---------------------------------------------------------------------------
 
 /** The observed_state.source literal CEE's chat-edit writers stamp. */
@@ -317,15 +318,47 @@ export const USER_EDIT_SOURCE = 'user_override' as const;
 /** The node-level provenance literal (the set_factor_value precedent). */
 export const USER_EDIT_PROVENANCE = 'user_set' as const;
 
+function operationWritesObservedValue(op: PatchOperation | undefined): boolean {
+  if (op?.op !== 'update_node') return false;
+  const value = asRecord(op.value);
+  if (value === null) return false;
+
+  const canonicalObserved = asRecord(value[OBSERVED_ROOT]);
+  if (
+    canonicalObserved !== null &&
+    Object.prototype.hasOwnProperty.call(canonicalObserved, 'value')
+  ) {
+    return true;
+  }
+
+  return Object.entries(value).some(([key, to]) => {
+    const segments = key.split(/[/.]/).filter((segment) => segment.length > 0);
+    if (!OBSERVED_ROOT_SPELLINGS.has(segments[0] ?? '')) return false;
+    if (segments.length === 2) return segments[1] === 'value';
+    if (segments.length !== 1) return false;
+    const root = asRecord(to);
+    return root !== null && Object.prototype.hasOwnProperty.call(root, 'value');
+  });
+}
+
 /**
- * Stamp user provenance onto every value-writing `update_node` op. Pure and
- * total — never throws, never mutates its inputs; ops needing no stamp are
- * returned by reference.
+ * Stamp user provenance onto every value-writing `update_node` op. When the
+ * operations have already been canonicalised, pass the corresponding
+ * pre-canonicalisation operations as `valueWriteOperations`; those retain the
+ * distinction between an authored value write and a unit/std-only leaf write
+ * whose merged payload merely contains the stored value. Pure and total —
+ * never throws, never mutates its inputs; ops needing no stamp are returned by
+ * reference.
  */
 export function stampUserEditProvenance(
   operations: readonly PatchOperation[],
+  valueWriteOperations: readonly PatchOperation[] = operations,
 ): PatchOperation[] {
-  return operations.map((op) => {
+  return operations.map((op, index) => {
+    // Canonicalisation merges stored observed-state siblings into leaf writes.
+    // Bind the authorship stamp to the PRE-merge operation so a unit/std-only
+    // edit cannot inherit `value` and masquerade as a user-authored value.
+    if (!operationWritesObservedValue(valueWriteOperations[index])) return op;
     if (op.op !== 'update_node') return op;
     const value = asRecord(op.value);
     if (value === null) return op;

@@ -2822,6 +2822,7 @@ export async function handleEditGraph(
     // backstop, so this prescreen and the backstop cannot disagree.
     const canonicalisedOps = stampUserEditProvenance(
       canonicaliseValueOps(operations, context.graph).operations,
+      operations,
     );
     const ambiguousScaleOps = findAmbiguousScaleValueOps(canonicalisedOps, context.graph);
     if (ambiguousScaleOps.length > 0) {
