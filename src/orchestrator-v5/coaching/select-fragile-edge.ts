@@ -41,13 +41,16 @@
  * future caller could surface it by accident. This module's entry in the
  * Tier-3 static guard's allow-list is classified `structured` for that reason.
  *
- * ── ORDER IS THE PRODUCER'S ──────────────────────────────────────────────────
- * `fragile_edges` arrives sorted by `switch_probability` DESCENDING (verified on
- * both captures: 0.1900 → 0.0516 and 0.3172 → 0.1836). This module CONSUMES that
- * order and never re-sorts. Re-ranking here would be a second opinion about
- * importance computed from a subset of the producer's inputs — the "never
- * manufacture importance" rule (ROADMAP 2.989; the 2.967 loss map).
+ * ── PRIORITY COMES FROM THE PRODUCER METRIC, NOT ARRIVAL ORDER ────────────────
+ * The estate has measured committed `fragile_edges` arrays that are not sorted,
+ * including one staging capture. The canonical shared selector therefore puts
+ * the maximum finite producer `switch_probability` first; strict `>` preserves
+ * producer order on ties, and the head is used only when no finite metric exists.
+ * If that row cannot be acted on, the established fail-soft scan may still find
+ * another eligible relationship, but user copy makes no unsupported superlative.
  */
+
+import { orderMostSensitiveRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 
 /** Why no edge was selected. Closed enum — the telemetry payload's `refusal_reason`. */
 export type FragileEdgeRefusalReason =
@@ -125,10 +128,9 @@ export interface FragileEdgeDecision {
   readonly selected: FragileEdgeSelection | null;
   /**
    * Present exactly when `selected === null`. The reason the FIRST
-   * identity-bearing candidate in producer order was rejected — deterministic,
-   * and the most informative single value, because producer order is a
-   * priority order. `no_fragile_edges` / `no_edge_identity` describe the whole
-   * input rather than one row.
+   * identity-bearing candidate in canonical metric-first order was rejected.
+   * `no_fragile_edges` / `no_edge_identity` describe the whole input rather
+   * than one row.
    */
   readonly refusalReason: FragileEdgeRefusalReason | null;
   /**
@@ -289,12 +291,15 @@ export function selectFragileEdge(enrichment: unknown): FragileEdgeDecision {
   const edgeEValues = readArray(root.edge_e_values);
   const factorSensitivity = readArray(root.factor_sensitivity);
 
-  /** The reason the FIRST identity-bearing candidate was rejected. */
+  /** The reason the FIRST identity-bearing candidate in canonical order was rejected. */
   let firstRejection: FragileEdgeDecision | null = null;
   let sawIdentityBearingRow = false;
 
-  // PRODUCER ORDER. No sort, no argmax, no re-rank.
-  for (const raw of fragileEdges) {
+  // Canonical producer-metric priority across every candidate. An ineligible
+  // maximum does not unnecessarily darken a valid lower-priority action. The
+  // copy is deliberately non-superlative.
+  const prioritised = orderMostSensitiveRows(fragileEdges);
+  for (const raw of prioritised) {
     const row = readRecord(raw);
     if (row === null) continue;
     const pair = readEndpointPair(row);

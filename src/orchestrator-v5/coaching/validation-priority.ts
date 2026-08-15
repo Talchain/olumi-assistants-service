@@ -72,9 +72,9 @@ export function isCleanDisplayLabel(label: string | undefined | null): label is 
 
 /**
  * The in-flow "what to validate" sentence for the advice gate's
- * `explain_results` composer — the single piece of evidence that would most
- * improve (or revise) confidence in the current lead, stated as an
- * insight-led priority rather than generic "gather more data" filler.
+ * `explain_results` composer — one useful confidence check grounded in the
+ * selected signal, stated concretely rather than as generic "gather more
+ * data" filler.
  * Distinct rhetorical job from its two neighbours in that composer: it
  * states the validation PRIORITY and why it matters, where
  * `describeFragileAssumption` DIAGNOSES the fragile link and
@@ -83,8 +83,9 @@ export function isCleanDisplayLabel(label: string | undefined | null): label is 
  * Specific by construction, from existing signals only (no new metric, no
  * invented evidence, no causal/sign claim — F.6):
  *   - when a fragile link was NAMED above (`hasNamedFragileEdge`), point at
- *     real-world support for THAT link — it is the assumption most likely to
- *     change the outcome, so it is also the highest-value thing to validate.
+ *     real-world support for THAT link. The projected link may not carry the
+ *     producer metric, so the copy says only what membership in the fragile set
+ *     proves; it never promotes arrival order into a superlative.
  *     References "that link" rather than re-quoting the endpoints, so it
  *     neither paraphrases the diagnosis sentence nor risks a second label
  *     render;
@@ -98,7 +99,7 @@ export function isCleanDisplayLabel(label: string | undefined | null): label is 
  * `needs_fragile_edges` stays false for `explain_results_free_text`.
  */
 export const VALIDATE_LINK_EVIDENCE =
-  'The evidence that would most improve confidence is real-world support for that link rather than the current model estimate, since it is the assumption most likely to change the outcome.';
+  'One useful confidence check is real-world support for that link rather than the current model estimate, since the robustness check flagged it as sensitive.';
 
 export function describeValidationPriority(
   hasNamedFragileEdge: boolean,
@@ -149,7 +150,7 @@ export function composeStandaloneValidationPriority(
       variant: 'link',
       from_label: from,
       to_label: to,
-      text: `The evidence that would most improve confidence is real-world support for the link from ${quoteLabel(from)} to ${quoteLabel(to)} rather than the current model estimate, since it is the assumption most likely to change the outcome.`,
+      text: `One useful confidence check is real-world support for the link from ${quoteLabel(from)} to ${quoteLabel(to)} rather than the current model estimate, since the robustness check flagged it as sensitive.`,
     };
   }
   if (isCleanDisplayLabel(topDriverLabel)) {

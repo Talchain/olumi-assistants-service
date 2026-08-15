@@ -56,6 +56,7 @@ import {
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
+import { orderMostSensitiveRows } from '../../orchestrator/shared/fragile-edge-authority.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
 import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
 import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
@@ -1636,7 +1637,7 @@ function isPinnedFactor(
 }
 
 interface FragileEdgeCandidate {
-  readonly prob: number;
+  readonly switch_probability?: number;
   /** Clean label the legacy shape would name (from preferred, then to). */
   readonly namedLabel: string | null;
   /** Structural id of whichever node supplied namedLabel. */
@@ -1680,16 +1681,17 @@ function resolveCautionCandidate(
   const labelMap = buildNodeLabelMap(readGraph(enrichment));
   const pinned = collectPinnedFactors(enrichment, controlledFactorIds);
 
-  const candidates: FragileEdgeCandidate[] = [];
+  const unresolvedCandidates: FragileEdgeCandidate[] = [];
   for (const raw of fragile) {
     const entry = readRecord(raw);
     if (!entry) continue;
-    const prob = readNumber(entry.switch_probability) ?? 0;
-    candidates.push({ prob, ...resolveFragileEdgeParts(entry, labelMap) });
+    const switchProbability = readNumber(entry.switch_probability);
+    unresolvedCandidates.push({
+      ...(switchProbability !== null ? { switch_probability: switchProbability } : {}),
+      ...resolveFragileEdgeParts(entry, labelMap),
+    });
   }
-  // Stable sort: descending switch_probability, original order on ties —
-  // matches the legacy "strictly greater wins, first seen keeps ties" pick.
-  candidates.sort((a, b) => b.prob - a.prob);
+  const candidates = orderMostSensitiveRows(unresolvedCandidates);
 
   const best = candidates.find((c) => c.namedLabel !== null);
   if (!best) return null; // legacy thin-data path: nothing resolvable at all
@@ -1765,7 +1767,7 @@ function buildNarrationTail(
 function resolveFragileEdgeParts(
   edge: Record<string, unknown>,
   labelMap: Map<string, string>,
-): Omit<FragileEdgeCandidate, 'prob'> {
+): Omit<FragileEdgeCandidate, 'switch_probability'> {
   const directFrom =
     typeof edge.from_label === 'string' && edge.from_label.length > 0
       ? edge.from_label

@@ -71,7 +71,7 @@ export interface AnalysisSummary {
   robustness_band: string | null;
   top_drivers: DriverSummary[];
   fragile_edge_count: number;
-  /** Fragile-edge details (label + switch_probability), sorted desc by switch_probability. Top 5 retained. */
+  /** Fragile-edge details (label + switch_probability). Arrival order is not a ranking authority. */
   fragile_edges: FragileEdgeSummary[];
   /** Per-factor sensitivity entries forwarded by the UI (top-level on analysis_state). Top 5 by influence_rank. */
   factor_sensitivity: FactorSensitivitySummary[];

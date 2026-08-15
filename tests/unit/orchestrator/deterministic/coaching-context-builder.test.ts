@@ -411,6 +411,25 @@ describe("top_fragile", () => {
     expect(result.top_fragile).not.toBeNull();
     expect(result.top_fragile!.flip_probability).toBe(0.18);
   });
+
+  it("HEAD-ONLY MUTANT — selects the finite maximum from unsorted fragile edges", () => {
+    const ctx = makeContext({
+      analysis_summary: makeAnalysis({
+        fragile_edges: [
+          { label: 'Head factor → Head outcome', switch_probability: 0.12 },
+          { label: 'Maximum factor → Maximum outcome', switch_probability: 0.81 },
+          { label: 'Middle factor → Middle outcome', switch_probability: 0.4 },
+        ],
+      }),
+    });
+    const result = buildCoachingContext(ctx, defaultSessionState());
+
+    expect(result.top_fragile).toEqual({
+      source_label: 'Maximum factor',
+      target_label: 'Maximum outcome',
+      flip_probability: 0.81,
+    });
+  });
 });
 
 // ============================================================================

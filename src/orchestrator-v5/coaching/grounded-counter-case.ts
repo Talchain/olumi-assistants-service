@@ -40,29 +40,27 @@
  * Kept apart, deliberately, rather than "unified": aligning them would be
  * exactly the reconciliation trap 21 warns against.
  *
- * ── ORDER IS THE PRODUCER'S. WE DO NOT MANUFACTURE IMPORTANCE ────────────────
- * `robustness.fragile_edges` arrives sorted by `switch_probability` DESCENDING
- * (verified on both committed live captures: 0.1900 → 0.0516 and 0.3172 →
- * 0.1836). This module CONSUMES the head of that order. It never re-sorts and
- * never compares probabilities itself: re-ranking here would be a second
- * opinion about importance computed from a subset of the producer's inputs.
+ * ── PRIORITY COMES FROM THE PRODUCER METRIC, NOT ARRIVAL ORDER ────────────────
+ * A committed-capture sweep disproved the old "sorted descending" premise.
+ * The shared authority selects the maximum finite `switch_probability`, with
+ * strict `>` so producer order breaks ties. Only an array with no finite value
+ * falls back to its head. No substitute metric or local score is invented.
  *
  * ── ⭐ WHAT THE PROSE MAY CLAIM, AND THE CLAIM IT CAREFULLY DOES NOT MAKE ────
  * DSK-TR-003 fires `consider_opposite` on a DECISIVE, attested-NON-FRAGILE
  * leader, and DSK-P-003's own contraindications forbid running it "when the
  * analysis shows a close call". So on the runs where this exercise ships, the
- * head fragile edge is the most sensitive relationship in a result that is NOT
- * considered fragile overall — its `switch_probability` can be modest.
+ * selected fragile edge can still carry a modest `switch_probability`: it is a
+ * priority within the producer's set, not a statement that the result is close.
  *
- * The copy therefore says the link is the one the robustness check found MOST
- * SENSITIVE — a true superlative over the producer's own ordering — and NEVER
- * that it is "likely to" overturn anything. That would import a probability
- * claim the run does not support, on precisely the runs this lens selects.
- * A superlative over a set is not a statement about a magnitude.
+ * The copy uses "most sensitive" only when a finite producer metric proves the
+ * maximum. On the no-finite compatibility fallback it says only that the link
+ * was flagged as sensitive. It NEVER says the link is "likely to" overturn
+ * anything; that would import a magnitude claim the run does not support.
  *
  * ── WHAT IS READ AS A STRUCTURED GATE AND NEVER SURFACED ────────────────────
- * `switch_probability` is read for NOTHING here — not even ordering (the
- * producer already ordered). `alternative_winner_label` is likewise NOT read:
+ * `switch_probability` is read only for the shared structured priority and is
+ * never surfaced. `alternative_winner_label` is likewise NOT read:
  * naming the option that would take the lead is a LEADING-OPTION CLAIM, and
  * that permission belongs to the canonical `readMayNameLeadingOptionVerdict`
  * derivation, which a pure module holds no access to and must not fake. Five
@@ -95,6 +93,10 @@
  */
 
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
+import {
+  selectMostSensitiveRow,
+  selectionHasMetricProof,
+} from '../../orchestrator/shared/fragile-edge-authority.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-user-facing-phrases.js';
 
@@ -102,9 +104,9 @@ import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-use
 export type GroundedCounterCaseRefusalReason =
   /** No robustness object, or it carried no fragile edges. */
   | 'no_fragile_edges'
-  /** Rows exist but the head carries no `(from_id, to_id)` identity. */
+  /** Rows exist but the metric-selected row carries no `(from_id, to_id)` identity. */
   | 'no_edge_identity'
-  /** The head row carries no human-readable endpoint labels — nothing to name. */
+  /** The metric-selected row carries no human-readable endpoint labels. */
   | 'no_endpoint_labels'
   /**
    * The composed sentence trips a prose gate or the length bound. The caller
@@ -172,12 +174,19 @@ function nonEmptyString(value: unknown): string | null {
  * on is byte-identical to the string that ships — a gate applied to a
  * differently-composed preview is a guard agreeing with itself (trap 13b).
  */
-export function composeGroundedCounterCase(fromLabel: string, toLabel: string): string {
+export function composeGroundedCounterCase(
+  fromLabel: string,
+  toLabel: string,
+  metricProvesMaximum = false,
+): string {
+  const sensitivityClaim = metricProvesMaximum
+    ? 'is the one the robustness check found most sensitive'
+    : 'is one the robustness check flagged as sensitive';
   return (
     'Take the opposite view for a moment: assume the option in front turns out to be ' +
     'the wrong choice. Of everything this run tested, the link from ' +
     `${fromLabel} to ${toLabel} ` +
-    'is the one the robustness check found most sensitive. Make the strongest case ' +
+    `${sensitivityClaim}. Make the strongest case ` +
     'that this link does not hold, and note what evidence would settle it either way.'
   );
 }
@@ -206,30 +215,6 @@ function isComposable(sentence: string): boolean {
   return true;
 }
 
-
-/**
- * The row carrying the greatest `switch_probability`. Producer order breaks
- * ties (strict `>`), so a correctly-sorted array yields its head unchanged.
- * When no row carries a finite value the producer's head is returned — the
- * pre-existing behaviour, and the identity/label gates below still apply.
- */
-function selectMostSensitiveRow(rows: readonly unknown[]): unknown {
-  let best = rows[0];
-  let bestValue: number | null = null;
-  for (const raw of rows) {
-    const row = readRecord(raw);
-    if (row === null) continue;
-    const value = typeof row.switch_probability === 'number' && Number.isFinite(row.switch_probability)
-      ? row.switch_probability
-      : null;
-    if (value === null) continue;
-    if (bestValue === null || value > bestValue) {
-      bestValue = value;
-      best = raw;
-    }
-  }
-  return best;
-}
 
 /** The composite separator the graph-edit path accepts (`parseEdgeId`). */
 const EDGE_IDENTITY_SEPARATOR = '→'; // →
@@ -265,7 +250,8 @@ export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterC
   // importance (the rule this module's header invokes) — it is declining to
   // infer that metric from arrival order. Ties keep producer order, so where
   // the array IS sorted the behaviour is byte-identical to before.
-  const head = readRecord(selectMostSensitiveRow(rows));
+  const selectedRaw = selectMostSensitiveRow(rows);
+  const head = readRecord(selectedRaw);
   const fromId = head !== null ? nonEmptyString(head.from_id) : null;
   const toId = head !== null ? nonEmptyString(head.to_id) : null;
   if (head === null || fromId === null || toId === null) {
@@ -280,7 +266,11 @@ export function selectGroundedCounterCase(enrichment: unknown): GroundedCounterC
     return { grounded: null, refusalReason: 'no_endpoint_labels' };
   }
 
-  const counterCase = composeGroundedCounterCase(fromLabel, toLabel);
+  const counterCase = composeGroundedCounterCase(
+    fromLabel,
+    toLabel,
+    selectionHasMetricProof(selectedRaw),
+  );
   if (!isComposable(counterCase)) {
     return { grounded: null, refusalReason: 'not_composable' };
   }
