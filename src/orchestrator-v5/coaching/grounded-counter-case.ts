@@ -96,7 +96,14 @@
 
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../orchestrator/routing/edit-graph-intent-regex.js';
+import { shouldSuppressEditDispatchForValueUpdate } from '../../orchestrator/routing/value-update-gate.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from '../compose/forbidden-user-facing-phrases.js';
+import { isAnalyticalQuestion } from '../routing/analytical-question-guard.js';
+import { isStateQueryQuestionShape } from '../routing/state-query-guard.js';
 
 /** Why no grounded counter-case was produced. Closed enum — the telemetry payload. */
 export type GroundedCounterCaseRefusalReason =
@@ -180,6 +187,53 @@ export function composeGroundedCounterCase(fromLabel: string, toLabel: string): 
     'is the one the robustness check found most sensitive. Make the strongest case ' +
     'that this link does not hold, and note what evidence would settle it either way.'
   );
+}
+
+/**
+ * The editable sentence the exercise asks the HUMAN to write in their own
+ * words when disconfirmation exposes a missing causal driver. It is prose in
+ * the card, not an action field: no chip sends it and no model write follows
+ * until the user supplies a driver and confirms the held proposal.
+ *
+ * No numeric or qualitative relationship strength is requested. The existing
+ * edit lane may propose those edge semantics, but graph management holds the
+ * resulting add_node + add_edge batch for explicit confirmation.
+ */
+export function composeGroundedCounterCaseHandoffTurn(toLabel: string): string {
+  return `Add [your driver] as a factor affecting ${toLabel}.`;
+}
+
+/**
+ * Compose the complete disconfirmation loop's card copy.
+ *
+ * The route gate is the exact five-conjunct `editVerbCandidate` predicate from
+ * `route-v2`, rebuilt from the SAME imported authorities. Producer labels are
+ * ordinary strategic prose and can contain any veto ("why", "compare", a
+ * value-update phrase, a state query), so the check runs on the actual handoff
+ * turn on every composition. A failed route or prose/length gate returns null;
+ * the caller then preserves the already-shipped grounded card byte-for-byte.
+ */
+export function composeGroundedCounterCaseWithModelHandoff(
+  fromLabel: string,
+  toLabel: string,
+): string | null {
+  const handoffTurn = composeGroundedCounterCaseHandoffTurn(toLabel);
+  const editVerbCandidate =
+    EDIT_GRAPH_POSITIVE_REGEX.test(handoffTurn) &&
+    !EDIT_GRAPH_NEGATIVE_REGEX.test(handoffTurn) &&
+    !shouldSuppressEditDispatchForValueUpdate(handoffTurn) &&
+    !isAnalyticalQuestion(handoffTurn) &&
+    !isStateQueryQuestionShape(handoffTurn);
+  if (!editVerbCandidate) return null;
+
+  const counterCase =
+    'Argue the opposite: assume the option in front is wrong. The run’s most sensitive link is ' +
+    `${fromLabel} → ${toLabel}. ` +
+    'Make the strongest case it fails and name evidence that would settle it. ' +
+    'If that reveals a missing driver, reply in your own words: “' +
+    `${handoffTurn}” ` +
+    'I’ll ask you to confirm before changing the model.';
+  return isComposable(counterCase) ? counterCase : null;
 }
 
 /**
