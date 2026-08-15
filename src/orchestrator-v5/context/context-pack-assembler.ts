@@ -785,9 +785,17 @@ export interface ContextPackFocusElement {
    *   · `ambiguous_label` — the label does not uniquely identify this element,
    *                         so the join was REFUSED. See the note on
    *                         {@link projectFocus}.
+   *   · `analysis_not_current` — analysis exists, but canonical state does not
+   *                         license it as current/trustworthy for exploration;
+   *                         no analysis values are attached.
    *   · `no_analysis`     — no analysis on this turn to join against.
    */
-  readonly analysis_link: 'linked' | 'not_in_analysis' | 'ambiguous_label' | 'no_analysis';
+  readonly analysis_link:
+    | 'linked'
+    | 'not_in_analysis'
+    | 'ambiguous_label'
+    | 'analysis_not_current'
+    | 'no_analysis';
   /** Present IFF `analysis_link === 'linked'` and at least one value matched. */
   readonly analysis?: ContextPackFocusAnalysis;
 }
@@ -867,6 +875,15 @@ export function projectFocus(
   selection: TurnSelection | undefined,
   displayAnalysis: DisplaySafeAnalysis | null,
   index: AnalysisIdentityIndex,
+  /**
+   * Canonical permission to bind analysis figures to the selected element.
+   * Production passes `CoachingStatePack.usable_for_chips`, which already
+   * composes freshness, blockers and contradictions in the canonical analysis
+   * selector. The default is deliberately fail-closed for any isolated caller;
+   * the sole production caller always supplies the explicit canonical verdict
+   * below.
+   */
+  analysisUsableForFocus = false,
 ): ContextPackFocus | null {
   if (selection === undefined) return null;
   // An EMPTY selection is not a selection: a truthy object on every turn would
@@ -877,7 +894,12 @@ export function projectFocus(
   const omitted = selection.elements.length - capped.length;
 
   const elements: ContextPackFocusElement[] = capped.map((el) => {
-    const analysisLink = resolveAnalysisLink(el.id, displayAnalysis, index);
+    const analysisLink = resolveAnalysisLink(
+      el.id,
+      displayAnalysis,
+      index,
+      analysisUsableForFocus,
+    );
     return {
       id: boundText(el.id, FOCUS_ID_MAX_CHARS),
       kind: boundText(el.kind, FOCUS_SHORT_TEXT_MAX_CHARS),
@@ -1069,8 +1091,16 @@ function resolveAnalysisLink(
   elementId: string,
   displayAnalysis: DisplaySafeAnalysis | null,
   index: AnalysisIdentityIndex,
+  analysisUsableForFocus: boolean,
 ): { link: ContextPackFocusElement['analysis_link']; analysis?: ContextPackFocusAnalysis } {
   if (displayAnalysis === null) return { link: 'no_analysis' };
+
+  // Analysis identity alone is not enough: the selected node comes from the
+  // CURRENT persisted graph, while `displayAnalysis` may be a prior run whose
+  // graph hash no longer matches. Attaching its figures would make stale values
+  // look selected/current. Consume the canonical usability predicate and fail
+  // closed before either the identity index or display labels are consulted.
+  if (!analysisUsableForFocus) return { link: 'analysis_not_current' };
 
   // HOP 1 — IDENTITY. What the analysis calls THIS node id, and what kind it is.
   const entry = index.byId.get(elementId);
@@ -1334,6 +1364,12 @@ export function assembleContextPackWithSummary(
     input.selection,
     displayAnalysis,
     buildAnalysisIdentityIndex(input.analysis),
+    // One authority for analysis currency: the turn-executor projects this
+    // boolean from the canonical analysis selector, where `usable_for_chips`
+    // requires fresh analysis and rejects blockers/contradictions. Absence is
+    // fail-closed. This prevents a current selected node from inheriting values
+    // from a stale prior run merely because its id/label still exists.
+    input.coachingContext?.usable_for_chips === true,
   );
 
   const base: ContextPack = {

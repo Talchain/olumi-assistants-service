@@ -87,7 +87,24 @@ function packWith(selection?: TurnSelection): ContextPack {
     priorFacts: [],
     analysis: ANALYSIS,
     graph: GRAPH as never,
-    ...(selection !== undefined ? { selection } : {}),
+    ...(selection !== undefined
+      ? {
+          selection,
+          // Direct assembler fixtures must declare the same canonical
+          // currency verdict production supplies. Identity alone is not
+          // permission to attach analysis figures to a selected node.
+          coachingContext: {
+            analysis_present: true,
+            freshness: 'fresh',
+            readiness_status: 'ready',
+            rerun_required: false,
+            usable_for_prose: true,
+            usable_for_chips: true,
+            blocked: false,
+            actionable_blocker_count: 0,
+          } as never,
+        }
+      : {}),
   });
 }
 

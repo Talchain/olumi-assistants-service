@@ -512,7 +512,13 @@ const ContextPackFocusElementSchema = z
      * analysis projection is label-keyed, so an ambiguous label means the join
      * was refused rather than guessed (see `projectFocus`).
      */
-    analysis_link: z.enum(['linked', 'not_in_analysis', 'ambiguous_label', 'no_analysis']),
+    analysis_link: z.enum([
+      'linked',
+      'not_in_analysis',
+      'ambiguous_label',
+      'analysis_not_current',
+      'no_analysis',
+    ]),
     analysis: ContextPackFocusAnalysisSchema.optional(),
   })
   .strict();

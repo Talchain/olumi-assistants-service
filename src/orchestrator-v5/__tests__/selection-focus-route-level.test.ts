@@ -275,6 +275,10 @@ async function runTurn(
 const QUESTION = 'why does this one matter?';
 
 beforeEach(() => {
+  // Every test starts from the graph whose hash the prior analysis fact owns.
+  // The stale-analysis control below mutates this one field deliberately and
+  // must not contaminate the rest of the route-level corpus.
+  PERSISTED_GRAPH.edges[0]!.strength.mean = 0.4;
   setTestSink(() => undefined);
 });
 afterEach(() => {
@@ -316,6 +320,24 @@ describe('hop 4 route-level — the selected element reaches the routing prompt'
     expect(b.elements.map((e) => e.id)).toEqual([OPTION_ID]);
     // Neither alone proves binding; the inequality does.
     expect(a.elements[0]).not.toEqual(b.elements[0]);
+  });
+
+  it('CURRENT-ANALYSIS BINDING — a graph change excludes stale figures from the selected node', async () => {
+    // The prior fact was hashed from mean=0.4. Change one analysis-affecting
+    // field while retaining every node id/label: identity-only joining would
+    // still attach the prior run's figures and falsely make them look current.
+    PERSISTED_GRAPH.edges[0]!.strength.mean = 0.8;
+
+    const prompt = await runTurn(QUESTION, { node_ids: [OPTION_ID], edge_ids: [] });
+    const focus = focusSection(prompt)!;
+    const selected = focus.elements.find((e) => e.id === OPTION_ID)!;
+
+    expect(selected.analysis_link).toBe('analysis_not_current');
+    expect(selected.analysis).toBeUndefined();
+    // The selected element itself remains available; only the stale analysis
+    // attachment is removed. This distinguishes a currency fence from a dead
+    // focus implementation.
+    expect(selected.label).toBe(OPTION_LABEL);
   });
 
   it('an unresolved id is DISCLOSED, never silently dropped and never guessed into another node', async () => {

@@ -137,7 +137,7 @@ function selectionFor(ids: readonly string[], graph: unknown = GRAPH): TurnSelec
 
 /** The focus this turn's routing prompt would have carried, from the REAL projection. */
 function focusFor(selection: TurnSelection): ContextPackFocus {
-  const focus = projectFocus(selection, DISPLAY, LABEL_INDEX);
+  const focus = projectFocus(selection, DISPLAY, LABEL_INDEX, true);
   if (focus === null) throw new Error('fixture: projectFocus returned null');
   return focus;
 }
