@@ -181,7 +181,7 @@ export type CeeTask =
  *     CEE_MODEL_ORCHESTRATOR = claude-sonnet-5
  *     CEE_MODEL_REPAIR       = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
  *     CEE_MODEL_DECISION_REVIEW = gpt-4.1  (registered pin: gpt-4.1-2025-04-14)
- *     CEE_MODEL_EXTRACTION   = gpt-4.1  (no CeeTask row — env-only)
+ *     CEE_MODEL_EXTRACTION   = gpt-4.1  (dedicated-adapter default below)
  *   Not set on Render → these tasks serve the default below directly.
  *
  * ⚠ PROMPT-STORE OVERRIDE DISCOVERY (2026-08-08): env vars are NOT the top of
@@ -245,6 +245,21 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // The v5 routing call site does NOT consume this value.
   routing: "claude-sonnet-4-20250514",
 };
+
+/**
+ * Live model assignments that do not use the main adapter router.
+ *
+ * These remain separate from `TASK_MODEL_DEFAULTS` because their call sites
+ * use dedicated adapters, but they are still load-bearing model authority and
+ * must have a checked-in landing point when a deployment env pin disappears.
+ */
+export const AUXILIARY_MODEL_DEFAULTS = {
+  // `src/adapters/llm/extraction.ts` serves factor enrichment on the
+  // POST /assist/v1/review path. Reconciled to staging CEE_MODEL_EXTRACTION.
+  extraction: "gpt-4.1-2025-04-14",
+} as const;
+
+export type AuxiliaryModelTask = keyof typeof AUXILIARY_MODEL_DEFAULTS;
 
 /**
  * Tasks where quality-tier model is REQUIRED

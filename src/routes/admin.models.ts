@@ -6,16 +6,16 @@
  *
  * Resolution order (mirrors router.ts getAdapter logic):
  *   1. CEE_MODEL_* env var override — always applied regardless of provider
- *   2. TASK_MODEL_DEFAULTS — always applied; provider follows the winning model
+ *   2. checked-in task default — always applied; provider follows the winning model
  *
  * Routes:
- * - GET /admin/models/routing  - Resolved model for every CeeTask
+ * - GET /admin/models/routing  - Resolved model for every live task assignment
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
-import { TASK_MODEL_DEFAULTS } from '../config/model-routing.js';
-import type { CeeTask } from '../config/model-routing.js';
+import { AUXILIARY_MODEL_DEFAULTS, TASK_MODEL_DEFAULTS } from '../config/model-routing.js';
+import type { AuxiliaryModelTask, CeeTask } from '../config/model-routing.js';
 import { getModelProvider } from '../config/models.js';
 import { config } from '../config/index.js';
 import { TASK_TO_CONFIG_KEY } from '../adapters/llm/router.js';
@@ -23,7 +23,7 @@ import { TASK_TO_CONFIG_KEY } from '../adapters/llm/router.js';
 type ModelSource = 'env_override' | 'default';
 
 interface TaskRouting {
-  task: CeeTask;
+  task: CeeTask | AuxiliaryModelTask;
   /** Resolved model ID. */
   model: string;
   /** Provider derived from the winning model. */
@@ -54,10 +54,10 @@ function resolveConfiguredProvider(): string {
  * Note: providers.json config-file overrides and request-time overrides are
  * not reflected here — those are per-request and not determinable statically.
  */
-function resolveTaskRouting(task: CeeTask): TaskRouting {
+function resolveTaskRouting(task: CeeTask | AuxiliaryModelTask): TaskRouting {
   // Consume the router's table directly. The former local copy omitted the
   // live validation and gated M2 tasks while claiming to mirror runtime.
-  const ceeModelKey = TASK_TO_CONFIG_KEY[task];
+  const ceeModelKey = task === 'extraction' ? 'extraction' : TASK_TO_CONFIG_KEY[task];
 
   // Step 1: CEE_MODEL_* env var override — applied unconditionally
   if (ceeModelKey) {
@@ -74,7 +74,9 @@ function resolveTaskRouting(task: CeeTask): TaskRouting {
 
   // Step 2: TASK_MODEL_DEFAULTS. LLM_PROVIDER is a lower-precedence fallback,
   // not permission to discard a cross-provider task assignment.
-  const taskDefault = TASK_MODEL_DEFAULTS[task];
+  const taskDefault = task === 'extraction'
+    ? AUXILIARY_MODEL_DEFAULTS.extraction
+    : TASK_MODEL_DEFAULTS[task];
   return {
     task,
     model: taskDefault,
@@ -90,7 +92,8 @@ export async function adminModelRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /admin/models/routing
    *
-   * Returns the resolved model for every CeeTask along with provider and source.
+   * Returns the resolved model for every routed or dedicated-adapter task along
+   * with provider and source.
    * Requires admin key (read permission is sufficient).
    *
    * Note: providers.json task overrides and per-request model overrides are not
@@ -100,7 +103,10 @@ export async function adminModelRoutes(app: FastifyInstance): Promise<void> {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const configuredProvider = resolveConfiguredProvider();
-    const tasks = Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[];
+    const tasks: Array<CeeTask | AuxiliaryModelTask> = [
+      ...(Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[]),
+      ...(Object.keys(AUXILIARY_MODEL_DEFAULTS) as AuxiliaryModelTask[]),
+    ];
     const taskList = tasks.map((task) => resolveTaskRouting(task));
 
     return reply

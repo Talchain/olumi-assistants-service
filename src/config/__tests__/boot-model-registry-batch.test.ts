@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { buildBootModelRegistryBatch } from '../boot-model-registry-batch.js';
 import { validateModelsRegistered } from '../models.js';
-import { TASK_MODEL_DEFAULTS } from '../model-routing.js';
+import { AUXILIARY_MODEL_DEFAULTS, TASK_MODEL_DEFAULTS } from '../model-routing.js';
 
 /**
  * A1 (review, BLOCKING — CLAUDE.md trap 11) — THE CALL SITE, NOT THE HELPER.
@@ -58,6 +58,9 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
     ]);
     const labels = batch.map((e) => e.label);
     for (const task of Object.keys(TASK_MODEL_DEFAULTS)) {
+      expect(labels).toContain(`task_default:${task}`);
+    }
+    for (const task of Object.keys(AUXILIARY_MODEL_DEFAULTS)) {
       expect(labels).toContain(`task_default:${task}`);
     }
     expect(labels).toContain('draft_graph (effective)');

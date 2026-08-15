@@ -14,7 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
-import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
+import {
+  AUXILIARY_MODEL_DEFAULTS,
+  TASK_MODEL_DEFAULTS,
+} from "../../src/config/model-routing.js";
 
 // NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
 // store treats it as a literal file name in cwd. Suites that share the
@@ -83,7 +86,10 @@ describe("GET /admin/models/routing", () => {
     const body = res.json();
     expect(Array.isArray(body.tasks)).toBe(true);
 
-    const expectedTasks = Object.keys(TASK_MODEL_DEFAULTS);
+    const expectedTasks = [
+      ...Object.keys(TASK_MODEL_DEFAULTS),
+      ...Object.keys(AUXILIARY_MODEL_DEFAULTS),
+    ];
     const returnedTasks = body.tasks.map((t: { task: string }) => t.task);
     for (const task of expectedTasks) {
       expect(returnedTasks).toContain(task);
@@ -338,7 +344,7 @@ describe("GET /admin/models/routing — cross-provider defaults (LLM_PROVIDER=an
     expect(body.default_provider).toBe("anthropic");
   });
 
-  it("reports the OpenAI task default and provider instead of discarding it", async () => {
+  it("reports OpenAI router and dedicated-adapter defaults instead of discarding them", async () => {
     const res = await appAnthropicProvider.inject({
       method: "GET",
       url: "/admin/models/routing",
@@ -353,6 +359,14 @@ describe("GET /admin/models/routing — cross-provider defaults (LLM_PROVIDER=an
     expect(optionsRow.source).toBe("default");
     expect(optionsRow.model).toBe(TASK_MODEL_DEFAULTS.options);
     expect(optionsRow.provider).toBe("openai");
+
+    // Factor enrichment bypasses the main router, but its checked-in default
+    // is governed and reported by the same live authority map.
+    const extractionRow = body.tasks.find((t: { task: string }) => t.task === "extraction");
+    expect(extractionRow).toBeDefined();
+    expect(extractionRow.source).toBe("default");
+    expect(extractionRow.model).toBe(AUXILIARY_MODEL_DEFAULTS.extraction);
+    expect(extractionRow.provider).toBe("openai");
   });
 
   it("bias_check (anthropic default) is still resolved when provider=anthropic", async () => {

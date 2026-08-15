@@ -584,9 +584,9 @@ export interface ModelRegistryCheckEntry {
  * Coverage argument, stated exactly rather than implied: the EFFECTIVE model
  * for a task is `env ?? checked-in default`. This batch carries EVERY env value
  * AND EVERY checked-in default, so it is a SUPERSET of the effective set. It
- * cannot miss an effective id — including for `extraction`, which is not a
- * `CeeTask` at all and has no checked-in default (its only consumer reads
- * `config.cee.models.extraction` directly, `adapters/llm/extraction.ts:65`).
+ * cannot miss an effective id — including for `extraction`, whose dedicated
+ * adapter default is supplied alongside the router defaults by
+ * `buildBootModelRegistryBatch`.
  *
  * DERIVE-DON'T-MIRROR (CLAUDE.md trap 12), at BOTH levels: each env record is
  * walked as a RECORD (so a `CEE_MODEL_*` key added to the config schema

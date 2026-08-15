@@ -27,7 +27,8 @@
  * What is in the batch, and the coverage argument
  * ─────────────────────────────────────────────────────────────────
  * The EFFECTIVE model for a task is `env ?? checked-in default`. The batch
- * carries every checked-in default AND every set value from every env tier, so
+ * carries every router and dedicated-adapter default AND every set value from
+ * every env tier, so
  * it is a strict SUPERSET of the effective set and cannot miss one. Two env
  * tiers are walked, not one (A2):
  *
@@ -44,7 +45,7 @@
  */
 
 import { config } from './index.js';
-import { TASK_MODEL_DEFAULTS } from './model-routing.js';
+import { AUXILIARY_MODEL_DEFAULTS, TASK_MODEL_DEFAULTS } from './model-routing.js';
 import { buildModelRegistryCheckBatch, type ModelRegistryCheckEntry } from './models.js';
 
 /**
@@ -63,7 +64,10 @@ export function buildBootModelRegistryBatch(
   const cee = config.cee;
   const legacyTier = cee.models ?? {};
   return buildModelRegistryCheckBatch(
-    TASK_MODEL_DEFAULTS,
+    {
+      ...TASK_MODEL_DEFAULTS,
+      ...AUXILIARY_MODEL_DEFAULTS,
+    },
     {
       env_model: legacyTier,
       env_task_model: cee.modelSelection?.taskModels ?? {},
