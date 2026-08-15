@@ -394,6 +394,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // honest decline instead of an unhandled error.
   const heldCanonicalisedOps = stampUserEditProvenance(
     canonicaliseValueOps(operations, input.currentGraph).operations,
+    operations,
   );
   const heldAmbiguousOps = findAmbiguousScaleValueOps(heldCanonicalisedOps, input.currentGraph);
   if (heldAmbiguousOps.length > 0) {

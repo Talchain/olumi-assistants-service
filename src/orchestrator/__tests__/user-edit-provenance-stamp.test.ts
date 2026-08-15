@@ -136,7 +136,7 @@ function valueOp(overrides: Partial<PatchOperation> = {}): PatchOperation {
  */
 function canonicaliseAndStamp(ops: PatchOperation[]): PatchOperation[] {
   return reconcileObservedValuePair(
-    stampUserEditProvenance(canonicaliseValueOps(ops, CURRENT_GRAPH).operations),
+    stampUserEditProvenance(canonicaliseValueOps(ops, CURRENT_GRAPH).operations, ops),
     CURRENT_GRAPH,
   );
 }
@@ -186,10 +186,72 @@ describe('stampUserEditProvenance — the op-level stamp', () => {
     expect(observed.source).toBe('user_override');
   });
 
+  it('clears a prior panel citation from an ordinary canonical value write', () => {
+    const [stamped] = stampUserEditProvenance([
+      valueOp({
+        value: {
+          observed_state: {
+            value: 0.9,
+            source: 'panel_elicited',
+            elicited_from: {
+              round_id: 'round-prior',
+              participant_id: 'participant-prior',
+              evidence_event_id: 'evidence-prior',
+            },
+          },
+        },
+      }),
+    ]);
+    const observed = (stamped!.value as Record<string, unknown>).observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(observed.source).toBe('user_override');
+    expect(observed.elicited_from).toBeUndefined();
+    expect('elicited_from' in observed).toBe(false);
+  });
+
   it('does NOT stamp a value-less observed_state write (unit-only edits are not the pill claim)', () => {
     const op = valueOp({ value: { observed_state: { unit: '%' } } });
     const [out] = stampUserEditProvenance([op]);
     expect(out).toBe(op); // by reference — untouched
+  });
+
+  it.each([
+    ['unit', 'USD'],
+    ['std', 0.2],
+  ])('preserves panel attribution through a composed %s-only edit', (leaf, nextValue) => {
+    const currentGraph = {
+      nodes: [
+        {
+          id: 'fac_target',
+          observed_state: {
+            value: 0.5,
+            unit: 'GBP',
+            std: 0.1,
+            source: 'panel_elicited',
+            elicited_from: {
+              round_id: 'round-prior',
+              participant_id: 'participant-prior',
+              evidence_event_id: 'evidence-prior',
+            },
+          },
+        },
+      ],
+    };
+    const original = valueOp({ value: { [`data/${leaf}`]: nextValue } });
+    const canonical = canonicaliseValueOps([original], currentGraph).operations;
+    const [stamped] = stampUserEditProvenance(canonical, [original]);
+    const observed = (stamped!.value as Record<string, unknown>).observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(observed.source).toBe('panel_elicited');
+    expect(observed.elicited_from).toEqual({
+      round_id: 'round-prior',
+      participant_id: 'participant-prior',
+      evidence_event_id: 'evidence-prior',
+    });
   });
 
   it('does NOT stamp non-update_node ops or label-only updates, and returns them BY REFERENCE', () => {
@@ -229,9 +291,14 @@ function buildContext(): ConversationContext {
           category: 'controllable',
           observed_state: {
             value: 0.5,
-            source: 'cee_inference',
+            source: 'panel_elicited',
             factor_type: 'cost',
             extractionType: 'inferred',
+            elicited_from: {
+              round_id: 'round-prior',
+              participant_id: 'participant-prior',
+              evidence_event_id: 'evidence-prior',
+            },
           },
         },
         { id: 'out_profit', kind: 'goal', label: 'Profit' },
@@ -300,10 +367,51 @@ describe('normal edit seam — a chat-set value earns the user stamp on the APPL
     const observed = edited.observed_state as Record<string, unknown>;
     expect(observed.value).toBe(0.42);
     expect(observed.source).toBe('user_override');
+    expect(observed.elicited_from).toBeUndefined();
+    expect('elicited_from' in observed).toBe(false);
     expect(edited.provenance).toBe('user_set');
 
     // Negative control: the untouched goal node earned NOTHING.
     const goal = nodes.find((n) => n.id === 'out_profit')!;
     expect(goal.provenance).not.toBe('user_set');
+  });
+
+  it('keeps the panel value attribution when chat changes only the unit', async () => {
+    const result = await handleEditGraph(
+      buildContext(),
+      'Change the monthly cash factor unit to USD',
+      makeAdapter({
+        operations: [
+          {
+            op: 'update_node',
+            path: '/nodes/fac_cash/data/unit',
+            value: 'USD',
+            old_value: 'GBP',
+            impact: 'minor',
+            rationale: 'Change the unit as requested.',
+          },
+        ],
+        removed_edges: [],
+        warnings: [],
+        coaching: { summary: 'Updated Monthly Cash.', rerun_recommended: true },
+      }),
+      'req-unit-only',
+      'turn-unit-only',
+    );
+
+    expect(result.wasRejected).toBe(false);
+    const nodes = (result.appliedGraph as { nodes: Array<Record<string, unknown>> }).nodes;
+    const observed = nodes.find((node) => node.id === 'fac_cash')!.observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(observed.value).toBe(0.5);
+    expect(observed.unit).toBe('USD');
+    expect(observed.source).toBe('panel_elicited');
+    expect(observed.elicited_from).toEqual({
+      round_id: 'round-prior',
+      participant_id: 'participant-prior',
+      evidence_event_id: 'evidence-prior',
+    });
   });
 });

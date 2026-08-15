@@ -424,6 +424,57 @@ describe('executeGmHeldResume', () => {
     ).toBe(true);
   });
 
+  it('a held unit-only edit preserves the existing panel value attribution', () => {
+    const attributedGraph = {
+      ...VALUE_GRAPH,
+      nodes: VALUE_GRAPH.nodes.map((node) =>
+        node.id === 'fac_setup'
+          ? {
+              ...node,
+              observed_state: {
+                value: 0.1,
+                unit: 'GBP',
+                source: 'panel_elicited',
+                elicited_from: {
+                  round_id: 'round-prior',
+                  participant_id: 'participant-prior',
+                  evidence_event_id: 'evidence-prior',
+                },
+              },
+            }
+          : node,
+      ),
+    };
+    const outcome = executeGmHeldResume(
+      executeInput({
+        operations: [
+          { op: 'update_node', path: 'fac_setup', value: { 'data/unit': 'USD' } },
+          RISK_ADD,
+          RISK_LINK,
+        ] as never,
+        currentGraph: attributedGraph,
+        currentGraphHash: hashOf(attributedGraph),
+      }),
+    );
+
+    expect(outcome.status).toBe('executed');
+    if (outcome.status !== 'executed') return;
+    const observed = (
+      outcome.mutatedGraph.nodes as Array<{
+        id: string;
+        observed_state?: Record<string, unknown>;
+      }>
+    ).find((node) => node.id === 'fac_setup')!.observed_state!;
+    expect(observed.value).toBe(0.1);
+    expect(observed.unit).toBe('USD');
+    expect(observed.source).toBe('panel_elicited');
+    expect(observed.elicited_from).toEqual({
+      round_id: 'round-prior',
+      participant_id: 'participant-prior',
+      evidence_event_id: 'evidence-prior',
+    });
+  });
+
   it('a "yes" never overrides integrity: unknown op kind re-referees rejected → referee_blocked', () => {
     // Bypass the read-side Zod (defence-in-depth pin on the referee layer).
     const outcome = executeGmHeldResume(
