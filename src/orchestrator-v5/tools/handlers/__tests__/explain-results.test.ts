@@ -715,7 +715,11 @@ describe('explain_results — validation beat (V5-LANE-B-STRUCTURAL-01)', () => 
         to_label: 'Head outcome',
       },
     });
-    expect(outcome.__validation_beat?.beat?.text).not.toMatch(
+    const validationBeat = outcome.__validation_beat;
+    if (validationBeat?.mechanism !== 'appended') {
+      throw new Error('expected an appended validation beat');
+    }
+    expect(validationBeat.beat.text).not.toMatch(
       /\b(?:most|top|highest)\b|most likely to change|leans on most/i,
     );
     expect(outcome.assistant_text).not.toContain('Producer second');
