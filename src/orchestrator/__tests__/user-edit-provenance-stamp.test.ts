@@ -414,4 +414,61 @@ describe('normal edit seam — a chat-set value earns the user stamp on the APPL
       evidence_event_id: 'evidence-prior',
     });
   });
+
+  it.each([
+    [
+      'value → unit → std',
+      [
+        { op: 'update_node', path: '/nodes/fac_cash/data/value', value: 0.42 },
+        { op: 'update_node', path: '/nodes/fac_cash/data/unit', value: 'USD' },
+        { op: 'update_node', path: '/nodes/fac_cash/data/std', value: 0.2 },
+      ],
+    ],
+    [
+      'std → unit → value',
+      [
+        { op: 'update_node', path: '/nodes/fac_cash/data/std', value: 0.2 },
+        { op: 'update_node', path: '/nodes/fac_cash/data/unit', value: 'USD' },
+        { op: 'update_node', path: '/nodes/fac_cash/data/value', value: 0.42 },
+      ],
+    ],
+    [
+      'one combined observed-state op',
+      [
+        {
+          op: 'update_node',
+          path: '/nodes/fac_cash',
+          value: { observed_state: { value: 0.42, unit: 'USD', std: 0.2 } },
+        },
+      ],
+    ],
+  ])('lands every same-target leaf independent of order (%s)', async (_label, operations) => {
+    const result = await handleEditGraph(
+      buildContext(),
+      'Set monthly cash to 0.42 USD with uncertainty 0.2',
+      makeAdapter({
+        operations,
+        removed_edges: [],
+        warnings: [],
+        coaching: { summary: 'Updated Monthly Cash.', rerun_recommended: true },
+      }),
+      'req-multi-leaf',
+      'turn-multi-leaf',
+    );
+
+    expect(result.wasRejected).toBe(false);
+    expect(result.appliedGraph).not.toBeNull();
+    const node = (
+      result.appliedGraph as { nodes: Array<Record<string, unknown>> }
+    ).nodes.find((candidate) => candidate.id === 'fac_cash')!;
+    const observed = node.observed_state as Record<string, unknown>;
+    expect(observed).toMatchObject({
+      value: 0.42,
+      unit: 'USD',
+      std: 0.2,
+      source: 'user_override',
+    });
+    expect('elicited_from' in observed).toBe(false);
+    expect(node.provenance).toBe('user_set');
+  });
 });
