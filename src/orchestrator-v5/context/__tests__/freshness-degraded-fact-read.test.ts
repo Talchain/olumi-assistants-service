@@ -34,7 +34,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { deriveAnalysisFreshness } from '../freshness.js';
-import type { HandlerFact } from '../../types.js';
+// Imported from the contract, matching `freshness.ts` itself — `../../types.js`
+// does not export this symbol, and the local `pnpm typecheck` gate cannot see
+// the mistake because `tsconfig.build.json` excludes test files. Only the
+// separate `Typecheck Drift (ratchet)` CI check covers them.
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 /**
  * A successful run_analysis fact whose hash matches the current graph.
