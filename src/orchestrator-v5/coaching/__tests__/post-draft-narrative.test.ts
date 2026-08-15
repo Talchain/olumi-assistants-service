@@ -15,6 +15,7 @@ import {
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
 import { buildAnalysisReadyPayload } from '../../../cee/transforms/analysis-ready.js';
+import { renderDirectionClarifications } from '../../../cee/compound-goal/direction-gate.js';
 import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
@@ -75,6 +76,15 @@ function textOf(input: Parameters<typeof buildPostDraftNarrative>[0]): string {
     ? input
     : { ...input, analysisReady: { status: 'ready' as const } };
   return buildPostDraftNarrative(withExplicitReadiness).text;
+}
+
+function buildReadyNarrative(
+  input: Parameters<typeof buildPostDraftNarrative>[0],
+): ReturnType<typeof buildPostDraftNarrative> {
+  return buildPostDraftNarrative({
+    ...input,
+    analysisReady: { ...input.analysisReady, status: 'ready' },
+  });
 }
 
 const GOAL_NODE = {
@@ -792,7 +802,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('synergy assumption sits as a point value');
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
@@ -814,7 +824,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('tighten the cost ramp curve');
     expect(result.text).not.toContain('long uninterrupted clause');
@@ -831,7 +841,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('the synergy assumption sits as a point value');
     expect(result.text).not.toContain('Recast it as a 10');
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
@@ -854,7 +864,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
     // The whole first sentence (including the decimal) lands in the
     // assumption tail; the decimal is NOT truncated to "$1.".
@@ -959,7 +969,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     const items = [
       { id: 's7', label: 'recommend foo', detail: 'we recommend doing foo', action_type: 'x' },
     ];
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
       strengthenItems: items,
     });
@@ -971,7 +981,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
   });
 
   it('reports `no_candidate` fallback when no source was available at all', () => {
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
     });
     expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
@@ -987,7 +997,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'x',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).not.toContain('fac_cost');
     expect(result.telemetry.assumption_source).not.toBe('strengthen_item_detail');
     assertCleanCopy(result.text);
@@ -997,7 +1007,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     const signals = [
       { type: 'narrow_framing', detail: 'the intervention modelling looks shaky on the third route' },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, coachingBiasSignals: signals });
+    const result = buildReadyNarrative({ graph: baseGraph, coachingBiasSignals: signals });
     expect(result.text).not.toMatch(/intervention/i);
     expect(result.telemetry.assumption_source).not.toBe('coaching_bias_signal');
   });
@@ -1011,7 +1021,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('go_to_market');
     // Source accepted — the legitimate user-facing label is NOT a
     // matching internal-id prefix and so passes the gate cleanly.
@@ -1039,6 +1049,177 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     expect(result.telemetry.strengthen_items_count).toBe(2);
     expect(result.telemetry.bias_findings_count).toBe(1);
     expect(result.telemetry.coaching_bias_signals_count).toBe(3);
+  });
+});
+
+describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
+  const actionCopy = 'run the analysis before committing to a route';
+  const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
+  const fixedAssumption =
+    "Assumption to check: whether the model's key inputs reflect your real delivery constraints";
+  const typedRecovery =
+    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+  const needsInputReadiness = {
+    status: 'needs_user_input',
+    blockers: [{
+      option_id: OPTION_A.id,
+      option_label: OPTION_A.label,
+      factor_id: FACTOR_QUALITY.id,
+      factor_label: FACTOR_QUALITY.label,
+      blocker_type: 'missing_value',
+      suggested_action: 'add_value',
+    }],
+  } as const;
+
+  const sourceCases: ReadonlyArray<{
+    name: string;
+    input: Parameters<typeof buildPostDraftNarrative>[0];
+  }> = [
+    {
+      name: 'strengthen detail',
+      input: {
+        graph: baseGraph,
+        strengthenItems: [{
+          id: 'freeform-detail',
+          label: 'Check delivery assumptions',
+          detail: actionCopy,
+          action_type: 'add_context',
+        }],
+      },
+    },
+    {
+      name: 'strengthen label',
+      input: {
+        graph: baseGraph,
+        strengthenItems: [{
+          id: 'freeform-label',
+          label: actionCopy,
+          detail: 'recommend option A',
+          action_type: 'add_context',
+        }],
+      },
+    },
+    {
+      name: 'bias finding explanation',
+      input: {
+        graph: baseGraph,
+        analysisReady: {
+          bias_findings: [{
+            id: 'freeform-bias',
+            category: 'action_copy',
+            severity: 'medium',
+            explanation: actionCopy,
+          }],
+        },
+      },
+    },
+    {
+      name: 'coaching bias signal detail',
+      input: {
+        graph: baseGraph,
+        coachingBiasSignals: [{ type: 'action_copy', detail: actionCopy }],
+      },
+    },
+    {
+      name: 'uncertainty driver',
+      input: {
+        graph: makeGraph([
+          GOAL_NODE,
+          OPTION_A,
+          OPTION_B,
+          {
+            ...FACTOR_QUALITY,
+            observed_state: { value: 0.5, uncertainty_drivers: [actionCopy] },
+          },
+          FACTOR_CAPACITY,
+        ]),
+      },
+    },
+  ];
+
+  it.each(sourceCases)('does not read $name bytes when typed readiness is non-ready', ({ input }) => {
+    const result = buildPostDraftNarrative({
+      ...input,
+      analysisReady: {
+        ...needsInputReadiness,
+        ...input.analysisReady,
+        status: 'needs_user_input',
+        blockers: needsInputReadiness.blockers,
+      },
+    });
+
+    expect(result.text.toLowerCase()).not.toContain(actionCopy);
+    expect(result.text).not.toMatch(/\brun the analysis\b/i);
+    expect(result.text).toContain(fixedAssumption);
+    expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.fallback_reason).toBe('no_candidate');
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+    expect(result.telemetry.additional_check_source).toBeNull();
+    expect(result.telemetry.direction_clarifications_surfaced).toBe(0);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+  });
+
+  it.each([
+    ['missing', { bias_findings: [{ explanation: actionCopy }] }],
+    ['unknown', { status: 'future_readiness_state', bias_findings: [{ explanation: actionCopy }] }],
+  ])('fails closed for a %s readiness status before reading freeform coaching', (_name, analysisReady) => {
+    const result = buildPostDraftNarrative({ graph: baseGraph, analysisReady });
+
+    expect(result.text.toLowerCase()).not.toContain(actionCopy);
+    expect(result.text).toContain(fixedAssumption);
+    expect(result.text.split('\n\n').at(-1)).toBe(
+      'Next, review the model and fill any gaps before comparing the options.',
+    );
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+  });
+
+  it.each([
+    ['needs_user_mapping', 'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.'],
+    ['needs_encoding', 'Next, choose how the unresolved option should be represented on the effect scale.'],
+    ['blocked', 'Next, resolve the model issue shown before comparing the options.'],
+  ])('excludes freeform coaching for the %s recovery class', (status, expectedRecovery) => {
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: [{ detail: actionCopy }],
+      analysisReady: { status },
+    });
+
+    expect(result.text.toLowerCase()).not.toContain(actionCopy);
+    expect(result.text).toContain(fixedAssumption);
+    expect(result.text.split('\n\n').at(-1)).toBe(expectedRecovery);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+  });
+
+  it('serves a producer-rendered direction clarification only when exact readiness is ready', () => {
+    const [directionCard] = renderDirectionClarifications([{
+      metric_text: 'customer satisfaction',
+      amount_text: '85%',
+      value: 0.85,
+      unit: '%',
+      reason: 'explicit_ambiguity',
+      question: 'Should customer satisfaction stay above or below 85%?',
+      options: ['At least 85%', 'At most 85%'],
+      node_label: 'Customer satisfaction',
+    }]);
+    expect(directionCard).toBeDefined();
+
+    const ready = buildReadyNarrative({ graph: baseGraph, strengthenItems: [directionCard] });
+    expect(ready.text).toContain('Limit to confirm:');
+    expect(ready.text).toContain('You mentioned 85% for customer satisfaction.');
+    expect(ready.telemetry.direction_clarifications_surfaced).toBe(1);
+
+    const nonReady = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: [directionCard],
+      analysisReady: needsInputReadiness,
+    });
+    expect(nonReady.text).not.toContain('Limit to confirm:');
+    expect(nonReady.text).not.toContain('85%');
+    expect(nonReady.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(nonReady.telemetry.direction_clarifications_surfaced).toBe(0);
   });
 });
 
@@ -1525,7 +1706,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
         'A phased pilot is a real third path that the binary framing hides from the comparison',
       ),
     ];
-    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const result = buildReadyNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('Worth a look:');
     expect(result.telemetry.additional_checks_surfaced).toBe(1);
@@ -1539,7 +1720,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
       strengthen('s2', 'L2', 'Second distinct assumption that also merits a closer look before analysis'),
       strengthen('s3', 'L3', 'Third separate point that should not appear because the cap is one extra item'),
     ];
-    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const result = buildReadyNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
     const checkBullets = result.text.split('\n').filter((line) => line.includes('Worth a look:'));
     expect(checkBullets.length).toBe(1);
     expect(result.telemetry.additional_checks_surfaced).toBe(1);
@@ -1553,7 +1734,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
       biasSignal('narrow_framing', 'The brief frames the choice as binary when phased routes also exist'),
       biasSignal('overconfidence', 'The estimate is a single point with no stated uncertainty band'),
     ];
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems,
       coachingBiasSignals,
@@ -1567,7 +1748,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     const strengthenItems = [
       strengthen('s1', 'L1', 'The single coaching point that becomes the assumption bullet only'),
     ];
-    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const result = buildReadyNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
     const checkBullets = result.text.split('\n').filter((line) => line.includes('Worth a look:'));
     expect(checkBullets.length).toBe(0);
     expect(result.telemetry.additional_checks_surfaced).toBe(0);
@@ -1587,7 +1768,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     const figure = 'Widen the 23.5M synergy estimate into a downside range before deciding';
 
     // As the primary assumption (single strengthen item).
-    const asAssumption = buildPostDraftNarrative({
+    const asAssumption = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems: [strengthen('s1', 'L1', figure)],
     });
@@ -1595,7 +1776,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     expect(asAssumption.text).toContain('23.5M');
 
     // As the extra "Worth a look" check (a distinct item[0], the figure at [1]).
-    const asCheck = buildPostDraftNarrative({
+    const asCheck = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems: [
         strengthen('s0', 'L0', 'Confirm the delivery timeline assumption holds under load'),
@@ -1626,7 +1807,7 @@ describe('buildPostDraftNarrative — new copy passes the real egress guards', (
       elements_considered_but_excluded: ['Set aside FX exposure as immaterial at this scale'],
       brief_completeness: 'thin',
     };
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems,
       coachingBiasSignals,
@@ -1658,7 +1839,7 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
   };
 
   it('surfaces structured coaching from a real staging draft into the rendered narrative, leaking no IDs', () => {
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: fixture.graph,
       // Exercise the deterministic sectioned path (summary absent / rejected) —
       // that is where the structured widening / strengthen / bias fields surface.

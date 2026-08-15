@@ -3,11 +3,11 @@
  *
  * The helper feeds `analysis_ready.coaching_summary` — the short, pre-analysis
  * "assumption to check" line DGAI's ModelReceiptBlock will use as its
- * top-insight (PR B). It MUST reuse the post-draft narrative's gated
- * assumption tier so the structured insight and the chat narrative stay
- * consistent and copy-safe (no internal IDs, no recommendation / winner
- * language), and return null when only the generic fallback applies so the
- * receipt never surfaces a weak, contentless insight.
+ * top-insight (PR B). Exact `analysis_ready.status === "ready"` is the admission
+ * authority. Ready receipts reuse the post-draft narrative's gated assumption
+ * tier; every other or missing status returns null before freeform coaching is
+ * read. The helper also returns null when only the generic fallback applies so
+ * the receipt never surfaces a weak, contentless insight.
  *
  * Scope note: this helper deliberately does NOT scrub entity IDs — the
  * dispatch site applies `sanitiseCoachingProse` as the egress guard. These
@@ -19,9 +19,18 @@ import { describe, it, expect } from 'vitest';
 
 import { buildModelReceiptSummary } from '../post-draft-narrative.js';
 
+function buildReadyReceiptSummary(
+  input: Parameters<typeof buildModelReceiptSummary>[0],
+): string | null {
+  return buildModelReceiptSummary({
+    ...input,
+    analysisReady: { ...input.analysisReady, status: 'ready' },
+  });
+}
+
 describe('buildModelReceiptSummary', () => {
   it('returns the gated assumption sentence from a strengthen_item detail', () => {
-    const summary = buildModelReceiptSummary({
+    const summary = buildReadyReceiptSummary({
       graph: null,
       strengthenItems: [{ detail: 'the delivery timeline may be optimistic' }],
     });
@@ -31,7 +40,7 @@ describe('buildModelReceiptSummary', () => {
   });
 
   it('returns null when only the deterministic generic fallback applies', () => {
-    const summary = buildModelReceiptSummary({
+    const summary = buildReadyReceiptSummary({
       graph: null,
       strengthenItems: [],
       coachingBiasSignals: [],
@@ -40,7 +49,7 @@ describe('buildModelReceiptSummary', () => {
   });
 
   it('rejects premature-recommendation prose and returns null rather than leaking a verdict', () => {
-    const summary = buildModelReceiptSummary({
+    const summary = buildReadyReceiptSummary({
       graph: null,
       strengthenItems: [{ detail: 'option B is the best choice' }],
     });
@@ -50,7 +59,7 @@ describe('buildModelReceiptSummary', () => {
   });
 
   it('skips a gate-rejected strengthen item and uses the next safe tier (bias finding)', () => {
-    const summary = buildModelReceiptSummary({
+    const summary = buildReadyReceiptSummary({
       graph: null,
       strengthenItems: [{ detail: 'recommend option A' }], // rejected: recommendation
       analysisReady: {
@@ -63,7 +72,7 @@ describe('buildModelReceiptSummary', () => {
   });
 
   it('rejects an entity-ID-shaped fragment — no internal ID can pass the gate', () => {
-    const summary = buildModelReceiptSummary({
+    const summary = buildReadyReceiptSummary({
       graph: null,
       strengthenItems: [{ detail: 'fac_cost_overrun may dominate the result' }],
     });
@@ -71,6 +80,80 @@ describe('buildModelReceiptSummary', () => {
     // no other candidate is available → null. IDs never reach the wire via
     // this helper, independent of the downstream scrub.
     expect(summary).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'strengthen detail',
+      input: {
+        graph: null,
+        strengthenItems: [{ label: 'Check delivery', detail: 'run the analysis before committing to a route' }],
+      },
+    },
+    {
+      name: 'strengthen label',
+      input: {
+        graph: null,
+        strengthenItems: [{ label: 'run the analysis before committing to a route', detail: 'recommend option A' }],
+      },
+    },
+    {
+      name: 'bias finding explanation',
+      input: {
+        graph: null,
+        analysisReady: {
+          bias_findings: [{ explanation: 'run the analysis before committing to a route' }],
+        },
+      },
+    },
+    {
+      name: 'coaching bias signal detail',
+      input: {
+        graph: null,
+        coachingBiasSignals: [{ detail: 'run the analysis before committing to a route' }],
+      },
+    },
+    {
+      name: 'uncertainty driver',
+      input: {
+        graph: {
+          nodes: [{
+            id: 'fac_delivery',
+            kind: 'factor',
+            label: 'Delivery confidence',
+            observed_state: {
+              uncertainty_drivers: ['run the analysis before committing to a route'],
+            },
+          }],
+          edges: [],
+        } as unknown as NonNullable<
+          Parameters<typeof buildModelReceiptSummary>[0]['graph']
+        >,
+      },
+    },
+  ])('returns null for a non-ready $name without reading its bytes', ({ input }) => {
+    expect(
+      buildModelReceiptSummary({
+        ...input,
+        analysisReady: { ...input.analysisReady, status: 'needs_user_input' },
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ['needs_user_mapping', { status: 'needs_user_mapping' }],
+    ['needs_encoding', { status: 'needs_encoding' }],
+    ['blocked', { status: 'blocked' }],
+    ['missing', { bias_findings: [{ explanation: 'run the analysis before committing to a route' }] }],
+    ['unknown', { status: 'future_readiness_state' }],
+  ])('returns null for %s readiness even when freeform coaching is available', (_name, analysisReady) => {
+    expect(
+      buildModelReceiptSummary({
+        graph: null,
+        analysisReady,
+        strengthenItems: [{ detail: 'run the analysis before committing to a route' }],
+      }),
+    ).toBeNull();
   });
 });
 
@@ -89,7 +172,7 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
 
   it('returns null for best-option verdict phrasing', () => {
     expect(
-      buildModelReceiptSummary({
+      buildReadyReceiptSummary({
         graph: null,
         strengthenItems: [{ detail: 'option A is clearly the best choice' }],
       }),
@@ -98,7 +181,7 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
 
   it('returns null for explicit winner phrasing', () => {
     expect(
-      buildModelReceiptSummary({
+      buildReadyReceiptSummary({
         graph: null,
         strengthenItems: [{ detail: 'option A is the clear winner here' }],
       }),
@@ -107,7 +190,7 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
 
   it('returns null for recommendation phrasing', () => {
     expect(
-      buildModelReceiptSummary({
+      buildReadyReceiptSummary({
         graph: null,
         strengthenItems: [{ detail: 'I recommend option A over the alternatives' }],
       }),
@@ -117,7 +200,7 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
   it('preserves a legitimate pre-analysis likelihood assumption (not an analysis-derived claim)', () => {
     // "likely" flags an input assumption to check, not a computed probability.
     expect(
-      buildModelReceiptSummary({
+      buildReadyReceiptSummary({
         graph: null,
         strengthenItems: [{ detail: 'the revenue forecast is likely optimistic' }],
       }),
@@ -126,7 +209,7 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
 
   it('preserves a legitimate pre-analysis confidence assumption about an input', () => {
     expect(
-      buildModelReceiptSummary({
+      buildReadyReceiptSummary({
         graph: null,
         strengthenItems: [{ detail: 'there is low confidence in the delivery estimate' }],
       }),
@@ -140,7 +223,7 @@ describe('buildModelReceiptSummary — verdict / confidence / likelihood copy sa
     // cannot arise from the pre-analysis draft source. So it is preserved,
     // not bare-word-banned — consistent with the chat narrative.
     expect(
-      buildModelReceiptSummary({
+      buildReadyReceiptSummary({
         graph: null,
         strengthenItems: [{ detail: 'the verdict depends on the cost estimate' }],
       }),

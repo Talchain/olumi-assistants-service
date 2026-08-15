@@ -7,7 +7,8 @@
  * ModelReceiptBlock; nothing renders it today.
  *
  * These tests pin the CEE-side contract:
- *   - emitted when graph persisted + safe signal-backed prose exists;
+ *   - emitted only when graph persisted + exact ready status + safe prose exists;
+ *   - omitted before reading freeform coaching for every non-ready status;
  *   - sanitised via the egress scrub (analysis_ready is NOT walked by the
  *     central envelope sanitiser, so the dispatch must scrub it);
  *   - omitted when no safe summary exists, or when the graph did not persist;
@@ -60,6 +61,33 @@ const MINIMAL_ANALYSIS_READY = {
     { option_id: 'opt_delay', label: 'Delay 6mo', status: 'ready', interventions: { fac_revenue: 0.3 } },
   ],
   goal_node_id: 'goal_revenue',
+} as unknown as NonNullable<DraftGraphResult['analysisReady']>;
+
+const NEEDS_INPUT_GRAPH = {
+  nodes: [
+    { id: 'goal_revenue', kind: 'goal', label: 'Choose a launch route' },
+    { id: 'opt_launch_now', kind: 'option', label: 'Launch now' },
+    { id: 'opt_delay', kind: 'option', label: 'Delay 6mo' },
+    { id: 'fac_revenue', kind: 'factor', label: 'Revenue impact' },
+  ],
+  edges: [],
+};
+
+const NEEDS_INPUT_ANALYSIS_READY = {
+  status: 'needs_user_input',
+  options: [
+    { option_id: 'opt_launch_now', label: 'Launch now', status: 'needs_user_mapping', interventions: {} },
+    { option_id: 'opt_delay', label: 'Delay 6mo', status: 'ready', interventions: { fac_revenue: 0.3 } },
+  ],
+  goal_node_id: 'goal_revenue',
+  blockers: [{
+    option_id: 'opt_launch_now',
+    option_label: 'Launch now',
+    factor_id: 'fac_revenue',
+    factor_label: 'Revenue impact',
+    blocker_type: 'missing_value',
+    suggested_action: 'add_value',
+  }],
 } as unknown as NonNullable<DraftGraphResult['analysisReady']>;
 
 function makePayload(overrides: Record<string, unknown> = {}) {
@@ -159,6 +187,40 @@ describe('dispatchDraftGraph — analysis_ready.coaching_summary (F1 PR A)', () 
 
     const res = await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-3', request: STUB_REQUEST });
 
+    expect(res.analysisReady).toBeDefined();
+    expect('coaching_summary' in (res.analysisReady as object)).toBe(false);
+  });
+
+  it('serves only deterministic recovery and no receipt coaching when a real dispatch is non-ready', async () => {
+    const freeformAction = 'run the analysis before committing to a route';
+    mockPipeline(
+      makeDraftResult({
+        graphOutput: NEEDS_INPUT_GRAPH,
+        analysisReady: NEEDS_INPUT_ANALYSIS_READY,
+        strengthenItems: [{
+          id: 'freeform-action',
+          label: 'Check launch timing',
+          detail: freeformAction,
+          action_type: 'add_context',
+        }],
+      }),
+      true,
+    );
+
+    const res = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-non-ready',
+      request: STUB_REQUEST,
+    });
+
+    expect(res.response.assistant_text.toLowerCase()).not.toContain(freeformAction);
+    expect(res.response.assistant_text).not.toMatch(/\brun the analysis\b/i);
+    expect(res.response.assistant_text).toContain(
+      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+    );
+    expect(res.response.assistant_text).toContain(
+      'Next, choose the missing effect value for "Launch now" on "Revenue impact" so the comparison can be prepared.',
+    );
     expect(res.analysisReady).toBeDefined();
     expect('coaching_summary' in (res.analysisReady as object)).toBe(false);
   });

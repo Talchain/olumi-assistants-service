@@ -537,24 +537,41 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const optionsBlock = buildOptionsBlock(options);
 
   const tradeOffBullet = buildTradeOffBullet(factors, risks);
+  const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
   // the general-purpose pickers below. Leaving it in both would surface the
   // same question twice, and leaving it ONLY in the generic pool is the defect
-  // being fixed — see `pickDirectionClarifications`.
-  const directionBullets = pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
-    (t) => toDirectionBullet(t),
-  );
-  const generalStrengthenItems = Array.isArray(strengthenItems)
+  // being fixed — see `pickDirectionClarifications`. Non-ready turns cannot
+  // trust it, however: at this boundary a producer-built clarification and an
+  // LLM item are distinguished only by a spoofable ID prefix, and package
+  // deduplication can let the latter occupy that ID. Until provenance is
+  // carried structurally, direction copy follows the same ready-only policy.
+  const directionBullets = mayServeFreeformCoaching
+    ? pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
+        (text) => toDirectionBullet(text),
+      )
+    : [];
+  const generalStrengthenItems = mayServeFreeformCoaching && Array.isArray(strengthenItems)
     ? strengthenItems.filter((i) => !isDirectionClarificationItem(i))
-    : strengthenItems;
+    : [];
 
-  const assumption = pickAssumption({
-    nodes,
-    analysisReady,
-    strengthenItems: generalStrengthenItems,
-    coachingBiasSignals,
-  });
+  // Freeform coaching fragments can contain action copy that the fragment gate
+  // is not designed to classify. For every non-ready or missing status, do not
+  // inspect those bytes at all: graph labels/trade-off, the fixed generic
+  // assumption and typed readiness recovery are the complete narrative.
+  const assumption: AssumptionPick = mayServeFreeformCoaching
+    ? pickAssumption({
+        nodes,
+        analysisReady,
+        strengthenItems: generalStrengthenItems,
+        coachingBiasSignals,
+      })
+    : {
+        text: FIXED_GENERIC_ASSUMPTION,
+        source: 'deterministic_fallback',
+        fallbackReason: 'no_candidate',
+      };
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
   // One extra "check" bullet from the next unused coaching signal. Seed the
@@ -562,12 +579,14 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // so the same signal is never surfaced twice.
   const usedTexts = new Set<string>();
   if (assumptionBullet) usedTexts.add(normaliseForDedup(stripBulletLabel(assumptionBullet)));
-  const additionalChecks = pickAdditionalChecks({
-    strengthenItems: generalStrengthenItems,
-    coachingBiasSignals,
-    alreadyUsed: usedTexts,
-    limit: MAX_ADDITIONAL_CHECKS,
-  });
+  const additionalChecks = mayServeFreeformCoaching
+    ? pickAdditionalChecks({
+        strengthenItems: generalStrengthenItems,
+        coachingBiasSignals,
+        alreadyUsed: usedTexts,
+        limit: MAX_ADDITIONAL_CHECKS,
+      })
+    : [];
   const additionalBullets = additionalChecks.map((c) => toCheckBullet(c.text));
 
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
@@ -646,13 +665,12 @@ export interface ModelReceiptSummaryInput {
 
 /**
  * Derive the short, pre-analysis "assumption to check" sentence for the F1
- * model-understanding receipt (`analysis_ready.coaching_summary`). Reuses the
- * SAME gated source-priority chain as the post-draft narrative's assumption
- * bullet ({@link pickAssumption}: strengthen → bias finding → coaching bias
- * signal → uncertainty driver), so the structured receipt insight and the
- * chat narrative stay consistent and copy-safe by construction — every
- * non-fallback candidate has passed {@link gateAssumptionFragment} (no IDs,
- * no graph-shape words, no recommendation / winner language).
+ * model-understanding receipt (`analysis_ready.coaching_summary`). Exact typed
+ * readiness is the admission authority: non-ready, missing and unknown states
+ * return `null` before any freeform source is read. Ready states reuse the same
+ * gated source-priority chain as the post-draft narrative's assumption bullet
+ * ({@link pickAssumption}: strengthen → bias finding → coaching bias signal →
+ * uncertainty driver).
  *
  * Returns `null` when only the deterministic generic fallback applies — the
  * receipt must not surface a weak, contentless insight. (The chat narrative
@@ -665,6 +683,8 @@ export interface ModelReceiptSummaryInput {
  * dispatch site rather than inside the builder.
  */
 export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): string | null {
+  if (input.analysisReady?.status !== 'ready') return null;
+
   const nodes = (input.graph?.nodes ?? []) as readonly NodeLite[];
   const pick = pickAssumption({
     nodes,
