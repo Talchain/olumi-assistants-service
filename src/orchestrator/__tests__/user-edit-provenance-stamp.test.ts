@@ -186,6 +186,31 @@ describe('stampUserEditProvenance — the op-level stamp', () => {
     expect(observed.source).toBe('user_override');
   });
 
+  it('clears a prior panel citation from an ordinary canonical value write', () => {
+    const [stamped] = stampUserEditProvenance([
+      valueOp({
+        value: {
+          observed_state: {
+            value: 0.9,
+            source: 'panel_elicited',
+            elicited_from: {
+              round_id: 'round-prior',
+              participant_id: 'participant-prior',
+              evidence_event_id: 'evidence-prior',
+            },
+          },
+        },
+      }),
+    ]);
+    const observed = (stamped!.value as Record<string, unknown>).observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(observed.source).toBe('user_override');
+    expect(observed.elicited_from).toBeUndefined();
+    expect('elicited_from' in observed).toBe(false);
+  });
+
   it('does NOT stamp a value-less observed_state write (unit-only edits are not the pill claim)', () => {
     const op = valueOp({ value: { observed_state: { unit: '%' } } });
     const [out] = stampUserEditProvenance([op]);
@@ -229,9 +254,14 @@ function buildContext(): ConversationContext {
           category: 'controllable',
           observed_state: {
             value: 0.5,
-            source: 'cee_inference',
+            source: 'panel_elicited',
             factor_type: 'cost',
             extractionType: 'inferred',
+            elicited_from: {
+              round_id: 'round-prior',
+              participant_id: 'participant-prior',
+              evidence_event_id: 'evidence-prior',
+            },
           },
         },
         { id: 'out_profit', kind: 'goal', label: 'Profit' },
@@ -300,6 +330,8 @@ describe('normal edit seam — a chat-set value earns the user stamp on the APPL
     const observed = edited.observed_state as Record<string, unknown>;
     expect(observed.value).toBe(0.42);
     expect(observed.source).toBe('user_override');
+    expect(observed.elicited_from).toBeUndefined();
+    expect('elicited_from' in observed).toBe(false);
     expect(edited.provenance).toBe('user_set');
 
     // Negative control: the untouched goal node earned NOTHING.

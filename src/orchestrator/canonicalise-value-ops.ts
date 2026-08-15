@@ -332,11 +332,21 @@ export function stampUserEditProvenance(
     const observed = asRecord(value[OBSERVED_ROOT]);
     if (observed === null) return op;
     if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
+    const stampedObserved: Record<string, unknown> = {
+      ...observed,
+      source: USER_EDIT_SOURCE,
+    };
+    // A normal chat edit is authored by the current user, not by a prior
+    // collaboration round. `canonicaliseValueOps` deliberately carries
+    // observed-state siblings forward, so without an explicit removal the
+    // old participant/evidence citation survives beside `user_override`.
+    // Absence is the shared contract's meaning for "not panel-elicited".
+    delete stampedObserved.elicited_from;
     return {
       ...op,
       value: {
         ...value,
-        [OBSERVED_ROOT]: { ...observed, source: USER_EDIT_SOURCE },
+        [OBSERVED_ROOT]: stampedObserved,
         provenance: USER_EDIT_PROVENANCE,
       },
     };
