@@ -93,6 +93,32 @@ function stampFor(sourceTurnIds: readonly string[]): string {
 }
 
 /**
+ * The in-band qualifier rendered on an entry assemble.ts RESTORED from the
+ * prior summary (`carried_forward`) rather than one this pass confirmed.
+ *
+ * Why the injected block must say this. Carry-forward exists because a pass
+ * that empties a retention-required slot destroys durable memory (the measured
+ * 57/57 erasure — see assemble.ts / retention.ts), and restoring the prior
+ * entry is the right repair for that case. But the SAME empty slot is also
+ * what a legitimate WITHDRAWAL looks like, and the repair cannot tell them
+ * apart: on a withdrawal it returns the superseded fact wearing its original
+ * provenance stamp, and — unqualified — the prompt then asserts it to the
+ * coach exactly as it asserts a fact the user restated this turn.
+ *
+ * So the block stops claiming confirmation it does not have. This is a
+ * DISCLOSURE, not a verdict: the entry is still injected (a disclosed
+ * uncertainty beats a deleted record, the same asymmetry the whole module
+ * runs on), it simply no longer passes itself off as fresh.
+ *
+ * Rendered INSIDE the slot line, never as a new line: the withheld-claim
+ * projector (context/withheld-history-redaction.ts) asserts the four-slot
+ * block's LINE COUNT is invariant under projection, so a qualifier on its own
+ * line would break a guard in another module.
+ */
+export const CARRIED_FORWARD_QUALIFIER =
+  '(carried forward — not restated by the latest summary pass, so this is prior record rather than fresh confirmation; it may since have been superseded or withdrawn)';
+
+/**
  * Render the injected block from the STRUCTURED slots (not the stored
  * `text`) so the R3 provenance stamps ride along. Mirrors assemble.ts's
  * rendering rules exactly: FRAME renders empty when absent; other empty
@@ -116,7 +142,16 @@ export function buildConversationSummarySection(
     const entries = bySlot.get(slot)?.entries ?? [];
     const rendered =
       entries.length > 0
-        ? entries.map((e) => `${e.text}${stampFor(e.source_turn_ids)}`).join(' ')
+        ? entries
+            .map(
+              (e) =>
+                `${e.text}${stampFor(e.source_turn_ids)}` +
+                // Qualify ONLY a restored entry. A fresh entry renders exactly
+                // as before — byte-identity for every summary that carried
+                // nothing forward, which is the overwhelming majority.
+                (e.carried_forward === true ? ` ${CARRIED_FORWARD_QUALIFIER}` : ''),
+            )
+            .join(' ')
         : slot === 'FRAME'
           ? ''
           : emptyMarker;
