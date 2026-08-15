@@ -1177,13 +1177,24 @@ export function projectGraphAndOptionsToV3(
   }));
 
   const extractedOptions = extractOptionsFromNodes(
-    extractOptionNodes(graph.nodes).map((node) => ({
-      id: projectedIdBySourceId.get(node.id) ?? node.id,
-      label: node.label ?? node.id,
-      description: node.body,
-      v4Interventions: isOptionData(node.data) ? node.data.interventions : undefined,
-      is_baseline: resolveOptionIsBaseline(node),
-    })),
+    extractOptionNodes(graph.nodes).map((node) => {
+      const sourceInterventions = isOptionData(node.data) ? node.data.interventions : undefined;
+      const canonicalInterventions = sourceInterventions
+        ? Object.fromEntries(
+            Object.entries(sourceInterventions).map(([sourceFactorId, value]) => [
+              projectedIdBySourceId.get(sourceFactorId) ?? sourceFactorId,
+              value,
+            ]),
+          )
+        : undefined;
+      return {
+        id: projectedIdBySourceId.get(node.id) ?? node.id,
+        label: node.label ?? node.id,
+        description: node.body,
+        v4Interventions: canonicalInterventions,
+        is_baseline: resolveOptionIsBaseline(node),
+      };
+    }),
     projectedNodes,
     projectedEdges,
     goalNodeId,

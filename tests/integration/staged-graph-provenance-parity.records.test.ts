@@ -372,6 +372,78 @@ describe("one terminal V3 graph/options projection authority", () => {
     }
   });
 
+  it("remaps source intervention and goal ids to the canonical V3 identities", () => {
+    const seam = projectDraftRecords(TERMINAL_AUTHORITY_RECORDS, TERMINAL_AUTHORITY_BRIEF);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) throw new Error(seam.reason);
+    const source = seam.projection.graph;
+    const factor = byLabel(source.nodes, "Developer Capacity");
+    const option = byLabel(source.nodes, "two developers");
+    const goal = byLabel(source.nodes, "Our revenue target is £3,000,000");
+    const renamed = new Map<string, string>([
+      [String(factor.id), "Factor Target / A"],
+      [String(option.id), "Option Choice / A"],
+      [String(goal.id), "Goal Target / A"],
+    ]);
+    const graph = {
+      ...source,
+      nodes: source.nodes.map((node) => {
+        const nextId = renamed.get(node.id) ?? node.id;
+        if (!node.data || typeof node.data !== "object") {
+          return { ...node, id: nextId };
+        }
+        const data = node.data as Record<string, unknown>;
+        const interventions = data.interventions;
+        return {
+          ...node,
+          id: nextId,
+          data: {
+            ...data,
+            ...(interventions && typeof interventions === "object"
+              ? {
+                  interventions: Object.fromEntries(
+                    Object.entries(interventions).map(([id, value]) => [
+                      renamed.get(id) ?? id,
+                      value,
+                    ]),
+                  ),
+                }
+              : {}),
+          },
+        };
+      }),
+      edges: source.edges.map((edge) => ({
+        ...edge,
+        from: renamed.get(edge.from) ?? edge.from,
+        to: renamed.get(edge.to) ?? edge.to,
+      })),
+    };
+
+    const staged = projectGraphForStagedFrame(
+      graph as never,
+      "v3",
+      "canonical-id-remap",
+      TERMINAL_AUTHORITY_BRIEF,
+    ) as StagedV3Graph;
+    const final = transformResponseToV3(
+      { graph } as unknown as V1DraftGraphResponse,
+      { brief: TERMINAL_AUTHORITY_BRIEF, requestId: "canonical-id-remap" },
+    );
+
+    expect(staged.goal_node_id).toBe(byLabel(staged.nodes, goal.label as string).id);
+    expect(final.goal_node_id).toBe(byLabel(final.nodes, goal.label as string).id);
+    const stagedOption = byLabel(staged.nodes, option.label as string);
+    const stagedInterventions = record(stagedOption.interventions);
+    expect(Object.keys(stagedInterventions)).toHaveLength(1);
+    const [canonicalFactorId] = Object.keys(stagedInterventions);
+    expect(byLabel(staged.nodes, factor.label as string).id).toBe(canonicalFactorId);
+    expect(record(record(stagedInterventions[canonicalFactorId!]).target_match).node_id).toBe(
+      canonicalFactorId,
+    );
+    expect(staged.nodes).toEqual(final.nodes);
+    expect(staged.options).toEqual(final.options);
+  });
+
   it("honours typed provenance before label binding, including verified numeric and unverified controls", () => {
     const { staged, final } = compileRecords(
       TERMINAL_AUTHORITY_RECORDS,
