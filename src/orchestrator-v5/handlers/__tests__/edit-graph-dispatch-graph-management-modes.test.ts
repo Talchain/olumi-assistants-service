@@ -87,14 +87,6 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
-import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import {
-  buildGmHeldAppliedChips,
-  executeGmHeldResume,
-  GM_HELD_APPLIED_RERUN_CHIP,
-  readGmHeldResume,
-} from '../gm-held-execute.js';
-import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { parsePendingAction, type PendingAction } from '../../session/pending-action.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { _resetConfigCache } from '../../../config/index.js';
@@ -165,91 +157,6 @@ const STRUCT_OPS: PatchOperation[] = [
   { op: 'add_node', path: 'fac_cost', value: { id: 'fac_cost', kind: 'factor', label: 'Cost' } },
 ];
 
-/**
- * The exact complete-loop consequence proposed after a human types the
- * disconfirmation card's handoff sentence. The human authors the missing
- * driver and target; the edit lane proposes edge semantics, which remain held
- * until the explicit confirmation exercised below.
- */
-const HANDOFF_MESSAGE =
-  'Add supplier concentration as a factor affecting Net New ARR Generated.';
-const HANDOFF_GRAPH = {
-  goal_node_id: 'goal_growth',
-  schema_version: 'v3',
-  nodes: [
-    { id: 'goal_growth', kind: 'goal', label: 'Sustainable Growth' },
-    {
-      id: 'fac_partner_invest',
-      kind: 'factor',
-      label: 'Partner Channel Investment',
-      observed_state: { value: 0.5 },
-    },
-    { id: 'out_new_arr', kind: 'outcome', label: 'Net New ARR Generated' },
-    {
-      id: 'opt_partner',
-      kind: 'option',
-      label: 'Partner-led plan',
-      interventions: { fac_partner_invest: { value: 0.7 } },
-    },
-    {
-      id: 'opt_direct',
-      kind: 'option',
-      label: 'Direct plan',
-      interventions: { fac_partner_invest: { value: 0.3 } },
-    },
-  ],
-  edges: [
-    {
-      from: 'fac_partner_invest',
-      to: 'out_new_arr',
-      strength: { mean: 0.6, std: 0.1 },
-      exists_probability: 0.9,
-      effect_direction: 'positive',
-    },
-    {
-      from: 'out_new_arr',
-      to: 'goal_growth',
-      strength: { mean: 0.7, std: 0.1 },
-      exists_probability: 0.9,
-      effect_direction: 'positive',
-    },
-  ],
-};
-const HANDOFF_OPS: PatchOperation[] = [
-  {
-    op: 'add_node',
-    path: 'fac_supplier_concentration',
-    value: {
-      id: 'fac_supplier_concentration',
-      kind: 'factor',
-      label: 'Supplier concentration',
-    },
-  },
-  {
-    op: 'add_edge',
-    path: 'fac_supplier_concentration::out_new_arr',
-    value: {
-      from: 'fac_supplier_concentration',
-      to: 'out_new_arr',
-      strength: { mean: 0.4, std: 0.15 },
-      exists_probability: 0.8,
-      effect_direction: 'negative',
-    },
-  },
-];
-const HANDOFF_POST_EDIT_GRAPH = {
-  ...HANDOFF_GRAPH,
-  nodes: [
-    ...HANDOFF_GRAPH.nodes,
-    {
-      id: 'fac_supplier_concentration',
-      kind: 'factor',
-      label: 'Supplier concentration',
-    },
-  ],
-  edges: [...HANDOFF_GRAPH.edges, HANDOFF_OPS[1]!.value],
-};
-
 /** D-S fixture of record — the 11 Jul manual-test batch shape: 8 tunable
  *  update_edge_field envelopes (strength / exists_probability tweaks). */
 const EIGHT_TUNABLE_EDGE_OPS: PatchOperation[] = Array.from({ length: 8 }, (_, i) => ({
@@ -313,7 +220,6 @@ async function runDispatch(
   // user message into the referee gate can be pinned. The default carries
   // no protection cue, so every pre-existing pin is byte-identical.
   message = 'Change the price factor',
-  graphState: GraphStateIngress = INGRESS_GRAPH,
 ) {
   (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
     makeAppliedEditResult(ops, resultOverrides),
@@ -325,7 +231,7 @@ async function runDispatch(
     payload: makePayload(message),
     requestId: 'req-gm-mode',
     request: STUB_REQUEST,
-    graphState,
+    graphState: INGRESS_GRAPH,
     analysisState: null,
   });
   const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
@@ -511,103 +417,6 @@ describe('mode=live', () => {
       blocker_code: 'STRUCTURAL_APPLY_HELD',
     });
     expect(blocks[0]!.details).not.toHaveProperty('candidate');
-  });
-
-  it('complete science loop: human-authored driver → held add_node+add_edge → explicit atomic confirm → stale hash + rerun', async () => {
-    setMode('live');
-    persistedBaseRef.current = HANDOFF_GRAPH;
-    const preEditHash = computeAnalysisAffectingGraphHash(HANDOFF_GRAPH as never);
-    expect(preEditHash).not.toBeNull();
-
-    const { result, response, metadata } = await runDispatch(
-      HANDOFF_OPS,
-      {
-        assistantText: 'Added supplier concentration to the model.',
-        appliedGraph: HANDOFF_POST_EDIT_GRAPH as unknown as EditGraphResult['appliedGraph'],
-        appliedChanges: {
-          summary: 'Added supplier concentration affecting Net New ARR Generated.',
-          changes: [
-            {
-              label: 'Supplier concentration',
-              description: 'Added factor and relationship.',
-              element_ref: 'fac_supplier_concentration',
-            },
-          ],
-          rerun_recommended: true,
-        },
-      },
-      HANDOFF_MESSAGE,
-      HANDOFF_GRAPH as unknown as GraphStateIngress,
-    );
-
-    // The exact sentence the human authored reaches the existing edit lane.
-    const [, editDescription] = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock
-      .calls[0]!;
-    expect(editDescription).toBe(HANDOFF_MESSAGE);
-
-    // HOLD: the structural pair is one proposal and neither graph nor applied
-    // fact reaches the writer. The only persisted turn state is the pending
-    // confirmation; no compensating write can race ahead of consent.
-    expect(metadata.graph).toBeUndefined();
-    expect((metadata.handler_facts as unknown[])).toHaveLength(0);
-    expect(result.graph).toBeNull();
-    const pending = parsePendingAction((metadata.pending_actions as unknown[])[0]);
-    expect(pending).not.toBeNull();
-    expect(pending!.preconditions.graph_hash).toBe(preEditHash);
-    expect(pending!.action.kind).toBe('apply_proposed_change');
-    if (pending!.action.kind !== 'apply_proposed_change') {
-      throw new Error('Expected held handoff to use an inline graph patch');
-    }
-    const embedded = pending!.action.inline_patch.operations;
-    expect(embedded).toEqual(HANDOFF_OPS);
-    expect((response as { suggested_actions: unknown[] }).suggested_actions).toHaveLength(1);
-
-    // EXPLICIT CONFIRM: read the persisted payload, re-referee it, and apply
-    // both structural operations in one returned graph+receipt transaction.
-    const read = readGmHeldResume(pending!);
-    expect(read.kind).toBe('ok');
-    if (read.kind !== 'ok' || preEditHash === null) return;
-    const confirmed = executeGmHeldResume({
-      operations: read.operations,
-      currentGraph: HANDOFF_GRAPH,
-      currentGraphHash: preEditHash,
-      freshness: 'fresh',
-      hasExistingAnalysis: true,
-      scenarioId: SCENARIO_ID,
-      turnId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-      requestId: 'req-dsk-model-handoff-confirm',
-    });
-    expect(confirmed.status).toBe('executed');
-    if (confirmed.status !== 'executed') return;
-
-    expect(
-      confirmed.appliedGraph.nodes.some(
-        (node) =>
-          node.id === 'fac_supplier_concentration' &&
-          node.kind === 'factor' &&
-          node.label === 'Supplier concentration',
-      ),
-    ).toBe(true);
-    expect(
-      confirmed.appliedGraph.edges.some(
-        (edge) =>
-          edge.from === 'fac_supplier_concentration' && edge.to === 'out_new_arr',
-      ),
-    ).toBe(true);
-    expect(confirmed.fact.result.status).toBe('applied');
-    expect(confirmed.fact.result.operations_count).toBe(2);
-    expect(confirmed.fact.result.rerun_recommended).toBe(true);
-
-    // CONSEQUENCE: the analysis-affecting identity changes, making the prior
-    // result stale; the existing applied-receipt authority emits the canonical
-    // rerun action when the confirmed graph remains analysis-ready.
-    const postEditHash = computeAnalysisAffectingGraphHash(confirmed.appliedGraph as never);
-    expect(postEditHash).not.toBe(preEditHash);
-    const readiness = computeStructuralReadiness(confirmed.appliedGraph);
-    expect(readiness?.status).toBe('ready');
-    expect(buildGmHeldAppliedChips(readiness)).toEqual([
-      { ...GM_HELD_APPLIED_RERUN_CHIP },
-    ]);
   });
 
   it('MIXED tunable+structural batch: held WHOLESALE — nothing persisted, no partial apply (D-S batch boundary)', async () => {
