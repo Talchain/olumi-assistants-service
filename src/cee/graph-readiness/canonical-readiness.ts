@@ -34,11 +34,31 @@
  *
  * ⚠ AND THE HONESTY CONSTRAINT ON THAT NORMALISATION: filling in required edge
  * PARAMETERS could fabricate evidence. It does not, and that is not an
- * assumption — `canonical-readiness.invariance.test.ts` asserts the admission
- * verdict and every per-option blocker are INVARIANT under the synthesised
- * values (they exist only to satisfy `EdgeV3`'s required keys; the admission
- * assessment reads graph CONNECTIVITY and option INTERVENTIONS, not edge
- * weights). If that invariance ever breaks, the test REDs and this adapter is
+ * assumption — `__tests__/canonical-readiness.invariance.test.ts` asserts it.
+ *
+ * That file sweeps std ∈ {0.01, 0.1, 0.5} × exists_probability ∈ {0, 0.5, 1} ×
+ * effect_direction ∈ {positive, negative} — 18 points — across a five-graph
+ * corpus that admits BOTH ways (healthy · one unconfigured option · goal-less ·
+ * mixed explicit/absent edge fields · identical options), and asserts the
+ * `can_run_analysis` verdict and every `readiness_issues[]` entry BY IDENTITY
+ * (code · option_id · factor_id, as a full set, never a count) are unchanged.
+ * It works in the INPUT SPACE — comparing a graph whose edges omit the fields
+ * against the same graph carrying each sweep value explicitly — so it pins the
+ * stronger property that NO synthesis choice can move admission, not merely
+ * that today's two constants happen to be inert. It carries a negative control
+ * (removing an option's interventions MUST flip the verdict), because an
+ * invariance probe that cannot see a difference is not evidence of invariance.
+ *
+ * The reason the parameters are inert: they exist only to satisfy `EdgeV3`'s
+ * required keys, and the admission assessment reads graph CONNECTIVITY and
+ * option INTERVENTIONS, not edge weights.
+ *
+ * ⚠ THE CITATION CAME FIRST AND THE FILE DID NOT — for the module's whole life
+ * until 2026-08-16 this paragraph named a test that did not exist (the
+ * invariance had been shown once by a build-time mutant and never pinned). If
+ * you are reading a claim like this one anywhere in this repo, open the file.
+ *
+ * If that invariance ever breaks, the test REDs and this adapter is
  * fabricating — treat it as a hard stop, not a flake.
  *
  * ⭐ TWO QUESTIONS, NAMED APART (the defect class this route already shipped
