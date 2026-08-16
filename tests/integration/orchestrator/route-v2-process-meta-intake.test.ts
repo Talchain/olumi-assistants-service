@@ -42,7 +42,12 @@ vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', async (i
   };
 });
 
-const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
+  id: 'mock-row-id',
+  ...(write.graph != null
+    ? { graph_write_disposition: 'accepted_insert' as const }
+    : {}),
+}));
 // ROADMAP 1.148 — importOriginal-spread + complete shared store mock
 // (derive, don't mirror): interface growth can't silently break this suite.
 // The previous hand-rolled 6-method mock left readMostRecentPendingActions /

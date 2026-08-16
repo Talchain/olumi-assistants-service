@@ -6,7 +6,8 @@
  * (scripts/rehearse-turn-fence-first-write-exemption.mjs — 38/38 against
  * real Postgres 16, including the RED reproduction of the phantom state
  * against the deployed 20260802120000 SQL), and the app-side semantics are
- * mirrored by the fake in turn-fence-first-write-exemption.test.ts.
+ * mirrored by the current v5 fence fakes in
+ * turn-fence-atomic-append.test.ts and turn-fence-stop-vs-disconnect.test.ts.
  *
  * THE LINES THIS SUITE EXISTS FOR:
  *   · graph presence is read IN the scenarios FOR UPDATE select (zero

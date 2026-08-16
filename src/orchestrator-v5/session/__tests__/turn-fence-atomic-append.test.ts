@@ -1,37 +1,14 @@
 /**
- * V5 TURN FENCE — the evaluate→append window, CLOSED (ROADMAP 2.174 fix c).
- *
- * THE SEAM (documented at turn-fence.ts arrival 10, proven RED here at
- * `a1fb06bd`): the fence evaluation is a SELECT and the append is a separate
- * round trip, so a Stop (or a newer claim) that lands INSIDE that ~10-40 ms
- * window is invisible to the evaluation the commit just passed — the fence is
- * a check, not a lock, and the stopped/superseded graph still lands.
- *
- * THE FIX: `append_turn_atomic_v4` — the fence check moves INSIDE the append
- * transaction, under a `FOR UPDATE` lock on the turn's own fence row, so a
- * concurrent `v5_mark_turn_stopped` serialises against the commit: either the
- * tombstone commits first (v4 sees it and REFUSES, SQLSTATE OLTF1) or it
- * waits for the commit (and then honestly reports `already_committed`).
- * Supersession is read under the same transaction (OLTF2). The code
- * FEATURE-DETECTS v4 (PGRST202 = not migrated) and falls back to today's
- * evaluate-then-append two-step — behaviour before the migration executes is
- * BYTE-EQUIVALENT to the pre-fix path, pinned below.
- *
- * The interleaving is DETERMINISTIC: the fake client exposes an
- * `onBeforeAppend` hook that runs a rival write (stop / newer claim) at the
- * exact point between the evaluation round trip and the append round trip —
- * the strongest form of the race, no timing required.
- *
- * The fake implements the MIGRATION'S semantics (claim/evaluate/stop exactly
- * as turn-fence-stop-vs-disconnect.test.ts, plus v4's in-transaction gate);
- * the rehearsal (PHASE0-EVIDENCE-2026-07-28/fence-hardening-build.md) proves
- * the real SQL matches this fake on the same call sequences.
+ * Turn-fence and CAS checks carried by the singular graph-only v5 append.
+ * The fake injects rivals at the top of the append transaction, closing the
+ * old evaluate→legacy-append window deterministically.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
 import { SessionLRUCache } from '../cache.js';
 import { SupabaseSessionStore } from '../supabase-store.js';
 import { GraphStaleWriteError, type SessionTurnWrite } from '../store.js';
@@ -50,243 +27,142 @@ const GRAPH_A = {
   nodes: [{ id: 'n_a', kind: 'factor', label: 'Window Probe A' }],
   edges: [],
 };
-
-// ── The fence-backed fake, extended with append_turn_atomic_v4 ──────────────
+const GRAPH_B = {
+  nodes: [{ id: 'n_b', kind: 'factor', label: 'Window Probe B' }],
+  edges: [],
+};
 
 interface FenceRow {
   generation: number;
-  scenarioId: string;
   turnId: string;
-  stoppedAt: string | null;
+  stopped: boolean;
 }
 
-interface AtomicFenceBackend {
-  client: SupabaseClient;
-  storedGraph: () => unknown;
-  calls: Array<{ fn: string; args: Record<string, unknown> }>;
-  rows: FenceRow[];
-  /**
-   * Runs synchronously at the top of the NEXT append_turn_atomic_* call —
-   * i.e. deterministically INSIDE the evaluate→append window (after any
-   * pre-RPC evaluation resolved, before the append's own logic runs). In the
-   * real database this models the rival transaction COMMITTING first; v4's
-   * FOR UPDATE serialisation makes that the only ordering in which the rival
-   * wins, which is exactly the ordering the fake reproduces.
-   */
-  onBeforeAppend: (() => void) | null;
-  /** When true, the fake pretends v4 was never migrated (PGRST202). */
-  v4Missing: boolean;
-  stop: (turnId: string) => void;
-  claim: (turnId: string) => number;
-}
-
-function makeAtomicFenceBackend(): AtomicFenceBackend {
+function makeBackend() {
   const rows: FenceRow[] = [];
-  const committedTurns = new Set<string>();
   const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
-  let sequence = 0;
   let graph: unknown = null;
   let graphIdentityHash: string | null = null;
+  let sequence = 0;
+  let onBeforeAppend: (() => void) | null = null;
+  let v5Missing = false;
 
-  const find = (scenarioId: string, turnId: string): FenceRow | undefined =>
-    rows.find((r) => r.scenarioId === scenarioId && r.turnId === turnId);
-
-  const backend: AtomicFenceBackend = {
-    client: null as never,
-    storedGraph: () => graph,
-    calls,
-    rows,
-    onBeforeAppend: null,
-    v4Missing: false,
-    stop: (turnId: string) => {
-      const existing = find(SCENARIO, turnId);
-      if (existing) {
-        existing.stoppedAt = existing.stoppedAt ?? new Date().toISOString();
-      } else {
-        sequence += 1;
-        rows.push({
-          generation: sequence,
-          scenarioId: SCENARIO,
-          turnId,
-          stoppedAt: new Date().toISOString(),
-        });
-      }
-    },
-    claim: (turnId: string) => {
-      const existing = find(SCENARIO, turnId);
-      if (existing) return existing.generation;
-      sequence += 1;
-      rows.push({ generation: sequence, scenarioId: SCENARIO, turnId, stoppedAt: null });
-      return sequence;
-    },
+  const claim = (turnId: string): number => {
+    const existing = rows.find((row) => row.turnId === turnId);
+    if (existing !== undefined) return existing.generation;
+    sequence += 1;
+    rows.push({ generation: sequence, turnId, stopped: false });
+    return sequence;
   };
+  const stop = (turnId: string): void => {
+    const existing = rows.find((row) => row.turnId === turnId);
+    if (existing !== undefined) existing.stopped = true;
+    else {
+      sequence += 1;
+      rows.push({ generation: sequence, turnId, stopped: true });
+    }
+  };
+
+  const query: Record<string, unknown> = {};
+  for (const method of ['select', 'update', 'eq', 'neq', 'is', 'not', 'order', 'in']) {
+    query[method] = () => query;
+  }
+  query.limit = () => Promise.resolve({ data: [], error: null });
+  query.maybeSingle = () => Promise.resolve({ data: null, error: null });
+  query.then = (resolve: (value: unknown) => unknown) =>
+    Promise.resolve({ data: null, error: null }).then(resolve);
 
   const client = {
     rpc: vi.fn(async (fn: string, args: Record<string, unknown>) => {
       calls.push({ fn, args });
-      const scenarioId = String(args.p_scenario_id ?? '');
-      const turnId = String(args.p_turn_id ?? '');
-
-      if (fn === 'v5_claim_turn_fence') {
-        return { data: backend.claim(turnId), error: null };
-      }
-
-      if (fn === 'v5_evaluate_turn_fence') {
-        const mine = find(scenarioId, turnId);
-        const scenarioRows = rows.filter((r) => r.scenarioId === scenarioId);
-        const maxGeneration =
-          scenarioRows.length === 0
-            ? null
-            : Math.max(...scenarioRows.map((r) => r.generation));
-        return {
-          data: {
-            claimed: mine !== undefined,
-            stopped: mine?.stoppedAt != null,
-            generation: mine?.generation ?? null,
-            max_generation: maxGeneration,
-          },
-          error: null,
-        };
-      }
-
-      if (fn === 'v5_mark_turn_stopped') {
-        backend.stop(turnId);
-        return {
-          data: {
-            stopped: true,
-            claimed: true,
-            already_committed: committedTurns.has(`${scenarioId}:${turnId}`),
-          },
-          error: null,
-        };
-      }
-
-      if (fn.startsWith('append_turn_atomic')) {
-        // THE WINDOW: the rival lands here — after any pre-RPC evaluation,
-        // before the append's own semantics run.
-        if (backend.onBeforeAppend !== null) {
-          const rival = backend.onBeforeAppend;
-          backend.onBeforeAppend = null;
+      if (fn === 'append_turn_atomic_v5') {
+        if (onBeforeAppend !== null) {
+          const rival = onBeforeAppend;
+          onBeforeAppend = null;
           rival();
         }
-
-        if (fn === 'append_turn_atomic_v4') {
-          if (backend.v4Missing) {
+        if (v5Missing) {
+          return { data: null, error: { code: 'PGRST202', message: 'v5 missing' } };
+        }
+        const generation = args.p_fence_generation as number | null;
+        if (generation !== null) {
+          const mine = rows.find((row) => row.generation === generation);
+          const max = Math.max(...rows.map((row) => row.generation));
+          if (mine === undefined) {
+            return { data: null, error: { code: 'OLTF3', message: 'unclaimed', details: '{}' } };
+          }
+          if (mine.stopped) {
             return {
               data: null,
               error: {
-                code: 'PGRST202',
-                message:
-                  'Could not find the function public.append_turn_atomic_v4 in the schema cache',
+                code: 'OLTF1',
+                message: 'stopped',
+                details: JSON.stringify({ generation, max_generation: max }),
               },
             };
           }
-          // ── The migration's in-transaction fence gate (fake) ─────────────
-          const fenceGeneration = args.p_fence_generation as number | null;
-          if (fenceGeneration != null && args.p_graph != null) {
-            const mine = find(scenarioId, turnId);
-            if (mine === undefined) {
-              return {
-                data: null,
-                error: { code: 'OLTF3', message: 'v4: no fence row', details: '{}' },
-              };
-            }
-            if (mine.stoppedAt !== null) {
-              return {
-                data: null,
-                error: {
-                  code: 'OLTF1',
-                  message: 'v4: turn stopped',
-                  details: JSON.stringify({
-                    generation: mine.generation,
-                    max_generation: Math.max(
-                      ...rows.filter((r) => r.scenarioId === scenarioId).map((r) => r.generation),
-                    ),
-                  }),
-                },
-              };
-            }
-            const maxGeneration = Math.max(
-              ...rows.filter((r) => r.scenarioId === scenarioId).map((r) => r.generation),
-            );
-            if (fenceGeneration < maxGeneration) {
-              return {
-                data: null,
-                error: {
-                  code: 'OLTF2',
-                  message: 'v4: superseded',
-                  details: JSON.stringify({
-                    generation: fenceGeneration,
-                    max_generation: maxGeneration,
-                  }),
-                },
-              };
-            }
-          }
-          // ── v3-equivalent CAS gate ───────────────────────────────────────
-          if (
-            args.p_cas_enforce === true &&
-            args.p_expected_graph_identity_hash != null &&
-            graphIdentityHash !== null &&
-            graphIdentityHash !== args.p_expected_graph_identity_hash &&
-            (args.p_incoming_graph_identity_hash == null ||
-              args.p_incoming_graph_identity_hash !== graphIdentityHash)
-          ) {
-            return { data: null, error: { code: 'OLGC1', message: 'v4: stale graph write' } };
+          // v5 preserves the locked first-write exemption: supersession only
+          // refuses when there is a current graph to protect.
+          if (generation < max && graph !== null) {
+            return {
+              data: null,
+              error: {
+                code: 'OLTF2',
+                message: 'superseded',
+                details: JSON.stringify({ generation, max_generation: max }),
+              },
+            };
           }
         }
-
-        committedTurns.add(`${scenarioId}:${turnId}`);
-        if (args.p_graph != null) {
-          graph = args.p_graph;
-          if (fn !== 'append_turn_atomic_v2') {
-            graphIdentityHash =
-              (args.p_incoming_graph_identity_hash as string | null) ?? null;
-          }
+        if (
+          args.p_cas_enforce === true &&
+          args.p_expected_graph_identity_hash != null &&
+          graphIdentityHash !== null &&
+          graphIdentityHash !== args.p_expected_graph_identity_hash &&
+          (args.p_incoming_graph_identity_hash == null ||
+            args.p_incoming_graph_identity_hash !== graphIdentityHash)
+        ) {
+          return { data: null, error: { code: 'OLGC1', message: 'stale' } };
         }
-        return { data: `row-${turnId}`, error: null };
+        graph = args.p_graph;
+        graphIdentityHash = (args.p_incoming_graph_identity_hash as string | null) ?? null;
+        return { data: { id: String(args.p_turn_id), disposition: 'inserted' }, error: null };
       }
-
-      return { data: null, error: { message: `unexpected rpc ${fn}` } };
+      if (fn === 'append_turn_atomic_v2') {
+        return { data: String(args.p_turn_id), error: null };
+      }
+      return { data: null, error: { code: 'UNEXPECTED', message: fn } };
     }),
-    from: vi.fn((table: string) => {
-      // ROADMAP 2.709 fidelity: the first-write exemption reads `scenarios`
-      // graph-presence before honouring a superseded refusal; answer from
-      // the SAME `graph` state the append writes (see the sibling comment in
-      // turn-fence-stop-vs-disconnect.test.ts).
-      const chain = {
-        select: () => chain,
-        eq: () => chain,
-        neq: () => chain,
-        order: () => chain,
-        limit: () =>
-          Promise.resolve({
-            data: table === 'scenarios' && graph !== null ? [{ id: SCENARIO }] : [],
-            error: null,
-          }),
-        maybeSingle: () => Promise.resolve({ data: null, error: null }),
-        not: () => chain,
-        is: () => chain,
-        in: () => chain,
-        update: () => chain,
-        then: (
-          resolve: (v: { data: unknown; error: null }) => unknown,
-          reject?: (e: unknown) => unknown,
-        ) => Promise.resolve({ data: null, error: null }).then(resolve, reject),
-      };
-      return chain as never;
-    }),
+    from: vi.fn(() => query as never),
   } as unknown as SupabaseClient;
 
-  backend.client = client;
-  return backend;
+  return {
+    client,
+    calls,
+    claim,
+    stop,
+    graph: () => graph,
+    setGraph: (value: unknown) => {
+      graph = value;
+      graphIdentityHash =
+        value == null
+          ? null
+          : computeExpectedGraphCasHashes(value).expectedGraphIdentityHash;
+    },
+    beforeAppend: (rival: () => void) => {
+      onBeforeAppend = rival;
+    },
+    missingV5: () => {
+      v5Missing = true;
+    },
+  };
 }
 
-function makeStore(client: SupabaseClient): SupabaseSessionStore {
+function store(client: SupabaseClient, graphCasRpc: 'off' | 'enforce' = 'off') {
   return new SupabaseSessionStore(
     client,
     new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-    { defaultReadLimit: 20 },
+    { defaultReadLimit: 20, graphCasRpc },
   );
 }
 
@@ -301,199 +177,119 @@ function write(turnId: string, graph?: unknown): SessionTurnWrite {
     llm_calls_used: 1,
     duration_ms: 50_000,
     handler_facts: [],
-    ...(graph !== undefined ? { graph } : {}),
+    ...(graph === undefined ? {} : { graph }),
   };
 }
 
-function handleFor(generation: number, turnId: string): TurnFenceHandle {
+function handle(turnId: string, generation: number): TurnFenceHandle {
   return { scenarioId: SCENARIO, turnId, generation };
 }
 
-beforeEach(() => {
-  setTestSink(null);
-});
+beforeEach(() => setTestSink(null));
 
-// ═══════════════════════════════════════════════════════════════════════════
-describe('2.174 fix c — the evaluate→append window (deterministic interleaving)', () => {
-  // ── THE PIN (proven RED at a1fb06bd: the graph landed despite the Stop) ──
-  it('a Stop landing INSIDE the window refuses the graph write (was: the stopped graph landed)', async () => {
-    const backend = makeAtomicFenceBackend();
-    const store = makeStore(backend.client);
-    const gen = backend.claim(TURN_A);
-
-    // The rival: an explicit user Stop for THIS turn, committing at the
-    // exact seam between the fence evaluation and the append round trip.
-    backend.onBeforeAppend = () => backend.stop(TURN_A);
-
-    const outcome = await runWithTurnFence(handleFor(gen, TURN_A), async () =>
-      store.append(write(TURN_A, GRAPH_A)).then(
-        () => null,
-        (e: unknown) => e,
-      ),
+describe('v5 in-transaction fence', () => {
+  it('refuses a Stop that lands at append and writes no graph', async () => {
+    const db = makeBackend();
+    const generation = db.claim(TURN_A);
+    db.beforeAppend(() => db.stop(TURN_A));
+    const session = store(db.client);
+    const mark = vi.spyOn(session, 'markGraphWriteFailed');
+    const result = runWithTurnFence(handle(TURN_A, generation), () =>
+      session.append(write(TURN_A, GRAPH_A)),
     );
-
-    expect(outcome).toBeInstanceOf(TurnFenceRejectedError);
-    expect((outcome as TurnFenceRejectedError).verdict).toBe('stopped');
-    expect(backend.storedGraph()).toBeNull();
+    await expect(result).rejects.toMatchObject({
+      name: TurnFenceRejectedError.name,
+      verdict: 'stopped',
+    });
+    expect(db.graph()).toBeNull();
+    expect(mark).toHaveBeenCalledWith(
+      SCENARIO,
+      TURN_A,
+      'stopped',
+      'draft_loss',
+    );
   });
 
-  it('a NEWER CLAIM landing inside the window is SEEN (OLTF2) — and the refusal STANDS, with no unfenced re-append (ROADMAP 2.736)', async () => {
-    // ⚠ THIS PIN HAS NOW FLIPPED TWICE, AND THE SECOND FLIP IS THE HONEST ONE.
-    //
-    // The window-detection property it exists for has never changed and is
-    // asserted below: the in-transaction gate DOES see the rival claim (v4
-    // answers OLTF2). 2.709 then re-priced that verdict for a graph-less
-    // scenario and had the APP recover — re-proving "graph absent + not
-    // stopped" and committing through the pre-v4 append. An external audit
-    // (Codex, 2026-08-08) showed that recovery wrote through an RPC with no
-    // fence check, after a re-read taken outside any lock: a Stop or a rival
-    // commit landing in THAT window was invisible.
-    //
-    // 2.736 removes the unfenced write. The exemption now lives only in
-    // migration 20260806120000's in-transaction gate, under the scenarios row
-    // lock. Against a pre-migration database the refusal stands — a disclosed,
-    // bounded reopening of the fresh-journey P0 until that migration runs.
-    const backend = makeAtomicFenceBackend();
-    const store = makeStore(backend.client);
-    const genA = backend.claim(TURN_A);
+  it('allows a superseded first graph under the same scenario lock', async () => {
+    const db = makeBackend();
+    const generation = db.claim(TURN_A);
+    db.beforeAppend(() => void db.claim(TURN_B));
+    const session = store(db.client);
+    const mark = vi.spyOn(session, 'markGraphWriteFailed');
+    const result = await runWithTurnFence(handle(TURN_A, generation), () =>
+      session.append(write(TURN_A, GRAPH_A)),
+    );
+    expect(result.graph_write_disposition).toBe('accepted_insert');
+    expect(db.graph()).toBe(GRAPH_A);
+    expect(mark).not.toHaveBeenCalled();
+  });
 
-    backend.onBeforeAppend = () => void backend.claim(TURN_B);
-
+  it('refuses a superseded graph when current authority exists', async () => {
+    const db = makeBackend();
+    db.setGraph(GRAPH_B);
+    const generation = db.claim(TURN_A);
+    db.beforeAppend(() => void db.claim(TURN_B));
+    const session = store(db.client);
+    const mark = vi.spyOn(session, 'markGraphWriteFailed');
     await expect(
-      runWithTurnFence(handleFor(genA, TURN_A), async () => store.append(write(TURN_A, GRAPH_A))),
-    ).rejects.toThrow(TurnFenceRejectedError);
-
-    // The gate saw the rival — and nothing was written by any path.
-    expect(backend.storedGraph()).toBeNull();
-    const appendFns = backend.calls
-      .filter((c) => c.fn.startsWith('append_turn_atomic'))
-      .map((c) => c.fn);
-    expect(appendFns).toEqual(['append_turn_atomic_v4']);
-  });
-
-  // ── POSITIVE CONTROL (trap 13): the atomic fence can be PASSED ───────────
-  it('an unmolested current turn commits through the atomic path', async () => {
-    const backend = makeAtomicFenceBackend();
-    const store = makeStore(backend.client);
-    const gen = backend.claim(TURN_A);
-
-    const result = await runWithTurnFence(handleFor(gen, TURN_A), async () =>
-      store.append(write(TURN_A, GRAPH_A)),
-    );
-
-    expect(result.id).toBe(`row-${TURN_A}`);
-    expect(backend.storedGraph()).toEqual(GRAPH_A);
-    // The check rode INSIDE the append: no separate evaluation round trip.
-    expect(backend.calls.filter((c) => c.fn === 'v5_evaluate_turn_fence')).toHaveLength(0);
-    const appendCall = backend.calls.find((c) => c.fn === 'append_turn_atomic_v4');
-    expect(appendCall).toBeDefined();
-    expect(appendCall!.args.p_fence_generation).toBe(gen);
-  });
-
-  it('non-graph writes never touch the fence and never use v4 (claim-type discipline)', async () => {
-    const backend = makeAtomicFenceBackend();
-    const store = makeStore(backend.client);
-
-    const result = await store.append(write(TURN_A)); // no graph, no fence context
-
-    expect(result.id).toBe(`row-${TURN_A}`);
-    expect(backend.calls.map((c) => c.fn)).toEqual(['append_turn_atomic_v2']);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-describe('2.174 fix c — BEFORE the migration executes (feature-detect, pinned)', () => {
-  // The stated posture: FEATURE-DETECT, not fail-closed. PGRST202 on v4 falls
-  // back to the pre-fix two-step (evaluate → append), so the code deploys
-  // safely ahead of the migration and the fence keeps exactly its pre-v4
-  // protection (the ~one-RPC window included, honestly).
-  it('v4 missing → falls back to evaluate-then-append and COMMITS a current turn', async () => {
-    const backend = makeAtomicFenceBackend();
-    backend.v4Missing = true;
-    const store = makeStore(backend.client);
-    const gen = backend.claim(TURN_A);
-
-    const result = await runWithTurnFence(handleFor(gen, TURN_A), async () =>
-      store.append(write(TURN_A, GRAPH_A)),
-    );
-
-    expect(result.id).toBe(`row-${TURN_A}`);
-    expect(backend.storedGraph()).toEqual(GRAPH_A);
-    // The fallback IS the pre-fix path: one evaluation round trip, then the
-    // pre-v4 append RPC.
-    expect(backend.calls.filter((c) => c.fn === 'v5_evaluate_turn_fence')).toHaveLength(1);
-    expect(backend.calls.filter((c) => c.fn === 'append_turn_atomic_v2')).toHaveLength(1);
-  });
-
-  it('v4 missing → a PRE-EXISTING tombstone still refuses (the pre-v4 protection, intact)', async () => {
-    const backend = makeAtomicFenceBackend();
-    backend.v4Missing = true;
-    const store = makeStore(backend.client);
-    const gen = backend.claim(TURN_A);
-    backend.stop(TURN_A); // BEFORE the append — visible to the evaluation
-
-    const outcome = await runWithTurnFence(handleFor(gen, TURN_A), async () =>
-      store.append(write(TURN_A, GRAPH_A)).then(
-        () => null,
-        (e: unknown) => e,
+      runWithTurnFence(handle(TURN_A, generation), () =>
+        session.append(write(TURN_A, GRAPH_A)),
       ),
+    ).rejects.toMatchObject({ verdict: 'superseded' });
+    expect(db.graph()).toBe(GRAPH_B);
+    expect(mark).toHaveBeenCalledWith(
+      SCENARIO,
+      TURN_A,
+      'superseded',
+      'draft_loss',
     );
-
-    expect(outcome).toBeInstanceOf(TurnFenceRejectedError);
-    expect((outcome as TurnFenceRejectedError).verdict).toBe('stopped');
-    expect(backend.storedGraph()).toBeNull();
   });
 
-  it('the v4-missing discovery is CACHED: the second graph write skips v4 entirely', async () => {
-    const backend = makeAtomicFenceBackend();
-    backend.v4Missing = true;
-    const store = makeStore(backend.client);
-    const genA = backend.claim(TURN_A);
-    await runWithTurnFence(handleFor(genA, TURN_A), async () =>
-      store.append(write(TURN_A, GRAPH_A)),
+  it('passes the admitted generation and does no pre-RPC evaluation', async () => {
+    const db = makeBackend();
+    const generation = db.claim(TURN_A);
+    await runWithTurnFence(handle(TURN_A, generation), () =>
+      store(db.client).append(write(TURN_A, GRAPH_A)),
     );
-    const genB = backend.claim(TURN_B);
-    await runWithTurnFence(handleFor(genB, TURN_B), async () =>
-      store.append(write(TURN_B, GRAPH_A)),
-    );
+    expect(db.calls.some((call) => call.fn === 'v5_evaluate_turn_fence')).toBe(false);
+    expect(db.calls.find((call) => call.fn === 'append_turn_atomic_v5')?.args)
+      .toMatchObject({ p_fence_generation: generation });
+  });
 
-    expect(backend.calls.filter((c) => c.fn === 'append_turn_atomic_v4')).toHaveLength(1);
+  it('missing v5 fails closed with no graph fallback', async () => {
+    const db = makeBackend();
+    db.missingV5();
+    const generation = db.claim(TURN_A);
+    await expect(
+      runWithTurnFence(handle(TURN_A, generation), () =>
+        store(db.client).append(write(TURN_A, GRAPH_A)),
+      ),
+    ).rejects.toMatchObject({ rpc_code: 'PGRST202' });
+    expect(
+      db.calls.filter((call) => call.fn.startsWith('append_turn_atomic')).map((call) => call.fn),
+    ).toEqual(['append_turn_atomic_v5']);
+  });
+
+  it('graph-free turns remain on v2 and do not touch the fence', async () => {
+    const db = makeBackend();
+    const result = await store(db.client).append(write(TURN_A));
+    expect(result.id).toBe(TURN_A);
+    expect(db.calls.map((call) => call.fn)).toEqual(['append_turn_atomic_v2']);
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-describe('2.174 fix c — CAS still enforced inside v4', () => {
-  it('a stale base under enforce mode maps to GraphStaleWriteError (OLGC1), not a fence refusal', async () => {
-    const backend = makeAtomicFenceBackend();
-    const store = new SupabaseSessionStore(
-      backend.client,
-      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
-      { defaultReadLimit: 20, graphCasRpc: 'enforce' },
+describe('v5 in-transaction CAS coexists with the fence', () => {
+  it('maps OLGC1 without weakening the admitted generation', async () => {
+    const db = makeBackend();
+    db.setGraph(GRAPH_A);
+    const generation = db.claim(TURN_B);
+    const result = runWithTurnFence(handle(TURN_B, generation), () =>
+      store(db.client, 'enforce').append({
+        ...write(TURN_B, GRAPH_B),
+        expectedGraphIdentityHash: 'deadbeef'.repeat(8),
+      }),
     );
-    // Seed a recorded identity hash by committing turn A's graph first.
-    const genA = backend.claim(TURN_A);
-    await runWithTurnFence(handleFor(genA, TURN_A), async () =>
-      store.append({
-        ...write(TURN_A, GRAPH_A),
-        expectedGraphIdentityHash: undefined,
-      } as SessionTurnWrite),
-    );
-
-    // Turn B arrives with a WRONG expected base.
-    const genB = backend.claim(TURN_B);
-    const outcome = await runWithTurnFence(handleFor(genB, TURN_B), async () =>
-      store
-        .append({
-          ...write(TURN_B, { nodes: [], edges: [] }),
-          expectedGraphIdentityHash: 'deadbeef'.repeat(8),
-        } as SessionTurnWrite)
-        .then(
-          () => null,
-          (e: unknown) => e,
-        ),
-    );
-
-    expect(outcome).toBeInstanceOf(GraphStaleWriteError);
-    expect(backend.storedGraph()).toEqual(GRAPH_A); // B's write rolled back
+    await expect(result).rejects.toBeInstanceOf(GraphStaleWriteError);
+    expect(db.graph()).toBe(GRAPH_A);
   });
 });

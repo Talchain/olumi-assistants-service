@@ -68,9 +68,97 @@ function makePayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function canonicalEdge(from: string, to: string) {
+  return {
+    from,
+    to,
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 1,
+    effect_direction: 'positive' as const,
+  };
+}
+
 const MINIMAL_GRAPH = {
-  nodes: [{ id: 'dec_launch', kind: 'decision', label: 'Launch?' }],
-  edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
+  goal_node_id: 'goal_revenue',
+  nodes: [
+    { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+    { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
+    {
+      id: 'opt_launch_now',
+      kind: 'option',
+      label: 'Launch now',
+      interventions: {
+        fac_revenue: {
+          value: 0.8,
+          source: 'user_specified',
+          target_match: {
+            node_id: 'fac_revenue',
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    },
+    {
+      id: 'opt_delay',
+      kind: 'option',
+      label: 'Delay 6mo',
+      interventions: {
+        fac_revenue: {
+          value: 0.3,
+          source: 'user_specified',
+          target_match: {
+            node_id: 'fac_revenue',
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    },
+    {
+      id: 'fac_revenue',
+      kind: 'factor',
+      label: 'Revenue potential',
+      category: 'controllable',
+    },
+  ],
+  edges: [
+    {
+      from: 'dec_launch',
+      to: 'opt_launch_now',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'dec_launch',
+      to: 'opt_delay',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt_launch_now',
+      to: 'fac_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt_delay',
+      to: 'fac_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'fac_revenue',
+      to: 'goal_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+  ],
 };
 
 // Cast to the DraftGraphResult['analysisReady'] shape rather than
@@ -247,8 +335,8 @@ describe('dispatchDraftGraph', () => {
           { id: 'n3', kind: 'factor', label: 'Market size' },
         ],
         edges: [
-          { from: 'n1', to: 'n2' },
-          { from: 'n3', to: 'n2' },
+          canonicalEdge('n1', 'n2'),
+          canonicalEdge('n3', 'n2'),
         ],
       };
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
@@ -272,7 +360,7 @@ describe('dispatchDraftGraph', () => {
           { id: 'n1', kind: 'decision', label: 'A' },
           { id: 'n2', kind: 'goal', label: 'B' },
         ],
-        edges: [{ from: 'n1', to: 'n2' }],
+        edges: [canonicalEdge('n1', 'n2')],
       };
       const draftResult = {
         ...makeDraftResult(graph, MINIMAL_ANALYSIS_READY),
@@ -307,7 +395,7 @@ describe('dispatchDraftGraph', () => {
           { id: 'f2', kind: 'factor', label: 'Cost' },
           { id: 'r1', kind: 'risk', label: 'Regulatory' },
         ],
-        edges: [{ from: 'o1', to: 'g1' }],
+        edges: [canonicalEdge('o1', 'g1')],
       };
       const draftResult = {
         ...makeDraftResult(graph, MINIMAL_ANALYSIS_READY),
@@ -342,7 +430,7 @@ describe('dispatchDraftGraph', () => {
           { id: 'o1', kind: 'option', label: 'Migrate' },
           { id: 'f1', kind: 'factor', label: 'Latency' },
         ],
-        edges: [{ from: 'o1', to: 'g1' }],
+        edges: [canonicalEdge('o1', 'g1')],
       };
       const draftResult = {
         ...makeDraftResult(graph, MINIMAL_ANALYSIS_READY),
@@ -368,7 +456,7 @@ describe('dispatchDraftGraph', () => {
       expect(text).not.toContain('risk of');
     });
 
-    it('coaching narrative uses the goalless lead when no goal node is present', async () => {
+    it('coaching narrative uses the goalless lead while canonical readiness stays blocked', async () => {
       const graph = {
         nodes: [
           { id: 'o1', kind: 'option', label: 'Plan A' },
@@ -376,7 +464,7 @@ describe('dispatchDraftGraph', () => {
           { id: 'f1', kind: 'factor', label: 'Budget' },
           { id: 'r1', kind: 'risk', label: 'Schedule slip' },
         ],
-        edges: [{ from: 'o1', to: 'f1' }],
+        edges: [canonicalEdge('o1', 'f1')],
       };
       const draftResult = { ...makeDraftResult(graph), assistantText: null };
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
@@ -389,11 +477,12 @@ describe('dispatchDraftGraph', () => {
       });
 
       const text = result.response.assistant_text;
+      expect(result.commitPerformed).toBe(true);
+      expect(result.analysisReady?.status).toBe('blocked');
       expect(text).toContain("I've built a first decision model from your brief");
       expect(text).toContain('Plan A');
       expect(text).toContain('Plan B');
       expect(text).toContain('Options compared');
-      // No goal quote — there is no goal node to name.
       expect(text).not.toContain('"');
       expect(text).not.toContain('nodes');
     });
@@ -409,7 +498,7 @@ describe('dispatchDraftGraph', () => {
           { id: 'o1', kind: 'option', label: 'Plan A' },
           { id: 'f1', kind: 'factor', label: 'Budget' },
         ],
-        edges: [{ from: 'o1', to: 'g1' }],
+        edges: [canonicalEdge('o1', 'g1')],
       };
       const draftResult = {
         ...makeDraftResult(graph, MINIMAL_ANALYSIS_READY),
@@ -647,7 +736,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.analysisReady).toBeUndefined();
     });
 
-    it('is undefined when result.analysisReady is undefined (no pipeline payload)', async () => {
+    it('uses canonical persisted readiness when the pipeline payload is absent', async () => {
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
         .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
       // makeDraftResult with no analysisReady arg → analysisReady undefined
@@ -661,7 +750,8 @@ describe('dispatchDraftGraph', () => {
       });
 
       expect('analysis_ready' in result.response).toBe(false);
-      expect(result.analysisReady).toBeUndefined();
+      expect(result.analysisReady?.status).toBe('ready');
+      expect(result.analysisReady?.goal_node_id).toBe('goal_revenue');
     });
   });
 
@@ -960,7 +1050,7 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     expect(typeof result.response.suggested_actions[2].message).toBe('string');
   });
 
-  it('fails closed to model review when analysis_ready is absent', async () => {
+  it('uses canonical persisted readiness when pipeline analysis_ready is absent', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
@@ -973,16 +1063,15 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.suggested_actions).toHaveLength(1);
+    expect(result.response.suggested_actions).toHaveLength(3);
     expect(result.response.suggested_actions[0]).toMatchObject({
-      id: 'chip_prompt_review_model_gaps',
-      label: 'Review model gaps',
+      id: 'chip_action_run_analysis',
+      label: 'Run analysis',
+      action_type: 'run_analysis',
     });
-    // Prompt chip — no action_type.
-    expect(result.response.suggested_actions[0].action_type).toBeUndefined();
   });
 
-  it('fails closed to model review when analysis_ready.status is unknown', async () => {
+  it('does not let an unknown pipeline status override ready persisted state', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     const pending = { ...MINIMAL_ANALYSIS_READY, status: 'pending_values' } as unknown as typeof MINIMAL_ANALYSIS_READY;
@@ -996,8 +1085,11 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
       request: STUB_REQUEST,
     });
 
-    expect(result.response.suggested_actions).toHaveLength(1);
-    expect(result.response.suggested_actions[0].label).toBe('Review model gaps');
+    expect(result.response.suggested_actions).toHaveLength(3);
+    expect(result.response.suggested_actions[0]).toMatchObject({
+      label: 'Run analysis',
+      action_type: 'run_analysis',
+    });
   });
 
   it('emits NO chips when graph persistence failed (route returns 500 anyway)', async () => {
@@ -1085,12 +1177,39 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
 
   it('does not let an accepted Run summary bypass typed non-ready status on the dispatch boundary', async () => {
     const graph = {
+      goal_node_id: 'goal_arr',
       nodes: [
         { id: 'goal_arr', kind: 'goal', label: 'Improve annual recurring revenue' },
-        { id: 'opt_phased', kind: 'option', label: 'Phased price rise' },
-        { id: 'fac_price', kind: 'factor', label: 'Monthly Subscription Price' },
+        { id: 'dec_price', kind: 'decision', label: 'Choose a pricing route' },
+        {
+          id: 'opt_phased',
+          kind: 'option',
+          label: 'Phased price rise',
+          interventions: {
+            fac_price: {
+              raw_value: 'high',
+              value_type: 'categorical',
+              source: 'user_specified',
+              target_match: {
+                node_id: 'fac_price',
+                match_type: 'exact_id',
+                confidence: 'high',
+              },
+            },
+          },
+        },
+        {
+          id: 'fac_price',
+          kind: 'factor',
+          label: 'Monthly Subscription Price',
+          category: 'controllable',
+        },
       ],
-      edges: [{ from: 'opt_phased', to: 'fac_price' }],
+      edges: [
+        canonicalEdge('dec_price', 'opt_phased'),
+        canonicalEdge('opt_phased', 'fac_price'),
+        canonicalEdge('fac_price', 'goal_arr'),
+      ],
     };
     const needsInput = {
       status: 'needs_user_input',
@@ -1115,6 +1234,12 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
       ...makeDraftResult(graph, needsInput),
       coachingSummary: CLEAN_SUMMARY,
     };
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockImplementation(async (_response, metadata) =>
+        makeCommitResult(true, metadata.graph) as Awaited<
+          ReturnType<typeof commitDirectAnswer>
+        >,
+      );
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
       draftResult as Awaited<ReturnType<typeof handleDraftGraph>>,
     );
@@ -1129,7 +1254,8 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
     expect(result.response.assistant_text).toContain('Phased price rise');
     expect(result.response.assistant_text).toContain('Monthly Subscription Price');
     expect(result.response.suggested_actions).toHaveLength(1);
-    expect(result.response.suggested_actions[0]?.label).toBe('Configure Phased price rise');
+    expect(result.response.suggested_actions[0]?.label).toBe('Resolve model issue');
+    expect(result.response.suggested_actions[0]?.action_type).toBeUndefined();
     const sourceEvent = (emit as unknown as MockedFunction<typeof emit>).mock.calls
       .find((call) => call[0] === TelemetryEvents.V5PostDraftCoachingSourceSelected);
     expect((sourceEvent?.[1] as Record<string, unknown>).coaching_summary_passed_gate).toBe(false);

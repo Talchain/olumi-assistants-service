@@ -105,6 +105,7 @@ const composed = draftResultToOlumiResponse(
   // from", so pass the value that carries that meaning here (`ctx.effectiveBrief`),
   // not the wire message that happens to equal it.
   ctx.effectiveBrief,
+  undefined,
 );
 
 // Stamp the envelope exactly as the route does before send.

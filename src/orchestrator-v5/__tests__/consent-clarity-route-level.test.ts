@@ -167,11 +167,44 @@ function genericProposal(): PendingAction {
 let pendingActionsForRead: readonly PendingAction[] = [];
 const appendCalls: Array<Record<string, unknown>> = [];
 
+const canonicalReadinessControl = vi.hoisted(() => ({
+  unavailableForCanonicalProjection: false,
+}));
+
+vi.mock('../../orchestrator/tools/analysis-ready-helper.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../orchestrator/tools/analysis-ready-helper.js')
+  >();
+  return {
+    ...actual,
+    buildCanonicalAnalysisReadyFromGraph: vi.fn((graph: unknown) => {
+      const record =
+        graph !== null && typeof graph === 'object' && !Array.isArray(graph)
+          ? (graph as Record<string, unknown>)
+          : null;
+      const isCanonicalProjection =
+        record !== null &&
+        Object.hasOwn(record, 'options') &&
+        Object.hasOwn(record, 'goal_node_id') &&
+        Object.hasOwn(record, 'goal_constraints');
+      return canonicalReadinessControl.unavailableForCanonicalProjection &&
+        isCanonicalProjection
+        ? undefined
+        : actual.buildCanonicalAnalysisReadyFromGraph(graph);
+    }),
+  };
+});
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: Record<string, unknown>) => {
       appendCalls.push(write);
-      return { id: `row-${appendCalls.length}` };
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -248,6 +281,7 @@ function expectCanonicalReceipt(
 beforeEach(() => {
   appendCalls.length = 0;
   pendingActionsForRead = [];
+  canonicalReadinessControl.unavailableForCanonicalProjection = false;
 });
 
 afterEach(() => {
@@ -383,6 +417,7 @@ describe('consent-clarity — "all of them"', () => {
     expect(result.response.assistant_text).toBe(assistant);
     expect(result.response.draft_graph).toBeDefined();
     expectCanonicalReceipt(result.response, write);
+    expect(result.analysisReady).toBeDefined();
     expect(assistant).toContain("'Marketing'");
     expect(assistant).toContain("'Goal'");
     expect(assistant).not.toBe(
@@ -394,6 +429,26 @@ describe('consent-clarity — "all of them"', () => {
     const persisted = (write.pending_actions ?? []) as ReadonlyArray<{ chip_id?: string }>;
     expect(persisted.some((p) => p.chip_id === HOLD_A_REF)).toBe(false);
     expect(persisted.some((p) => p.chip_id === HOLD_B_REF)).toBe(false);
+  });
+
+  it('fails closed before append when held-all projected canonical readiness is unavailable', async () => {
+    setGmMode('live');
+    pendingActionsForRead = [holdA(), holdB()];
+    canonicalReadinessControl.unavailableForCanonicalProjection = true;
+    const result = await runTurnExecutor(
+      payload('all of them'),
+      'req-consent-all-status-unavailable',
+      { routingAdapter: throwingRoutingAdapter() },
+    );
+
+    expect(appendCalls).toHaveLength(0);
+    expect(result.telemetry.commit_performed).toBe(false);
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.response.graph_hash).toBeUndefined();
+    const errorBlock = (
+      result.response.blocks as Array<{ type: string; error_code?: string }>
+    ).find((block) => block.type === 'error');
+    expect(errorBlock?.error_code).toBe('INTERNAL_ERROR');
   });
 
   it('mixed set (GM hold + generic proposal) + "all of them" → NO mutation; honest one-at-a-time list', async () => {

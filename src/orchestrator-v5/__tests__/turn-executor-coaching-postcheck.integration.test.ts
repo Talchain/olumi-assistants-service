@@ -35,7 +35,12 @@ import type {
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async (write: { graph?: unknown }) => ({
+      id: 'mock-row-id',
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    }),
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
@@ -258,4 +263,3 @@ describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)'
     expect(postcheckEvent()?.data.violation).toBe('invented_mutation_success');
   });
 });
-

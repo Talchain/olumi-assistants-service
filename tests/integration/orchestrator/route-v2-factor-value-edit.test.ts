@@ -48,7 +48,12 @@ function buildPersistedGraph() {
   };
 }
 
-const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
+  id: 'mock-row-id',
+  ...(write.graph != null
+    ? { graph_write_disposition: 'accepted_insert' as const }
+    : {}),
+}));
 let persisted: unknown = buildPersistedGraph();
 const commitReceiptState = vi.hoisted(() => ({
   mode: 'normal' as 'normal' | 'graph_null' | 'graph_not_persisted',

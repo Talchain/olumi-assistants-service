@@ -131,7 +131,12 @@ function makeSpyStore(): { store: SessionStore; appendCalls: SessionTurnWrite[] 
   const noop = createNoopSessionStore({ appendId: 'row-spy' });
   const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
     appendCalls.push(write);
-    return { id: 'row-spy' };
+    return {
+      id: 'row-spy',
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    };
   });
   void spy;
   return { store: noop, appendCalls };

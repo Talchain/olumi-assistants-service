@@ -51,8 +51,66 @@ const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const STUB_REQUEST = {} as FastifyRequest;
 
 const MINIMAL_GRAPH = {
-  nodes: [{ id: 'dec_launch', kind: 'decision', label: 'Launch?' }],
-  edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
+  nodes: [
+    { id: 'goal_revenue', kind: 'goal', label: 'Choose the launch route' },
+    { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
+    {
+      id: 'fac_revenue',
+      kind: 'factor',
+      label: 'Revenue impact',
+      category: 'controllable',
+      observed_state: { value: 0.5 },
+    },
+    {
+      id: 'opt_launch_now',
+      kind: 'option',
+      label: 'Launch now',
+      interventions: { fac_revenue: { value: 0.8, source: 'brief_extraction' } },
+    },
+    {
+      id: 'opt_delay',
+      kind: 'option',
+      label: 'Delay 6mo',
+      interventions: { fac_revenue: { value: 0.3, source: 'brief_extraction' } },
+    },
+  ],
+  edges: [
+    {
+      from: 'dec_launch',
+      to: 'opt_launch_now',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_launch',
+      to: 'opt_delay',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'opt_launch_now',
+      to: 'fac_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'opt_delay',
+      to: 'fac_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'fac_revenue',
+      to: 'goal_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+  ],
 };
 
 const MINIMAL_ANALYSIS_READY = {
@@ -124,8 +182,8 @@ function makeDraftResult(opts: {
   };
 }
 
-function makeCommitResult(graphPersisted: boolean) {
-  return canonicalCommitResultFixture(graphPersisted ? MINIMAL_GRAPH : null, {
+function makeCommitResult(graph: unknown | null) {
+  return canonicalCommitResultFixture(graph, {
     persistedRowId: 'row-1',
   });
 }
@@ -133,8 +191,11 @@ function makeCommitResult(graphPersisted: boolean) {
 function mockPipeline(draftResult: unknown, graphPersisted: boolean): void {
   (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
     .mockResolvedValue(draftResult as Awaited<ReturnType<typeof handleDraftGraph>>);
+  const graphOutput = (draftResult as { graphOutput?: unknown }).graphOutput ?? null;
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-    .mockResolvedValue(makeCommitResult(graphPersisted) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    .mockResolvedValue(
+      makeCommitResult(graphPersisted ? graphOutput : null) as Awaited<ReturnType<typeof commitDirectAnswer>>,
+    );
 }
 
 const SAFE_STRENGTHEN = [{ detail: 'the delivery timeline may be optimistic' }];

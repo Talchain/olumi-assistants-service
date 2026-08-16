@@ -65,7 +65,10 @@ function makePayload(overrides: Record<string, unknown> = {}) {
 
 const MINIMAL_GRAPH = {
   nodes: [{ id: 'dec_launch', kind: 'decision', label: 'Launch?' }],
-  edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
+  // Empty is a valid GraphV3 edge set. The fixture is intentionally blocked
+  // for analysis, but still structurally parseable so post-commit readiness
+  // can return an honest status rather than fail the receipt closed.
+  edges: [],
 };
 
 function makeDraftResult(opts: Partial<DraftGraphResult> = {}): DraftGraphResult {

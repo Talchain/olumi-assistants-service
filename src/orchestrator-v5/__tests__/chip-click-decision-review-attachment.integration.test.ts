@@ -273,7 +273,7 @@ function createStatefulFakeStore(): SessionStore {
   const noop = createNoopSessionStore();
   const store: SessionStore & { readonly capturedWrites: readonly SessionTurnWrite[] } = {
     ...noop,
-    async append(write: SessionTurnWrite): Promise<{ id: string }> {
+    async append(write: SessionTurnWrite) {
       writes.push(write);
       if (
         write.briefText !== undefined &&
@@ -289,7 +289,12 @@ function createStatefulFakeStore(): SessionStore {
       if (write.handler_facts !== undefined) {
         facts.push(write);
       }
-      return { id: `row-${write.turn_id}` };
+      return {
+        id: `row-${write.turn_id}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     async loadGraphAndBriefText(scenarioId: string) {
       return {
@@ -587,4 +592,3 @@ describe('F10 — chip_run makes ZERO decision_review calls with the await flag 
     expect(enrichment?.decision_review).toBeUndefined();
   });
 });
-

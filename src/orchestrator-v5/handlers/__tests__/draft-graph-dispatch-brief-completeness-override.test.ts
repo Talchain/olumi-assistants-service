@@ -137,6 +137,7 @@ describe('LINK-R1 C1 — the brief-completeness advisory on the clarify-v2 (brie
       'req-override-1',
       // The brief the pipeline actually drafted from — `effectiveBrief`.
       BRIEF_TEXT_AS_PERSISTED.B2,
+      undefined,
     );
 
     expect(
@@ -155,6 +156,7 @@ describe('LINK-R1 C1 — the brief-completeness advisory on the clarify-v2 (brie
       true,
       'req-override-2',
       BRIEF_TEXT_AS_PERSISTED.B2,
+      undefined,
     );
 
     expect(res.assistant_text).not.toContain(THIN_SENTENCE);
@@ -171,6 +173,7 @@ describe('LINK-R1 C1 — the brief-completeness advisory on the clarify-v2 (brie
       true,
       'req-override-3',
       'Should we go into Germany or push harder in the UK? Not sure.',
+      undefined,
     );
 
     expect(res.assistant_text).toContain(THIN_SENTENCE);
@@ -186,6 +189,7 @@ describe('LINK-R1 C1 — the brief-completeness advisory on the clarify-v2 (brie
       true,
       'req-ordinary',
       BRIEF_TEXT_AS_PERSISTED.B2,
+      undefined,
     );
 
     expect(res.assistant_text).not.toContain(THIN_SENTENCE);

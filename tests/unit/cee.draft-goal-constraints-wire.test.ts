@@ -170,7 +170,14 @@ function composeWire(brief: string = LIVE_BRIEF) {
   const persistedGraph = projectGraphForPersistence(graphOutput);
   const committed = buildCanonicalCommittedGraphReceipt(persistedGraph);
   const response = {
-    ...draftResultToOlumiResponse(result, PAYLOAD, true, "req_test", PAYLOAD.message),
+    ...draftResultToOlumiResponse(
+      result,
+      PAYLOAD,
+      true,
+      "req_test",
+      PAYLOAD.message,
+      undefined,
+    ),
     graph_hash: committed.analysisGraphHash,
     draft_graph: committed.draftGraph,
   };
@@ -347,6 +354,7 @@ describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)"
       true,
       "req_egress",
       PAYLOAD.message,
+      undefined,
     );
     const persistedGraph = projectGraphForPersistence(graphOutput);
     const committed = buildCanonicalCommittedGraphReceipt(persistedGraph);

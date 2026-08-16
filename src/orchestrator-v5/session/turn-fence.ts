@@ -79,15 +79,11 @@
  *     `MAX(generation)+1`, so there is no read-modify-write to race.
  * 10. A STOP INSIDE THE WINDOW between the evaluation and the append RPC →
  *     ⚠ CLOSED by 2.174 fix c (this row got built): a claimed turn's graph
- *     write now runs through `append_turn_atomic_v4`, which performs THIS
+ *     write now runs through `append_turn_atomic_v5`, which performs THIS
  *     check inside the append transaction under a FOR UPDATE on the turn's
  *     own fence row — a concurrent Stop either commits first (the append
- *     refuses) or waits (and then `already_committed` reads true). The
- *     pre-v4 text stands for the FALLBACK path only (v4 not yet migrated,
- *     feature-detected via PGRST202): there the evaluation is a SELECT, the
- *     append is a separate round trip, and the window is one RPC (~10-40 ms)
- *     out of a ~50 s turn — the fence is then a CHECK, not a LOCK, exactly
- *     as originally documented.
+ *     refuses) or waits. There is no graph-bearing fallback to v2/v3/v4;
+ *     missing v5 fails closed.
  * 11. THE FENCE RPC IS UNAVAILABLE (migration not executed, DB blip) → the
  *     graph write is REFUSED (fail closed). We cannot prove the write is
  *     current, and the whole point is not to clobber. This mirrors
@@ -140,7 +136,7 @@ export const TURN_FENCE_RPC = {
 } as const;
 
 /**
- * 2.174 fix c — the SQLSTATEs `append_turn_atomic_v4` raises when its
+ * 2.174 fix c — the SQLSTATEs `append_turn_atomic_v5` raises when its
  * IN-TRANSACTION fence gate refuses the commit (same custom-class convention
  * as the CAS conflict's OLGC1). One constant per verdict so the migration,
  * the fake backend and the app-side mapping cannot drift apart silently —
@@ -153,7 +149,7 @@ export const TURN_FENCE_ATOMIC_SQLSTATE = {
 } as const;
 
 /**
- * Classify a v4 RPC error as an in-transaction fence refusal, or `null` when
+ * Classify a v5 RPC error as an in-transaction fence refusal, or `null` when
  * it is not one (CAS conflict, outage, missing function — the caller's other
  * ladders handle those). `generation` / `max_generation` ride in the error's
  * DETAIL as JSON; parsed defensively — a malformed detail costs the two

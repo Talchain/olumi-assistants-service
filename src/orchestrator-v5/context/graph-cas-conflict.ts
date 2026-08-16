@@ -9,19 +9,16 @@
  *
  * ⚠️ WHAT THIS IS — AND IS NOT
  * ----------------------------
- * This is app-side stale-write OBSERVATION (plus a provisional, default-off
- * enforcement path). It is NOT atomic compare-and-swap and NOT complete write
- * safety: the pre-write SELECT and the `append_turn_atomic_v2` RPC are two
- * separate round-trips, so a concurrent writer can land between them (a
- * SELECT-then-write TOCTOU window). True atomicity requires an in-transaction,
- * row-locked compare inside a NEW, distinctly named RPC — designed (markdown
- * only, not built) in `Docs/v5/proposals/append-turn-atomic-v3-graph-cas.md`.
+ * This module is only the app-side stale-write OBSERVER. Its pre-write SELECT
+ * is not an atomicity guarantee: a concurrent writer can land after it. The
+ * graph-only `append_turn_atomic_v5` RPC separately performs the authoritative
+ * compare under the scenario row lock when its CAS mode is `enforce`.
  *
  * ⚠️ COVERAGE CAVEAT (do not over-claim from this telemetry)
  * ----------------------------------------------------------
  * A3 observe-mode instruments ONLY the live app write chokepoint:
  * `commitDirectAnswer` → `SupabaseSessionStore.append()` →
- * `append_turn_atomic_v2`. It does NOT prove system-wide absence of stale
+ * `append_turn_atomic_v5`. It does NOT prove system-wide absence of stale
  * writes. Not covered:
  *   - service-role manual writes (SQL console, admin tooling, migrations);
  *   - direct database writes of any kind that bypass the store;
@@ -32,8 +29,8 @@
  *     grant layer, so they are not an open `authenticated` surface, but a
  *     service-role caller could still invoke them outside this hook.
  * Low conflict volume in this telemetry therefore means low conflict volume
- * on the instrumented path only. RPC v3 (the proposal above) remains the
- * path to true atomic write safety.
+ * on the instrumented path only. Atomic write safety comes from v5 itself,
+ * not from low observer conflict volume.
  *
  * TRUSTED BASE RULE (load-bearing)
  * --------------------------------
@@ -73,25 +70,19 @@ export type GraphCasMode = 'off' | 'observe' | 'enforce';
 /**
  * Runtime mode for the ATOMIC graph CAS commit RPC (env
  * `CEE_V5_GRAPH_CAS_RPC`). Distinct from `GraphCasMode` (the app-side observe
- * hook above): this selects which commit RPC `SupabaseSessionStore.append()`
- * calls for graph-bearing writes, closing the SELECT-then-write TOCTOU window
- * inside the DB transaction (append_turn_atomic_v3, FOR UPDATE + in-txn
- * compare).
- *  - 'off'     — call append_turn_atomic_v2 exactly as today (default; safe
- *                against the un-migrated schema — v3 need not exist).
- *  - 'shadow'  — call v3 threading the CAS params with p_cas_enforce=false:
- *                the UPDATE stays unconditional (v2-equivalent) but stamps
- *                scenarios.graph_identity_hash. No write is ever rejected.
- *  - 'enforce' — call v3 with p_cas_enforce=true: a stale-base graph write is
- *                REJECTED atomically (SQLSTATE OLGC1 → GraphStaleWriteError),
- *                never clobbered.
- * Requires migration 20260717120000 (Paul-gated) live before any non-'off'
- * value is used.
+ * hook above): every graph-bearing write now calls append_turn_atomic_v5; this
+ * mode selects the CAS arguments carried into that one RPC.
+ *  - 'off'     — pass null hashes and p_cas_enforce=false.
+ *  - 'shadow'  — stamp the incoming identity with p_cas_enforce=false; no
+ *                write is rejected by CAS.
+ *  - 'enforce' — compare under the scenario row lock and reject stale-base
+ *                writes atomically (OLGC1 → GraphStaleWriteError).
+ * The additive v5 migration must be live before any graph-bearing app build.
  */
 export type GraphCasRpcMode = 'off' | 'shadow' | 'enforce';
 
 /**
- * Custom PostgreSQL SQLSTATE raised by append_turn_atomic_v3 when an
+ * Custom PostgreSQL SQLSTATE raised by append_turn_atomic_v5 when an
  * enforced in-transaction CAS detects a stale-base graph write. PostgREST
  * surfaces it verbatim in the Supabase error `code` field, exactly as the
  * Model Management RPCs surface MV001/MV404/MV409 (store-adapter.ts). The

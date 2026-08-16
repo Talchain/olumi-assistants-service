@@ -112,7 +112,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
           const pending = (write as { pending_actions?: ReadonlyArray<PendingAction> })
             .pending_actions;
           mockedMostRecentPendingActions = pending ?? [];
-          return { id: `row-${appendCalls.length}` };
+          return {
+            id: `row-${appendCalls.length}`,
+            ...(write.graph != null
+              ? { graph_write_disposition: 'accepted_insert' as const }
+              : {}),
+          };
         },
         readRecent: async () => [
           makeSessionTurnRow({

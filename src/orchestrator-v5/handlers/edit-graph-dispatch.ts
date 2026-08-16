@@ -3939,17 +3939,27 @@ export async function dispatchEditGraph(
     const committedReceiptForWire = shouldEmitCommittedReceipt
       ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
       : null;
+    const committedAnalysisReady = shouldEmitCommittedReceipt
+      ? buildCanonicalAnalysisReadyFromGraph(commitResult.persistedGraph)
+      : undefined;
     if (
       shouldEmitCommittedReceipt &&
       (
         !commitResult.graphPersisted ||
         commitResult.persistedAnalysisGraphHash === null ||
         committedReceiptForWire === null ||
+        committedAnalysisReady === undefined ||
         commitResult.persistedAnalysisGraphHash !==
           committedReceiptForWire.analysisGraphHash
       )
     ) {
-      throw new Error('edit_graph committed receipt mismatch');
+      throw new Error('edit_graph committed receipt/readiness mismatch');
+    }
+    if (committedAnalysisReady !== undefined) {
+      // Whole-status authority is post-commit and reads the exact append
+      // bytes. The earlier projection remains useful only while composing
+      // pre-commit semantic detail; it cannot authorize the returned wire.
+      analysisReady = committedAnalysisReady;
     }
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse

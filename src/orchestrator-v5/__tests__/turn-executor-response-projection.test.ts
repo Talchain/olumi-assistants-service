@@ -44,7 +44,12 @@ vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: Record<string, unknown>) => {
       appendCalls.push(write);
-      return { id: `row-${appendCalls.length}` };
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],

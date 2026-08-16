@@ -113,12 +113,7 @@ describe('buildCanonicalCommittedGraphReceipt', () => {
     }
   });
 
-  it('accepts an explicit null goal but refuses malformed/present carrier values', () => {
-    expect(
-      buildCanonicalCommittedGraphReceipt({ ...fullGraph, goal_node_id: null })
-        .draftGraph.goal_node_id,
-    ).toBeNull();
-
+  it('refuses malformed carrier values', () => {
     for (const graph of [
       null,
       { ...fullGraph, options: 'not-an-array' },
@@ -134,6 +129,46 @@ describe('buildCanonicalCommittedGraphReceipt', () => {
         CommittedGraphReceiptError,
       );
     }
+  });
+
+  it('requires explicit goal identity whenever one or more goal nodes exist', () => {
+    expect(
+      buildCanonicalCommittedGraphReceipt(fullGraph).draftGraph.goal_node_id,
+    ).toBe('goal_value');
+
+    expect(() =>
+      buildCanonicalCommittedGraphReceipt({ ...fullGraph, goal_node_id: null }),
+    ).toThrowError('goal_identity_invalid');
+
+    const withMultipleGoals = {
+      ...fullGraph,
+      nodes: [
+        ...fullGraph.nodes,
+        { id: 'goal_resilience', kind: 'goal', label: 'Resilience' },
+      ],
+    };
+    expect(
+      buildCanonicalCommittedGraphReceipt(withMultipleGoals).draftGraph.goal_node_id,
+    ).toBe('goal_value');
+    expect(() =>
+      buildCanonicalCommittedGraphReceipt({
+        ...withMultipleGoals,
+        goal_node_id: null,
+      }),
+    ).toThrowError('goal_identity_invalid');
+  });
+
+  it('accepts explicit null only when the graph has no goal node', () => {
+    const noGoal = {
+      nodes: fullGraph.nodes.filter((node) => node.kind !== 'goal'),
+      edges: [],
+      options: fullGraph.options,
+      goal_node_id: null,
+      goal_constraints: [],
+    };
+    expect(
+      buildCanonicalCommittedGraphReceipt(noGoal).draftGraph.goal_node_id,
+    ).toBeNull();
   });
 
   it('accepts explicit canonical empty state and hashes those exact bytes', () => {
@@ -193,5 +228,63 @@ describe('canonical receipt architecture drift guards', () => {
     expect(source).not.toContain('computeStructuralReadiness(');
     expect(source).not.toContain('canonical_graph_hash_analysis_state');
     expect(source).not.toMatch(/analysis_ready\s*:/);
+  });
+
+  it('pins every turn receipt to one defined canonical readiness result from the exact persistence projection', () => {
+    const source = readFileSync(
+      join(repoRoot, 'src/orchestrator-v5/turn-executor.ts'),
+      'utf8',
+    );
+
+    // Readiness repair and routed D1 can derive after append because their
+    // response has no readiness-dependent durable chip/pending decision.
+    expect(
+      source.match(
+        /const committedAnalysisReady = buildCanonicalAnalysisReadyFromGraph\(\s*committed\.persistedGraph,\s*\)/g,
+      ),
+    ).toHaveLength(2);
+    expect(source.match(/committedAnalysisReady === undefined/g)).toHaveLength(2);
+    // Held single/all must derive the response atomically: the optional
+    // commit callback receives the exact projected object before durable
+    // assistant/chip/pending assembly, and its one #983 result is exposed only
+    // after the accepted append and receipt/hash validation.
+    expect(source.match(/deriveResponseFromPersistedGraph: \(persistedGraph\) =>/g))
+      .toHaveLength(2);
+    expect(
+      source.match(
+        /const canonicalReadiness =\s*buildCanonicalAnalysisReadyFromGraph\(persistedGraph\);/g,
+      ),
+    ).toHaveLength(2);
+    expect(source.match(/canonicalReadiness === undefined/g)).toHaveLength(2);
+    expect(source.match(/committedAnalysisReady === null/g)).toHaveLength(2);
+    expect(source).toMatch(
+      /const committedReceiptRequired = handlerOutcome\?\.mutated_graph != null;[\s\S]*if \(committedReceiptRequired\) \{[\s\S]*committedAnalysisReady === undefined/,
+    );
+    expect(source).toMatch(
+      /analysisReadyForTurn = committedAnalysisReady;/,
+    );
+    expect(source).not.toMatch(/GraphV3\.safeParse\(\s*committed\.persistedGraph\s*\)/);
+    expect(source).not.toMatch(
+      /buildCanonicalAnalysisReadyFromGraph\((?:outcome|lastExecuted)\.appliedGraph\)/,
+    );
+    expect(source).not.toContain('persistedGraphParse');
+    expect(source).not.toContain('wire analysis_ready left at its pre-mutation value');
+  });
+
+  it('keeps edge/factor post-commit readiness and scrub context on the exact persisted object', () => {
+    const source = readFileSync(
+      join(repoRoot, 'src/orchestrator-v5/system-events/dispatch.ts'),
+      'utf8',
+    );
+
+    expect(
+      source.match(
+        /buildCanonicalAnalysisReadyFromGraph\(persistedGraphBytes\)/g,
+      ),
+    ).toHaveLength(2);
+    expect(source).not.toMatch(
+      /GraphV3\.safeParse\(\s*persistedGraphBytes\s*\)/,
+    );
+    expect(source).not.toContain('graph: committedParse.data');
   });
 });

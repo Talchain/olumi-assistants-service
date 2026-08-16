@@ -50,7 +50,12 @@ export function createMockSessionStore(
   overrides: Partial<SessionStore> = {},
 ): SessionStore {
   const complete: Required<SessionStore> = {
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async (write) => ({
+      id: 'mock-row-id',
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    }),
     readRecent: async () => [],
     // Consistent with the empty `readRecent` above: no turns read, none
     // stored. Tests probing the beyond-window disclosure override it.

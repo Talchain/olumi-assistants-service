@@ -96,6 +96,26 @@ const UNKNOWN_KEY_MUTANTS = [
   },
 ];
 
+const canonicalReadinessControl = vi.hoisted(() => ({
+  unavailableAfterGraphAppend: false,
+  graphAppendOccurred: false,
+}));
+
+vi.mock('../../orchestrator/tools/analysis-ready-helper.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../orchestrator/tools/analysis-ready-helper.js')
+  >();
+  return {
+    ...actual,
+    buildCanonicalAnalysisReadyFromGraph: vi.fn((graph: unknown) =>
+      canonicalReadinessControl.unavailableAfterGraphAppend &&
+      canonicalReadinessControl.graphAppendOccurred
+        ? undefined
+        : actual.buildCanonicalAnalysisReadyFromGraph(graph),
+    ),
+  };
+});
+
 let pendingActionsForRead: readonly PendingAction[] = [OFFER.pending];
 const appendCalls: Array<Record<string, unknown>> = [];
 
@@ -103,7 +123,13 @@ vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: Record<string, unknown>) => {
       appendCalls.push(write);
-      return { id: `row-${appendCalls.length}` };
+      if (write.graph != null) canonicalReadinessControl.graphAppendOccurred = true;
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -148,6 +174,8 @@ beforeEach(() => {
   _resetConfigCache();
   appendCalls.length = 0;
   pendingActionsForRead = [OFFER.pending];
+  canonicalReadinessControl.unavailableAfterGraphAppend = false;
+  canonicalReadinessControl.graphAppendOccurred = false;
 });
 
 afterEach(() => {
@@ -178,6 +206,24 @@ describe('readiness multi-repair through TurnExecutor', () => {
     expect(result.response.draft_graph).toBeDefined();
     expect(result.analysisReady?.status).toBe('blocked');
     expect(result.response.assistant_text).toContain('did not invent');
+  });
+
+  it('fails closed without a receipt when postcommit canonical readiness is unavailable', async () => {
+    canonicalReadinessControl.unavailableAfterGraphAppend = true;
+    const result = await runTurnExecutor(payload(), 'req-readiness-repair-status-unavailable', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+
+    expect(appendCalls.some((write) => write.graph != null)).toBe(true);
+    // The durable insert already happened; the postcommit authority failure
+    // suppresses the success receipt without rewriting that telemetry fact.
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.response.graph_hash).toBeUndefined();
+    const errorBlock = (
+      result.response.blocks as Array<{ type: string; error_code?: string }>
+    ).find((block) => block.type === 'error');
+    expect(errorBlock?.error_code).toBe('INTERNAL_ERROR');
   });
 
   it('a stale pin regenerates a proposal but performs zero graph writes', async () => {

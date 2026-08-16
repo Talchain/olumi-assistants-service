@@ -73,7 +73,13 @@ const M1_GRAPH = {
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
     { id: 'opt_launch', kind: 'option', label: 'Launch now' },
   ],
-  edges: [{ from: 'opt_launch', to: 'goal_revenue' }],
+  edges: [{
+    from: 'opt_launch',
+    to: 'goal_revenue',
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 1,
+    effect_direction: 'positive' as const,
+  }],
 };
 
 function makePayload() {

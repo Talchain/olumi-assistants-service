@@ -1,0 +1,25 @@
+-- DO NOT APPLY while any app worker can call append_turn_atomic_v5.
+-- Rollback order is app-first:
+--   1. Roll back the canonical receipt producer/application build.
+--   2. Drain all workers and prove zero append_turn_atomic_v5 calls.
+--   3. Only then revoke/drop the function and immutability trigger helper.
+--
+-- accepted_graph is intentionally retained. Dropping it destroys the durable
+-- replay witness and is unnecessary: old app builds ignore the nullable
+-- column. Any eventual data-loss cleanup requires separate approval.
+
+REVOKE EXECUTE ON FUNCTION public.append_turn_atomic_v5(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb,
+  jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint
+) FROM service_role;
+
+DROP FUNCTION IF EXISTS public.append_turn_atomic_v5(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb,
+  jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint
+);
+
+DROP TRIGGER IF EXISTS v5_conversation_turns_accepted_graph_immutable
+  ON public.v5_conversation_turns;
+DROP FUNCTION IF EXISTS public.v5_guard_accepted_graph_immutable();
+
+-- Deliberately no DROP COLUMN accepted_graph.

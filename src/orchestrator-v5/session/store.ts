@@ -121,7 +121,7 @@ export interface SessionTurnWrite {
   /**
    * V5 Conversation Context Reliability: the user's verbatim turn message
    * (boundary `payload.message`), persisted to
-   * `v5_conversation_turns.user_message` via `append_turn_atomic_v2`
+   * `v5_conversation_turns.user_message` via the selected atomic append RPC
    * (`p_user_message`). The next turn's ContextPack projects it into
    * `conversation.recent_turns[].user_message` so the LLM can resolve
    * follow-ups ("Why?", "the second one"). Length-capped by the caller
@@ -134,7 +134,7 @@ export interface SessionTurnWrite {
    * V5 Conversation Context Reliability: the FINAL public assistant answer
    * for this turn (`OlumiResponse.assistant_text` — the egress-validated,
    * user-visible prose), persisted to `v5_conversation_turns.assistant_message`
-   * via `append_turn_atomic_v2` (`p_assistant_message`). NEVER raw LLM output,
+   * via the selected atomic append RPC (`p_assistant_message`). NEVER raw LLM output,
    * hidden summaries, or blocked content — `assistant_text` is what the user
    * saw. Derived inside `commitDirectAnswer` from the composed response and
    * length-capped there. `undefined`/omitted writes NULL.
@@ -168,8 +168,23 @@ export interface SessionTurnWrite {
   readonly expectedGraphAnalysisHash?: string | null;
 }
 
+export type GraphAppendDisposition =
+  | 'accepted_insert'
+  | 'byte_identical_replay'
+  | 'divergent_replay';
+
+export interface SessionAppendResult {
+  readonly id: string;
+  /**
+   * Present for graph-bearing writes only. `accepted_insert` is the sole
+   * authoritative outcome; replay dispositions are surfaced by the typed
+   * failure below and never returned as a successful append.
+   */
+  readonly graph_write_disposition?: GraphAppendDisposition;
+}
+
 export interface SessionStore {
-  append(write: SessionTurnWrite): Promise<{ id: string }>;
+  append(write: SessionTurnWrite): Promise<SessionAppendResult>;
   // V5 Conversation Context Reliability: returns the content-bearing superset
   // (user_message / assistant_message re-attached after the vendored strict
   // parse). SessionTurnWithContent ⊇ SessionTurn, so existing consumers that
@@ -429,7 +444,7 @@ export interface SessionStore {
    * fails CLOSED on them (refuses the turn, route 422). This doc previously
    * said it "fails-open … the later `append_turn_atomic` is the last line of
    * defence"; that premise was verified FALSE for ownership —
-   * `append_turn_atomic` (v1/v2/v3) reads `user_id` FROM the scenarios row to
+   * `append_turn_atomic` (v1 through v5) reads `user_id` FROM the scenarios row to
    * denormalise it onto the turn and never compares it to any caller
    * identity, so it guards scenario EXISTENCE, not ownership. There is
    * nothing behind this check.
@@ -628,17 +643,39 @@ export class StateCommitFailedError extends Error {
 }
 
 /**
- * A3 graph CAS — enforce mode ONLY. Thrown by `SupabaseSessionStore.append()`
- * BEFORE the append_turn_atomic_v2 RPC when the pre-write evaluation
- * categorises the write as `analysis_affecting_conflict` and
- * CEE_V5_GRAPH_CAS_MODE='enforce' (non-prod only — prod auto-downgrades to
- * observe). No other category is ever enforced; observe mode never throws.
+ * A graph-bearing idempotency key already exists. Even byte-identical replay
+ * is non-authoritative for the current workspace: a later turn may have moved
+ * `scenarios.graph`, so callers must reconcile through a current-state read.
+ * Content-free by construction; the attempted graph is never attached.
+ */
+export class GraphAppendReplayError extends StateCommitFailedError {
+  readonly graph_write_disposition:
+    | 'byte_identical_replay'
+    | 'divergent_replay';
+
+  constructor(
+    disposition: 'byte_identical_replay' | 'divergent_replay',
+    opts?: { cause?: unknown },
+  ) {
+    super(`Graph append refused non-authoritative ${disposition}`, {
+      cause: opts?.cause,
+      rpc_code: 'GRAPH_APPEND_REPLAY',
+    });
+    this.name = 'GraphAppendReplayError';
+    this.graph_write_disposition = disposition;
+  }
+}
+
+/**
+ * Graph CAS refusal. The class covers both the legacy app-side observer's
+ * non-production enforcement and the authoritative OLGC1 refusal returned by
+ * `append_turn_atomic_v5` when atomic CAS is enabled.
  *
  * Extends StateCommitFailedError so every existing TurnExecutor
  * `instanceof StateCommitFailedError` catch maps it onto the existing typed
  * failure envelope (STATE_COMMIT_FAILED → INTERNAL_ERROR) — no route or wire
- * shape change. This is app-side, best-effort blocking with a
- * SELECT-then-write TOCTOU window, NOT an atomicity guarantee.
+ * shape change. The observer path remains best-effort and has a
+ * SELECT-then-write window; the v5 RPC path is atomic under the scenario lock.
  */
 export class GraphStaleWriteError extends StateCommitFailedError {
   /** Closed-enum conflict category from graph-cas-conflict.ts. */

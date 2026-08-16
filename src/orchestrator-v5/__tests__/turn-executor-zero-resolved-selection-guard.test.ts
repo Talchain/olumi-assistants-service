@@ -203,7 +203,12 @@ vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (row: (typeof harness.appendedRows)[number]) => {
       harness.appendedRows.push(row);
-      return { id: `row-${randomUUID()}` };
+      return {
+        id: `row-${randomUUID()}`,
+        ...(row.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async (_id: string, limit = 20) => {
       const replayed = harness.replayAppendedHistory

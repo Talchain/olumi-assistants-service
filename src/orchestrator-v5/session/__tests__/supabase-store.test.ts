@@ -24,6 +24,7 @@ import type { PendingAction } from '../pending-action.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const GRAPH_ACK_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 const VALID_PENDING: PendingAction = {
   id: 'pa-store-strict-1',
@@ -68,7 +69,10 @@ function makeClient(cfg: MockConfig = {}): {
   const client = {
     rpc: vi.fn(async (fn: string, args: unknown) => {
       rpcCalls.push({ fn, args });
-      return cfg.rpcResult ?? { data: 'row-id-123', error: null };
+      return cfg.rpcResult ??
+        (fn === 'append_turn_atomic_v5'
+          ? { data: { id: GRAPH_ACK_ID, disposition: 'inserted' }, error: null }
+          : { data: 'row-id-123', error: null });
     }),
     from: vi.fn((table: string) => {
       const filters: Record<string, unknown> = {};
@@ -170,8 +174,10 @@ describe('SupabaseSessionStore.append', () => {
     );
     const graph = { nodes: [{ id: 'n1', kind: 'decision', label: 'Launch?' }], edges: [] };
     await store.append({ ...WRITE, graph });
+    expect(rpcCalls[0].fn).toBe('append_turn_atomic_v5');
     const args = rpcCalls[0].args as Record<string, unknown>;
     expect(args.p_graph).toEqual(graph);
+    expect(args.p_fence_generation).toBeNull();
   });
 
   it('returns the persisted row id from the RPC', async () => {
@@ -303,7 +309,7 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     expect(args.p_assistant_message).toBeNull();
   });
 
-  it('always passes all 15 named args even when write.graph IS provided', async () => {
+  it('passes the shared 15 args plus v5 CAS/fence args when write.graph IS provided', async () => {
     const { client, rpcCalls } = makeClient();
     const store = new SupabaseSessionStore(
       client,
@@ -314,7 +320,8 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, graph });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(15);
+    expect(rpcCalls[0].fn).toBe('append_turn_atomic_v5');
+    expect(Object.keys(args)).toHaveLength(19);
     expect(args.p_graph).toEqual(graph);
     expect(args.p_brief_text).toBeNull();
     expect(args.p_pending_actions).toEqual([]);
@@ -380,6 +387,7 @@ describe('SupabaseSessionStore.append — V5 Step 4 regression (PostgREST overlo
     await store.append({ ...WRITE, graph, briefText });
 
     const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(rpcCalls[0].fn).toBe('append_turn_atomic_v5');
     expect(args.p_graph).toEqual(graph);
     expect(args.p_brief_text).toBe(briefText);
   });

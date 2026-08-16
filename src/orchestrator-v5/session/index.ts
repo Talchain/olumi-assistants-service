@@ -59,9 +59,10 @@ export function getSessionStore(): SessionStore {
     // config, which owns the off|observe|enforce parse + the prod
     // enforce→observe downgrade). Default 'off' — zero behavioural change.
     graphCasMode: appConfig.features.graphCasMode,
-    // ATOMIC graph CAS commit RPC (CEE_V5_GRAPH_CAS_RPC — off|shadow|enforce).
-    // Default 'off' → append_turn_atomic_v2 exactly as today. Requires
-    // migration 20260717120000 (Paul-gated) live before any non-'off' value.
+    // Atomic graph-CAS mode carried by the mandatory graph-only v5 RPC
+    // (CEE_V5_GRAPH_CAS_RPC — off|shadow|enforce). `off` disables the compare,
+    // not the v5 acknowledgement. Migration 20260816120000 must precede any
+    // graph-bearing build; missing v5 deliberately fails closed.
     graphCasRpc: appConfig.features.graphCasRpc,
   });
   return cachedInstance;
@@ -115,6 +116,10 @@ function parsePositiveIntEnv(raw: string | undefined, fallback: number): number 
 }
 
 export type { SessionStore, SessionTurnWrite } from './store.js';
-export { StateCommitFailedError, SessionReadError } from './store.js';
+export {
+  GraphAppendReplayError,
+  StateCommitFailedError,
+  SessionReadError,
+} from './store.js';
 export type { InvalidationScope, InvalidationResult } from './invalidation.js';
 export { describeScope } from './invalidation.js';

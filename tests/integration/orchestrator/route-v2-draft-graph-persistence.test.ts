@@ -60,6 +60,15 @@ const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const TURN_ID_1 = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const TURN_ID_2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
+function acceptedAppendResult(write: { graph?: unknown }, id: string) {
+  return {
+    id,
+    ...(write.graph != null
+      ? { graph_write_disposition: 'accepted_insert' as const }
+      : {}),
+  };
+}
+
 const MINIMAL_GRAPH_1 = {
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch product?' },
@@ -67,8 +76,20 @@ const MINIMAL_GRAPH_1 = {
     { id: 'factor_market', kind: 'factor', label: 'Market readiness' },
   ],
   edges: [
-    { from: 'dec_launch', to: 'goal_revenue' },
-    { from: 'factor_market', to: 'dec_launch' },
+    {
+      from: 'dec_launch',
+      to: 'goal_revenue',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'factor_market',
+      to: 'dec_launch',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
   ],
 };
 
@@ -77,7 +98,13 @@ const MINIMAL_GRAPH_2 = {
     { id: 'dec_hire', kind: 'decision', label: 'Hire senior eng?' },
     { id: 'goal_capacity', kind: 'goal', label: 'Team capacity' },
   ],
-  edges: [{ from: 'dec_hire', to: 'goal_capacity' }],
+  edges: [{
+    from: 'dec_hire',
+    to: 'goal_capacity',
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 1,
+    effect_direction: 'positive' as const,
+  }],
 };
 
 function makePayload(turnId: string, overrides: Record<string, unknown> = {}) {
@@ -123,7 +150,9 @@ describe('V5 draft_graph persistence integration', () => {
     beforeEach(() => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
-      appendMock.mockResolvedValue({ id: 'row-turn-1' });
+      appendMock.mockImplementation(async (write) =>
+        acceptedAppendResult(write, 'row-turn-1'),
+      );
     });
 
     it('returns 200-shape response with stage_indicator=analyse', async () => {
@@ -275,7 +304,9 @@ describe('V5 draft_graph persistence integration', () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(null, 'Could not draft a graph for that brief.') as Awaited<ReturnType<typeof handleDraftGraph>>);
       // commitDirectAnswer still fires (turn is recorded), but with no graph.
-      appendMock.mockResolvedValue({ id: 'row-turn-3' });
+      appendMock.mockImplementation(async (write) =>
+        acceptedAppendResult(write, 'row-turn-3'),
+      );
     });
 
     it('passes graph=undefined to store.append — omits p_graph from RPC call', async () => {
@@ -320,7 +351,9 @@ describe('V5 draft_graph persistence integration', () => {
       // First turn
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
-      appendMock.mockResolvedValueOnce({ id: 'row-turn-first' });
+      appendMock.mockImplementationOnce(async (write) =>
+        acceptedAppendResult(write, 'row-turn-first'),
+      );
 
       await dispatchDraftGraph({
         payload: makePayload(TURN_ID_1),
@@ -331,7 +364,9 @@ describe('V5 draft_graph persistence integration', () => {
       // Second turn (new TURN_ID, same SCENARIO_ID)
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_2) as Awaited<ReturnType<typeof handleDraftGraph>>);
-      appendMock.mockResolvedValueOnce({ id: 'row-turn-second' });
+      appendMock.mockImplementationOnce(async (write) =>
+        acceptedAppendResult(write, 'row-turn-second'),
+      );
 
       await dispatchDraftGraph({
         payload: makePayload(TURN_ID_2),
@@ -362,8 +397,12 @@ describe('V5 draft_graph persistence integration', () => {
         .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>)
         .mockResolvedValueOnce(makeDraftResult(MINIMAL_GRAPH_2) as Awaited<ReturnType<typeof handleDraftGraph>>);
       appendMock
-        .mockResolvedValueOnce({ id: 'row-turn-first' })
-        .mockResolvedValueOnce({ id: 'row-turn-second' });
+        .mockImplementationOnce(async (write) =>
+          acceptedAppendResult(write, 'row-turn-first'),
+        )
+        .mockImplementationOnce(async (write) =>
+          acceptedAppendResult(write, 'row-turn-second'),
+        );
 
       await dispatchDraftGraph({
         payload: makePayload(TURN_ID_1),
@@ -410,7 +449,9 @@ describe('V5 draft_graph persistence integration', () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
 
-      appendMock.mockResolvedValueOnce({ id: 'row-turn-draft' });
+      appendMock.mockImplementationOnce(async (write) =>
+        acceptedAppendResult(write, 'row-turn-draft'),
+      );
 
       // After the draft commit, store.readRecent returns the row.
       readRecentMock.mockResolvedValueOnce([committedTurn]);
@@ -438,9 +479,9 @@ describe('V5 draft_graph persistence integration', () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
 
-      appendMock.mockImplementation(async () => {
+      appendMock.mockImplementation(async (write) => {
         callOrder.push('append');
-        return { id: 'row-turn-ordering' };
+        return acceptedAppendResult(write, 'row-turn-ordering');
       });
       readRecentMock.mockImplementation(async () => {
         callOrder.push('readRecent');

@@ -70,7 +70,12 @@ const mockState: {
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: async (write: { graph?: unknown }) => ({
+      id: `row-${randomUUID()}`,
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    }),
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,
     invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),

@@ -53,7 +53,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
       createMockSessionStore({
         append: async (write: unknown) => {
           appendCalls.push(write);
-          return { id: 'mock-row' };
+          return {
+            id: 'mock-row',
+            ...((write as { graph?: unknown }).graph != null
+              ? { graph_write_disposition: 'accepted_insert' as const }
+              : {}),
+          };
         },
       }),
     resetSessionStoreForTests: () => {},
@@ -419,7 +424,7 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
       ],
     };
 
-    const { telemetry } = await runTurnExecutor(payload, 'req-p15-int-1', {
+    const result = await runTurnExecutor(payload, 'req-p15-int-1', {
       routingAdapter,
       handlerRegistry: registry,
       graphState: graphState as never,
@@ -427,11 +432,32 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
         logs.push(r);
       },
     });
+    const { telemetry } = result;
 
     expect(telemetry.stages_completed).toContain('validate');
     expect(telemetry.stages_completed).not.toContain('validate_skipped_no_graph');
     expect(telemetry.stages_completed).not.toContain('validate_skipped_graph_checks');
     expect(telemetry.failure_type).toBeNull();
+    expect(telemetry.commit_performed).toBe(true);
+    // This is the real permissive UI ingress shape: its edges predate the
+    // stricter GraphV3 readiness-only fields. First-touch adoption is not a
+    // transactional mutation receipt, so it succeeds and persists the exact
+    // graph without inventing either a draft_graph attestation or readiness.
+    const graphAppend = appendCalls.find(
+      (write) => (write as { graph?: unknown }).graph != null,
+    ) as { graph: Record<string, unknown> } | undefined;
+    expect(graphAppend).toBeDefined();
+    expect(graphAppend!.graph.nodes).toStrictEqual(graphState.nodes);
+    expect(graphAppend!.graph.edges).toStrictEqual(graphState.edges);
+    for (const carrier of ['options', 'goal_node_id', 'goal_constraints'] as const) {
+      expect(Object.hasOwn(graphAppend!.graph, carrier), carrier).toBe(true);
+    }
+    expect(graphAppend!.graph.goal_node_id).toBe('goal_1');
+    expect(graphAppend!.graph.goal_constraints).toStrictEqual([]);
+    expect(graphAppend!.graph.options).toHaveLength(3);
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.response.graph_hash).toBeUndefined();
+    expect(result.analysisReady).toBeUndefined();
 
     await new Promise((r) => setImmediate(r));
     expect(logs).toHaveLength(1);

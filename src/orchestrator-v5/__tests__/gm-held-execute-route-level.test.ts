@@ -79,6 +79,59 @@ const MINIMAL_GRAPH = STRICT_GRAPH as unknown as Parameters<
 >[0];
 const GRAPH_HASH = computeAnalysisAffectingGraphHash(MINIMAL_GRAPH) ?? 'h_unset';
 
+const PROJECTION_MUTATING_GRAPH = {
+  nodes: [
+    { id: 'opt-a', kind: 'option', label: 'Option A' },
+    { id: 'opt-b', kind: 'option', label: 'Option B' },
+    { id: 'goal-g', kind: 'goal', label: 'Goal' },
+    { id: 'dec-choice', kind: 'decision', label: 'Choose an option' },
+    {
+      id: 'fac-marketing',
+      kind: 'factor',
+      label: 'Marketing',
+      category: 'controllable',
+      observed_state: { value: 0.1, raw_value: 5, cap: 50 },
+    },
+  ],
+  edges: [
+    {
+      from: 'dec-choice',
+      to: 'opt-a',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'dec-choice',
+      to: 'opt-b',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt-a',
+      to: 'fac-marketing',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt-b',
+      to: 'fac-marketing',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'fac-marketing',
+      to: 'goal-g',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    },
+  ],
+};
+
 /** The canonical validated operation batch the hold captured (edit-pipeline shape). */
 const HELD_OPERATIONS = [
   {
@@ -91,6 +144,98 @@ const HELD_OPERATIONS = [
 let pendingActionsForRead: readonly PendingAction[] = [];
 const appendCalls: Array<Record<string, unknown>> = [];
 let replayAppendedHistory = false;
+let graphForRead: unknown = MINIMAL_GRAPH;
+
+const canonicalReadinessControl = vi.hoisted(() => ({
+  unavailableForCanonicalProjection: false,
+  canonicalProjectionCalls: 0,
+}));
+
+const persistenceProjectionControl = vi.hoisted(() => ({
+  promoteOptionsToReady: false,
+  appliedCount: 0,
+}));
+
+vi.mock('../persisted-graph-projection.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../persisted-graph-projection.js')
+  >();
+  return {
+    ...actual,
+    projectGraphForPersistence: vi.fn((
+      graph: unknown,
+      context?: Parameters<typeof actual.projectGraphForPersistence>[1],
+    ) => {
+      const projected = actual.projectGraphForPersistence(graph, context);
+      if (
+        !persistenceProjectionControl.promoteOptionsToReady ||
+        projected === null ||
+        typeof projected !== 'object' ||
+        Array.isArray(projected)
+      ) {
+        return projected;
+      }
+      const record = projected as Record<string, unknown>;
+      const optionNodes = Array.isArray(record.nodes)
+        ? record.nodes.filter(
+            (node): node is Record<string, unknown> =>
+              node !== null &&
+              typeof node === 'object' &&
+              !Array.isArray(node) &&
+              (node as Record<string, unknown>).kind === 'option',
+          )
+        : [];
+      if (optionNodes.length !== 2) return projected;
+      persistenceProjectionControl.appliedCount += 1;
+      return {
+        ...record,
+        options: optionNodes.map((node, index) => ({
+          id: node.id,
+          label: node.label,
+          is_baseline: index === 0,
+          interventions: {
+            'fac-marketing': {
+              value: index === 0 ? 0.1 : 0.3,
+              source: 'user_specified',
+              target_match: {
+                node_id: 'fac-marketing',
+                match_type: 'exact_id',
+                confidence: 'high',
+              },
+            },
+          },
+        })),
+      };
+    }),
+  };
+});
+
+vi.mock('../../orchestrator/tools/analysis-ready-helper.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../orchestrator/tools/analysis-ready-helper.js')
+  >();
+  return {
+    ...actual,
+    buildCanonicalAnalysisReadyFromGraph: vi.fn((graph: unknown) => {
+      const record =
+        graph !== null && typeof graph === 'object' && !Array.isArray(graph)
+          ? (graph as Record<string, unknown>)
+          : null;
+      const isCanonicalProjection =
+        record !== null &&
+        Object.hasOwn(record, 'options') &&
+        Object.hasOwn(record, 'goal_node_id') &&
+        Object.hasOwn(record, 'goal_constraints');
+      if (isCanonicalProjection) {
+        canonicalReadinessControl.canonicalProjectionCalls += 1;
+      }
+      return canonicalReadinessControl.unavailableForCanonicalProjection &&
+        isCanonicalProjection
+        ? undefined
+        : actual.buildCanonicalAnalysisReadyFromGraph(graph);
+    }),
+  };
+});
 
 function gmHeldPending(
   overrides: {
@@ -134,7 +279,12 @@ vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: Record<string, unknown>) => {
       appendCalls.push(write);
-      return { id: `row-${appendCalls.length}` };
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () =>
       replayAppendedHistory
@@ -161,8 +311,8 @@ vi.mock('../session/index.js', () => ({
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     invalidateAll: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => MINIMAL_GRAPH,
-    loadGraphAndBriefText: async () => ({ graph: MINIMAL_GRAPH, briefText: null }),
+    loadGraph: async () => graphForRead,
+    loadGraphAndBriefText: async () => ({ graph: graphForRead, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => pendingActionsForRead,
   }),
@@ -245,6 +395,11 @@ beforeEach(() => {
   appendCalls.length = 0;
   pendingActionsForRead = [gmHeldPending()];
   replayAppendedHistory = false;
+  graphForRead = MINIMAL_GRAPH;
+  canonicalReadinessControl.unavailableForCanonicalProjection = false;
+  canonicalReadinessControl.canonicalProjectionCalls = 0;
+  persistenceProjectionControl.promoteOptionsToReady = false;
+  persistenceProjectionControl.appliedCount = 0;
 });
 
 afterEach(() => {
@@ -340,6 +495,79 @@ describe('GM held-execute — live mode applies the confirmed hold (RED on base)
     expect(dg!.node_count).toBe(dg!.nodes.length);
     expect(dg!.edge_count).toBe(dg!.edges.length);
     expectCanonicalReceipt(result.response, lastAppend());
+    expect(result.analysisReady).toBeDefined();
+  });
+
+  it('projection-mutating held apply persists and returns one canonical ready response, chip and pending', async () => {
+    setGmMode('live');
+    graphForRead = PROJECTION_MUTATING_GRAPH;
+    pendingActionsForRead = [gmHeldPending({
+      graphHash:
+        computeAnalysisAffectingGraphHash(PROJECTION_MUTATING_GRAPH as never) ??
+        'h_projection_unset',
+    })];
+    persistenceProjectionControl.promoteOptionsToReady = true;
+
+    const result = await runTurnExecutor(
+      payload('yes'),
+      'req-gm-held-projection-mutates-readiness',
+      { routingAdapter: throwingRoutingAdapter() },
+    );
+
+    expect(appendCalls).toHaveLength(1);
+    expect(persistenceProjectionControl.appliedCount).toBe(1);
+    expect(canonicalReadinessControl.canonicalProjectionCalls).toBe(1);
+    const write = lastAppend();
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.analysisReady?.status).toBe('ready');
+    expect(result.response.assistant_text).toBe(write.assistantMessage);
+    expect(result.response.assistant_text).not.toContain(
+      'does not have effect values yet',
+    );
+    expect(result.response.suggested_actions).toEqual([
+      expect.objectContaining({
+        id: 'chip_action_rerun_analysis_gm_held_applied',
+        action_type: 'run_analysis',
+      }),
+    ]);
+    expect(write.pending_actions).toEqual([
+      expect.objectContaining({
+        chip_id: 'chip_action_rerun_analysis_gm_held_applied',
+        action: { kind: 'run_analysis' },
+      }),
+    ]);
+    expectCanonicalReceipt(result.response, write);
+    expect((write.graph as Record<string, unknown>).options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'opt-a',
+          interventions: expect.objectContaining({ 'fac-marketing': expect.any(Object) }),
+        }),
+        expect.objectContaining({
+          id: 'opt-b',
+          interventions: expect.objectContaining({ 'fac-marketing': expect.any(Object) }),
+        }),
+      ]),
+    );
+  });
+
+  it('fails closed before append when held-single projected canonical readiness is unavailable', async () => {
+    setGmMode('live');
+    canonicalReadinessControl.unavailableForCanonicalProjection = true;
+    const result = await runTurnExecutor(
+      payload('yes'),
+      'req-gm-held-status-unavailable',
+      { routingAdapter: throwingRoutingAdapter() },
+    );
+
+    expect(appendCalls).toHaveLength(0);
+    expect(result.telemetry.commit_performed).toBe(false);
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.response.graph_hash).toBeUndefined();
+    const errorBlock = (
+      result.response.blocks as Array<{ type: string; error_code?: string }>
+    ).find((block) => block.type === 'error');
+    expect(errorBlock?.error_code).toBe('INTERNAL_ERROR');
   });
 
   it('F2-CEE negative: a declined resume (hash divergence) ships NO draft_graph — nothing was applied', async () => {

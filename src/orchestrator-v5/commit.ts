@@ -2,21 +2,20 @@
  * V5 commit stage — slice B.
  *
  * A1 shipped this as a pure no-op per Paul's constraint 11. Slice B wires
- * persistence: on success the RPC `append_turn_atomic` records the turn in
- * `v5_conversation_turns`; on failure a `StateCommitFailedError` is thrown
- * and the TurnExecutor catch at turn-executor.ts:223-232 maps it to the
- * `STATE_COMMIT_FAILED` wire code.
+ * persistence: graph-free turns use `append_turn_atomic_v2`; graph-bearing
+ * turns use the strict acknowledgement RPC `append_turn_atomic_v5`. On failure
+ * a `StateCommitFailedError` is thrown and the TurnExecutor catch maps it to
+ * the `STATE_COMMIT_FAILED` wire code.
  *
- * Idempotency: `turn_id` is client-generated. The RPC enforces
- * `UNIQUE (scenario_id, turn_id)` with `ON CONFLICT DO NOTHING`, so two
- * concurrent calls with identical `(scenario_id, turn_id)` each return the
- * same row id and neither raises. TurnExecutor currently uses `request_id`
- * as `turn_id`; request_id is a UUID per turn, so cross-turn collisions
- * don't occur. A retry of the same request (same request_id) is idempotent
- * by construction.
+ * Idempotency: `turn_id` is client-generated and the database enforces
+ * `UNIQUE (scenario_id, turn_id)`. A graph replay is deliberately not returned
+ * as a successful commit: v5 atomically classifies identical and divergent
+ * replay against the immutable accepted-graph witness, and both outcomes throw
+ * before any success receipt or post-insert hook. The caller must reconcile
+ * current workspace authority through a current-state read.
  *
  * Graph atomicity: when CommitMetadata.graph is provided, it is passed to
- * append_turn_atomic as p_graph. The RPC writes scenarios.graph and inserts
+ * append_turn_atomic_v5 as p_graph. The RPC writes scenarios.graph and inserts
  * the turn row in the same PL/pgSQL transaction — both succeed or both roll
  * back. This eliminates the split-state risk of two separate RPC calls.
  *
@@ -36,7 +35,11 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import { getSessionStore } from './session/index.js';
-import type { SessionStore } from './session/store.js';
+import {
+  GraphAppendReplayError,
+  StateCommitFailedError,
+  type SessionStore,
+} from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import {
   checkPersistedGraphInvariants,
@@ -58,6 +61,7 @@ import {
 } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
+import type { AnalysisReadyPayload } from '../orchestrator/tools/analysis-ready-helper.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
@@ -65,6 +69,17 @@ import { getModelManagementService } from './model-management/index.js';
 import type { ModelManagementResult, VersionWriteOutcome } from './model-management/index.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
+
+/**
+ * Result of the one optional response derivation over the final persistence
+ * projection. The callback is deliberately synchronous: it may only derive
+ * public response/readiness data from the supplied read-only graph and cannot
+ * start another write or create a second commit authority.
+ */
+export interface PersistedGraphResponseDerivation {
+  readonly response: OlumiResponse;
+  readonly analysisReady: AnalysisReadyPayload;
+}
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -77,11 +92,25 @@ export interface CommitMetadata {
   readonly handler_facts: readonly HandlerFact[];
   /**
    * Draft graph to persist atomically with the turn insert via
-   * append_turn_atomic(p_graph). Both the graph write and the turn row commit
+   * append_turn_atomic_v5(p_graph). Both the graph write and the turn row commit
    * or roll back together. Omit for non-draft turns — the RPC leaves
    * scenarios.graph unchanged when p_graph is null.
    */
   readonly graph?: unknown;
+  /**
+   * Optional, narrowly-scoped response derivation over the exact graph object
+   * that this commit will pass to `SessionStore.append`. It runs exactly once
+   * after `projectGraphForPersistence` and before assistant text, chips,
+   * pending actions or append input are derived. Returning an absent/malformed
+   * result, throwing, or mutating the projected graph aborts before append.
+   *
+   * The current component permits this only for held-single/held-all apply
+   * receipts, where user-facing readiness recovery must reflect persistence
+   * normalisation while response/chip/pending persistence remains atomic.
+   */
+  readonly deriveResponseFromPersistedGraph?: (
+    persistedGraph: Readonly<Record<string, unknown>>,
+  ) => PersistedGraphResponseDerivation | undefined;
   /**
    * User-supplied free-text decision brief to persist atomically with the
    * turn insert via append_turn_atomic(p_brief_text). Set by
@@ -362,8 +391,8 @@ export interface CommitResult {
    * Exposed because `persistedAnalysisGraphHash` alone is not enough for a
    * caller that must DERIVE something else from the committed state. The persist
    * passes mutate `intercept`, node `interventions` and top-level `options[]`,
-   * and at least one downstream derivation reads exactly those:
-   * `computeStructuralReadiness` reads option nodes' merged interventions. A
+   * and at least one downstream derivation reads exactly those: canonical
+   * readiness reads option nodes' merged interventions. A
    * caller deriving readiness from its own pre-projection copy can therefore
    * publish a readiness verdict describing a graph that was never stored —
    * the same "advertised state != persisted state" class the hash field above
@@ -704,9 +733,10 @@ export function graphWasProvided(graph: unknown): boolean {
  * TurnExecutor's existing catch handles the mapping to `STATE_COMMIT_FAILED`.
  *
  * When metadata.graph is provided, the graph is written atomically with the
- * turn row via append_turn_atomic(p_graph). On success, graphPersisted=true
- * is returned so the caller can set stage_indicator='analyse'. On RPC failure
- * the whole call throws (StateCommitFailedError) — there is no partial state.
+ * turn row via append_turn_atomic_v5(p_graph). Only an `accepted_insert`
+ * acknowledgement returns `graphPersisted=true`; replay, malformed/missing ack
+ * and RPC failure throw before any success-side effect. There is no partial
+ * success state.
  */
 export async function commitDirectAnswer(
   response: OlumiResponse,
@@ -767,6 +797,49 @@ export async function commitDirectAnswer(
   const effectiveGraphHash = writesGraph
     ? (persistedAnalysisGraphHash ?? undefined)
     : metadata.graph_hash;
+
+  // Held-apply receipts need their public recovery copy and chips to follow
+  // the exact persistence projection, not the handler's pre-projection graph.
+  // Run this optional derivation at the only safe atomic point: the final graph
+  // object exists, but no assistant text, pending action or append input has
+  // yet been derived. The JSON snapshot is a fail-closed purity guard over the
+  // trusted synchronous callback; even a non-analysis-field mutation is
+  // refused before append rather than silently changing the bytes/hash that
+  // the caller will later attest.
+  let persistedGraphResponseDerivation: PersistedGraphResponseDerivation | null = null;
+  if (metadata.deriveResponseFromPersistedGraph !== undefined) {
+    if (
+      !writesGraph ||
+      graphForStore === null ||
+      typeof graphForStore !== 'object' ||
+      Array.isArray(graphForStore)
+    ) {
+      throw new Error('persisted graph response derivation requires an object graph');
+    }
+    const graphSnapshotBeforeDerivation = JSON.stringify(graphForStore);
+    if (typeof graphSnapshotBeforeDerivation !== 'string') {
+      throw new Error('persisted graph response derivation could not snapshot graph');
+    }
+    const derived = metadata.deriveResponseFromPersistedGraph(
+      graphForStore as Readonly<Record<string, unknown>>,
+    );
+    if (
+      derived === undefined ||
+      derived === null ||
+      typeof derived !== 'object' ||
+      !derived.response ||
+      derived.analysisReady === undefined ||
+      derived.analysisReady === null
+    ) {
+      throw new Error('persisted graph response derivation returned no canonical result');
+    }
+    const graphSnapshotAfterDerivation = JSON.stringify(graphForStore);
+    if (graphSnapshotAfterDerivation !== graphSnapshotBeforeDerivation) {
+      throw new Error('persisted graph response derivation mutated graph');
+    }
+    persistedGraphResponseDerivation = derived;
+    response = derived.response;
+  }
 
   // Atomic-emit contract: every chip whose action_type is in the resumable
   // set produces exactly one matching pending action, written in the same
@@ -996,7 +1069,11 @@ export async function commitDirectAnswer(
   const assistantMessage = capConversationText(
     durablePublicAssistantText(
       responseForCommit.assistant_text,
-      parseContentGraph(metadata.contentGraph),
+      parseContentGraph(
+        persistedGraphResponseDerivation !== null
+          ? graphForStore
+          : metadata.contentGraph,
+      ),
     ),
     'assistant_message',
   );
@@ -1103,7 +1180,7 @@ export async function commitDirectAnswer(
     );
   }
 
-  const { id: persistedRowId } = await store.append({
+  const appendResult = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
     turn_class: metadata.turn_class,
@@ -1124,6 +1201,29 @@ export async function commitDirectAnswer(
     expectedGraphIdentityHash: metadata.expectedGraphIdentityHash,
     expectedGraphAnalysisHash: metadata.expectedGraphAnalysisHash,
   });
+  if (
+    writesGraph &&
+    (
+      appendResult.graph_write_disposition === 'byte_identical_replay' ||
+      appendResult.graph_write_disposition === 'divergent_replay'
+    )
+  ) {
+    throw new GraphAppendReplayError(appendResult.graph_write_disposition);
+  }
+  if (
+    writesGraph &&
+    appendResult.graph_write_disposition !== 'accepted_insert'
+  ) {
+    // Defence in depth over the production Supabase adapter. A test double,
+    // alternate store, or future adapter returning an id without the v5
+    // accepted-insert witness must never authorize graph receipt fields or
+    // any post-insert hook.
+    throw new StateCommitFailedError(
+      'Graph append did not prove accepted_insert',
+      { rpc_code: 'GRAPH_APPEND_ACK_REQUIRED' },
+    );
+  }
+  const persistedRowId = appendResult.id;
 
   // Post-success observability. The turn's state is now durably committed; the
   // telemetry below is best-effort and MUST NOT convert a successful persist

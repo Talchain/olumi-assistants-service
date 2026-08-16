@@ -41,7 +41,12 @@ vi.mock('../../../src/cee/unified-pipeline/index.js', () => ({
   isKnownSafeNormaliseError: () => false,
 }));
 
-const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
+  id: 'mock-row-id',
+  ...(write.graph != null
+    ? { graph_write_disposition: 'accepted_insert' as const }
+    : {}),
+}));
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,
@@ -153,6 +158,7 @@ const GRAPH = {
   version: '1.2',
   nodes: [
     { id: 'goal_4day', kind: 'goal', label: 'Choose a support rota' },
+    { id: 'dec_rota', kind: 'decision', label: 'Choose the support rota' },
     // This is deliberately an exact-ready control. Freeform direction cards
     // are not admitted for non-ready/missing states because their producer
     // provenance is not structurally carried to the narrative boundary.
@@ -193,17 +199,62 @@ const GRAPH = {
       },
     },
     { id: 'out_csat', kind: 'outcome', label: 'Customer Satisfaction Score' },
-    { id: 'fac_support_cost', kind: 'factor', label: 'Support cost' },
+    {
+      id: 'fac_support_cost',
+      kind: 'factor',
+      label: 'Support cost',
+      category: 'controllable',
+    },
   ],
-  edges: [{ id: 'e1', from: 'fac_support_cost', to: 'out_csat', belief: 0.6 }],
+  edges: [
+    {
+      from: 'dec_rota',
+      to: 'opt_four_day',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'dec_rota',
+      to: 'opt_status_quo',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt_four_day',
+      to: 'fac_support_cost',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'opt_status_quo',
+      to: 'fac_support_cost',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'fac_support_cost',
+      to: 'out_csat',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'out_csat',
+      to: 'goal_4day',
+      strength: { mean: 0.6, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+  ],
 };
 
-// The unified-pipeline producer contract includes analysis_ready beside the
-// graph. This route test deliberately uses a lightweight legacy edge fixture
-// for its unrelated narration concern, so asking draft-graph's graph fallback
-// to reconstruct readiness would make the test depend on an invalid carrier
-// it is not meant to exercise. Carry the exact producer field instead: the
-// served assertion below then proves producer → dispatcher → finaliser → wire.
+// Pipeline readiness remains semantic input for the narration detail under
+// test. Whole-status readiness on the served wire is independently rebuilt
+// from this exact, valid persisted graph by the canonical post-commit authority.
 const ANALYSIS_READY = {
   goal_node_id: 'goal_4day',
   status: 'ready',

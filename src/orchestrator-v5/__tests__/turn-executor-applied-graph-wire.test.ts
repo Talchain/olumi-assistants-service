@@ -65,6 +65,26 @@ const appendCalls: AppendWrite[] = [];
 let mockedPendingActions: ReadonlyArray<PendingAction> = [];
 let appendError: Error | null = null;
 
+const canonicalReadinessControl = vi.hoisted(() => ({
+  unavailableAfterGraphAppend: false,
+  graphAppendOccurred: false,
+}));
+
+vi.mock('../../orchestrator/tools/analysis-ready-helper.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../orchestrator/tools/analysis-ready-helper.js')
+  >();
+  return {
+    ...actual,
+    buildCanonicalAnalysisReadyFromGraph: vi.fn((graph: unknown) =>
+      canonicalReadinessControl.unavailableAfterGraphAppend &&
+      canonicalReadinessControl.graphAppendOccurred
+        ? undefined
+        : actual.buildCanonicalAnalysisReadyFromGraph(graph),
+    ),
+  };
+});
+
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: AppendWrite) => {
@@ -74,7 +94,13 @@ vi.mock('../session/index.js', () => ({
         throw appendError;
       }
       appendCalls.push(write);
-      return { id: `row-${appendCalls.length}` };
+      if (write.graph != null) canonicalReadinessControl.graphAppendOccurred = true;
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],
@@ -348,6 +374,8 @@ beforeEach(() => {
   appendCalls.length = 0;
   mockedPendingActions = [];
   appendError = null;
+  canonicalReadinessControl.unavailableAfterGraphAppend = false;
+  canonicalReadinessControl.graphAppendOccurred = false;
 });
 
 afterEach(() => {
@@ -397,6 +425,28 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     expect(result.response.graph_hash).toBe(committedHash);
     expect(dg!.nodes).toEqual((result.effectiveGraph as GraphV3T).nodes);
     expect(dg!.edges).toEqual((result.effectiveGraph as GraphV3T).edges);
+    expect(result.analysisReady).toBeDefined();
+  });
+
+  it('fails closed without a receipt when D1 postcommit canonical readiness is unavailable', async () => {
+    canonicalReadinessControl.unavailableAfterGraphAppend = true;
+    const result = await runTurnExecutor(
+      payload('Set the budget to £45,000'),
+      'req-applied-graph-status-unavailable',
+      {
+        routingAdapter: mockRoutingAdapter(setFactorValueToolCall()),
+        graphState: buildBudgetGraph() as never,
+      },
+    );
+
+    expect(appendCalls.some((write) => write.graph != null)).toBe(true);
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.response.graph_hash).toBeUndefined();
+    const errorBlock = (
+      result.response.blocks as Array<{ type: string; error_code?: string }>
+    ).find((block) => block.type === 'error');
+    expect(errorBlock?.error_code).toBe('INTERNAL_ERROR');
   });
 
   it('CHIP-REPLAY applied receipt (wire-proven absence 2, £250k shape): the consented cap-extension resume carries draft_graph with the renormalised post-mutation graph', async () => {

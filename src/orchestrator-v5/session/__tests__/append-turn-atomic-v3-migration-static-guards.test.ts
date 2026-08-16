@@ -10,7 +10,7 @@
  * The DB behaviour these guard is the DB half of POC-BOARD item 3: an
  * IN-TRANSACTION compare-and-swap under FOR UPDATE that rejects a stale-base
  * graph write with SQLSTATE OLGC1 (the app maps it to GraphStaleWriteError —
- * pinned by supabase-store-graph-cas-v3.test.ts). Mutation anchor: delete the
+ * retained as rollback evidence beside the v5 successor tests. Mutation anchor: delete the
  * CAS `IF p_cas_enforce … RAISE … OLGC1` block and the "in-transaction CAS"
  * assertions below go red — proving the guard bites.
  */

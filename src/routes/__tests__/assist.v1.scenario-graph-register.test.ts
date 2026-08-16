@@ -45,7 +45,7 @@ vi.mock("../../utils/telemetry.js", () => ({
 
 // ── The store double ────────────────────────────────────────────────────────
 // `append` is THE atomic writer (scenarios.graph + scenarios.graph_identity_hash
-// in one statement, via append_turn_atomic_v3/v4). It is a spy so the suite can
+// in one statement, via graph-only append_turn_atomic_v5). It is a spy so the suite can
 // assert not only the response but WHAT WAS WRITTEN — the difference between
 // "answers 200" and "answers 200 having stored the imported graph", which is the
 // whole of this row.
@@ -134,7 +134,10 @@ beforeEach(() => {
   getScenarioOwner.mockResolvedValue(null);
   scenarioExists.mockResolvedValue(true);
   loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
-  append.mockResolvedValue({ id: "turn-1" });
+  append.mockResolvedValue({
+    id: "11111111-1111-4111-8111-111111111111",
+    graph_write_disposition: "accepted_insert",
+  });
 });
 
 describe("register — the acceptance case the P0 walk failed", () => {
@@ -302,6 +305,22 @@ describe("register — the atomic writer, and the trusted CAS base", () => {
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: IMPORTED });
     expect(res.statusCode).toBe(503);
+    await app.close();
+  });
+
+  it.each([
+    ["byte-identical replay", { id: "11111111-1111-4111-8111-111111111111", graph_write_disposition: "byte_identical_replay" }],
+    ["divergent replay", { id: "11111111-1111-4111-8111-111111111111", graph_write_disposition: "divergent_replay" }],
+    ["missing disposition", { id: "11111111-1111-4111-8111-111111111111" }],
+    ["malformed disposition", { id: "11111111-1111-4111-8111-111111111111", graph_write_disposition: "inserted" }],
+  ])("answers 503 with no success receipt for %s", async (_label, result) => {
+    append.mockResolvedValueOnce(result);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+
+    expect(res.statusCode).toBe(503);
+    expect(res.json().registered).not.toBe(true);
+    expect(res.json().graph_identity_hash).toBeUndefined();
     await app.close();
   });
 });

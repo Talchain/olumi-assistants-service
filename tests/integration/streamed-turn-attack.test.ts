@@ -77,7 +77,12 @@ vi.mock("../../src/orchestrator-v5/session/index.js", async (importOriginal) => 
           if (w.graph !== undefined && w.graph !== null) {
             persistedGraphs.set(w.scenario_id, w.graph);
           }
-          return { id: "mock-row" };
+          return {
+            id: "mock-row",
+            ...(w.graph != null
+              ? { graph_write_disposition: "accepted_insert" as const }
+              : {}),
+          };
         },
         loadGraph: async (scenarioId: string) =>
           (persistedGraphs.get(scenarioId) ?? null) as never,

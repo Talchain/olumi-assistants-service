@@ -1,10 +1,11 @@
 /**
  * Supabase-backed SessionStore implementation (slice B).
  *
- * Writes: exclusively via the `append_turn_atomic` RPC — idempotent via
- * `ON CONFLICT (scenario_id, turn_id) DO NOTHING`. Callers pass a client-
- * generated `turn_id`; two concurrent calls with identical keys return the
- * same row `id` and neither raises.
+ * Writes: graph-free turns use `append_turn_atomic_v2`; graph-bearing turns
+ * use the strict acknowledgement RPC `append_turn_atomic_v5`. Both retain the
+ * unique `(scenario_id, turn_id)` key. A graph insert is the only authoritative
+ * success; identical and divergent graph replays are atomically classified and
+ * raised as typed non-authoritative failures before any app-side success hook.
  *
  * Reads: direct SELECT from `v5_conversation_turns` with ORDER BY created_at
  * DESC + LIMIT. The `readFactsFor` path queries `v5_handler_facts` with the
@@ -36,11 +37,14 @@ import {
 import type { SessionLRUCache } from './cache.js';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
+  GraphAppendReplayError,
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
+  type GraphAppendDisposition,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
+  type SessionAppendResult,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
@@ -58,7 +62,6 @@ import {
   classifyAtomicFenceError,
   currentTurnFenceSlot,
   errMessage,
-  evaluateTurnFence,
   markTurnStopped,
   TurnFenceRejectedError,
   type TurnFenceEvaluation,
@@ -69,12 +72,12 @@ import {
 
 /**
  * 2.174 fix c — how a graph-bearing write will be fenced:
- *  · `atomic`  — the turn holds an admitted claim and `append_turn_atomic_v4`
- *    is (as far as we know) available: the fence check rides INSIDE the
- *    append transaction; no pre-RPC evaluation happens at all.
- *  · `checked` — everything else: the pre-v4 behaviour ran (evaluation
- *    passed, or the write proceeds unfenced per the documented gaps) and the
- *    caller dispatches the pre-v4 RPC (v2/v3).
+ *  · `atomic`  — the turn holds an admitted claim; its generation rides into
+ *    `append_turn_atomic_v5` and the fence check runs inside the append
+ *    transaction.
+ *  · `checked` — an explicitly unfenced/non-ingress path; graph append still
+ *    uses v5, but passes a null generation. There is no legacy graph RPC
+ *    dispatch or fallback.
  */
 type TurnFencePlan =
   | { readonly path: 'atomic'; readonly generation: number }
@@ -108,6 +111,51 @@ interface SupabaseErrorLike {
   code?: string;
 }
 
+type GraphAppendRpcDisposition =
+  | 'inserted'
+  | 'replayed_identical'
+  | 'replayed_divergent';
+
+interface GraphAppendRpcAck {
+  readonly id: string;
+  readonly disposition: GraphAppendRpcDisposition;
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseGraphAppendRpcAck(data: unknown): GraphAppendRpcAck | null {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return null;
+  const record = data as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.length !== 2 || keys[0] !== 'disposition' || keys[1] !== 'id') return null;
+  if (typeof record.id !== 'string' || !UUID_PATTERN.test(record.id)) return null;
+  if (
+    record.disposition !== 'inserted' &&
+    record.disposition !== 'replayed_identical' &&
+    record.disposition !== 'replayed_divergent'
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    disposition: record.disposition,
+  };
+}
+
+function mapGraphAppendDisposition(
+  disposition: GraphAppendRpcDisposition,
+): GraphAppendDisposition {
+  switch (disposition) {
+    case 'inserted':
+      return 'accepted_insert';
+    case 'replayed_identical':
+      return 'byte_identical_replay';
+    case 'replayed_divergent':
+      return 'divergent_replay';
+  }
+}
+
 function errMsg(e: unknown): string {
   return (e as SupabaseErrorLike | null)?.message ?? String(e);
 }
@@ -120,17 +168,17 @@ export interface SupabaseSessionStoreOptions {
   readonly defaultReadLimit: number;
   /**
    * A3 graph CAS observe-mode (`CEE_V5_GRAPH_CAS_MODE`). Absent → 'off'
-   * (zero SELECTs, byte-identical write path). See `evaluateGraphCas` and
+   * (zero observer SELECTs; the graph still uses the mandatory v5 append).
+   * See `evaluateGraphCas` and
    * graph-cas-conflict.ts for semantics and the coverage caveat.
    */
   readonly graphCasMode?: GraphCasMode;
   /**
-   * ATOMIC graph CAS commit RPC (`CEE_V5_GRAPH_CAS_RPC`). Absent → 'off'
-   * (call append_turn_atomic_v2 exactly as today — safe against the
-   * un-migrated schema). 'shadow'/'enforce' route graph-bearing writes to
-   * append_turn_atomic_v3 (migration 20260717120000; Paul-gated). See
-   * `GraphCasRpcMode` and the RPC-v3 proposal doc. Independent of
-   * `graphCasMode` — the observe hook and the atomic RPC are orthogonal.
+   * Atomic graph-CAS behavior carried by the mandatory graph-only v5 RPC.
+   * 'off' passes null hashes and does not enforce; 'shadow' stamps the incoming
+   * identity without enforcing; 'enforce' performs the in-transaction CAS.
+   * This mode no longer selects a legacy RPC. Independent of `graphCasMode` —
+   * the observe hook and the atomic DB check are orthogonal.
    */
   readonly graphCasRpc?: GraphCasRpcMode;
 }
@@ -145,26 +193,16 @@ function identityHashPrefix(hash: string | null | undefined): string | null {
 }
 
 export class SupabaseSessionStore implements SessionStore {
-  /**
-   * 2.174 fix c — set once when `append_turn_atomic_v4` answers PGRST202
-   * (not migrated); every later graph write then takes the pre-v4 two-step
-   * without re-probing. Per-instance by design: the expected order is
-   * migrate → deploy (which restarts the process), so no invalidation path
-   * is needed; an out-of-order deploy simply keeps the pre-v4 protection
-   * until its next restart, stated in the fallback WARN.
-   */
-  private atomicFenceRpcUnavailable = false;
-
   constructor(
     private readonly client: SupabaseClient,
     private readonly cache: SessionLRUCache,
     private readonly options: SupabaseSessionStoreOptions,
   ) {}
 
-  async append(write: SessionTurnWrite): Promise<{ id: string }> {
+  async append(write: SessionTurnWrite): Promise<SessionAppendResult> {
     // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
     // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
-    // SELECTs and the RPC call below is byte-identical to today. In observe
+    // observer SELECTs and does not change the mandatory v5 dispatch. In observe
     // mode there is NO code path from this hook to a thrown error, a changed
     // response, or a skipped RPC — the commit always proceeds. In enforce mode
     // (non-prod only; prod config auto-downgrades to observe) ONLY
@@ -173,7 +211,8 @@ export class SupabaseSessionStore implements SessionStore {
     //
     // NOT atomic: the SELECT inside evaluateGraphCas and the RPC below are
     // separate round-trips (TOCTOU window). This is observation, not write
-    // safety — see graph-cas-conflict.ts and the RPC-v3 proposal doc.
+    // safety — see graph-cas-conflict.ts. The v5 RPC closes this window when
+    // its in-transaction CAS mode is enabled.
     await this.runGraphCasHook(write);
 
     // PostgREST overload disambiguation: always pass all 11 named args,
@@ -210,18 +249,15 @@ export class SupabaseSessionStore implements SessionStore {
     // wrapped in a `pre_dispatch` envelope (snapshot_timing + version) before
     // persistence so the snapshot's derivation point is self-describing for
     // Stage 2B-2 lifecycle. Content-free — only closed-enum codes + hashes.
-    // V5 Conversation Context Reliability: persist via append_turn_atomic_v2,
-    // which is append_turn_atomic + two trailing content params
-    // (p_user_message / p_assistant_message). It is a DISTINCTLY NAMED
-    // function (not a same-name overload), so there is zero PostgREST
-    // candidate ambiguity with the legacy append_turn_atomic — the two
-    // coexist. The v2 RPC MUST be live in the target DB before this build
-    // deploys (migration 20260609120000 ships first); calling it where the
-    // migration is absent surfaces as StateCommitFailedError, never silent
-    // data loss. Content columns are nullable and meaningfully NULL: write
-    // NULL when the turn carried no user/assistant text.
-    // The 15 named args are identical for v2 and v3 (v3 is a strict superset:
-    // v2's params + 3 trailing CAS params). Build once, spread into both.
+    // V5 Conversation Context Reliability: both selected RPCs carry the
+    // content params (p_user_message / p_assistant_message). Graph-free turns
+    // retain v2; graph-bearing turns require the distinct graph-only v5 RPC.
+    // Calling either where its migration is absent surfaces as
+    // StateCommitFailedError, never silent data loss. Content columns are
+    // nullable and meaningfully NULL: write NULL when the turn carried no
+    // user/assistant text.
+    // The first 15 named args are shared by graph-free v2 and graph-only v5.
+    // Build them once; v5 adds CAS and fence arguments below.
     const baseRpcArgs = {
       p_scenario_id: write.scenario_id,
       p_turn_id: write.turn_id,
@@ -241,90 +277,51 @@ export class SupabaseSessionStore implements SessionStore {
       p_assistant_message: write.assistantMessage ?? null,
     };
 
-    // ATOMIC graph CAS (CEE_V5_GRAPH_CAS_RPC). Route graph-bearing writes to
-    // append_turn_atomic_v3 (in-transaction FOR UPDATE + compare) when the
-    // flag is not 'off'. Non-graph writes and flag-'off' always call v2 —
-    // this is what keeps the DEFAULT path byte-identical to today AND safe
-    // against the un-migrated schema (v3 need not exist). See GraphCasRpcMode.
+    // Graph-bearing writes always use the additive v5 acknowledgement RPC.
+    // Non-graph writes remain byte-identical on v2. There is deliberately no
+    // feature detection or fallback for a missing v5 function: an id-only
+    // legacy response cannot prove this attempt's graph was accepted.
     const rpcMode: GraphCasRpcMode = this.options.graphCasRpc ?? 'off';
-    // (`useV3` is derived where it is used — inside dispatchCheckedAppend.)
 
     // ── V5 TURN FENCE — the last thing before the write ────────────────────
     // Placed HERE, after every argument is built and with nothing between it
-    // and the RPC dispatch below. 2.174 fix c: for a CLAIMED turn with
-    // `append_turn_atomic_v4` available, this resolves to the ATOMIC plan —
-    // no pre-RPC evaluation at all; the check runs INSIDE the append
-    // transaction under a lock on the turn's own fence row, so the
-    // evaluate→append window (turn-fence.ts arrival 10) does not exist on
-    // that path. Everything else (unfenced / unclaimed / v4-missing
-    // fallback) keeps the pre-v4 evaluate-then-append behaviour exactly.
+    // and the RPC dispatch below. A claimed turn resolves to the atomic plan:
+    // v5 checks the exact admitted generation under the DB lock. Explicitly
+    // unfenced paths pass null. A failed ingress claim is refused here, and no
+    // graph path falls back to v2/v3/v4.
     const fencePlan = await this.enforceTurnFence(write);
 
-    if (fencePlan.path === 'atomic') {
-      return await this.appendAtomicFenced(write, baseRpcArgs, rpcMode, fencePlan.generation);
+    if (write.graph != null) {
+      return await this.appendGraphV5(
+        write,
+        baseRpcArgs,
+        rpcMode,
+        fencePlan.path === 'atomic' ? fencePlan.generation : null,
+      );
     }
 
-    return await this.dispatchCheckedAppend(write, baseRpcArgs, rpcMode);
+    return await this.appendNonGraphV2(write, baseRpcArgs);
   }
 
   /**
-   * The pre-v4 (v2/v3) append dispatch — extracted from `append()` verbatim
-   * (ROADMAP 2.709) so the atomic path's first-write-exemption RECOVERY can
-   * re-dispatch through the exact same RPC + error mapping rather than a
-   * hand-copied twin. Behaviour on the ordinary checked path is unchanged.
+   * Legacy v2 is retained for graph-free turns only. Its UUID response is
+   * sufficient because no committed graph authority is being advertised.
    */
-  private async dispatchCheckedAppend(
+  private async appendNonGraphV2(
     write: SessionTurnWrite,
     baseRpcArgs: Record<string, unknown>,
-    rpcMode: GraphCasRpcMode,
-  ): Promise<{ id: string }> {
-    const useV3 = rpcMode !== 'off' && write.graph != null;
-    const rpcName = useV3 ? 'append_turn_atomic_v3' : 'append_turn_atomic_v2';
-    const { data, error } = useV3
-      ? await this.client.rpc('append_turn_atomic_v3', {
-          ...baseRpcArgs,
-          // Trusted server-read base captured at turn start (undefined =
-          // uninstrumented, null = server-read-but-empty → both map to
-          // SQL NULL = no base to compare = unconditional, v2-equivalent).
-          p_expected_graph_identity_hash: write.expectedGraphIdentityHash ?? null,
-          // Identity of the graph BEING written (the exact JSONB in p_graph),
-          // via the single normaliser authority. Stamped into
-          // scenarios.graph_identity_hash so the column tracks the persisted
-          // graph in lock-step, and used by v3's self-noop guard.
-          p_incoming_graph_identity_hash:
-            computeExpectedGraphCasHashes(write.graph).expectedGraphIdentityHash,
-          // enforce → real CAS (OLGC1 on divergence); shadow → unconditional.
-          p_cas_enforce: rpcMode === 'enforce',
-        })
-      : await this.client.rpc('append_turn_atomic_v2', baseRpcArgs);
+  ): Promise<SessionAppendResult> {
+    const { data, error } = await this.client.rpc('append_turn_atomic_v2', baseRpcArgs);
 
     if (error) {
-      // v3 atomic CAS conflict → typed 409-class refusal, NEVER a silent
-      // clobber. The whole transaction (turn row included) rolled back in the
-      // DB, so no partial state survives; surface GraphStaleWriteError so the
-      // TurnExecutor's existing `instanceof StateCommitFailedError` catch maps
-      // it onto the typed failure envelope (refresh-reconfirm).
-      if (useV3 && errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
-        this.emitRpcCasConflict(write, rpcMode, errCode(error));
-        throw new GraphStaleWriteError(
-          `append_turn_atomic_v3 rejected a stale graph write for scenario ${write.scenario_id} ` +
-            `(SQLSTATE ${GRAPH_CAS_RPC_CONFLICT_SQLSTATE}) — refresh and reconfirm. ` +
-            'Atomic in-transaction CAS: the whole turn rolled back, nothing clobbered.',
-          {
-            conflict_category: 'rpc_cas_conflict',
-            cause: error,
-            expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
-          },
-        );
-      }
       throw new StateCommitFailedError(
-        `${rpcName} RPC failed: ${errMsg(error)}`,
+        `append_turn_atomic_v2 RPC failed: ${errMsg(error)}`,
         { cause: error, rpc_code: errCode(error) },
       );
     }
     if (typeof data !== 'string') {
       throw new StateCommitFailedError(
-        `${rpcName} returned non-string id: ${JSON.stringify(data)}`,
+        `append_turn_atomic_v2 returned non-string id: ${JSON.stringify(data)}`,
       );
     }
 
@@ -336,17 +333,112 @@ export class SupabaseSessionStore implements SessionStore {
     // invariants. The next readRecent pays one DB round-trip and is
     // guaranteed consistent. Cache-ahead-of-DB is impossible.
     this.cache.invalidateAll(write.scenario_id);
-    await this.resolveDraftLossAfterGraphCommit(write);
 
     return { id: data };
   }
 
   /**
+   * Singular graph append authority. The v5 RPC atomically classifies an
+   * accepted insert versus both replay classes using the immutable graph
+   * snapshot stored on the turn row. Only `inserted` reaches cache/loss
+   * side-effects or returns successfully.
+   */
+  private async appendGraphV5(
+    write: SessionTurnWrite,
+    baseRpcArgs: Record<string, unknown>,
+    rpcMode: GraphCasRpcMode,
+    fenceGeneration: number | null,
+  ): Promise<SessionAppendResult> {
+    const casArgs =
+      rpcMode !== 'off'
+        ? {
+            p_expected_graph_identity_hash: write.expectedGraphIdentityHash ?? null,
+            p_incoming_graph_identity_hash:
+              computeExpectedGraphCasHashes(write.graph).expectedGraphIdentityHash,
+            p_cas_enforce: rpcMode === 'enforce',
+          }
+        : {
+            p_expected_graph_identity_hash: null,
+            p_incoming_graph_identity_hash: null,
+            p_cas_enforce: false,
+          };
+    const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
+      ...baseRpcArgs,
+      ...casArgs,
+      p_fence_generation: fenceGeneration,
+    });
+
+    if (error) {
+      const fenceEvaluation = classifyAtomicFenceError(error);
+      if (fenceEvaluation !== null) {
+        this.emitFenceEvaluated(
+          write,
+          fenceEvaluation.verdict,
+          fenceEvaluation.generation,
+          fenceEvaluation.maxGeneration,
+          'atomic_append',
+        );
+        await this.markGraphWriteFailed(
+          write.scenario_id,
+          currentTurnFenceSlot()?.turnId ?? write.turn_id,
+          fenceEvaluation.verdict,
+          'draft_loss',
+        );
+        this.throwFenceRefusal(write, write.turn_id, fenceEvaluation, 'atomic_append');
+      }
+      if (errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
+        this.emitRpcCasConflict(write, rpcMode, errCode(error));
+        throw new GraphStaleWriteError(
+          `append_turn_atomic_v5 rejected a stale graph write for scenario ${write.scenario_id} ` +
+            `(SQLSTATE ${GRAPH_CAS_RPC_CONFLICT_SQLSTATE}) — refresh and reconfirm. ` +
+            'Atomic in-transaction CAS: the whole turn rolled back, nothing clobbered.',
+          {
+            conflict_category: 'rpc_cas_conflict',
+            cause: error,
+            expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
+          },
+        );
+      }
+      throw new StateCommitFailedError(
+        `append_turn_atomic_v5 RPC failed: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) },
+      );
+    }
+
+    const ack = parseGraphAppendRpcAck(data);
+    if (ack === null) {
+      throw new StateCommitFailedError(
+        'append_turn_atomic_v5 returned malformed graph acknowledgement',
+        { rpc_code: 'GRAPH_APPEND_ACK_INVALID' },
+      );
+    }
+    const disposition = mapGraphAppendDisposition(ack.disposition);
+    if (disposition !== 'accepted_insert') {
+      throw new GraphAppendReplayError(disposition);
+    }
+
+    if (fenceGeneration !== null) {
+      this.emitFenceEvaluated(
+        write,
+        'current',
+        fenceGeneration,
+        null,
+        'atomic_append',
+      );
+    }
+    this.cache.invalidateAll(write.scenario_id);
+    await this.resolveDraftLossAfterGraphCommit(write);
+    return {
+      id: ack.id,
+      graph_write_disposition: disposition,
+    };
+  }
+
+  /**
    * ROADMAP 2.735 — a graph has committed, so any outstanding draft loss on
-   * this scenario is over. Called from BOTH successful graph-write paths
-   * (checked and atomic) and a no-op for graph-less writes: a conversational
-   * turn resolves nothing, and firing on one would clear a mark while the
-   * user's model is still missing.
+   * this scenario is over. Called only after v5 returns an accepted insert and
+   * a no-op for graph-less writes: a conversational turn resolves nothing, and
+   * firing on one would clear a mark while the user's model is still missing.
    */
   private async resolveDraftLossAfterGraphCommit(write: SessionTurnWrite): Promise<void> {
     if (write.graph == null) return;
@@ -546,14 +638,12 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     // ── 2.174 fix c: the ATOMIC plan ─────────────────────────────────────
-    // A claimed turn with `append_turn_atomic_v4` available skips the
+    // A claimed turn skips the
     // pre-RPC evaluation entirely — the fence check runs INSIDE the append
     // transaction, under a lock on this turn's own fence row, so there is
-    // no window between "checked" and "wrote" at all. When v4 is not
-    // migrated yet (feature-detected via PGRST202 in appendAtomicFenced and
-    // remembered per store instance) every claimed turn takes the pre-v4
-    // evaluate-then-append below, byte-equivalent to the pre-fix path.
-    if (handle.generation !== null && !this.atomicFenceRpcUnavailable) {
+    // no window between "checked" and "wrote" at all. Graph writes now fail
+    // closed if the v5 RPC is unavailable; there is no pre-v5 fallback.
+    if (handle.generation !== null) {
       return { path: 'atomic', generation: handle.generation };
     }
 
@@ -574,39 +664,17 @@ export class SupabaseSessionStore implements SessionStore {
     // early copy logged `reason` but not the generations; the tail logged the
     // generations but no reason). Two refusal paths must never log
     // differently, so now there is one.
-    const evaluation: TurnFenceEvaluation =
-      handle.generation === null
-        ? {
-            verdict: 'unclaimed',
-            generation: null,
-            maxGeneration: null,
-            // 2.174 fix b: the two null-generation states carry distinct
-            // reasons — `never_admitted` means the request was bound at
-            // ingress but work dispatched without passing the admission
-            // gate (no code path does this; refused on principle), while
-            // `claim_did_not_land` is the #759 failed-claim state.
-            unavailableReason: neverAdmitted ? 'never_admitted' : 'claim_did_not_land',
-          }
-        : await evaluateTurnFence(this.client, handle);
-
-    // ── ROADMAP 2.709 — FIRST-WRITE EXEMPTION (checked path) ─────────────
-    // A `superseded` verdict on a scenario with NO committed graph is the
-    // fresh-journey P0: the write being refused is the ONLY graph the
-    // scenario has ever had, and the superseding turn (a question, a chip
-    // click) wrote nothing. One read decides both halves — `scenarios.graph
-    // IS NULL` means "this is a first write" AND "no later graph write has
-    // landed". `stopped` is NEVER exempted; a failing read refuses
-    // (fail-closed, the fence's standing posture). TOCTOU between this read
-    // and the append is the pre-v4 check-not-lock window, unchanged; the
-    // zero-window form lives in migration 20260806120000's in-transaction
-    // gate.
-    if (
-      evaluation.verdict === 'superseded' &&
-      (await this.firstWriteExemptionApplies(write))
-    ) {
-      this.emitFirstWriteExemption(write, evaluation, 'pre_rpc');
-      return { path: 'checked' };
-    }
+    const evaluation: TurnFenceEvaluation = {
+      verdict: 'unclaimed',
+      generation: null,
+      maxGeneration: null,
+      // 2.174 fix b: the two null-generation states carry distinct reasons —
+      // `never_admitted` means the request was bound at ingress but work
+      // dispatched without passing admission; `claim_did_not_land` is the
+      // failed-claim state. Both refuse before append. Superseded first-write
+      // handling now exists only inside v5 under the scenario row lock.
+      unavailableReason: neverAdmitted ? 'never_admitted' : 'claim_did_not_land',
+    };
 
     this.emitFenceEvaluated(
       write,
@@ -631,83 +699,6 @@ export class SupabaseSessionStore implements SessionStore {
       'draft_loss',
     );
     this.throwFenceRefusal(write, handle.turnId, evaluation, 'pre_rpc');
-  }
-
-  /**
-   * ROADMAP 2.709 — does the first-write exemption apply to this graph
-   * write? True iff the scenario provably holds NO committed graph. A
-   * failed read returns false — we cannot prove the write is a first
-   * write, so the superseded refusal stands (fail closed).
-   */
-  private async firstWriteExemptionApplies(write: SessionTurnWrite): Promise<boolean> {
-    try {
-      return !(await this.scenarioHasCommittedGraph(write.scenario_id));
-    } catch (err) {
-      log.warn(
-        {
-          event: 'v5.turn_fence.first_write_exemption_read_failed',
-          scenario_id: write.scenario_id,
-          turn_id: write.turn_id,
-          err: errMessage(err),
-        },
-        'V5 turn fence — scenario graph-presence read failed; the superseded refusal STANDS (fail closed)',
-      );
-      return false;
-    }
-  }
-
-  /**
-   * One indexed existence read: does `scenarios.graph` hold a value for this
-   * scenario? Throws on a failed read — the CALLER decides the fail-closed
-   * direction (exemption: refuse; notice: skip).
-   */
-  private async scenarioHasCommittedGraph(scenarioId: string): Promise<boolean> {
-    const { data, error } = await this.client
-      .from('scenarios')
-      .select('id')
-      .eq('id', scenarioId)
-      .not('graph', 'is', null)
-      .limit(1);
-    if (error) {
-      throw new Error(`scenarios graph-presence read failed: ${errMsg(error)}`);
-    }
-    return ((data as unknown[] | null) ?? []).length > 0;
-  }
-
-  /**
-   * Exemption telemetry — the refusal event must NOT fire for an allowed write.
-   *
-   * ROADMAP 2.736 narrowed `channel` to its ONE remaining producer. The union
-   * used to carry `'atomic_recovery'` for the app-side OLTF2 recovery; that
-   * recovery is gone, so the label described nothing. A label that outlives
-   * the thing it named is how a reader learns to trust a value that can never
-   * appear (CLAUDE.md trap 14), so it is removed rather than left inert —
-   * the type now makes re-introducing it a compile error rather than a
-   * silently-dead branch.
-   */
-  private emitFirstWriteExemption(
-    write: SessionTurnWrite,
-    evaluation: TurnFenceEvaluation,
-    channel: 'pre_rpc',
-  ): void {
-    try {
-      const payload = {
-        scenario_id: write.scenario_id,
-        turn_id: write.turn_id,
-        turn_class: write.turn_class,
-        verdict: 'superseded',
-        generation: evaluation.generation,
-        max_generation: evaluation.maxGeneration,
-        channel,
-      };
-      emit(TelemetryEvents.V5TurnFenceFirstWriteExemption, payload);
-      log.info(
-        payload,
-        'V5 turn fence — FIRST-WRITE EXEMPTION: a superseded graph write proceeds because the scenario holds no committed graph (ROADMAP 2.709)',
-      );
-    } catch {
-      // Never let telemetry decide whether a write is fenced.
-    }
   }
 
   /**
@@ -838,6 +829,24 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * One indexed existence read used only by draft-loss disclosure: does the
+   * scenario currently hold a graph? This no longer participates in append
+   * admission or replay classification; both are atomic inside v5.
+   */
+  private async scenarioHasCommittedGraph(scenarioId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('id')
+      .eq('id', scenarioId)
+      .not('graph', 'is', null)
+      .limit(1);
+    if (error) {
+      throw new Error(`scenarios graph-presence read failed: ${errMsg(error)}`);
+    }
+    return ((data as unknown[] | null) ?? []).length > 0;
+  }
+
+  /**
    * ROADMAP 2.709 invariant 6, narrowed by 2.735 — does a draft loss stand?
    * Cheap-first order: the mark read answers false for almost every scenario;
    * the graph-presence read runs only behind a hit. Throws on read failure —
@@ -925,7 +934,7 @@ export class SupabaseSessionStore implements SessionStore {
 
   /**
    * The ONE refusal tail (R-11: two refusal paths must never log
-   * differently), shared by the pre-RPC evaluation and the v4
+   * differently), shared by the pre-RPC evaluation and the v5
    * in-transaction gate. The caller has already emitted the fence
    * telemetry (emitFenceEvaluated also emits the refused event for
    * non-current verdicts — calling it here too would double-count).
@@ -963,200 +972,10 @@ export class SupabaseSessionStore implements SessionStore {
       `V5 turn fence refused a graph write for scenario ${write.scenario_id} ` +
         `turn ${turnId} — ${detail}. ` +
         (channel === 'atomic_append'
-          ? 'The fence check ran INSIDE the append transaction (append_turn_atomic_v4); the whole turn rolled back.'
+          ? 'The fence check ran INSIDE the append transaction (append_turn_atomic_v5); the whole turn rolled back.'
           : 'The fence is a pre-write CHECK, not a lock.'),
       evaluation,
     );
-  }
-
-  /**
-   * 2.174 fix c — the fence-checked atomic append. Reaches here ONLY for a
-   * graph-bearing write whose turn holds an admitted claim; the fence
-   * verdict is computed by `append_turn_atomic_v4` inside the same
-   * transaction as the append, under `FOR UPDATE` on this turn's fence row,
-   * so a concurrent Stop either commits first (refusal below) or waits for
-   * this commit (and then reports `already_committed` honestly). The
-   * evaluate→append window of the pre-v4 design does not exist on this path.
-   *
-   * BEFORE THE MIGRATION EXECUTES the RPC does not exist: PostgREST answers
-   * PGRST202, we remember that per store instance, and the append re-runs
-   * through the pre-v4 two-step — FEATURE-DETECT, not fail-closed, stated
-   * and pinned (turn-fence-atomic-append.test.ts). A restart after the
-   * migration lands picks v4 up again (deploys restart the process, so the
-   * expected order migrate→deploy needs no cache invalidation).
-   */
-  private async appendAtomicFenced(
-    write: SessionTurnWrite,
-    baseRpcArgs: Record<string, unknown>,
-    rpcMode: GraphCasRpcMode,
-    generation: number,
-  ): Promise<{ id: string }> {
-    // CAS args mirror EXACTLY what the pre-v4 dispatch sends per mode:
-    // 'off' → the v2 shape (no hashes, no stamp, no compare); shadow/enforce
-    // → the v3 shape. v4's CAS block is v3's verbatim, so mode semantics are
-    // unchanged — the fence gate is the only delta.
-    const casArgs =
-      rpcMode !== 'off'
-        ? {
-            p_expected_graph_identity_hash: write.expectedGraphIdentityHash ?? null,
-            p_incoming_graph_identity_hash:
-              computeExpectedGraphCasHashes(write.graph).expectedGraphIdentityHash,
-            p_cas_enforce: rpcMode === 'enforce',
-          }
-        : {
-            p_expected_graph_identity_hash: null,
-            p_incoming_graph_identity_hash: null,
-            p_cas_enforce: false,
-          };
-
-    const { data, error } = await this.client.rpc('append_turn_atomic_v4', {
-      ...baseRpcArgs,
-      ...casArgs,
-      p_fence_generation: generation,
-    });
-
-    if (error) {
-      if (errCode(error) === 'PGRST202') {
-        // v4 is not migrated on this database. Remember it (per instance),
-        // say so once, and re-run this append through the pre-v4 two-step
-        // (enforceTurnFence will now evaluate pre-RPC and dispatch v2/v3).
-        // Costs one extra RPC round trip and one duplicate A3 observe pass
-        // on the single discovery call — every later graph write skips v4.
-        this.atomicFenceRpcUnavailable = true;
-        log.warn(
-          {
-            event: 'v5.turn_fence.atomic_rpc_unavailable',
-            scenario_id: write.scenario_id,
-            turn_id: write.turn_id,
-          },
-          'V5 turn fence — append_turn_atomic_v4 is not present in this database (PGRST202); falling back to the pre-v4 evaluate-then-append for the life of this instance. Execute migration 20260731130000 to close the evaluate→append window.',
-        );
-        return await this.append(write);
-      }
-      const fenceEvaluation = classifyAtomicFenceError(error);
-      if (fenceEvaluation !== null) {
-        // ── ROADMAP 2.736 — READ-ONLY REPLAY PASSTHROUGH ─────────────────
-        // This used to be the first-write exemption RECOVERY: an unfenced
-        // re-append that could resurrect a stopped draft or clobber a newer
-        // graph (Codex finding, 2026-08-08). It now only answers the
-        // idempotency question — "has this exact turn already committed?" —
-        // and returns the existing row id if so. It performs NO write, so
-        // there is no check-to-write window left to race. The exemption
-        // itself lives in migration 20260806120000's in-transaction gate,
-        // under the scenarios row lock. See tryFirstWriteExemptRecovery.
-        if (fenceEvaluation.verdict === 'superseded') {
-          const recovered = await this.tryFirstWriteExemptRecovery(write);
-          if (recovered !== null) return recovered;
-        }
-        this.emitFenceEvaluated(
-          write,
-          fenceEvaluation.verdict,
-          fenceEvaluation.generation,
-          fenceEvaluation.maxGeneration,
-          'atomic_append',
-        );
-        await this.markGraphWriteFailed(
-          write.scenario_id,
-          currentTurnFenceSlot()?.turnId ?? write.turn_id,
-          fenceEvaluation.verdict,
-          // 2.735: the atomic gate only fires for a graph-bearing append, so
-          // this refusal always destroys a real drafted model.
-          'draft_loss',
-        );
-        this.throwFenceRefusal(write, write.turn_id, fenceEvaluation, 'atomic_append');
-      }
-      if (errCode(error) === GRAPH_CAS_RPC_CONFLICT_SQLSTATE) {
-        this.emitRpcCasConflict(write, rpcMode, errCode(error));
-        throw new GraphStaleWriteError(
-          `append_turn_atomic_v4 rejected a stale graph write for scenario ${write.scenario_id} ` +
-            `(SQLSTATE ${GRAPH_CAS_RPC_CONFLICT_SQLSTATE}) — refresh and reconfirm. ` +
-            'Atomic in-transaction CAS: the whole turn rolled back, nothing clobbered.',
-          {
-            conflict_category: 'rpc_cas_conflict',
-            cause: error,
-            expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
-          },
-        );
-      }
-      throw new StateCommitFailedError(
-        `append_turn_atomic_v4 RPC failed: ${errMsg(error)}`,
-        { cause: error, rpc_code: errCode(error) },
-      );
-    }
-    if (typeof data !== 'string') {
-      throw new StateCommitFailedError(
-        `append_turn_atomic_v4 returned non-string id: ${JSON.stringify(data)}`,
-      );
-    }
-
-    // The in-transaction verdict was `current` — emit it on the same
-    // telemetry contract as the pre-RPC evaluation (max_generation is not
-    // returned by a successful v4; the reason names the channel).
-    this.emitFenceEvaluated(write, 'current', generation, null, 'atomic_append');
-
-    // Commit ordering — identical to the pre-v4 path: RPC success → cache
-    // evict → return.
-    this.cache.invalidateAll(write.scenario_id);
-    await this.resolveDraftLossAfterGraphCommit(write);
-    return { id: data };
-  }
-
-  /**
-   * ROADMAP 2.709, REWRITTEN BY 2.736 — the OLTF2 replay passthrough.
-   *
-   * ── WHAT THIS USED TO DO, AND WHY IT IS GONE ────────────────────────────
-   * It used to RECOVER the refused write: read graph absence → re-evaluate the
-   * fence → then dispatch `dispatchCheckedAppend`, which calls
-   * `append_turn_atomic_v2/v3` — RPCs with NO fence check at all. An external
-   * audit (Codex, 2026-08-08) put the objection precisely: a Stop, or a rival
-   * commit, landing between the re-evaluation and that write is INVISIBLE, so
-   * the recovery could resurrect a draft the user had explicitly stopped, or
-   * overwrite a graph newer than the one it was holding. Our own review had
-   * priced this as "bounded to a few ms, and it dies when the migration runs";
-   * that is a defence made of DEPLOY ORDER, and deploy order is not a
-   * guarantee. The tests only ever covered a Stop arriving BEFORE the
-   * re-evaluation — never after it, which is the whole window.
-   *
-   * The remedy is the first one the audit named: the exemption executes ONLY
-   * inside the locking SQL path. Migration 20260806120000 makes
-   * `append_turn_atomic_v4` decide the exemption under the `scenarios FOR
-   * UPDATE` it already holds — zero check-to-write window, a Stop serialises
-   * on the same fence row — so once it executes this branch is unreachable by
-   * construction and nothing here needs to reproduce it.
-   *
-   * ⚠ THE COST, STATED PLAINLY RATHER THAN HIDDEN: between this deploy and
-   *   that migration, a superseded FIRST write is refused again — the
-   *   fresh-journey P0 is reopened for that window. That is a disclosed,
-   *   bounded regression chosen over an unfenced write, and it is why the
-   *   migration must follow this deploy promptly. It is NOT "deploy order is
-   *   free"; it is the opposite, and the migration header now says so.
-   *
-   * ── WHAT REMAINS: a read-only idempotency answer ─────────────────────────
-   * If THIS (scenario, turn) has already committed, the honest answer to a
-   * retry is the existing row id, not a 500 about a turn that is in fact
-   * persisted (turn-fence.ts arrival 8). This is a SELECT; it writes nothing,
-   * so no interleaving can make it unsafe. It now runs UNCONDITIONALLY —
-   * previously it was reachable only when the scenario already held a graph,
-   * so a replay of a committed turn on a still-graph-less scenario 500ed.
-   */
-  private async tryFirstWriteExemptRecovery(
-    write: SessionTurnWrite,
-  ): Promise<{ id: string } | null> {
-    try {
-      const { data, error } = await this.client
-        .from('v5_conversation_turns')
-        .select('id')
-        .eq('scenario_id', write.scenario_id)
-        .eq('turn_id', write.turn_id)
-        .limit(1);
-      if (!error) {
-        const row = ((data as Array<{ id?: unknown }> | null) ?? [])[0];
-        if (row && typeof row.id === 'string') return { id: row.id };
-      }
-    } catch {
-      // Fall through to the original refusal.
-    }
-    return null;
   }
 
   /**
@@ -1316,7 +1135,7 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
-   * Emit the atomic-CAS conflict telemetry (append_turn_atomic_v3 OLGC1).
+   * Emit the atomic-CAS conflict telemetry (append_turn_atomic_v5 OLGC1).
    * Guarded: a telemetry fault must never mask the GraphStaleWriteError the
    * caller is about to throw. Content-free — closed enums + 16-hex hash
    * prefixes + the rpc_code only, mirroring the A3 observe payload's privacy
@@ -1642,8 +1461,8 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async storeDraftGraph(scenarioId: string, graph: unknown): Promise<void> {
-    // True no-op on an absent graph: return BEFORE any RPC. Unlike
-    // append_turn_atomic_v2 (which guards `IF p_graph IS NOT NULL`), the
+    // True no-op on an absent graph: return BEFORE any RPC. Unlike the legacy
+    // append functions (which guard `IF p_graph IS NOT NULL`), the
     // store_draft_graph RPC runs an UNCONDITIONAL `UPDATE scenarios SET
     // graph = p_graph` (migration 20260422120000), so passing null would CLEAR
     // scenarios.graph rather than leave it unchanged. Never issue the RPC unless
@@ -1652,7 +1471,7 @@ export class SupabaseSessionStore implements SessionStore {
 
     // Track S 0.13c-4: persist-site intercept repair on the SECOND scenarios.graph
     // write RPC. `store_draft_graph` is currently dead on the live V5 path
-    // (commitDirectAnswer → append_turn_atomic_v2 is the sole live writer), but this
+    // (commitDirectAnswer → append_turn_atomic_v5 is the sole live graph writer), but this
     // method is reserved for out-of-band admin/migration use — exactly the caller
     // class the persist-site repair must defend against. Repairing here keeps the
     // coverage airtight if it is ever re-wired.

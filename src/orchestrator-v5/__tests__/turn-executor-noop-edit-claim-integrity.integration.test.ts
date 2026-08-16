@@ -71,7 +71,12 @@ let priorFacts: unknown[] = [];
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async (write: { graph?: unknown }) => ({
+      id: 'mock-row-id',
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
     readMostRecentPendingActions: async () => [],

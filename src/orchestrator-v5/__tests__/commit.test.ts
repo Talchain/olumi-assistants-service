@@ -7,6 +7,7 @@ import type { SuggestedAction } from '../compose/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 const META = {
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -59,6 +60,146 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     ).rejects.toBe(boom);
   });
 
+  describe('exact persisted-graph response derivation', () => {
+    const canonicalReadiness = {
+      status: 'ready' as const,
+      options: [],
+      goal_node_id: '',
+    };
+
+    function makeSpyStore(): {
+      readonly store: SessionStore;
+      readonly appendCalls: SessionTurnWrite[];
+    } {
+      const appendCalls: SessionTurnWrite[] = [];
+      const store = createNoopSessionStore({ appendId: 'row-derived' });
+      vi.spyOn(store, 'append').mockImplementation(async (write) => {
+        appendCalls.push(write);
+        return {
+          id: 'row-derived',
+          ...(write.graph != null
+            ? { graph_write_disposition: 'accepted_insert' as const }
+            : {}),
+        };
+      });
+      return { store, appendCalls };
+    }
+
+    it('invokes once on the exact projected object before response, chip, pending and append bytes are fixed', async () => {
+      const inputGraph = { nodes: [], edges: [] };
+      const inputSnapshot = JSON.stringify(inputGraph);
+      const { store, appendCalls } = makeSpyStore();
+      let callbackGraph: Readonly<Record<string, unknown>> | null = null;
+      const derive = vi.fn((persistedGraph: Readonly<Record<string, unknown>>) => {
+        callbackGraph = persistedGraph;
+        return {
+          response: composeDirectAnswerResponse({
+            answerKind: 'functional',
+            assistant_text: 'Derived from the graph that will be stored.',
+            stage: 'analyse',
+            suggested_actions: [{
+              id: 'chip_action_run_analysis_derived',
+              label: 'Run analysis',
+              message: 'Run analysis.',
+              action_type: 'run_analysis' as const,
+            }],
+          }),
+          analysisReady: canonicalReadiness,
+        };
+      });
+
+      const result = await commitDirectAnswer(
+        composeDirectAnswerResponse({
+          answerKind: 'functional',
+          assistant_text: 'Provisional response.',
+          stage: 'analyse',
+        }),
+        {
+          ...META,
+          graph: inputGraph,
+          deriveResponseFromPersistedGraph: derive,
+        },
+        store,
+      );
+
+      expect(derive).toHaveBeenCalledTimes(1);
+      expect(appendCalls).toHaveLength(1);
+      expect(callbackGraph).toBe(result.persistedGraph);
+      expect(appendCalls[0]!.graph).toBe(result.persistedGraph);
+      expect(result.response.assistant_text).toBe(
+        'Derived from the graph that will be stored.',
+      );
+      expect(appendCalls[0]!.assistantMessage).toBe(result.response.assistant_text);
+      expect(result.response.suggested_actions).toHaveLength(1);
+      expect(appendCalls[0]!.pending_actions).toHaveLength(1);
+      expect(appendCalls[0]!.pending_actions?.[0]?.chip_id).toBe(
+        result.response.suggested_actions?.[0]?.id,
+      );
+      expect(result.persistedAnalysisGraphHash).toBe(
+        computeAnalysisAffectingGraphHash(result.persistedGraph as never),
+      );
+      expect(JSON.stringify(inputGraph)).toBe(inputSnapshot);
+      expect(JSON.stringify(result.persistedGraph)).toBe(
+        JSON.stringify(projectGraphForPersistence(inputGraph)),
+      );
+    });
+
+    it('undefined callback result aborts before append', async () => {
+      const { store, appendCalls } = makeSpyStore();
+      await expect(
+        commitDirectAnswer(
+          composeDirectAnswerResponse({
+            answerKind: 'functional',
+            assistant_text: 'Provisional response.',
+            stage: 'analyse',
+          }),
+          {
+            ...META,
+            graph: { nodes: [], edges: [] },
+            deriveResponseFromPersistedGraph: () => undefined,
+          },
+          store,
+        ),
+      ).rejects.toThrow('returned no canonical result');
+      expect(appendCalls).toHaveLength(0);
+    });
+
+    it('callback mutation is detected as graph drift and aborts before append', async () => {
+      const inputGraph = { nodes: [], edges: [] };
+      const inputSnapshot = JSON.stringify(inputGraph);
+      const { store, appendCalls } = makeSpyStore();
+      await expect(
+        commitDirectAnswer(
+          composeDirectAnswerResponse({
+            answerKind: 'functional',
+            assistant_text: 'Provisional response.',
+            stage: 'analyse',
+          }),
+          {
+            ...META,
+            graph: inputGraph,
+            deriveResponseFromPersistedGraph: (persistedGraph) => {
+              (persistedGraph as Record<string, unknown>).goal_constraints = [
+                { id: 'mutant' },
+              ];
+              return {
+                response: composeDirectAnswerResponse({
+                  answerKind: 'functional',
+                  assistant_text: 'Mutant response.',
+                  stage: 'analyse',
+                }),
+                analysisReady: canonicalReadiness,
+              };
+            },
+          },
+          store,
+        ),
+      ).rejects.toThrow('mutated graph');
+      expect(appendCalls).toHaveLength(0);
+      expect(JSON.stringify(inputGraph)).toBe(inputSnapshot);
+    });
+  });
+
   // V5 Phase 1 brief persistence: briefText must thread from CommitMetadata
   // through commit.ts to SessionStore.append.
   describe('V5 Phase 1 brief persistence — briefText pass-through', () => {
@@ -70,7 +211,12 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       const noop = createNoopSessionStore({ appendId: 'row-spy' });
       const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
         appendCalls.push(write);
-        return { id: 'row-spy' };
+        return {
+          id: 'row-spy',
+          ...(write.graph != null
+            ? { graph_write_disposition: 'accepted_insert' as const }
+            : {}),
+        };
       });
       // Hold the spy alive so vitest does not auto-restore inside async ticks.
       void spy;
@@ -136,7 +282,12 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       const noop = createNoopSessionStore({ appendId: 'row-cas' });
       const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
         appendCalls.push(write);
-        return { id: 'row-cas' };
+        return {
+          id: 'row-cas',
+          ...(write.graph != null
+            ? { graph_write_disposition: 'accepted_insert' as const }
+            : {}),
+        };
       });
       void spy;
       return { store: noop, appendCalls };
@@ -200,7 +351,12 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       const store = createNoopSessionStore({ appendId: 'row-spy' });
       vi.spyOn(store, 'append').mockImplementation(async (write) => {
         appendCalls.push(write);
-        return { id: 'row-spy' };
+        return {
+          id: 'row-spy',
+          ...(write.graph != null
+            ? { graph_write_disposition: 'accepted_insert' as const }
+            : {}),
+        };
       });
       // A run_analysis chip with a blank label is dropped by the finalizer; a
       // sibling valid run_analysis chip survives. Only the survivor may yield a
@@ -242,7 +398,12 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       const store = createNoopSessionStore({ appendId: 'row-cap' });
       vi.spyOn(store, 'append').mockImplementation(async (write) => {
         appendCalls.push(write);
-        return { id: 'row-cap' };
+        return {
+          id: 'row-cap',
+          ...(write.graph != null
+            ? { graph_write_disposition: 'accepted_insert' as const }
+            : {}),
+        };
       });
       return { store, appendCalls };
     }
@@ -422,7 +583,12 @@ describe('commitDirectAnswer — persist-site intercept repair (Track S 0.13c-4)
     const noop = createNoopSessionStore({ appendId: 'row-x' });
     const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
       appendCalls.push(write);
-      return { id: 'row-x' };
+      return {
+        id: 'row-x',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     });
     void spy;
     return { store: noop, appendCalls };
@@ -521,7 +687,12 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
     const noop = createNoopSessionStore({ appendId: 'row-fheld' });
     const spy = vi.spyOn(noop, 'append').mockImplementation(async (write) => {
       appendCalls.push(write);
-      return { id: 'row-fheld' };
+      return {
+        id: 'row-fheld',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     });
     void spy;
     return { store: noop, appendCalls };

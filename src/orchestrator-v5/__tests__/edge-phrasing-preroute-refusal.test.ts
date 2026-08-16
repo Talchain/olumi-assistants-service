@@ -35,7 +35,12 @@ import type { GraphV3T } from '../../schemas/cee-v3.js';
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
-    append: async () => ({ id: 'mock-row-id' }),
+    append: async (write: { graph?: unknown }) => ({
+      id: 'mock-row-id',
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    }),
     readRecent: async () => [],
     readFactsFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),

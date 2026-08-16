@@ -35,6 +35,7 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
 const SCENARIO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const GRAPH_ACK_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 // ── graph fixtures (same projection semantics as graph-cas-conflict.test) ──
 
@@ -115,7 +116,10 @@ function makeClient(cfg: MockConfig = {}): {
   const client = {
     rpc: vi.fn(async (fn: string, args: unknown) => {
       rpcCalls.push({ fn, args });
-      return cfg.rpcResult ?? { data: 'row-id-123', error: null };
+      return cfg.rpcResult ??
+        (fn === 'append_turn_atomic_v5'
+          ? { data: { id: GRAPH_ACK_ID, disposition: 'inserted' }, error: null }
+          : { data: 'row-id-123', error: null });
     }),
     from: vi.fn((table: string) => {
       const filters: Record<string, unknown> = {};
@@ -203,19 +207,23 @@ describe('A3 graph CAS — clean write (match)', () => {
     const store = makeStore(client, 'observe');
 
     const result = await store.append(GRAPH_WRITE);
-    expect(result.id).toBe('row-id-123');
+    expect(result.id).toBe(GRAPH_ACK_ID);
 
     // Exactly one pre-write SELECT of scenarios.graph by PK.
     expect(scenarioSelects).toHaveLength(1);
     expect(scenarioSelects[0]!.cols).toBe('graph');
     expect(scenarioSelects[0]!.filters['eq:id']).toBe(SCENARIO);
 
-    // RPC unchanged: same function, same 15 named args, no CAS params leak.
+    // The observer is orthogonal to the mandatory v5 RPC. With atomic CAS
+    // mode off, v5 receives explicit null/false CAS args.
     expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0]!.fn).toBe('append_turn_atomic_v2');
+    expect(rpcCalls[0]!.fn).toBe('append_turn_atomic_v5');
     const args = rpcCalls[0]!.args as Record<string, unknown>;
-    expect(Object.keys(args)).toHaveLength(15);
-    expect(args).not.toHaveProperty('p_expected_graph_identity_hash');
+    expect(Object.keys(args)).toHaveLength(19);
+    expect(args.p_expected_graph_identity_hash).toBeNull();
+    expect(args.p_incoming_graph_identity_hash).toBeNull();
+    expect(args.p_cas_enforce).toBe(false);
+    expect(args.p_fence_generation).toBeNull();
 
     const cas = events.filter((e) => e.event === 'v5.graph_cas.evaluated');
     expect(cas).toHaveLength(1);
@@ -234,7 +242,7 @@ describe('A3 graph CAS — stale write (analysis_affecting_conflict)', () => {
     const store = makeStore(client, 'observe');
 
     const result = await store.append(GRAPH_WRITE);
-    expect(result.id).toBe('row-id-123');
+    expect(result.id).toBe(GRAPH_ACK_ID);
     expect(rpcCalls).toHaveLength(1); // proceeded — observe never blocks
 
     const cas = events.filter((e) => e.event === 'v5.graph_cas.evaluated');
@@ -265,7 +273,7 @@ describe('A3 graph CAS — stale write (analysis_affecting_conflict)', () => {
     );
     expect((thrown as Error).name).toBe('GraphStaleWriteError');
 
-    // Blocked PRE-RPC: append_turn_atomic_v2 never invoked.
+    // Blocked PRE-RPC: append_turn_atomic_v5 never invoked.
     expect(rpcCalls).toHaveLength(0);
 
     expect(events.filter((e) => e.event === 'v5.graph_cas.evaluated')).toHaveLength(1);
@@ -331,7 +339,7 @@ describe('A3 graph CAS — cosmetic concurrent edit', () => {
       const store = makeStore(client, mode);
 
       const result = await store.append(GRAPH_WRITE);
-      expect(result.id).toBe('row-id-123');
+      expect(result.id).toBe(GRAPH_ACK_ID);
       expect(rpcCalls).toHaveLength(1); // never blocked — cosmetic is observed only
 
       const cas = events.find((e) => e.event === 'v5.graph_cas.evaluated')!;
@@ -359,7 +367,7 @@ describe('A3 graph CAS — self_noop (idempotent replay safety)', () => {
         ...GRAPH_WRITE,
         graph: DIVERGED_GRAPH, // incoming == current
       });
-      expect(result.id).toBe('row-id-123');
+      expect(result.id).toBe(GRAPH_ACK_ID);
       expect(rpcCalls).toHaveLength(1); // enforce does NOT block self_noop
 
       const cas = events.find((e) => e.event === 'v5.graph_cas.evaluated')!;
@@ -385,7 +393,7 @@ describe('A3 graph CAS — unavailable paths always proceed', () => {
       const store = makeStore(client, mode);
 
       const result = await store.append(GRAPH_WRITE);
-      expect(result.id).toBe('row-id-123');
+      expect(result.id).toBe(GRAPH_ACK_ID);
       expect(rpcCalls).toHaveLength(1);
 
       const cas = events.find((e) => e.event === 'v5.graph_cas.evaluated')!;
@@ -402,7 +410,7 @@ describe('A3 graph CAS — unavailable paths always proceed', () => {
     const store = makeStore(client, 'observe');
 
     const result = await store.append(GRAPH_WRITE);
-    expect(result.id).toBe('row-id-123');
+    expect(result.id).toBe(GRAPH_ACK_ID);
     expect(rpcCalls).toHaveLength(1);
 
     const cas = events.find((e) => e.event === 'v5.graph_cas.evaluated')!;
@@ -418,7 +426,7 @@ describe('A3 graph CAS — unavailable paths always proceed', () => {
     const { client, rpcCalls } = makeClient({ scenariosGraph: DIVERGED_GRAPH });
     const store = makeStore(client, 'observe');
     const result = await store.append(GRAPH_WRITE);
-    expect(result.id).toBe('row-id-123');
+    expect(result.id).toBe(GRAPH_ACK_ID);
     expect(rpcCalls).toHaveLength(1);
   });
 });
@@ -443,8 +451,8 @@ describe('A3 graph CAS — flag off (default)', () => {
     expect(legacy.scenarioSelects).toHaveLength(0);
     expect(off.scenarioSelects).toHaveLength(0);
 
-    // Byte-identical RPC invocation between absent-option and off — and the
-    // canonical 15-name arg shape (no CAS additions).
+    // Byte-identical v5 invocation between absent-option and off, including
+    // explicit null/false CAS and fence arguments.
     expect(off.rpcCalls[0]!.fn).toBe(legacy.rpcCalls[0]!.fn);
     expect(JSON.stringify(off.rpcCalls[0]!.args)).toBe(
       JSON.stringify(legacy.rpcCalls[0]!.args),
@@ -452,11 +460,15 @@ describe('A3 graph CAS — flag off (default)', () => {
     expect(Object.keys(off.rpcCalls[0]!.args as Record<string, unknown>).sort()).toEqual([
       'p_assistant_message',
       'p_brief_text',
+      'p_cas_enforce',
       'p_coaching_state',
       'p_duration_ms',
+      'p_expected_graph_identity_hash',
+      'p_fence_generation',
       'p_graph',
       'p_handler_facts',
       'p_handler_id',
+      'p_incoming_graph_identity_hash',
       'p_llm_calls_used',
       'p_pending_actions',
       'p_request_hash',

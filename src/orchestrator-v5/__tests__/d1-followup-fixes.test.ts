@@ -254,7 +254,12 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
     };
 
     const fakeStore = {
-      append: async () => ({ id: 'mock-row-id' }),
+      append: async (write: { graph?: unknown }) => ({
+        id: 'mock-row-id',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      }),
       readRecent: async () => [],
       readFactsFor: async () => [],
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
@@ -285,7 +290,12 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
   it('omits goal_constraints when the graph has none', async () => {
     const graphWithoutConstraints = buildReadyD1SnapshotGraph();
     const fakeStore = {
-      append: async () => ({ id: 'mock-row-id' }),
+      append: async (write: { graph?: unknown }) => ({
+        id: 'mock-row-id',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      }),
       readRecent: async () => [],
       readFactsFor: async () => [],
       invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' as const }),
@@ -432,7 +442,12 @@ vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: { graph?: unknown; handler_id?: unknown; handler_facts?: unknown }) => {
       appendCalls.push(write);
-      return { id: 'mock-row-id' };
+      return {
+        id: 'mock-row-id',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => mockState.priorTurns,
     readFactsFor: async () => mockState.priorFacts,

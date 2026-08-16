@@ -570,7 +570,9 @@ describe('dispatchEditGraph — V5 H5 unified mutation predicate (Codex round-2 
         makeAppliedSuccessResult("I've updated Price to 'Price (revised)'."),
       );
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+      .mockImplementation(async (_response, metadata) =>
+        canonicalCommitResultFixture(metadata.graph ?? null),
+      );
 
     const out = await dispatchEditGraph({
       payload: makePayload(),

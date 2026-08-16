@@ -125,11 +125,13 @@ export function buildCanonicalCommittedGraphReceipt(
   }
 
   const goalNodeId = rawGoalNodeId === null ? null : rawGoalNodeId;
+  const hasGoalNode = numericBounds.graph.nodes.some((node) => node.kind === 'goal');
   if (
-    goalNodeId !== null &&
-    !numericBounds.graph.nodes.some(
-      (node) => node.id === goalNodeId && node.kind === 'goal',
-    )
+    (goalNodeId === null && hasGoalNode) ||
+    (goalNodeId !== null &&
+      !numericBounds.graph.nodes.some(
+        (node) => node.id === goalNodeId && node.kind === 'goal',
+      ))
   ) {
     throw new CommittedGraphReceiptError('goal_identity_invalid');
   }

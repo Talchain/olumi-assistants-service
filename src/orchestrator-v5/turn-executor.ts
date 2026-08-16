@@ -88,7 +88,6 @@ import {
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
 import {
-  assessCanonicalAnalysisReadiness,
   buildCanonicalAnalysisReadyFromGraph,
   buildAnalysisRefusalReadiness,
 } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -3131,30 +3130,33 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          const readback = assessCanonicalAnalysisReadiness(committed.persistedGraph);
-          analysisReadyForTurn = readback.analysisReady;
-          const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
+          const committedReceipt = buildCanonicalCommittedGraphReceipt(
+            committed.persistedGraph,
+          );
+          const committedAnalysisReady = buildCanonicalAnalysisReadyFromGraph(
+            committed.persistedGraph,
+          );
+          if (
+            !committed.graphPersisted ||
+            committed.persistedAnalysisGraphHash === null ||
+            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
+            committedAnalysisReady === undefined
+          ) {
+            throw new Error('readiness repair committed receipt/readiness mismatch');
+          }
+          analysisReadyForTurn = committedAnalysisReady;
           response = {
             ...committed.response,
-            draft_graph: buildAppliedGraphWireField(
-              readbackParsed.success ? readbackParsed.data : outcome.appliedGraph,
-            ),
+            graph_hash: committedReceipt.analysisGraphHash,
+            draft_graph: committedReceipt.draftGraph,
           };
-          let postApplyHash: string | null = null;
-          try {
-            postApplyHash = computeAnalysisAffectingGraphHash(
-              committed.persistedGraph as GraphStateIngress | null | undefined,
-            );
-          } catch {
-            postApplyHash = null;
-          }
           // Reuse the shared canonical state selector for post-repair
           // freshness/readiness. The repair fact is not a run_analysis fact,
           // so keep it out of the fact chain: including it would shift the
           // selected prior fact index without changing the selected analysis.
           // This is also the canonical frame returned by finalisation; wire,
           // Run admission and diagnostics therefore read one record.
-          currentAnalysisGraphHashForTurn = postApplyHash;
+          currentAnalysisGraphHashForTurn = committedReceipt.analysisGraphHash;
           canonicalReadinessGraphForRun = committed.persistedGraph;
           // Invalidate the pre-repair memo, then reuse the already-approved
           // per-turn canonical assembly seam. Adding another direct selector
@@ -3294,17 +3296,25 @@ export async function runTurnExecutor(
         // that PLoT preflight would 422-block, and the chip set points at
         // the real configure path (shared builder → deterministic edit-lane
         // route) rather than offering nothing.
-        const gmReadiness = buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph);
         const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph);
-        const appliedResponse = composeAnswer({
-          answerKind: 'functional',
-          assistant_text: buildGmHeldAppliedReceipt(
-            gmAppliedSubject !== null ? [gmAppliedSubject] : [],
-            deriveUnconfiguredOptionLabels(gmReadiness),
-          ),
-          stage: context.stage,
-          suggested_actions: buildGmHeldAppliedChips(gmReadiness),
-        });
+        const buildHeldSingleAppliedResponse = (
+          readiness: NonNullable<
+            ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+          > | undefined,
+        ) =>
+          composeAnswer({
+            answerKind: 'functional',
+            assistant_text: buildGmHeldAppliedReceipt(
+              gmAppliedSubject !== null ? [gmAppliedSubject] : [],
+              deriveUnconfiguredOptionLabels(readiness),
+            ),
+            stage: context.stage,
+            suggested_actions: buildGmHeldAppliedChips(readiness),
+          });
+        // Provisional only: commitDirectAnswer replaces this with the callback
+        // response derived from its exact persistence projection before any
+        // assistant text/chip/pending bytes are assembled or appended.
+        const appliedResponse = buildHeldSingleAppliedResponse(undefined);
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
         intentClass = 'execute';
@@ -3325,6 +3335,9 @@ export async function runTurnExecutor(
         // carries a graph. The post-commit graphPersisted result remains the
         // finaliser's authority; a rejected commit restores this observation.
         handlerEmittedMutatedGraph = true;
+        let persistedGraphReadiness: NonNullable<
+          ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+        > | null = null;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3339,6 +3352,16 @@ export async function runTurnExecutor(
             duration_ms: Date.now() - startedAt,
             handler_facts: [outcome.fact],
             graph: outcome.mutatedGraph,
+            deriveResponseFromPersistedGraph: (persistedGraph) => {
+              const canonicalReadiness =
+                buildCanonicalAnalysisReadyFromGraph(persistedGraph);
+              if (canonicalReadiness === undefined) return undefined;
+              persistedGraphReadiness = canonicalReadiness;
+              return {
+                response: buildHeldSingleAppliedResponse(canonicalReadiness),
+                analysisReady: canonicalReadiness,
+              };
+            },
             // Consumed proposal never carries forward (zombie-chip guard).
             consumedPendingRefs: [heldPending.chip_id],
           });
@@ -3347,12 +3370,14 @@ export async function runTurnExecutor(
           const committedReceipt = buildCanonicalCommittedGraphReceipt(
             committed.persistedGraph,
           );
+          const committedAnalysisReady = persistedGraphReadiness;
           if (
             !committed.graphPersisted ||
             committed.persistedAnalysisGraphHash === null ||
-            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
+            committedAnalysisReady === null
           ) {
-            throw new Error('GM held apply committed receipt mismatch');
+            throw new Error('GM held apply committed receipt/readiness mismatch');
           }
           // Attach only the exact post-projection persisted receipt. The old
           // path used outcome.appliedGraph and could advertise options/goal/
@@ -3367,9 +3392,8 @@ export async function runTurnExecutor(
           // accepts the receipt, readiness reflects the applied graph, and
           // wire freshness re-derives against the post-apply hash (an
           // applied substantive edit honestly reads stale).
-          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(
-            committed.persistedGraph,
-          );
+          analysisReadyForTurn = committedAnalysisReady;
+          sonnetTextForLog = committed.response.assistant_text;
           freshness = deriveAnalysisFreshness(
             context.prior_facts,
             committedReceipt.analysisGraphHash,
@@ -3521,23 +3545,31 @@ export async function runTurnExecutor(
         // for any hold the re-referee refused — never a silent partial.
         // ROADMAP 2.11 / P1-3: same needs-encoding disclosure + chip
         // behaviour as the single-resume site above.
-        const gmReadiness = buildCanonicalAnalysisReadyFromGraph(lastExecuted.appliedGraph);
-        let receiptText = buildGmHeldAppliedReceipt(
-          appliedSubjects,
-          deriveUnconfiguredOptionLabels(gmReadiness),
-        );
-        if (declinedLabels.length > 0) {
-          const declinedNamed = declinedLabels.map((l) => `'${l}'`).join(', ');
-          receiptText += ` I couldn't take ${declinedNamed} forward, so the model is unchanged for ${
-            declinedLabels.length === 1 ? 'that one' : 'those'
-          }.`;
-        }
-        const appliedResponse = composeAnswer({
-          answerKind: 'functional',
-          assistant_text: receiptText,
-          stage: context.stage,
-          suggested_actions: buildGmHeldAppliedChips(gmReadiness),
-        });
+        const buildHeldAllAppliedResponse = (
+          readiness: NonNullable<
+            ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+          > | undefined,
+        ) => {
+          let receiptText = buildGmHeldAppliedReceipt(
+            appliedSubjects,
+            deriveUnconfiguredOptionLabels(readiness),
+          );
+          if (declinedLabels.length > 0) {
+            const declinedNamed = declinedLabels.map((l) => `'${l}'`).join(', ');
+            receiptText += ` I couldn't take ${declinedNamed} forward, so the model is unchanged for ${
+              declinedLabels.length === 1 ? 'that one' : 'those'
+            }.`;
+          }
+          return composeAnswer({
+            answerKind: 'functional',
+            assistant_text: receiptText,
+            stage: context.stage,
+            suggested_actions: buildGmHeldAppliedChips(readiness),
+          });
+        };
+        // Provisional only; the exact projected-graph callback below replaces
+        // this before durable response/chip/pending derivation.
+        const appliedResponse = buildHeldAllAppliedResponse(undefined);
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
         intentClass = 'execute';
@@ -3552,6 +3584,9 @@ export async function runTurnExecutor(
         // to commitTurn before it chooses the durable assistant bytes. The
         // actual graphPersisted result still gates the final wire exception.
         handlerEmittedMutatedGraph = true;
+        let persistedGraphReadiness: NonNullable<
+          ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
+        > | null = null;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3563,6 +3598,16 @@ export async function runTurnExecutor(
             duration_ms: Date.now() - startedAt,
             handler_facts: appliedFacts,
             graph: lastExecuted.mutatedGraph,
+            deriveResponseFromPersistedGraph: (persistedGraph) => {
+              const canonicalReadiness =
+                buildCanonicalAnalysisReadyFromGraph(persistedGraph);
+              if (canonicalReadiness === undefined) return undefined;
+              persistedGraphReadiness = canonicalReadiness;
+              return {
+                response: buildHeldAllAppliedResponse(canonicalReadiness),
+                analysisReady: canonicalReadiness,
+              };
+            },
             // Every APPLIED hold is consumed (zombie-chip guard); declined
             // holds keep the existing pending lifecycle and its honest
             // outcomes.
@@ -3573,21 +3618,22 @@ export async function runTurnExecutor(
           const committedReceipt = buildCanonicalCommittedGraphReceipt(
             committed.persistedGraph,
           );
+          const committedAnalysisReady = persistedGraphReadiness;
           if (
             !committed.graphPersisted ||
             committed.persistedAnalysisGraphHash === null ||
-            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
+            committedAnalysisReady === null
           ) {
-            throw new Error('GM held apply-all committed receipt mismatch');
+            throw new Error('GM held apply-all committed receipt/readiness mismatch');
           }
           response = {
             ...committed.response,
             graph_hash: committedReceipt.analysisGraphHash,
             draft_graph: committedReceipt.draftGraph,
           };
-          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(
-            committed.persistedGraph,
-          );
+          analysisReadyForTurn = committedAnalysisReady;
+          sonnetTextForLog = committed.response.assistant_text;
           freshness = deriveAnalysisFreshness(
             context.prior_facts,
             committedReceipt.analysisGraphHash,
@@ -10737,7 +10783,7 @@ export async function runTurnExecutor(
       // through the ENTIRE W2 pipeline for free (commit.ts:
       // repairGraphForPersistence → normaliseOptionInterventionContract →
       // reconcileTopLevelOptionsFromNodes [decision ③, options[] free-ride] →
-      // append_turn_atomic_v3 [CAS identity-hash stamp]). Server-authoritative:
+      // append_turn_atomic_v5 [accepted-insert ack + CAS identity stamp]). Server-authoritative:
       // adopt can NEVER overwrite an existing server model (rows E/F never
       // adopt), so a revert cannot un-write a clobbered model — zero data risk.
       //
@@ -11228,30 +11274,46 @@ export async function runTurnExecutor(
         effectiveTurnGraph = preCommitEffectiveTurnGraph;
         effectiveTurnGraphSetPreCommit = false;
       }
-      // Validate every graph-writing D1 commit against the exact persisted
+      // Validate every graph-writing D1 RECEIPT against the exact persisted
       // projection, then make those exact bytes the internal graph authority.
-      // Pure first-touch adoption remains receipt-free on the wire, but its
-      // freshness/hash view must still describe what the append stored.
-      let persistedGraphParse: ReturnType<typeof GraphV3.safeParse> | null = null;
+      // Pure first-touch adoption remains receipt-free on the wire. It accepts
+      // the deliberately-permissive ingress graph contract, which can be a
+      // legacy partial graph that #983 cannot strictly assess (for example,
+      // edges without the later GraphV3 readiness fields). Such an adoption
+      // still persists and hashes the exact projected bytes; it carries the
+      // canonical status only when #983 can derive one and otherwise carries
+      // no status. It must never reuse a precommit/request readiness verdict.
+      const committedReceiptRequired = handlerOutcome?.mutated_graph != null;
       let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt> | null = null;
       if (committed.graphPersisted) {
-        committedReceipt = buildCanonicalCommittedGraphReceipt(
+        const committedAnalysisReady = buildCanonicalAnalysisReadyFromGraph(
           committed.persistedGraph,
         );
-        if (
-          committed.persistedAnalysisGraphHash === null ||
-          committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
-        ) {
-          throw new Error('routed D1 committed receipt mismatch');
+        if (committedReceiptRequired) {
+          committedReceipt = buildCanonicalCommittedGraphReceipt(
+            committed.persistedGraph,
+          );
+          if (
+            committed.persistedAnalysisGraphHash === null ||
+            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
+            committedAnalysisReady === undefined
+          ) {
+            throw new Error('routed D1 committed receipt/readiness mismatch');
+          }
         }
-        persistedGraphParse = GraphV3.safeParse(committed.persistedGraph);
-        // The receipt builder already validated the permissive ingress shape
-        // and all canonical carriers. Preserve the raw object here: GraphV3's
-        // parsed value strips top-level options/goal identity and would make
-        // the egress/hash view describe a lossy projection. Freshness already
-        // came from this same idempotent persistence projection at the single
-        // pinned post-handler derivation seam above; do not re-derive it here.
+        // Preserve the raw persisted object here: GraphV3's parsed value strips
+        // top-level options/goal identity and would make the egress/hash view
+        // describe a lossy projection. For a mutation receipt the receipt
+        // builder above validated the permissive ingress shape and all
+        // canonical carriers. For receipt-free adoption, commitDirectAnswer's
+        // terminal projection/hash invariant is the authority. Freshness
+        // already came from this same idempotent persistence projection at the
+        // single pinned post-handler derivation seam above; do not re-derive it.
         effectiveTurnGraph = committed.persistedGraph as GraphV3T;
+        // Assignment is deliberately unconditional: `undefined` clears any
+        // precommit/request status on a permissive legacy adoption instead of
+        // silently falling back to a verdict about different bytes.
+        analysisReadyForTurn = committedAnalysisReady;
       }
       // Only a genuine persisted mutation attaches an apply-to-canvas receipt.
       // A graph write intentionally withheld by a warrant/selection guard keeps
@@ -11271,48 +11333,9 @@ export async function runTurnExecutor(
       // was already re-derived from the post-mutation hash at the
       // post-handler block — so the wire's
       // `analysis_ready.current_graph_hash` reflects the committed graph.
-      // But `analysisReadyForTurn` (the readiness payload the finaliser
-      // stamps as `analysis_ready`, carrying the option interventions)
-      // still held its PRE-mutation value from the per-turn parse at STEP 0
-      // (`effectiveTurnGraph` was re-projected pre-commit above, so the
-      // durable-text scrub and the wire egress already share the committed
-      // graph). Proven live consequence: the wire paired a post-mutation
-      // `current_graph_hash` with pre-mutation option interventions, so the
-      // canvas showed stale absolutes (£320k/£80k) while the DB held the
-      // correct renormalised values. Re-derive readiness AFTER the commit
-      // succeeds — a failed commit (the catch below) never advertises
-      // unpersisted state, same rule as the GM-held path.
-      if (committed.graphPersisted && persistedGraphParse !== null) {
-        if (persistedGraphParse.success) {
-          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(
-            committed.persistedGraph,
-          );
-        } else {
-          // Should be unreachable: D1 handlers GraphV3-validate the mutated
-          // graph and the persistence merge only restores top-level fields.
-          // Fail open to the pre-mutation projection (the pre-fix behaviour)
-          // rather than dropping readiness from the wire, but say so loudly:
-          // structured warn + frozen-registry event (PR #414 review) so the
-          // merge-seam/schema-drift signal is dashboard-visible. Payload is
-          // content-free — correlation ids, the closed handler enum, and the
-          // first zod issue path (schema keys/indices only, never values).
-          emit(TelemetryEvents.V5CommittedGraphReprojectionFailed, {
-            request_id: requestId,
-            scenario_id: context.session_id,
-            handler_id: handlerIdForCommit ?? null,
-            first_issue_path:
-              persistedGraphParse.error.issues[0]?.path.join('.') ?? '',
-          });
-          log.warn(
-            {
-              request_id: requestId,
-              scenario_id: context.session_id,
-              handler_id: handlerIdForCommit ?? null,
-            },
-            'V5 TurnExecutor — committed D1 graph failed GraphV3 parse; wire analysis_ready left at its pre-mutation value',
-          );
-        }
-      }
+      // `analysisReadyForTurn` is replaced inside the committed-graph block
+      // above by the sole #983 whole-status builder over exact persisted
+      // bytes. There is no lossy GraphV3 gate and no pre-mutation fallback.
       // Pending-action consumed telemetry fires only after the commit
       // succeeds — never for a pending action whose handler failed,
       // whose validation rejected the dispatch, or whose commit

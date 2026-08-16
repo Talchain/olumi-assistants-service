@@ -107,7 +107,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
       createMockSessionStore({
         append: async (write) => {
           appendCalls.push(write);
-          return { id: 'mock-row-id' };
+          return {
+            id: 'mock-row-id',
+            ...(write.graph != null
+              ? { graph_write_disposition: 'accepted_insert' as const }
+              : {}),
+          };
         },
         // build-turn-context calls readRecent first (filters to handler
         // turn_class) then readFactsFor against each row id. To exercise

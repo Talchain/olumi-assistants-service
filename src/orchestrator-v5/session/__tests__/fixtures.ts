@@ -38,7 +38,11 @@ import type {
   InvalidationResult,
   InvalidationScope,
 } from '../invalidation.js';
-import type { SessionStore, SessionTurnWrite } from '../store.js';
+import type {
+  SessionAppendResult,
+  SessionStore,
+  SessionTurnWrite,
+} from '../store.js';
 import type { PendingAction } from '../pending-action.js';
 import type { SessionTurnWithContent } from '../conversation-content.js';
 
@@ -97,9 +101,14 @@ export function createNoopSessionStore(
   // on `SessionStore` (added after this fixture shipped) and is attached
   // conditionally below the literal — see `getScenarioOwnerBehaviour`.
   const store = {
-    async append(_: SessionTurnWrite): Promise<{ id: string }> {
+    async append(write: SessionTurnWrite): Promise<SessionAppendResult> {
       if (opts.throwOnAppend) throw opts.throwOnAppend;
-      return { id: opts.appendId ?? 'noop-row-id' };
+      return {
+        id: opts.appendId ?? 'noop-row-id',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     async readRecent(
       _scenarioId: string,

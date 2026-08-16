@@ -667,7 +667,7 @@ async function dispatchEdgeStrengthEdit(
   try {
     // The trusted expected base includes both edge mean and direction in its
     // analysis projection and every persisted field in its identity projection.
-    // append_turn_atomic_v4/v3 checks the identity under the DB row lock when
+    // append_turn_atomic_v5 checks the identity under the DB row lock when
     // the deployed CAS RPC is enforcing, closing the read→write race.
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const commitResult = await commitDirectAnswer(result.response, {
@@ -748,7 +748,8 @@ async function dispatchEdgeStrengthEdit(
     );
     return { response: result.response, commitPerformed: false, graph: null };
   }
-  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const canonicalAnalysisReady =
+    buildCanonicalAnalysisReadyFromGraph(persistedGraphBytes);
   const exactTargetReadback = isExactCommittedEdgeReadback({
     projected: result.graph,
     committed: persistedGraphBytes,
@@ -771,7 +772,7 @@ async function dispatchEdgeStrengthEdit(
     graphPersisted !== true ||
     persistedAnalysisGraphHash === null ||
     persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-    !committedParse.success ||
+    canonicalAnalysisReady === undefined ||
     !exactTargetReadback ||
     !confirmationStillProvenanceOnly
   ) {
@@ -782,7 +783,7 @@ async function dispatchEdgeStrengthEdit(
         scenario_id: payload.scenario_id,
         graph_persisted: graphPersisted,
         has_analysis_hash: persistedAnalysisGraphHash !== null,
-        graph_parse_ok: committedParse.success,
+        canonical_readiness_available: canonicalAnalysisReady !== undefined,
         exact_target_readback: exactTargetReadback,
         confirmation_provenance_only: confirmationStillProvenanceOnly,
       },
@@ -790,7 +791,11 @@ async function dispatchEdgeStrengthEdit(
     );
     return { response: result.response, commitPerformed: false, graph: null };
   }
-  const graphForReadiness = committedParse.data;
+  // Receipt validation already admitted the exact persisted object through the
+  // permissive ingress and strict canonical carrier contracts. Preserve that
+  // same object for the egress label scrub; a GraphV3 parse here would strip
+  // analysis-affecting carriers after commit and reintroduce a second graph.
+  const committedGraph = persistedGraphBytes as GraphV3T;
   // The exact graph this commit projected and handed to the atomic store is
   // the UI's authoritative readback. It is load-bearing for confirm_current:
   // graph_patch honestly stays `noop` for the unchanged scientific tuple,
@@ -844,9 +849,9 @@ async function dispatchEdgeStrengthEdit(
   return {
     response,
     commitPerformed: true,
-    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    analysisReady: canonicalAnalysisReady,
     freshness,
-    graph: graphForReadiness,
+    graph: committedGraph,
   };
 }
 
@@ -1077,7 +1082,8 @@ async function dispatchFactorValueEdit(
     draft_graph: committedReceipt.draftGraph,
   };
 
-  // Readiness from the bytes that LANDED, not from our pre-projection copy.
+  // Readiness from the exact bytes that LANDED, not from our pre-projection
+  // copy or a GraphV3 parse that strips canonical hash carriers.
   //
   // This is not pedantry. The canonical graph adapter reads each option node's
   // merged `interventions`, and `projectGraphForPersistence` runs
@@ -1085,17 +1091,28 @@ async function dispatchFactorValueEdit(
   // the store. Deriving readiness from the un-projected graph can therefore
   // publish a readiness verdict for a graph that was never stored — the same
   // "advertised state != persisted state" class as the hash defect above.
-  // Falls back to the merged graph only if the projected bytes fail to re-parse,
-  // which would itself mean the store holds something we cannot model.
-  const committedParse = GraphV3.safeParse(persistedGraphBytes);
-  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
+  const canonicalAnalysisReady =
+    buildCanonicalAnalysisReadyFromGraph(persistedGraphBytes);
+  if (canonicalAnalysisReady === undefined) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        canonical_readiness_available: canonicalAnalysisReady !== undefined,
+      },
+      'V5 factor_value_edit — persisted graph/readiness mismatch; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
 
   return {
     response,
     commitPerformed: true,
-    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    analysisReady: canonicalAnalysisReady,
     // Still the full graph: the egress id-leak scrub resolves ids to labels
-    // against it, independently of the hash above.
-    graph: graphForReadiness,
+    // against it, independently of the hash above. Receipt validation admitted
+    // this exact object; never replace it with a lossy GraphV3 parse.
+    graph: persistedGraphBytes as GraphV3T,
   };
 }

@@ -42,7 +42,12 @@ vi.mock('../session/index.js', () => ({
       turn_class?: unknown;
     }) => {
       appendCalls.push(write);
-      return { id: 'mock-row-id' };
+      return {
+        id: 'mock-row-id',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],

@@ -99,6 +99,12 @@ const commit = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
 const buildCanonical = buildCanonicalAnalysisReadyFromGraph as MockedFunction<
   typeof buildCanonicalAnalysisReadyFromGraph
 >;
+const CANONICAL_BLOCKED_READINESS = {
+  status: 'blocked',
+  goal_node_id: 'goal_revenue',
+  options: [],
+  blocked_reason: 'FEWER_THAN_TWO_OPTIONS',
+} as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>;
 let events: Array<{ event: string; data: Record<string, unknown> }> = [];
 
 beforeEach(() => {
@@ -106,9 +112,7 @@ beforeEach(() => {
   commit.mockResolvedValue(
     canonicalCommitResultFixture(POST_EDIT_GRAPH, { persistedRowId: 'r' }),
   );
-  buildCanonical.mockReturnValue(
-    undefined as unknown as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>,
-  );
+  buildCanonical.mockReturnValue(CANONICAL_BLOCKED_READINESS);
   events = [];
   setTestSink((event, data) => events.push({ event, data }));
 });
@@ -153,9 +157,7 @@ describe('R7 NB-1 — assembly-region exactly-once', () => {
 
   it('normal success path emits exactly once across both finallys (no double-emit)', async () => {
     hg.mockResolvedValue(makeAppliedResult());
-    buildCanonical.mockReturnValue(
-      undefined as unknown as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>,
-    );
+    buildCanonical.mockReturnValue(CANONICAL_BLOCKED_READINESS);
     const result = await run();
     expect(result.commitPerformed).toBe(true);
     expect(turnEvents()).toHaveLength(1); // inner finally emits; outer finally is a guarded no-op

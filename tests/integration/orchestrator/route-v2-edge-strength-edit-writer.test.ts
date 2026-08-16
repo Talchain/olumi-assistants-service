@@ -41,7 +41,12 @@ function buildPersistedGraph() {
   };
 }
 
-const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
+  id: 'mock-row-id',
+  ...(write.graph != null
+    ? { graph_write_disposition: 'accepted_insert' as const }
+    : {}),
+}));
 const loadGraphMock = vi.fn();
 const readMostRecentPendingActionsMock = vi.fn();
 const readRecentMock = vi.fn();
@@ -310,7 +315,12 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     graphCasRpcEnforce = true;
     commitReceiptState.mode = 'normal';
     appendMock.mockReset();
-    appendMock.mockResolvedValue({ id: 'mock-row-id' });
+    appendMock.mockImplementation(async (write: { graph?: unknown }) => ({
+      id: 'mock-row-id',
+      ...(write.graph != null
+        ? { graph_write_disposition: 'accepted_insert' as const }
+        : {}),
+    }));
     loadGraphMock.mockReset();
     loadGraphMock.mockImplementation(async () => persisted);
     readMostRecentPendingActionsMock.mockReset();

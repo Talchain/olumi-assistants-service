@@ -105,6 +105,7 @@ function asPriorFactsWithTurn(
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: {
+      graph?: unknown
       turn_class?: string
       handler_id?: string | null
       handler_facts?: readonly Record<string, unknown>[]
@@ -117,7 +118,12 @@ vi.mock('../session/index.js', () => ({
         created_at: new Date().toISOString(),
         handler_facts: write.handler_facts ?? [],
       })
-      return { id }
+      return {
+        id,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      }
     },
     readRecent: async () => asPriorTurns(),
     readFactsFor: async (rowIds: readonly string[]) => asPriorFacts(rowIds),

@@ -63,7 +63,7 @@ function createStatefulFakeStore(): SessionStore {
 
   return {
     ...noop,
-    async append(write: SessionTurnWrite): Promise<{ id: string }> {
+    async append(write: SessionTurnWrite) {
       // Mirror the RPC's first-write-wins predicate: only set brief_text
       // when the scenario currently has none.
       if (write.briefText !== undefined && !briefByScenario.has(write.scenario_id)) {
@@ -75,7 +75,12 @@ function createStatefulFakeStore(): SessionStore {
       if (write.graph !== undefined) {
         graphByScenario.set(write.scenario_id, write.graph);
       }
-      return { id: `row-${write.turn_id}` };
+      return {
+        id: `row-${write.turn_id}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     async loadGraphAndBriefText(scenarioId: string) {
       return {

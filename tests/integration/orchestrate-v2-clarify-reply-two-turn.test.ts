@@ -98,7 +98,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
       const pending = (write as { pending_actions?: ReadonlyArray<unknown> })
         .pending_actions;
       mostRecentPendingActions = pending ?? [];
-      return { id: `row-${appendCalls.length}` };
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],

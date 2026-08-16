@@ -32,7 +32,12 @@ function buildCapturingStore(): CapturingStore {
     captured: { writes },
     async append(write) {
       writes.push(write);
-      return { id: 'fake-row-id' };
+      return {
+        id: 'fake-row-id',
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     async readRecent() {
       return [];

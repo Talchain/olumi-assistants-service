@@ -46,7 +46,12 @@ vi.mock('../../orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
 
 let pendingActionsForRead: readonly PendingAction[] = [];
 
-const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
+  id: 'mock-row-id',
+  ...(write.graph != null
+    ? { graph_write_disposition: 'accepted_insert' as const }
+    : {}),
+}));
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,

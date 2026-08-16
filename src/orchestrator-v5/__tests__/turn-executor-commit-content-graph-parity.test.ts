@@ -52,7 +52,12 @@ vi.mock('../session/index.js', () => ({
         throw new Error('injected append failure (commit-revert pin)');
       }
       appendCalls.push(write);
-      return { id: `row-${appendCalls.length}` };
+      return {
+        id: `row-${appendCalls.length}`,
+        ...(write.graph != null
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => [],
     readFactsFor: async () => [],

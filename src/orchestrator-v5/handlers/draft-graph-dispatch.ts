@@ -87,6 +87,7 @@ import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -218,6 +219,13 @@ export function draftResultToOlumiResponse(
    * parameter REDs any caller that does not pass it, wherever it lives.
    */
   effectiveBrief: string | null,
+  /**
+   * Sole whole-status authority for wire/chip decisions. A persisted draft
+   * caller supplies this from `buildCanonicalAnalysisReadyFromGraph` over the
+   * exact `CommitResult.persistedGraph`; pipeline readiness remains semantic
+   * detail for narration and bias blocks only.
+   */
+  wholeStatusAnalysisReady: AnalysisReadyPayload | undefined,
 ): OlumiResponse {
   // Derive node/edge counts from the FINAL graph (post-repair, post-validation)
   // to ensure the assistant_text matches what the UI will render.
@@ -332,15 +340,14 @@ export function draftResultToOlumiResponse(
   // path from surviving beside the canonical one.
 
   // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
-  // dispatcher surfaces `result.analysisReady` on `DispatchDraftGraphResult`
+  // dispatcher surfaces the canonical post-commit whole status on
+  // `DispatchDraftGraphResult`
   // (when graphPersisted), and the response-finaliser stamps it onto the
   // wire envelope after composition, before egress validation. The chip
-  // gate below still reads the raw payload locally to choose the post-draft
-  // chip — that's chip-suggestion logic, not envelope stamping.
+  // gate below reads that same canonical status locally to choose the
+  // post-draft chip — pipeline readiness is detail-only here.
   const analysisReadyField: AnalysisReadyPayload | undefined =
-    graphPersisted && result.analysisReady
-      ? (result.analysisReady as AnalysisReadyPayload)
-      : undefined;
+    graphPersisted ? wholeStatusAnalysisReady : undefined;
 
   // V5 review: post-draft_graph chips. The draft path produces its own
   // response envelope (not through the standard composers) so it needs its
@@ -765,16 +772,20 @@ export async function dispatchDraftGraph(
     const committedReceipt = shouldEmitCommittedReceipt
       ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
       : null;
+    const canonicalAnalysisReady = shouldEmitCommittedReceipt
+      ? buildCanonicalAnalysisReadyFromGraph(commitResult.persistedGraph)
+      : undefined;
     if (
       shouldEmitCommittedReceipt &&
       (
         !commitResult.graphPersisted ||
         commitResult.persistedAnalysisGraphHash === null ||
         committedReceipt === null ||
+        canonicalAnalysisReady === undefined ||
         commitResult.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
       )
     ) {
-      throw new Error('draft_graph committed receipt mismatch');
+      throw new Error('draft_graph committed receipt/readiness mismatch');
     }
 
     let response = {
@@ -784,6 +795,7 @@ export async function dispatchDraftGraph(
         commitResult.graphPersisted,
         requestId,
         effectiveBrief,
+        canonicalAnalysisReady,
       ),
       ...(committedReceipt
         ? {
@@ -809,10 +821,7 @@ export async function dispatchDraftGraph(
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.
     // Only surface when the graph actually persisted — a non-persisted
     // draft has no canvas state for the UI to apply readiness against.
-    const baseAnalysisReady: AnalysisReadyPayload | undefined =
-      commitResult.graphPersisted && draftResult.analysisReady
-        ? (draftResult.analysisReady as AnalysisReadyPayload)
-        : undefined;
+    const baseAnalysisReady = canonicalAnalysisReady;
 
     // F1 (PR A): attach a short, sanitised, pre-analysis "assumption to
     // check" line to analysis_ready as the additive, passthrough-safe
@@ -937,7 +946,14 @@ export async function dispatchDraftGraph(
       },
       'V5 draft_graph dispatch — commit failed; route returns 500 INTERNAL_ERROR',
     );
-    const response = draftResultToOlumiResponse(draftResult, payload, false, requestId, effectiveBrief);
+    const response = draftResultToOlumiResponse(
+      draftResult,
+      payload,
+      false,
+      requestId,
+      effectiveBrief,
+      undefined,
+    );
     return { response, commitPerformed: false, graph: draftResult.graphOutput };
   }
 }

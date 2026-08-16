@@ -50,8 +50,9 @@
  *
  * ── WHAT MAKES IT ATOMIC, AND WHY NOT `store_draft_graph` ──────────────────
  * `scenarios.graph` and `scenarios.graph_identity_hash` MUST move in one
- * statement. `append_turn_atomic_v3`/`_v4` (reached through `store.append`) do
- * exactly that under a `SELECT … FOR UPDATE` row lock, stamping
+ * statement. Graph-bearing `store.append` calls use `append_turn_atomic_v5`,
+ * which does exactly that under a `SELECT … FOR UPDATE` row lock and returns
+ * an accepted-insert witness, stamping
  * `p_incoming_graph_identity_hash` from the single normaliser authority. The
  * lighter `store_draft_graph` RPC does NOT write the identity hash, so using it
  * would leave the column describing a graph we no longer store — silently
@@ -380,7 +381,7 @@ export default async function route(app: FastifyInstance) {
 
       const turnId = registrationTurnId();
       try {
-        await store.append({
+        const appended = await store.append({
           scenario_id: scenarioId,
           turn_id: turnId,
           // DL-7 PR B precedent (system-events/dispatch.ts): a server-initiated
@@ -398,6 +399,14 @@ export default async function route(app: FastifyInstance) {
           expectedGraphIdentityHash,
           expectedGraphAnalysisHash,
         });
+        // Defence in depth over the Supabase adapter, which already throws for
+        // both replay dispositions. A test double or future adapter returning
+        // only an id (or any non-insert disposition) must not let this route
+        // answer `registered:true`: only this attempt's accepted insert proves
+        // the imported graph became durable current authority.
+        if (appended.graph_write_disposition !== 'accepted_insert') {
+          throw new Error('Graph registration append did not prove accepted_insert');
+        }
       } catch (err) {
         if (err instanceof GraphStaleWriteError) {
           // Atomic in-transaction CAS refused: the whole turn rolled back and

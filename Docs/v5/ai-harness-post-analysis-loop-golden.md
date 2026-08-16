@@ -27,10 +27,7 @@
   ```
   Your most recent analysis is up to date with the current model. Here is where things stand and what is still open.
   
-  A few things are still open:
-  • "Hire two senior engineers locally" isn't connected to any factors yet
-  • "Hire one senior engineer overseas" is connected to factors but has no numeric values set
-  • the goal node doesn't have a measurable success threshold set
+  Still open: configure "Hire two senior engineers locally" by choosing which factor it changes and by how much.
   
   Recent changes in view:
   • Customer churn from 10% to 12%
@@ -50,10 +47,7 @@
   ```
   Your most recent analysis is up to date with the current model. Here is what you could firm up next.
   
-  A few things are still open:
-  • "Hire two senior engineers locally" isn't connected to any factors yet
-  • "Hire one senior engineer overseas" is connected to factors but has no numeric values set
-  • the goal node doesn't have a measurable success threshold set
+  Still open: configure "Hire two senior engineers locally" by choosing which factor it changes and by how much.
   
   Recent changes in view:
   • Customer churn from 10% to 12%
@@ -73,10 +67,7 @@
   ```
   Your most recent analysis is up to date with the current model. Here is what you could firm up next.
   
-  A few things are still open:
-  • "Hire two senior engineers locally" isn't connected to any factors yet
-  • "Hire one senior engineer overseas" is connected to factors but has no numeric values set
-  • the goal node doesn't have a measurable success threshold set
+  Still open: configure "Hire two senior engineers locally" by choosing which factor it changes and by how much.
   
   Recent changes in view:
   • Customer churn from 10% to 12%
