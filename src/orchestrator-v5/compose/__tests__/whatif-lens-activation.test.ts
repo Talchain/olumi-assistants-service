@@ -167,7 +167,10 @@ describe('ROADMAP 1.195 — the what-if suggestion gate is CLEARED', () => {
   it('the LIVE availability path reports the what-if executor available when the transport is up', () => {
     withIslTransport();
     expect(liveLensExecutorAvailability()).toStrictEqual({
-      executorAvailable: { what_if_counterfactual: true },
+      executorAvailable: {
+        evpi_evidence_priority: false,
+        what_if_counterfactual: true,
+      },
     });
   });
 });
@@ -202,7 +205,10 @@ describe('ROADMAP 1.195 — the capability FIRES (behavioural witness, live path
   it('stays dark when the ISL transport is absent — the ANDed leg, witnessed', () => {
     withoutIslTransport();
     expect(liveLensExecutorAvailability()).toStrictEqual({
-      executorAvailable: { what_if_counterfactual: false },
+      executorAvailable: {
+        evpi_evidence_priority: false,
+        what_if_counterfactual: false,
+      },
     });
     expect(buildLensSuggestionCoachingBlock(whatIfOnlyFact(), CTX, null)).toBeNull();
     expect(suggestionEvents()).toHaveLength(0);

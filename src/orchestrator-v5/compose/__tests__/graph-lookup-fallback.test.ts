@@ -147,6 +147,7 @@ interface FactOverrides {
   readonly leadingOptionId?: string | null;
   readonly withEnrichmentGraph?: { nodes: unknown[]; edges: unknown[] };
   readonly withDecisionReview?: boolean;
+  readonly withEvppiPriority?: boolean;
 }
 
 /**
@@ -172,6 +173,13 @@ function productionShapedFact(overrides: FactOverrides = {}): RunAnalysisHandler
     },
     option_comparison_status: 'computed',
     factor_sensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.8 }],
+    ...(overrides.withEvppiPriority === true
+      ? {
+          factor_evppi: [
+            { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
+          ],
+        }
+      : {}),
     robustness: { level: 'moderate' },
     ...(overrides.withDecisionReview === false ? {} : { decision_review: DECISION_REVIEW }),
     ...(overrides.withEnrichmentGraph !== undefined
@@ -465,11 +473,31 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
     ]);
   });
 
-  it('evidence_priority card and evidence block resolve the factor ref from the fallback', () => {
+  it('the richer evidence block resolves the factor ref and supersedes the duplicate priority card', () => {
     const env = composeToolCallResponse({
       answerKind: 'functional',
       ...BASE_INPUT,
-      handlerFacts: [productionShapedFact()],
+      handlerFacts: [productionShapedFact({ withEvppiPriority: true })],
+      persistedGraph: PERSISTED_GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+    });
+    const priority = reviewCardsOfKind(env.blocks, 'evidence_priority');
+    expect(priority).toHaveLength(0);
+    const evidence = byType(env.blocks, 'evidence');
+    expect(evidence).toHaveLength(1);
+    expect((evidence[0] as unknown as { target_refs: unknown[] }).target_refs).toEqual([
+      { id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' },
+    ]);
+  });
+
+  it('builds the deterministic factor priority card from the persisted graph when Decision Review is absent', () => {
+    const env = composeToolCallResponse({
+      answerKind: 'functional',
+      ...BASE_INPUT,
+      handlerFacts: [productionShapedFact({
+        withEvppiPriority: true,
+        withDecisionReview: false,
+      })],
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
@@ -478,11 +506,10 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
     expect((priority[0] as unknown as { target_refs: unknown[] }).target_refs).toEqual([
       { id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' },
     ]);
-    const evidence = byType(env.blocks, 'evidence');
-    expect(evidence).toHaveLength(1);
-    expect((evidence[0] as unknown as { target_refs: unknown[] }).target_refs).toEqual([
-      { id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' },
-    ]);
+    expect((priority[0] as unknown as { body: string }).body).toContain(
+      'gather relevant data or expert judgement',
+    );
+    expect(byType(env.blocks, 'evidence')).toHaveLength(0);
   });
 
   it('prior-fact FRESH lifecycle rebuild also resolves target_refs from the fallback', () => {

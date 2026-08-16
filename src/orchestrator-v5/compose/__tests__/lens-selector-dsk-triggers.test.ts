@@ -53,7 +53,6 @@ interface FactorInput {
   readonly factor_id?: string;
   readonly influence_score?: number;
   readonly influence_rank?: number;
-  readonly evpi_percentage_points?: number;
   readonly confidence?: number | null;
   readonly flip_risk_category?: string;
 }
@@ -72,6 +71,7 @@ interface EnrichmentInput {
   readonly option_comparison?: readonly OptionInput[];
   readonly confidence_tier?: string;
   readonly robustness?: RobustnessInput;
+  readonly factor_evppi?: readonly Record<string, unknown>[];
 }
 
 function makeFact(input: EnrichmentInput = {}): RunAnalysisHandlerFact {
@@ -87,6 +87,9 @@ function makeFact(input: EnrichmentInput = {}): RunAnalysisHandlerFact {
   }
   if (input.robustness !== undefined) {
     enrichment.robustness = input.robustness;
+  }
+  if (input.factor_evppi !== undefined) {
+    enrichment.factor_evppi = input.factor_evppi;
   }
   return {
     fact_type: 'run_analysis',
@@ -105,7 +108,7 @@ function makeFact(input: EnrichmentInput = {}): RunAnalysisHandlerFact {
 
 /**
  * Balanced factor bank: no flip category, no dominance, no low confidence,
- * no EVPI — so rules 1/2b/3 stay silent and the DSK lenses are isolated.
+ * no EVPPI — so rules 1/2b/3 stay silent and the DSK lenses are isolated.
  */
 const BALANCED_FACTORS: readonly FactorInput[] = [
   { factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 },
@@ -242,14 +245,11 @@ describe('selectLens — consider_opposite (DSK-TR-003 disconfirmation)', () => 
     ).toBeNull();
   });
 
-  it('yields to every higher-priority lens (EVPI outranks it)', () => {
+  it('yields to every higher-priority lens (resolved EVPPI outranks it)', () => {
     const selection = selectLens(
       makeFact({
         ...DECISIVE_ATTESTED,
-        factor_sensitivity: [
-          ...BALANCED_FACTORS.slice(1),
-          { factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9, evpi_percentage_points: 5 },
-        ],
+        factor_evppi: [{ factor_id: 'fac_a', evppi: 0.4, status: 'resolved' }],
       }),
     );
     expect(selection).not.toBeNull();
@@ -300,7 +300,7 @@ describe('selectLens — devils_advocacy (DSK-TR-005 structured dissent)', () =>
 
   it('wins the slot when dominance holds and the higher lenses are silent', () => {
     // Decisive leader (2c silent), strong tier (2a silent), high confidence
-    // (2b silent), no flip categories, no EVPI, robustness absent —
+    // (2b silent), no flip categories, no EVPPI, robustness absent —
     // sensitivity 1b still fires, so displace it via no-repeat.
     const fact = makeFact({
       confidence_tier: 'strong',

@@ -162,8 +162,8 @@ export interface V5CoachingDelivery {
    * is off.
    */
   phase3_block_context_available: boolean;
-  /** Whether the copy drew from the projected analysis fallback rather than
-   *  the decision_review enrichment. */
+  /** Whether the copy drew from a projected-analysis fallback rather than
+   *  direct decision_review or factor-EVPPI authority. */
   fallback_analysis_used: boolean;
   /** Whether the response was deterministic (no LLM call) or LLM-backed. */
   deterministic: boolean;

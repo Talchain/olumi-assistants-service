@@ -60,6 +60,7 @@ import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
 // count. `configure-option-product-copy-routes.test.ts` pins `generateChips`
 // OUTPUT, not just the shared recovery source.
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
+import { selectFactorEvppiPriorityGuidance } from '../coaching/select-factor-evppi.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -506,10 +507,11 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // pre-route.
   //
   // V5 coaching — a third prompt chip ("What should we validate?") is
-  // appended ONLY when the CURRENT-turn run_analysis fact carries
-  // non-empty decision_review.evidence_enhancements with at least one
-  // entry having a non-empty `specific_action` string. Honesty gate:
-  // never offer the chip when the advice answer would be empty.
+  // appended ONLY when the CURRENT-turn run_analysis fact carries a complete
+  // producer-ranked factor_evppi priority and that exact factor has a
+  // safe factor_sensitivity label. Decision Review may enrich the answer but
+  // is not a prerequisite. Honesty gate: never offer the chip when the
+  // deterministic advice answer would be empty.
   //
   // **Current-turn handler facts are authoritative.** The chip only
   // fires on the run_analysis success turn (`handlerJustRan ===
@@ -518,7 +520,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // chip pointing at stale pre-edit evidence whenever the current
   // run_analysis's enricher soft-failed — exactly the dishonesty
   // Codex flagged on the original PR #190. If current-turn has no
-  // usable enhancements, the chip is suppressed.
+  // usable priority-label join, the chip is suppressed.
   //
   // The chip has no `action_type` — on click, the message text routes
   // through the post-analysis advice gate's evidence_gap class and is
@@ -1130,26 +1132,30 @@ function cap(chips: readonly SuggestedAction[]): readonly SuggestedAction[] {
  * "What should we validate?" prompt chip.
  *
  * Returns `true` when `handlerFacts` (the CURRENT turn's facts) carries
- * a successful `run_analysis` fact whose
- * `result.enrichment.decision_review.evidence_enhancements` map has at
- * least one entry with a non-empty `specific_action` string.
+ * a successful `run_analysis` fact whose producer-ranked `factor_evppi`
+ * priority has an exact human label on that same factor. Decision Review may
+ * enrich it with a specific action, but is not required: that enrichment is
+ * configuration-gated and can soft-fail.
  *
  * **Current-turn authoritative.** No priorFacts fallback: the chip only
  * fires on the run_analysis success turn, so the freshly-attached
  * enrichment on THIS turn is the only honest source. If the current
- * run_analysis's enricher soft-failed (no usable specific_action),
- * suppress the chip — surfacing it via a stale prior fact would point
+ * run_analysis lacks a safe exact-factor label, suppress the chip — surfacing
+ * it via a stale prior fact would point
  * the user at pre-edit evidence, which is exactly what Codex flagged
  * on the original PR #190 walk.
  *
  * The chip-click answer is composed by `composeEvidenceGap` in
  * post-analysis-advice-gate.ts. That composer is wired (via
- * `pickLatestDecisionReview`) to the freshness-aligned selector, so
+ * `pickLatestFactorEvppiPriorityGuidance`) to the
+ * freshness-aligned selector, so
  * once the chip is offered, the deterministic answer it points at uses
  * the SAME fact this check inspected.
  *
- * Defensive shape parsing throughout: the `decision_review` payload is
- * a passthrough `Record<string, unknown>`.
+ * The old "any enhancement" rule made LLM object order the de-facto science
+ * authority: it could offer a chip even when EVPPI was partial, unreadable, or
+ * pointed at a different factor. Selection now fails closed through the shared
+ * identity-and-label join; no magnitude is read or exposed here.
  */
 function currentTurnCarriesUsableValidationGuidance(
   handlerFacts: readonly HandlerFact[] | undefined,
@@ -1164,22 +1170,8 @@ function currentTurnCarriesUsableValidationGuidance(
     if (fact.fact_type !== 'run_analysis') continue;
     const enrichment = fact.result.enrichment;
     if (enrichment == null || typeof enrichment !== 'object') continue;
-    const dr = (enrichment as Record<string, unknown>)['decision_review'];
-    if (dr == null || typeof dr !== 'object' || Array.isArray(dr)) continue;
-    const enhancements = (dr as Record<string, unknown>)['evidence_enhancements'];
-    if (
-      enhancements == null ||
-      typeof enhancements !== 'object' ||
-      Array.isArray(enhancements)
-    ) continue;
-    for (const key of Object.keys(enhancements)) {
-      const entry = (enhancements as Record<string, unknown>)[key];
-      if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) continue;
-      const action = (entry as Record<string, unknown>)['specific_action'];
-      if (typeof action === 'string' && action.trim().length > 0) {
-        return true;
-      }
-    }
+    const record = enrichment as Record<string, unknown>;
+    if (selectFactorEvppiPriorityGuidance(record).outcome === 'selected') return true;
   }
   return false;
 }

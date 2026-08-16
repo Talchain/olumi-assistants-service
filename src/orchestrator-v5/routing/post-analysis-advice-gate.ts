@@ -85,6 +85,9 @@ import {
   describeValidationPriority,
   isRenderableValidationEdge,
 } from '../coaching/validation-priority.js';
+import {
+  type FactorEvppiPriorityGuidanceDecision,
+} from '../coaching/select-factor-evppi.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -265,9 +268,9 @@ export interface AdviceGateInput {
    * V5 coaching — verbatim `decision_review` enrichment from the latest
    * successful run_analysis fact (as stored under
    * `result.enrichment.decision_review`). When present, `evidence_gap`
-   * prefers `evidence_enhancements[].specific_action` strings and the
-   * first `key_assumptions[]` entry as content sources for richer,
-   * grounded validation/research advice. Caller threads this from
+   * may read the exact `evidence_enhancements[factor_id].specific_action`
+   * selected by `factorEvppiGuidance`. It never ranks enhancement object
+   * order or assumptions. Caller threads this from
    * `context.prior_facts` at gate time; current-turn run_analysis facts
    * are not yet in prior_facts when the gate fires (the gate only matches
    * when freshness === 'fresh', which requires a prior fact). Optional /
@@ -275,6 +278,13 @@ export interface AdviceGateInput {
    * behaviour.
    */
   readonly decisionReview?: Record<string, unknown> | null | undefined;
+  /**
+   * Number-free exact-factor guidance from the same successful run. Its safe
+   * label comes from PLoT factor_sensitivity, so real EVPPI remains actionable
+   * when configuration-gated Decision Review is absent; a same-factor action is
+   * optional enrichment. Missing/undefined is fail-closed.
+   */
+  readonly factorEvppiGuidance?: FactorEvppiPriorityGuidanceDecision | null | undefined;
   /**
    * Raw robustness signals (`enrichment.robustness.level`,
    * `enrichment.robustness.near_tie.is_tie`) from the latest successful
@@ -363,6 +373,7 @@ export interface AdviceGateSuggestedAction {
  */
 export type AdviceGateCopySource =
   | 'decision_review'
+  | 'factor_evppi'
   | 'analysis_projection'
   | 'fragile_edges'
   | 'top_drivers'
@@ -1174,6 +1185,7 @@ function evaluateAvailability(
   cls: AdviceClass,
   analysis: AdviceGateAnalysis,
   analysisReady: AnalysisReadyPayload | null | undefined,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
 ): readonly string[] {
   const reqs = CLASS_REQUIREMENTS[cls];
   const missing: string[] = [];
@@ -1201,8 +1213,8 @@ function evaluateAvailability(
   if (reqs.needs_analysis_ready && !hasSufficientReadinessData(analysisReady)) {
     missing.push('analysis_ready');
   }
-  // evidence_gap accepts either readiness data OR a renderable top
-  // driver — fail only when BOTH are missing. The driver check uses
+  // evidence_gap accepts readiness data, a renderable top driver, OR exact
+  // number-free factor-EVPPI guidance — fail only when all are missing. The driver check uses
   // `hasRenderableTopDriver` (non-empty trimmed `factor_label`) so a
   // whitespace-only label can't satisfy the gate and then make the
   // gap-list fall-through emit "sensitivity is on   ". Matches the
@@ -1213,7 +1225,8 @@ function evaluateAvailability(
   if (cls === 'evidence_gap') {
     const haveReadiness = hasSufficientReadinessData(analysisReady);
     const haveDrivers = hasRenderableTopDriver(analysis);
-    if (!haveReadiness && !haveDrivers) {
+    const haveEvppiGuidance = factorEvppiGuidance?.outcome === 'selected';
+    if (!haveReadiness && !haveDrivers && !haveEvppiGuidance) {
       missing.push('analysis_ready_or_top_drivers');
     }
   }
@@ -1292,6 +1305,7 @@ export function tryPostAnalysisAdviceGate(
     matchedClass,
     analysis,
     input.analysisReady,
+    input.factorEvppiGuidance,
   );
   if (missing.length > 0) {
     // AI Harness capability 1 (flag-gated by `input.canonicalState` presence —
@@ -1350,6 +1364,7 @@ export function tryPostAnalysisAdviceGate(
     analysis,
     analysisReady: input.analysisReady ?? undefined,
     decisionReview: input.decisionReview ?? undefined,
+    factorEvppiGuidance: input.factorEvppiGuidance,
     rawRobustness: input.rawRobustness ?? undefined,
     flipClaimPosture: input.flipClaimPosture ?? undefined,
   };
@@ -1533,7 +1548,7 @@ function formatRecentChanges(changes: readonly AdviceGateRecentChange[]): string
  * additive, non-user-facing — mirrors the branch conditions the composers use
  * so a trace can prove which structured source the copy drew from. Returns
  * structural-only data (no labels, no values). For `evidence_gap` it re-checks
- * the same precedence the composer applies (decision_review → readiness gaps →
+ * the same precedence the composer applies (factor_evppi → readiness gaps →
  * fragile edges → top driver → projection); the re-check is a cheap pure call.
  */
 function describeCopySource(
@@ -1554,9 +1569,15 @@ function describeCopySource(
   if (cls === 'readiness') {
     copy_source = 'readiness';
   } else if (cls === 'evidence_gap') {
-    if (extractValidationGuidanceFromDecisionReview(input.decisionReview) != null) {
-      copy_source = 'decision_review';
-      fields.push('decision_review');
+    if (
+      composeFactorEvppiValidationGuidance(input.factorEvppiGuidance) != null
+    ) {
+      copy_source = 'factor_evppi';
+      fields.push('factor_evppi');
+      if (
+        input.factorEvppiGuidance?.outcome === 'selected'
+        && input.factorEvppiGuidance.specificAction !== null
+      ) fields.push('decision_review');
     } else if (
       input.analysisReady
       && hasSufficientReadinessData(input.analysisReady)
@@ -1638,6 +1659,7 @@ interface ComposeInput {
   readonly analysis: AdviceGateAnalysis;
   readonly analysisReady: AnalysisReadyPayload | undefined;
   readonly decisionReview: Record<string, unknown> | undefined;
+  readonly factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined;
   readonly rawRobustness: RawRobustnessSignals | null | undefined;
   /** ROADMAP 2.278 — see {@link AdviceGateInput.flipClaimPosture}. */
   readonly flipClaimPosture: FlipClaimPosture | undefined;
@@ -1674,7 +1696,11 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
     case 'readiness':
       return composeReadiness(input.analysisReady);
     case 'evidence_gap':
-      return composeEvidenceGap(input.analysis, input.analysisReady, input.decisionReview);
+      return composeEvidenceGap(
+        input.analysis,
+        input.analysisReady,
+        input.factorEvppiGuidance,
+      );
     case 'explain_results_free_text':
       return composeExplainResults(
         input.leadingLabel,
@@ -2028,17 +2054,14 @@ function composeReadiness(
 function composeEvidenceGap(
   analysis: AdviceGateAnalysis,
   analysisReady: AnalysisReadyPayload | undefined,
-  decisionReview: Record<string, unknown> | undefined,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
 ): string {
-  // V5 coaching: prefer decision_review.evidence_enhancements when the
-  // enricher has attached usable content. evidence_enhancements carries
-  // grounded `specific_action` strings keyed by factor; key_assumptions
-  // surfaces an assumption worth testing. Both are passthrough from the
-  // LLM v11 schema; treat the payload as `unknown` and validate shape
-  // defensively so a malformed or partial enrichment falls back cleanly
-  // to the projection-only behaviour below.
-  const fromDR = extractValidationGuidanceFromDecisionReview(decisionReview);
-  if (fromDR != null) return fromDR;
+  // V5 science-to-reasoning: factor_evppi order/status selects the exact
+  // factor. A same-factor Decision Review action may enrich the result, but a
+  // deterministic label-grounded action keeps this producer→reasoning chain
+  // live when that enrichment is disabled, absent, or soft-failed.
+  const fromEvppi = composeFactorEvppiValidationGuidance(factorEvppiGuidance);
+  if (fromEvppi != null) return fromEvppi;
 
   const gaps: string[] = [];
   if (analysisReady && hasSufficientReadinessData(analysisReady)) {
@@ -2107,75 +2130,40 @@ function composeEvidenceGap(
 }
 
 /**
- * V5 coaching — extract validation/research guidance from a
- * `decision_review` enrichment payload. Returns deterministic prose when
- * at least one `evidence_enhancements[].specific_action` is a non-empty
- * string; otherwise returns `null` so `composeEvidenceGap` falls back to
- * projection-only behaviour.
+ * V5 coaching — compose validation/research guidance for the exact
+ * producer-ranked EVPPI factor. Decision Review may supply the action for that
+ * identity; otherwise deterministic label-grounded copy keeps the capability
+ * reachable without inventing a value or exposing an EVPPI magnitude.
  *
  * Copy-safety:
- *   - opener: "To build confidence in this analysis, the most useful
- *     things to check are:" — no `recommend*` / no `winner*` / no
+ *   - opener: "The first evidence priority from this analysis is:" — the
+ *     priority is licensed by producer order/status, not LLM object order;
+ *     no `recommend*` / no `winner*` / no
  *     sentence-leading instructional `Set/Updated/...` verbs (would trip
  *     the false-success guard per feedback_success_claim_regex_instructional_set).
- *   - per-item prose is sourced verbatim from the LLM `specific_action`
- *     string (already sanitised by the decision_review enricher's
- *     egress filter); we do NOT reword it.
- *   - one optional `key_assumptions[0]` line, appended only when the
- *     first entry is a non-empty string.
+ *   - an optional per-item action is the exact selected-factor
+ *     `specific_action`; otherwise the fallback asks for evidence/data/expert
+ *     judgement about the named factor's current estimate or range.
+ *   - assumptions and non-selected enhancements are never ranking fallbacks.
  *
- * Defensive shape parsing: the enrichment is a `Record<string, unknown>`
- * passthrough, so every field is validated with `readRecord` / `isNonEmpty
- * String` before use. A malformed enrichment returns `null` and never
- * leaks raw payloads.
+ * Defensive shape parsing happened in the shared selector before this
+ * projection: malformed identity, label, or action carriers return a typed
+ * refusal and never leak raw payloads.
  */
-function extractValidationGuidanceFromDecisionReview(
-  decisionReview: Record<string, unknown> | undefined,
+function composeFactorEvppiValidationGuidance(
+  guidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
 ): string | null {
-  if (decisionReview == null) return null;
-  const enhancements = readRecord(decisionReview['evidence_enhancements']);
-  const actions: string[] = [];
-  if (enhancements != null) {
-    for (const key of Object.keys(enhancements)) {
-      const entry = readRecord(enhancements[key]);
-      if (entry == null) continue;
-      const action = entry['specific_action'];
-      if (isNonEmptyString(action)) {
-        actions.push(action.trim());
-      }
-      if (actions.length >= 2) break;
-    }
+  if (guidance?.outcome !== 'selected') return null;
+  if (guidance.specificAction !== null) {
+    return `The first evidence priority from this analysis is ${guidance.factorLabel}:\n• ${guidance.specificAction}`;
   }
-  const assumptionsRaw = decisionReview['key_assumptions'];
-  const firstAssumption = Array.isArray(assumptionsRaw)
-    ? assumptionsRaw.find(isNonEmptyString)?.trim() ?? null
-    : null;
-  if (actions.length === 0 && firstAssumption == null) return null;
-
-  const lines: string[] = [];
-  if (actions.length > 0) {
-    lines.push('To build confidence in this analysis, the most useful things to check are:');
-    for (const a of actions) {
-      lines.push(`• ${a}`);
-    }
-  }
-  if (firstAssumption != null) {
-    const intro = actions.length === 0
-      ? 'One assumption worth testing first: '
-      : 'One assumption worth testing alongside this: ';
-    lines.push(`${intro}${firstAssumption}`);
-  }
-  return lines.join('\n');
+  return `The first evidence priority from this analysis is ${guidance.factorLabel}. Review the evidence behind its current estimate or range, then gather relevant data or expert judgement to narrow that uncertainty.`;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   if (value == null) return null;
   if (typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function composeExplainResults(

@@ -333,8 +333,8 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
 //   - chip-click run_analysis emits the same baseline 2 chips that the
 //     routed path emits.
 //   - The "What should we validate?" prompt chip appears iff the
-//     CURRENT-turn decision_review enrichment carries a non-empty
-//     `evidence_enhancements[].specific_action` string.
+//     CURRENT-turn producer-ranked factor EVPPI identity has an exact safe
+//     label. A same-factor Decision Review action is optional enrichment.
 //   - No prior-fact rescue: a missing/empty/malformed current-turn
 //     enrichment suppresses the chip even when priorFacts has usable
 //     enrichment (preserves the PR #190 honesty rule from
@@ -434,7 +434,7 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     expect((chips[1] as { action_type?: string }).action_type).toBe('what_would_flip');
   });
 
-  it('emits the "What should we validate?" prompt chip when current-turn decision_review.evidence_enhancements has a usable specific_action', async () => {
+  it('emits the "What should we validate?" prompt chip from current-turn EVPPI identity plus exact factor label', async () => {
     // Replace the enricher's pass-through with one that attaches
     // decision_review.evidence_enhancements with a usable specific_action
     // — the exact contract PR #190's `currentTurnCarriesUsableValidationGuidance`
@@ -448,6 +448,12 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
             result: {
               ...f.result,
               enrichment: {
+                factor_evppi: [
+                  { factor_id: 'fac_delivery', evppi: 0.1, status: 'resolved' },
+                ],
+                factor_sensitivity: [
+                  { factor_id: 'fac_delivery', factor_label: 'Delivery reliability' },
+                ],
                 decision_review: {
                   produced_at: '2026-05-21T17:00:00.000Z',
                   evidence_enhancements: {
@@ -538,7 +544,7 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
   });
 
-  it('suppresses the validation chip when decision_review.evidence_enhancements entries lack specific_action (defensive parsing)', async () => {
+  it('keeps the validation chip reachable without a decision-review action when the PLoT label join is valid', async () => {
     enrichRunAnalysisMock.mockImplementation(
       async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => {
         return handlerFacts.map((f) => {
@@ -548,6 +554,12 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
             result: {
               ...f.result,
               enrichment: {
+                factor_evppi: [
+                  { factor_id: 'fac_a', evppi: 0.1, status: 'resolved' },
+                ],
+                factor_sensitivity: [
+                  { factor_id: 'fac_a', factor_label: 'Delivery reliability' },
+                ],
                 decision_review: {
                   produced_at: '2026-05-21T17:00:00.000Z',
                   evidence_enhancements: {
@@ -573,8 +585,8 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     }
 
     const chips = out.response.suggested_actions ?? [];
-    expect(chips).toHaveLength(2);
-    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+    expect(chips).toHaveLength(3);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
   });
 
   it('MAX_CHIPS=3 cap respected — never more than 3 suggested_actions on the chip-click run_analysis path', async () => {
@@ -587,6 +599,12 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
             result: {
               ...f.result,
               enrichment: {
+                factor_evppi: [
+                  { factor_id: 'fac_a', evppi: 0.1, status: 'resolved' },
+                ],
+                factor_sensitivity: [
+                  { factor_id: 'fac_a', factor_label: 'Delivery reliability' },
+                ],
                 decision_review: {
                   produced_at: '2026-05-21T17:00:00.000Z',
                   evidence_enhancements: {
@@ -623,6 +641,12 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
             result: {
               ...f.result,
               enrichment: {
+                factor_evppi: [
+                  { factor_id: 'fac_a', evppi: 0.1, status: 'resolved' },
+                ],
+                factor_sensitivity: [
+                  { factor_id: 'fac_a', factor_label: 'Delivery reliability' },
+                ],
                 decision_review: {
                   produced_at: '2026-05-21T17:00:00.000Z',
                   evidence_enhancements: {
@@ -650,4 +674,3 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
-

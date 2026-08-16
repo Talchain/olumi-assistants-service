@@ -193,7 +193,9 @@ function stagingShapedAnalysisState(): Record<string, unknown> {
   };
 }
 
-function makeFreshRunAnalysisFact(): Record<string, unknown> {
+function makeFreshRunAnalysisFact(
+  enrichment: Record<string, unknown> = { analysis_status: 'completed' },
+): Record<string, unknown> {
   return {
     fact_type: 'run_analysis' as const,
     fact_version: 1 as const,
@@ -227,7 +229,7 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       },
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
-      enrichment: { analysis_status: 'completed' },
+      enrichment,
       win_probabilities: { opt_hire_local: 0.638, opt_status_quo: 0.156 },
     },
   };
@@ -356,6 +358,85 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(result.response.assistant_text).not.toMatch(/EVPI/i);
     expect(result.response.assistant_text).not.toMatch(/\bconfidence\b/i);
     expect(result.response.assistant_text).not.toContain('normalised');
+  });
+
+  it('threads producer-ranked EVPPI identity through the real evidence-gap turn', async () => {
+    mockState.priorFacts = [makeFreshRunAnalysisFact({
+      analysis_status: 'completed',
+      // Deliberately reverse the authorities: LLM object order says A first,
+      // while the ISL producer ranks B first. Only B may reach the answer.
+      factor_evppi: [
+        { factor_id: 'fac_b', evppi: 0.01, status: 'resolved' },
+        { factor_id: 'fac_a', evppi: 0.9, status: 'resolved' },
+      ],
+      factor_sensitivity: [
+        { factor_id: 'fac_a', factor_label: 'Factor A' },
+        { factor_id: 'fac_b', factor_label: 'Delivery uncertainty' },
+      ],
+      decision_review: {
+        evidence_enhancements: {
+          fac_a: { specific_action: 'LLM-order action A must not be served.' },
+          fac_b: { specific_action: 'Collect matched cohort evidence for factor B.' },
+        },
+        key_assumptions: ['An unranked assumption must not be promoted.'],
+      },
+    })];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      mkPayload('What should we validate?'),
+      'req-factor-evppi-validation-priority',
+      {
+        routingAdapter: adapter,
+        graphState: READY_GRAPH as never,
+        analysisState: stagingShapedAnalysisState() as never,
+      },
+    );
+
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.response.assistant_text).toContain(
+      'The first evidence priority from this analysis is Delivery uncertainty:',
+    );
+    expect(result.response.assistant_text).toContain(
+      'Collect matched cohort evidence for factor B.',
+    );
+    expect(result.response.assistant_text).not.toContain('LLM-order action A');
+    expect(result.response.assistant_text).not.toContain('unranked assumption');
+    expect(result.response.assistant_text).not.toMatch(/0\.01|0\.9|evppi/i);
+  });
+
+  it('keeps the science-to-reasoning action live when Decision Review is absent', async () => {
+    mockState.priorFacts = [makeFreshRunAnalysisFact({
+      analysis_status: 'completed',
+      factor_evppi: [
+        { factor_id: 'fac_b', evppi: 0, status: 'resolved' },
+      ],
+      factor_sensitivity: [
+        { factor_id: 'fac_b', factor_label: 'Delivery uncertainty' },
+      ],
+      // decision_review deliberately absent: it is configuration-gated and
+      // may be absent or soft-fail regardless of the deployed flag posture.
+    })];
+    const adapter = throwingRoutingAdapter();
+    const result = await runTurnExecutor(
+      mkPayload('What should we validate?'),
+      'req-factor-evppi-validation-no-review',
+      {
+        routingAdapter: adapter,
+        graphState: READY_GRAPH as never,
+        analysisState: stagingShapedAnalysisState() as never,
+      },
+    );
+
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.response.assistant_text).toContain(
+      'The first evidence priority from this analysis is Delivery uncertainty.',
+    );
+    expect(result.response.assistant_text).toContain(
+      'gather relevant data or expert judgement',
+    );
+    expect(result.response.assistant_text).not.toMatch(/\b0(?:\.\d+)?\b|evppi/i);
   });
 
   it('telemetry confirms the parity wiring: analysis_state_source=request + top_driver_source=top_level', async () => {

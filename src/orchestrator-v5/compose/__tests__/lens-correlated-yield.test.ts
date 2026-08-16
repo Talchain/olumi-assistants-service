@@ -1,7 +1,7 @@
 /**
  * ROADMAP 2.211-① — the CORRELATED-ONLY YIELD amendment to rule 1's trigger.
  *
- * The priority ORDER is unchanged (flip-risk → pre-mortem → EVPI → what-if) and
+ * The priority ORDER is unchanged (flip-risk → pre-mortem → EVPPI → what-if) and
  * is not up for change here. What is narrowed is rule 1's TRIGGER: when
  * flip-risk's hit is `FLIP_RISK_CORRELATED` (which, by evaluator precedence,
  * already means NO isolated flip factor exists) AND at least one other lens is
@@ -43,7 +43,6 @@ interface FactorInput {
   readonly factor_id?: string;
   readonly influence_score?: number;
   readonly influence_rank?: number;
-  readonly evpi_percentage_points?: number;
   readonly confidence?: number | null;
   readonly flip_risk_category?: string;
 }
@@ -52,6 +51,7 @@ interface EnrichmentInput {
   readonly factor_sensitivity?: readonly FactorInput[];
   readonly option_comparison?: readonly { readonly win_probability?: number }[];
   readonly confidence_tier?: string;
+  readonly factor_evppi?: readonly Record<string, unknown>[];
 }
 
 function makeFact(input: EnrichmentInput = {}, computedAt = '2026-07-31T10:00:00.000Z'): RunAnalysisHandlerFact {
@@ -59,6 +59,7 @@ function makeFact(input: EnrichmentInput = {}, computedAt = '2026-07-31T10:00:00
   if (input.factor_sensitivity !== undefined) enrichment.factor_sensitivity = input.factor_sensitivity;
   if (input.option_comparison !== undefined) enrichment.option_comparison = input.option_comparison;
   if (input.confidence_tier !== undefined) enrichment.confidence_tier = input.confidence_tier;
+  if (input.factor_evppi !== undefined) enrichment.factor_evppi = input.factor_evppi;
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -92,23 +93,24 @@ const CORRELATED_PLUS_PREMORTEM: EnrichmentInput = {
 };
 
 /**
- * CORRELATED + EVPI, pre-mortem silent on all three doors (tier `strong`,
+ * CORRELATED + EVPPI, pre-mortem silent on all three doors (tier `strong`,
  * bands medium+, leader decisive at 0.85 ≥ MAX). The yield must land on the
- * NEXT triggered lens in the locked order — EVPI, not pre-mortem.
+ * NEXT triggered lens in the locked order — EVPPI, not pre-mortem.
  */
-const CORRELATED_PLUS_EVPI: EnrichmentInput = {
+const CORRELATED_PLUS_EVPPI: EnrichmentInput = {
   confidence_tier: 'strong',
   factor_sensitivity: [
     { factor_id: 'fac_a', influence_score: 1.0, influence_rank: 1, confidence: 0.9, flip_risk_category: 'correlated' },
-    { factor_id: 'fac_b', influence_score: 0.9, influence_rank: 2, confidence: 0.9, evpi_percentage_points: 5 },
+    { factor_id: 'fac_b', influence_score: 0.9, influence_rank: 2, confidence: 0.9 },
     { factor_id: 'fac_c', influence_score: 0.8, influence_rank: 3, confidence: 0.9 },
   ],
   option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+  factor_evppi: [{ factor_id: 'fac_b', evppi: 0.5, status: 'resolved' }],
 };
 
 /**
  * CORRELATED and nothing else: pre-mortem silent (strong / medium bands /
- * decisive leader), EVPI absent. The what-if evaluator fires (a rank-1 factor
+ * decisive leader), EVPPI absent. The what-if evaluator fires (a rank-1 factor
  * exists) but its executor is gated closed, so flip-risk is the ONLY eligible
  * lens. Ruling bullet 3: it still emits.
  */
@@ -147,15 +149,16 @@ const MIXED_ISOLATED_AND_CORRELATED: EnrichmentInput = {
 };
 
 /** All three core lenses triggered, flip-risk via CORRELATED: the yield must
- *  respect the locked order among the others (pre-mortem before EVPI). */
-const CORRELATED_PLUS_PREMORTEM_PLUS_EVPI: EnrichmentInput = {
+ *  respect the locked order among the others (pre-mortem before EVPPI). */
+const CORRELATED_PLUS_PREMORTEM_PLUS_EVPPI: EnrichmentInput = {
   confidence_tier: 'needs_work',
   factor_sensitivity: [
     { factor_id: 'fac_a', influence_score: 1.0, influence_rank: 1, confidence: 0.9, flip_risk_category: 'correlated' },
-    { factor_id: 'fac_b', influence_score: 0.9, influence_rank: 2, confidence: 0.9, evpi_percentage_points: 5 },
+    { factor_id: 'fac_b', influence_score: 0.9, influence_rank: 2, confidence: 0.9 },
     { factor_id: 'fac_c', influence_score: 0.8, influence_rank: 3, confidence: 0.9 },
   ],
   option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+  factor_evppi: [{ factor_id: 'fac_b', evppi: 0.5, status: 'resolved' }],
 };
 
 /**
@@ -192,15 +195,15 @@ describe('2.211-① — CORRELATED-only flip-risk yields to the next triggered l
     expect(selection?.displacementCause).toBe('correlated_yield');
   });
 
-  it('CORRELATED-only + EVPI triggered (pre-mortem not) → EVPI selected', () => {
-    const selection = selectLens(makeFact(CORRELATED_PLUS_EVPI));
+  it('CORRELATED-only + EVPPI triggered (pre-mortem not) → evidence priority selected', () => {
+    const selection = selectLens(makeFact(CORRELATED_PLUS_EVPPI));
     expect(selection?.lens).toBe('evpi_evidence_priority');
-    expect(selection?.rationaleCode).toBe('MATERIAL_EVPI');
+    expect(selection?.rationaleCode).toBe('RESOLVED_EVPPI_PRIORITY');
     expect(selection?.displacedLens).toBe('sensitivity_flip_risk');
   });
 
-  it('yields to the next lens in the LOCKED order when several others trigger (pre-mortem before EVPI)', () => {
-    const selection = selectLens(makeFact(CORRELATED_PLUS_PREMORTEM_PLUS_EVPI));
+  it('yields to the next lens in the LOCKED order when several others trigger (pre-mortem before EVPPI)', () => {
+    const selection = selectLens(makeFact(CORRELATED_PLUS_PREMORTEM_PLUS_EVPPI));
     expect(selection?.lens).toBe('pre_mortem');
     expect(selection?.rationaleCode).toBe('CONFIDENCE_NEEDS_WORK');
   });
@@ -305,8 +308,8 @@ describe('2.211-① — composition with the no-immediate-repeat tie-break', () 
     expect(selection?.displacementCause).toBe('correlated_yield');
   });
 
-  it('three-lens turn with prev = pre_mortem: no-repeat lands on EVPI (locked order among the others)', () => {
-    const selection = selectLens(makeFact(CORRELATED_PLUS_PREMORTEM_PLUS_EVPI), {
+  it('three-lens turn with prev = pre_mortem: no-repeat lands on EVPPI evidence priority', () => {
+    const selection = selectLens(makeFact(CORRELATED_PLUS_PREMORTEM_PLUS_EVPPI), {
       previousAnalysisLens: 'pre_mortem',
     });
     expect(selection?.lens).toBe('evpi_evidence_priority');

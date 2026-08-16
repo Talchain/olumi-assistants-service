@@ -1000,9 +1000,9 @@ describe('generateChips — V5 state-trust stale-rerun rule', () => {
 
 // =========================================================================
 // V5 coaching — post-run_analysis validation prompt chip. Surfaces only
-// when the current-turn run_analysis fact's decision_review enrichment
-// contains usable evidence_enhancements (at least one entry has a
-// non-empty `specific_action` string). The chip has no `action_type` —
+// when the current-turn run_analysis fact carries a resolved factor_evppi
+// priority with an exact factor_sensitivity label. Decision Review can enrich
+// the next answer but is not required. The chip has no `action_type` —
 // on click, the message text routes through the post-analysis advice
 // gate's evidence_gap class for a deterministic, grounded answer.
 // =========================================================================
@@ -1010,6 +1010,12 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
   function runAnalysisFactWithDecisionReview(
     evidenceEnhancements: Record<string, unknown>,
     keyAssumptions: readonly unknown[] = [],
+    factorEvppi: readonly Record<string, unknown>[] = (() => {
+      const firstFactorId = Object.keys(evidenceEnhancements)[0];
+      return firstFactorId === undefined
+        ? []
+        : [{ factor_id: firstFactorId, evppi: 0.1, status: 'resolved' }];
+    })(),
   ): HandlerFact {
     return {
       fact_type: 'run_analysis',
@@ -1021,6 +1027,11 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
         summary: 'Prior run',
         win_probabilities: { 'opt-a': 0.6, 'opt-b': 0.4 },
         enrichment: {
+          factor_evppi: factorEvppi,
+          factor_sensitivity: factorEvppi.map((entry) => ({
+            factor_id: entry.factor_id,
+            factor_label: String(entry.factor_id).replace(/^fac_/, '').replace(/_/g, ' '),
+          })),
           decision_review: {
             produced_at: '2026-05-21T10:00:00.000Z',
             evidence_enhancements: evidenceEnhancements,
@@ -1041,7 +1052,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
     }),
   });
 
-  it('emits validation prompt chip when evidence_enhancements is non-empty', () => {
+  it('emits validation prompt chip when the exact producer priority has a safe label', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
@@ -1057,6 +1068,88 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
     expect(chips[2].message).toBe(
       'What should we validate or research to build confidence in this decision?',
     );
+  });
+
+  it('uses producer priority rather than decision-review object order to qualify the chip', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(
+        USABLE_ENHANCEMENTS,
+        [],
+        [{ factor_id: 'fac_cost', evppi: 0.01, status: 'resolved' }],
+      )],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
+  });
+
+  it('keeps the chip live from PLoT priority plus label when decision review is absent', () => {
+    const fact = runAnalysisFactWithDecisionReview(
+      { fac_delivery: { specific_action: 'Optional enrichment.' } },
+    );
+    if (fact.fact_type !== 'run_analysis') throw new Error('fixture must be run_analysis');
+    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    delete enrichment.decision_review;
+
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [fact],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
+  });
+
+  it('fails closed when the selected factor has no exact safe label', () => {
+    const fact = runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS);
+    if (fact.fact_type !== 'run_analysis') throw new Error('fixture must be run_analysis');
+    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    enrichment.factor_sensitivity = [
+      { factor_id: 'fac_delivery', factor_label: 'fac_delivery' },
+    ];
+
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [fact],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('suppresses the chip when the EVPPI producer says the ranking is partial', () => {
+    const fact = runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS);
+    if (fact.fact_type !== 'run_analysis') throw new Error('fixture must be run_analysis');
+    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    enrichment.inference_warnings = [{
+      code: 'FACTOR_EVPPI_PARTIAL',
+      field: 'factor_evppi',
+    }];
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [fact],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+  });
+
+  it('does not require decision-review action text when the selected factor has a safe label', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(
+        {
+          fac_selected: { rationale: 'missing action' },
+          fac_later: { specific_action: 'A later unranked action.' },
+        },
+        [],
+        [{ factor_id: 'fac_selected', evppi: 0.2, status: 'resolved' }],
+      )],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
   });
 
   it('validation chip label is at most 30 characters', () => {
@@ -1105,7 +1198,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
   });
 
-  it('suppresses validation chip when evidence_enhancements entries lack specific_action', () => {
+  it('still emits validation chip when evidence_enhancements entries lack specific_action', () => {
     const chips = generateChips({
       stage: 'analyse',
       handlerFacts: [
@@ -1118,8 +1211,8 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       analysis: analysisAt('stable'),
       validationRegistry: REGISTRY,
     });
-    expect(chips).toHaveLength(2);
-    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
+    expect(chips).toHaveLength(3);
+    expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
   });
 
   it('CODEX BLOCKER FIX — suppresses validation chip when current-turn fact has no enrichment, EVEN IF priorFacts is usable', () => {

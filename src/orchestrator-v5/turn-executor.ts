@@ -393,6 +393,7 @@ import {
   type FactorNodeInfo,
 } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
+import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
@@ -7179,6 +7180,12 @@ export async function runTurnExecutor(
           // Returns null when no enrichment is available; the gate
           // falls back to its projection-only behaviour.
           decisionReview: pickLatestDecisionReview(context.prior_facts),
+          // Science-to-reasoning bridge: the same selected analysis fact's
+          // producer-ranked factor EVPPI identity + exact PLoT label, with an
+          // optional same-factor Decision Review action. The label-backed
+          // guidance remains live when configuration-gated Decision Review is
+          // absent or soft-fails. Do not infer the deployed flag posture here.
+          factorEvppiGuidance: pickLatestFactorEvppiPriorityGuidance(context.prior_facts),
           // Raw robustness signals (`enrichment.robustness.level`,
           // `enrichment.robustness.near_tie.is_tie`) from the SAME fact
           // the freshness/projection layer selected. Lets the post-
@@ -7272,10 +7279,12 @@ export async function runTurnExecutor(
           // even when phase3 block context was unavailable.
           phase3_block_context_available:
             contextReadiness?.phase3_block_context_available ?? null,
-          // True when the matched copy drew from the projected analysis
-          // fallback rather than the decision_review enrichment.
+          // True when the matched copy drew from a projected-analysis
+          // fallback rather than direct Decision Review or factor-EVPPI
+          // authority.
           fallback_analysis_used: adviceOutcome.matched
             ? adviceOutcome.copy_source !== 'decision_review'
+              && adviceOutcome.copy_source !== 'factor_evppi'
             : null,
           // The advice-gate path is always deterministic (llm_calls_used: 0).
           deterministic: adviceOutcome.matched ? true : null,
@@ -7362,7 +7371,9 @@ export async function runTurnExecutor(
             coaching_fields_used: adviceOutcome.coaching_fields_used,
             phase3_block_context_available:
               contextReadiness?.phase3_block_context_available ?? false,
-            fallback_analysis_used: adviceOutcome.copy_source !== 'decision_review',
+            fallback_analysis_used:
+              adviceOutcome.copy_source !== 'decision_review'
+              && adviceOutcome.copy_source !== 'factor_evppi',
             deterministic: true,
           };
           // V5 P0 proposal-memory continuation — emit-time capture at
