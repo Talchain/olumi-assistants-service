@@ -42,7 +42,25 @@ const VALID_SET_EVENT = {
 
 describe('schema 0.42 — root edge_strength_edit contract', () => {
   it('is bound to the exact published reader contract', () => {
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.42.0');
+    // ⚠ THIS PIN MOVES ONLY WITH EVIDENCE, NEVER TO CLEAR A RED. It exists so a
+    // schemas bump is a deliberate act that re-examines this reader, and the
+    // only honest way to advance it is to show the reader's own bytes did not
+    // move — a changelog saying "additive" is a claim, not a measurement.
+    //
+    // 0.42.0 → 0.44.0 (the conditional_winners train, which also carries the
+    // never-vendored 0.43.0). DERIVED by unpacking both tarballs and diffing
+    // every `dist` file that mentions `edge_strength_edit` — five of them:
+    //   dist/boundary/turn-payload.d.ts   BYTE-IDENTICAL
+    //   dist/boundary/turn-payload.js     BYTE-IDENTICAL
+    //   dist/boundary/enums.d.ts          BYTE-IDENTICAL
+    //   dist/boundary/enums.js            BYTE-IDENTICAL
+    //   dist/fixtures/index.js            differs ONLY in line numbers
+    //     (1614→1664, 2393→2464); every edge_strength_edit line is textually
+    //     identical, shifted by the two conditional-winner fixtures added above
+    //     it in the file.
+    // So the strict member, the root superRefine, and the intent/direction
+    // vocabularies this suite exercises are unchanged across both releases.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.44.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

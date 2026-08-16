@@ -7,7 +7,85 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.42.0.tgz`
+### `talchain-schemas-0.44.0.tgz`
+
+> **⚠⚠ PACKED FROM AN UNMERGED BRANCH — READ THIS BEFORE MERGING THIS PR.**
+> Every other entry in this file records a tarball packed from a **merged,
+> tagged release**. This one cannot, and saying otherwise would be the false
+> label this repo's doctrine exists to prevent.
+>
+> `@talchain/schemas` **publishes on merge to `main`** — that is its release
+> switch — and the schemas half of this train (olumi-schemas **#43**) is
+> deliberately still OPEN so both halves can be reviewed as one change. The
+> bytes here were therefore packed from that PR's branch head,
+> **`bf53ad8fdea3b3c74e94ee7b2b436ba2ecab0b0b`**, with
+> `package.json.version == 0.44.0` asserted before packing, via
+> `npm ci && npm run build && npm pack` (node 20.19.5 / npm 10.8.2 — the same
+> toolchain the 0.40.0 entry records).
+>
+> sha256 `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72`
+> — 419,086 bytes. A second independent `npm pack` produced **byte-identical**
+> output.
+>
+> **REQUIRED BEFORE THIS PR MERGES — do not skip, and do not treat a green CI
+> as covering it.** CI validates that these bytes match the adjacent `.sha256`;
+> it cannot know whether they match what was PUBLISHED, because nothing was
+> published when they were made.
+>
+> 1. Merge olumi-schemas #43 ⇒ 0.44.0 publishes and is tagged.
+> 2. Re-pack from a fresh blobless clone with `HEAD` asserted equal to
+>    `git rev-list -n1 v0.44.0` *before any read* — fetching a ref is not
+>    checking it out.
+> 3. Assert the sha256 is **identical** to the one above. If it differs, the
+>    published bytes are not these bytes: replace the tarball and the `.sha256`
+>    in this PR rather than reasoning about why the difference is harmless.
+> 4. Then replace this whole block with the normal
+>    "SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE" wording.
+>
+> The estate rule this protects is "no two repos may hold DIFFERENT bytes under
+> one version string". Until step 3 is done, that rule is *asserted here and not
+> yet proven*.
+
+**What CEE adopts here: one transport key, its claim-safety ruling, and a
+two-release version jump.**
+
+`0.44.0` adds `conditional_winners` to `CEE_UI_ENRICHMENT_KEEP_LIST`, plus the
+typed `EnrichmentConditionalWinnerSchema` / `EnrichmentConditionalBucketSchema`
+and an optional `AnalysisEnrichment.conditional_winners`. The paired CEE change
+adds the key to `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` and rules it **`projected`**
+in the withheld-claim registry: each bucket's `winner_id` / `winner_label` /
+`runner_up_id` / `runner_up_label` are stripped on a turn whose verdict withholds
+the leading-option claim, and the factor-level science is kept.
+
+> **⚠ THIS IS A TWO-LINE JUMP: 0.42.0 → 0.44.0, SO IT ALSO ADOPTS 0.43.0.**
+> CEE never vendored 0.43.0, and `@talchain/schemas` is 0.x, where **MINOR is
+> the breaking axis** — so this bump crosses two compatibility lines, not one.
+> 0.43.0 is additive for old payloads: legacy-optional
+> `DraftGraphBlockSchema.options` / `goal_node_id`, the strict
+> `CanonicalCommittedGraphBlockSchema` / `CanonicalCommittedGraphReceiptSchema`
+> producer forms, and `CANONICAL_GRAPH_HASH_PROJECTION_VERSION` +
+> `CANONICAL_GRAPH_HASH_NESTED_PROJECTION`. It adds names and relaxes two
+> previously-absent optional keys; it makes nothing required and narrows no
+> vocabulary. CEE adopts it as a **reader only** here — this PR enables no
+> canonical receipt emission and adds no digest implementation. 0.43.0's own
+> rollout note calls for exactly this order: publish, re-vendor CEE and the UI,
+> and only then enable emission.
+
+**Rollback path:** revert this whole PR and run `pnpm install`. Git restores the
+exact 0.42.0 tarball, checksum, pin and lockfile. Reverting is independent: no
+producer depends on the new key, and dropping `conditional_winners` from the
+keep-list returns the wire to the shape it has had for this key's whole life.
+Reverting never unpublishes 0.44.0.
+
+### `talchain-schemas-0.42.0.tgz` (historical — no longer vendored)
+
+The exact prior CEE bytes were sha256
+`1d5f2c7a7ee71b71d60f80b2e37db3e94f2f379a5741fd84c1099a4e13016ba0`
+(403,431 bytes). Tag `v0.42.0` resolves to
+`bbfb7eb1e3f450598ff061a8651ce8c7e053468d`. They remain recoverable from the
+pre-change CEE commit and are restored by the rollback above.
+
+### `talchain-schemas-0.42.0.tgz` — original adoption note (retained)
 
 > **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE AND REPRODUCED TWICE.**
 > Packed from a fresh blobless clone of `olumi-schemas` after asserting both
