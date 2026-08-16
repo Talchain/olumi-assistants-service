@@ -242,6 +242,79 @@ describe('admission absorbs an ABSENCE, never a value it cannot read', () => {
   });
 });
 
+describe('a blocker on a SUBMITTED option is never waived', () => {
+  /**
+   * ⚠ ALSO FOUND BY A SURVIVING MUTANT (drop the touched-option identity check).
+   *
+   * The waiver has two conjuncts — the blocker's CODE must mean "nothing is
+   * set", AND it must name an option the exclusion is about to drop. Every
+   * earlier fixture satisfied both together, so nothing bound the second one.
+   *
+   * `opt_partial` is linked to TWO factors and valued on ONE. Its interventions
+   * are non-empty, so the gate SUBMITS it — it is not touched — yet it still
+   * raises `MISSING_OPTION_VALUE` for the unvalued factor. Exclusion answers
+   * nothing about an option that is being submitted, so the refusal must stand.
+   * Without the identity conjunct this graph is admitted and the run goes out
+   * carrying an option CEE has just said is incomplete.
+   */
+  const PARTIAL_PLUS_EMPTY = {
+    version: '1',
+    nodes: [
+      ...baseNodes(),
+      { id: 'fac_ramp', kind: 'factor', label: 'Ramp Delay', category: 'controllable', observed_state: { value: 0.5, cap: 1 } },
+      option('opt_c0', 'Configured 0', { fac_velocity: 0.4 }),
+      option('opt_c1', 'Configured 1', { fac_velocity: 0.8 }),
+      option('opt_partial', 'Partial', { fac_velocity: 0.6 }),
+      option('opt_empty', 'Empty'),
+    ],
+    edges: [
+      v3Edge('e1', 'decision', 'opt_c0'),
+      v3Edge('e2', 'decision', 'opt_c1'),
+      v3Edge('e3', 'decision', 'opt_partial'),
+      v3Edge('e4', 'decision', 'opt_empty'),
+      v3Edge('e5', 'opt_c0', 'fac_velocity'),
+      v3Edge('e6', 'opt_c1', 'fac_velocity'),
+      v3Edge('e7', 'opt_partial', 'fac_velocity'),
+      v3Edge('e8', 'opt_partial', 'fac_ramp'),
+      v3Edge('e9', 'opt_empty', 'fac_velocity'),
+      v3Edge('e10', 'fac_velocity', 'goal'),
+      v3Edge('e11', 'fac_ramp', 'goal'),
+    ],
+  };
+
+  it('refuses when a waivable-CODE blocker names an option the run will SUBMIT', () => {
+    const admission = resolveRunAdmission(PARTIAL_PLUS_EMPTY);
+
+    // PRECONDITIONS PINNED IN-TEST — the fixture must genuinely present BOTH
+    // halves, or this passes for the wrong reason.
+    // (1) the exclusion has something to do, so the plan conjunct is satisfied;
+    expect(admission.plan.will_scaffold_options).toBe(true);
+    expect(admission.plan.scaffolded_option_ids).toEqual(['opt_empty']);
+    // (2) and there is a blocker with a WAIVABLE CODE on an option NOT touched.
+    const blockers = (admission.strict.issues ?? []).filter(
+      (i) => i.code === 'MISSING_OPTION_VALUE',
+    );
+    expect(blockers.map((i) => i.option_id).sort()).toEqual(['opt_empty', 'opt_partial']);
+
+    // The verdict under test: identical code, different option, refusal stands.
+    expect(admission.willProceed).toBe(false);
+  });
+
+  it('DISCRIMINATING TWIN — completing that option admits the run', () => {
+    const completed = {
+      ...PARTIAL_PLUS_EMPTY,
+      nodes: PARTIAL_PLUS_EMPTY.nodes.map((n) =>
+        n.id === 'opt_partial'
+          ? { ...n, interventions: { fac_velocity: 0.6, fac_ramp: 0.2 } }
+          : n,
+      ),
+    };
+    const admission = resolveRunAdmission(completed);
+    expect(admission.willProceed).toBe(true);
+    expect(admission.waivedOptionIds).toEqual(['opt_empty']);
+  });
+});
+
 describe('the route and the run give ONE answer', () => {
   /**
    * The anti-drift property. The panel's offer is
