@@ -16,12 +16,20 @@
  */
 
 import { createHash } from 'node:crypto';
+import {
+  CANONICAL_GRAPH_HASH_NESTED_PROJECTION,
+  CANONICAL_GRAPH_HASH_PROJECTION_VERSION,
+} from '@talchain/schemas/boundary';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
 const HASH_HEX_LENGTH = 16;
+
+/** Exported for health/drift witnesses; the vocabulary itself is schema-owned. */
+export const ANALYSIS_GRAPH_HASH_PROJECTION_VERSION =
+  CANONICAL_GRAPH_HASH_PROJECTION_VERSION;
 
 /**
  * Compute a deterministic 16-char hex hash of graph identity. Returns null
@@ -163,28 +171,34 @@ function pickDefined<T extends Record<string, unknown>>(
 
 function projectObservedState(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  return pickDefined(raw as Record<string, unknown>, ['value', 'baseline', 'cap']);
+  return pickDefined(
+    raw as Record<string, unknown>,
+    CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.observed_state_fields,
+  );
 }
 
 function projectPrior(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  return pickDefined(raw as Record<string, unknown>, [
-    'distribution',
-    'range_min',
-    'range_max',
-  ]);
+  return pickDefined(
+    raw as Record<string, unknown>,
+    CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.prior_fields,
+  );
 }
 
 function projectIntervention(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  if (r.value !== undefined) out.value = r.value;
-  if (r.value_type !== undefined) out.value_type = r.value_type;
-  if (r.encoding_map !== undefined) out.encoding_map = r.encoding_map;
-  if (r.target_match && typeof r.target_match === 'object') {
-    const tm = r.target_match as Record<string, unknown>;
-    if (tm.node_id !== undefined) out.target_match = { node_id: tm.node_id };
+  const contract = CANONICAL_GRAPH_HASH_NESTED_PROJECTION.intervention;
+  const out = pickDefined<Record<string, unknown>>(r, contract.fields);
+  const targetMatch = r[contract.target_match_field];
+  if (targetMatch && typeof targetMatch === 'object') {
+    const projected = pickDefined<Record<string, unknown>>(
+      targetMatch as Record<string, unknown>,
+      contract.target_match_fields,
+    );
+    if (Object.keys(projected).length > 0) {
+      out[contract.target_match_field] = projected;
+    }
   }
   return out;
 }
@@ -209,19 +223,13 @@ interface NodeProjection {
 
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  // Keep the accumulator broad: `slice(1)` is a runtime exclusion, while
+  // TypeScript conservatively retains `id` in the manifest key union.
+  const out: Record<string, unknown> = {
+    id: typeof r.id === 'string' ? r.id : '',
+  };
 
-  for (const key of [
-    'kind',
-    'category',
-    'factor_type',
-    'is_baseline',
-    'goal_threshold',
-    'goal_threshold_raw',
-    'goal_threshold_cap',
-    'intercept',
-    'encoding_map',
-  ] as const) {
+  for (const key of CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.fields.slice(1)) {
     if (r[key] !== undefined) out[key] = r[key];
   }
 
@@ -235,12 +243,14 @@ function projectNode(raw: unknown): NodeProjection {
     out.prior = prior;
   }
 
-  const interventions = projectInterventionRecord(r.interventions);
+  const interventionsField =
+    CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.interventions_field;
+  const interventions = projectInterventionRecord(r[interventionsField]);
   if (interventions !== undefined && Object.keys(interventions).length > 0) {
-    out.interventions = interventions;
+    out[interventionsField] = interventions;
   }
 
-  return out;
+  return out as NodeProjection;
 }
 
 interface EdgeProjection {
@@ -251,24 +261,25 @@ interface EdgeProjection {
 
 function projectEdge(raw: unknown): EdgeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: EdgeProjection = {
+  const out: Record<string, unknown> = {
     from: typeof r.from === 'string' ? r.from : '',
     to: typeof r.to === 'string' ? r.to : '',
   };
 
-  if (r.edge_type !== undefined) out.edge_type = r.edge_type;
-  if (r.exists_probability !== undefined) out.exists_probability = r.exists_probability;
-  if (r.effect_direction !== undefined) out.effect_direction = r.effect_direction;
+  for (const key of CANONICAL_GRAPH_HASH_NESTED_PROJECTION.edge.fields.slice(2)) {
+    if (r[key] !== undefined) out[key] = r[key];
+  }
 
   if (r.strength && typeof r.strength === 'object') {
     const s = r.strength as Record<string, unknown>;
-    const strength: Record<string, unknown> = {};
-    if (s.mean !== undefined) strength.mean = s.mean;
-    if (s.std !== undefined) strength.std = s.std;
+    const strength = pickDefined<Record<string, unknown>>(
+      s,
+      CANONICAL_GRAPH_HASH_NESTED_PROJECTION.edge.strength_fields,
+    );
     if (Object.keys(strength).length > 0) out.strength = strength;
   }
 
-  return out;
+  return out as EdgeProjection;
 }
 
 interface OptionProjection {
@@ -278,21 +289,31 @@ interface OptionProjection {
 
 function projectOption(raw: unknown): OptionProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const out: OptionProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  const out: Record<string, unknown> = {
+    id: typeof r.id === 'string' ? r.id : '',
+  };
 
-  if (r.status !== undefined) out.status = r.status;
-  if (r.is_baseline !== undefined) out.is_baseline = r.is_baseline;
+  for (const key of CANONICAL_GRAPH_HASH_NESTED_PROJECTION.option.fields.slice(1)) {
+    if (r[key] !== undefined) out[key] = r[key];
+  }
 
-  const interventions = projectInterventionRecord(r.interventions);
+  const interventionsField =
+    CANONICAL_GRAPH_HASH_NESTED_PROJECTION.option.interventions_field;
+  const interventions = projectInterventionRecord(r[interventionsField]);
   if (interventions !== undefined && Object.keys(interventions).length > 0) {
-    out.interventions = interventions;
+    out[interventionsField] = interventions;
   }
 
   // Only include raw_interventions when option is not yet ready — that signals
   // the encoding state still affects analysis preconditions.
-  if (r.status !== 'ready' && r.raw_interventions && typeof r.raw_interventions === 'object') {
-    out.raw_interventions = r.raw_interventions;
+  const conditional = CANONICAL_GRAPH_HASH_NESTED_PROJECTION.option.conditional_field;
+  if (
+    r[conditional.include_when.field] !== conditional.include_when.not_equals &&
+    r[conditional.field] &&
+    typeof r[conditional.field] === 'object'
+  ) {
+    out[conditional.field] = r[conditional.field];
   }
 
-  return out;
+  return out as OptionProjection;
 }

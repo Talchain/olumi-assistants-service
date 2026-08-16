@@ -53,6 +53,7 @@ vi.mock('../index.js', async (importOriginal) => {
 import { dispatchDraftGraph } from '../../../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../../orchestrator-v5/commit.js';
+import { canonicalCommitResultFixture } from '../../../orchestrator-v5/handlers/__tests__/canonical-commit-result-fixture.js';
 import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { enrichDraftGraph } from '../index.js';
 // REAL graph-hash module — the same one the dispatch calls. Read-only import.
@@ -131,12 +132,13 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
       makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>,
     );
-    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue({
-      response: {},
-      performed: true,
-      persisted_row_id: 'row-1',
-      graphPersisted: true,
-    } as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockImplementation(
+      async (response, metadata) =>
+        canonicalCommitResultFixture(metadata.graph ?? null, {
+          response,
+          persistedRowId: 'row-1',
+        }),
+    );
     (enrichDraftGraph as MockedFunction<typeof enrichDraftGraph>).mockResolvedValue({
       enriched: true,
       reason: 'applied',

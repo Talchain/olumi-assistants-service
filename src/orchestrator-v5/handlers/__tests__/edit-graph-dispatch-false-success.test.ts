@@ -61,6 +61,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
@@ -140,12 +141,7 @@ function makeAppliedSuccessResult(assistantText: string): EditGraphResult {
 }
 
 function makeCommitResult() {
-  return {
-    response: {},
-    performed: true as const,
-    persisted_row_id: 'row-test',
-    graphPersisted: true,
-  };
+  return canonicalCommitResultFixture(INGRESS_GRAPH);
 }
 
 const STUB_REQUEST = {} as FastifyRequest;

@@ -42,6 +42,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -124,7 +125,9 @@ function makeDraftResult(opts: {
 }
 
 function makeCommitResult(graphPersisted: boolean) {
-  return { response: {}, performed: true as const, persisted_row_id: 'row-1', graphPersisted };
+  return canonicalCommitResultFixture(graphPersisted ? MINIMAL_GRAPH : null, {
+    persistedRowId: 'row-1',
+  });
 }
 
 function mockPipeline(draftResult: unknown, graphPersisted: boolean): void {

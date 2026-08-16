@@ -74,6 +74,7 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { loadRecentConversationTurns } from '../../build-turn-context.js';
 import type { GraphStateIngress, AnalysisStateIngress } from '../../boundary/request-extensions.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
@@ -160,12 +161,10 @@ function makeRejectedEditResult(): EditGraphResult {
 }
 
 function makeCommitResult(graphPersisted: boolean) {
-  return {
-    response: {},
-    performed: true as const,
-    persisted_row_id: 'row-edit-1',
-    graphPersisted,
-  };
+  return canonicalCommitResultFixture(
+    graphPersisted ? POST_EDIT_GRAPH : null,
+    { persistedRowId: 'row-edit-1' },
+  );
 }
 
 const STUB_REQUEST = {} as FastifyRequest;

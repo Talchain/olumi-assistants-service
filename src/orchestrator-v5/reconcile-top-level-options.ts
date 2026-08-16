@@ -9,21 +9,22 @@
  * option, while a consumer reading option-NODES can — the two views diverge
  * (probe A2/B1: `options[]` stayed 3 after an option was added to `nodes[]`).
  *
- * Decision ③ — RULED (Paul, 2026-07-22 23:35Z, evidence-based): **write-both
- * NARROWLY — update-if-present at option-mutating commits only, NEVER invent the
- * field.** The reader-manifest sweep found live CEE readers of top-level
+ * Decision ③ originally ruled **update-if-present** for this pass. The
+ * canonical committed-receipt component supersedes the old whole-commit
+ * "never invent the field" invariant: `projectGraphForPersistence` now authors
+ * explicit `options: []` before invoking this still-narrow reconciler. The
+ * reader-manifest sweep found live CEE readers of top-level
  * `options[]` (incl. the ContextPack projection preferring `options[]`), so the
- * two views must agree; but a graph that carries NO `options[]` array must not
- * suddenly grow one on an unrelated commit (that collides with the tested
- * "commit does not invent graph fields" invariant). Retiring `options[]` was
- * rejected — it would touch every PLoT/ISL analysis consumer.
+ * two views must agree. Retiring `options[]` was rejected — it would touch
+ * every PLoT/ISL analysis consumer.
  *
  * STATUS — WIRED (decision ③ ruled 22 Jul 2026). `commitDirectAnswer` calls this
  * at the single persist chokepoint (`store.append`'s only caller), AFTER
- * `normaliseOptionInterventionContract` and before the write, so every
+ * `normaliseOptionInterventionContract` and canonical carrier authoring, before
+ * the write, so every
  * option-mutating commit (add-option held-confirm, edit_graph apply) reconciles
- * top-level `options[]` while the update-if-present guard keeps the "commit does
- * not invent graph fields" invariant green. The wiring is pinned by
+ * top-level `options[]`. Direct callers still retain update-if-present; the
+ * persisted projection deliberately supplies the canonical empty array. The wiring is pinned by
  * `commit-options-reconcile-wiring.test.ts` (call-site deletion → RED).
  *
  * SCOPE — additive + idempotent + UPDATE-IF-PRESENT. When (and only when) a

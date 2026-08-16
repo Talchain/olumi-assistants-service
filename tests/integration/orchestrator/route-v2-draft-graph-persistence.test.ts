@@ -52,6 +52,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 import { dispatchDraftGraph } from '../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../src/orchestrator/tools/draft-graph.js';
 import { StateCommitFailedError } from '../../../src/orchestrator-v5/session/store.js';
+import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -157,7 +158,7 @@ describe('V5 draft_graph persistence integration', () => {
       const [writeArg] = appendMock.mock.calls[0];
       // The graph must be passed directly — not nested — so append_turn_atomic
       // can write it atomically with the turn row via p_graph.
-      expect(writeArg.graph).toEqual(MINIMAL_GRAPH_1);
+      expect(writeArg.graph).toEqual(projectGraphForPersistence(MINIMAL_GRAPH_1));
       expect(writeArg.scenario_id).toBe(SCENARIO_ID);
       expect(writeArg.turn_id).toBe(TURN_ID_1);
     });
@@ -344,8 +345,8 @@ describe('V5 draft_graph persistence integration', () => {
       const [secondWriteArg] = appendMock.mock.calls[1];
 
       // Each call carries its own graph — the atomic RPC overwrites scenarios.graph.
-      expect(firstWriteArg.graph).toEqual(MINIMAL_GRAPH_1);
-      expect(secondWriteArg.graph).toEqual(MINIMAL_GRAPH_2);
+      expect(firstWriteArg.graph).toEqual(projectGraphForPersistence(MINIMAL_GRAPH_1));
+      expect(secondWriteArg.graph).toEqual(projectGraphForPersistence(MINIMAL_GRAPH_2));
 
       // Different turn_ids (not duplicated)
       expect(firstWriteArg.turn_id).toBe(TURN_ID_1);

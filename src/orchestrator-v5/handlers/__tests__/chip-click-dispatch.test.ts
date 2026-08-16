@@ -367,7 +367,7 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     // what_would_flip) never MUTATES the graph, so its responses must
     // never carry the applied-mutation `draft_graph` wire field — that
     // attach is scoped to committed D1 mutations (turn-executor STEP 7,
-    // GM-held resume, edit_graph apply). See applied-graph-emit.ts.
+    // GM-held resume, edit_graph apply). See committed-graph-receipt.ts.
     expect('draft_graph' in out.response).toBe(false);
   });
 

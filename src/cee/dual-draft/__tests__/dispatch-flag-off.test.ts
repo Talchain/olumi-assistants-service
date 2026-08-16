@@ -61,6 +61,7 @@ vi.mock('../index.js', async (importOriginal) => {
 import { dispatchDraftGraph } from '../../../orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../../orchestrator-v5/commit.js';
+import { canonicalCommitResultFixture } from '../../../orchestrator-v5/handlers/__tests__/canonical-commit-result-fixture.js';
 import { enrichDraftGraph } from '../index.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -102,15 +103,21 @@ function makeDraftResult(graphOutput: unknown = M1_GRAPH) {
 }
 
 function makeCommitResult(graphPersisted: boolean) {
-  return { response: {}, performed: true as const, persisted_row_id: 'row-1', graphPersisted };
+  return canonicalCommitResultFixture(graphPersisted ? M1_GRAPH : null, {
+    persistedRowId: 'row-1',
+  });
 }
 
 describe('dispatchDraftGraph — V6 dual-draft flag gate (Phase 0/1)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     flag.enabled = false;
-    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
-      makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>,
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockImplementation(
+      async (response, metadata) =>
+        canonicalCommitResultFixture(metadata.graph ?? null, {
+          response,
+          persistedRowId: 'row-1',
+        }),
     );
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
       makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>,

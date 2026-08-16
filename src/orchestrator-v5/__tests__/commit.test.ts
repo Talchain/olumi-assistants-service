@@ -6,6 +6,7 @@ import type { SessionStore, SessionTurnWrite } from '../session/store.js';
 import type { SuggestedAction } from '../compose/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { setTestSink } from '../../utils/telemetry.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 
 const META = {
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -117,7 +118,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
         { ...META, graph, briefText: 'brief' },
         store,
       );
-      expect(appendCalls[0].graph).toEqual(graph);
+      expect(appendCalls[0].graph).toEqual(projectGraphForPersistence(graph));
       expect(appendCalls[0].briefText).toBe('brief');
     });
   });
@@ -473,7 +474,7 @@ answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
     const { store, appendCalls } = makeSpyStore();
     await commitDirectAnswer(composed(), { ...META, graph: clean }, store);
     setTestSink(null);
-    expect(appendCalls[0]!.graph).toEqual(clean);
+    expect(appendCalls[0]!.graph).toEqual(projectGraphForPersistence(clean));
     expect(events.filter((e) => e === 'v5.graph_persist.intercept_repair')).toHaveLength(0);
   });
 

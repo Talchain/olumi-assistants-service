@@ -285,35 +285,30 @@ describe('STEP 7 commit — contentGraph ordering parity + fail-open telemetry (
     ).toBe(PRE_MUTATION_HASH);
   });
 
-  it('fixup 1 (fail-open visibility) — a committed graph failing the GraphV3 re-projection parse emits the frozen-registry event with the first zod issue path', async () => {
+  it('canonical receipt barrier — a malformed committed graph emits no success receipt', async () => {
     corruptMergedGraphEdges = true;
     const telemetryEvents: Array<{ name: string; data: Record<string, unknown> }> = [];
     setTestSink((name, data) => telemetryEvents.push({ name, data }));
 
     const result = await runRescaleTurn('req-reprojection-fail-open');
 
-    // Fail-open contract unchanged: the commit itself still lands…
+    // The injected append still lands before the post-commit witness runs…
     expect(result.telemetry.commit_performed).toBe(true);
-    // …and the wire projection stays at its pre-mutation value (the
-    // pre-#414 behaviour) rather than dropping readiness.
+    // …but the exact receipt barrier fails the turn closed and reverts the
+    // internal egress graph rather than attesting malformed persisted bytes.
+    expect(result.telemetry.failure_type).toBe('INTERNAL_ERROR');
     expect(
       computeAnalysisAffectingGraphHash(result.effectiveGraph as never),
     ).toBe(PRE_MUTATION_HASH);
     const optA = result.analysisReady?.options.find((o) => o.option_id === 'opt_a');
     expect(optA?.interventions.fac_migration).toBe(1);
 
-    // THE FIX — the fallback is dashboard-visible: frozen-registry event,
-    // content-free payload (correlation ids + handler id + first zod issue
-    // path — schema keys only, never values).
-    const failOpen = telemetryEvents.find(
-      (e) => e.name === 'v5.turn_executor.committed_graph_reprojection_failed',
-    );
-    expect(failOpen).toBeDefined();
-    expect(failOpen!.data).toMatchObject({
-      request_id: 'req-reprojection-fail-open',
-      scenario_id: SCENARIO_ID,
-      first_issue_path: 'edges',
-    });
-    expect(failOpen!.data).toHaveProperty('handler_id');
+    expect(result.response.draft_graph).toBeUndefined();
+    expect(result.response.graph_hash).toBeUndefined();
+    expect(
+      telemetryEvents.find(
+        (e) => e.name === 'v5.turn_executor.committed_graph_reprojection_failed',
+      ),
+    ).toBeUndefined();
   });
 });

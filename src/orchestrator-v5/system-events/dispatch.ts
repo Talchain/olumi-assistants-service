@@ -51,11 +51,11 @@ import {
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
+import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
 import {
   applyEdgeStrengthEdit,
+  isCanonicalCarrierSafeProvenanceOnlyEdgeConfirmation,
   isExactCommittedEdgeReadback,
-  isProvenanceOnlyEdgeConfirmation,
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
@@ -733,6 +733,21 @@ async function dispatchEdgeStrengthEdit(
     return { response: result.response, commitPerformed: false, graph: null };
   }
 
+  let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt>;
+  try {
+    committedReceipt = buildCanonicalCommittedGraphReceipt(persistedGraphBytes);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 edge_strength_edit — exact persisted receipt unavailable; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
   const exactTargetReadback = isExactCommittedEdgeReadback({
     projected: result.graph,
@@ -742,7 +757,7 @@ async function dispatchEdgeStrengthEdit(
   });
   const confirmationStillProvenanceOnly =
     event.intent !== 'confirm_current' ||
-    isProvenanceOnlyEdgeConfirmation({
+    isCanonicalCarrierSafeProvenanceOnlyEdgeConfirmation({
       before: result.baseGraph,
       after: persistedGraphBytes,
       from: event.from,
@@ -755,6 +770,7 @@ async function dispatchEdgeStrengthEdit(
   if (
     graphPersisted !== true ||
     persistedAnalysisGraphHash === null ||
+    persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
     !committedParse.success ||
     !exactTargetReadback ||
     !confirmationStillProvenanceOnly
@@ -781,10 +797,8 @@ async function dispatchEdgeStrengthEdit(
   // while this receipt proves provenance was durably stamped.
   const response: OlumiResponse = {
     ...committedResponse,
-    ...(persistedAnalysisGraphHash !== null
-      ? { graph_hash: persistedAnalysisGraphHash }
-      : {}),
-    draft_graph: buildAppliedGraphWireField(committedParse.data),
+    graph_hash: committedReceipt.analysisGraphHash,
+    draft_graph: committedReceipt.draftGraph,
   };
   // Fact history is observational only: it never authorises or blocks the
   // write. A healthy empty read means canonical `none`; a degraded read must
@@ -946,6 +960,7 @@ async function dispatchFactorValueEdit(
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const commitResult = await commitDirectAnswer(result.response, {
@@ -977,6 +992,7 @@ async function dispatchFactorValueEdit(
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
   } catch (err) {
     log.error(
       {
@@ -1004,6 +1020,39 @@ async function dispatchFactorValueEdit(
     'V5 factor_value_edit committed — graph written, hash recomputed',
   );
 
+  let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt>;
+  try {
+    committedReceipt = buildCanonicalCommittedGraphReceipt(persistedGraphBytes);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 factor_value_edit — exact persisted receipt unavailable; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  if (
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        graph_persisted: graphPersisted,
+        has_persisted_hash: persistedAnalysisGraphHash !== null,
+      },
+      'V5 factor_value_edit — persisted hash/receipt mismatch; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
   // ⚠ ADVERTISE THE PERSISTED HASH, NOT ONE WE COMPUTED OURSELVES.
   //
   // `commitDirectAnswer` runs `projectGraphForPersistence` on the way to the
@@ -1022,10 +1071,11 @@ async function dispatchFactorValueEdit(
   //
   // Caught by `route-v2-factor-value-edit.test.ts` — the wire hash and the hash
   // of the graph the store received disagreed until this was threaded.
-  const response: OlumiResponse =
-    persistedAnalysisGraphHash !== null
-      ? { ...result.response, graph_hash: persistedAnalysisGraphHash }
-      : result.response;
+  const response: OlumiResponse = {
+    ...result.response,
+    graph_hash: committedReceipt.analysisGraphHash,
+    draft_graph: committedReceipt.draftGraph,
+  };
 
   // Readiness from the bytes that LANDED, not from our pre-projection copy.
   //

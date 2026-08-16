@@ -10,14 +10,14 @@
  * itself needs a pin that discriminates the CALL SITE. Here we drive the real
  * `commitDirectAnswer` and assert on the graph that reaches `store.append`, so
  * deleting the `reconcileTopLevelOptionsFromNodes(...)` call in commit.ts turns
- * (a) and (c) RED while (b) and the "commit does not invent graph fields"
- * invariant (turn-executor-d1-mutation-commit-graph.test.ts) stay GREEN.
+ * (a), (b), and (c) RED. The canonical committed-receipt component supersedes
+ * the former "commit does not invent graph fields" invariant: the persist
+ * projection now authors every canonical hash carrier before append.
  *
  * MUTATION-CHECK (recorded in the lane report): revert the wiring call →
  *   (a) options-add             → RED  (new option never mirrored)
  *   (c) intervention fidelity   → RED  (configured option never mirrored)
- *   (b) never-invent            → GREEN (absent options[] stays absent)
- *   invariant (D1-SHAPE)        → GREEN (echo carries no options[])
+ *   (b) canonicalise+mirror     → RED  (absent options[] never becomes canonical)
  */
 import { describe, it, expect, vi } from 'vitest';
 
@@ -67,7 +67,7 @@ type OptionEntry = {
 };
 type PersistedGraph = { nodes: unknown[]; edges?: unknown[]; options?: OptionEntry[] };
 
-describe('commitDirectAnswer — options[] reconcile wiring (decision ③, update-if-present)', () => {
+describe('commitDirectAnswer — canonical options[] reconcile wiring', () => {
   it('(a) option-add on a graph WITH options[]: the new option-node is mirrored into options[]', async () => {
     // options[] carries only the baseline; opt_outsource is added as an
     // option-NODE (the live add path) but is missing from top-level options[].
@@ -131,10 +131,10 @@ describe('commitDirectAnswer — options[] reconcile wiring (decision ③, updat
     expect(graph.options).toHaveLength(1);
   });
 
-  it('(b) never-invent: a graph WITHOUT options[] commits with the field STILL absent', async () => {
-    // Option-nodes are present, but there is no top-level options[] ARRAY. The
-    // ruling forbids growing one on this commit (the "commit does not invent
-    // graph fields" invariant). The graph still commits.
+  it('(b) canonicalises a missing options[] before append, then mirrors option nodes', async () => {
+    // The receipt producer barrier requires own carriers on append.graph.
+    // Canonicalisation therefore establishes [] before this reconciler mirrors
+    // the option node into it.
     const graph = {
       nodes: [
         { id: 'dec', kind: 'decision' },
@@ -152,8 +152,21 @@ describe('commitDirectAnswer — options[] reconcile wiring (decision ③, updat
     await commitDirectAnswer(composed(), { ...META, graph }, store);
 
     const persisted = appendCalls[0]!.graph as PersistedGraph;
-    expect(persisted.options).toBeUndefined();
-    // The commit still landed the graph (nodes preserved).
+    expect(persisted.options).toEqual([
+      {
+        id: 'opt_a',
+        label: 'A',
+        status: 'ready',
+        interventions: { fac_x: { value: 0.3, source: 'user_specified' } },
+      },
+    ]);
+    expect(
+      Object.prototype.hasOwnProperty.call(appendCalls[0]!.graph, 'goal_node_id'),
+    ).toBe(true);
+    expect((appendCalls[0]!.graph as { goal_node_id: unknown }).goal_node_id).toBeNull();
+    expect((appendCalls[0]!.graph as { goal_constraints: unknown }).goal_constraints).toEqual(
+      [],
+    );
     expect(persisted.nodes).toHaveLength(2);
   });
 

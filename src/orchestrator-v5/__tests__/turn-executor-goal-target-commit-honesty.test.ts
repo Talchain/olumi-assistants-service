@@ -318,7 +318,7 @@ describe('goal-target receipt honesty guard at the STEP 7 commit chokepoint', ()
     // swapped turn never advertises its unpersisted mutation via the
     // `draft_graph` wire field either (same predicate as the withheld
     // commit: the attach reads the graph the commit persisted, and this
-    // turn persisted none). See applied-graph-emit.ts.
+    // turn persisted none). See committed-graph-receipt.ts.
     expect('draft_graph' in result.response).toBe(false);
   });
 });

@@ -82,7 +82,7 @@ import { composeRecoverableValidationResponse } from './compose/recoverable-vali
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
-import { buildAppliedGraphWireField } from './compose/applied-graph-emit.js';
+import { buildCanonicalCommittedGraphReceipt } from './compose/committed-graph-receipt.js';
 import {
   collectValidEntityLabels,
   neutraliseUnvalidatedBoldEntities,
@@ -308,6 +308,7 @@ import {
   computeAnalysisAffectingGraphHash,
   computeDeterministicGraphHash,
 } from './context/graph-hash.js';
+import { projectGraphForPersistence } from './persisted-graph-projection.js';
 import { computeExpectedGraphCasHashes } from './context/graph-cas-conflict.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import {
@@ -3343,17 +3344,23 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          // F2-CEE (1.16 run-3 diagnosis): a consented held-apply previously
-          // shipped `blocks: []` with NO graph payload, assuming the UI
-          // re-reads `scenarios.graph` — it never does. Attach the applied
-          // post-mutation graph via the EXISTING `draft_graph` wire field
-          // (the UI's only inline-graph ingestion path), same shape as the
-          // draft dispatch emits (see applied-graph-emit.ts). Post-commit
-          // only: a failed commit (catch below) never advertises
-          // unpersisted state.
+          const committedReceipt = buildCanonicalCommittedGraphReceipt(
+            committed.persistedGraph,
+          );
+          if (
+            !committed.graphPersisted ||
+            committed.persistedAnalysisGraphHash === null ||
+            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+          ) {
+            throw new Error('GM held apply committed receipt mismatch');
+          }
+          // Attach only the exact post-projection persisted receipt. The old
+          // path used outcome.appliedGraph and could advertise options/goal/
+          // intercept bytes that the atomic append never stored.
           response = {
             ...committed.response,
-            draft_graph: buildAppliedGraphWireField(outcome.appliedGraph),
+            graph_hash: committedReceipt.analysisGraphHash,
+            draft_graph: committedReceipt.draftGraph,
           };
           // Post-commit honesty plumbing: the mutation is durable, so the
           // turn outcome reports graph_mutated, the structural-claim guard
@@ -3363,18 +3370,9 @@ export async function runTurnExecutor(
           analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(
             committed.persistedGraph,
           );
-          const postApplyHash = ((): string | null => {
-            try {
-              return computeAnalysisAffectingGraphHash(
-                outcome.mutatedGraph as GraphStateIngress | null | undefined,
-              );
-            } catch {
-              return null;
-            }
-          })();
           freshness = deriveAnalysisFreshness(
             context.prior_facts,
-            postApplyHash,
+            committedReceipt.analysisGraphHash,
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(outcome.mutatedGraph)
               : undefined,
@@ -3572,25 +3570,27 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
+          const committedReceipt = buildCanonicalCommittedGraphReceipt(
+            committed.persistedGraph,
+          );
+          if (
+            !committed.graphPersisted ||
+            committed.persistedAnalysisGraphHash === null ||
+            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+          ) {
+            throw new Error('GM held apply-all committed receipt mismatch');
+          }
           response = {
             ...committed.response,
-            draft_graph: buildAppliedGraphWireField(lastExecuted.appliedGraph),
+            graph_hash: committedReceipt.analysisGraphHash,
+            draft_graph: committedReceipt.draftGraph,
           };
           analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(
             committed.persistedGraph,
           );
-          const postApplyHash = ((): string | null => {
-            try {
-              return computeAnalysisAffectingGraphHash(
-                lastExecuted!.mutatedGraph as GraphStateIngress | null | undefined,
-              );
-            } catch {
-              return null;
-            }
-          })();
           freshness = deriveAnalysisFreshness(
             context.prior_facts,
-            postApplyHash,
+            committedReceipt.analysisGraphHash,
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(lastExecuted.mutatedGraph)
               : undefined,
@@ -9617,19 +9617,21 @@ export async function runTurnExecutor(
       //
       // Hash representation: handlers run their candidate post-mutation
       // graph through GraphV3.parse before emitting `mutated_graph`,
-      // which strips top-level `options` and `goal_node_id` (they're
-      // not declared on GraphV3). Hashing the GraphV3 projection
-      // directly would therefore differ from the prior run_analysis
-      // fact's `graph_hash_at_run` for projection-shape reasons rather
-      // than mutation reasons. Stamp the mutation's structural fields
-      // onto the ingress shape so the comparison is apples-to-apples
-      // with how `graph_hash_at_run` was originally computed.
+      // which strips top-level hash carriers not declared on GraphV3.
+      // Restore the server-authoritative base shape, then run the SAME
+      // idempotent projection the atomic commit runs. This makes this existing
+      // (pinned) freshness derivation describe the bytes the append will store,
+      // including canonical own-key absence and reconciled options, without a
+      // second post-commit derivation.
       const hashForPostHandlerFreshness = ((): string | null => {
         if (handlerOutcome.mutated_graph === undefined) {
           return currentAnalysisGraphHashForTurn;
         }
         const mutated = handlerOutcome.mutated_graph as Record<string, unknown>;
-        const ingress = (graphStateForTurn ?? {}) as Record<string, unknown>;
+        const ingress = (context.persistedGraph ?? graphStateForTurn ?? {}) as Record<
+          string,
+          unknown
+        >;
         const merged: Record<string, unknown> = {
           ...ingress,
           nodes: mutated.nodes,
@@ -9645,7 +9647,12 @@ export async function runTurnExecutor(
         // fields used by hashing).
         canonicalReadinessGraphForRun = mutated;
         return computeAnalysisAffectingGraphHash(
-          merged as GraphStateIngress | null | undefined,
+          projectGraphForPersistence(merged, {
+            scenarioId: context.session_id,
+            turnId: context.request_id,
+            turnClass: 'handler',
+            source: proposedHandlerId ?? undefined,
+          }) as GraphStateIngress | null | undefined,
         );
       })();
       // Option-identity guard inputs (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
@@ -11166,11 +11173,11 @@ export async function runTurnExecutor(
       // committed-graph projection can be applied in the right order at
       // both seams it feeds (see the pre-commit assignment below and the
       // post-commit readiness re-projection after `commitTurn`).
-      const committedGraphParse =
+      const preCommitGraphParse =
         graphForCommit !== null && graphForCommit !== undefined
           ? GraphV3.safeParse(graphForCommit)
           : null;
-      if (committedGraphParse?.success) {
+      if (preCommitGraphParse?.success) {
         // Ordering parity with `commitGmHeldResume` (PR #414 review):
         // `commitTurn` snapshots `contentGraph = effectiveTurnGraph` for the
         // durable-text scrub, so the egress/label graph must be set to the
@@ -11181,7 +11188,7 @@ export async function runTurnExecutor(
         // unpersisted state (same rule as the GM-held path).
         preCommitEffectiveTurnGraph = effectiveTurnGraph;
         effectiveTurnGraphSetPreCommit = true;
-        effectiveTurnGraph = committedGraphParse.data;
+        effectiveTurnGraph = preCommitGraphParse.data;
       }
       const committed = await commitTurn(composedOk, {
         scenario_id: context.session_id,
@@ -11221,6 +11228,42 @@ export async function runTurnExecutor(
         effectiveTurnGraph = preCommitEffectiveTurnGraph;
         effectiveTurnGraphSetPreCommit = false;
       }
+      // Validate every graph-writing D1 commit against the exact persisted
+      // projection, then make those exact bytes the internal graph authority.
+      // Pure first-touch adoption remains receipt-free on the wire, but its
+      // freshness/hash view must still describe what the append stored.
+      let persistedGraphParse: ReturnType<typeof GraphV3.safeParse> | null = null;
+      let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt> | null = null;
+      if (committed.graphPersisted) {
+        committedReceipt = buildCanonicalCommittedGraphReceipt(
+          committed.persistedGraph,
+        );
+        if (
+          committed.persistedAnalysisGraphHash === null ||
+          committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+        ) {
+          throw new Error('routed D1 committed receipt mismatch');
+        }
+        persistedGraphParse = GraphV3.safeParse(committed.persistedGraph);
+        // The receipt builder already validated the permissive ingress shape
+        // and all canonical carriers. Preserve the raw object here: GraphV3's
+        // parsed value strips top-level options/goal identity and would make
+        // the egress/hash view describe a lossy projection. Freshness already
+        // came from this same idempotent persistence projection at the single
+        // pinned post-handler derivation seam above; do not re-derive it here.
+        effectiveTurnGraph = committed.persistedGraph as GraphV3T;
+      }
+      // Only a genuine persisted mutation attaches an apply-to-canvas receipt.
+      // A graph write intentionally withheld by a warrant/selection guard keeps
+      // its existing honest refusal instead of being flattened to a generic
+      // post-commit receipt error.
+      if (handlerOutcome?.mutated_graph != null && committedReceipt !== null) {
+        response = {
+          ...response,
+          graph_hash: committedReceipt.analysisGraphHash,
+          draft_graph: committedReceipt.draftGraph,
+        };
+      }
       // F3 (response projection, 1.16 run-3 diagnosis) — post-commit honesty
       // plumbing for the routed D1 execute path, parity with
       // `commitGmHeldResume` above. The commit just durably persisted
@@ -11239,46 +11282,11 @@ export async function runTurnExecutor(
       // correct renormalised values. Re-derive readiness AFTER the commit
       // succeeds — a failed commit (the catch below) never advertises
       // unpersisted state, same rule as the GM-held path.
-      if (committed.graphPersisted && committedGraphParse !== null) {
-        if (committedGraphParse.success) {
+      if (committed.graphPersisted && persistedGraphParse !== null) {
+        if (persistedGraphParse.success) {
           analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(
             committed.persistedGraph,
           );
-          // F-DG (W1 overnight 2026-07-11, wire-proven): #414 attached the
-          // applied post-mutation graph as `draft_graph` on the edit_graph
-          // apply family (edit-graph-dispatch + GM held-consent), but the
-          // routed D1 typed-handler receipts composed HERE — including the
-          // pending-action chip replays (e.g. the £250k consented
-          // cap-extension resume), which synthesise an execute proposal and
-          // funnel into this same commit — shipped without it. The UI's only
-          // inline-graph ingestion path is the top-level `draft_graph` wire
-          // field (adaptDraftResponse/applyDraftResult), so those applied
-          // mutations were invisible on the canvas. Attach the SAME typed
-          // parse of the SAME committed graph the readiness/egress
-          // re-projections above use, in exactly the draft-dispatch shape
-          // (see applied-graph-emit.ts). Gating parity with #414: committed
-          // success only — the commit-failure catch below replaces the
-          // response wholesale. On a failed GraphV3 parse (the else branch)
-          // nothing is attached — fail open to the pre-fix wire.
-          //
-          // ROADMAP 1.192: attach the applied-graph wire field ONLY when a D1
-          // handler actually MUTATED the graph this turn (`mutated_graph`) —
-          // NOT for a pure adopt-on-first-touch commit (row A), which persists
-          // the client's OWN graph_state silently. An adopt echoes no
-          // `draft_graph`: the UI already holds that graph and syncs identity
-          // via the κ handshake (`graph_hash` / `computed_against_hash`), not
-          // an apply-to-canvas receipt — advertising a draft on a plain
-          // coaching turn would trigger a spurious canvas re-render. Row B
-          // (adopt-then-edit) HAS `mutated_graph`, so a genuine edit still
-          // advertises `draft_graph`. Pre-1.192 a committed graph ALWAYS came
-          // from `mutated_graph`, so this gate restores the exact prior
-          // draft_graph semantics.
-          if (handlerOutcome?.mutated_graph != null) {
-            response = {
-              ...response,
-              draft_graph: buildAppliedGraphWireField(committedGraphParse.data),
-            };
-          }
         } else {
           // Should be unreachable: D1 handlers GraphV3-validate the mutated
           // graph and the persistence merge only restores top-level fields.
@@ -11293,7 +11301,7 @@ export async function runTurnExecutor(
             scenario_id: context.session_id,
             handler_id: handlerIdForCommit ?? null,
             first_issue_path:
-              committedGraphParse.error.issues[0]?.path.join('.') ?? '',
+              persistedGraphParse.error.issues[0]?.path.join('.') ?? '',
           });
           log.warn(
             {

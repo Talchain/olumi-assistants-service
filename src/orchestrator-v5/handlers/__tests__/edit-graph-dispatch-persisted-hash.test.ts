@@ -115,13 +115,14 @@ function makeInterceptDuplicateEditResult(): EditGraphResult {
   };
 }
 
-function makeCommitResult() {
+function makeCommitResult(persistedGraph: unknown) {
   return {
     response: {},
     performed: true as const,
     persisted_row_id: 'row-hash',
     graphPersisted: true,
-    persistedAnalysisGraphHash: null,
+    persistedGraph,
+    persistedAnalysisGraphHash: hash(persistedGraph),
     pendingLifecycle: {
       priorCount: 0,
       consumedCount: 0,
@@ -171,8 +172,11 @@ afterEach(() => {
 describe('dispatchEditGraph — §3.2: the advertised hash describes the PERSISTED graph', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
-      makeCommitResult() as unknown as Awaited<ReturnType<typeof commitDirectAnswer>>,
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockImplementation(
+      async (_response, metadata) =>
+        makeCommitResult(metadata.graph) as unknown as Awaited<
+          ReturnType<typeof commitDirectAnswer>
+        >,
     );
   });
 
@@ -214,7 +218,7 @@ describe('dispatchEditGraph — §3.2: the advertised hash describes the PERSIST
       makeInterceptDuplicateEditResult(),
     );
 
-    await dispatchEditGraph({
+    const out = await dispatchEditGraph({
       payload: makePayload(),
       requestId: 'req-persisted-hash-2',
       request: STUB_REQUEST,
@@ -230,5 +234,24 @@ describe('dispatchEditGraph — §3.2: the advertised hash describes the PERSIST
     expect(metadata.graph_hash).not.toBe(
       hash(makeInterceptDuplicateEditResult().appliedGraph),
     );
+
+    // The success receipt is built from those exact projected/persisted bytes,
+    // not the pre-projection applied graph or a parsed subset.
+    const receipt = out.response.draft_graph as unknown as Record<string, unknown>;
+    const persisted = metadata.graph as Record<string, unknown>;
+    for (const key of [
+      'nodes',
+      'edges',
+      'options',
+      'goal_node_id',
+      'goal_constraints',
+    ] as const) {
+      expect(Object.hasOwn(persisted, key), `persisted ${key}`).toBe(true);
+      expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+      expect(receipt[key], key).toStrictEqual(persisted[key]);
+    }
+    expect(receipt.node_count).toBe((receipt.nodes as unknown[]).length);
+    expect(receipt.edge_count).toBe((receipt.edges as unknown[]).length);
+    expect(out.response.graph_hash).toBe(hash(metadata.graph));
   });
 });

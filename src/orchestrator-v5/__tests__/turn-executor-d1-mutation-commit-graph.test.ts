@@ -351,7 +351,7 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
     expect(completed?.data.commit_performed).toBe(false);
   });
 
-  it('genuinely-empty persisted graph: strict read returns null → the ingress-shaped mutated graph is the first valid write (no fail-closed, no invention)', async () => {
+  it('genuinely-empty persisted graph: strict read returns null → the ingress-shaped mutation is canonicalised as the first valid write', async () => {
     currentPersistedGraph = null;
 
     await runSetFactorValueTurn(
@@ -367,9 +367,10 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
       committed.nodes as Array<{ id: string; observed_state?: { value?: number } }>
     ).find((n) => n.id === 'fac_local_hire');
     expect(mutatedNode?.observed_state?.value).toBe(1);
-    // Nothing invented: the echo never carried options[], so the first
-    // write doesn't either.
-    expect(committed.options).toBeUndefined();
+    // Canonical producer barrier: option nodes are reconciled into the own-key
+    // top-level carrier before append.
+    expect(Array.isArray(committed.options)).toBe(true);
+    expect((committed.options as unknown[]).length).toBeGreaterThan(0);
   });
 
   it('no-op value update (set to the current value) still commits the FULL merged shape — no strip on no-op', async () => {

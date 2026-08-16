@@ -41,6 +41,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID     = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -83,12 +84,9 @@ function makeDraftResult(opts: Partial<DraftGraphResult> = {}): DraftGraphResult
 }
 
 function makeCommitResult(graphPersisted: boolean) {
-  return {
-    response: {},
-    performed: true as const,
-    persisted_row_id: 'row-1',
-    graphPersisted,
-  };
+  return canonicalCommitResultFixture(graphPersisted ? MINIMAL_GRAPH : null, {
+    persistedRowId: 'row-1',
+  });
 }
 
 const STUB_REQUEST = {} as FastifyRequest;

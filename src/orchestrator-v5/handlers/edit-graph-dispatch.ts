@@ -70,7 +70,7 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
+import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
 import {
   buildTurnContext,
   loadMostRecentPendingActions,
@@ -1271,7 +1271,7 @@ function buildBoundarySuggestedActions(
  * with `operations: PatchOperation[]` does not fit the narrow boundary
  * `graph_patch` operation enum. The applied graph instead reaches the UI
  * via the top-level `draft_graph` wire field (attached AFTER the commit
- * succeeds, at the dispatch success return — see applied-graph-emit.ts)
+ * succeeds, at the dispatch success return — see committed-graph-receipt.ts)
  * plus the recomputed `analysis_ready` readiness the finaliser stamps.
  * NOTE (F2-CEE, 1.16 run-3 diagnosis): the previous wording claimed the
  * graph reached the UI via "the persisted scenarios.graph row" — a
@@ -3934,6 +3934,23 @@ export async function dispatchEditGraph(
       // egress is graph-free too), keeping stored == wire.
       contentGraph: graphForCommit,
     });
+    const shouldEmitCommittedReceipt =
+      effectiveAppliedMutation && !goalTargetSwapWithheldGraph;
+    const committedReceiptForWire = shouldEmitCommittedReceipt
+      ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
+      : null;
+    if (
+      shouldEmitCommittedReceipt &&
+      (
+        !commitResult.graphPersisted ||
+        commitResult.persistedAnalysisGraphHash === null ||
+        committedReceiptForWire === null ||
+        commitResult.persistedAnalysisGraphHash !==
+          committedReceiptForWire.analysisGraphHash
+      )
+    ) {
+      throw new Error('edit_graph committed receipt mismatch');
+    }
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,
     // the commit seam itself may rewrite the response (turn-TTL lapse
     // notice, F-HELD 2b; steer-don't-bind chip suppression, F-HELD 3a).
@@ -3984,14 +4001,15 @@ export async function dispatchEditGraph(
       // returned `blocks: []` with NO graph payload, assuming the UI reads
       // `scenarios.graph` — it never does (its only inline-graph ingestion
       // path is the top-level `draft_graph` field). Attach the applied
-      // post-mutation graph via that EXISTING wire field, same shape as
-      // the draft dispatch emits (see applied-graph-emit.ts), gated by the
-      // SAME predicate as `graph` below so the wire never carries an
-      // unpersisted mutation. Post-commit only — this branch runs after
-      // `commitDirectAnswer` resolved; the commit-failure catch below
-      // returns the response without a graph payload.
-      response: appliedGraphForWire
-        ? { ...response, draft_graph: buildAppliedGraphWireField(appliedGraphForWire) }
+      // exact persisted graph via that EXISTING wire field. Post-commit only:
+      // the singular builder accepts CommitResult.persistedGraph and refuses
+      // any missing/invalid/hash-divergent receipt.
+      response: committedReceiptForWire
+        ? {
+            ...response,
+            graph_hash: committedReceiptForWire.analysisGraphHash,
+            draft_graph: committedReceiptForWire.draftGraph,
+          }
         : response,
       commitPerformed: true,
       analysisReady,

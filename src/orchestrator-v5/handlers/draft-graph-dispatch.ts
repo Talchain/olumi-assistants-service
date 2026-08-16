@@ -86,6 +86,7 @@ import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/p
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
+import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -323,41 +324,12 @@ export function draftResultToOlumiResponse(
   // frame stays visible and the operator can investigate the persistence log.
   const stageIndicator = graphPersisted ? 'analyse' : payload.stage;
 
-  // Hard constraints extracted from the brief. These ride on `graphOutput` as
-  // a SIBLING of nodes/edges (package.ts:406 emits them alongside `graph`;
-  // transformResponseToV3 lifts them to the V3 root; draft-graph.ts:300's
-  // `body.graph ?? body` then makes that root the graphOutput). Before
-  // @talchain/schemas 0.18.0 the rebuild below dropped them, because
-  // DraftGraphBlockSchema was `.strict()` over exactly four keys — so
-  // threading the field WITHOUT the contract bump would have failed
-  // validateEgress and replaced every draft response with the
-  // EGRESS_CONTRACT_VIOLATION envelope. 0.18.0 declares it optional.
-  //
-  // Emitted ONLY when a non-empty array is actually present. An absent or
-  // empty extraction omits the key entirely rather than emitting `[]`, so
-  // no-constraint responses stay byte-identical to the pre-0.18.0 wire and
-  // the contract's "consumers must treat absence and [] as equivalent" note
-  // is never exercised by us.
-  const rawGoalConstraints = (result.graphOutput as { goal_constraints?: unknown } | undefined)
-    ?.goal_constraints;
-  const goalConstraints =
-    Array.isArray(rawGoalConstraints) && rawGoalConstraints.length > 0
-      ? (rawGoalConstraints as unknown[])
-      : undefined;
-
-  // Include the FINAL graph inline so the UI can apply it directly without a
-  // Supabase re-fetch. Only present when graphOutput is available and
-  // persistence succeeded — on failure the client never sees this response.
-  const draftGraphField =
-    graphPersisted && result.graphOutput
-      ? {
-          nodes: (result.graphOutput.nodes ?? []) as unknown[],
-          edges: (result.graphOutput.edges ?? []) as unknown[],
-          node_count: finalNodeCount,
-          edge_count: finalEdgeCount,
-          ...(goalConstraints ? { goal_constraints: goalConstraints } : {}),
-        }
-      : undefined;
+  // The committed graph is NOT composed here. `result.graphOutput` is the
+  // pre-persistence candidate and can differ from the bytes the atomic append
+  // receives after projection. `dispatchDraftGraph` attaches the singular
+  // canonical receipt only after commit, from `CommitResult.persistedGraph`.
+  // Keeping this manual composer graph-free prevents a second/lossy receipt
+  // path from surviving beside the canonical one.
 
   // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
   // dispatcher surfaces `result.analysisReady` on `DispatchDraftGraphResult`
@@ -419,7 +391,6 @@ export function draftResultToOlumiResponse(
     suggested_actions: [...suggestedActions],
     insights: [],
     stage_indicator: stageIndicator,
-    ...(draftGraphField && { draft_graph: draftGraphField }),
     ...(timingsBlock !== undefined && { _timings: timingsBlock }),
   } as OlumiResponse;
 }
@@ -787,7 +758,40 @@ export async function dispatchDraftGraph(
     );
     const persistenceMs = Date.now() - commitStartedAt;
 
-    let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId, effectiveBrief);
+    // A draft that produced a graph succeeds on the wire only with an exact
+    // persisted receipt. A pipeline result with NO graph still records its
+    // honest non-graph turn and remains receipt-free.
+    const shouldEmitCommittedReceipt = draftResult.graphOutput != null;
+    const committedReceipt = shouldEmitCommittedReceipt
+      ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
+      : null;
+    if (
+      shouldEmitCommittedReceipt &&
+      (
+        !commitResult.graphPersisted ||
+        commitResult.persistedAnalysisGraphHash === null ||
+        committedReceipt === null ||
+        commitResult.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+      )
+    ) {
+      throw new Error('draft_graph committed receipt mismatch');
+    }
+
+    let response = {
+      ...draftResultToOlumiResponse(
+        draftResult,
+        payload,
+        commitResult.graphPersisted,
+        requestId,
+        effectiveBrief,
+      ),
+      ...(committedReceipt
+        ? {
+            graph_hash: committedReceipt.analysisGraphHash,
+            draft_graph: committedReceipt.draftGraph,
+          }
+        : {}),
+    };
     // HOLD-WIPE fix — the committed provisional response carried the lapse
     // notice (and the commit seam may have appended its own turn-TTL lapse
     // notice, F-HELD 2b). The REAL wire response is built above, so

@@ -137,7 +137,13 @@ describe('V5 Phase 1 brief persistence — composed round-trip', () => {
     expect(ctx.scenarioBriefText).toBe('Should I take the offer at company X?');
     // And the graph from the same round trip is also surfaced (proves
     // loadGraphAndBriefText returns both fields, not just brief_text).
-    expect(ctx.persistedGraph).toEqual({ nodes: [], edges: [] });
+    expect(ctx.persistedGraph).toEqual({
+      nodes: [],
+      edges: [],
+      options: [],
+      goal_node_id: null,
+      goal_constraints: [],
+    });
   });
 
   it('first-write-wins via commit chain: a no-brief commit followed by a brief-bearing commit lands the latter', async () => {

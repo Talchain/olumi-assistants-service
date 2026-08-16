@@ -50,6 +50,9 @@ function buildPersistedGraph() {
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 let persisted: unknown = buildPersistedGraph();
+const commitReceiptState = vi.hoisted(() => ({
+  mode: 'normal' as 'normal' | 'graph_null' | 'graph_not_persisted',
+}));
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
@@ -65,6 +68,27 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
 }));
+
+vi.mock('../../../src/orchestrator-v5/commit.js', async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import('../../../src/orchestrator-v5/commit.js')
+  >();
+  return {
+    ...original,
+    commitDirectAnswer: async (
+      ...args: Parameters<typeof original.commitDirectAnswer>
+    ) => {
+      const result = await original.commitDirectAnswer(...args);
+      if (commitReceiptState.mode === 'graph_null') {
+        return { ...result, persistedGraph: null };
+      }
+      if (commitReceiptState.mode === 'graph_not_persisted') {
+        return { ...result, graphPersisted: false };
+      }
+      return result;
+    },
+  };
+});
 
 // TurnExecutor's ORIENT step is the only thing that reaches the LLM. Asserting
 // this was never called proves the edit stayed on the deterministic path.
@@ -150,6 +174,7 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     appendMock.mockClear();
     llmChatMock.mockClear();
     persisted = buildPersistedGraph();
+    commitReceiptState.mode = 'normal';
   });
 
   // ── 1. the graph is actually written ─────────────────────────────────────
@@ -233,6 +258,26 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(typeof body.graph_hash).toBe('string');
     expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(committedGraph() as never));
 
+    // Factor edits used to be the one transactional writer with no graph
+    // receipt. The five hash carriers now mirror the exact append bytes; only
+    // counts are derived.
+    const graph = committedGraph()!;
+    const receipt = body.draft_graph as Record<string, unknown>;
+    expect(receipt).toBeDefined();
+    for (const key of [
+      'nodes',
+      'edges',
+      'options',
+      'goal_node_id',
+      'goal_constraints',
+    ] as const) {
+      expect(Object.hasOwn(graph, key), `append ${key}`).toBe(true);
+      expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+      expect(receipt[key], key).toStrictEqual(graph[key]);
+    }
+    expect(receipt.node_count).toBe((receipt.nodes as unknown[]).length);
+    expect(receipt.edge_count).toBe((receipt.edges as unknown[]).length);
+
     expect(body.analysis_ready).toBeDefined();
     // Honest absence: no freshness derivation is threaded on this path, so the
     // block must NOT assert a freshness verdict. Claiming `fresh` here would
@@ -242,6 +287,55 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     // The receipt is real prose, which is what makes the egress scrub matter.
     expect(body.assistant_text).toContain('Marketing budget');
     expect(body.assistant_text.length).toBeGreaterThan(0);
+  });
+
+  it('fails closed when the commit has no persisted graph receipt', async () => {
+    commitReceiptState.mode = 'graph_null';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        {
+          kind: 'factor_value_edit',
+          target_id: 'f-budget',
+          value: 0.5,
+          raw_value: 50000,
+          unit: '£',
+        },
+        '8',
+      ),
+    });
+
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body) as Record<string, unknown>;
+    expect(Object.hasOwn(body, 'draft_graph')).toBe(false);
+    expect(Object.hasOwn(body, 'graph_hash')).toBe(false);
+  });
+
+  it('fails closed when the commit does not attest that the graph persisted', async () => {
+    commitReceiptState.mode = 'graph_not_persisted';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        ...payloadFor(
+          {
+            kind: 'factor_value_edit',
+            target_id: 'f-budget',
+            value: 0.5,
+            raw_value: 50000,
+            unit: '£',
+          },
+          '0',
+        ),
+        turn_id: '33333333-3333-4333-8333-333333333333',
+      },
+    });
+
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body) as Record<string, unknown>;
+    expect(Object.hasOwn(body, 'draft_graph')).toBe(false);
+    expect(Object.hasOwn(body, 'graph_hash')).toBe(false);
   });
 
   it('derives the user-unit input from `value` and the STORED cap when raw_value is absent', async () => {

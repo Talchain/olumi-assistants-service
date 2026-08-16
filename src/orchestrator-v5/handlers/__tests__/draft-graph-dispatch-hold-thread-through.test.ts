@@ -37,6 +37,7 @@ vi.mock('../../build-turn-context.js', () => ({
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { loadMostRecentPendingActions } from '../../build-turn-context.js';
 import { GM_HELD_HANDLER_ID } from '../edit-graph-referee-gate.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -160,30 +161,12 @@ beforeEach(() => {
   setTestSink((name, data) => {
     events.push({ name, data });
   });
-  vi.mocked(commitDirectAnswer).mockImplementation(async (resp) => ({
-    response: resp,
-    performed: true as const,
-    persisted_row_id: 'row-1',
-    graphPersisted: true,
-    // §3.2: the analysis hash of the bytes actually written. This echo mock
-    // persists nothing, so `null` is the honest value.
-    persistedAnalysisGraphHash: null,
-    // Same reasoning, same honest value: the bytes actually written. Added when
-    // `CommitResult` gained `persistedGraph` so a caller can derive from the
-    // COMMITTED graph rather than its own pre-projection copy. An echo mock
-    // writes nothing, so there are no committed bytes to hand back.
-    persistedGraph: null,
-    pendingLifecycle: {
-      priorCount: 0,
-      consumedCount: 0,
-      supersededCount: 0,
-      expiredWallCount: 0,
-      expiredTurnsCount: 0,
-      hashInvalidatedCount: 0,
-      capDroppedCount: 0,
-      survivedCount: 0,
-    },
-  }));
+  vi.mocked(commitDirectAnswer).mockImplementation(async (resp, metadata) =>
+    canonicalCommitResultFixture(metadata.graph ?? null, {
+      response: resp,
+      persistedRowId: 'row-1',
+    }),
+  );
   vi.mocked(handleDraftGraph).mockResolvedValue(
     makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>,
   );

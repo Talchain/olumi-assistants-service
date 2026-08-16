@@ -47,6 +47,8 @@ import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { Stage } from '@talchain/schemas/boundary';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,12 +103,19 @@ function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH, analysisReady?: D
   };
 }
 
-function makeCommitResult(graphPersisted: boolean) {
+function makeCommitResult(graphPersisted: boolean, graph: unknown = MINIMAL_GRAPH) {
+  const persistedGraph = graphPersisted ? projectGraphForPersistence(graph) : null;
   return {
     response: {},
     performed: true as const,
     persisted_row_id: 'row-1',
     graphPersisted,
+    persistedGraph,
+    persistedAnalysisGraphHash: graphPersisted
+      ? computeAnalysisAffectingGraphHash(
+          persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+        )
+      : null,
   };
 }
 
@@ -122,7 +131,11 @@ describe('dispatchDraftGraph', () => {
   describe('when persistence succeeds (commitDirectAnswer returns graphPersisted=true)', () => {
     beforeEach(() => {
       (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-        .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+        .mockImplementation(async (_response, metadata) =>
+          makeCommitResult(true, metadata.graph) as Awaited<
+            ReturnType<typeof commitDirectAnswer>
+          >,
+        );
     });
 
     it('returns stage_indicator=analyse', async () => {
@@ -186,7 +199,7 @@ describe('dispatchDraftGraph', () => {
       expect(result.commitPerformed).toBe(true);
     });
 
-    it('includes draft_graph in response with non-empty nodes and edges', async () => {
+    it('includes the exact canonical committed graph receipt', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -200,6 +213,30 @@ describe('dispatchDraftGraph', () => {
       expect(Array.isArray(result.response.draft_graph?.nodes)).toBe(true);
       expect(Array.isArray(result.response.draft_graph?.edges)).toBe(true);
       expect((result.response.draft_graph?.nodes?.length ?? 0) > 0).toBe(true);
+      const persisted = projectGraphForPersistence(MINIMAL_GRAPH) as Record<
+        string,
+        unknown
+      >;
+      const receipt = result.response.draft_graph as unknown as Record<
+        string,
+        unknown
+      >;
+      for (const key of [
+        'nodes',
+        'edges',
+        'options',
+        'goal_node_id',
+        'goal_constraints',
+      ] as const) {
+        expect(Object.hasOwn(persisted, key), `persisted ${key}`).toBe(true);
+        expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+        expect(receipt[key], key).toStrictEqual(persisted[key]);
+      }
+      expect(receipt.node_count).toBe((receipt.nodes as unknown[]).length);
+      expect(receipt.edge_count).toBe((receipt.edges as unknown[]).length);
+      expect(result.response.graph_hash).toBe(
+        computeAnalysisAffectingGraphHash(persisted as never),
+      );
     });
 
     it('draft_graph node_count and edge_count match the FINAL graph arrays', async () => {

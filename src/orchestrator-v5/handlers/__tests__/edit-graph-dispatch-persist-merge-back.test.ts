@@ -68,6 +68,7 @@ import {
 } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import {
   buildTurnContext,
   loadMostRecentPendingActions,
@@ -177,12 +178,9 @@ function committedGraph(): Record<string, unknown> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue({
-    response: {} as never,
-    performed: true,
-    persisted_row_id: 'row-1',
-    graphPersisted: true,
-  } as never);
+  (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
+    canonicalCommitResultFixture(ECHO_GRAPH_STATE, { persistedRowId: 'row-1' }),
+  );
   vi.mocked(loadMostRecentPendingActions).mockResolvedValue([]);
 });
 
@@ -261,7 +259,7 @@ describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithfu
     );
 
     // The intended mutation is applied (appliedGraph wins on nodes/edges).
-    expect(graph.nodes).toBe(applied.nodes);
+    expect(graph.nodes).toStrictEqual(applied.nodes);
     expect(graph.edges).toBe(applied.edges);
     const mutated = (graph.nodes as Array<Record<string, unknown>>).find(
       (n) => n.id === 'fac_local_hire',
@@ -304,7 +302,7 @@ describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithfu
     // legitimate no-persisted-graph case — there is nothing to lose, and
     // the edit must still persist.
     expect(graph.goal_node_id).toBe(ECHO_GRAPH_STATE.goal_node_id);
-    expect(graph.nodes).toBe(applied.nodes);
+    expect(graph.nodes).toStrictEqual(applied.nodes);
   });
 
   it('DEGRADED persisted read (strict read throws) → FAIL CLOSED: dispatch rejects and NO graph is committed (Codex P0 — never overwrite canonical state with the lossy echo)', async () => {

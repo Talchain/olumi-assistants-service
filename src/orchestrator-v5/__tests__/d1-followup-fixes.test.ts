@@ -619,17 +619,25 @@ describe('P1-3 — post-handler freshness reflects mutated graph', () => {
     expect(postHandlerFreshness!.data.current_graph_hash).not.toBe(priorGraphHash);
   });
 
-  it('a no-op mutation (same value) keeps freshness fresh against the prior fact', async () => {
-    // When the handler mutates but the result is byte-identical to
-    // the ingress (same value, same unit, same cap), the post-merge
-    // hash matches `graph_hash_at_run` and freshness stays 'fresh'.
-    // Proves the fix isn't over-eager: cosmetic re-saves of the same
-    // value don't spuriously stale the analysis.
+  it('a same-value edit still marks freshness stale when persistence canonically migrates a missing goal pointer', async () => {
+    // This legacy fixture has exactly one goal but omits goal_node_id. The
+    // same-value handler edit is a value no-op, yet the canonical producer
+    // projection must persist the unambiguous goal id before append. That
+    // carrier is analysis-affecting, so the persisted hash legitimately moves
+    // and the old analysis must become stale. The next test is the negative
+    // control: with the carrier already present, the same edit stays fresh.
     const ingressGraph = buildD1Fixture();
     const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const { projectGraphForPersistence } = await import('../persisted-graph-projection.js');
     const priorGraphHash = computeAnalysisAffectingGraphHash(
       ingressGraph as unknown as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
     );
+    const projectedGraphHash = computeAnalysisAffectingGraphHash(
+      projectGraphForPersistence(ingressGraph) as unknown as Parameters<
+        typeof computeAnalysisAffectingGraphHash
+      >[0],
+    );
+    expect(projectedGraphHash).not.toBe(priorGraphHash);
 
     mockState.priorTurns = [
       {
@@ -699,8 +707,8 @@ describe('P1-3 — post-handler freshness reflects mutated graph', () => {
       .filter((e) => e.event === 'v5.analysis_freshness.derived')
       .find((e) => e.data.dispatch_path === 'turn_executor_post_handler');
     expect(postHandlerFreshness).toBeDefined();
-    expect(postHandlerFreshness!.data.freshness).toBe('fresh');
-    expect(postHandlerFreshness!.data.current_graph_hash).toBe(priorGraphHash);
+    expect(postHandlerFreshness!.data.freshness).toBe('stale');
+    expect(postHandlerFreshness!.data.current_graph_hash).toBe(projectedGraphHash);
   });
 
   it('no-op mutation preserves freshness when ingress carries top-level options + goal_node_id (GraphV3-stripping regression pin)', async () => {

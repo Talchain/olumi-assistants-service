@@ -78,6 +78,7 @@ vi.mock('../../graph-management/referee.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { buildTurnContext } from '../../build-turn-context.js';
 import {
   GM_HELD_REPLACES_PRIOR_NOTICE,
@@ -195,22 +196,9 @@ function makeAppliedEditResult(
 }
 
 function makeCommitResult() {
-  return {
-    response: {},
-    performed: true as const,
-    persisted_row_id: 'row-gm-mode',
-    graphPersisted: true,
-    pendingLifecycle: {
-      priorCount: 0,
-      consumedCount: 0,
-      supersededCount: 0,
-      expiredWallCount: 0,
-      expiredTurnsCount: 0,
-      hashInvalidatedCount: 0,
-      capDroppedCount: 0,
-      survivedCount: 0,
-    },
-  };
+  return canonicalCommitResultFixture(POST_EDIT_GRAPH, {
+    persistedRowId: 'row-gm-mode',
+  });
 }
 
 async function runDispatch(

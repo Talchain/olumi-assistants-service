@@ -733,10 +733,10 @@ export async function commitDirectAnswer(
   // ── THE PERSISTED FORM, RESOLVED FIRST (design §3.2 closure) ──────────────
   // `graphForStore` is the exact object that will be written to
   // `scenarios.graph`. It is resolved HERE, before anything derives a decision
-  // from a graph hash, because the three persist passes it applies
+  // from a graph hash, because the persistence passes it applies
   // (`repairGraphForPersistence`, `normaliseOptionInterventionContract`,
-  // `reconcileTopLevelOptionsFromNodes`) mutate `intercept`, node
-  // `interventions` and top-level `options[]` — all three inside
+  // canonical carrier authoring, `reconcileTopLevelOptionsFromNodes`) mutate
+  // `intercept`, node `interventions` and top-level hash carriers — all inside
   // `computeAnalysisAffectingGraphHash`'s projection.
   //
   // These passes used to run just above `store.append`, AFTER the pending
@@ -772,18 +772,18 @@ export async function commitDirectAnswer(
   // set produces exactly one matching pending action, written in the same
   // `append_turn_atomic` call.
   //
-  // When a caller pre-supplied an explicit pending_actions list, we use it as
-  // given — but those sites (proposal-continuation, edit-graph-dispatch,
-  // turn-executor ambiguous short-confirm) derive their chip-pendings via
-  // `derivePendingActionsFromFinalizedChips`, so the list is ALREADY consistent
-  // with the egress-finalised chip set. When no list was supplied we derive
-  // here, also from the finalised set. Either way, a chip dropped at egress
+  // When a caller pre-supplies an explicit pending_actions list, its graph pin
+  // was necessarily computed before the persistence projection. Re-pin this
+  // turn's NEW pendings to `effectiveGraphHash` when this commit writes a graph;
+  // prior-turn pendings are carried separately below and retain their original
+  // preconditions for the divergence filter. When no list was supplied we
+  // derive here directly against the effective hash. Either way, a chip dropped at egress
   // (`sanitiseOlumiResponseForEgress` → `finalizeChips`: unsafe / blank /
   // duplicate / over-budget) can never leave an orphaned resumable pending that
   // a later "yes" short-confirm could resume — the "persisted pending ⟹
   // rendered chip" invariant is structural at every derivation site.
   const nowMsForPendings = Date.now();
-  const initialChipDerivedPending =
+  const suppliedOrDerivedPending =
     metadata.pending_actions === undefined
       ? derivePendingActionsFromFinalizedChips(
           (response.suggested_actions ?? []) as readonly SuggestedAction[],
@@ -795,6 +795,20 @@ export async function commitDirectAnswer(
           },
         )
       : metadata.pending_actions;
+  const initialChipDerivedPending =
+    metadata.pending_actions !== undefined && effectiveGraphHash !== undefined
+      ? suppliedOrDerivedPending.map((pending) =>
+          pending.preconditions.graph_hash === effectiveGraphHash
+            ? pending
+            : {
+                ...pending,
+                preconditions: {
+                  ...pending.preconditions,
+                  graph_hash: effectiveGraphHash,
+                },
+              },
+        )
+      : suppliedOrDerivedPending;
 
   // F-HELD fix 3a (steer-don't-bind): while a confirmation-expecting pending
   // remains live AFTER this commit, do not mint competing run_analysis

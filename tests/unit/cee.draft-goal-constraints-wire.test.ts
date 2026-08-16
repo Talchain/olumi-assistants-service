@@ -28,6 +28,8 @@ import { describe, it, expect } from "vitest";
 import { runCompoundGoals } from "../../src/cee/unified-pipeline/stages/repair/compound-goals.js";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
 import { draftResultToOlumiResponse } from "../../src/orchestrator-v5/handlers/draft-graph-dispatch.js";
+import { buildCanonicalCommittedGraphReceipt } from "../../src/orchestrator-v5/compose/committed-graph-receipt.js";
+import { projectGraphForPersistence } from "../../src/orchestrator-v5/persisted-graph-projection.js";
 
 /**
  * Mirrors the live staging scenario: a brief carrying a hard budget cap, and
@@ -45,9 +47,8 @@ const LIVE_BRIEF =
   "anything over is unaffordable, full stop.";
 
 /**
- * Same decision, no hard constraint. Drives the omission case: the extractor
- * finds nothing, so the projection must omit the key entirely rather than
- * emit an empty array.
+ * Same decision, no hard constraint. Drives canonical explicit absence: the
+ * committed graph and receipt must own `goal_constraints: []`.
  */
 const NO_CONSTRAINT_BRIEF =
   "Should we launch the new product this year? " +
@@ -162,16 +163,25 @@ function composeWire(brief: string = LIVE_BRIEF) {
     coachingWideningLogObject: null,
   };
 
-  // The REAL composer that builds the `/orchestrate/v2/turn` response body.
-  const response = draftResultToOlumiResponse(result, PAYLOAD, true, "req_test", PAYLOAD.message);
+  // The manual composer is intentionally graph-free. Mirror the production
+  // dispatcher's post-commit step: persistence projection authors canonical
+  // carrier absence before append; the singular receipt builder validates and
+  // transports those exact persisted fields.
+  const persistedGraph = projectGraphForPersistence(graphOutput);
+  const committed = buildCanonicalCommittedGraphReceipt(persistedGraph);
+  const response = {
+    ...draftResultToOlumiResponse(result, PAYLOAD, true, "req_test", PAYLOAD.message),
+    graph_hash: committed.analysisGraphHash,
+    draft_graph: committed.draftGraph,
+  };
 
   // Serialize for real: `undefined` vanishes silently through JSON emission,
   // so an object-level assertion can pass on a value the client never sees.
   return JSON.stringify(response);
 }
 
-describe("draft goal_constraints — THE PROJECTION (draft-graph-dispatch.ts:261-269)", () => {
-  it("draft_graph carries EXACTLY the four base keys PLUS goal_constraints", () => {
+describe("draft goal_constraints — canonical post-commit receipt", () => {
+  it("draft_graph carries exactly five hash carriers plus two derived counts", () => {
     const reparsed = JSON.parse(composeWire());
 
     // The graph itself rode onto the wire — so the assertion below is a
@@ -179,15 +189,15 @@ describe("draft goal_constraints — THE PROJECTION (draft-graph-dispatch.ts:261
     expect(reparsed.draft_graph).toBeDefined();
     expect(reparsed.draft_graph.nodes.length).toBeGreaterThan(0);
 
-    // Exact key-set, so ANY future change to the projection turns this red
-    // and forces the author here. Was the four base keys before the fix;
-    // goal_constraints is the fifth and the only addition.
+    // Exact key-set: five canonical hash carriers plus count metadata.
     expect(Object.keys(reparsed.draft_graph).sort()).toEqual([
       "edge_count",
       "edges",
       "goal_constraints",
+      "goal_node_id",
       "node_count",
       "nodes",
+      "options",
     ]);
   });
 
@@ -217,12 +227,7 @@ describe("draft goal_constraints — THE PROJECTION (draft-graph-dispatch.ts:261
     expect(nodeIds).toContain(c.node_id);
   });
 
-  it("OMISSION: a brief with no constraint omits the key ENTIRELY (never `[]`)", () => {
-    // Byte-identity guarantee for the flag-off / no-constraint case: the
-    // pre-0.18.0 wire had four keys and no goal_constraints, and a brief that
-    // carries no hard constraint must still produce exactly that. Emitting an
-    // empty array instead would change every no-constraint response on the
-    // wire for no benefit.
+  it("CANONICAL CLEAR: a brief with no constraint emits an own empty array", () => {
     const wire = composeWire(NO_CONSTRAINT_BRIEF);
     const reparsed = JSON.parse(wire);
 
@@ -233,10 +238,14 @@ describe("draft goal_constraints — THE PROJECTION (draft-graph-dispatch.ts:261
     expect(Object.keys(reparsed.draft_graph).sort()).toEqual([
       "edge_count",
       "edges",
+      "goal_constraints",
+      "goal_node_id",
       "node_count",
       "nodes",
+      "options",
     ]);
-    expect(wire).not.toContain('"goal_constraints"');
+    expect(reparsed.draft_graph.goal_constraints).toEqual([]);
+    expect(wire).toContain('"goal_constraints":[]');
   });
 });
 
@@ -324,7 +333,7 @@ describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)"
     const { validateEgress } = await import("../../src/validators/b1.js");
 
     const { graphOutput } = buildLiveGraphOutput();
-    const response = draftResultToOlumiResponse(
+    const composed = draftResultToOlumiResponse(
       {
         graphOutput,
         assistantText: null,
@@ -339,6 +348,13 @@ describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)"
       "req_egress",
       PAYLOAD.message,
     );
+    const persistedGraph = projectGraphForPersistence(graphOutput);
+    const committed = buildCanonicalCommittedGraphReceipt(persistedGraph);
+    const response = {
+      ...composed,
+      graph_hash: committed.analysisGraphHash,
+      draft_graph: committed.draftGraph,
+    };
 
     const egress: any = validateEgress(response, "req_egress");
 

@@ -56,6 +56,7 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
@@ -102,7 +103,9 @@ let events: Array<{ event: string; data: Record<string, unknown> }> = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  commit.mockResolvedValue({ response: {}, performed: true, persisted_row_id: 'r', graphPersisted: true } as Awaited<ReturnType<typeof commitDirectAnswer>>);
+  commit.mockResolvedValue(
+    canonicalCommitResultFixture(POST_EDIT_GRAPH, { persistedRowId: 'r' }),
+  );
   buildCanonical.mockReturnValue(
     undefined as unknown as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>,
   );

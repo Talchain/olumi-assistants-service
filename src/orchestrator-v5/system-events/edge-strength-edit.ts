@@ -20,7 +20,11 @@ import { log } from '../../utils/telemetry.js';
 import { composeToolCallResponse } from '../compose.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import {
+  canonicaliseCommittedGraphHashCarriers,
+  projectGraphForPersistence,
+} from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import type { GraphLookup } from '../routing/validator.js';
@@ -222,6 +226,37 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
   }
 
   return isDeepStrictEqual(normalisedAfter, args.before);
+}
+
+/**
+ * Confirmation may author omitted empty carrier state on a legacy graph, but
+ * it may never use that migration to change the scientific model. Compare the
+ * raw and canonicalised-before hashes first, then apply the byte-exact
+ * provenance allowlist to the canonical form. Missing `options`/constraints
+ * and a no-goal pointer are hash-equivalent; deriving a sole goal node id is
+ * deliberately not and therefore fails closed.
+ */
+export function isCanonicalCarrierSafeProvenanceOnlyEdgeConfirmation(args: {
+  readonly before: unknown;
+  readonly after: unknown;
+  readonly from: string;
+  readonly to: string;
+}): boolean {
+  const beforeParse = GraphV3.safeParse(args.before);
+  if (!beforeParse.success) return false;
+
+  const canonicalBefore = canonicaliseCommittedGraphHashCarriers(args.before);
+  const rawHash = computeAnalysisAffectingGraphHash(args.before as GraphV3T);
+  const canonicalHash = computeAnalysisAffectingGraphHash(
+    canonicalBefore as GraphV3T,
+  );
+  return (
+    rawHash === canonicalHash &&
+    isProvenanceOnlyEdgeConfirmation({
+      ...args,
+      before: canonicalBefore,
+    })
+  );
 }
 
 /**
@@ -561,11 +596,14 @@ export async function applyEdgeStrengthEdit(
 
   // `confirm_current` is permission to stamp exactly two provenance fields,
   // not permission to repair, normalise or cosmetically rewrite anything else.
-  // Analysis-hash equality alone is insufficient: it ignores labels and other
-  // additive persisted fields whose loss would still corrupt the shared model.
+  // The canonical receipt producer barrier is the one exception: compare
+  // against the determinate own-key carrier projection that every write now
+  // authors before append. This admits only hash-equivalent explicit empty/null
+  // omissions (or an already-present goal id). Deriving a missing goal id,
+  // option reconciliation, or any other changed byte still refuses.
   if (
     event.intent === 'confirm_current' &&
-    !isProvenanceOnlyEdgeConfirmation({
+    !isCanonicalCarrierSafeProvenanceOnlyEdgeConfirmation({
       before: persistedGraph,
       after: projectedGraph,
       from: event.from,

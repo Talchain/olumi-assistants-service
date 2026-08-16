@@ -49,6 +49,7 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -142,13 +143,25 @@ function noopResult(): EditGraphResult {
   };
 }
 
-function commitOk() {
+function commitOk(persistedGraph: unknown) {
+  const graphPersisted = persistedGraph !== undefined && persistedGraph !== null;
   return {
     response: {},
     performed: true as const,
     persisted_row_id: 'row-1',
-    graphPersisted: true,
+    graphPersisted,
+    persistedGraph: graphPersisted ? persistedGraph : null,
+    persistedAnalysisGraphHash: graphPersisted
+      ? computeAnalysisAffectingGraphHash(persistedGraph as GraphStateIngress)
+      : null,
   };
+}
+
+function mockSuccessfulCommit() {
+  (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockImplementation(
+    async (_response, metadata) =>
+      commitOk(metadata.graph) as Awaited<ReturnType<typeof commitDirectAnswer>>,
+  );
 }
 
 const STUB_REQUEST = {} as FastifyRequest;
@@ -156,6 +169,9 @@ const STUB_REQUEST = {} as FastifyRequest;
 type DraftGraphField = {
   nodes: unknown[];
   edges: unknown[];
+  options: unknown[];
+  goal_node_id: string | null;
+  goal_constraints: unknown[];
   node_count: number;
   edge_count: number;
 };
@@ -190,9 +206,7 @@ describe('edit-graph-dispatch — applied edits carry the applied graph on the w
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       appliedResult(),
     );
-    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
-      commitOk() as Awaited<ReturnType<typeof commitDirectAnswer>>,
-    );
+    mockSuccessfulCommit();
 
     const out = await dispatchEditGraph({
       payload: payload(),
@@ -214,6 +228,23 @@ describe('edit-graph-dispatch — applied edits carry the applied graph on the w
     expect(dg!.edges).toHaveLength(dg!.edge_count);
     // Attached only AFTER the commit resolved.
     expect(commitDirectAnswer).toHaveBeenCalledTimes(1);
+    const persisted = (
+      commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>
+    ).mock.calls[0]![1].graph as Record<string, unknown>;
+    for (const key of [
+      'nodes',
+      'edges',
+      'options',
+      'goal_node_id',
+      'goal_constraints',
+    ] as const) {
+      expect(Object.hasOwn(persisted, key), `persisted ${key}`).toBe(true);
+      expect(Object.hasOwn(dg!, key), `receipt ${key}`).toBe(true);
+      expect(dg![key], key).toStrictEqual(persisted[key]);
+    }
+    expect(out.response.graph_hash).toBe(
+      computeAnalysisAffectingGraphHash(persisted as GraphStateIngress),
+    );
     // Lockstep with the returned egress graph (same predicate).
     expect(out.graph).not.toBeNull();
   });
@@ -222,9 +253,7 @@ describe('edit-graph-dispatch — applied edits carry the applied graph on the w
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       rejectedResult(),
     );
-    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
-      commitOk() as Awaited<ReturnType<typeof commitDirectAnswer>>,
-    );
+    mockSuccessfulCommit();
 
     const out = await dispatchEditGraph({
       payload: payload(),
@@ -242,9 +271,7 @@ describe('edit-graph-dispatch — applied edits carry the applied graph on the w
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
       noopResult(),
     );
-    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
-      commitOk() as Awaited<ReturnType<typeof commitDirectAnswer>>,
-    );
+    mockSuccessfulCommit();
 
     const out = await dispatchEditGraph({
       payload: payload(),

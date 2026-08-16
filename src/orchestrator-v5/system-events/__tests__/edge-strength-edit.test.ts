@@ -8,6 +8,7 @@ import {
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import {
   applyEdgeStrengthEdit,
@@ -248,7 +249,12 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
   );
 
   it('confirm_current is provenance-only and leaves the analysis hash unchanged', async () => {
-    const graph = buildD1Fixture();
+    // A provenance-only confirmation starts from bytes that have already
+    // crossed the canonical persistence chokepoint. A legacy partial fixture
+    // would also require option/carrier reconciliation, which is correctly
+    // refused by the negative control below rather than smuggled into this
+    // confirmation.
+    const graph = projectGraphForPersistence(buildD1Fixture()) as GraphV3T;
     const edge = edgeIn(graph);
     edge.strength.mean = 0;
     edge.effect_direction = 'negative';
@@ -279,14 +285,37 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
     expect(result.response.assistant_text).toContain('as your judgement');
     expect(result.response.assistant_text).not.toMatch(/positive|negative|0\./i);
     expect(result.response.assistant_text).not.toContain('Adjusted');
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(beforeAnalysisHash);
-    expect(computeGraphIdentityHash(result.graph)?.value).not.toBe(beforeIdentityHash);
+    expect(
+      computeAnalysisAffectingGraphHash(result.mutatedGraph as GraphV3T),
+    ).toBe(beforeAnalysisHash);
+    expect(
+      computeGraphIdentityHash(result.mutatedGraph as GraphV3T)?.value,
+    ).not.toBe(beforeIdentityHash);
     expect(isProvenanceOnlyEdgeConfirmation({
       before: graph,
       after: result.mutatedGraph,
       from: 'f-budget',
       to: 'g-revenue',
     })).toBe(true);
+  });
+
+  it('refuses legacy one-goal confirmation when carrier migration would derive a goal id', async () => {
+    const graph = buildD1Fixture();
+    expect(Object.hasOwn(graph, 'goal_node_id')).toBe(false);
+    const before = structuredClone(graph);
+    const beforeHash = computeAnalysisAffectingGraphHash(graph);
+
+    const result = await apply(
+      graph,
+      eventFor({ intent: 'confirm_current', magnitude: 0.4 }),
+    );
+
+    expect(result).toMatchObject({
+      kind: 'refused',
+      reason: 'confirmation_would_change_non_provenance_state',
+    });
+    expect(graph).toStrictEqual(before);
+    expect(computeAnalysisAffectingGraphHash(graph)).toBe(beforeHash);
   });
 
   it('refuses confirm_current when canonical persistence would change analysis inputs', async () => {
@@ -297,6 +326,8 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
       // repair it, moving the analysis hash. Confirmation must not use its
       // provenance permission to smuggle that analysis-affecting repair in.
       options: [],
+      goal_node_id: 'g-revenue',
+      goal_constraints: [],
     };
     const before = structuredClone(graph);
     const result = await apply(

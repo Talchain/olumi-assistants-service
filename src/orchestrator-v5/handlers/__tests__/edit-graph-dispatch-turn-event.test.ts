@@ -49,6 +49,7 @@ vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { getSystemPromptMeta } from '../../../adapters/llm/prompt-loader.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -128,7 +129,10 @@ function makeRejectedResult(failureCode: string): EditGraphResult {
 }
 
 function makeCommit(graphPersisted: boolean) {
-  return { response: {}, performed: true as const, persisted_row_id: 'row-1', graphPersisted };
+  return canonicalCommitResultFixture(
+    graphPersisted ? POST_EDIT_GRAPH : null,
+    { persistedRowId: 'row-1' },
+  );
 }
 
 const hg = handleEditGraph as MockedFunction<typeof handleEditGraph>;

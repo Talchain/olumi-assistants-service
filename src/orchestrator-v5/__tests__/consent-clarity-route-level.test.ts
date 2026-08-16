@@ -25,6 +25,7 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 import type { PendingAction } from '../session/pending-action.js';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { findForbiddenPhraseHit } from '../compose/forbidden-user-facing-phrases.js';
 import { _resetConfigCache } from '../../config/index.js';
@@ -65,7 +66,11 @@ const STRICT_GRAPH = {
     );
   }
 }
-const MINIMAL_GRAPH = STRICT_GRAPH as unknown as Parameters<
+// These tests exercise pending-consent lifecycle, not legacy graph migration.
+// Start from the exact canonical persisted form so a surviving hold is judged
+// against the same hash the next append will retain; a legacy partial graph's
+// first canonical write may legitimately invalidate a pre-migration pin.
+const MINIMAL_GRAPH = projectGraphForPersistence(STRICT_GRAPH) as unknown as Parameters<
   typeof computeAnalysisAffectingGraphHash
 >[0];
 const GRAPH_HASH = computeAnalysisAffectingGraphHash(MINIMAL_GRAPH) ?? 'h_unset';
@@ -216,6 +221,30 @@ function lastAppend(): Record<string, unknown> {
   return appendCalls[appendCalls.length - 1]!;
 }
 
+function expectCanonicalReceipt(
+  response: { draft_graph?: unknown; graph_hash?: unknown },
+  write: Record<string, unknown>,
+) {
+  const graph = write.graph as Record<string, unknown>;
+  const receipt = response.draft_graph as Record<string, unknown>;
+  for (const key of [
+    'nodes',
+    'edges',
+    'options',
+    'goal_node_id',
+    'goal_constraints',
+  ] as const) {
+    expect(Object.hasOwn(graph, key), `append ${key}`).toBe(true);
+    expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+    expect(receipt[key], key).toStrictEqual(graph[key]);
+  }
+  expect(receipt.node_count).toBe((receipt.nodes as unknown[]).length);
+  expect(receipt.edge_count).toBe((receipt.edges as unknown[]).length);
+  expect(response.graph_hash).toBe(
+    computeAnalysisAffectingGraphHash(graph as never),
+  );
+}
+
 beforeEach(() => {
   appendCalls.length = 0;
   pendingActionsForRead = [];
@@ -353,6 +382,7 @@ describe('consent-clarity — "all of them"', () => {
     expect(assistant).toContain('Confirmed:');
     expect(result.response.assistant_text).toBe(assistant);
     expect(result.response.draft_graph).toBeDefined();
+    expectCanonicalReceipt(result.response, write);
     expect(assistant).toContain("'Marketing'");
     expect(assistant).toContain("'Goal'");
     expect(assistant).not.toBe(

@@ -25,12 +25,12 @@
  * so applied typed/chip-replay mutations were invisible on the canvas — the
  * exact class the £250k chip journey uses.
  *
- * Fix under test: the STEP 7 post-commit block attaches
- * `draft_graph: buildAppliedGraphWireField(committedGraphParse.data)` after
- * (and only after) a successful graph-bearing commit — the SAME typed parse
- * of the SAME committed graph that F3 already re-projects readiness and the
- * egress label graph from, and the SAME gating discipline as #414: committed
- * success only, never on failed / swap / non-mutating turns.
+ * Fix under test: the STEP 7 post-commit block attaches the singular canonical
+ * receipt built from `CommitResult.persistedGraph` after (and only after) a
+ * successful graph-bearing commit. Its five hash carriers are the exact
+ * persisted values; counts alone are derived. The same gating discipline as
+ * #414 remains: committed success only, never on failed / swap / non-mutating
+ * turns.
  *
  * Negative pins: a failed commit attaches nothing (the catch replaces the
  * response wholesale); a goal-target swap turn withholds the graph write and
@@ -285,6 +285,41 @@ const MIGRATION_GRAPH = {
 
 const PRE_MUTATION_HASH = computeAnalysisAffectingGraphHash(MIGRATION_GRAPH as never);
 
+function expectCanonicalCommittedReceipt(
+  draftGraph: NonNullable<ReturnType<typeof receiptOf>>,
+  committed: unknown,
+) {
+  const persisted = committed as Record<string, unknown>;
+  const receipt = draftGraph as unknown as Record<string, unknown>;
+  for (const key of [
+    'nodes',
+    'edges',
+    'options',
+    'goal_node_id',
+    'goal_constraints',
+  ] as const) {
+    expect(Object.hasOwn(persisted, key), `persisted ${key}`).toBe(true);
+    expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+    expect(receipt[key], key).toStrictEqual(persisted[key]);
+  }
+  expect(draftGraph.node_count).toBe(draftGraph.nodes.length);
+  expect(draftGraph.edge_count).toBe(draftGraph.edges.length);
+  expect(computeAnalysisAffectingGraphHash(draftGraph as never)).toBe(
+    computeAnalysisAffectingGraphHash(committed as never),
+  );
+}
+
+function receiptOf(response: { draft_graph?: unknown }) {
+  return response.draft_graph as
+    | {
+        nodes: unknown[];
+        edges: unknown[];
+        node_count: number;
+        edge_count: number;
+      }
+    | undefined;
+}
+
 /** The consented cap-extension pending (as persisted by turn 1 of the loop). */
 function rescalePending(): PendingAction {
   return {
@@ -343,15 +378,14 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     // `draft_graph` field (the UI's only inline-graph ingestion path), in
     // exactly the draft-dispatch shape: nodes, edges, and counts derived
     // from the SAME graph.
-    const dg = result.response.draft_graph;
+    const dg = receiptOf(result.response);
     expect(dg).toBeDefined();
     const wireBudget = (dg!.nodes as Array<Record<string, unknown>>).find(
       (n) => n.id === 'f-budget',
     );
     expect(wireBudget).toBeDefined();
     expect((wireBudget!.observed_state as Record<string, unknown>).raw_value).toBe(45000);
-    expect(dg!.node_count).toBe(dg!.nodes.length);
-    expect(dg!.edge_count).toBe(dg!.edges.length);
+    expectCanonicalCommittedReceipt(dg!, committed);
     expect(dg!.node_count).toBe(committed.nodes.length);
     expect(dg!.edge_count).toBe(committed.edges.length);
 
@@ -360,9 +394,7 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     // typed view the egress label graph re-projection uses.
     const committedHash = computeAnalysisAffectingGraphHash(committed as never);
     expect(committedHash).not.toBeNull();
-    expect(
-      computeAnalysisAffectingGraphHash({ nodes: dg!.nodes, edges: dg!.edges } as never),
-    ).toBe(committedHash);
+    expect(result.response.graph_hash).toBe(committedHash);
     expect(dg!.nodes).toEqual((result.effectiveGraph as GraphV3T).nodes);
     expect(dg!.edges).toEqual((result.effectiveGraph as GraphV3T).edges);
   });
@@ -386,7 +418,7 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     // The wire carries the applied graph: cap extended to 320000, factor at
     // £250,000, and the options' interventions renormalised against the new
     // cap — the exact values the canvas failed to show live.
-    const dg = result.response.draft_graph;
+    const dg = receiptOf(result.response);
     expect(dg).toBeDefined();
     const nodes = dg!.nodes as Array<{
       id: string;
@@ -400,14 +432,11 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
       200000 / 320000,
       10,
     );
-    expect(dg!.node_count).toBe(dg!.nodes.length);
-    expect(dg!.edge_count).toBe(dg!.edges.length);
+    expectCanonicalCommittedReceipt(dg!, committed);
 
     // Hash parity with the committed graph, moved off the pre-mutation anchor.
     const committedHash = computeAnalysisAffectingGraphHash(committed as never);
-    expect(
-      computeAnalysisAffectingGraphHash({ nodes: dg!.nodes, edges: dg!.edges } as never),
-    ).toBe(committedHash);
+    expect(result.response.graph_hash).toBe(committedHash);
     expect(committedHash).not.toBe(PRE_MUTATION_HASH);
   });
 
@@ -508,7 +537,7 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     expect((wireBudget!.observed_state as Record<string, unknown>).raw_value).toBe(45000);
   });
 
-  it('T2 negative: a graph with no goal_constraints OMITS the key entirely (byte-parity with the no-constraint wire)', async () => {
+  it('T2 canonical absence: a graph with no constraints owns goal_constraints: []', async () => {
     const result = await runTurnExecutor(
       payload('Set the budget to £45,000'),
       'req-applied-graph-no-goal-constraints',
@@ -518,11 +547,10 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
       },
     );
     expect(result.telemetry.commit_performed).toBe(true);
-    const dg = result.response.draft_graph;
+    const dg = receiptOf(result.response);
     expect(dg).toBeDefined();
-    // Absent, not `[]` — matching draft-graph-dispatch.ts's emit rule so
-    // no-constraint responses stay byte-identical to the pre-fix wire and the
-    // contract's "absence and [] are equivalent" note is never exercised.
-    expect('goal_constraints' in (dg as object)).toBe(false);
+    const receipt = dg as unknown as Record<string, unknown>;
+    expect(Object.hasOwn(receipt, 'goal_constraints')).toBe(true);
+    expect(receipt.goal_constraints).toStrictEqual([]);
   });
 });

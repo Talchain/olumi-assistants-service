@@ -60,6 +60,7 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { extractEditLlmCallTelemetry } from '../../diagnostics/v5-diagnostic-trace.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -160,12 +161,10 @@ function makeRejectedEditResult(diagnostics?: EditGraphTraceDiagnostics): EditGr
 }
 
 function makeCommitResult(graphPersisted: boolean) {
-  return {
-    response: {},
-    performed: true as const,
-    persisted_row_id: 'row-edit-1',
-    graphPersisted,
-  };
+  return canonicalCommitResultFixture(
+    graphPersisted ? POST_EDIT_GRAPH : null,
+    { persistedRowId: 'row-edit-1' },
+  );
 }
 
 // ── extraction-unit tests ──────────────────────────────────────────────────────

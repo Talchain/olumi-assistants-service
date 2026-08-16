@@ -268,6 +268,30 @@ function committedEdge() {
   );
 }
 
+function expectCanonicalReceiptMirrorsAppend(
+  body: Record<string, unknown>,
+  append: AppendArg,
+) {
+  const persistedGraph = append.graph!;
+  const receipt = body.draft_graph as Record<string, unknown>;
+  for (const key of [
+    'nodes',
+    'edges',
+    'options',
+    'goal_node_id',
+    'goal_constraints',
+  ] as const) {
+    expect(Object.hasOwn(persistedGraph, key), `append ${key}`).toBe(true);
+    expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+    expect(receipt[key], key).toStrictEqual(persistedGraph[key]);
+  }
+  expect(receipt.node_count).toBe((receipt.nodes as unknown[]).length);
+  expect(receipt.edge_count).toBe((receipt.edges as unknown[]).length);
+  expect(body.graph_hash).toBe(
+    computeAnalysisAffectingGraphHash(persistedGraph as never),
+  );
+}
+
 describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
   let app: FastifyInstance;
 
@@ -376,6 +400,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     });
     expect(draftGraph.node_count).toBe(2);
     expect(draftGraph.edge_count).toBe(1);
+    expectCanonicalReceiptMirrorsAppend(bodyRecord, append);
     expect(bodyRecord.assistant_text).toContain('Demand');
     expect(bodyRecord.assistant_text).toContain('Growth');
     expect(bodyRecord.graph_hash).toBe(
@@ -509,6 +534,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       provenance: { source: 'user_specified' },
       provenance_display: 'user_set',
     });
+    expectCanonicalReceiptMirrorsAppend(body, append);
     expect(body.assistant_text).toContain('Confirmed the current strength');
     expect(body.assistant_text).toContain('as your judgement');
     expect(body.assistant_text).not.toContain('Adjusted');

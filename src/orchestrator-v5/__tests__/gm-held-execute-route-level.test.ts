@@ -217,6 +217,30 @@ function lastAppend(): Record<string, unknown> {
   return appendCalls[appendCalls.length - 1]!;
 }
 
+function expectCanonicalReceipt(
+  response: { draft_graph?: unknown; graph_hash?: unknown },
+  write: Record<string, unknown>,
+) {
+  const graph = write.graph as Record<string, unknown>;
+  const receipt = response.draft_graph as Record<string, unknown>;
+  for (const key of [
+    'nodes',
+    'edges',
+    'options',
+    'goal_node_id',
+    'goal_constraints',
+  ] as const) {
+    expect(Object.hasOwn(graph, key), `append ${key}`).toBe(true);
+    expect(Object.hasOwn(receipt, key), `receipt ${key}`).toBe(true);
+    expect(receipt[key], key).toStrictEqual(graph[key]);
+  }
+  expect(receipt.node_count).toBe((receipt.nodes as unknown[]).length);
+  expect(receipt.edge_count).toBe((receipt.edges as unknown[]).length);
+  expect(response.graph_hash).toBe(
+    computeAnalysisAffectingGraphHash(graph as never),
+  );
+}
+
 beforeEach(() => {
   appendCalls.length = 0;
   pendingActionsForRead = [gmHeldPending()];
@@ -315,6 +339,7 @@ describe('GM held-execute — live mode applies the confirmed hold (RED on base)
     expect(factor!.description).toBe('Quarterly ad budget');
     expect(dg!.node_count).toBe(dg!.nodes.length);
     expect(dg!.edge_count).toBe(dg!.edges.length);
+    expectCanonicalReceipt(result.response, lastAppend());
   });
 
   it('F2-CEE negative: a declined resume (hash divergence) ships NO draft_graph — nothing was applied', async () => {

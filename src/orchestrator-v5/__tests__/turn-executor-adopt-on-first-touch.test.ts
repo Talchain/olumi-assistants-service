@@ -31,6 +31,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -236,7 +237,7 @@ describe('row A — first-touch adopt (no server model + incoming + no mutation)
     expect(ids).toEqual([...OPTION_NODE_IDS].sort());
   });
 
-  it('honest no-op: an incoming template with NO top-level options[] persists faithfully but options[] is NOT invented (option nodes stay in nodes[]; options derived downstream at run_analysis)', async () => {
+  it('canonicalises an incoming template with no top-level options[] and reconciles its option nodes before append', async () => {
     currentPersistedGraph = null;
     expect(ECHO_GRAPH_STATE.options).toBeUndefined();
 
@@ -253,10 +254,11 @@ describe('row A — first-touch adopt (no server model + incoming + no mutation)
       options?: unknown;
       nodes: Array<{ id: string; kind?: string }>;
     };
-    // options[] NOT invented (update-if-present no-op)…
-    expect(Array.isArray(committed.options)).toBe(false);
-    // …but the 4 option-KIND nodes ARE persisted in nodes[] (analysis derives
-    // options from node kinds), so the graph is not model-blind.
+    expect(Array.isArray(committed.options)).toBe(true);
+    expect(
+      (committed.options as Array<{ id: string }>).map((option) => option.id).sort(),
+    ).toEqual([...OPTION_NODE_IDS].sort());
+    // The same 4 option-KIND nodes remain persisted in nodes[].
     const optionNodeIds = committed.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort();
     expect(optionNodeIds).toEqual([...OPTION_NODE_IDS].sort());
   });
@@ -269,7 +271,9 @@ describe('row A — first-touch adopt (no server model + incoming + no mutation)
     // Set one edge's std to exactly 0 (ingress passes std<=0 through unrepaired;
     // it is floored later at the compute-load seam, never at write).
     withZeroStd.edges[0]!.strength = { mean: 0.5, std: 0 };
-    const expectedHash = computeAnalysisAffectingGraphHash(withZeroStd as never);
+    const expectedHash = computeAnalysisAffectingGraphHash(
+      projectGraphForPersistence(withZeroStd) as never,
+    );
 
     await runTurnExecutor(
       payload('thoughts?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa03'),
@@ -285,7 +289,8 @@ describe('row A — first-touch adopt (no server model + incoming + no mutation)
     };
     // std=0 survived verbatim (NOT floored to COMPUTE_SIGMA_FLOOR at write).
     expect(committed.edges[0]!.strength!.std).toBe(0);
-    // The persisted hash equals the incoming hash — adopt forked no identity.
+    // The persisted hash equals the canonical pre-append projection. Carrier
+    // authoring is deliberate identity, while the numeric std remains exact.
     expect(computeAnalysisAffectingGraphHash(currentPersistedGraph as never)).toBe(expectedHash);
   });
 
