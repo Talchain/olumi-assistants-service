@@ -3,7 +3,7 @@
  *
  * Picks the SINGLE most useful decision-science lens to surface after an
  * analysis, from EXPLICIT auditable rules over REAL analysis state (option
- * comparison, factor sensitivity, EVPI, confidence tier). It is:
+ * comparison, factor sensitivity, per-factor EVPPI, confidence tier). It is:
  *
  *   - **Deterministic — no LLM call.** The selection is a pure function of the
  *     enrichment already computed by ISL/PLoT. The UI DISPLAYS the decision;
@@ -20,7 +20,7 @@
  * ("most useful available lens"), in order:
  *   1. sensitivity / flip-risk explanation
  *   2. pre-mortem (review-path form)
- *   3. EVPI-ranked evidence priority
+ *   3. producer-ranked EVPPI evidence priority
  *
  * ── AMENDMENT, 2026-07-31 (ROADMAP 2.211): NO IMMEDIATE REPEAT ──────────────
  * The ORDER above is NOT changed and is not up for change here. What is added
@@ -61,7 +61,7 @@
  * EVIDENCE: `PHASE0-EVIDENCE-2026-07-28/probe-premortem-chain-final.md` — a
  * 12-turn live walk on staging: `sensitivity_flip_risk` won the lens race
  * 12/12 (10 on `FLIP_RISK_CORRELATED`, 2 on `FLIP_RISK_ISOLATED`); pre_mortem
- * and EVPI emitted 0/12 with their own triggers simultaneously true on several
+ * and evidence priority emitted 0/12 with their own triggers simultaneously true on several
  * turns. The correlated claim is the WEAKEST rule-1 door ("flips only in
  * combination"), yet it was preempting every stronger-fit lens below it.
  *
@@ -117,6 +117,10 @@ import {
   type FlipClaimPosture,
 } from '../context/flip-threshold-rows.js';
 import {
+  selectFactorEvppiPriority,
+  type FactorEvppiPriorityDecision,
+} from '../coaching/select-factor-evppi.js';
+import {
   readRawRobustnessSignals,
   type RawRobustnessSignals,
 } from '../coaching/pick-raw-robustness.js';
@@ -158,6 +162,9 @@ import {
 export type LensId =
   | 'sensitivity_flip_risk'
   | 'pre_mortem'
+  // Compatibility wire identifier. Its trigger is now genuine per-factor
+  // EVPPI; renaming the public ID would break stored no-repeat state and UI
+  // telemetry without improving the scientific authority.
   | 'evpi_evidence_priority'
   // ROADMAP 2.692 slice 2 — the `resolve_disagreement` tier's two members
   // (2.690 CH-1 and 2.692 §1.4 I-DISAGREE). Fed by `judgementSignals` on
@@ -200,7 +207,7 @@ export type LensRationaleCode =
   | 'TOP_FACTOR_LOW_CONFIDENCE' // the #1-influence factor is least certain
   | 'WIN_PROB_MODERATE' // a leader exists but not decisively
   // evpi_evidence_priority
-  | 'MATERIAL_EVPI' // learning more about a factor would move the decision
+  | 'RESOLVED_EVPPI_PRIORITY' // producer-ranked evidence priority cleared its noise floor
   // fragile_edge_resolution (ROADMAP 2.989) — one specific relationship in the
   // graph is the thing most worth resolving next, and the platform can perform
   // the change. See `coaching/select-fragile-edge.ts` for the gates.
@@ -225,6 +232,7 @@ export type LensRationaleCode =
  */
 export type LensGroundingField =
   | 'factor_sensitivity'
+  | 'factor_evppi'
   | 'confidence_tier'
   | 'option_comparison'
   // ROADMAP 2.989 — the fragile-edge lens grounds in `robustness`, which IS in
@@ -255,8 +263,8 @@ export type LensGroundingField =
  * directive emitter resolves it to a label via the shared `GraphNodeLookup`,
  * fail-closed on miss. `kind` is `'factor'` for every subject the selector emits
  * today — the lens subjects are all factors (the dominant driver, the isolated
- * flip factor, the top-influence low-confidence factor, the material-EVPI
- * factor). Lenses with no single-factor subject (CONFIDENCE_NEEDS_WORK,
+ * flip factor, the top-influence low-confidence factor, the first producer-
+ * ranked resolved EVPPI factor). Lenses with no single-factor subject (CONFIDENCE_NEEDS_WORK,
  * WIN_PROB_MODERATE) leave this undefined → the directive falls through to the v1
  * winner-highlight rather than fabricating a target.
  */
@@ -376,13 +384,6 @@ export const PREMORTEM_WINPROB_MIN = 0.4;
 export const PREMORTEM_WINPROB_MAX = 0.7;
 
 /**
- * Rule 3 — EVPI is material at/above this many percentage points. Below this
- * (or `evpi_status: 'below_resolution'`, where the value is deliberately
- * ABSENT) there is nothing worth a dedicated research nudge.
- */
-export const EVPI_MATERIAL_MIN_PP = 1.0;
-
-/**
  * Rule 4 (consider_opposite, DSK-TR-003) — the leader must be clear of the
  * runner-up by at least this much. This is TR-003's own negative condition
  * ("Do not fire if the analysis shows a close call (separation <10%) — the
@@ -499,10 +500,12 @@ function isContraindicatedAfter(lens: LensId, previous: LensId | null | undefine
  * NEVER suggest a lens whose executor is absent (design §2.6/2.7): the selector
  * must not point a user at a decision-science method the platform cannot honestly
  * run. Every `LensId` declares here whether its executor is INTRINSICALLY present
- * on the live path:
- *   - the three core lenses point at actions that always execute — sensitivity →
- *     `what_would_flip`, pre-mortem → the review-path pre_mortem card, EVPI →
- *     `gather_evidence` — so they are always available;
+ * on the live path before any caller-owned presentation override:
+ *   - the three core lenses point at actions that execute — sensitivity →
+ *     `what_would_flip`, pre-mortem → the review-path pre_mortem card, EVPPI →
+ *     `gather_evidence` — so their capabilities are intrinsically available;
+ *     a mounted caller may still explicitly suppress a duplicate compatibility
+ *     presentation when the same capability has a more specific live surface;
  *   - `what_if_counterfactual` runs against ISL (`createCounterfactualClient()`,
  *     latent when `ISL_BASE_URL` is unset) and is additionally gated by ROADMAP
  *     1.195 — so it is NOT intrinsically available; the caller must inject its
@@ -546,10 +549,11 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
  *  env-free (the env/config read lives at the compose call site). */
 export interface LensSelectorOptions {
   /**
-   * Per-lens executor availability for NON-intrinsic (extension) lenses. A lens
-   * whose executor is absent is NEVER suggested — the selector falls through to
-   * the next available lens (design §2.6/2.7). Omitted / `false` ⇒ the extension
-   * lens is not suggested (fail-closed).
+   * Per-lens mounted-path availability override. A lens whose executor or
+   * presentation is absent is NEVER suggested — the selector falls through to
+   * the next available lens (design §2.6/2.7). Omitted ⇒ the compile-exhaustive
+   * intrinsic verdict above; explicit `false` can quarantine a duplicate legacy
+   * presentation, while explicit `true` activates an available extension.
    */
   readonly executorAvailable?: Partial<Record<LensId, boolean>>;
   /**
@@ -605,8 +609,15 @@ export interface LensSelectorOptions {
 }
 
 function isLensExecutorAvailable(lens: LensId, options?: LensSelectorOptions): boolean {
-  if (LENS_EXECUTOR_INTRINSICALLY_AVAILABLE[lens]) return true;
-  return options?.executorAvailable?.[lens] ?? false;
+  // A caller with exact mounted-path knowledge may explicitly quarantine an
+  // otherwise intrinsic compatibility lens. Previously `false` was ignored for
+  // every intrinsic lens, so a live caller could not retire a parallel surface
+  // without deleting its persisted LensId and history compatibility in the
+  // same release. Omission retains the stable intrinsic default; an explicit
+  // boolean is authoritative in either direction.
+  const callerVerdict = options?.executorAvailable?.[lens];
+  if (callerVerdict !== undefined) return callerVerdict;
+  return LENS_EXECUTOR_INTRINSICALLY_AVAILABLE[lens];
 }
 
 /**
@@ -671,8 +682,6 @@ interface FactorSignal {
   readonly factorId: string | null;
   readonly influenceScore: number | null;
   readonly influenceRank: number | null;
-  /** Present ONLY when a finite value exists and status is not below-resolution. */
-  readonly evpiPercentagePoints: number | null;
   readonly confidenceBand: ConfidenceBand | null;
   /**
    * ROADMAP 2.681 — the LADDER's low-confidence signal, which is NOT
@@ -692,6 +701,11 @@ interface FactorSignal {
 
 interface AnalysisSignals {
   readonly factors: readonly FactorSignal[];
+  /**
+   * Genuine per-factor Strong–Oakley EVPPI priority, read through the shared
+   * identity-only selector. No magnitude enters this signal bag.
+   */
+  readonly factorEvppiPriority: FactorEvppiPriorityDecision;
   /** Finite win_probability values across option_comparison entries. */
   readonly optionWinProbabilities: readonly number[];
   readonly confidenceTier: 'strong' | 'fair' | 'needs_work' | null;
@@ -764,18 +778,10 @@ function readAnalysisSignals(
     for (const raw of fs) {
       const e = readRecord(raw);
       if (e === null) continue;
-      // EVPI counts only when a finite value is present AND ISL did not mark it
-      // below resolution (where the pp value is deliberately absent).
-      const evpiStatus = typeof e.evpi_status === 'string' ? e.evpi_status : null;
-      const evpiPp =
-        evpiStatus === 'below_resolution'
-          ? null
-          : finiteNumberOrNull(e.evpi_percentage_points);
       factors.push({
         factorId: typeof e.factor_id === 'string' && e.factor_id.length > 0 ? e.factor_id : null,
         influenceScore: finiteNumberOrNull(e.influence_score),
         influenceRank: finiteNumberOrNull(e.influence_rank),
-        evpiPercentagePoints: evpiPp,
         confidenceBand: bandConfidence(e.confidence),
         lensLowConfidence: isLensLowConfidence(e.confidence),
         flipRiskCategory:
@@ -820,6 +826,7 @@ function readAnalysisSignals(
 
   return {
     factors,
+    factorEvppiPriority: selectFactorEvppiPriority(enrichment),
     optionWinProbabilities,
     confidenceTier,
     flipClaimPosture: readFlipClaimPosture(enrichment),
@@ -986,22 +993,12 @@ function evaluatePreMortem(signals: AnalysisSignals): EvaluatorHit | null {
   return null;
 }
 
-/** Rule 3 — EVPI-ranked evidence priority. */
-function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | null {
-  // Behaviour-identical trigger (max present pp ≥ MIN); carries the max-pp
-  // factor's id as the focus subject.
-  let best: (FactorSignal & { evpiPercentagePoints: number }) | null = null;
-  for (const f of signals.factors) {
-    if (f.evpiPercentagePoints === null) continue;
-    if (best === null || f.evpiPercentagePoints > best.evpiPercentagePoints) {
-      best = f as FactorSignal & { evpiPercentagePoints: number };
-    }
-  }
-  if (best === null) return null;
-  if (best.evpiPercentagePoints >= EVPI_MATERIAL_MIN_PP) {
-    return { code: 'MATERIAL_EVPI', subjectFactorId: best.factorId };
-  }
-  return null;
+/** Rule 3 — producer-ranked per-factor EVPPI evidence priority. */
+function evaluateEvppiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | null {
+  const priority = signals.factorEvppiPriority;
+  return priority.outcome === 'selected'
+    ? { code: 'RESOLVED_EVPPI_PRIORITY', subjectFactorId: priority.factorId }
+    : null;
 }
 
 /**
@@ -1255,7 +1252,7 @@ function evaluateDevilsAdvocacy(signals: AnalysisSignals): EvaluatorHit | null {
  * be corrected at the observation — a false comment in a selector teaches a
  * probe to stop looking (trap 14).
  *
- * ⚠ AND THE "only reached when no flip-risk / pre-mortem / EVPI lens fired"
+ * ⚠ AND THE "only reached when no flip-risk / pre-mortem / evidence-priority lens fired"
  * clause that stood here was false too, by the same evidence: all three live
  * emissions were as the ROADMAP 2.211 no-repeat RUNNER-UP, i.e. on turns where
  * a higher lens had fired and was displaced. Last position bounds this lens's
@@ -1313,8 +1310,8 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'The factor that moves this result the most is also the one you are least sure about. A pre-mortem helps you name what could go wrong before you commit.',
   WIN_PROB_MODERATE:
     'The leading option is ahead, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
-  MATERIAL_EVPI:
-    'There is a factor where learning more would change the decision the most. Gathering evidence there first, rather than everywhere, is the fastest way to firm up the choice.',
+  RESOLVED_EVPPI_PRIORITY:
+    'This run ranked one assessed factor first for further evidence. Investigate that priority before widening the search.',
   // ── ROADMAP 2.989 — the resolvable fragile relationship ────────────────────
   // ⚠ NUMBER-FREE, AND THAT IS A RULING, NOT AN OMISSION. Two independent
   // constraints, both derived at the bytes:
@@ -1402,10 +1399,13 @@ const TITLE_OVERRIDE_BY_RATIONALE: Partial<Readonly<Record<LensRationaleCode, st
  * The science-bearing enrichment field each rationale grounds its claim in —
  * compile-enforced-exhaustive over `LensRationaleCode` (a new rationale fails the
  * build here until given a grounding field). This is the wave-3 σ input: the
- * field the claim-safety cage is consulted for. `option_comparison` is
- * deliberately NOT in the A1-seeded Tier-2 allow-list, so the WIN_PROB_MODERATE
- * lens's grounding field is a live, organically-observable cage DENIAL (positive
- * control on staging); the others ground in allow-listed fields.
+ * field the claim-safety cage is consulted for. `option_comparison` and
+ * `factor_evppi` are deliberately NOT in the A1-seeded Tier-2 allow-list, so
+ * their grounding fields remain organically-observable cage DENIAL controls.
+ * Neither lens attaches a field value: the EVPPI reader exposes only the
+ * producer-ranked factor identity, never the outcome-unit magnitude. The deny
+ * therefore remains the backstop against a future value attachment without
+ * falsely relabelling the lens as grounded in factor sensitivity.
  */
 export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, LensGroundingField>> = {
   FLIP_RISK_ISOLATED: 'factor_sensitivity',
@@ -1414,7 +1414,7 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   CONFIDENCE_NEEDS_WORK: 'confidence_tier',
   TOP_FACTOR_LOW_CONFIDENCE: 'factor_sensitivity',
   WIN_PROB_MODERATE: 'option_comparison',
-  MATERIAL_EVPI: 'factor_sensitivity',
+  RESOLVED_EVPPI_PRIORITY: 'factor_evppi',
   // 2.989: the claim is about the run's ROBUSTNESS output (which relationships
   // can move the ranking), so the cage is consulted for `robustness`.
   FRAGILE_EDGE_RESOLVABLE: 'robustness',
@@ -1505,7 +1505,7 @@ function buildSelection(
 /**
  * Select the single most useful lens for this analysis, or `null` when the
  * evidence doesn't justify one (or the only lens whose evidence fired has no
- * executor). Priority order: sensitivity/flip-risk → pre-mortem → EVPI evidence
+ * executor). Priority order: sensitivity/flip-risk → pre-mortem → EVPPI evidence
  * priority → what-if counterfactual (extension, executor-gated); the first rule
  * that BOTH fires AND has an available executor wins.
  *
@@ -1680,7 +1680,7 @@ export function rankInterventions(
   const ladder: readonly (readonly [LensId, EvaluatorHit | null])[] = [
     ['sensitivity_flip_risk', evaluateSensitivityFlipRisk(signals)],
     ['pre_mortem', evaluatePreMortem(signals)],
-    ['evpi_evidence_priority', evaluateEvpiEvidencePriority(signals)],
+    ['evpi_evidence_priority', evaluateEvppiEvidencePriority(signals)],
     // DSK slice 1 — below the three locked core lenses (their order is not
     // touched), above the generic what-if explorer: a lens derived from a
     // specific DSK trigger's evidence condition outranks the last-resort

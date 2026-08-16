@@ -165,7 +165,12 @@ const EXCLUDED_RECORDS: readonly OmittedOptionRecord[] = [
   { option_id: 'opt_new', label: 'New Option' },
 ];
 
-/** Handler outcome for a success run that held the status quo AND excluded an option. */
+/**
+ * Mocked handler outcome for a success run that held the status quo AND
+ * excluded an option. The carrier is injected deliberately so this suite
+ * isolates dispatch threading into the real chip consumer; canonical
+ * readiness is still derived independently from READY_GRAPH.
+ */
 function scaffoldedHandlerOk() {
   return {
     assistant_text: 'Ran analysis on your current scenario.',
@@ -216,7 +221,7 @@ describe('chip-click-dispatch — D-ask-1 scaffold live wiring (M4)', () => {
     _resetConfigCache();
   });
 
-  it('a run that EXCLUDED an option offers the CONFIGURE chip FIRST on the real dispatch path (real generateChips, no injection)', async () => {
+  it('a non-ready run that EXCLUDED an option offers only its CONFIGURE recovery on the real dispatch path', async () => {
     const out = await dispatchChipClickRunAnalysis({
       payload: payload(),
       requestId: 'req-cc-scaffold-chip',
@@ -230,6 +235,16 @@ describe('chip-click-dispatch — D-ask-1 scaffold live wiring (M4)', () => {
       label: 'Configure New Option',
       message: 'Help me configure New Option.',
     });
+    expect(chips).toHaveLength(1);
+    expect(
+      chips.some((chip) =>
+        [
+          'chip_action_explain_results',
+          'chip_action_what_would_flip',
+          'chip_prompt_validate_decision',
+        ].includes(chip.id),
+      ),
+    ).toBe(false);
   });
 
   it('threads scaffoldedOptions into the decision_review enricher input (P1-2, chip-path call site)', async () => {

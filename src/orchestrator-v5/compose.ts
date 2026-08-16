@@ -13,6 +13,7 @@
 
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import type { GraphPatchBlockData } from '../orchestrator/types.js';
 
 import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
@@ -28,6 +29,7 @@ import {
   buildReviewCardBlocks,
   buildStaleRerunCoachingBlock,
   liveLensExecutorAvailability,
+  selectEvidencePriorityGuidance,
   type BlockBuildCtx,
   type GraphNodeLookup,
 } from './compose/phase3-blocks.js';
@@ -213,6 +215,14 @@ export interface ComposeToolCallInput {
    */
   readonly handlerFacts?: readonly HandlerFact[];
   /**
+   * Exact current canonical readiness. Factor-EVPPI guidance is science advice
+   * and therefore requires positive `ready` permission; absent/unknown and
+   * every non-ready status suppress only that guidance while ordinary Phase 3
+   * content keeps its existing behaviour. This is input-only authority: the
+   * composer never manufactures or emits `analysis_ready`.
+   */
+  readonly analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'];
+  /**
    * V5 Task 2.1: pre-generated deterministic chips. See `ComposeInput`.
    */
   readonly suggested_actions?: readonly SuggestedAction[];
@@ -338,6 +348,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.persistedGraphHash,
     input.priorTurnFactsForLensHistory,
     input.flipFocusFactorId,
+    input.analysisReadyStatus,
   );
 
   return {
@@ -399,6 +410,7 @@ function buildBlocksFromFacts(
   persistedGraphHash?: string | null,
   priorTurnFactsForLensHistory?: readonly HandlerFact[],
   flipFocusFactorId?: string,
+  analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -499,6 +511,7 @@ function buildBlocksFromFacts(
           lookup,
           'fresh',
           fallbackForFact,
+          analysisReadyStatus,
           previousAnalysisLens,
           judgementSignals,
         );
@@ -658,7 +671,13 @@ function buildBlocksFromFacts(
   // verdict to select the canonical source fact and decide emission.
   // Runs AFTER row 7 by design — see the block above.
   if (!currentTurnRunAnalysisHandled && lifecycle !== undefined) {
-    blocks.push(...buildLifecycleBlocksFromPrior(lifecycle, persistedGraph));
+    blocks.push(
+      ...buildLifecycleBlocksFromPrior(
+        lifecycle,
+        persistedGraph,
+        analysisReadyStatus,
+      ),
+    );
   }
 
   return blocks;
@@ -774,10 +793,10 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // through a withheld turn unchanged, and why that is PINNED by a test
   // rather than guarded by new machinery.
   //
-  // Transport is claim-inert; the claim cage is the READER. Only
-  // `factor_evppi` has a licensed surface (a ranking with a below-resolution
-  // band, NO magnitudes — `units: 'outcome'` is why), and that surface is a
-  // separate UI train. Design: V7C-EVPPI-RANKING-DESIGN-2026-07-30.
+  // Transport is claim-inert; the claim cage is the READER. `factor_evppi`
+  // now has an identity-only CEE reasoning surface: producer order/status may
+  // select a factor, but magnitude never leaves the reader. The UI ranking
+  // remains a separate surface. Design: V7C-EVPPI-RANKING-DESIGN-2026-07-30.
   'factor_evppi',
   'decision_evpi',
   'p_win_sensitivity',
@@ -1165,6 +1184,7 @@ function rebuildPhase3BlocksFresh(
   lookup: GraphNodeLookup,
   freshness: 'fresh' | 'stale' = 'fresh',
   rawPersistedGraphForLevers?: unknown,
+  analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
   /**
    * ROADMAP 2.211 — the lens selected by the immediately-preceding ANALYSIS turn
    * of this scenario, for the no-immediate-repeat tie-break. Passed by the
@@ -1203,6 +1223,17 @@ function rebuildPhase3BlocksFresh(
   // as a gap to gather evidence about or an assumption to confirm.
   const interventionControlledFactorIds =
     collectInterventionControlledFactorIds(rawPersistedGraphForLevers);
+  // One strict decision, shared by both mounted factor-EVPPI surfaces. The
+  // selector validates producer order/status, the full carrier, exact same-run
+  // factor_sensitivity label and the optional same-factor action. Readiness is
+  // positive permission: unknown/non-ready never invokes the science selector.
+  const factorEvppiGuidance = analysisReadyStatus === 'ready'
+    ? selectEvidencePriorityGuidance(
+        fact,
+        lookup,
+        interventionControlledFactorIds,
+      )
+    : null;
   // Capability layer P0 (ROADMAP 1.183): the deterministic lens suggestion. Read
   // from the SAME fact enrichment, threaded here so BOTH the current-turn fresh
   // path and the prior-fact fresh path emit an identical block for a given
@@ -1210,17 +1241,49 @@ function rebuildPhase3BlocksFresh(
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
   const lensSurface = buildLensSurface(fact, ctx, previousAnalysisLens, judgementSignals);
+  const evidenceBlocks = buildEvidenceBlocks(
+    fact,
+    lookup,
+    confidenceLookup,
+    ctx,
+    interventionControlledFactorIds,
+    factorEvppiGuidance,
+  );
+  const evidenceFactorIds = new Set(evidenceBlocks.map((block) => block.factor_ref.id));
   const reviewCards = buildReviewCardBlocks(
     fact,
     lookup,
     ctx,
     interventionControlledFactorIds,
-  );
+    factorEvppiGuidance,
+  ).filter((block) => {
+    if (block.card_kind !== 'evidence_priority') return true;
+    const priorityFactorId = block.target_refs.find((ref) => ref.kind === 'factor')?.id;
+    // The typed EvidenceBlock is the richer mounted surface: it names the
+    // factor, explains the gap, gives the concrete technique and states the
+    // expected hygiene benefit.  The older evidence_priority ReviewCard
+    // repeats the same action in the same assistant turn.  Keep that card only
+    // as a reachability fallback when the richer block cannot honestly be
+    // built (for example, readable producer confidence is absent).
+    return priorityFactorId === undefined || !evidenceFactorIds.has(priorityFactorId);
+  });
+  const isLegacyGenericEvppiLens =
+    lensSurface?.selection.lens === 'evpi_evidence_priority';
   const built = [
     ...reviewCards,
     ...buildCoachingBlocks(fact, lookup, ctx, interventionControlledFactorIds),
-    ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx, interventionControlledFactorIds),
-    ...(lensSurface !== null ? [lensSurface.suggestion] : []),
+    ...evidenceBlocks,
+    // The historical EVPPI lens is a generic prose announcement with no
+    // endpoint-specific action. Live executor availability already
+    // QUARANTINES it before selection; this wire check is the second fail-closed
+    // boundary if a future caller ever bypasses that availability. Genuine
+    // EVPPI reaches the user only through the selected factor's concrete
+    // EvidenceBlock or factor-scoped ReviewCard fallback above. When neither can be
+    // built, silence is more honest than presenting generic prose as the
+    // capability. All other lenses are unchanged.
+    ...(lensSurface !== null && !isLegacyGenericEvppiLens
+      ? [lensSurface.suggestion]
+      : []),
   ];
   // Capability layer P1 (ROADMAP 1.183): the STRUCTURED artefact for the lens
   // P0 announced — built from the SAME selection object (never a second
@@ -1423,6 +1486,7 @@ function presumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean 
 function buildLifecycleBlocksFromPrior(
   lifecycle: NonNullable<ComposeToolCallInput['lifecycle']>,
   persistedGraph?: unknown,
+  analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
 ): OlumiResponse['blocks'] {
   const { freshness, priorFacts } = lifecycle;
   const verdict = freshness.freshness;
@@ -1533,6 +1597,7 @@ function buildLifecycleBlocksFromPrior(
     lookup,
     'fresh',
     persistedGraph,
+    analysisReadyStatus,
   );
   const freshBlocks: OlumiResponse['blocks'] = [analysisResultBlock, ...phase3Blocks];
   emitLifecycle(lifecycle, {

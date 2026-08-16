@@ -234,8 +234,16 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
   };
 
   const STANDARD_FACTOR_SENSITIVITY = [
-    { factor_id: 'fac_delivery_risk', confidence: 0.2 }, // low
-    { factor_id: 'fac_cost_overrun', confidence: 0.6 }, // medium
+    {
+      factor_id: 'fac_delivery_risk',
+      factor_label: 'Delivery risk',
+      confidence: 0.2,
+    }, // low
+    {
+      factor_id: 'fac_cost_overrun',
+      factor_label: 'Cost overrun',
+      confidence: 0.6,
+    }, // medium
   ];
 
   const RICH_DECISION_REVIEW = {
@@ -309,7 +317,7 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     },
   };
 
-  function phase3Fact(): HandlerFact {
+  function phase3Fact(options: { readonly withEvppiPriority?: boolean } = {}): HandlerFact {
     return {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -321,6 +329,14 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
         enrichment: {
           graph: STANDARD_GRAPH,
           factor_sensitivity: STANDARD_FACTOR_SENSITIVITY,
+          ...(options.withEvppiPriority === true
+            ? {
+                factor_evppi: [
+                  { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
+                  { factor_id: 'fac_cost_overrun', evppi: 0.2, status: 'resolved' },
+                ],
+              }
+            : {}),
           decision_review: { ...RICH_DECISION_REVIEW, produced_at: '2026-05-16T15:00:00.000Z' },
           // T1 claim safety — the fixture must DECLARE its constraint verdict.
           // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without
@@ -361,7 +377,7 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     // this fixture selects NO lens at all (its `factor_sensitivity` rows carry
     // only `factor_id` + `confidence` — no `flip_risk_category`, no
     // `influence_score`, no `influence_rank`; and the enrichment has no
-    // `confidence_tier`, no `option_comparison`, no EVPI — so every `selectLens`
+    // `confidence_tier`, no `option_comparison`, no EVPPI — so every `selectLens`
     // rule misses and it returns its load-bearing `null`).
     //
     // The precondition is asserted, not assumed: no lens suggestion block ⇒ no
@@ -406,7 +422,8 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
   it('emits expected counts per card_kind from the rich-fixture decision_review', () => {
     const env = composeToolCallResponse({
       ...baseInput,
-      handlerFacts: [phase3Fact()],
+      handlerFacts: [phase3Fact({ withEvppiPriority: true })],
+      analysisReadyStatus: 'ready',
     });
     const parsed = OlumiResponseSchema.parse(env);
     const reviewCards = parsed.blocks.filter((b) => b.type === 'review_card');
@@ -417,7 +434,17 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     expect(byCardKind('flip_threshold')).toHaveLength(1);
     expect(byCardKind('bias')).toHaveLength(1);
     expect(byCardKind('robustness')).toHaveLength(1);
-    expect(byCardKind('evidence_priority')).toHaveLength(1);
+    // A richer EvidenceBlock for the same exact factor supersedes the legacy
+    // review-card and generic-lens presentations in the composed turn (one
+    // concrete action, not three descriptions of the same recommendation).
+    expect(byCardKind('evidence_priority')).toHaveLength(0);
+    expect(
+      parsed.blocks.some(
+        (b) =>
+          b.type === 'coaching' &&
+          b.signal_id.includes('coach:lens:evpi_evidence_priority'),
+      ),
+    ).toBe(false);
     expect(byCardKind('assumption')).toHaveLength(2); // key_assumptions[].length
     expect(byCardKind('scenario_context')).toHaveLength(1);
   });
@@ -455,6 +482,111 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
       expect(block.freshness).toBe('fresh');
     }
   });
+
+  it('keeps the evidence_priority review card as a fallback when the richer evidence block cannot be built', () => {
+    const fact = phase3Fact({ withEvppiPriority: true });
+    const enrichment = (fact.result as Record<string, unknown>)
+      .enrichment as Record<string, unknown>;
+    enrichment.factor_sensitivity = [
+      { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+    ];
+
+    const parsed = OlumiResponseSchema.parse(
+      composeToolCallResponse({
+        ...baseInput,
+        handlerFacts: [fact],
+        analysisReadyStatus: 'ready',
+      }),
+    );
+    expect(parsed.blocks.filter((b) => b.type === 'evidence')).toHaveLength(0);
+    expect(
+      parsed.blocks.filter(
+        (b) => b.type === 'review_card' && b.card_kind === 'evidence_priority',
+      ),
+    ).toHaveLength(1);
+    expect(
+      parsed.blocks.some(
+        (b) =>
+          b.type === 'coaching' &&
+          b.signal_id.includes('coach:lens:evpi_evidence_priority'),
+      ),
+    ).toBe(false);
+  });
+
+  it('uses one deterministic factor card instead of the generic lens when Decision Review has no action', () => {
+    const fact = phase3Fact({ withEvppiPriority: true });
+    const enrichment = (fact.result as Record<string, unknown>)
+      .enrichment as Record<string, unknown>;
+    enrichment.factor_sensitivity = [
+      { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+    ];
+    const decisionReview = enrichment.decision_review as Record<string, unknown>;
+    decisionReview.evidence_enhancements = {};
+
+    const parsed = OlumiResponseSchema.parse(
+      composeToolCallResponse({
+        ...baseInput,
+        handlerFacts: [fact],
+        analysisReadyStatus: 'ready',
+      }),
+    );
+    expect(
+      parsed.blocks.some(
+        (b) =>
+          b.type === 'coaching' &&
+          b.signal_id.includes('coach:lens:evpi_evidence_priority'),
+      ),
+    ).toBe(false);
+    const priorityCards = parsed.blocks.filter(
+      (b) => b.type === 'review_card' && b.card_kind === 'evidence_priority',
+    );
+    expect(priorityCards).toHaveLength(1);
+    const priorityCard = priorityCards[0];
+    if (priorityCard?.type !== 'review_card') throw new Error('narrowing');
+    expect(priorityCard.body).toContain('gather relevant data or expert judgement');
+    expect(parsed.blocks.some((b) => b.type === 'evidence')).toBe(false);
+  });
+
+  it.each([
+    { name: 'unknown', status: undefined },
+    { name: 'known non-ready', status: 'needs_user_input' as const },
+  ])(
+    '$name readiness suppresses factor-EVPPI priority while preserving ordinary Phase 3 content',
+    ({ status }) => {
+      const fact = phase3Fact({ withEvppiPriority: true });
+      const enrichment = (fact.result as Record<string, unknown>)
+        .enrichment as Record<string, unknown>;
+      enrichment.factor_evppi = [
+        { factor_id: 'fac_cost_overrun', evppi: 0.4, status: 'resolved' },
+        { factor_id: 'fac_delivery_risk', evppi: 0.2, status: 'resolved' },
+      ];
+
+      const parsed = OlumiResponseSchema.parse(
+        composeToolCallResponse({
+          ...baseInput,
+          handlerFacts: [fact],
+          ...(status === undefined ? {} : { analysisReadyStatus: status }),
+        }),
+      );
+      const evidence = parsed.blocks.filter((block) => block.type === 'evidence');
+
+      expect(evidence.map((block) => block.type === 'evidence' && block.factor_ref.id)).toEqual([
+        'fac_delivery_risk',
+        'fac_cost_overrun',
+      ]);
+      expect(
+        parsed.blocks.some(
+          (block) =>
+            block.type === 'review_card' && block.card_kind === 'evidence_priority',
+        ),
+      ).toBe(false);
+      expect(
+        parsed.blocks.some(
+          (block) => block.type === 'review_card' && block.card_kind === 'narrative',
+        ),
+      ).toBe(true);
+    },
+  );
 
   it('skips Phase 3 emission when graph_hash_at_run is absent (Codex correction #4 fresh-only)', () => {
     const factWithoutHash: HandlerFact = {

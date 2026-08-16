@@ -90,16 +90,17 @@
  * NOT "resolving this would change your decision" — that is option-switching,
  * and it is `factor_evppi`'s question, not this one.
  *
- * ── WHY THIS FIELD AND NOT `factor_evppi` (the genuine VOI) ──────────────────
- * MEASURED over the two committed captures — the whole in-repo evidence base:
+ * ── HISTORICAL WHY THIS FIELD WAS EXPLORED ───────────────────────────────────
+ * At the time this isolated, unwired selector was written, the two committed
+ * captures showed:
  *   `factor_evppi`     — 1 row each, **0 of 2 captures** carry a `resolved` row.
  *   `p_win_sensitivity`— 4 and 6 rows, **1 of 2 captures** carries a `resolved`
  *                        row (session-b2, `fac_energy`).
- * Building on `factor_evppi` today is building a structurally-dark capability
- * (the l47 depth finding the design itself records). `factor_evppi` remains the
- * better quantity the day it resolves; this module is deliberately shaped so
- * that adding it later is a second refusal-reason and a second row, not a
- * rewrite.
+ * That historical premise is no longer product authority. The live reasoning
+ * chain now consumes producer-resolved `factor_evppi` through
+ * `select-factor-evppi.ts`. This p_win_sensitivity selector remains
+ * QUARANTINED/unwired research code and must not compete for the evidence-first
+ * priority; its tests preserve scientific meaning only, not reachability.
  *
  * ── THE GATE IS THE PRODUCER'S OWN, AND ITS STRENGTH IS DISCLOSED ────────────
  * `status: 'resolved' | 'below_resolution'` is ISL's own noise-floor test:

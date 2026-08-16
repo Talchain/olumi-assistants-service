@@ -2,7 +2,7 @@
  * Capability layer P0 — deterministic lens selector tests (ROADMAP 1.183).
  *
  * Proves each rule picks its lens under the triggering state, the priority
- * order (sensitivity → pre-mortem → EVPI), the threshold boundaries, and — the
+ * order (sensitivity → pre-mortem → EVPPI), the threshold boundaries, and — the
  * load-bearing negative control — that weak / absent evidence recommends
  * NOTHING. These tests are the mutation witnesses for every selector rule:
  * flipping a threshold or a comparator turns the matching case RED.
@@ -14,7 +14,6 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import {
   BODY_BY_RATIONALE,
   DOMINANCE_SHARE_MIN,
-  EVPI_MATERIAL_MIN_PP,
   PREMORTEM_WINPROB_MAX,
   PREMORTEM_WINPROB_MIN,
   TITLE_BY_LENS,
@@ -36,8 +35,8 @@ interface FactorInput {
   readonly factor_id?: string;
   readonly influence_score?: number;
   readonly influence_rank?: number;
+  /** Legacy heuristic field: retained only for negative-authority controls. */
   readonly evpi_percentage_points?: number;
-  readonly evpi_status?: string;
   readonly confidence?: number | null;
   readonly flip_risk_category?: string;
 }
@@ -50,6 +49,8 @@ interface EnrichmentInput {
   readonly factor_sensitivity?: readonly FactorInput[];
   readonly option_comparison?: readonly OptionInput[];
   readonly confidence_tier?: string;
+  readonly factor_evppi?: readonly Record<string, unknown>[];
+  readonly inference_warnings?: readonly Record<string, unknown>[];
   /** When true, omit the `enrichment` key entirely (no analysis at all). */
   readonly noEnrichment?: boolean;
 }
@@ -72,6 +73,12 @@ function makeFact(input: EnrichmentInput = {}): RunAnalysisHandlerFact {
     }
     if (input.confidence_tier !== undefined) {
       enrichment.confidence_tier = input.confidence_tier;
+    }
+    if (input.factor_evppi !== undefined) {
+      enrichment.factor_evppi = input.factor_evppi;
+    }
+    if (input.inference_warnings !== undefined) {
+      enrichment.inference_warnings = input.inference_warnings;
     }
     result.enrichment = enrichment;
   }
@@ -116,8 +123,7 @@ describe('selectLens — recommends NOTHING when evidence is weak', () => {
     expect(selectLens(makeFact({ factor_sensitivity: [], confidence_tier: 'strong' }))).toBeNull();
   });
 
-  it('returns null when EVPI is present but below the resolution floor', () => {
-    // Just under the material threshold — no lens.
+  it('returns null when every EVPPI row is below its resolution floor', () => {
     const fact = makeFact({
       confidence_tier: 'strong',
       factor_sensitivity: [
@@ -126,17 +132,32 @@ describe('selectLens — recommends NOTHING when evidence is weak', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          evpi_percentage_points: EVPI_MATERIAL_MIN_PP - 0.5,
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
       ],
       option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+      factor_evppi: [
+        { factor_id: 'fac_a', evppi: 0.5, status: 'below_resolution' },
+      ],
     });
     expect(selectLens(fact)).toBeNull();
   });
 
-  it('ignores EVPI marked below_resolution even when the pp value looks material', () => {
+  it('returns null when the producer discloses a partial EVPPI assessment', () => {
+    const fact = makeFact({
+      ...HEALTHY,
+      factor_evppi: [
+        { factor_id: 'fac_a', evppi: 0.5, status: 'resolved' },
+      ],
+      inference_warnings: [
+        { code: 'FACTOR_EVPPI_PARTIAL', field: 'factor_evppi' },
+      ],
+    });
+    expect(selectLens(fact)).toBeNull();
+  });
+
+  it('does not fall back to the heuristic factor-sensitivity EVPI field', () => {
     const fact = makeFact({
       confidence_tier: 'strong',
       factor_sensitivity: [
@@ -145,9 +166,8 @@ describe('selectLens — recommends NOTHING when evidence is weak', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          // A stale/garbage pp value that must NOT count because status says so.
+          // Legacy heuristic bytes are not the Strong–Oakley EVPPI authority.
           evpi_percentage_points: 99,
-          evpi_status: 'below_resolution',
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
@@ -279,7 +299,7 @@ describe('selectLens — rule 1: sensitivity / flip-risk', () => {
 
   it('does NOT treat two equal drivers (0.5 share) as dominant', () => {
     // Exactly at the share boundary — strict `>` means no trigger. With strong
-    // confidence + decisive win-prob + no material EVPI, this is NOTHING.
+    // confidence + decisive win-prob + no resolved EVPPI priority, this is NOTHING.
     const fact = makeFact({
       confidence_tier: 'strong',
       factor_sensitivity: [
@@ -377,11 +397,11 @@ describe('selectLens — rule 2: pre-mortem', () => {
 });
 
 // ============================================================================
-// Rule 3 — EVPI evidence priority
+// Rule 3 — genuine per-factor EVPPI evidence priority
 // ============================================================================
 
-describe('selectLens — rule 3: EVPI evidence priority', () => {
-  it('picks EVPI when a factor has material value of information', () => {
+describe('selectLens — rule 3: EVPPI evidence priority', () => {
+  it('picks evidence priority when the producer has a resolved EVPPI row', () => {
     const fact = makeFact({
       confidence_tier: 'strong',
       factor_sensitivity: [
@@ -390,19 +410,23 @@ describe('selectLens — rule 3: EVPI evidence priority', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          evpi_percentage_points: EVPI_MATERIAL_MIN_PP + 2,
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
       ],
       option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+      factor_evppi: [
+        { factor_id: 'fac_a', evppi: 0.02, status: 'resolved' },
+      ],
     });
     const sel = selectLens(fact);
     expect(sel?.lens).toBe('evpi_evidence_priority');
-    expect(sel?.rationaleCode).toBe('MATERIAL_EVPI');
+    expect(sel?.rationaleCode).toBe('RESOLVED_EVPPI_PRIORITY');
+    expect(sel?.subjectRef).toStrictEqual({ id: 'fac_a', kind: 'factor' });
+    expect(sel?.groundingField).toBe('factor_evppi');
   });
 
-  it('fires exactly at the material EVPI boundary', () => {
+  it('preserves producer order instead of choosing the largest consumer-side number', () => {
     const fact = makeFact({
       confidence_tier: 'strong',
       factor_sensitivity: [
@@ -411,14 +435,36 @@ describe('selectLens — rule 3: EVPI evidence priority', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          evpi_percentage_points: EVPI_MATERIAL_MIN_PP,
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
       ],
       option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+      factor_evppi: [
+        { factor_id: 'fac_b', evppi: 0.01, status: 'resolved' },
+        { factor_id: 'fac_a', evppi: 0.9, status: 'resolved' },
+      ],
     });
-    expect(selectLens(fact)?.rationaleCode).toBe('MATERIAL_EVPI');
+    expect(selectLens(fact)?.subjectRef?.id).toBe('fac_b');
+  });
+
+  it('honours an explicit live-path quarantine of the intrinsic compatibility lens', () => {
+    const fact = makeFact({
+      confidence_tier: 'strong',
+      factor_sensitivity: [
+        { factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 },
+        { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
+        { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
+      ],
+      option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+      factor_evppi: [{ factor_id: 'fac_a', evppi: 0.4, status: 'resolved' }],
+    });
+
+    expect(
+      selectLens(fact, {
+        executorAvailable: { evpi_evidence_priority: false },
+      }),
+    ).toBeNull();
   });
 });
 
@@ -427,7 +473,7 @@ describe('selectLens — rule 3: EVPI evidence priority', () => {
 // ============================================================================
 
 describe('selectLens — priority ordering (at most one)', () => {
-  it('sensitivity outranks pre-mortem and EVPI when all three could fire', () => {
+  it('sensitivity outranks pre-mortem and EVPPI when all three could fire', () => {
     const fact = makeFact({
       confidence_tier: 'needs_work', // would trip pre-mortem
       factor_sensitivity: [
@@ -436,18 +482,18 @@ describe('selectLens — priority ordering (at most one)', () => {
           influence_score: 0.7, // dominant → sensitivity
           influence_rank: 1,
           confidence: 0.2, // low → would trip pre-mortem
-          evpi_percentage_points: 5, // material → would trip EVPI
           flip_risk_category: 'isolated', // isolated → sensitivity (rule 1a)
         },
         { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.1, influence_rank: 3, confidence: 0.9 },
       ],
       option_comparison: [{ win_probability: 0.55 }, { win_probability: 0.45 }],
+      factor_evppi: [{ factor_id: 'fac_a', evppi: 0.5, status: 'resolved' }],
     });
     expect(selectLens(fact)?.lens).toBe('sensitivity_flip_risk');
   });
 
-  it('pre-mortem outranks EVPI when both could fire (no sensitivity trigger)', () => {
+  it('pre-mortem outranks EVPPI when both could fire (no sensitivity trigger)', () => {
     const fact = makeFact({
       confidence_tier: 'needs_work', // pre-mortem
       factor_sensitivity: [
@@ -457,12 +503,12 @@ describe('selectLens — priority ordering (at most one)', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          evpi_percentage_points: 5, // material → EVPI
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
       ],
       option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+      factor_evppi: [{ factor_id: 'fac_a', evppi: 0.5, status: 'resolved' }],
     });
     expect(selectLens(fact)?.lens).toBe('pre_mortem');
   });
@@ -493,7 +539,7 @@ describe('selectLens — copy is prose-guard clean', () => {
     { confidence_tier: 'needs_work', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }] },
     { confidence_tier: 'fair', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.2 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }] },
     { confidence_tier: 'fair', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }], option_comparison: [{ win_probability: 0.55 }] },
-    { confidence_tier: 'strong', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9, evpi_percentage_points: 5 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }], option_comparison: [{ win_probability: 0.85 }] },
+    { confidence_tier: 'strong', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }], option_comparison: [{ win_probability: 0.85 }], factor_evppi: [{ factor_id: 'fac_a', evppi: 0.5, status: 'resolved' }] },
   ];
 
   it('emits no forbidden vocabulary, raw decimals, or entity ids in any lens copy', () => {
@@ -545,7 +591,7 @@ describe('λ — every lens/rationale has copy that passes the REAL runtime pros
 // ============================================================================
 
 describe('selectLens — never suggests a lens whose executor is absent', () => {
-  // HEALTHY trips NO core lens (not fragile, decisive, no material EVPI) yet HAS
+  // HEALTHY trips NO core lens (not fragile, decisive, no resolved EVPPI) yet HAS
   // a rank-1 driver, so the what-if extension lens is the only candidate — the
   // exact probe for the executor-availability rule.
   it('the what-if lens is suggested ONLY when its executor is injected available', () => {

@@ -36,9 +36,14 @@
  *     produced_at: ISO 8601 (V5-added),
  *   }
  *
- * **No new LLM call.** Every emitted block sources from existing
- * enrichment.decision_review fields. Per-factor confidence for
- * EvidenceBlock derives from the PLoT-provided
+ * **No new LLM call.** Most blocks source existing
+ * `enrichment.decision_review` fields. The evidence-priority ReviewCard is the
+ * deliberate deterministic exception: its rank comes from producer-resolved
+ * `factor_evppi`, its display label comes from the exact matching
+ * `factor_sensitivity` row in that same analysis, and its number-free action
+ * needs no Decision Review. The canonical graph lookup still validates current
+ * factor identity; it cannot replace the same-run label. Per-factor confidence
+ * for a richer EvidenceBlock derives from the PLoT-provided
  * `enrichment.factor_sensitivity[].confidence`, NOT from decision_review
  * (which has no confidence field) — v11 does not expose calibrated
  * per-factor confidence inside decision_review. Documented at the
@@ -164,9 +169,14 @@ import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 import { selectGroundedCounterCase } from '../coaching/grounded-counter-case.js';
 // Lane C — the grounded sensitivity body (names the subject factor).
 import { selectGroundedSensitivityBody } from '../coaching/grounded-sensitivity-body.js';
+import {
+  selectFactorEvppiPriorityGuidance,
+  type FactorEvppiPriorityGuidanceDecision,
+} from '../coaching/select-factor-evppi.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
+const FACTOR_EVPPI_SOURCE_HANDLER = 'run_analysis';
 
 const TITLE_MAX = 80;
 /**
@@ -839,19 +849,31 @@ function readAttestedFlipWinners(fact: RunAnalysisHandlerFact): ReadonlyMap<stri
 }
 
 /**
- * Build all Phase 3 ReviewCardBlocks from a fresh `decision_review`
- * enrichment. Returns `[]` when no enrichment is present. Each emitted
- * block is `BlockSchema`-validated; failures DROP the block.
+ * Build all Phase 3 ReviewCardBlocks from a fresh analysis. Most cards enrich
+ * the turn from `decision_review`; the factor-EVPPI evidence-priority card is
+ * deterministic and remains reachable when that configuration-gated
+ * enrichment is absent. Its strict, readiness-gated guidance decision is
+ * supplied by the shared Phase 3 funnel; the default `null` fails that science
+ * surface closed for direct callers. Each emitted block is
+ * `BlockSchema`-validated; failures DROP it.
  */
 export function buildReviewCardBlocks(
   fact: RunAnalysisHandlerFact,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
   interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null = null,
 ): readonly ReviewCardBlock[] {
   const dr = readDecisionReview(fact);
-  if (dr === null) return [];
   const blocks: ReviewCardBlock[] = [];
+  if (dr === null) {
+    const evidencePriority = buildEvidencePriorityCard(
+      factorEvppiGuidance,
+      lookup,
+      ctx,
+    );
+    return evidencePriority === null ? [] : [evidencePriority];
+  }
   // Doctrine D-U F2 / Finding 1: lever labels for EVERY free-text surface
   // (structural membership resolved to labels via the shared lookup). Computed
   // once and threaded into the free-text builders so a lever is never NAMED as
@@ -895,13 +917,13 @@ export function buildReviewCardBlocks(
   const robustness = buildRobustnessCard(dr, ctx);
   if (robustness !== null) blocks.push(robustness);
 
-  // evidence_priority (rank 6) — top-1 of evidence_enhancements; the rest
-  // ride as EvidenceBlocks (not ReviewCards). One review card per fact.
+  // evidence_priority (rank 6) — exact producer-ranked EVPPI identity when a
+  // matching usable enhancement exists; the rest ride as unranked
+  // EvidenceBlocks (not ReviewCards). One review card per fact.
   const evidencePriority = buildEvidencePriorityCard(
-    dr,
+    factorEvppiGuidance,
     lookup,
     ctx,
-    interventionControlledFactorIds,
   );
   if (evidencePriority !== null) blocks.push(evidencePriority);
 
@@ -1135,9 +1157,16 @@ export function buildCoachingBlocks(
 
 /**
  * Build all Phase 3 EvidenceBlocks from a fresh `decision_review`
- * enrichment. One block per top-N `evidence_enhancements` entry (ranked
- * by the LLM's emission order — the spec says "cover at least the 3
- * evidence_gaps with highest voi" so emission order ≈ voi rank).
+ * enrichment. One block per usable `evidence_enhancements` entry.
+ *
+ * The first block is the exact factor selected by ISL's producer-ranked
+ * `factor_evppi` authority when that factor has a usable enhancement. The
+ * remaining entries preserve the LLM object's emission order only as a stable
+ * presentation order; it is not treated as a scientific ranking. When EVPPI
+ * has no honest selection, every enhancement remains an unranked suggestion
+ * and no block earns the top-priority severity escalation.
+ * `factorEvppiGuidance` is the shared strict, readiness-gated decision; its
+ * default `null` preserves ordinary evidence while withholding science rank.
  *
  * factor_ref + target_refs primary entry resolved via lookup; on miss
  * the block is DROPPED rather than emitting `id`-as-label (per §0.1).
@@ -1151,15 +1180,30 @@ export function buildEvidenceBlocks(
   confidenceLookup: ReadonlyMap<string, 'high' | 'medium' | 'low'>,
   ctx: BlockBuildCtx,
   interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null = null,
 ): readonly EvidenceBlock[] {
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
   const enhancements = readRecord(dr.evidence_enhancements);
   if (enhancements === null) return [];
 
+  const selectedGuidance = factorEvppiGuidance?.outcome === 'selected'
+    ? factorEvppiGuidance
+    : null;
+  const selectedPriorityId = selectedGuidance?.factorId ?? null;
+
+  const orderedEntries = Object.entries(enhancements);
+  if (selectedPriorityId !== null) {
+    const priorityIndex = orderedEntries.findIndex(([factorId]) => factorId === selectedPriorityId);
+    if (priorityIndex > 0) {
+      const [priorityEntry] = orderedEntries.splice(priorityIndex, 1);
+      if (priorityEntry !== undefined) orderedEntries.unshift(priorityEntry);
+    }
+  }
+
   const blocks: EvidenceBlock[] = [];
   let rank = 0;
-  for (const [factorId, rawEntry] of Object.entries(enhancements)) {
+  for (const [factorId, rawEntry] of orderedEntries) {
     const entry = readRecord(rawEntry);
     if (entry === null) continue;
 
@@ -1177,9 +1221,11 @@ export function buildEvidenceBlocks(
       continue;
     }
 
-    const specificAction = typeof entry.specific_action === 'string'
-      ? entry.specific_action.trim()
-      : '';
+    const specificAction = factorId === selectedPriorityId
+      ? (selectedGuidance?.specificAction ?? '')
+      : typeof entry.specific_action === 'string'
+        ? entry.specific_action.trim()
+        : '';
     if (specificAction.length === 0) {
       // Codex correction #2: drop the block rather than emit awkward
       // filler when the actionable verb is missing.
@@ -1212,26 +1258,40 @@ export function buildEvidenceBlocks(
     // and the `factor_sensitivity[].confidence` field is OPTIONAL per the
     // contract test at `decision-review-enricher.contract.test.ts:321`.
     // Without a real signal, any band we assigned would silently mislabel
-    // the block (e.g. 'low' → severity critical/warning). The evidence-
-    // gap insight still surfaces via the `evidence_priority`
-    // ReviewCardBlock (which has no current_confidence field).
+    // the block (e.g. 'low' → severity critical/warning). A separate
+    // `evidence_priority` ReviewCard can still surface the exact producer-
+    // ranked factor with a deterministic number-free action; this richer
+    // channel correctly emits nothing rather than fabricating confidence.
     const currentConfidence = confidenceLookup.get(factorId);
     if (currentConfidence === undefined) continue;
     rank++;
 
-    // Severity per the deterministic scheme: low confidence + top-1 →
-    // critical; low confidence otherwise → warning; else info.
+    // Only the exact producer-ranked EVPPI factor may earn the top-priority
+    // escalation. LLM object order alone never creates a scientific critical.
     let severity: Phase3BlockSeverityLiteral = 'info';
     if (currentConfidence === 'low') {
-      severity = rank === 1 ? 'critical' : 'warning';
+      severity = factorId === selectedPriorityId ? 'critical' : 'warning';
     }
 
+    // The selected factor's display label is the exact same-run
+    // factor_sensitivity label already safety-checked by the strict guidance
+    // selector. The graph lookup remains structural identity authority, but it
+    // cannot silently replace that analysis-run label with a renamed/current
+    // label. Non-priority evidence keeps its historical graph label.
+    const factorLabel = factorId === selectedPriorityId
+      ? selectedGuidance!.factorLabel
+      : factorRef.label;
+    const factorTargetRef = {
+      id: factorRef.id,
+      label: factorLabel,
+      kind: 'factor' as const,
+    };
     const candidate = {
       ...commonMetadata('evidence', factorId, ctx),
       type: 'evidence' as const,
-      factor_label: factorRef.label,
-      factor_ref: { id: factorRef.id, label: factorRef.label, kind: 'factor' as const },
-      target_refs: [{ id: factorRef.id, label: factorRef.label, kind: 'factor' as const }],
+      factor_label: factorLabel,
+      factor_ref: factorTargetRef,
+      target_refs: [factorTargetRef],
       current_confidence: currentConfidence,
       evidence_gap: truncate(rationale, BODY_MAX),
       suggested_technique: suggestedTechnique,
@@ -1330,7 +1390,7 @@ export function buildStaleRerunCoachingBlock(
  * (`selectLens === null`, the load-bearing negative), NO block is emitted.
  *
  * `source: 'deterministic_signal'` is the honest provenance: this suggestion is
- * derived from the analysis SIGNALS (option/factor sensitivity, EVPI,
+ * derived from the analysis SIGNALS (option/factor sensitivity, per-factor EVPPI,
  * confidence tier), NOT from the LLM `decision_review` pass.
  *
  * NO `action_intent` chip: the on-card action_intent affordance is inert on the
@@ -1728,6 +1788,11 @@ export function buildLensSuggestionCoachingBlock(
 export function liveLensExecutorAvailability(): LensSelectorOptions {
   return {
     executorAvailable: {
+      // REPLACED on the live wire by the exact factor-scoped EvidenceBlock /
+      // ReviewCard chain. Keep the LensId and pure selector behaviour for
+      // persisted history/telemetry compatibility, but do not let the generic
+      // announcement occupy or distort the production intervention slot.
+      evpi_evidence_priority: false,
       what_if_counterfactual: whatIfSuggestionExecutorAvailable(Boolean(config.isl.baseUrl)),
     },
   };
@@ -2061,16 +2126,16 @@ export function buildLensSurface(
  *                           refuse. Unblocking it is a Tier-3 ratification
  *                           decision, not a builder.
  *
- *   evpi_evidence_priority→ ComparisonBlock: NOT BUILT. Its payload is
- *                           `option_comparison[].win_probability`, and
- *                           `option_comparison` is deliberately NOT in Lock 2
- *                           (`TIER2_COACHING_ALLOWLIST`) — lens-selector.ts's
- *                           `GROUNDING_FIELD_BY_RATIONALE` comment states the
- *                           omission is intentional and serves as a live cage
- *                           DENIAL control. Adding it is Brief 4 gate G2: a
- *                           per-field decision with science sign-off, not a
- *                           build-lane edit. (The EVPI lens's evidence is already
- *                           surfaced first-class by the EvidenceBlocks.)
+ *   evpi_evidence_priority→ ComparisonBlock: NOT BUILT. The genuine authority
+ *                           is now `factor_evppi`, whose outcome-unit magnitude
+ *                           has no licensed rendering. The lens and evidence
+ *                           channels carry only the producer-ranked factor
+ *                           identity and a matching usable action; they never
+ *                           substitute `option_comparison`, the retired
+ *                           `factor_sensitivity[].evpi_percentage_points`
+ *                           heuristic, or an LLM object's order. A numeric
+ *                           comparison block would need a separate units/copy
+ *                           ruling, not a builder in this lane.
  *
  *   consider_opposite     → ExerciseBlock (DSK slice 1, deterministic): fixed
  *                           instruction copy in `counter_case`, target_ref =
@@ -2985,53 +3050,79 @@ function buildRobustnessCard(
 }
 
 function buildEvidencePriorityCard(
-  dr: Record<string, unknown>,
+  guidance: FactorEvppiPriorityGuidanceDecision | null,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
-  interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
 ): ReviewCardBlock | null {
-  const enhancements = readRecord(dr.evidence_enhancements);
-  if (enhancements === null) return null;
-  const entries = Object.entries(enhancements);
-  if (entries.length === 0) return null;
-  // Take the top entry — emission order ≈ voi rank per the v11 prompt.
-  for (const [factorId, rawEntry] of entries) {
-    const entry = readRecord(rawEntry);
-    if (entry === null) continue;
+  if (guidance?.outcome !== 'selected') return null;
+  const factorId = guidance.factorId;
+  const ref = lookup.get(factorId);
+  if (ref === undefined || ref.kind !== 'factor') return null;
 
-    // Doctrine D-U F2: never crown an option-set LEVER as the highest-leverage
-    // "evidence gap to strengthen". Skip it and let the next non-lever gap take
-    // the card (channel preserved); if none remains, no card is emitted.
-    if (isLeverFactor(factorId, interventionControlledFactorIds)) continue;
-    const rationale = typeof entry.rationale === 'string'
-      ? entry.rationale.trim()
-      : '';
-    if (rationale.length === 0) continue;
-    const ref = lookup.get(factorId);
-    if (ref === undefined || ref.kind !== 'factor') continue;
-    const candidate = {
-      ...commonMetadata('review:evidence_priority', factorId, ctx),
-      type: 'review_card' as const,
-      card_kind: 'evidence_priority' as const,
-      title: truncate(`Highest-leverage evidence gap: ${ref.label}`, TITLE_MAX),
-      body: truncate(rationale, BODY_MAX),
-      ...reviewCardSignals('evidence_priority', 'info'),
-      target_refs: [ref],
-      priority_rank: 60,
-      action_intent: 'gather_evidence' as ActionIntentLiteral,
-      action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
-    };
-    return validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
-      block_type: 'review_card',
-      kind: 'evidence_priority',
-      prose: [
-        { name: 'title', value: candidate.title },
-        { name: 'body', value: candidate.body },
-        { name: 'action_label', value: candidate.action_label },
-      ],
-    });
+  // A same-factor Decision Review action may enrich the card, but it never
+  // justifies the rank and is never required. The deterministic fallback is
+  // deliberately number-free and asks the human to strengthen evidence rather
+  // than fabricating a replacement value.
+  const specificAction = guidance.specificAction ?? '';
+  const body = specificAction.length > 0
+    ? specificAction
+    : `Review the evidence behind the current estimate or range for ${guidance.factorLabel}, then gather relevant data or expert judgement to narrow that uncertainty.`;
+  const targetRef = {
+    id: ref.id,
+    label: guidance.factorLabel,
+    kind: 'factor' as const,
+  };
+
+  const candidate = {
+    ...commonMetadata(
+      'review:evidence_priority',
+      factorId,
+      ctx,
+      specificAction.length > 0 ? SOURCE_HANDLER : FACTOR_EVPPI_SOURCE_HANDLER,
+    ),
+    type: 'review_card' as const,
+    card_kind: 'evidence_priority' as const,
+    title: truncate(`Evidence to strengthen first: ${guidance.factorLabel}`, TITLE_MAX),
+    body: truncate(body, BODY_MAX),
+    ...reviewCardSignals('evidence_priority', 'info'),
+    target_refs: [targetRef],
+    priority_rank: 60,
+    action_intent: 'gather_evidence' as ActionIntentLiteral,
+    action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
+  };
+  return validateProseAndSchemaOrDrop(ReviewCardBlockSchema, candidate, {
+    block_type: 'review_card',
+    kind: 'evidence_priority',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+      { name: 'action_label', value: candidate.action_label },
+    ],
+  });
+}
+
+/**
+ * One eligibility join for every graph-backed evidence-priority block.
+ * Graph factor identity and the union-lever exclusion are structural product
+ * authorities; the EVPPI reader owns science order/status/partiality. Keeping
+ * the join here prevents the evidence list and its companion card from
+ * answering the same run differently.
+ */
+export function selectEvidencePriorityGuidance(
+  fact: RunAnalysisHandlerFact,
+  lookup: GraphNodeLookup,
+  interventionControlledFactorIds: ReadonlySet<string>,
+): FactorEvppiPriorityGuidanceDecision {
+  const eligibleFactorIds = new Set<string>();
+  for (const [factorId, ref] of lookup) {
+    if (ref.kind === 'factor' && !isLeverFactor(factorId, interventionControlledFactorIds)) {
+      eligibleFactorIds.add(factorId);
+    }
   }
-  return null;
+
+  return selectFactorEvppiPriorityGuidance(fact.result.enrichment, {
+    eligibleFactorIds,
+  });
 }
 
 function buildAssumptionCards(
@@ -3231,11 +3322,12 @@ function commonMetadata(
   prefix: string,
   key: string,
   ctx: BlockBuildCtx,
+  sourceHandler: string = SOURCE_HANDLER,
 ): {
   readonly block_id: string;
   readonly signal_id: string;
   readonly created_at: string;
-  readonly source_handler: typeof SOURCE_HANDLER;
+  readonly source_handler: string;
   readonly graph_hash_at_generation: string;
   readonly freshness: 'fresh' | 'stale';
 } {
@@ -3244,7 +3336,7 @@ function commonMetadata(
     block_id: deterministicBlockId(signal_id),
     signal_id,
     created_at: ctx.created_at,
-    source_handler: SOURCE_HANDLER,
+    source_handler: sourceHandler,
     graph_hash_at_generation: ctx.graph_hash_at_generation,
     freshness: ctx.freshness ?? 'fresh',
   };

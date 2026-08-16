@@ -580,7 +580,7 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     }
   });
 
-  it('evidence_gap composer surfaces gaps from readiness AND fragile edges', () => {
+  it('known non-ready evidence_gap composer returns only canonical readiness recovery', () => {
     const out = tryPostAnalysisAdviceGate({
       message: "What's missing?",
       analysis: FIXTURE_ANALYSIS,
@@ -589,9 +589,11 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toMatch(/biggest open gap/i);
-      // Either the fragile edge or a readiness gap appears
-      expect(out.assistant_text.length).toBeGreaterThan(40);
+      expect(out.copy_source).toBe('readiness');
+      expect(out.assistant_text).toContain('configure "Hire two senior engineers locally"');
+      expect(out.assistant_text).not.toContain('Delivery risk');
+      expect(out.assistant_text).not.toContain('Successful launch');
+      expect(out.assistant_text).not.toMatch(/biggest open gap/i);
     }
   });
 
@@ -1506,9 +1508,10 @@ describe('tryPostAnalysisAdviceGate — suggested_actions per class', () => {
 // brief's canonical phrasings ("What should we validate?", "How do we
 // build confidence?", "What assumptions should we test?", and the exact
 // long workstream prompt) deterministically. composeEvidenceGap prefers
-// `evidence_enhancements[].specific_action` + `key_assumptions[0]` when a
-// decision_review record is threaded through; otherwise falls back to the
-// projection-only behaviour preserved from PR #178.
+// the exact `evidence_enhancements[factor_id].specific_action` selected by the
+// producer-ranked factor EVPPI identity; otherwise it falls back to the
+// projection-only behaviour preserved from PR #178. LLM object order and
+// generic assumptions are not ranking authorities.
 // =========================================================================
 describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)', () => {
   const SAMPLE_DECISION_REVIEW: Record<string, unknown> = Object.freeze({
@@ -1601,34 +1604,141 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     if (out.matched) expect(out.advice_class).toBe('evidence_gap');
   });
 
-  it('composeEvidenceGap uses decision_review.evidence_enhancements when present', () => {
+  it('decision-review action order alone cannot select evidence guidance', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.advice_class).toBe('evidence_gap');
-      // Opener
-      expect(out.assistant_text).toContain('To build confidence in this analysis');
-      // Pulls the first two specific_action strings verbatim
-      expect(out.assistant_text).toContain(
-        'Pull on-time delivery rates from the last two releases and check the variance.',
-      );
+      expect(out.copy_source).not.toBe('decision_review');
+      expect(out.assistant_text).not.toContain('Pull on-time delivery rates');
+      expect(out.assistant_text).not.toContain('Talk to the finance team');
+      expect(out.assistant_text).not.toContain('The local senior hiring market');
+    }
+  });
+
+  it('live priority path returns only the exact producer-ranked factor action', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_READY,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_cost_overrun_risk',
+        factorLabel: 'Cost overrun risk',
+        specificAction: 'Talk to the finance team about historical overruns on similar engagements.',
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('factor_evppi');
+      expect(out.assistant_text).toContain('The first evidence priority from this analysis is Cost overrun risk:');
       expect(out.assistant_text).toContain(
         'Talk to the finance team about historical overruns on similar engagements.',
       );
-      // First key_assumption surfaces as a follow-up line
-      expect(out.assistant_text).toContain('One assumption worth testing alongside this');
-      expect(out.assistant_text).toContain(
-        'The local senior hiring market will remain as competitive as it is today.',
-      );
-      // Does NOT fall through to the projection-only "biggest open gap"
-      // sentence when enrichment is the source of truth
-      expect(out.assistant_text).not.toMatch(/^The biggest open gap/);
+      expect(out.assistant_text).not.toContain('Pull on-time delivery rates');
+      expect(out.assistant_text).not.toContain('The local senior hiring market');
+      expect(out.assistant_text).not.toContain('fac_cost_overrun_risk');
+    }
+  });
+
+  it.each([
+    ['needs_user_mapping', READY_PAYLOAD_OPEN],
+    [
+      'needs_encoding',
+      {
+        ...READY_PAYLOAD_OPEN,
+        status: 'needs_encoding',
+        options: READY_PAYLOAD_OPEN.options.map((option) => ({
+          ...option,
+          status: 'needs_encoding' as const,
+        })),
+      } as AnalysisReadyPayload,
+    ],
+    [
+      'needs_user_input',
+      { status: 'needs_user_input', goal_node_id: 'goal_1', options: [] } as AnalysisReadyPayload,
+    ],
+    [
+      'blocked',
+      {
+        status: 'blocked',
+        goal_node_id: '',
+        options: [],
+        blockers: [{ blocker_type: 'missing_value' }],
+      } as AnalysisReadyPayload,
+    ],
+    [
+      'blocked with sparse optional detail carrier',
+      { status: 'blocked' } as AnalysisReadyPayload,
+    ],
+  ])('known non-ready %s returns readiness-only copy despite selected EVPPI guidance', (_status, readiness) => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: readiness,
+      freshness: 'fresh',
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_cost_overrun_risk',
+        factorLabel: 'Cost overrun risk',
+        specificAction: 'Talk to the finance team about historical overruns.',
+      },
+    });
+
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('readiness');
+      expect(out.suggested_actions).toEqual([]);
+      expect(out.assistant_text).not.toContain('Cost overrun risk');
+      expect(out.assistant_text).not.toContain('Talk to the finance team');
+      expect(out.assistant_text).not.toContain('The first evidence priority');
+    }
+  });
+
+  it('unknown readiness cannot be rescued by otherwise-valid EVPPI guidance', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
+      freshness: 'fresh',
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_delivery_risk',
+        factorLabel: 'Delivery reliability',
+        specificAction: null,
+      },
+    });
+
+    expect(out).toStrictEqual({
+      matched: false,
+      reason: 'data_unavailable_for_class',
+      advice_class: 'evidence_gap',
+      missing_inputs: ['analysis_ready_or_top_drivers'],
+    });
+  });
+
+  it('live priority refusal never falls back to LLM enhancement or assumption order', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_READY,
+      freshness: 'fresh',
+      decisionReview: SAMPLE_DECISION_REVIEW,
+      factorEvppiGuidance: { outcome: 'not_selected', reason: 'producer_partial' },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).not.toBe('decision_review');
+      expect(out.assistant_text).not.toContain('Pull on-time delivery rates');
+      expect(out.assistant_text).not.toContain('Talk to the finance team');
+      expect(out.assistant_text).not.toContain('The local senior hiring market');
     }
   });
 
@@ -1636,7 +1746,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       // decisionReview deliberately omitted
     });
@@ -1647,7 +1757,51 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
       // or the fragile-edge / top-driver narrative
       expect(out.assistant_text).toMatch(/biggest open gap/i);
       // Should NOT contain enrichment-only opener
-      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+      expect(out.assistant_text).not.toContain('The first evidence priority from this analysis');
+    }
+  });
+
+  it('serves deterministic exact-factor guidance when decision review is absent', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_READY,
+      freshness: 'fresh',
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_delivery_risk',
+        factorLabel: 'Delivery reliability',
+        specificAction: null,
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('factor_evppi');
+      expect(out.assistant_text).toContain(
+        'The first evidence priority from this analysis is Delivery reliability.',
+      );
+      expect(out.assistant_text).toContain('gather relevant data or expert judgement');
+      expect(out.assistant_text).not.toMatch(/\b0(?:\.\d+)?\b|evppi/i);
+    }
+  });
+
+  it('treats exact EVPPI guidance as sufficient evidence-gap input on its own', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
+      analysisReady: READY_PAYLOAD_READY,
+      freshness: 'fresh',
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_delivery_risk',
+        factorLabel: 'Delivery reliability',
+        specificAction: null,
+      },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.assistant_text).toContain('Delivery reliability');
+      expect(out.copy_source).toBe('factor_evppi');
     }
   });
 
@@ -1655,7 +1809,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: {
         produced_at: '2026-05-21T10:00:00.000Z',
@@ -1668,7 +1822,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
       // No enhancements + no assumptions → enrichment helper returns null,
       // composer falls back to projection-only behaviour.
       expect(out.assistant_text).toMatch(/biggest open gap/i);
-      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+      expect(out.assistant_text).not.toContain('The first evidence priority from this analysis');
     }
   });
 
@@ -1679,7 +1833,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: {
         produced_at: '2026-05-21T10:00:00.000Z',
@@ -1695,7 +1849,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toMatch(/biggest open gap/i);
-      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+      expect(out.assistant_text).not.toContain('The first evidence priority from this analysis');
     }
   });
 
@@ -1703,9 +1857,13 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
+      factorEvppiGuidance: {
+        outcome: 'selected', factorId: 'fac_delivery_risk', factorLabel: 'Delivery risk',
+        specificAction: 'Pull on-time delivery rates from the last two releases and check the variance.',
+      },
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
@@ -1734,9 +1892,13 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
+      factorEvppiGuidance: {
+        outcome: 'selected', factorId: 'fac_delivery_risk', factorLabel: 'Delivery risk',
+        specificAction: 'Pull on-time delivery rates from the last two releases and check the variance.',
+      },
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
@@ -1788,7 +1950,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
         ...FIXTURE_ANALYSIS,
         fragile_edges: [{ from_label: '   ', to_label: 'Successful launch' }],
       },
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
@@ -1835,7 +1997,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
         top_drivers: [{ factor_label: '   ', sensitivity_value: 0.45 }],
         fragile_edges: [],
       },
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
@@ -1864,16 +2026,20 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: CHIP_MESSAGE,
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
+      factorEvppiGuidance: {
+        outcome: 'selected', factorId: 'fac_delivery_risk', factorLabel: 'Delivery risk',
+        specificAction: 'Pull on-time delivery rates from the last two releases and check the variance.',
+      },
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.advice_class).toBe('evidence_gap');
-      // With enrichment, the validation-aware lead is the
-      // decision_review-grounded opener.
-      expect(out.assistant_text).toContain('To build confidence in this analysis');
+      // With a producer priority, the validation-aware lead is the exact
+      // decision-review action joined by factor identity.
+      expect(out.assistant_text).toContain('The first evidence priority from this analysis');
     }
   });
 
@@ -2724,17 +2890,17 @@ describe('post-analysis stays grounded when decision_review is unavailable (by-d
       expect(out.advice_class).toBe('evidence_gap');
       // Grounded in the projection (fragile edge / top driver), not a template.
       expect(out.assistant_text).toMatch(/biggest open gap/i);
-      expect(out.assistant_text).not.toContain('To build confidence in this analysis');
+      expect(out.assistant_text).not.toContain('The first evidence priority from this analysis');
     }
   });
 });
 
 describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
-  it('tags evidence_gap from decision_review when usable evidence_enhancements exist', () => {
+  it('tags evidence_gap from factor_evppi while recording optional decision-review enrichment', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: {
         produced_at: '2026-05-21T10:00:00.000Z',
@@ -2743,10 +2909,17 @@ describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
         },
         key_assumptions: ['The hiring market stays as competitive as today.'],
       },
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_a',
+        factorLabel: 'Delivery timing',
+        specificAction: 'Pull the last two quarters of delivery data and check the variance.',
+      },
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.copy_source).toBe('decision_review');
+      expect(out.copy_source).toBe('factor_evppi');
+      expect(out.coaching_fields_used).toContain('factor_evppi');
       expect(out.coaching_fields_used).toContain('decision_review');
     }
   });

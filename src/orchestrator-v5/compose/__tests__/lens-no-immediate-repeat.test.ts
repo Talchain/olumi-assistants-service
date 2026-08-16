@@ -1,7 +1,7 @@
 /**
  * ROADMAP 2.211 — the NO-IMMEDIATE-REPEAT amendment to the locked lens priority.
  *
- * The priority ORDER is unchanged (flip-risk → pre-mortem → EVPI → what-if).
+ * The priority ORDER is unchanged (flip-risk → pre-mortem → EVPPI → what-if).
  * What is added: when the SAME lens fired on the immediately-preceding analysis
  * turn of this scenario AND at least one other lens's trigger is currently
  * true (with an available executor), the selector takes the NEXT-priority
@@ -31,8 +31,6 @@ interface FactorInput {
   readonly factor_id?: string;
   readonly influence_score?: number;
   readonly influence_rank?: number;
-  readonly evpi_percentage_points?: number;
-  readonly evpi_status?: string;
   readonly confidence?: number | null;
   readonly flip_risk_category?: string;
 }
@@ -81,7 +79,7 @@ const BOTH_TRIGGER: EnrichmentInput = {
 /**
  * ONLY flip-risk triggers. Rule 2 is silent on all three doors (tier `strong`,
  * rank-1 confidence bands `medium`, max win_probability 0.85 ≥ MAX) and rule 3
- * is silent (no EVPI). Repeating IS correct here.
+ * is silent (no EVPPI). Repeating IS correct here.
  */
 const ONLY_FLIP_RISK_TRIGGERS: EnrichmentInput = {
   confidence_tier: 'strong',
