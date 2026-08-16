@@ -5,7 +5,13 @@
     "source_environment": "synthetic",
     "contract_version": "0.3.0",
     "capture_date": "2026-04-16",
-    "scenario_tags": ["a0", "ingress", "egress", "valid", "a1-direct-answer"],
+    "scenario_tags": [
+      "a0",
+      "ingress",
+      "egress",
+      "valid",
+      "a1-direct-answer"
+    ],
     "expected_result_class": "pass",
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
@@ -13,8 +19,9 @@
     "note_a1": "A0 originally expected a FEATURE_NOT_ENABLED envelope. A1 replaced the stub with TurnExecutor, so this fixture now asserts a direct_answer success envelope; the B1 ingress/egress boundary behaviour it was designed to cover is unchanged.",
     "note_v0_7_0": "v5-handler-surface brief updated this fixture to the v0.7.0 discriminated-union shape (kind: 'message', required source).",
     "note_v5_maintenance": "v5-maintenance brief changed stage from 'frame' to 'analyse' and message from 'Should we expand into Germany next quarter?' to a neutral question so the payload does NOT match route-v2's draft_graph dispatch trigger (stage=frame + no graph + decision keywords). This fixture exercises the TurnExecutor text_only path at the B1 boundary; draft_graph has its own dedicated route-v2-draft-graph.test.ts.",
-    "note_v5_context_compose": "Task 2.1 (chip generation) — analyse stage with no analysis and no graph emits a 'Review model gaps' conversational prompt; the executable Run analysis chip remains gated on exact canonical readiness.",
-    "note_roadmap_1132_f1": "ROADMAP 1.132 F1 (PR #616): the deterministic egress answer-shape fallback now synthesises `_answer_shape` for the model's own un-shaped multi-sentence ANSWER prose and SETS assistant_text := deriveAnswerTextFromShape(shape) (headline + blank line + detail) to preserve the sidecar byte-equality tie. Expected assistant_text therefore carries the '\\n\\n' join and the wire now carries the `_answer_shape` sidecar — the identical additive key coach/converse turns have shipped unconditionally since the F1 flag deletion."
+    "note_v5_context_compose": "Task 2.1 (chip generation) \u2014 analyse stage with no analysis and no graph emits a 'Review model gaps' conversational prompt; the executable Run analysis chip remains gated on exact canonical readiness.",
+    "note_roadmap_1132_f1": "ROADMAP 1.132 F1 (PR #616): the deterministic egress answer-shape fallback now synthesises `_answer_shape` for the model's own un-shaped multi-sentence ANSWER prose and SETS assistant_text := deriveAnswerTextFromShape(shape) (headline + blank line + detail) to preserve the sidecar byte-equality tie. Expected assistant_text therefore carries the '\\n\\n' join and the wire now carries the `_answer_shape` sidecar \u2014 the identical additive key coach/converse turns have shipped unconditionally since the F1 flag deletion.",
+    "note_analysis_state_v1": "schemas 0.46.0 / analysis-state authority step 3: CEE now composes one `analysis_state` verdict per turn at the V5 finaliser, so this synthetic envelope gains the key. Its content is the HONEST verdict for this turn and was not chosen to make the test pass: this is a text-only direct_answer with no prior successful analysis, hence run_state `never_run`; no readiness payload was supplied, hence the producer-owned `unknown` status (which is NOT a synonym for `blocked`); nothing is usable because there is no result; and `leader_claim.permitted` is false with `separation_unavailable` because the claim is a CONJUNCTION of CEE entitlement AND engine separation, and no separation was computed on a turn that ran no analysis. Every other key in this body is UNCHANGED \u2014 the additive guarantee is proven separately against a capture taken on a clone at the PR base (staging bacf35d5, schemas 0.44.0)."
   },
   "mock_narrate_output": "Expanding into Germany depends on regulatory readiness, localisation cost, and the payoff of the additional market. Name the biggest uncertainty first.",
   "request": {
@@ -45,7 +52,27 @@
         }
       ],
       "insights": [],
-      "stage_indicator": "analyse"
+      "stage_indicator": "analyse",
+      "analysis_state": {
+        "run_state": {
+          "kind": "never_run"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "separation_unavailable"
+        },
+        "robustness": {},
+        "usable_for_prose": false,
+        "usable_for_chips": false,
+        "usable_for_followup": false,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      }
     },
     "telemetry": {
       "boundary_validation_event_count": 2,

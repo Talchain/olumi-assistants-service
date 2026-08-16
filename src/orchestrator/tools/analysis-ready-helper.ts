@@ -570,7 +570,18 @@ function structuralIssue(
   };
 }
 
-function blockerIssue(
+/**
+ * Map ONE wire `analysis_ready` blocker onto a canonical readiness issue.
+ *
+ * EXPORTED for the `analysis_state` composer (schemas 0.46.0), which needs the
+ * same code/category/message/repairability verdict for the wire contract's
+ * `AnalysisBlocker`. Imported rather than re-implemented on purpose: two
+ * mappers would be two authorities on what `missing_connection` means, and the
+ * estate's chronic defect is exactly that shape. Returns `null` for a blocker
+ * whose `blocker_type` this mapper does not recognise — a caller drops it
+ * rather than inventing a category for it.
+ */
+export function blockerIssue(
   blocker: unknown,
   ordinal: number,
   status: string,
