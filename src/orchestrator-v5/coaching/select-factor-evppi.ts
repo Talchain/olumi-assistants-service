@@ -35,6 +35,7 @@ const FactorEvppiPriorityRowSchema = EnrichmentFactorEvppiEntrySchema.pick({
 });
 
 const FACTOR_EVPPI_PARTIAL_WARNING_CODE = 'FACTOR_EVPPI_PARTIAL';
+const ENRICHMENT_CONTRACT_MISMATCH_WARNING_CODE = 'ENRICHMENT_CONTRACT_MISMATCH';
 const UNSAFE_LABEL_FORMAT_CODEPOINT_RE =
   /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
 
@@ -43,6 +44,7 @@ type FactorEvppiPriorityRow = ReturnType<typeof FactorEvppiPriorityRowSchema.par
 export type FactorEvppiPriorityRefusalReason =
   | 'absent'
   | 'producer_partial'
+  | 'transport_contract_mismatch'
   | 'warning_carrier_unreadable'
   | 'all_below_resolution'
   | 'unreadable_before_priority'
@@ -215,6 +217,15 @@ export function selectFactorEvppiPriority(
       }
       if (parsedWarning.code === FACTOR_EVPPI_PARTIAL_WARNING_CODE) {
         return { outcome: 'not_selected', reason: 'producer_partial' };
+      }
+      if (parsedWarning.code === ENRICHMENT_CONTRACT_MISMATCH_WARNING_CODE) {
+        // PLoT's egress guard may withhold a malformed factor_evppi row and
+        // disclose the removal under this envelope-wide warning. It does not
+        // rewrite that disclosure as FACTOR_EVPPI_PARTIAL. Promoting the next
+        // surviving row would therefore invent a rank the transported array
+        // no longer proves. Refuse the whole priority without parsing warning
+        // prose or relying on PLoT's internal `_meta` evidence carrier.
+        return { outcome: 'not_selected', reason: 'transport_contract_mismatch' };
       }
     }
   }

@@ -99,6 +99,22 @@ describe('selectFactorEvppiPriority', () => {
     ).toStrictEqual({ outcome: 'selected', factorId: 'fac_first' });
   });
 
+  it('refuses a ranking whose transport contract may have withheld an earlier row', () => {
+    expect(
+      selectFactorEvppiPriority({
+        factor_evppi: [row('fac_surviving_first', 0.5, 'resolved')],
+        inference_warnings: [
+          {
+            code: 'ENRICHMENT_CONTRACT_MISMATCH',
+          },
+        ],
+      }),
+    ).toStrictEqual({
+      outcome: 'not_selected',
+      reason: 'transport_contract_mismatch',
+    });
+  });
+
   it.each([
     ['non-array warning carrier', { code: 'FACTOR_EVPPI_PARTIAL' }],
     ['non-object warning entry', ['FACTOR_EVPPI_PARTIAL']],
