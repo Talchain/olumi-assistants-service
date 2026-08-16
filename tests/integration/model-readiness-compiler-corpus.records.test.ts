@@ -21,7 +21,10 @@ import {
   type V3DraftGraphResponse,
 } from '../../src/cee/transforms/schema-v3.js';
 import type { V1DraftGraphResponse } from '../../src/cee/transforms/schema-v2.js';
-import { composeConfigureOptionClarifyResponse } from '../../src/orchestrator-v5/compose/configure-option-clarify-response.js';
+import {
+  composeConfigureOptionClarifyResponse,
+  CONFIGURE_OPTION_EXAMPLE_VALUE,
+} from '../../src/orchestrator-v5/compose/configure-option-clarify-response.js';
 import { buildConfigureOptionChipMessage } from '../../src/orchestrator-v5/configure-option-chip-text.js';
 import { shouldInterceptBeforeEditLane } from '../../src/orchestrator-v5/routing/configure-option-clarify.js';
 import {
@@ -262,7 +265,13 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
       factorLabels: intercept.factorLabels,
       stage: 'analyse',
     });
-    expect(response.assistant_text).toContain('<0-1>');
+    // ⚠ WAS `toContain('<0-1>')` (row 2.1235 / NEW-5). That placeholder reached
+    // real user copy — a strategic user was asked to hand-expand a template
+    // inside a command string — so the value slot now carries a concrete
+    // number. Derived from the exported constant, never transcribed, and pinned
+    // against the CLASS so any future `<...>` slot REDs here.
+    expect(response.assistant_text).toContain(CONFIGURE_OPTION_EXAMPLE_VALUE);
+    expect(response.assistant_text).not.toMatch(/<[^>]{1,20}>/);
     expect(response.assistant_text).toContain(temporalLabel);
     expect(response.assistant_text).toContain('Monthly Subscription Price');
     expect(response.suggested_actions).toEqual([]);
