@@ -39,7 +39,7 @@ const compose = (valueAlreadySupplied: boolean) =>
   composeConfigureOptionClarifyResponse({
     optionLabel: OPTION,
     factorLabels: [FACTOR],
-    stage: 'ideate',
+    stage: 'analyse',
     valueAlreadySupplied,
   }).assistant_text;
 
