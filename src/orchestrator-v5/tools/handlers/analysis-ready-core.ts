@@ -45,6 +45,7 @@ import {
   type CanonicalReadinessRepairProposal,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { computeScaffoldPlan, type ScaffoldPlan } from './analysable-option-gate.js';
 
 // ============================================================================
 // Neutral verdict vocabulary
@@ -181,6 +182,187 @@ export function ep2State(result: ReadinessResult): Ep2State {
     default:
       return 'blocked';
   }
+}
+
+// ============================================================================
+// RUN ADMISSION — the TWO-TERM gate (row 2.1235 / NEW-1 / L-63)
+// ============================================================================
+
+/**
+ * THE ONE ADMISSION PREDICATE. Both the `/graph-readiness` route and the V5 run
+ * path read this, so "may analysis run?" has exactly one answer per graph.
+ *
+ * ## Why it exists — the drift it closes, measured
+ *
+ * F4 (21 Jul) fixed a readiness↔run disagreement in ONE direction: the run
+ * proceeded on a partly-configured model while the panel said "blocked". The
+ * cure was `scaffold_plan.will_scaffold_options` — a pre-run PROJECTION of what
+ * `gateAnalysableOptions` would do — and the deployed UI composes it as
+ *     allowed = can_run_analysis || scaffold_plan.will_scaffold_options
+ * (`DecisionGuideAI@f15bccaf canRunAnalysis.ts:230-232`, `:255`).
+ *
+ * **#983 then moved the RUN's admission UPSTREAM of the gate that projection
+ * describes, and the drift flipped direction.** `build-turn-context.ts` now
+ * refuses on `assessAnalysisReadiness` alone — a ONE-term gate — and throws
+ * before `run-analysis.ts` §2.55 can exclude anything. So the panel offers a Run
+ * the server refuses: F4's symptom, mirrored.
+ *
+ * Measured at deployed CEE `2988eac` (2026-08-16), `/assist/v1/graph-readiness`,
+ * three arms of one graph — the probe DISCRIMINATES, so this is not instrument
+ * blindness:
+ *
+ *   | options configured | can_run_analysis | will_scaffold_options | diverges |
+ *   |--------------------|------------------|-----------------------|----------|
+ *   | 4 of 4             | true             | false                 | no       |
+ *   | **2 of 4**         | **false**        | **true**              | **YES**  |
+ *   | 0 of 4             | false            | false                 | no       |
+ *
+ * The mixed arm is what a FRESH DRAFT produces, which is why a first-time user
+ * could not reach a single analysis in 24 minutes and 9 turns.
+ *
+ * ## What it does NOT do
+ *
+ * It never waives a blocker the exclusion cannot answer. A blocker is waivable
+ * only when the run will drop or hold the very option it names — i.e. it is a
+ * per-option `option_values` / `option_mapping` issue carrying an `option_id`
+ * that {@link computeScaffoldPlan} lists as touched. A structural, numeric or
+ * internal blocker (or an option-value blocker on an option that WILL be
+ * submitted) keeps the refusal, because the run really would fail.
+ *
+ * ⭐ Nothing is fabricated by admitting. The excluded options are dropped from
+ * the PLoT submission and disclosed BY NAME by the existing omitted-suffix
+ * machinery (`coaching/scaffold-disclosure.ts`) — no minted values, no rank, no
+ * win probability. Admission changes WHICH options are compared, never what any
+ * number means.
+ *
+ * TOTAL: never throws. Any internal failure returns the strict verdict, i.e.
+ * today's refusal — an admission gate must fail toward saying no.
+ */
+export interface RunAdmission {
+  /** The strict, whole-model verdict — unchanged, always computed. */
+  readonly strict: ReadinessResult;
+  /** The pre-run projection of the run path's submission decision. */
+  readonly plan: ScaffoldPlan;
+  /**
+   * True when the run WILL proceed: either the model is strictly ready, or
+   * every blocker names an option the run is about to exclude/hold and at least
+   * {@link computeScaffoldPlan}'s two-option minimum survives.
+   */
+  readonly willProceed: boolean;
+  /** Options whose blockers are answered by exclusion/hold, not by the user. */
+  readonly waivedOptionIds: readonly string[];
+  /**
+   * The strict value-preserving canonical graph, or null when a carrier is
+   * unencodable. Null is safe — the caller falls back to the graph it holds.
+   */
+  readonly canonicalGraph: unknown | null;
+}
+
+/** A blocker the exclusion can answer: per-option, and on a touched option. */
+function isWaivableByExclusion(
+  issue: CanonicalReadinessIssue,
+  touchedOptionIds: ReadonlySet<string>,
+): boolean {
+  if (issue.category !== 'option_values' && issue.category !== 'option_mapping') return false;
+  return typeof issue.option_id === 'string' && touchedOptionIds.has(issue.option_id);
+}
+
+/**
+ * Resolve the two-term admission for a graph. Pure and total.
+ */
+export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
+  const strict = assessAnalysisReadiness(rawGraph);
+  const empty: ScaffoldPlan = {
+    will_scaffold_options: false,
+    option_count: 0,
+    scaffolded_option_ids: [],
+  };
+  if (strict.status !== 'unrecoverable') {
+    return {
+      strict,
+      plan: empty,
+      willProceed: true,
+      waivedOptionIds: [],
+      canonicalGraph: strict.canonicalGraph,
+    };
+  }
+  try {
+    const assessment = assessCanonicalAnalysisReadiness(rawGraph);
+    const canonicalGraph = assessment.canonicalGraph;
+    const wireOptions = assessment.analysisReady?.options ?? [];
+    if (wireOptions.length === 0) {
+      return { strict, plan: empty, willProceed: false, waivedOptionIds: [], canonicalGraph: null };
+    }
+    // The SAME predicate the route advertises and `run_analysis` executes —
+    // `computeScaffoldPlan` delegates to `gateAnalysableOptions` rather than
+    // re-deriving, so there is deliberately no second predicate to keep in sync.
+    const plan = computeScaffoldPlan({
+      options: wireOptions.map((option) => ({
+        id: option.option_id,
+        option_id: option.option_id,
+        label: option.label,
+        interventions: option.interventions ?? {},
+        // Carried through so a status-quo arm is HELD rather than excluded,
+        // matching the run path's own gate input. Absent on the wire shape ⇒
+        // undefined ⇒ `isBaselineOption`'s strict `=== true` excludes, which is
+        // the conservative direction (fewer survivors ⇒ readier to refuse).
+        ...((option as { is_baseline?: boolean }).is_baseline === true
+          ? { is_baseline: true }
+          : {}),
+      })),
+      graph: rawGraph,
+      rawPersistedGraph: rawGraph,
+      // Matches run_analysis' pinned-true call site (the egress scale net has
+      // been unconditional since 2026-07-20, O-7 wave 2).
+      scaleNetEnabled: true,
+    });
+    if (!plan.will_scaffold_options) {
+      return { strict, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
+    }
+    const touched = new Set(plan.scaffolded_option_ids);
+    const blockers = assessment.blockingIssues;
+    // EVERY blocker must be answered by the exclusion. One that is not means the
+    // run would fail after admission — the drift in the other direction, which
+    // is exactly what F4 exists to prevent. An EMPTY blocker set cannot reach
+    // here (the strict verdict was `unrecoverable`, which requires ≥1), and
+    // `every` over an empty array is vacuously true, so it is rejected by name
+    // rather than left to a silent vacuous pass.
+    if (blockers.length === 0 || !blockers.every((i) => isWaivableByExclusion(i, touched))) {
+      return { strict, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
+    }
+    return {
+      strict,
+      plan,
+      willProceed: true,
+      waivedOptionIds: [...touched],
+      canonicalGraph,
+    };
+  } catch {
+    // An admission gate fails toward saying no.
+    return { strict, plan: empty, willProceed: false, waivedOptionIds: [], canonicalGraph: null };
+  }
+}
+
+/**
+ * The admitted verdict for a graph the two-term gate lets through. Reported as
+ * `repaired` (not `analysis_ready`): the run is proceeding on a MODIFIED
+ * submission, and calling that "ready" would overstate it.
+ */
+export function admittedVerdict(admission: RunAdmission): ReadinessResult {
+  if (admission.strict.status !== 'unrecoverable') return admission.strict;
+  return {
+    status: 'repaired',
+    reasonCodes: ['OPTIONS_NOT_CONFIGURED'],
+    reasonCategory: 'option_values',
+    deterministicRecovery: false,
+    safeToAnalyse: true,
+    safeToPersist: true,
+    userActionRequired: false,
+    canonicalGraph: admission.canonicalGraph,
+    nextStep: null,
+    issues: admission.strict.issues,
+    repairProposal: null,
+  };
 }
 
 /**

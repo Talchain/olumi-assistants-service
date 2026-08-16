@@ -73,7 +73,7 @@ import {
   assessCanonicalAnalysisReadiness,
   type CanonicalReadinessIssue,
 } from "../../orchestrator/tools/analysis-ready-helper.js";
-import { computeScaffoldPlan } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
+import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 
 /** Default parametric uncertainty. Must be > 0 to satisfy `EdgeStrengthV3`. */
 const SYNTHETIC_STRENGTH_STD = 0.1;
@@ -297,22 +297,23 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
 
   const readinessIssues = assessment.blockingIssues.map(toBlocker);
 
-  // Scaffold projection, computed by the SAME predicate the run path uses, but
-  // fed the CANONICAL options rather than the request's cached payload.
-  const scaffold = computeScaffoldPlan({
-    options: options.map((option) => ({
-      id: option.option_id,
-      option_id: option.option_id,
-      label: option.label,
-      status: option.status,
-      interventions: option.interventions ?? {},
-    })),
-    graph: assessableGraph,
-    rawPersistedGraph: assessableGraph,
-    // Matches run_analysis' pinned-true call site (egress scale net is
-    // unconditional since 2026-07-20, O-7 wave 2).
-    scaleNetEnabled: true,
-  });
+  // Scaffold projection — now the RUN PATH'S OWN ADMISSION OBJECT, not a
+  // parallel computation of it.
+  //
+  // ⚠ IT USED TO BE `computeScaffoldPlan` ALONE, AND THAT WAS HALF THE ANSWER
+  // (row 2.1235 / NEW-1 / L-63, 2026-08-16). `computeScaffoldPlan` reports
+  // whether EXCLUSION leaves a submittable set — it knows nothing about the
+  // OTHER blockers on the graph. So a model with a structural or numeric
+  // blocker AND an unconfigured option advertised `will_scaffold_options: true`
+  // while the run refused, because the deployed UI's gate is
+  //     allowed = can_run_analysis || scaffold_plan.will_scaffold_options
+  // (`DecisionGuideAI@f15bccaf canRunAnalysis.ts:230-232`, `:255`).
+  //
+  // `resolveRunAdmission` is the predicate `build-turn-context.ts` admits on, so
+  // this field now answers its documented question — *"will the run proceed even
+  // though not every option is configured?"* — with the run path's own answer
+  // rather than with a projection of one term of it.
+  const admission = resolveRunAdmission(assessableGraph);
 
   return {
     can_run_analysis: assessment.safeToAnalyse,
@@ -329,8 +330,13 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
       return critiques.length > 0 ? { critiques } : {};
     })(),
     scaffold_plan: {
-      will_scaffold_options: scaffold.will_scaffold_options,
-      ...(scaffold.will_scaffold_options ? { option_count: scaffold.option_count } : {}),
+      // BOTH terms. `plan.will_scaffold_options` says exclusion leaves a
+      // submittable set; `willProceed` says nothing ELSE blocks the run. The
+      // panel may only offer when both hold.
+      will_scaffold_options: admission.plan.will_scaffold_options && admission.willProceed,
+      ...(admission.plan.will_scaffold_options && admission.willProceed
+        ? { option_count: admission.plan.option_count }
+        : {}),
     },
   };
 }

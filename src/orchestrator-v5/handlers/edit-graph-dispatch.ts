@@ -43,6 +43,7 @@ import {
 // intercept uses, so the recovery copy and the intercept copy cannot drift.
 import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outcome.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
+import { carriesConfigureOptionValuePayload } from '../routing/configure-option-intent.js';
 import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
@@ -3452,6 +3453,15 @@ export async function dispatchEditGraph(
         optionLabel: configureOutcome.optionLabel,
         factorLabels: configureOutcome.factorLabels,
         stage: payload.stage,
+        // ⭐ TERMINATION (L-25 / NEW-1, 2026-08-16). Without this the composer
+        // re-emits the SAME demand the user just answered: witnessed verbatim
+        // on deployed CEE `bacf35d` — the product asked for a literal template,
+        // the user typed it back exactly, and got the identical sentence again.
+        // `carriesConfigureOptionValuePayload` is the SAME predicate the pre-edit
+        // intercept uses to decline this turn (`configure-option-clarify.ts:217`,
+        // reason `value_payload_present`), so "the user supplied a value" has one
+        // definition on both sides of the edit lane rather than two.
+        valueAlreadySupplied: carriesConfigureOptionValuePayload(payload.message),
       }).assistant_text,
     };
   }

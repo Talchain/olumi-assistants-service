@@ -41,16 +41,43 @@ export interface ComposeConfigureOptionClarifyInput {
   /** Real linked factors, already filtered to the unset ones. Non-empty. */
   readonly factorLabels: readonly string[];
   readonly stage: StageType;
+  /**
+   * TRUE when the user's message ALREADY carried a value — i.e. they answered
+   * the demand this composer made last turn, and it still did not land.
+   *
+   * ⭐ THIS FLAG EXISTS BECAUSE THE REPLY WITHOUT IT DOES NOT TERMINATE.
+   * Witnessed on deployed CEE `bacf35d` (2026-08-16, simulated-user run,
+   * 18:15:06Z → 18:15:42Z): the product demanded a literal template, the user
+   * typed it back VERBATIM, and `edit-graph-dispatch.ts` re-emitted **the
+   * identical demand, word for word**. `evaluateConfigureOptionOutcome` is pure
+   * and stateless, `collectCandidateFactorLabels` returns the same first factor
+   * while nothing lands, so the same bytes are produced forever. Nothing counted
+   * the repeat; nothing varied the copy.
+   *
+   * Repeating a demand the user has already met is not a clarification — it is
+   * the product telling the user they did not do the thing they just did.
+   */
+  readonly valueAlreadySupplied?: boolean;
 }
 
 /**
- * The placeholder the user replaces. Kept as the literal `<0-1>` the shared
- * template already establishes for prompt copy, and glossed in the next
- * sentence so it never reads as jargon — the walk logged a real
- * validator-jargon leak ("'strength' needs to be a number between -1 and 1.
- * You gave -30.") and this copy must not add another.
+ * A CONCRETE example value, not a placeholder.
+ *
+ * ⚠ THIS WAS `'<0-1>'` AND THE ANGLE BRACKETS REACHED REAL USER COPY (NEW-5,
+ * simulated-user run 2026-08-16): *"Set the … option's effect on … to `<0-1>`
+ * Replace `<0-1>` with a number from 0 … to 1."* A strategic user was being
+ * asked to hand-type a templated command string and mentally expand a
+ * placeholder — the L-38 template-syntax-in-prose family, and a worse instance
+ * of it than the one that was filed.
+ *
+ * A real number in the slot makes the sentence directly copyable, which is the
+ * whole point of advising a phrasing at all: it is `PROBE_P1` verbatim, the form
+ * proven to route (`configure-option-chip-text.ts`), and the routing witness
+ * only requires a digit after `to`, so a decimal is accepted exactly as the
+ * placeholder form was. The 0-to-1 meaning is still glossed in the next
+ * sentence — the gloss was never the problem; the placeholder was.
  */
-const VALUE_PLACEHOLDER = '<0-1>';
+const EXAMPLE_VALUE = '0.6';
 
 /** Join labels as readable English: "A", "A and B", "A, B and C". */
 function joinLabels(labels: readonly string[]): string {
@@ -75,15 +102,28 @@ export function composeConfigureOptionClarifyResponse(
   const example = buildConfigureOptionAdvisedFormat(
     optionLabel,
     primaryFactor,
-    VALUE_PLACEHOLDER,
+    EXAMPLE_VALUE,
   );
 
-  const assistant_text = [
-    `"${optionLabel}" has no effect values yet, so the analysis cannot compare it with the others.`,
-    linkSentence,
-    `Tell me what it changes in this form: ${example}`,
-    `Replace ${VALUE_PLACEHOLDER} with a number from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
-  ].join(' ');
+  // THE TERMINATING BRANCH. The user already gave a number and it did not
+  // attach, so asking again in the same words says nothing new and blames them
+  // for it. Say what is true instead — and say the thing that is now WORTH
+  // knowing: since the two-term run admission landed
+  // (`tools/handlers/analysis-ready-core.ts::resolveRunAdmission`), an option
+  // with no effect values no longer stops the analysis. It is left out of the
+  // comparison and named, which the run already discloses.
+  const assistant_text = input.valueAlreadySupplied === true
+    ? [
+        `I have your number for "${optionLabel}" on ${primaryFactor}, but it has not attached to that link yet, so "${optionLabel}" still has no effect values.`,
+        `You do not have to solve this before analysing: the analysis will run on the options that are set, and it will name "${optionLabel}" as left out of the comparison rather than scoring it.`,
+        `To set the value directly, open "${optionLabel}" on the canvas and enter it on its link to ${primaryFactor}.`,
+      ].join(' ')
+    : [
+        `"${optionLabel}" has no effect values yet, so the analysis cannot compare it with the others.`,
+        linkSentence,
+        `Tell me what it changes, like this: ${example}`,
+        `Use a number from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
+      ].join(' ');
 
   return composeDirectAnswerResponse({
     answerKind: 'functional',
