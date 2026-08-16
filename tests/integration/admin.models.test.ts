@@ -3,7 +3,7 @@
  *
  * Covers:
  * - GET /admin/models/routing — auth, response shape, all tasks present
- * - GET /admin/models/routing — provider-mismatch scenario (LLM_PROVIDER=anthropic)
+ * - GET /admin/models/routing — cross-provider task defaults
  * - GET /admin/dashboard — serves HTML (IP-only gate, no admin key needed for the page itself)
  * - GET /admin/dashboard/env — auth, response shape, feature flags present
  * - Read-only key (ADMIN_API_KEY_READ only) — routes registered and accessible
@@ -14,7 +14,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
-import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
+import {
+  AUXILIARY_MODEL_DEFAULTS,
+  EXECUTABLE_RUNTIME_TASKS,
+  RUNTIME_AI_TASK_AUTHORITY,
+  TASK_MODEL_DEFAULTS,
+} from "../../src/config/model-routing.js";
 
 // NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
 // store treats it as a literal file name in cwd. Suites that share the
@@ -83,11 +88,91 @@ describe("GET /admin/models/routing", () => {
     const body = res.json();
     expect(Array.isArray(body.tasks)).toBe(true);
 
-    const expectedTasks = Object.keys(TASK_MODEL_DEFAULTS);
+    const expectedTasks = [
+      ...Object.keys(TASK_MODEL_DEFAULTS),
+      ...Object.keys(AUXILIARY_MODEL_DEFAULTS),
+    ];
     const returnedTasks = body.tasks.map((t: { task: string }) => t.task);
     for (const task of expectedTasks) {
       expect(returnedTasks).toContain(task);
     }
+  });
+
+  it("derives every executable runtime path into the report", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/admin/models/routing",
+      headers: ADMIN_HEADERS,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const returnedTasks = body.tasks.map((row: { task: string }) => row.task);
+
+    expect(EXECUTABLE_RUNTIME_TASKS).toEqual(
+      Object.entries(RUNTIME_AI_TASK_AUTHORITY)
+        .filter(([, authority]) => authority.hasExecutablePath)
+        .map(([task]) => task),
+    );
+    for (const task of EXECUTABLE_RUNTIME_TASKS) {
+      expect(returnedTasks).toContain(task);
+    }
+    expect(returnedTasks).toContain("clarify_brief");
+    expect(returnedTasks).toContain("explain_diff");
+  });
+
+  it("reports exact dedicated Anthropic default chains and gated availability", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/admin/models/routing",
+      headers: ADMIN_HEADERS,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const byTask = new Map(
+      body.tasks.map((row: { task: string }) => [row.task, row]),
+    );
+
+    expect(byTask.get("rolling_summary")).toMatchObject({
+      model: RUNTIME_AI_TASK_AUTHORITY.rolling_summary.checkedInModel,
+      provider: "anthropic",
+      availability: "registry_enabled",
+      source: "default",
+      source_key: "DEFAULT_SUMMARY_MODEL",
+      executable: true,
+      has_executable_path: true,
+      lifecycle_state: "dedicated_adapter",
+      runtime_availability: "available",
+    });
+    expect(byTask.get("decision_review_decompose")).toMatchObject({
+      model:
+        RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose.checkedInModel,
+      provider: "anthropic",
+      availability: "registry_enabled",
+      source: "default",
+      source_key: "DEFAULT_DECOMPOSE_MODEL",
+      executable: false,
+      has_executable_path: true,
+      lifecycle_state: "feature_gated",
+      runtime_availability: "feature_gated_default_off",
+    });
+    expect(byTask.get("extraction")).toMatchObject({
+      provider: "fixtures",
+      availability: "fixture_only",
+      lifecycle_state: "dedicated_adapter",
+      runtime_availability: "available",
+    });
+    expect(byTask.get("critique_graph")).toMatchObject({
+      provider: "fixtures",
+      availability: "fixture_only",
+      lifecycle_state: "standalone_route",
+      runtime_availability: "available",
+    });
+    expect(byTask.get("m2_graph_review")).toMatchObject({
+      executable: false,
+      has_executable_path: true,
+      lifecycle_state: "feature_gated",
+      runtime_availability: "feature_gated_default_off",
+    });
   });
 
   it("each task entry has required fields", async () => {
@@ -102,7 +187,19 @@ describe("GET /admin/models/routing", () => {
       expect(entry).toHaveProperty("model");
       expect(entry).toHaveProperty("provider");
       expect(entry).toHaveProperty("source");
-      expect(["env_override", "default"]).toContain(entry.source);
+      expect(entry).toHaveProperty("source_key");
+      expect(entry).toHaveProperty("runtime_availability");
+      expect(entry).toHaveProperty("has_executable_path");
+      expect([
+        "env_override",
+        "default",
+        "global_model",
+        "provider_default",
+        "providers_config",
+        "failover",
+        "per_call",
+        "store_model_config",
+      ]).toContain(entry.source);
       expect(typeof entry.model).toBe("string");
       expect(entry.model.length).toBeGreaterThan(0);
     }
@@ -285,10 +382,10 @@ describe("Cache-Control headers on admin endpoints", () => {
 });
 
 // ============================================================================
-// Provider-mismatch scenario: LLM_PROVIDER=anthropic with OpenAI task defaults
+// Cross-provider scenario: task assignment outranks LLM_PROVIDER
 // ============================================================================
 
-describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropic)", () => {
+describe("GET /admin/models/routing — cross-provider defaults (LLM_PROVIDER=anthropic)", () => {
   let appAnthropicProvider: FastifyInstance;
 
   beforeAll(async () => {
@@ -338,7 +435,7 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     expect(body.default_provider).toBe("anthropic");
   });
 
-  it("OpenAI task defaults are reported as provider_mismatch with null model", async () => {
+  it("reports OpenAI router and dedicated-adapter defaults instead of discarding them", async () => {
     const res = await appAnthropicProvider.inject({
       method: "GET",
       url: "/admin/models/routing",
@@ -346,16 +443,21 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     });
     const body = res.json();
 
-    // options defaults to gpt-5.2 (openai) and has no CEE_MODEL_* override key,
-    // so it stays an OpenAI default — should be skipped when provider=anthropic.
-    // (draft_graph is no longer a valid probe here: its default is now the
-    // anthropic model claude-sonnet-4-6, reconciled to live staging.)
+    // options defaults to gpt-5.2 (openai) and has no CEE_MODEL_* override.
+    // The task assignment outranks the lower-precedence global provider.
     const optionsRow = body.tasks.find((t: { task: string }) => t.task === "options");
     expect(optionsRow).toBeDefined();
-    expect(optionsRow.source).toBe("provider_mismatch");
-    expect(optionsRow.model).toBeNull();
-    expect(typeof optionsRow.resolution_note).toBe("string");
-    expect(optionsRow.resolution_note.length).toBeGreaterThan(0);
+    expect(optionsRow.source).toBe("default");
+    expect(optionsRow.model).toBe(TASK_MODEL_DEFAULTS.options);
+    expect(optionsRow.provider).toBe("openai");
+
+    // Factor enrichment bypasses the main router, but its checked-in default
+    // is governed and reported by the same live authority map.
+    const extractionRow = body.tasks.find((t: { task: string }) => t.task === "extraction");
+    expect(extractionRow).toBeDefined();
+    expect(extractionRow.source).toBe("default");
+    expect(extractionRow.model).toBe(AUXILIARY_MODEL_DEFAULTS.extraction);
+    expect(extractionRow.provider).toBe("openai");
   });
 
   it("bias_check (anthropic default) is still resolved when provider=anthropic", async () => {

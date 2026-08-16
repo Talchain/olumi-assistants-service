@@ -1,7 +1,8 @@
 # `Prompts/canonical/` — the repo-canonical prompt estate
 
-**These files are the canonical bytes of every LLM prompt CEE actually serves from PMS.
-PMS is populated FROM here. Here is the source of truth; PMS is the delivery mechanism.**
+**These files are the verified canonical bytes of the captured PMS prompt set.
+PMS is populated FROM here. One current gap is explicit below: `validate_graph`
+became live after this capture and does not yet have a verified canonical export.**
 
 Captured 2026-07-27 from CEE commit `74936a650e4b97d9f06d7ee740394c135396edf4`
 (which was also the deployed `cee-staging` build at capture time) and the staging
@@ -28,13 +29,20 @@ was cross-checked against what the live service reports it is sending.
 | `draft_graph.txt` | `draft_graph` | v195 | first-brief draft dispatch |
 | `edit_graph.txt` | `edit_graph` | v11 | free-text graph-edit turn |
 | `repair_edit_graph.txt` | `repair_edit_graph` | v2 | edit retry (attempt ≥ 2) after invalid ops |
-| `repair_graph.txt` | `repair_graph` | v6 | draft turn where PLoT validation fails |
+| `repair_graph.txt` | `repair_graph` | v6 | **never** — inert compatibility row; the LLM capability is retired |
 | `decision_review.txt` | `decision_review` | **v15** | `run_analysis` outcome + the PLoT→CEE decision-review callback |
 
 > ⚠ **This table is a mirror and it drifted.** `decision_review` read `v14` here
 > until 2026-08-10 while `manifest.json` — which this README itself calls the
 > authority — had recorded `served_version: 15`, `served_hash_verified: true`
 > since the 31 Jul regeneration. **Read `manifest.json`, not this table.**
+
+> ⚠ **Known live-export gap:** `validate_graph` is now active at the shipped
+> code default (`CEE_VALIDATION_PIPELINE_ENABLED=true`, with the env var acting
+> as a kill-switch) and resolves a PMS prompt, but this directory has no
+> verified `validate_graph.txt`. Until a live status read is captured and
+> exported, its exact served PMS version/hash is not derivable from this
+> manifest. Do not silently substitute the bundled default and call it served.
 
 ## What is deliberately NOT in here
 
@@ -55,9 +63,15 @@ constant directly and never calls `getSystemPrompt('enrich_factors')`. **Editing
 row silently changes nothing.** Edit `src/prompts/enrich-factors.ts`.
 
 **Dark and dead PMS keys are not exported** (`suggest_options`, `clarify_brief`,
-`critique_graph`, `validate_graph`, `m2_graph_review`, and ~10 dead `*_narrate` rows).
+`critique_graph`, `m2_graph_review`, and ~10 dead `*_narrate` rows).
 They are listed in `manifest.json` under `dark_or_dead` with the reason each is
 unreachable. Exporting them would imply they are product surface; they are not.
+
+`repair_graph` is the deliberate compatibility exception: its historical bytes
+remain exported and its PMS row still participates in readiness, but the model
+capability and every production caller were removed by ROADMAP 2.763. Source
+guards fail if `.repairGraph()` is reintroduced. Retire the PMS row, bundled
+default and health metadata together; do not rewire the inert prompt.
 
 ## How the version pointer resolves
 
@@ -77,6 +91,10 @@ A prompt change is a code change. It goes through review here first.
    that says what changed and why.
 4. **Pin it on staging:** `PATCH /admin/prompts/<prompt_id>` `{"stagingVersion": N}`.
    Leave `activeVersion` alone — that is the production pointer.
+   For a task with a real eval pack, the admin route now requires a current,
+   hash-matched, floor-passing committed promotion report before either pointer
+   can move. A rejection is atomic and returns
+   `prompt_promotion_evidence_required` with the failed evidence kind and action.
 5. **Reload:** `POST /admin/prompts/reload`. *A re-pin without a reload silently no-ops.*
 6. **Verify the SERVED bytes, not the pointer.** `GET /admin/prompts/status` returns
    `content_hash` = `sha256(content).hex[:16]` (`src/prompts/loader.ts:33`). Confirm it
@@ -106,10 +124,11 @@ To revert: `PATCH {"stagingVersion": <previous>}` + reload, then confirm the has
   v16.** The original naming trap is still documented at
   `tools/conversation-harness/prompt-estate/revert-anchors/decision-review-revert-anchor.txt`;
   what it warns about is confusing the POISONED v12 with a good version, not the number 15.
-  Note the marker is **advisory only**: the admin `requires_approval` guard
-  (`src/routes/admin.prompts.ts:502`) only fires on a `status`→`production` transition, and
-  this row is already `production`, so **nothing in code blocks a `stagingVersion: 12`
-  patch**. Treat that as an open gap.
+  The poisoned hash is now blocked by the runtime promotion-evidence gate: a
+  `stagingVersion: 12` or `activeVersion: 12` mutation cannot clear without a
+  current passing report bound to those exact bytes. The existing approval
+  guard remains separate and still applies to a `status`→`production`
+  transition.
 - **The `routing` key resolves the PMS task `orchestrator`**, not `routing`
   (`src/prompts/tracked.ts:88` `PMS_TASK_ALIAS`). Bump the `orchestrator` row.
 - **`Prompts/v40.txt` (the parent directory) is the routing FALLBACK** read from disk at

@@ -18,7 +18,7 @@ describe("validateDraftModelRegistered (Lane F boot assert)", () => {
   it("FIRES for a model that is not in the registry (typo / retired id)", () => {
     const errors = validateDraftModelRegistered("claude-sonnet-does-not-exist");
     expect(errors.length).toBe(1);
-    expect(errors[0]).toMatch(/NOT in the model registry/);
+    expect(errors[0]).toMatch(/neither an enabled registry id nor an explicit alias/);
     expect(errors[0]).toContain("claude-sonnet-does-not-exist");
   });
 

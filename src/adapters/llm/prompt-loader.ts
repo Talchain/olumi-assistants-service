@@ -40,14 +40,13 @@
  *   Operations: draft_graph, suggest_options, repair_graph, clarify_brief, critique_graph
  *
  * **OpenAI adapter** (`src/adapters/llm/openai.ts`):
- *   Uses this centralized prompt management system via `getSystemPrompt()` for:
+ *   Uses this centralized prompt management system for:
  *   - draft_graph: Full prompt management integration
  *   - repair_graph: Full prompt management integration (v6 minimal-diff prompt)
- *   Other operations (suggest_options, clarify_brief) use inline prompts.
- *   This partial integration is intentional:
- *   - OpenAI's API structure differs from Anthropic (user-only vs system+user)
- *   - OpenAI integration is secondary/fallback; Anthropic is primary
- *   - Operations `critiqueGraph` and `explainDiff` are not implemented for OpenAI
+ *   - suggest_options: Exact resolved snapshot as system authority, with
+ *     user-owned goal/constraints/options sent separately
+ *   clarify_brief remains an inline prompt. Operations `critiqueGraph` and
+ *   `explainDiff` are not implemented for OpenAI.
  */
 
 import { loadPromptSync, loadPrompt, getDefaultPrompts, type CeeTaskId, type LoadedPrompt } from '../../prompts/index.js';
@@ -132,6 +131,16 @@ interface CacheEntry {
   modelConfig?: { staging?: string; production?: string };
 }
 
+type PromptCacheStatus = 'fresh' | 'stale' | 'expired' | 'miss';
+
+interface ResolvedSystemPrompt {
+  readonly content: string;
+  /** Exact immutable-by-convention entry that supplied `content`. */
+  readonly entry: CacheEntry;
+  /** Status of this resolution, independent of later global cache mutation. */
+  readonly cacheStatus: PromptCacheStatus;
+}
+
 const promptCache = new Map<CeeTaskId, CacheEntry>();
 
 /**
@@ -199,6 +208,14 @@ export async function getSystemPrompt(
   operation: string,
   options?: GetSystemPromptOptions,
 ): Promise<string> {
+  return (await resolveSystemPrompt(operation, options)).content;
+}
+
+/** Resolve bytes and their exact metadata source in one call-scoped value. */
+async function resolveSystemPrompt(
+  operation: string,
+  options?: GetSystemPromptOptions,
+): Promise<ResolvedSystemPrompt> {
   const variables = options?.variables;
   const forceDefault = options?.forceDefault ?? false;
   // Ensure default prompts are registered on first access
@@ -214,18 +231,28 @@ export async function getSystemPrompt(
   if (forceDefault) {
     log.info({ taskId, forceDefault: true }, 'Force default prompt requested - skipping cache and store');
     const content = loadPromptSync(taskId, variables ?? {});
+    const promptHash = createHash('sha256').update(content).digest('hex');
     emit(TelemetryEvents.PromptLoadedFromDefault, { taskId, reason: 'force_default' });
     if (isTrackedKey(taskId)) {
       emit(TelemetryEvents.V5PromptResolved, {
         key: taskId,
         source: mapSource('default'),
         version: resolvePublicVersion(taskId as TrackedKey, 'default', undefined),
-        content_hash: createHash('sha256').update(content).digest('hex').slice(0, 16),
+        content_hash: promptHash.slice(0, 16),
         trigger: 'runtime',
         cache: 'miss',
       });
     }
-    return content;
+    return {
+      content,
+      entry: {
+        content,
+        loadedAt: Date.now(),
+        source: 'default',
+        promptHash,
+      },
+      cacheStatus: 'miss',
+    };
   }
 
   const hasVariables = Boolean(variables && Object.keys(variables).length > 0);
@@ -246,7 +273,7 @@ export async function getSystemPrompt(
       triggerBackgroundRefresh(taskId, variables);
     }
 
-    return cached.content;
+    return { content: cached.content, entry: cached, cacheStatus: 'fresh' };
   }
 
   // Stale-while-revalidate: if cache is stale but within grace period, return stale + refresh
@@ -265,7 +292,7 @@ export async function getSystemPrompt(
     triggerBackgroundRefresh(taskId, variables);
 
     // Return stale cached value immediately (better than defaults)
-    return cached.content;
+    return { content: cached.content, entry: cached, cacheStatus: 'stale' };
   }
 
   // Cache miss or very stale - log the reason with visibility in production logs
@@ -308,19 +335,20 @@ export async function getSystemPrompt(
         isTransientFailure = true;
       } else if (loaded.source === 'store') {
         const promptHash = createHash('sha256').update(loaded.content).digest('hex');
+        const storeEntry: CacheEntry = {
+          content: loaded.content,
+          loadedAt: Date.now(),
+          source: loaded.source,
+          promptId: loaded.promptId,
+          version: loaded.version,
+          promptHash,
+          isStaging: loaded.isStaging,
+          modelConfig: loaded.modelConfig,
+        };
 
         // Update cache with store prompt
         if (!hasVariables) {
-          promptCache.set(taskId, {
-            content: loaded.content,
-            loadedAt: Date.now(),
-            source: loaded.source,
-            promptId: loaded.promptId,
-            version: loaded.version,
-            promptHash,
-            isStaging: loaded.isStaging,
-            modelConfig: loaded.modelConfig,
-          });
+          promptCache.set(taskId, storeEntry);
         }
 
         log.info(
@@ -329,7 +357,11 @@ export async function getSystemPrompt(
         );
         emit(TelemetryEvents.PromptLoadedFromStore, { taskId, fromCache: false, reason: 'cache_expired_sync_fetch' });
 
-        return loaded.content;
+        return {
+          content: loaded.content,
+          entry: storeEntry,
+          cacheStatus: 'fresh',
+        };
       } else if (loaded !== null) {
         // Store returned defaults - this is a permanent condition (no managed prompt exists)
         // It's OK to cache defaults in this case
@@ -379,13 +411,14 @@ export async function getSystemPrompt(
     // This prevents "poisoning" the cache with defaults when Supabase is temporarily slow.
     // The next request will retry and likely succeed since we just "woke up" Supabase.
     const willCache = !hasVariables && !isTransientFailure;
+    const defaultEntry: CacheEntry = {
+      content,
+      loadedAt: now,
+      source: 'default',
+      promptHash,
+    };
     if (willCache) {
-      promptCache.set(taskId, {
-        content,
-        loadedAt: now,
-        source: 'default',
-        promptHash,
-      });
+      promptCache.set(taskId, defaultEntry);
     }
 
     // Emit telemetry with reason and cache status for monitoring
@@ -433,7 +466,11 @@ export async function getSystemPrompt(
     // Trigger background refresh from store to update cache for next request
     triggerBackgroundRefresh(taskId, variables);
 
-    return content;
+    return {
+      content,
+      entry: defaultEntry,
+      cacheStatus: willCache ? 'fresh' : 'miss',
+    };
   } catch (error) {
     // Log but don't crash - this allows graceful degradation
     log.warn(
@@ -507,7 +544,7 @@ function triggerBackgroundRefresh(
   inflightRefresh.set(taskId, refreshPromise);
 }
 
-export function getSystemPromptMeta(operation: string): {
+export interface SystemPromptMeta {
   taskId: CeeTaskId;
   source: 'store' | 'default';
   promptId?: string;
@@ -525,15 +562,14 @@ export function getSystemPromptMeta(operation: string): {
   use_staging_mode?: boolean;
   /** Environment-specific model configuration (if from store and configured) */
   modelConfig?: { staging?: string; production?: string };
-} {
-  ensureDefaultsRegistered();
+}
 
-  const taskId = OPERATION_TO_TASK_ID[operation];
-  if (!taskId) {
-    throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
-  }
-
-  const cached = promptCache.get(taskId);
+function buildSystemPromptMeta(
+  taskId: CeeTaskId,
+  entry: CacheEntry | undefined,
+  cacheStatusOverride?: PromptCacheStatus,
+): SystemPromptMeta {
+  const cached = entry;
   const source: 'store' | 'default' = cached?.source ?? 'default';
   const promptId = cached?.promptId;
   const version = cached?.version;
@@ -543,8 +579,10 @@ export function getSystemPromptMeta(operation: string): {
   const useStagingMode = shouldUseStagingPrompts();
 
   // Compute cache status
-  let cacheStatus: 'fresh' | 'stale' | 'expired' | 'miss';
-  if (!cached) {
+  let cacheStatus: PromptCacheStatus;
+  if (cacheStatusOverride !== undefined) {
+    cacheStatus = cacheStatusOverride;
+  } else if (!cached) {
     cacheStatus = 'miss';
   } else if (cacheAgeMs! < CACHE_TTL_MS) {
     cacheStatus = 'fresh';
@@ -584,7 +622,61 @@ export function getSystemPromptMeta(operation: string): {
     cache_age_ms: cacheAgeMs,
     cache_status: cacheStatus,
     use_staging_mode: useStagingMode,
-    modelConfig: cached?.modelConfig,
+    modelConfig: cached?.modelConfig ? { ...cached.modelConfig } : undefined,
+  };
+}
+
+export function getSystemPromptMeta(operation: string): SystemPromptMeta {
+  ensureDefaultsRegistered();
+
+  const taskId = OPERATION_TO_TASK_ID[operation];
+  if (!taskId) {
+    throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
+  }
+
+  return buildSystemPromptMeta(taskId, promptCache.get(taskId));
+}
+
+export type SystemPromptSnapshotOptions = Pick<
+  GetSystemPromptOptions,
+  'forceDefault'
+>;
+
+/**
+ * Resolve prompt bytes before model selection and return the metadata from the
+ * exact call-scoped resolution entry. Reading `getSystemPromptMeta()` alone is
+ * not enough:
+ * on cold start or after invalidation it reports a cache miss and silently
+ * hides a store `modelConfig` pin.
+ *
+ * Callers pass the returned content into the selected adapter, keeping the
+ * model pin and provider-bound prompt bytes on one resolution.
+ */
+export async function getSystemPromptSnapshot(
+  operation: string,
+  options?: SystemPromptSnapshotOptions,
+): Promise<{ readonly content: string; readonly meta: SystemPromptMeta }> {
+  const resolution = await resolveSystemPrompt(operation, options);
+  const taskId = OPERATION_TO_TASK_ID[operation];
+  if (!taskId) {
+    throw new Error(`Unknown LLM operation: ${operation}. No prompt mapping defined.`);
+  }
+  const contentHash = createHash('sha256')
+    .update(resolution.content)
+    .digest('hex');
+  if (resolution.entry.promptHash !== contentHash) {
+    throw new Error(
+      `Prompt snapshot invariant failed for '${operation}'; resolved bytes do not match their entry hash.`,
+    );
+  }
+
+  return {
+    content: resolution.content,
+    meta: buildSystemPromptMeta(
+      taskId,
+      resolution.entry,
+      resolution.cacheStatus,
+    ),
   };
 }
 
@@ -725,20 +817,15 @@ function fallbackVersionForOperation(operation: string): string {
 }
 
 /**
- * Log prompt fallback alignment and model routing at startup.
+ * Log prompt fallback alignment at startup.
  *
  * For each core prompt route, compares the fallback version against
  * the store version (if cached). Logs a WARNING for any drift.
- * Also logs the active model for each route from model-routing config.
  *
  * Non-blocking: never throws or fails startup.
  *
- * @param modelDefaults — pass TASK_MODEL_DEFAULTS from the caller to avoid
- *   ESM-incompatible require() or circular dependency issues.
  */
-export function logStartupHealthCheck(
-  modelDefaults?: Record<string, string>,
-): void {
+export function logStartupHealthCheck(): void {
   try {
     // Prompt fallback drift check — monitors the 5 core routes
     // that were subject to the fallback alignment audit.
@@ -776,15 +863,6 @@ export function logStartupHealthCheck(
       log.warn(
         { driftCount, total: coreRoutes.length },
         `${driftCount}/${coreRoutes.length} core prompts using fallback defaults (store unavailable)`,
-      );
-    }
-
-    // Model routing summary
-    if (modelDefaults) {
-      const routingEntries = coreRoutes.map(r => `${r}=${modelDefaults[r] ?? 'unknown'}`);
-      log.info(
-        { routing: Object.fromEntries(coreRoutes.map(r => [r, modelDefaults[r] ?? 'unknown'])) },
-        `Model routing: ${routingEntries.join(', ')}`,
       );
     }
   } catch (err) {

@@ -12,7 +12,9 @@ import type {
   GetCompiledOptions,
   ActivePromptResult,
   PostgresStoreConfig,
+  PromptMutationPrecondition,
 } from './interface.js';
+import { PromptMutationConflictError } from './interface.js';
 import type {
   PromptDefinition,
   PromptVersion,
@@ -301,7 +303,11 @@ export class PostgresPromptStore implements IPromptStore {
     }
   }
 
-  async update(id: string, request: UpdatePromptRequest): Promise<PromptDefinition> {
+  async update(
+    id: string,
+    request: UpdatePromptRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const sql = this.ensureInitialized();
 
     try {
@@ -348,7 +354,7 @@ export class PostgresPromptStore implements IPromptStore {
         ? (request.modelConfig ? JSON.stringify(request.modelConfig) : null)
         : (existing.modelConfig ? JSON.stringify(existing.modelConfig) : null);
 
-      await sql`
+      const updatedRows = await sql<{ id: string }[]>`
         UPDATE prompts SET
           name = ${request.name ?? existing.name},
           description = ${request.description ?? existing.description ?? null},
@@ -357,9 +363,15 @@ export class PostgresPromptStore implements IPromptStore {
           staging_version = ${request.stagingVersion === null ? null : (request.stagingVersion ?? existing.stagingVersion ?? null)},
           design_version = ${request.designVersion ?? existing.designVersion ?? null},
           model_config = ${newModelConfig},
-          tags = ${request.tags ?? existing.tags}
+          tags = ${request.tags ?? existing.tags},
+          updated_at = NOW()
         WHERE id = ${id}
+          AND updated_at = ${precondition?.expectedUpdatedAt ?? existing.updatedAt}
+        RETURNING id
       `;
+      if (updatedRows.length === 0) {
+        throw new PromptMutationConflictError(id);
+      }
 
       log.info({ promptId: id }, 'Prompt updated');
 
@@ -415,7 +427,11 @@ export class PostgresPromptStore implements IPromptStore {
     }
   }
 
-  async rollback(id: string, request: RollbackRequest): Promise<PromptDefinition> {
+  async rollback(
+    id: string,
+    request: RollbackRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const sql = this.ensureInitialized();
 
     try {
@@ -431,10 +447,17 @@ export class PostgresPromptStore implements IPromptStore {
 
       const previousActive = existing.activeVersion;
 
-      await sql`
-        UPDATE prompts SET active_version = ${request.targetVersion}
+      const updatedRows = await sql<{ id: string }[]>`
+        UPDATE prompts SET
+          active_version = ${request.targetVersion},
+          updated_at = NOW()
         WHERE id = ${id}
+          AND updated_at = ${precondition?.expectedUpdatedAt ?? existing.updatedAt}
+        RETURNING id
       `;
+      if (updatedRows.length === 0) {
+        throw new PromptMutationConflictError(id);
+      }
 
       log.info(
         {
@@ -559,7 +582,11 @@ export class PostgresPromptStore implements IPromptStore {
     }
   }
 
-  async delete(id: string, hard = false): Promise<void> {
+  async delete(
+    id: string,
+    hard = false,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<void> {
     const sql = this.ensureInitialized();
 
     try {
@@ -568,12 +595,26 @@ export class PostgresPromptStore implements IPromptStore {
         throw new Error(`Prompt '${id}' not found`);
       }
 
+      const expectedUpdatedAt =
+        precondition?.expectedUpdatedAt ?? existing.updatedAt;
+      let affectedRows: Array<{ id: string }>;
       if (hard) {
         // CASCADE will delete versions too
-        await sql`DELETE FROM prompts WHERE id = ${id}`;
+        affectedRows = await sql<{ id: string }[]>`
+          DELETE FROM prompts
+          WHERE id = ${id} AND updated_at = ${expectedUpdatedAt}
+          RETURNING id
+        `;
       } else {
         // Soft delete - archive
-        await sql`UPDATE prompts SET status = 'archived' WHERE id = ${id}`;
+        affectedRows = await sql<{ id: string }[]>`
+          UPDATE prompts SET status = 'archived', updated_at = NOW()
+          WHERE id = ${id} AND updated_at = ${expectedUpdatedAt}
+          RETURNING id
+        `;
+      }
+      if (affectedRows.length === 0) {
+        throw new PromptMutationConflictError(id);
       }
 
       log.info({ promptId: id, hard }, 'Prompt deleted');

@@ -64,7 +64,7 @@
  * derive from this constant; a twin literal in either is a hand-maintained
  * mirror (trap 12) and a test fails on one.
  */
-export const MIN_CERTIFYING_SAMPLE_SIZE = 3;
+export { MIN_CERTIFYING_SAMPLE_SIZE } from '../../../../src/prompts/promotion-evidence.js';
 
 /** A dimension's status inside a promotion report. Mirrors the pack's own
  * three-state model (`../types.ts` DimensionStatus) — NA is not a pass. */

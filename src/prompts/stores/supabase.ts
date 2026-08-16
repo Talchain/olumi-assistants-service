@@ -17,7 +17,9 @@ import type {
   PromptListFilter,
   GetCompiledOptions,
   ActivePromptResult,
+  PromptMutationPrecondition,
 } from './interface.js';
+import { PromptMutationConflictError } from './interface.js';
 import type {
   PromptDefinition,
   CreatePromptRequest,
@@ -30,6 +32,20 @@ import type {
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  PROMPT_OBSERVATION_CAPABILITY,
+  type ObservationType,
+  type ObservationsResult,
+  type PromptObservation,
+  type PromptObservationCapability,
+  type ProvidesPromptObservationCapability,
+} from './observations.js';
+
+export type {
+  ObservationType,
+  ObservationsResult,
+  PromptObservation,
+} from './observations.js';
 
 function getJwtClaim(token: string, claim: string): string | undefined {
   const parts = token.split('.');
@@ -101,40 +117,29 @@ interface ObservationRow {
 }
 
 /**
- * Observation types for prompt feedback
- */
-export type ObservationType = 'note' | 'rating' | 'failure' | 'success';
-
-/**
- * Prompt observation for tracking feedback and issues
- */
-export interface PromptObservation {
-  id?: string;
-  promptId: string;
-  version: number;
-  observationType: ObservationType;
-  content?: string;
-  rating?: number; // 1-5
-  payloadHash?: string;
-  createdBy?: string;
-  createdAt?: string;
-}
-
-/**
- * Result of getObservations including aggregated rating
- */
-export interface ObservationsResult {
-  observations: PromptObservation[];
-  averageRating: number | null;
-  totalCount: number;
-}
-
-/**
  * Supabase-backed prompt store
  */
-export class SupabasePromptStore implements IPromptStore {
+export class SupabasePromptStore
+  implements IPromptStore, ProvidesPromptObservationCapability
+{
   private client: SupabaseClient | null = null;
   private config: SupabaseStoreConfig;
+
+  /**
+   * Publish only the observation operations to the governance boundary. The
+   * frozen closures cannot be used to recover this store or its prompt
+   * mutation methods.
+   */
+  readonly [PROMPT_OBSERVATION_CAPABILITY]: PromptObservationCapability =
+    Object.freeze({
+      listObservations: (promptId: string) => this.getObservations(promptId),
+      getObservationVersion: (promptId: string, version: number) =>
+        this.getObservations(promptId, version),
+      addObservation: (
+        observation: Omit<PromptObservation, 'id' | 'createdAt'>,
+      ) => this.addObservation(observation),
+      deleteObservation: (id: string) => this.deleteObservation(id),
+    });
 
   constructor(config: Omit<SupabaseStoreConfig, 'type'>) {
     this.config = { ...config, type: 'supabase' };
@@ -344,7 +349,11 @@ export class SupabasePromptStore implements IPromptStore {
   /**
    * Update prompt metadata
    */
-  async update(id: string, request: UpdatePromptRequest): Promise<PromptDefinition> {
+  async update(
+    id: string,
+    request: UpdatePromptRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const client = this.ensureInitialized();
 
     const existing = await this.get(id);
@@ -362,11 +371,11 @@ export class SupabasePromptStore implements IPromptStore {
         .neq('id', id);
 
       if (prodPrompts && prodPrompts.length > 0) {
-        // Demote existing production prompt
-        await client
-          .from('cee_prompts')
-          .update({ status: 'staging', updated_at: new Date().toISOString() })
-          .eq('id', prodPrompts[0].id);
+        throw new Error(
+          `Cannot set prompt '${id}' to production: task '${existing.taskId}' ` +
+            `already has a production prompt ('${prodPrompts[0].id}'). ` +
+            'Archive or demote the existing production prompt first.',
+        );
       }
     }
 
@@ -383,10 +392,20 @@ export class SupabasePromptStore implements IPromptStore {
     if (request.designVersion !== undefined) updateData.design_version = request.designVersion;
     if (request.modelConfig !== undefined) updateData.model_config = request.modelConfig;
 
-    const { error } = await client.from('cee_prompts').update(updateData).eq('id', id);
+    let updateQuery = client.from('cee_prompts').update(updateData).eq('id', id);
+    if (precondition) {
+      updateQuery = updateQuery.eq(
+        'updated_at',
+        precondition.expectedUpdatedAt,
+      );
+    }
+    const { data: updatedRows, error } = await updateQuery.select('id');
 
     if (error) {
       throw new Error(`Failed to update prompt: ${error.message}`);
+    }
+    if (precondition && (!updatedRows || updatedRows.length === 0)) {
+      throw new PromptMutationConflictError(id);
     }
 
     log.info({ promptId: id }, 'Prompt updated');
@@ -432,7 +451,11 @@ export class SupabasePromptStore implements IPromptStore {
   /**
    * Rollback to a previous version
    */
-  async rollback(id: string, request: RollbackRequest): Promise<PromptDefinition> {
+  async rollback(
+    id: string,
+    request: RollbackRequest,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<PromptDefinition> {
     const client = this.ensureInitialized();
 
     const existing = await this.get(id);
@@ -445,16 +468,26 @@ export class SupabasePromptStore implements IPromptStore {
       throw new Error(`Version ${request.targetVersion} not found`);
     }
 
-    const { error } = await client
+    let rollbackQuery = client
       .from('cee_prompts')
       .update({
         active_version: request.targetVersion,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id);
+    if (precondition) {
+      rollbackQuery = rollbackQuery.eq(
+        'updated_at',
+        precondition.expectedUpdatedAt,
+      );
+    }
+    const { data: updatedRows, error } = await rollbackQuery.select('id');
 
     if (error) {
       throw new Error(`Failed to rollback: ${error.message}`);
+    }
+    if (precondition && (!updatedRows || updatedRows.length === 0)) {
+      throw new PromptMutationConflictError(id);
     }
 
     log.info(
@@ -544,7 +577,11 @@ export class SupabasePromptStore implements IPromptStore {
   /**
    * Delete a prompt
    */
-  async delete(id: string, hard = false): Promise<void> {
+  async delete(
+    id: string,
+    hard = false,
+    precondition?: PromptMutationPrecondition,
+  ): Promise<void> {
     const client = this.ensureInitialized();
 
     const existing = await this.get(id);
@@ -554,19 +591,39 @@ export class SupabasePromptStore implements IPromptStore {
 
     if (hard) {
       // Hard delete - cascade will handle versions
-      const { error } = await client.from('cee_prompts').delete().eq('id', id);
+      let deleteQuery = client.from('cee_prompts').delete().eq('id', id);
+      if (precondition) {
+        deleteQuery = deleteQuery.eq(
+          'updated_at',
+          precondition.expectedUpdatedAt,
+        );
+      }
+      const { data: deletedRows, error } = await deleteQuery.select('id');
       if (error) {
         throw new Error(`Failed to delete prompt: ${error.message}`);
+      }
+      if (precondition && (!deletedRows || deletedRows.length === 0)) {
+        throw new PromptMutationConflictError(id);
       }
       log.info({ promptId: id }, 'Prompt hard deleted');
     } else {
       // Soft delete - archive
-      const { error } = await client
+      let archiveQuery = client
         .from('cee_prompts')
         .update({ status: 'archived', updated_at: new Date().toISOString() })
         .eq('id', id);
+      if (precondition) {
+        archiveQuery = archiveQuery.eq(
+          'updated_at',
+          precondition.expectedUpdatedAt,
+        );
+      }
+      const { data: archivedRows, error } = await archiveQuery.select('id');
       if (error) {
         throw new Error(`Failed to archive prompt: ${error.message}`);
+      }
+      if (precondition && (!archivedRows || archivedRows.length === 0)) {
+        throw new PromptMutationConflictError(id);
       }
       log.info({ promptId: id }, 'Prompt archived');
     }
@@ -584,8 +641,9 @@ export class SupabasePromptStore implements IPromptStore {
 
     // Find prompt for task (exclude archived, allow draft/staging/production)
     // Version selection is controlled by stagingVersion vs activeVersion, not prompt status
-    // Deterministic selection: most recently updated non-archived prompt wins
-    // This ensures predictable behavior when multiple prompts exist for the same task
+    // Raw-adapter compatibility only. Production callers are wrapped by
+    // GovernedPromptStore, which performs immutable canonical-id election and
+    // never delegates task election to this query.
     const { data: prompts, error: promptError } = await client
       .from('cee_prompts')
       .select('*')
@@ -656,7 +714,8 @@ export class SupabasePromptStore implements IPromptStore {
     const client = this.ensureInitialized();
 
     // Find prompt for task (exclude archived, allow draft/staging/production)
-    // Deterministic selection: most recently updated non-archived prompt wins
+    // Raw-adapter compatibility only; GovernedPromptStore owns production
+    // canonical election and never delegates task election to this query.
     const { data: prompts, error } = await client
       .from('cee_prompts')
       .select('*')

@@ -8,7 +8,9 @@
     "served_hash_algo": "sha256(content).hex[:16]  (src/prompts/loader.ts:33)",
     "served_hash_crosscheck": "each key below whose served_hash_verified=true had its exported bytes hashed and matched against the LIVE /admin/prompts/status sent_hash/content_hash on cee-staging; sampled 8x with no instance split",
     "not_exported_deliberately": "Code-constant prompts already live in src/ and are NOT duplicated here — duplicating them would create exactly the hand-maintained mirror this manifest exists to remove. They are listed under code_constant_live_prompts with their authoritative file path.",
-    "decision_review_regen_note": "decision_review row REGENERATED 2026-07-31 by the fix-decision-review-v15 lane at the moment of promotion: PMS row version 15 created, stagingVersion patched 14->15, reload issued, and the served hash read back from the LIVE /admin/prompts/status (version=15, content_hash=ba4879dd0a714b8f, chars=33049) — not inferred from the file. The other rows are unchanged from the 2026-07-27 generation at cee_commit 74936a65 and remain as stale or as fresh as they were."
+    "decision_review_regen_note": "decision_review row REGENERATED 2026-07-31 by the fix-decision-review-v15 lane at the moment of promotion: PMS row version 15 created, stagingVersion patched 14->15, reload issued, and the served hash read back from the LIVE /admin/prompts/status (version=15, content_hash=ba4879dd0a714b8f, chars=33049) — not inferred from the file. The other rows are unchanged from the 2026-07-27 generation at cee_commit 74936a65 and remain as stale or as fresh as they were.",
+    "runtime_disposition_reconciled_2026_08_15": "Source at CEE 4775ce61 proves repair_graph has no executable LLM capability (ROADMAP 2.763) and validate_graph is active at the shipped code default (CEE_VALIDATION_PIPELINE_ENABLED defaults true). This corrects trigger/disposition metadata only; no captured prompt bytes or PMS pointers were changed.",
+    "known_canonical_export_gap": "validate_graph can now shape a live LLM call but has no repo-canonical PMS byte export in this directory. Its exact served PMS version/hash therefore cannot be proved from this manifest; query the live prompt status and add a verified export before representing this estate as complete."
   },
   "pms_prompts": [
     {
@@ -89,7 +91,7 @@
       "chars": 19864,
       "served_hash_verified": true,
       "live_served_hash_observed": "ed4ead640907dc9c",
-      "trigger": "draft turn where PLoT validation of the drafted graph fails (plot-validation.ts:180)"
+      "trigger": "NONE — inert compatibility row. ROADMAP 2.763 removed LLMAdapter.repairGraph and every production caller; source guards fail if the capability is reintroduced. The PMS row/default stays until its Paul-gated external retirement is performed atomically with health/readiness metadata."
     },
     {
       "key": "repair_edit_graph",
@@ -142,6 +144,16 @@
       "gate": "none"
     }
   ],
+  "live_pms_export_gaps": [
+    {
+      "key": "validate_graph",
+      "why_live": "Pass 2 independent causal-edge review; CEE_VALIDATION_PIPELINE_ENABLED defaults true and acts as a kill-switch.",
+      "model_default": "o4-mini",
+      "registered_default_source": "src/prompts/defaults.ts (VALIDATE_GRAPH_PROMPT)",
+      "last_observed_pms_active_version_at_2026_07_27_capture": 4,
+      "warning": "No verified canonical export exists here, so this historical pointer is not evidence of the bytes served today."
+    }
+  ],
   "dark_or_dead": [
     {
       "key": "suggest_options",
@@ -157,11 +169,6 @@
       "key": "critique_graph",
       "why": "only caller = standalone POST /assist/critique-graph; zero callers",
       "pms_active_version": 1
-    },
-    {
-      "key": "validate_graph",
-      "why": "CEE_VALIDATION_PIPELINE_ENABLED=false on deployed staging",
-      "pms_active_version": 4
     },
     {
       "key": "m2_graph_review",

@@ -56,13 +56,18 @@ import {
   logExperimentEnded,
   interpolatePrompt,
 } from '../prompts/index.js';
-import type { ObservationType } from '../prompts/stores/supabase.js';
-import { SupabasePromptStore } from '../prompts/stores/supabase.js';
+import type { ObservationType } from '../prompts/stores/observations.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/prompt-loader.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
-import { MODEL_REGISTRY } from '../config/models.js';
+import { ModelAssignmentError, resolveModelAssignment } from '../config/model-assignment.js';
+import { requireTaskModelAssignmentCapability } from '../config/model-routing.js';
+import {
+  getGovernedPromptObservationCapability,
+  PromptGovernanceError,
+} from '../prompts/stores/governed.js';
+import { PromptMutationConflictError } from '../prompts/stores/interface.js';
 import {
   verifyAdminKey,
   getActorFromRequest,
@@ -99,6 +104,30 @@ function ensureStoreHealthy(reply: FastifyReply): boolean {
     return false;
   }
   return true;
+}
+
+function sendPromptMutationConflict(
+  error: unknown,
+  reply: FastifyReply,
+): boolean {
+  if (error instanceof PromptGovernanceError) {
+    reply.status(error.statusCode).send({
+      error: error.code.toLowerCase(),
+      message: error.message,
+      ...error.details,
+    });
+    return true;
+  }
+  if (error instanceof PromptMutationConflictError) {
+    reply.status(409).send({
+      error: error.code.toLowerCase(),
+      message: error.message,
+      promptId: error.promptId,
+      action: 'Reload the prompt and retry the complete mutation.',
+    });
+    return true;
+  }
+  return false;
 }
 
 // =========================================================================
@@ -203,28 +232,30 @@ const VersionParamsSchema = z.object({
 // =========================================================================
 
 /**
- * Validate modelConfig against MODEL_REGISTRY
+ * Validate modelConfig through the same exact model authority as runtime.
  * Returns validation errors if any model IDs are invalid
  */
 function validateModelConfig(
+  taskId: string,
   modelConfig: { staging?: string; production?: string } | null | undefined
 ): string[] {
   const errors: string[] = [];
   if (!modelConfig) return errors;
 
-  if (modelConfig.staging) {
-    if (!MODEL_REGISTRY[modelConfig.staging]) {
-      errors.push(`Invalid staging model: '${modelConfig.staging}'. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`);
-    } else if (!MODEL_REGISTRY[modelConfig.staging].enabled) {
-      errors.push(`Staging model '${modelConfig.staging}' is disabled`);
-    }
-  }
-
-  if (modelConfig.production) {
-    if (!MODEL_REGISTRY[modelConfig.production]) {
-      errors.push(`Invalid production model: '${modelConfig.production}'. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`);
-    } else if (!MODEL_REGISTRY[modelConfig.production].enabled) {
-      errors.push(`Production model '${modelConfig.production}' is disabled`);
+  for (const environment of ['staging', 'production'] as const) {
+    const model = modelConfig[environment];
+    if (!model) continue;
+    try {
+      requireTaskModelAssignmentCapability(
+        taskId,
+        resolveModelAssignment(model),
+      );
+    } catch (error) {
+      errors.push(
+        error instanceof ModelAssignmentError
+          ? `${environment} model '${model}' [${error.code}]: ${error.message}`
+          : `${environment} model '${model}' could not be validated`,
+      );
     }
   }
 
@@ -356,7 +387,10 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Validate modelConfig against MODEL_REGISTRY
-    const modelConfigErrors = validateModelConfig(body.data.modelConfig);
+    const modelConfigErrors = validateModelConfig(
+      body.data.taskId,
+      body.data.modelConfig,
+    );
     if (modelConfigErrors.length > 0) {
       return reply.status(400).send({
         error: 'validation_error',
@@ -388,6 +422,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(201).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('already exists')) {
         return reply.status(409).send({
           error: 'conflict',
@@ -471,18 +506,6 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // Validate modelConfig against MODEL_REGISTRY (if provided)
-    if (body.data.modelConfig !== undefined) {
-      const modelConfigErrors = validateModelConfig(body.data.modelConfig);
-      if (modelConfigErrors.length > 0) {
-        return reply.status(400).send({
-          error: 'validation_error',
-          message: modelConfigErrors.join('; '),
-          field: 'modelConfig',
-        });
-      }
-    }
-
     try {
       const store = getPromptStore();
       const beforePrompt = await store.get(params.data.id);
@@ -493,6 +516,24 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
           message: `Prompt '${params.data.id}' not found`,
         });
       }
+
+      // A prompt task is immutable, so PATCH validation must consume the
+      // existing record's task capability before any governed mutation runs.
+      if (body.data.modelConfig !== undefined) {
+        const modelConfigErrors = validateModelConfig(
+          beforePrompt.taskId,
+          body.data.modelConfig,
+        );
+        if (modelConfigErrors.length > 0) {
+          return reply.status(400).send({
+            error: 'validation_error',
+            message: modelConfigErrors.join('; '),
+            field: 'modelConfig',
+          });
+        }
+      }
+
+      const actor = getActorFromRequest(request);
 
       // Check for approval requirement when promoting to production
       const isPromotion = body.data.status === 'production' && beforePrompt.status !== 'production';
@@ -521,8 +562,6 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const prompt = await store.update(params.data.id, body.data);
-      const actor = getActorFromRequest(request);
-
       // Audit log
       const auditLogger = getAuditLogger();
       await logPromptUpdated(
@@ -583,6 +622,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(200).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('not found')) {
         return reply.status(404).send({
           error: 'not_found',
@@ -640,6 +680,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(204).send();
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('not found')) {
         return reply.status(404).send({
           error: 'not_found',
@@ -702,6 +743,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(201).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       if (error instanceof Error && error.message.includes('not found')) {
         return reply.status(404).send({
           error: 'not_found',
@@ -783,6 +825,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.status(200).send(prompt);
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       // Emit rollback failure telemetry
       emit(TelemetryEvents.PromptRollbackFailed, {
         promptId: params.data.id,
@@ -1135,6 +1178,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         message: 'Version approved successfully. You can now promote to production.',
       });
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       log.error({ error, promptId: params.data.id }, 'Prompt approval failed');
 
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1252,6 +1296,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
         message: `Updated ${body.data.testCases.length} test cases for version ${body.data.version}`,
       });
     } catch (error) {
+      if (sendPromptMutationConflict(error, reply)) return;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       if (errorMessage.includes('not found')) {
@@ -1532,16 +1577,9 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
   // Observation Routes
   // =========================================================================
 
-  /**
-   * Helper to get Supabase store with observation methods
-   * Returns null if store is not Supabase
-   */
-  function getSupabaseStore(): SupabasePromptStore | null {
-    const store = getPromptStore();
-    if (store instanceof SupabasePromptStore) {
-      return store;
-    }
-    return null;
+  /** Resolve only the governed observation facet; never unwrap IPromptStore. */
+  function getObservationCapability() {
+    return getGovernedPromptObservationCapability(getPromptStore());
   }
 
   /**
@@ -1562,8 +1600,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1579,7 +1617,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await supabaseStore.getObservations(params.data.id);
+      const result = await observations.listObservations(params.data.id);
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'list_observations',
@@ -1617,8 +1655,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1634,7 +1672,10 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await supabaseStore.getObservations(params.data.id, params.data.version);
+      const result = await observations.getObservationVersion(
+        params.data.id,
+        params.data.version,
+      );
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'list_version_observations',
@@ -1674,8 +1715,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1699,7 +1740,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const observation = await supabaseStore.addObservation({
+      const observation = await observations.addObservation({
         promptId: params.data.id,
         version: body.data.version,
         observationType: body.data.observationType as ObservationType,
@@ -1754,8 +1795,8 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
     if (!ensureStoreHealthy(reply)) return;
 
-    const supabaseStore = getSupabaseStore();
-    if (!supabaseStore) {
+    const observations = getObservationCapability();
+    if (!observations) {
       return reply.status(501).send({
         error: 'not_implemented',
         message: 'Observations are only available with Supabase store',
@@ -1771,7 +1812,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      await supabaseStore.deleteObservation(params.data.obsId);
+      await observations.deleteObservation(params.data.obsId);
 
       emit(AdminTelemetryEvents.AdminPromptAccess, {
         action: 'delete_observation',

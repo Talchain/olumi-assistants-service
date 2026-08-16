@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getAdapter, getAdapterForProvider, getAdapterWithResolution, resetAdapterCache } from "../../src/adapters/llm/router.js";
 import { TASK_MODEL_DEFAULTS, type CeeTask } from "../../src/config/model-routing.js";
 import { _resetConfigCache } from "../../src/config/index.js";
+import { ModelAssignmentError } from "../../src/config/model-assignment.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
 describe("LLM Router", () => {
@@ -45,10 +46,10 @@ describe("LLM Router", () => {
 
     it("respects LLM_MODEL env var for model selection", () => {
       process.env.LLM_PROVIDER = "anthropic";
-      process.env.LLM_MODEL = "claude-3-opus-20240229";
+      process.env.LLM_MODEL = "claude-opus-4-8";
       const adapter = getAdapter();
 
-      expect(adapter.model).toBe("claude-3-opus-20240229");
+      expect(adapter.model).toBe("claude-opus-4-8");
     });
 
     it("uses default model when LLM_MODEL is not set", () => {
@@ -158,20 +159,43 @@ describe("LLM Router", () => {
   });
 
   describe("Task-specific routing", () => {
-    it("uses LLM_PROVIDER unless task model matches that provider", () => {
+    it("uses each task default and derives its provider, even when LLM_PROVIDER names the opposite provider", () => {
       process.env.LLM_PROVIDER = "anthropic";
+      delete process.env.LLM_MODEL;
+      delete process.env.CEE_MODEL_DRAFT;
+      delete process.env.CEE_MODEL_DRAFT_GRAPH;
+      delete process.env.CEE_MODEL_OPTIONS;
+      delete process.env.CEE_MODEL_REPAIR;
+      _resetConfigCache();
 
       const draftAdapter = getAdapter("draft_graph");
       const suggestAdapter = getAdapter("suggest_options");
-      const repairAdapter = getAdapter("repair_graph");
+      const validationAdapter = getAdapter("validate_graph");
 
-      // LLM_PROVIDER takes precedence; task defaults only used if compatible
-      // draft_graph default is gpt-4o (OpenAI), but LLM_PROVIDER=anthropic → Anthropic
-      // suggest_options default is gpt-5.2 (OpenAI), but LLM_PROVIDER=anthropic → Anthropic
-      // repair_graph default is claude-sonnet-4 (Anthropic), matches LLM_PROVIDER → Anthropic
+      expect(draftAdapter.model).toBe(TASK_MODEL_DEFAULTS.draft_graph);
       expect(draftAdapter.name).toBe("anthropic");
-      expect(suggestAdapter.name).toBe("anthropic");
-      expect(repairAdapter.name).toBe("anthropic");
+      expect(suggestAdapter.model).toBe(TASK_MODEL_DEFAULTS.suggest_options);
+      expect(suggestAdapter.name).toBe("openai");
+      expect(validationAdapter.model).toBe(TASK_MODEL_DEFAULTS.validate_graph);
+      expect(validationAdapter.name).toBe("openai");
+    });
+
+    it("does not let the global model silently replace the orchestrator task default", () => {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.LLM_MODEL = "gpt-4o-mini";
+      delete process.env.CEE_MODEL_ORCHESTRATOR;
+      _resetConfigCache();
+
+      const { adapter, resolution } = getAdapterWithResolution("orchestrator");
+
+      expect(resolution).toMatchObject({
+        task: "orchestrator",
+        resolved_model: TASK_MODEL_DEFAULTS.orchestrator,
+        resolution_source: "task_default",
+        provider: "anthropic",
+      });
+      expect(adapter.name).toBe("anthropic");
+      expect(adapter.model).toBe(TASK_MODEL_DEFAULTS.orchestrator);
     });
   });
 
@@ -180,6 +204,88 @@ describe("LLM Router", () => {
       expect(() => {
         getAdapterForProvider("unknown" as any);
       }).toThrow("Unknown provider");
+    });
+  });
+
+  describe("Task/provider capability authority", () => {
+    function expectProviderMismatch(run: () => unknown): void {
+      let caught: unknown;
+      try {
+        run();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(ModelAssignmentError);
+      if (!(caught instanceof ModelAssignmentError)) return;
+      expect(caught.code).toBe("MODEL_PROVIDER_MISMATCH");
+      expect(caught.message).toContain("does not implement task 'critique_graph'");
+    }
+
+    beforeEach(() => {
+      delete process.env.LLM_FAILOVER_PROVIDERS;
+      delete process.env.CEE_MODEL_CRITIQUE;
+      process.env.LLM_PROVIDER = "openai";
+      _resetConfigCache();
+      resetAdapterCache();
+    });
+
+    it("fails the unsupported critique default before constructing a serving adapter", () => {
+      expectProviderMismatch(() => getAdapterWithResolution("critique_graph"));
+    });
+
+    it("accepts an Anthropic critique env override and rejects an OpenAI override", () => {
+      process.env.CEE_MODEL_CRITIQUE = "claude-sonnet-4-6";
+      _resetConfigCache();
+      resetAdapterCache();
+
+      const valid = getAdapterWithResolution("critique_graph");
+      expect(valid.adapter.name).toBe("anthropic");
+      expect(valid.resolution).toMatchObject({
+        provider: "anthropic",
+        resolved_model: "claude-sonnet-4-6",
+        resolution_source: "env_var",
+      });
+
+      process.env.CEE_MODEL_CRITIQUE = "gpt-4o";
+      _resetConfigCache();
+      resetAdapterCache();
+      expectProviderMismatch(() => getAdapterWithResolution("critique_graph"));
+    });
+
+    it("applies the same guard to store pins while preserving valid Anthropic pins", () => {
+      expectProviderMismatch(() =>
+        getAdapterWithResolution(
+          "critique_graph",
+          "gpt-4o",
+          "store_model_config",
+        ),
+      );
+
+      const valid = getAdapterWithResolution(
+        "critique_graph",
+        "claude-sonnet-4-6",
+        "store_model_config",
+      );
+      expect(valid.adapter.name).toBe("anthropic");
+      expect(valid.resolution).toMatchObject({
+        provider: "anthropic",
+        resolved_model: "claude-sonnet-4-6",
+        resolution_source: "store_model_config",
+      });
+    });
+
+    it("preserves the implemented Fixtures critique path", () => {
+      process.env.LLM_PROVIDER = "fixtures";
+      _resetConfigCache();
+      resetAdapterCache();
+
+      const resolved = getAdapterWithResolution("critique_graph");
+      expect(resolved.adapter.name).toBe("fixtures");
+      expect(resolved.resolution).toMatchObject({
+        provider: "fixtures",
+        resolved_model: TASK_MODEL_DEFAULTS.critique_graph,
+        availability: "fixture_only",
+      });
     });
   });
 
@@ -237,9 +343,8 @@ describe("LLM Router", () => {
 
   describe("TASK_MODEL_DEFAULTS integration", () => {
     it("uses claude-sonnet-5 for draft_graph when no CEE_MODEL_DRAFT override", () => {
-      // Default reconciled to live staging (2026-08-08). The anthropic default
-      // only serves when LLM_PROVIDER matches; under openai it is skipped
-      // (provider-mismatch) — see the startup WARN in model-resolution-logger.
+      // Default reconciled to live staging (2026-08-08). Provider follows the
+      // winning task model even when the lower-precedence global differs.
       delete process.env.CEE_MODEL_DRAFT;
       delete process.env.CEE_MODEL_DRAFT_GRAPH;
       delete process.env.LLM_MODEL;
@@ -282,7 +387,7 @@ describe("LLM Router", () => {
     });
 
     it("uses claude-sonnet-5 for orchestrator when no CEE_MODEL_ORCHESTRATOR override", () => {
-      // Default reconciled to live staging (2026-07-19); serves under matching provider.
+      // Default reconciled to live staging (2026-07-19).
       delete process.env.CEE_MODEL_ORCHESTRATOR;
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "anthropic";
@@ -294,7 +399,7 @@ describe("LLM Router", () => {
     });
 
     it("uses claude-sonnet-5 for edit_graph when no CEE_MODEL_EDIT_GRAPH override", () => {
-      // Default reconciled to live staging (2026-08-08); serves under matching provider.
+      // Default reconciled to live staging (2026-08-08).
       delete process.env.CEE_MODEL_EDIT_GRAPH;
       delete process.env.LLM_MODEL;
       process.env.LLM_PROVIDER = "anthropic";
@@ -414,8 +519,6 @@ describe("LLM Router", () => {
     });
 
     it("reports resolution_source=task_default when only TASK_MODEL_DEFAULTS applies", () => {
-      // Use a task whose default provider matches LLM_PROVIDER so the task
-      // default is actually applied (not skipped on provider-mismatch).
       // clarification defaults to gpt-4.1-2025-04-14 (openai).
       delete process.env.CEE_MODEL_CLARIFICATION;
       process.env.LLM_PROVIDER = "openai";
@@ -425,6 +528,17 @@ describe("LLM Router", () => {
       expect(resolution.resolved_model).toBe(TASK_MODEL_DEFAULTS.clarification);
     });
 
+    it("still attributes authority to the task default when the global model has identical bytes", () => {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.LLM_MODEL = TASK_MODEL_DEFAULTS.clarification;
+      _resetConfigCache();
+
+      const { resolution } = getAdapterWithResolution("clarification");
+
+      expect(resolution.resolved_model).toBe(TASK_MODEL_DEFAULTS.clarification);
+      expect(resolution.resolution_source).toBe("task_default");
+    });
+
     it("reports resolution_source=env_var when CEE_MODEL_DRAFT is set", () => {
       process.env.LLM_PROVIDER = "openai";
       process.env.CEE_MODEL_DRAFT = "gpt-4.1-2025-04-14";
@@ -432,6 +546,18 @@ describe("LLM Router", () => {
       const { resolution } = getAdapterWithResolution("draft_graph");
       expect(resolution.resolution_source).toBe("env_var");
       expect(resolution.resolved_model).toBe("gpt-4.1-2025-04-14");
+    });
+
+    it("still attributes authority to the task env override when the global model is identical", () => {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.LLM_MODEL = "gpt-4.1-2025-04-14";
+      process.env.CEE_MODEL_DRAFT = "gpt-4.1-2025-04-14";
+      _resetConfigCache();
+
+      const { resolution } = getAdapterWithResolution("draft_graph");
+
+      expect(resolution.resolved_model).toBe("gpt-4.1-2025-04-14");
+      expect(resolution.resolution_source).toBe("env_var");
     });
 
     it("reports resolution_source=per_call when modelOverride is passed without origin", () => {

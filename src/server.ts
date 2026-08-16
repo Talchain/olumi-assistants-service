@@ -84,11 +84,14 @@ import { adminModelRoutes } from "./routes/admin.models.js";
 import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
 import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
+import {
+  buildEffectiveTaskModels,
+  resolveModelRoutingSnapshot,
+} from "./adapters/llm/model-routing-report.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts, resolvePromptEnvironment, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
-import { TASK_MODEL_DEFAULTS } from "./config/model-routing.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
@@ -251,18 +254,15 @@ export async function build() {
     );
   }
 
-  // Log effective task→model assignments at startup (env overrides applied over code defaults)
-  const effectiveTaskModels = {
-    draft_graph: config.cee.models.draft ?? TASK_MODEL_DEFAULTS.draft_graph,
-    repair_graph: config.cee.models.repair ?? TASK_MODEL_DEFAULTS.repair_graph,
-    edit_graph: config.cee.models.edit_graph ?? TASK_MODEL_DEFAULTS.edit_graph,
-    orchestrator: config.cee.models.orchestrator ?? TASK_MODEL_DEFAULTS.orchestrator,
-    options: config.cee.models.options ?? TASK_MODEL_DEFAULTS.options,
-    critique_graph: config.cee.models.critique ?? TASK_MODEL_DEFAULTS.critique_graph,
-    decision_review: config.cee.models.decision_review ?? TASK_MODEL_DEFAULTS.decision_review,
-    clarification: config.cee.models.clarification ?? TASK_MODEL_DEFAULTS.clarification,
-  };
-  log.info({ event: 'config.task_models', ...effectiveTaskModels }, 'Effective task model assignments (env overrides applied)');
+  // One adapter-free routing projection feeds startup status and the admin
+  // endpoint. Gated, inert/display and invalid rows remain visible in the full
+  // snapshot but cannot be presented as effective serving assignments.
+  const modelRoutingSnapshot = resolveModelRoutingSnapshot();
+  const effectiveTaskModels = buildEffectiveTaskModels(modelRoutingSnapshot);
+  log.info(
+    { event: 'config.task_models', ...effectiveTaskModels },
+    'Effective task model assignments from shared routing authority',
+  );
 
   // Boot fail-loud drift guard (Lane F 2026-07-23, EXTENDED to all call sites
   // 2026-07-24 — ROADMAP 1.185(a) rec-2 / MODEL-ROUTING-POLICY D10;
@@ -399,17 +399,11 @@ export async function build() {
     orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
     diagnostic_trace: diagnosticTraceEnabled,
     streaming: config.features.orchestratorStreaming,
-    models: {
-      orchestrator: effectiveTaskModels.orchestrator,
-      draft: effectiveTaskModels.draft_graph,
-      edit_graph: effectiveTaskModels.edit_graph,
-      repair: effectiveTaskModels.repair_graph,
-      decision_review: effectiveTaskModels.decision_review,
-    },
+    models: effectiveTaskModels,
     deprecated_vars_detected: deprecationWarnings.length,
     dead_vars_detected: deadVarWarnings.length,
   }, 'Startup health summary');
-  logResolvedTaskModels();
+  logResolvedTaskModels(modelRoutingSnapshot);
 
   // Security configuration (read from env or use defaults)
   const BODY_LIMIT_BYTES = Number(env.BODY_LIMIT_BYTES) || 1024 * 1024; // 1 MB default
@@ -1354,7 +1348,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     }
 
     // Startup health check: log prompt fallback alignment and model routing
-    logStartupHealthCheck(TASK_MODEL_DEFAULTS);
+    logStartupHealthCheck();
 
     // Register admin routes if enabled and configured
     // Set ADMIN_ROUTES_ENABLED=false in production to disable

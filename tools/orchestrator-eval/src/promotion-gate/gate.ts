@@ -21,7 +21,11 @@
 
 import { resolve } from 'node:path';
 import { hashCanonicalFile } from './manifest.js';
-import { MIN_CERTIFYING_SAMPLE_SIZE } from './types.js';
+import {
+  DEFAULT_MAX_FUTURE_SKEW_DAYS,
+  DEFAULT_MAX_REPORT_AGE_DAYS,
+  passesPromotionFloor,
+} from '../../../../src/prompts/promotion-evidence.js';
 import type {
   GateBlockKind,
   GateResult,
@@ -62,53 +66,7 @@ import type {
  *   nothing enforces is the defect class, not a comment style. It is code now.
  */
 export function passesFloor(report: PromotionReport): { ok: boolean; reason: string } {
-  const dims = report.dims;
-  if (dims.length === 0) {
-    return { ok: false, reason: 'report carries ZERO dimensions — a report that measured nothing cannot certify a pass' };
-  }
-  const measured = dims.filter((d) => d.status !== 'not_applicable');
-  if (measured.length === 0) {
-    return { ok: false, reason: `report measured ZERO dimensions (all ${dims.length} not_applicable) — examined nothing` };
-  }
-  const failed = dims.filter((d) => d.status === 'fail').map((d) => d.name);
-  if (failed.length > 0) {
-    return { ok: false, reason: `failing dimension(s): ${failed.join(', ')}` };
-  }
-  const requiredNa = dims.filter((d) => d.required && d.status === 'not_applicable').map((d) => d.name);
-  if (requiredNa.length > 0) {
-    return {
-      ok: false,
-      reason: `required dimension(s) not measured (not_applicable): ${requiredNa.join(', ')} — cannot certify a floor on data we do not have`,
-    };
-  }
-  // A2: at least one REQUIRED dimension must be affirmatively MEASURED. Without
-  // this, a report carrying a single conditional pass certifies a promotion
-  // while nothing the prompt MUST do was ever checked.
-  const measuredRequired = dims.filter((d) => d.required && d.status !== 'not_applicable');
-  if (measuredRequired.length === 0) {
-    return {
-      ok: false,
-      reason:
-        `ZERO required dimensions measured (${dims.length} dim(s), none required-and-measured) — ` +
-        'a conditional dimension cannot, on its own, satisfy the floor',
-    };
-  }
-  // A1: the sample size is re-derived here, never taken from the report's verdict.
-  if (!Number.isFinite(report.sampleSize) || report.sampleSize < MIN_CERTIFYING_SAMPLE_SIZE) {
-    return {
-      ok: false,
-      reason:
-        `sample size n=${report.sampleSize} is below the certifying minimum of ${MIN_CERTIFYING_SAMPLE_SIZE} — ` +
-        'fewer runs is a compliance rate nobody has estimated, not a score',
-    };
-  }
-  if (report.verdict !== 'PASS') {
-    return { ok: false, reason: `report verdict is ${report.verdict}, not PASS` };
-  }
-  return {
-    ok: true,
-    reason: `${measuredRequired.length} required dimension(s) measured and clear, n=${report.sampleSize}`,
-  };
+  return passesPromotionFloor(report);
 }
 
 /** Days between two ISO/Date instants (may be fractional). */
@@ -133,10 +91,7 @@ export interface GateOptions {
   readonly maxFutureSkewDays: number;
 }
 
-export const DEFAULT_MAX_REPORT_AGE_DAYS = 90;
-
-/** Generous enough for timezone/clock confusion, far short of useful post-dating. */
-export const DEFAULT_MAX_FUTURE_SKEW_DAYS = 1;
+export { DEFAULT_MAX_REPORT_AGE_DAYS, DEFAULT_MAX_FUTURE_SKEW_DAYS };
 
 /**
  * Compute the gate over injected state. Pure: no fs except hashing the pack's

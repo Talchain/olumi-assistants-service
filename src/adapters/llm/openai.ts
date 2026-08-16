@@ -17,7 +17,12 @@ import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-c
 import { getMaxTokensFromConfig } from "./router.js";
 import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
-import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
+import {
+  getSystemPrompt,
+  getSystemPromptMeta,
+  getSystemPromptSnapshot,
+  invalidatePromptCache,
+} from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 import {
   LLMDraftResponse as OpenAIDraftResponse,
@@ -197,7 +202,15 @@ export function buildModelParams(
   }
 }
 
-function buildSuggestOptionsPrompt(goal: string, constraints?: Record<string, unknown>, existingOptions?: string[]): string {
+/**
+ * User-owned context for suggest_options. The governing instructions are the
+ * exact PMS/default snapshot and are sent separately as the system message.
+ */
+function buildSuggestOptionsUserContent(
+  goal: string,
+  constraints?: Record<string, unknown>,
+  existingOptions?: string[],
+): string {
   const existingContext = existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -206,37 +219,7 @@ function buildSuggestOptionsPrompt(goal: string, constraints?: Record<string, un
     ? `\n\n## Constraints\n${JSON.stringify(constraints, null, 2)}`
     : "";
 
-  return `You are an expert at generating strategic options for decisions.
-
-## Goal
-${goal}
-${constraintsContext}${existingContext}
-
-## Your Task
-Generate 3-5 distinct, actionable options. For each option provide:
-- id: short lowercase identifier (e.g., "extend_trial", "in_app_nudges")
-- title: concise name (3-8 words)
-- pros: 2-3 advantages
-- cons: 2-3 disadvantages or risks
-- evidence_to_gather: 2-3 data points or metrics to collect
-
-IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
-
-## Output Format (JSON)
-Return ONLY valid JSON:
-{
-  "options": [
-    {
-      "id": "opt_1",
-      "title": "Option Title",
-      "pros": ["Pro 1", "Pro 2"],
-      "cons": ["Con 1", "Con 2"],
-      "evidence_to_gather": ["Metric 1", "Metric 2"]
-    }
-  ]
-}
-
-Return ONLY the JSON object, no markdown formatting`;
+  return `## Goal\n${goal}${constraintsContext}${existingContext}`;
 }
 
 function buildClarifyBriefPrompt(
@@ -411,17 +394,25 @@ export class OpenAIAdapter implements LLMAdapter {
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
     const collector = opts.collector;
+    const preloadedDraftPrompt =
+      opts.preloadedSystemPrompt?.operation === 'draft_graph'
+        ? opts.preloadedSystemPrompt
+        : undefined;
 
     // Cache bypass support: invalidate and force fresh load from Supabase
-    if (opts.bypassCache) {
+    if (opts.bypassCache && !preloadedDraftPrompt) {
       invalidatePromptCache('draft_graph', 'header_refresh');
       log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via bypass flag (OpenAI)');
     }
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
     // If forceDefault is true, skip store/cache and use hardcoded default directly
-    const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
-    const promptMeta = getSystemPromptMeta('draft_graph');
+    const systemPrompt = preloadedDraftPrompt
+      ? preloadedDraftPrompt.content
+      : await getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
+    const promptMeta = preloadedDraftPrompt
+      ? preloadedDraftPrompt.meta
+      : getSystemPromptMeta('draft_graph');
 
     // Build user content with brief and documents (defense-in-depth 60k cap)
     let docContext = "";
@@ -898,13 +889,29 @@ export class OpenAIAdapter implements LLMAdapter {
 
   async suggestOptions(args: SuggestOptionsArgs, opts: CallOpts): Promise<SuggestOptionsResult> {
     const { goal, constraints, existingOptions } = args;
-    const prompt = buildSuggestOptionsPrompt(goal, constraints, existingOptions);
+    const preloadedSuggestPrompt =
+      opts.preloadedSystemPrompt?.operation === 'suggest_options'
+        ? opts.preloadedSystemPrompt
+        : await getSystemPromptSnapshot('suggest_options');
+    const userContent = buildSuggestOptionsUserContent(
+      goal,
+      constraints,
+      existingOptions,
+    );
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
     const startTime = Date.now();
 
-    log.info({ goal_chars: goal.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey }, "calling OpenAI for options");
+    log.info({
+      goal_chars: goal.length,
+      model: this.model,
+      provider: 'openai',
+      idempotency_key: idempotencyKey,
+      prompt_id: preloadedSuggestPrompt.meta.taskId,
+      prompt_hash: preloadedSuggestPrompt.meta.prompt_hash,
+      prompt_source: preloadedSuggestPrompt.meta.source,
+    }, "calling OpenAI for options");
 
     const abortController = new AbortController();
     const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
@@ -933,7 +940,10 @@ export class OpenAIAdapter implements LLMAdapter {
           apiClient.chat.completions.create(
             {
               model: this.model,
-              messages: [{ role: "user", content: prompt }],
+              messages: [
+                { role: "system", content: preloadedSuggestPrompt.content },
+                { role: "user", content: userContent },
+              ],
               response_format: { type: "json_object" },
               ...modelParams,
             },

@@ -214,4 +214,67 @@ describe("OpenAI draftGraph error classification", () => {
       expect(serialized).not.toBe("{}");
     }
   });
+
+  it("suggest_options sends the exact preloaded snapshot as system authority", async () => {
+    mockCreate = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              options: [
+                {
+                  id: "opt_1",
+                  title: "A valid option",
+                  pros: ["Useful", "Distinct"],
+                  cons: ["Costly", "Uncertain"],
+                  evidence_to_gather: ["Conversion rate", "Retention rate"],
+                },
+              ],
+            }),
+          },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    });
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const adapter = new OpenAIAdapter("gpt-4o-mini");
+    const exactPrompt = "SERVED-PMS-SUGGEST-BYTES-v77";
+
+    await adapter.suggestOptions(
+      {
+        goal: "Choose a launch strategy",
+        constraints: { budget: "bounded" },
+        existingOptions: ["Do nothing"],
+      },
+      {
+        requestId: "suggest-prompt-authority",
+        timeoutMs: 80_000,
+        preloadedSystemPrompt: {
+          operation: "suggest_options",
+          content: exactPrompt,
+          meta: {
+            taskId: "suggest_options",
+            source: "store",
+            prompt_version: "suggest_options_default@v77 (staging)",
+            prompt_hash: "exact-hash",
+          },
+        },
+      },
+    );
+
+    const request = mockCreate.mock.calls[0]?.[0] as {
+      messages?: Array<{ role: string; content: string }>;
+    };
+    expect(request.messages?.[0]).toEqual({
+      role: "system",
+      content: exactPrompt,
+    });
+    expect(request.messages?.[1]?.role).toBe("user");
+    expect(request.messages?.[1]?.content).toContain(
+      "## Goal\nChoose a launch strategy",
+    );
+    expect(JSON.stringify(request.messages)).not.toContain(
+      "You are an expert at generating strategic options for decisions.",
+    );
+  });
 });

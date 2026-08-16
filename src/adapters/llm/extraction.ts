@@ -8,11 +8,15 @@
  */
 
 import OpenAI from "openai";
-import { FALLBACK_ANTHROPIC_MODEL } from "./model-fallback.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
-import { getModelProvider, isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import { isModelClientAllowed, getModelBlockReason } from "../../config/models.js";
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+} from "../../config/model-assignment.js";
+import { AUXILIARY_MODEL_DEFAULTS } from "../../config/model-routing.js";
 import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 
 // ============================================================================
@@ -53,24 +57,36 @@ export interface ExtractionResult {
 // ============================================================================
 
 /**
- * Get the model to use for extraction tasks.
- * Priority: modelOverride > CEE_MODEL_EXTRACTION > CEE_MODEL_DRAFT > provider default
+ * Resolve the dedicated extraction assignment. Unlike the old fallback chain,
+ * this never inherits the drafting/global model: extraction is a live task and
+ * has its own checked-in landing point.
  */
-function getExtractionModel(provider: "openai" | "anthropic", modelOverride?: string): string {
-  // Request-time model override takes highest priority
-  if (modelOverride) {
-    return modelOverride;
-  }
-  // Prefer dedicated extraction model
-  if (config.cee.models.extraction) {
-    return config.cee.models.extraction;
-  }
-  // Fall back to draft model
-  if (config.cee.models.draft) {
-    return config.cee.models.draft;
-  }
-  // Provider defaults
-  return provider === "openai" ? "gpt-4o-mini" : FALLBACK_ANTHROPIC_MODEL;
+export function resolveExtractionAssignment(
+  configuredProvider: "openai" | "anthropic" | "fixtures",
+  modelOverride?: string,
+  configuredExtractionModel: string | undefined = config.cee.models.extraction,
+): {
+  model: string;
+  provider: "openai" | "anthropic" | "fixtures";
+  source: "per_call" | "env_var" | "task_default";
+} {
+  const model =
+    modelOverride ??
+    configuredExtractionModel ??
+    AUXILIARY_MODEL_DEFAULTS.extraction;
+  const source = modelOverride
+    ? "per_call"
+    : configuredExtractionModel
+      ? "env_var"
+      : "task_default";
+  const assignment = resolveModelAssignment(model, {
+    fixtures: configuredProvider === "fixtures",
+  });
+  return {
+    model: assignment.model,
+    provider: assignment.provider,
+    source,
+  };
 }
 
 // ============================================================================
@@ -226,7 +242,10 @@ async function callOpenAI(
 
   try {
     const client = getOpenAIClient();
-    const model = getExtractionModel("openai", modelOverride);
+    const model = resolveExtractionAssignment(
+      "openai",
+      modelOverride,
+    ).model;
 
     const responsePromise = client.chat.completions.create({
       model,
@@ -303,7 +322,10 @@ async function callAnthropic(
 
   try {
     const client = getAnthropicClient();
-    const model = getExtractionModel("anthropic", modelOverride);
+    const model = resolveExtractionAssignment(
+      "anthropic",
+      modelOverride,
+    ).model;
 
     const responsePromise = client.messages.create({
       model,
@@ -397,48 +419,48 @@ export async function callLLMForExtraction(
   const startTime = Date.now();
   const abortController = new AbortController();
 
-  // Validate and apply model override if specified
-  let effectiveModelOverride = options.modelOverride;
+  // Validate an explicit override before any provider call. Unknown, disabled
+  // or blocked ids fail deliberately; they never fall through to another model.
+  const effectiveModelOverride = options.modelOverride;
   if (effectiveModelOverride && provider !== "fixtures") {
-    // Validate model override against blocklist
+    resolveModelAssignment(effectiveModelOverride);
     const blockedModels = getClientBlockedModels();
     if (!isModelClientAllowed(effectiveModelOverride, blockedModels)) {
       const reason = getModelBlockReason(effectiveModelOverride, blockedModels);
-      log.warn(
-        {
-          event: "cee.extraction.model_override_rejected",
-          model_override: effectiveModelOverride,
-          reason,
-        },
-        "Model override rejected for extraction - using default"
+      throw new ModelAssignmentError(
+        'MODEL_CLIENT_BLOCKED',
+        effectiveModelOverride,
+        reason ?? `Model '${effectiveModelOverride}' is blocked for client use.`,
       );
-      effectiveModelOverride = undefined;
-    } else {
-      // Switch provider to match the model
-      const modelProvider = getModelProvider(effectiveModelOverride);
-      if (modelProvider && modelProvider !== provider) {
-        log.info(
-          {
-            event: "cee.extraction.provider_switch",
-            model_override: effectiveModelOverride,
-            previous_provider: provider,
-            new_provider: modelProvider,
-          },
-          "Switching provider to match model override for extraction"
-        );
-        provider = modelProvider;
-      }
     }
   }
 
-  // Update options with validated model override
-  const validatedOptions = { ...options, modelOverride: effectiveModelOverride };
+  const assignment = resolveExtractionAssignment(provider, effectiveModelOverride);
+  if (assignment.provider !== provider) {
+    log.info(
+      {
+        event: "cee.extraction.provider_switch",
+        resolved_model: assignment.model,
+        resolution_source: assignment.source,
+        previous_provider: provider,
+        new_provider: assignment.provider,
+      },
+      "Switching provider to match resolved extraction model"
+    );
+    provider = assignment.provider;
+  }
+
+  // Pass the already-resolved model to the provider-specific call. This makes
+  // model and provider one atomic assignment rather than two fallback chains.
+  const validatedOptions = { ...options, modelOverride: assignment.model };
 
   log.debug(
     {
       event: "cee.extraction.call_start",
       provider,
-      model_override: effectiveModelOverride,
+      requested_model_override: effectiveModelOverride,
+      resolved_model: assignment.model,
+      resolution_source: assignment.source,
       requestId: validatedOptions.requestId,
       timeoutMs: validatedOptions.timeoutMs ?? EXTRACTION_TIMEOUT_MS,
     },
@@ -481,6 +503,8 @@ export async function callLLMForExtraction(
     {
       event: "cee.extraction.call_complete",
       provider,
+      resolved_model: assignment.model,
+      resolution_source: assignment.source,
       success: result.success,
       durationMs,
       inputTokens: result.usage?.input_tokens,

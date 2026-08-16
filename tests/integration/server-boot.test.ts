@@ -45,6 +45,23 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
       resolution_source: 'task_default' as const,
     },
   }),
+  // Startup reporting consumes the same adapter-free router plan as runtime.
+  // Keep this fixture-only plan explicit so server boot cannot instantiate or
+  // call a provider while building the effective-task projection.
+  resolveConfiguredRouterPlan: (task?: string) => ({
+    kind: 'single' as const,
+    task,
+    assignment: {
+      model: 'fixture-v1',
+      provider: 'fixtures' as const,
+      declaredProvider: null,
+      registryModelId: null,
+      availability: 'fixture_only' as const,
+      config: null,
+    },
+    resolutionSource: 'llm_model_fallback' as const,
+    sourceKey: 'LLM_PROVIDER=fixtures',
+  }),
   getMaxTokensFromConfig: () => undefined,
   // Real-server build() pin: server.ts warms the provider-config cache at boot.
   warmProviderConfigCache: async () => ({ loaded: false, path: '' }),

@@ -10,13 +10,9 @@ import { TASK_MODEL_DEFAULTS } from '../model-routing.js';
  * ROADMAP — floating-alias finding (assessment-models-prompts.md §1.5).
  *
  * `CEE_MODEL_DECISION_REVIEW`, `CEE_MODEL_REPAIR` and `CEE_MODEL_EXTRACTION`
- * are set to the BARE alias `gpt-4.1` on staging. That alias is NOT in
- * MODEL_REGISTRY (only the dated pin `gpt-4.1-2025-04-14` is), and the boot
- * registry drift guard could not see it: `server.ts` assembled its batch from
- * `draft_graph` EFFECTIVE + every CHECKED-IN `TASK_MODEL_DEFAULTS` value + two
- * router-bypass defaults. Env overrides win over checked-in defaults (router
- * precedence step 3 > step 4), so the values that actually SERVE were the only
- * ones the guard never checked.
+ * carry the explicit `gpt-4.1` provider alias on staging. The boot guard and
+ * request-time resolver consume the same alias declaration, so those exact ids
+ * are accepted while undeclared floating strings fail deliberately.
  *
  * These tests pin the WIDENED batch: every operator-supplied `CEE_MODEL_*`
  * value is validated too, DERIVED from `config.cee.models` rather than
@@ -29,7 +25,7 @@ import { TASK_MODEL_DEFAULTS } from '../model-routing.js';
  * property these tests hold.
  */
 describe('boot model-registry check batch', () => {
-  it('RED-FIRST: an unregistered EFFECTIVE (env-supplied) model fails boot validation', () => {
+  it('accepts the three deployed gpt-4.1 values as one explicit alias', () => {
     // The exact staging posture measured on 2026-07-31 (Render API).
     const envModels = {
       decision_review: 'gpt-4.1',
@@ -43,14 +39,7 @@ describe('boot model-registry check batch', () => {
     const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, { env_model: envModels });
     const errors = validateModelsRegistered(batch);
 
-    // All three unregistered aliases must be named, each against its own key.
-    expect(errors).toHaveLength(3);
-    for (const key of ['decision_review', 'repair', 'extraction']) {
-      expect(
-        errors.some((e) => e.includes('"gpt-4.1"') && e.includes(`env_model:${key}`)),
-        `expected a boot error naming env_model:${key} — got:\n${errors.join('\n')}`,
-      ).toBe(true);
-    }
+    expect(errors).toEqual([]);
   });
 
   it('the batch is DERIVED from each env record — a NEW key IN A WALKED RECORD needs no code edit', () => {

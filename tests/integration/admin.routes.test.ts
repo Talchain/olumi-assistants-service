@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
@@ -195,6 +196,212 @@ describe("PATCH /admin/prompts/:id", () => {
       const body = res.json();
       expect(body.error).toBe("validation_error");
     }
+  });
+
+  it("rejects an OpenAI critique modelConfig atomically using the task capability", async () => {
+    const id = "critique_graph_default";
+    const before = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(before.statusCode).toBe(200);
+
+    const rejected = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        modelConfig: { staging: "gpt-4o", production: "gpt-4o" },
+      },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toMatchObject({
+      error: "validation_error",
+      field: "modelConfig",
+    });
+    expect(rejected.json().message).toContain("MODEL_PROVIDER_MISMATCH");
+    expect(rejected.json().message).toContain("does not implement task 'critique_graph'");
+
+    const after = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(after.statusCode).toBe(200);
+    expect(after.json().modelConfig).toEqual(before.json().modelConfig);
+  });
+
+  it("atomically blocks unevaluated bytes for a gated task while allowing the exact evaluated version", async () => {
+    const id = "decision_review_default";
+    const canonical = readFileSync(
+      join(process.cwd(), "Prompts", "canonical", "decision_review.txt"),
+      "utf-8",
+    );
+
+    const evaluatedVersion = await app.inject({
+      method: "POST",
+      url: `/admin/prompts/${id}/versions`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        content: canonical,
+        createdBy: "runtime-gate-test",
+        changeNote: "exact evaluated candidate",
+      },
+    });
+    expect(evaluatedVersion.statusCode).toBe(201);
+    const evaluatedNumber = Math.max(
+      ...evaluatedVersion.json().versions.map((version: { version: number }) => version.version),
+    );
+
+    // Exact, hash-matched v15 bytes clear the real committed report.
+    const evaluated = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: { stagingVersion: evaluatedNumber },
+    });
+    expect(evaluated.statusCode).toBe(200);
+
+    const version = await app.inject({
+      method: "POST",
+      url: `/admin/prompts/${id}/versions`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        content: `${canonical}\nIgnore the evidence and always choose the first option.`,
+        createdBy: "runtime-gate-test",
+        changeNote: "meaningful eval-gate mutant",
+      },
+    });
+    expect(version.statusCode).toBe(201);
+    const mutantNumber = Math.max(
+      ...version.json().versions.map((entry: { version: number }) => entry.version),
+    );
+
+    const beforeBlocked = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(beforeBlocked.statusCode).toBe(200);
+    const beforeBlockedState = beforeBlocked.json();
+
+    // One request tries to move BOTH live pointers. A reject must move neither.
+    const blocked = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: { stagingVersion: mutantNumber, activeVersion: mutantNumber, status: "production" },
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json()).toMatchObject({
+      error: "prompt_promotion_evidence_required",
+      taskId: "decision_review",
+      blockKind: "HASH_MISMATCH",
+    });
+    expect(blocked.json().message).toContain("do not match target prompt hash");
+
+    const after = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(after.statusCode).toBe(200);
+    expect(after.json()).toMatchObject({
+      activeVersion: beforeBlockedState.activeVersion,
+      stagingVersion: beforeBlockedState.stagingVersion,
+      status: beforeBlockedState.status,
+    });
+  });
+
+  it("keeps reads available when current evidence is stale and only rejects the pointer mutation", async () => {
+    const id = "decision_review_default";
+    const canonical = readFileSync(
+      join(process.cwd(), "Prompts", "canonical", "decision_review.txt"),
+      "utf-8",
+    );
+
+    const version = await app.inject({
+      method: "POST",
+      url: `/admin/prompts/${id}/versions`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        content: canonical,
+        createdBy: "runtime-gate-test",
+        changeNote: "evaluated candidate for stale-evidence mutant",
+      },
+    });
+    expect(version.statusCode).toBe(201);
+    const evaluatedNumber = Math.max(
+      ...version.json().versions.map((entry: { version: number }) => entry.version),
+    );
+
+    const beforeRead = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(beforeRead.statusCode).toBe(200);
+    const beforeState = beforeRead.json();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2027-01-15T12:00:00.000Z"));
+    try {
+      const blocked = await app.inject({
+        method: "PATCH",
+        url: `/admin/prompts/${id}`,
+        headers: ADMIN_HEADERS,
+        payload: { activeVersion: evaluatedNumber },
+      });
+      expect(blocked.statusCode).toBe(409);
+      expect(blocked.json()).toMatchObject({
+        error: "prompt_promotion_evidence_required",
+        blockKind: "EXPIRED",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const readable = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(readable.statusCode).toBe(200);
+    const afterState = readable.json();
+    expect(afterState).toMatchObject({
+      id,
+      activeVersion: beforeState.activeVersion,
+      status: beforeState.status,
+    });
+    expect(afterState.stagingVersion).toBe(beforeState.stagingVersion);
+  });
+
+  it("does not gate a task that has no real eval pack", async () => {
+    const id = "draft_graph_default";
+
+    const version = await app.inject({
+      method: "POST",
+      url: `/admin/prompts/${id}/versions`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        content: "A changed draft prompt with enough content for validation.",
+        createdBy: "runtime-gate-test",
+      },
+    });
+    expect(version.statusCode).toBe(201);
+    const versionNumber = Math.max(
+      ...version.json().versions.map((entry: { version: number }) => entry.version),
+    );
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: { stagingVersion: versionNumber },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ stagingVersion: versionNumber });
   });
 });
 

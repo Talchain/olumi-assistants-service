@@ -8,6 +8,10 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { anthropicTemperatureFor } from "../../config/models.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getDefaultModelForTask } from "../../config/model-routing.js";
+import {
+  requireModelAssignmentProvider,
+  resolveModelAssignment,
+} from '../../config/model-assignment.js';
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
 import { withRetry } from "../../utils/retry.js";
@@ -441,7 +445,10 @@ function measureTruncatedDraftAnatomy(text: string): {
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
 
-async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string; attachmentBlocks?: Anthropic.ContentBlockParam[] }> {
+async function buildDraftPrompt(
+  args: DraftArgs,
+  opts?: { forceDefault?: boolean; preloadedSystemPrompt?: string },
+): Promise<{ system: AnthropicSystemBlock[]; userContent: string; attachmentBlocks?: Anthropic.ContentBlockParam[] }> {
   let docContext = "";
   if (args.docs.length) {
     const parts: string[] = [];
@@ -479,7 +486,7 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
-  const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
+  const systemPrompt = opts?.preloadedSystemPrompt ?? await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
 
   // ── DRAFT-BY-RECORDS: the output-shape instruction ──────────────────────
   // Appended as a SECOND system block, AFTER the block carrying the
@@ -508,38 +515,11 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   };
 }
 
-const _SUGGEST_SYSTEM_PROMPT = `You are an expert at generating strategic options for decisions.
-
-## Your Task
-Generate 3-5 distinct, actionable options. For each option provide:
-- id: short lowercase identifier (e.g., "extend_trial", "in_app_nudges")
-- title: concise name (3-8 words)
-- pros: 2-3 advantages
-- cons: 2-3 disadvantages or risks
-- evidence_to_gather: 2-3 data points or metrics to collect
-
-IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
-
-## Output Format (JSON)
-{
-  "options": [
-    {
-      "id": "extend_trial",
-      "title": "Extend free trial period",
-      "pros": ["Experiential value", "Low dev cost"],
-      "cons": ["Cost exposure", "Expiry dip risk"],
-      "evidence_to_gather": ["Trial→upgrade funnel", "Usage lift during trial"]
-    }
-  ]
-}
-
-Respond ONLY with valid JSON.`;
-
 async function buildSuggestPrompt(args: {
   goal: string;
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
-}): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+}, preloadedSystemPrompt?: string): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const existingContext = args.existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -551,7 +531,7 @@ async function buildSuggestPrompt(args: {
   const userContent = `## Goal\n${args.goal}${constraintsContext}${existingContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('suggest_options');
+  const systemPrompt = preloadedSystemPrompt ?? await getSystemPrompt('suggest_options');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "suggest_options" }),
@@ -709,21 +689,29 @@ export async function draftGraphWithAnthropic(
     signal?: AbortSignal;
     timeoutMs?: number;
     maxTokensCeiling?: number;
+    preloadedSystemPrompt?: CallOpts['preloadedSystemPrompt'];
     /** ROADMAP 1.204 M1 — see CallOpts.onDraftProgress. Optional; absent ⇒ the
      *  streaming loop is byte-identical to before (no scanner constructed). */
     onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
   }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
+  const preloadedDraftPrompt =
+    opts?.preloadedSystemPrompt?.operation === 'draft_graph'
+      ? opts.preloadedSystemPrompt
+      : undefined;
 
   // X-CEE-Refresh-Prompt support: invalidate cache to force fresh load from Supabase
-  if (opts?.refreshPrompts) {
+  if (opts?.refreshPrompts && !preloadedDraftPrompt) {
     invalidatePromptCache('draft_graph', 'header_refresh');
     log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via X-CEE-Refresh-Prompt header');
   }
 
-  const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
-  const promptMeta = getSystemPromptMeta('draft_graph');
+  const prompt = await buildDraftPrompt(args, {
+    forceDefault: opts?.forceDefault,
+    preloadedSystemPrompt: preloadedDraftPrompt?.content,
+  });
+  const promptMeta = preloadedDraftPrompt?.meta ?? getSystemPromptMeta('draft_graph');
   // Derive the last-resort fallback from the checked-in draft default rather
   // than a hard-copied literal (1.185(a) rec-2 derive-don't-mirror). Pinned by
   // model-resolution-table.test.ts (claude-sonnet-5 since 2026-08-08); every
@@ -2625,11 +2613,11 @@ export async function suggestOptionsWithAnthropic(args: {
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
   model?: string;
-}): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
-  const prompt = await buildSuggestPrompt(args);
+}, opts?: { preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
+  const prompt = await buildSuggestPrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
-  const suggestPromptMeta = getSystemPromptMeta('suggest_options');
+  const suggestPromptMeta = opts?.promptMeta ?? getSystemPromptMeta('suggest_options');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -2834,7 +2822,10 @@ Also provide:
 
 Respond ONLY with valid JSON.`;
 
-async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+async function buildClarifyPrompt(
+  args: ClarifyArgs,
+  preloadedSystemPrompt?: string,
+): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const previousContext = args.previous_answers?.length
     ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
     : "";
@@ -2844,7 +2835,7 @@ async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: Anthropi
 ${previousContext}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('clarify_brief');
+  const systemPrompt = preloadedSystemPrompt ?? await getSystemPrompt('clarify_brief');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "clarify_brief" }),
@@ -2853,12 +2844,16 @@ ${previousContext}${currencyInstruction}`;
 }
 
 export async function clarifyBriefWithAnthropic(
-  args: ClarifyArgs
+  args: ClarifyArgs,
+  opts?: {
+    preloadedSystemPrompt?: string;
+    promptMeta?: ReturnType<typeof getSystemPromptMeta>;
+  },
 ): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
-  const prompt = await buildClarifyPrompt(args);
+  const prompt = await buildClarifyPrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
-  const clarifyPromptMeta = getSystemPromptMeta('clarify_brief');
+  const clarifyPromptMeta = opts?.promptMeta ?? getSystemPromptMeta('clarify_brief');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -3041,7 +3036,10 @@ Also provide:
 
 Respond ONLY with valid JSON.`;
 
-async function buildCritiquePrompt(args: CritiqueArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+async function buildCritiquePrompt(
+  args: CritiqueArgs,
+  preloadedSystemPrompt?: string,
+): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const graphJson = JSON.stringify(
     {
       nodes: args.graph.nodes,
@@ -3061,7 +3059,7 @@ ${graphJson}
 ${briefContext}${focusContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('critique_graph');
+  const systemPrompt = preloadedSystemPrompt ?? await getSystemPrompt('critique_graph');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "critique_graph" }),
@@ -3070,12 +3068,13 @@ ${briefContext}${focusContext}`;
 }
 
 export async function critiqueGraphWithAnthropic(
-  args: CritiqueArgs
+  args: CritiqueArgs,
+  opts?: { preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> },
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
-  const prompt = await buildCritiquePrompt(args);
+  const prompt = await buildCritiquePrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('critique_graph') ?? 2048;
-  const critiquePromptMeta = getSystemPromptMeta('critique_graph');
+  const critiquePromptMeta = opts?.promptMeta ?? getSystemPromptMeta('critique_graph');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -3421,7 +3420,18 @@ interface ChatWithAnthropicArgs {
 export async function chatWithAnthropic(
   args: ChatWithAnthropicArgs
 ): Promise<ChatResult> {
-  const model = resolveAnthropicModel(args.model);
+  // This is the shared network boundary for dedicated Anthropic callers as
+  // well as router-backed chat. Resolve the final fallback string through the
+  // same registry authority immediately here: unknown/disabled ids and models
+  // assigned to another provider must fail before a client or request exists.
+  const fallbackModel = resolveAnthropicModel(args.model);
+  const assignment = requireModelAssignmentProvider(
+    resolveModelAssignment(fallbackModel),
+    'anthropic',
+  );
+  // resolveModelAssignment deliberately preserves exact explicit model/alias
+  // bytes; never substitute the registry target in the provider request.
+  const model = assignment.model;
   const thinkingRequested = args.thinking?.type === 'enabled';
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'chat');
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
@@ -4387,7 +4397,15 @@ export class AnthropicAdapter implements LLMAdapter {
         // Native document attachment (D-59-7). Anthropic-native; carried through.
         attachment: args.attachment,
       },
-      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs, maxTokensCeiling: opts.maxTokensCeiling }
+      {
+        collector: opts.collector,
+        refreshPrompts: opts.bypassCache,
+        forceDefault: opts.forceDefault,
+        signal: opts.signal ?? opts.abortSignal,
+        timeoutMs: opts.timeoutMs,
+        maxTokensCeiling: opts.maxTokensCeiling,
+        preloadedSystemPrompt: opts.preloadedSystemPrompt,
+      }
     );
 
     return {
@@ -4400,10 +4418,19 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async suggestOptions(args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
+  async suggestOptions(args: SuggestOptionsArgs, opts: CallOpts): Promise<SuggestOptionsResult> {
     const result = await suggestOptionsWithAnthropic({
       ...args,
       model: this.model,
+    }, {
+      preloadedSystemPrompt:
+        opts.preloadedSystemPrompt?.operation === 'suggest_options'
+          ? opts.preloadedSystemPrompt.content
+          : undefined,
+      promptMeta:
+        opts.preloadedSystemPrompt?.operation === 'suggest_options'
+          ? opts.preloadedSystemPrompt.meta
+          : undefined,
     });
 
     return {
@@ -4412,7 +4439,7 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
+  async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {
     const { brief, round, previous_answers, seed, currencyInstruction } = args;
 
     const result = await clarifyBriefWithAnthropic({
@@ -4422,7 +4449,16 @@ export class AnthropicAdapter implements LLMAdapter {
       seed,
       model: this.model,
       currencyInstruction,
-    } as any);
+    } as any, {
+      preloadedSystemPrompt:
+        opts.preloadedSystemPrompt?.operation === 'clarify_brief'
+          ? opts.preloadedSystemPrompt.content
+          : undefined,
+      promptMeta:
+        opts.preloadedSystemPrompt?.operation === 'clarify_brief'
+          ? opts.preloadedSystemPrompt.meta
+          : undefined,
+    });
 
     return {
       questions: result.questions,
@@ -4433,15 +4469,27 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async critiqueGraph(args: CritiqueGraphArgs, _opts: CallOpts): Promise<CritiqueGraphResult> {
+  async critiqueGraph(args: CritiqueGraphArgs, opts: CallOpts): Promise<CritiqueGraphResult> {
     const { graph, brief, focus_areas } = args;
 
-    const result = await critiqueGraphWithAnthropic({
-      graph,
-      brief,
-      focus_areas,
-      model: this.model,
-    });
+    const result = await critiqueGraphWithAnthropic(
+      {
+        graph,
+        brief,
+        focus_areas,
+        model: this.model,
+      },
+      {
+        preloadedSystemPrompt:
+          opts.preloadedSystemPrompt?.operation === 'critique_graph'
+            ? opts.preloadedSystemPrompt.content
+            : undefined,
+        promptMeta:
+          opts.preloadedSystemPrompt?.operation === 'critique_graph'
+            ? opts.preloadedSystemPrompt.meta
+            : undefined,
+      },
+    );
 
     return {
       issues: result.issues,

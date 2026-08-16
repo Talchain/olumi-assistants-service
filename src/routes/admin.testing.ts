@@ -19,7 +19,13 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking, anthropicTemperatureFor } from '../config/models.js';
+import { MODEL_REGISTRY, isReasoningModel, supportsExtendedThinking, anthropicTemperatureFor } from '../config/models.js';
+import {
+  ModelAssignmentError,
+  resolveModelAssignment,
+  type ResolvedModelAssignment,
+} from '../config/model-assignment.js';
+import { requiresMaxCompletionTokens } from '../adapters/llm/openai.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -30,13 +36,10 @@ import { ADMIN_LLM_TIMEOUT_MS, ADMIN_REASONING_TIMEOUT_MS, ADMIN_REASONING_HIGH_
  * This applies to reasoning models and all GPT-5.x models.
  */
 function needsMaxCompletionTokens(model: string): boolean {
-  // Reasoning models always need max_completion_tokens
-  if (isReasoningModel(model)) return true;
-  // GPT-5.x models (including gpt-5-mini, gpt-5.2, etc.) require max_completion_tokens
-  if (model.startsWith('gpt-5')) return true;
-  // o1 models also need it
-  if (model.startsWith('o1')) return true;
-  return false;
+  const assignment = resolveModelAssignment(model);
+  return assignment.provider === 'openai'
+    ? requiresMaxCompletionTokens(assignment.model)
+    : false;
 }
 
 /**
@@ -44,13 +47,11 @@ function needsMaxCompletionTokens(model: string): boolean {
  * GPT-5.x models only support temperature=1 (default).
  */
 function doesNotSupportCustomTemperature(model: string): boolean {
-  // Reasoning models don't support temperature at all
-  if (isReasoningModel(model)) return true;
-  // GPT-5.x models only support default temperature (1)
-  if (model.startsWith('gpt-5')) return true;
-  // o1 models don't support temperature
-  if (model.startsWith('o1')) return true;
-  return false;
+  const assignment = resolveModelAssignment(model);
+  return Boolean(
+    assignment.config?.reasoning ||
+      assignment.config?.rejectsSamplingParams,
+  );
 }
 
 // ============================================================================
@@ -254,8 +255,9 @@ async function callLLMWithPrompt(
   options?: LLMCallOptions,
 ): Promise<LLMCallResult> {
   const startTime = Date.now();
-  const modelConfig = getModelConfig(model);
-  const provider = modelConfig?.provider ?? getModelProvider(model) ?? 'openai';
+  const assignment = resolveModelAssignment(model);
+  const modelConfig = assignment.config;
+  const provider = assignment.provider;
 
   // Use provided maxTokens or fall back to model config
   const maxTokens = options?.maxTokens ?? modelConfig?.maxTokens ?? 4096;
@@ -994,67 +996,50 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const contentHash = createHash('sha256').update(compiledContent).digest('hex');
 
       // Determine model to use
-      // Priority: explicit override > prompt modelConfig > task default (if provider matches) > configured provider default
+      // Priority: explicit override > prompt modelConfig > task default >
+      // configured provider default. Provider follows the winning model inside
+      // callLLMWithPrompt(), matching the live router contract.
       let model = modelOverride;
-      const configuredProvider = config.llm?.provider;
-
       // Check prompt's per-prompt model configuration
       if (!model && prompt.modelConfig) {
         // Use environment-specific model based on prompt status
         const env = prompt.status === 'production' ? 'production' : 'staging';
         const promptModel = prompt.modelConfig[env];
         if (promptModel) {
-          // Validate that the model's provider matches configured LLM_PROVIDER
-          // This prevents using OpenAI models when LLM_PROVIDER=anthropic
-          const promptModelProvider = getModelProvider(promptModel);
-          if (!configuredProvider || promptModelProvider === configuredProvider) {
-            model = promptModel;
-          } else {
-            // Provider mismatch - log warning and fall through to provider default
-            log.warn({
-              prompt_id: prompt.id,
-              prompt_model: promptModel,
-              prompt_model_provider: promptModelProvider,
-              configured_provider: configuredProvider,
-            }, 'Prompt modelConfig provider mismatch - falling back to provider default');
-          }
+          model = promptModel;
         }
       }
 
       // Fall back to task defaults if no prompt-specific model
       if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
-        const taskDefault = getDefaultModelForTask(prompt.taskId);
-        const taskDefaultProvider = getModelProvider(taskDefault);
-        // Only use task default if its provider matches configured provider
-        // This ensures LLM_PROVIDER=anthropic doesn't try to use OpenAI models
-        if (!configuredProvider || taskDefaultProvider === configuredProvider) {
-          model = taskDefault;
-        }
-        // Otherwise fall through to provider default below
+        model = getDefaultModelForTask(prompt.taskId);
       }
 
       if (!model) {
-        // Fall back to configured provider's default model
-        // This respects LLM_PROVIDER env var so Claude-only deployments use Claude
-        if (configuredProvider === 'anthropic') {
-          model = 'claude-sonnet-4-20250514';
-        } else {
-          model = 'gpt-4o-mini';
-        }
+        // Operator harness fallback is explicit. It must not infer a model from
+        // the process-wide provider when the prompt task has no live route.
+        model = 'gpt-4o-mini';
       }
 
-      // Validate model if specified
-      if (modelOverride && !MODEL_REGISTRY[modelOverride]) {
+      let assignment: ResolvedModelAssignment;
+      try {
+        assignment = resolveModelAssignment(model);
+      } catch (error) {
+        if (!(error instanceof ModelAssignmentError)) throw error;
         return reply.status(400).send({
-          error: 'validation_error',
-          message: `Unknown model: ${modelOverride}. Available models: ${Object.keys(MODEL_REGISTRY).join(', ')}`,
+          error: error.code.toLowerCase(),
+          message: error.message,
+          model: error.model,
+          action:
+            'Choose an enabled registry model or an explicitly declared alias.',
         });
       }
+      model = assignment.model;
 
       // Validate parameter combinations
-      const isReasoning = isReasoningModel(model);
+      const isReasoning = Boolean(assignment.config?.reasoning);
       const supportsTemp = !doesNotSupportCustomTemperature(model);
-      const modelConfig = getModelConfig(model);
+      const modelConfig = assignment.config;
 
       // reasoning_effort is only valid for OpenAI reasoning models
       if (reasoningEffort !== undefined && !isReasoning) {

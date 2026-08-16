@@ -27,6 +27,7 @@ vi.mock('../../../../adapters/llm/router.js', () => ({
       task: 'draft_graph',
       resolved_model: 'claude-sonnet-4-6',
       resolution_source: 'default',
+      provider: 'anthropic',
     },
   }),
 }));

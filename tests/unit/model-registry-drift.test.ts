@@ -42,7 +42,7 @@ describe("validateModelRegistered (single-model core check)", () => {
   it("FIRES for an unregistered id and names the call site + id", () => {
     const errors = validateModelRegistered("some_task", "model-does-not-exist");
     expect(errors.length).toBe(1);
-    expect(errors[0]).toMatch(/NOT in the model registry/);
+    expect(errors[0]).toMatch(/neither an enabled registry id nor an explicit alias/);
     expect(errors[0]).toContain("model-does-not-exist");
     expect(errors[0]).toContain("some_task");
   });
@@ -94,7 +94,7 @@ describe("validateDraftModelRegistered still delegates (Lane-F back-compat)", ()
   });
   it("FIRES for an unregistered draft model", () => {
     expect(validateDraftModelRegistered("claude-sonnet-does-not-exist")[0]).toMatch(
-      /NOT in the model registry/,
+      /neither an enabled registry id nor an explicit alias/,
     );
   });
 });

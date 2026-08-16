@@ -5,19 +5,29 @@ import * as router from "../src/adapters/llm/router.js";
 
 describe("Critique ordering", () => {
   it("sorts issues BLOCKER→IMPROVEMENT→OBSERVATION", async () => {
-    vi.spyOn(router, "getAdapter").mockReturnValue({
-      name: "fixtures",
-      model: "fixture-v1",
-      critiqueGraph: async () => ({
-        issues: [
-          { level: "OBSERVATION", note: "observation note c" },
-          { level: "BLOCKER", note: "blocker note a" },
-          { level: "IMPROVEMENT", note: "improvement note b" },
-        ],
-        suggested_fixes: [],
-        usage: { input_tokens: 0, output_tokens: 0 },
-      }),
-    } as any);
+    vi.spyOn(router, "getAdapterWithResolution").mockReturnValue({
+      adapter: {
+        name: "fixtures",
+        model: "fixture-v1",
+        critiqueGraph: async () => ({
+          issues: [
+            { level: "OBSERVATION", note: "observation note c" },
+            { level: "BLOCKER", note: "blocker note a" },
+            { level: "IMPROVEMENT", note: "improvement note b" },
+          ],
+          suggested_fixes: [],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        }),
+      } as any,
+      resolution: {
+        task: "critique_graph",
+        resolved_model: "fixture-v1",
+        resolution_source: "task_default",
+        provider: "fixtures",
+        availability: "fixture_only",
+        registry_model_id: null,
+      },
+    });
 
     const app = Fastify();
     await route(app);

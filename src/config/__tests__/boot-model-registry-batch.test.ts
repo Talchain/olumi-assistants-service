@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { buildBootModelRegistryBatch } from '../boot-model-registry-batch.js';
 import { validateModelsRegistered } from '../models.js';
-import { TASK_MODEL_DEFAULTS } from '../model-routing.js';
+import { AUXILIARY_MODEL_DEFAULTS, TASK_MODEL_DEFAULTS } from '../model-routing.js';
 
 /**
  * A1 (review, BLOCKING — CLAUDE.md trap 11) — THE CALL SITE, NOT THE HELPER.
@@ -31,7 +31,7 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
     vi.unstubAllEnvs();
   });
 
-  it('A1: the seam reads the LIVE config — the three staging aliases surface as boot errors', () => {
+  it('A1: the seam reads the LIVE config — explicit staging aliases are accepted deterministically', () => {
     // The exact staging posture measured 2026-07-31 (Render API).
     vi.stubEnv('CEE_MODEL_DECISION_REVIEW', 'gpt-4.1');
     vi.stubEnv('CEE_MODEL_REPAIR', 'gpt-4.1');
@@ -39,13 +39,7 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
 
     const errors = validateModelsRegistered(buildBootModelRegistryBatch());
 
-    expect(errors).toHaveLength(3);
-    for (const key of ['decision_review', 'repair', 'extraction']) {
-      expect(
-        errors.some((e) => e.includes('"gpt-4.1"') && e.includes(`env_model:${key}`)),
-        `expected a boot error naming env_model:${key} — got:\n${errors.join('\n')}`,
-      ).toBe(true);
-    }
+    expect(errors).toEqual([]);
   });
 
   it('A1: with no CEE_MODEL_* set the seam is clean (no false alarm on the normal posture)', () => {
@@ -58,6 +52,9 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
     ]);
     const labels = batch.map((e) => e.label);
     for (const task of Object.keys(TASK_MODEL_DEFAULTS)) {
+      expect(labels).toContain(`task_default:${task}`);
+    }
+    for (const task of Object.keys(AUXILIARY_MODEL_DEFAULTS)) {
       expect(labels).toContain(`task_default:${task}`);
     }
     expect(labels).toContain('draft_graph (effective)');
@@ -78,29 +75,26 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
    * The first cut walked only `config.cee.models` (the legacy tier, 14 keys) while
    * claiming "a NEW CEE_MODEL_* key is covered without a code edit". That claim
    * was FALSE: `config.cee.modelSelection.taskModels` is a second record of ten
-   * `CEE_MODEL_TASK_*` keys (config/index.ts:1664-1675), and
-   * `model-resolution-logger.ts` `resolveTaskModel` ranks it ABOVE the legacy
-   * tier (`env_task_tier` is checked before `env_legacy_tier`).
+   * `CEE_MODEL_TASK_*` keys (config/index.ts:1664-1675).
    *
    * Verified independently at the bytes rather than inherited: the tier's only
    * runtime consumer, `selectModel` (`services/model-selector.ts:124`), has
    * ZERO importers — scope `rg -a` for `selectModel(` / `model-selector` over
    * `src/` and `tools/`, one hit, its own definition. So the tier is dead at the
-   * ROUTER today. It is NOT dead at the startup LOG: `resolveTaskModel` reads it
-   * live, so a `CEE_MODEL_TASK_*` set to an unregistered id already changes what
-   * the boot log claims serves a task.
+   * ROUTER today. The shared startup/admin projection does not read it either,
+   * so it is audited explicitly as non-serving inventory.
    *
-   * Disposition: WALK BOTH RECORDS (the review's preferred option). The dead tier
-   * will not stay dead, walking it cannot produce a false verdict, and it makes
-   * the derive-don't-mirror claim true rather than nearly true.
+   * Disposition: keep walking both records, but label the dead tier INERT. It
+   * may not change serving claims without first acquiring a shared live
+   * resolver and capability validation.
    */
   it('A2: the TASK tier (CEE_MODEL_TASK_*) is walked too — the second record is not invisible', () => {
-    vi.stubEnv('CEE_MODEL_TASK_DRAFT_GRAPH', 'gpt-4.1');
+    vi.stubEnv('CEE_MODEL_TASK_DRAFT_GRAPH', 'gpt-4.1-not-registered');
 
     const errors = validateModelsRegistered(buildBootModelRegistryBatch());
 
     expect(
-      errors.some((e) => e.includes('env_task_model:draftGraph') && e.includes('"gpt-4.1"')),
+      errors.some((e) => e.includes('inert_env_inventory:draftGraph') && e.includes('"gpt-4.1-not-registered"')),
       `expected the task tier to be validated — got:\n${errors.join('\n')}`,
     ).toBe(true);
   });
@@ -112,64 +106,38 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
     const errors = validateModelsRegistered(buildBootModelRegistryBatch());
 
     expect(errors.some((e) => e.includes('env_model:critique'))).toBe(true);
-    expect(errors.some((e) => e.includes('env_task_model:critiqueGraph'))).toBe(true);
+    expect(errors.some((e) => e.includes('inert_env_inventory:critiqueGraph'))).toBe(true);
     // The labels must not collide — an operator has to know WHICH env var to fix.
     expect(errors.some((e) => e.includes('unregistered-legacy-tier'))).toBe(true);
     expect(errors.some((e) => e.includes('unregistered-task-tier'))).toBe(true);
+    expect(errors.find((e) => e.includes('unregistered-task-tier'))).toMatch(/no serving authority/i);
   });
 });
 
 /**
- * A3 (review) — THE GUARD MUST NOT PRINT A FALSE SENTENCE.
- *
- * The widened guard fires three times on every staging boot carrying the legacy
- * copy: *"Requests routed to it would fail at the adapter."* **That sentence is
- * false**, and `gpt-4.1` serving happily on staging today is the empirical proof.
- *
- * Verified independently at the bytes, complete manifest, scope `rg -a` over
- * `src/` excluding `__tests__`:
- *   - `isKnownModel`  → 1 caller: `validateModelRegistered` itself (models.ts:479)
- *   - `isModelEnabled` → 1 caller: `validateModelRegistered` itself (models.ts:484)
- *   - `MODEL_REGISTRY` / `isKnownModel` / `isModelEnabled` in `src/adapters/` → ZERO hits
- * So registry membership is consulted ONLY at boot, by this guard. No adapter
- * ever checks it, and an unregistered-but-real model id serves normally.
- *
- * A guard that cries wolf three times per boot teaches operators to ignore it —
- * the broken-alarm defect this programme keeps paying for (CLAUDE.md trap 7, and
- * trap 7b's lesson that a bad label makes lanes stop looking).
- *
- * The replacement copy states only what IS true, all of it verified above:
- * no registry metadata; `getModelProvider` returns undefined so the router's
- * provider-match step no-ops; `isModelClientAllowed` rejects the same id from a
- * client while the server-side value is accepted (asymmetric — router.ts:818,
- * extraction.ts:405); and a floating alias can be repointed upstream silently.
+ * A3 (repair) — boot validation and request-time resolution share the same
+ * exact registry/alias policy. An explicit alias is valid; an undeclared id is
+ * rejected deliberately before provider invocation.
  */
-describe('A3 — operator-override copy tells the truth', () => {
+describe('A3 — operator overrides use the shared registry/alias contract', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('does NOT claim the request would fail at the adapter', () => {
+  it('accepts an explicit alias without an operator warning', () => {
     vi.stubEnv('CEE_MODEL_DECISION_REVIEW', 'gpt-4.1');
     const errors = validateModelsRegistered(buildBootModelRegistryBatch());
-    const row = errors.find((e) => e.includes('env_model:decision_review'));
-
-    expect(row).toBeDefined();
-    expect(row).not.toMatch(/would fail/i);
-    expect(row).not.toMatch(/fail at the adapter/i);
+    expect(errors).toEqual([]);
   });
 
-  it('states what IS true: unvalidated, no registry metadata, and pin it', () => {
-    vi.stubEnv('CEE_MODEL_DECISION_REVIEW', 'gpt-4.1');
+  it('rejects an undeclared override before the adapter and says how to fix it', () => {
+    vi.stubEnv('CEE_MODEL_DECISION_REVIEW', 'gpt-4.1-floating-unknown');
     const row = validateModelsRegistered(buildBootModelRegistryBatch()).find((e) =>
       e.includes('env_model:decision_review'),
     );
 
-    expect(row).toMatch(/not in the model registry/i);
-    // The actionable instruction — the operator must know what to DO.
-    expect(row).toMatch(/pin/i);
-    // The honest caveat that stops it reading as an outage.
-    expect(row).toMatch(/may still serve/i);
+    expect(row).toMatch(/neither an enabled registry id nor an explicit alias/i);
+    expect(row).toMatch(/reject it before an adapter call/i);
   });
 
   it('a CHECKED-IN default keeps its own copy — the two classes are not conflated', () => {
@@ -179,6 +147,6 @@ describe('A3 — operator-override copy tells the truth', () => {
       { label: 'task_default:draft_graph', modelId: 'totally-made-up', kind: 'checked_in_default' },
     ]);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).not.toMatch(/may still serve/i);
+    expect(errors[0]).toMatch(/reject it before an adapter call/i);
   });
 });

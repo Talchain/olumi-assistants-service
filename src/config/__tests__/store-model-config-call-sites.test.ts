@@ -13,7 +13,9 @@ import {
  * Precedence rank 2 (`store_model_config`) is NOT global. The router never
  * consults the prompt store; it only sees a `modelOverride` argument, so a
  * prompt-store modelConfig pin takes effect ONLY where the CALL SITE reads the
- * pin and passes it on. On every other task the pin is INERT.
+ * pin and passes it on. On every other task the pin is INERT. The cold-safe
+ * sites now name the task through `getSystemPromptSnapshot('<task>')`, which
+ * loads prompt bytes and metadata together before adapter selection.
  *
  * That fact was documented as though rank 2 applied everywhere, and the
  * documentation drifted from the code in both directions (CLAUDE.md trap 12 —
@@ -57,7 +59,7 @@ const READS_STORE_MODEL_CONFIG = /\.modelConfig\s*\[/;
  * A literal task name. This is what separates a LIVE TASK PATH from the admin
  * harness: the harness runs an operator-chosen prompt record and names no task.
  */
-const NAMES_A_TASK = /getSystemPromptMeta\(\s*['"][a-z0-9_]+['"]/;
+const NAMES_A_TASK = /getSystemPrompt(?:Meta|Snapshot)\(\s*['"][a-z0-9_]+['"]/;
 
 interface Scan {
   /** Every non-test .ts file under src/, repo-relative with posix separators. */
@@ -210,7 +212,7 @@ describe("store_model_config call-site derivation — declaration equals source"
       `The set of NON-TASK readers of a prompt modelConfig has changed.\n\n` +
         `  derived from src/: ${JSON.stringify(nonTask, null, 2)}\n` +
         `  declared:          ${JSON.stringify(sorted(STORE_MODEL_CONFIG_NON_TASK_READERS), null, 2)}\n\n` +
-        `A file lands here when it reads a pin but names no task via getSystemPromptMeta('<task>'). ` +
+        `A file lands here when it reads a pin but names no task via getSystemPromptMeta/Snapshot('<task>'). ` +
         `If a LIVE task path has drifted into this bucket it means it stopped naming its task — ` +
         `check it is still routing what you think it routes.`,
     ).toEqual(sorted(STORE_MODEL_CONFIG_NON_TASK_READERS));
@@ -225,6 +227,75 @@ describe("store_model_config call-site derivation — declaration equals source"
  * ======================================================================== */
 
 describe("store_model_config — the documented claims are bound to the source", () => {
+  it("EVERY_DECLARED_SITE_LOADS_A_COHERENT_SNAPSHOT_BEFORE_ROUTING_AND_PASSES_ITS_BYTES", () => {
+    const namedTasks: string[] = [];
+    for (const relativePath of STORE_MODEL_CONFIG_LIVE_CALL_SITES) {
+      const body = readFileSync(
+        join(SRC_ROOT, relativePath.replace(/^src\//, "")),
+        "utf8",
+      );
+      const snapshotMatch = body.match(
+        /await\s+getSystemPromptSnapshot\(\s*['"]([a-z0-9_]+)['"]/,
+      );
+      expect(
+        snapshotMatch,
+        `${relativePath} must await its task's prompt bytes+metadata before model selection`,
+      ).not.toBeNull();
+      namedTasks.push(snapshotMatch![1]);
+
+      const snapshotAt = body.indexOf(snapshotMatch![0]);
+      const modelConfigAt = body.indexOf('.modelConfig', snapshotAt);
+      const adapterAt = body.indexOf('getAdapterWithResolution(', modelConfigAt);
+      expect(modelConfigAt, `${relativePath} must read the resolved snapshot modelConfig`).toBeGreaterThan(snapshotAt);
+      expect(adapterAt, `${relativePath} must select its adapter only after the snapshot pin`).toBeGreaterThan(modelConfigAt);
+      expect(body.slice(snapshotAt, adapterAt + 500)).toContain('store_model_config');
+      const preloadAt = body.indexOf('preloadedSystemPrompt', adapterAt);
+      expect(preloadAt, `${relativePath} must pass the resolved prompt bytes into the adapter`).toBeGreaterThan(adapterAt);
+      expect(body.slice(preloadAt, preloadAt + 300)).toMatch(
+        new RegExp(`operation:\\s*['"]${snapshotMatch![1]}['"]`),
+      );
+      expect(body.slice(preloadAt, preloadAt + 300)).toMatch(
+        /preloadedSystemPrompt[\s\S]*content:\s*[a-zA-Z]*[pP]romptSnapshot\.content/,
+      );
+      expect(body.slice(preloadAt, preloadAt + 300)).toMatch(
+        /preloadedSystemPrompt[\s\S]*meta:\s*[a-zA-Z]*[pP]romptSnapshot\.meta/,
+      );
+    }
+
+    expect(namedTasks.sort()).toEqual([
+      'critique_graph',
+      'draft_graph',
+      'suggest_options',
+    ]);
+  });
+
+  it("SELECTED_ADAPTERS_CONSUME_BOTH_PRELOADED_BYTES_AND_METADATA", () => {
+    const anthropic = readFileSync(
+      join(SRC_ROOT, "adapters", "llm", "anthropic.ts"),
+      "utf8",
+    );
+    const openai = readFileSync(
+      join(SRC_ROOT, "adapters", "llm", "openai.ts"),
+      "utf8",
+    );
+
+    expect(anthropic).toContain('preloadedSystemPrompt: preloadedDraftPrompt?.content');
+    expect(anthropic).toContain('preloadedDraftPrompt?.meta ?? getSystemPromptMeta');
+    for (const operation of ['suggest_options', 'critique_graph']) {
+      const operationChecks = anthropic.match(
+        new RegExp(`preloadedSystemPrompt\\?\\.operation === '${operation}'`, 'g'),
+      );
+      expect(
+        operationChecks?.length,
+        `Anthropic ${operation} must gate both preloaded content and metadata on the exact operation`,
+      ).toBeGreaterThanOrEqual(2);
+    }
+    expect(openai).toContain("preloadedSystemPrompt?.operation === 'draft_graph'");
+    expect(openai).toContain('preloadedDraftPrompt.content');
+    expect(openai).toContain('preloadedDraftPrompt.meta');
+    expect(openai).toContain('opts.bypassCache && !preloadedDraftPrompt');
+  });
+
   it("ORCHESTRATOR_SITE_PASSES_NO_MODEL_OVERRIDE — rank 2 is unreachable there", () => {
     const routing = readFileSync(
       join(SRC_ROOT, "orchestrator-v5", "routing", "route-with-tool-use.ts"),

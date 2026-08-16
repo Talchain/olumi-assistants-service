@@ -32,7 +32,11 @@ vi.mock("../../src/adapters/llm/router.js", () => ({
 }));
 
 vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({
-  getSystemPromptMeta: vi.fn().mockReturnValue({ modelConfig: null }),
+  getSystemPromptSnapshot: vi.fn().mockResolvedValue({
+    content: 'mock draft system prompt',
+    meta: { modelConfig: null },
+  }),
+  invalidatePromptCache: vi.fn(),
 }));
 
 vi.mock("../../src/config/index.js", () => ({

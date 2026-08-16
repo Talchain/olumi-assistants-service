@@ -47,7 +47,7 @@ export class FailoverAdapter implements LLMAdapter {
   readonly model: string;
 
   constructor(
-    private readonly adapters: LLMAdapter[],
+    adapters: LLMAdapter[],
     private readonly operation: string = "unknown"
   ) {
     if (adapters.length === 0) {
@@ -57,16 +57,24 @@ export class FailoverAdapter implements LLMAdapter {
     // Primary adapter determines name/model for telemetry
     this.name = `${adapters[0].name}-failover`;
     this.model = adapters[0].model;
+    this.adapters = [...adapters];
   }
+
+  private readonly adapters: readonly LLMAdapter[];
 
   /**
    * Get failover configuration metadata
    * Used by /v1/status for diagnostics
    */
-  getFailoverMetadata(): { enabled: true; providers: string[] } {
+  getFailoverMetadata(): {
+    enabled: true;
+    providers: string[];
+    topology: Array<{ provider: string; model: string }>;
+  } {
     return {
       enabled: true,
       providers: this.adapters.map((a) => a.name),
+      topology: this.adapters.map((a) => ({ provider: a.name, model: a.model })),
     };
   }
 
