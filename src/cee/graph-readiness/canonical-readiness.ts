@@ -69,10 +69,7 @@
  * second. Only the canonical assessment does.
  */
 
-import {
-  assessCanonicalAnalysisReadiness,
-  type CanonicalReadinessIssue,
-} from "../../orchestrator/tools/analysis-ready-helper.js";
+import type { CanonicalReadinessIssue } from "../../orchestrator/tools/analysis-ready-helper.js";
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 
 /** Default parametric uncertainty. Must be > 0 to satisfy `EdgeStrengthV3`. */
@@ -272,7 +269,13 @@ function computeCritiques(graph: unknown): RouteReadinessCritique[] {
  */
 export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
   const assessableGraph = toCanonicalAssessableGraph(graph);
-  const assessment = assessCanonicalAnalysisReadiness(assessableGraph);
+  // ⚠ ONE assessment for the whole route. This used to call
+  // `assessCanonicalAnalysisReadiness` here AND again inside
+  // `resolveRunAdmission` — measured +28% on a route the canvas hits on every
+  // change, and two independent calls could in principle disagree about the
+  // same graph, which is the hazard this module exists to remove.
+  const admission = resolveRunAdmission(assessableGraph);
+  const assessment = admission.assessment;
 
   const payload = assessment.analysisReady as
     | {
@@ -313,7 +316,6 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
   // this field now answers its documented question — *"will the run proceed even
   // though not every option is configured?"* — with the run path's own answer
   // rather than with a projection of one term of it.
-  const admission = resolveRunAdmission(assessableGraph);
 
   return {
     can_run_analysis: assessment.safeToAnalyse,

@@ -28,19 +28,25 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { composeConfigureOptionClarifyResponse } from '../configure-option-clarify-response.js';
+import {
+  composeConfigureOptionClarifyResponse,
+  QUALITATIVE_VALUE_KNOWN_DROPPED,
+} from '../configure-option-clarify-response.js';
 import { FORBIDDEN_USER_FACING_PHRASES } from '../forbidden-user-facing-phrases.js';
 import { CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE } from '../../configure-option-chip-text.js';
+import { carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
 
 const OPTION = 'Hire 3 Senior Engineers';
 const FACTOR = 'Engineering Delivery Velocity';
 
+/** Default arm: the run WOULD proceed, so the promise is licensed. */
 const compose = (valueAlreadySupplied: boolean) =>
   composeConfigureOptionClarifyResponse({
     optionLabel: OPTION,
     factorLabels: [FACTOR],
     stage: 'analyse',
     valueAlreadySupplied,
+    analysisWillProceed: true,
   }).assistant_text;
 
 describe('angle-bracket placeholder syntax never reaches user copy', () => {
@@ -92,6 +98,80 @@ describe('the loop terminates', () => {
     // than looping.
     expect(text).toMatch(/analysis will run/i);
     expect(text).toMatch(/left out of the comparison/i);
+  });
+
+  it('C1 — it NEVER promises a run the server would refuse', () => {
+    const PROMISE = /analysis will run/i;
+
+    // Licensed: the caller derived that the run proceeds.
+    expect(compose(true)).toMatch(PROMISE);
+
+    // NOT licensed — three ways the caller can fail to license it. Each must
+    // drop the promise. This was unconditional in the first version of the fix,
+    // which made it FALSE whenever a structural blocker co-existed: the very
+    // defect this PR closes, one level down, in prose.
+    for (const [name, extra] of [
+      ['run refuses, with a next step', { analysisWillProceed: false, blockedNextStep: 'Connect the model to its goal, then run the analysis again.' }],
+      ['run refuses, no next step', { analysisWillProceed: false }],
+      ['caller could not determine it', {}],
+    ] as const) {
+      const text = composeConfigureOptionClarifyResponse({
+        optionLabel: OPTION,
+        factorLabels: [FACTOR],
+        stage: 'analyse',
+        valueAlreadySupplied: true,
+        ...extra,
+      }).assistant_text;
+      expect(text, `promise leaked: ${name}`).not.toMatch(PROMISE);
+      // …and it never silently becomes vague about the option either.
+      expect(text, name).toContain(OPTION);
+    }
+  });
+
+  it('C1 — when the run refuses it states the honest alternative, in the admission own words', () => {
+    const NEXT = 'Connect the model to its goal, then run the analysis again.';
+    const text = composeConfigureOptionClarifyResponse({
+      optionLabel: OPTION,
+      factorLabels: [FACTOR],
+      stage: 'analyse',
+      valueAlreadySupplied: true,
+      analysisWillProceed: false,
+      blockedNextStep: NEXT,
+    }).assistant_text;
+    expect(text).toContain('The analysis cannot run on this model yet.');
+    expect(text).toContain(NEXT);
+  });
+
+  it('C2 — it never claims to possess the user number (the flag is a ROUTING regex)', () => {
+    // `valueAlreadySupplied` is fed by a digit-anchored routing predicate that
+    // cannot tell WHOSE value it saw. Measured below: a message aimed at an
+    // entirely different target sets it true. So no possession claim may
+    // appear in this copy at all — every sentence must be true of the MODEL.
+    const offTarget = 'Update the timeline to 3 months';
+    expect(carriesConfigureOptionValuePayload(offTarget)).toBe(true);
+
+    const text = compose(true);
+    expect(text).not.toMatch(/\bI have your (?:number|value)\b/i);
+    expect(text).not.toMatch(/\byour number\b/i);
+    // What it says instead is a fact about the graph, true either way.
+    expect(text).toContain(`"${OPTION}" still has no effect value on ${FACTOR}`);
+  });
+
+  it('C2 — KNOWN-DROPPED: the qualitative no-digit class does NOT terminate, and the set is exactly this', () => {
+    // Trap 22f's honest-gap protocol: a gap the suite can SEE. REDs if the set
+    // grows (a new phrasing started failing) OR shrinks (one started working
+    // and the record went stale). Closing it needs a value parsed for THIS
+    // option×factor — real work, rowed, not smuggled into a copy fix.
+    const stillDropped = QUALITATIVE_VALUE_KNOWN_DROPPED.filter(
+      (phrasing) => !carriesConfigureOptionValuePayload(phrasing),
+    );
+    expect(stillDropped).toEqual([...QUALITATIVE_VALUE_KNOWN_DROPPED]);
+
+    // POSITIVE CONTROL — the probe can see the other answer, so the assertion
+    // above is a measurement and not a predicate that always returns false.
+    expect(
+      carriesConfigureOptionValuePayload("Set the X option's effect on Y to 0.6"),
+    ).toBe(true);
   });
 
   it('both branches survive the egress guard', () => {

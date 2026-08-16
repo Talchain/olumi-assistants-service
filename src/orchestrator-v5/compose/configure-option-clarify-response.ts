@@ -42,23 +42,80 @@ export interface ComposeConfigureOptionClarifyInput {
   readonly factorLabels: readonly string[];
   readonly stage: StageType;
   /**
-   * TRUE when the user's message ALREADY carried a value — i.e. they answered
-   * the demand this composer made last turn, and it still did not land.
+   * TRUE when the user's message looked like it already carried a value — i.e.
+   * they answered the demand this composer made last turn, and it still did not
+   * land.
    *
    * ⭐ THIS FLAG EXISTS BECAUSE THE REPLY WITHOUT IT DOES NOT TERMINATE.
    * Witnessed on deployed CEE `bacf35d` (2026-08-16, simulated-user run,
    * 18:15:06Z → 18:15:42Z): the product demanded a literal template, the user
    * typed it back VERBATIM, and `edit-graph-dispatch.ts` re-emitted **the
-   * identical demand, word for word**. `evaluateConfigureOptionOutcome` is pure
-   * and stateless, `collectCandidateFactorLabels` returns the same first factor
-   * while nothing lands, so the same bytes are produced forever. Nothing counted
-   * the repeat; nothing varied the copy.
+   * identical demand, word for word**.
    *
-   * Repeating a demand the user has already met is not a clarification — it is
-   * the product telling the user they did not do the thing they just did.
+   * ⚠⚠ WHAT IT IS NOT, AND THIS BOUNDS THE COPY BELOW. It is fed by
+   * `carriesConfigureOptionValuePayload`, a DIGIT-ANCHORED ROUTING regex. It
+   * answers *"does this message look like a value-set instruction?"* — NOT
+   * *"do I have the user's number for THIS option on THIS factor?"* Those are
+   * two different questions (trap 21), and measured, the gap is real in both
+   * directions:
+   *
+   *   - `"…to high"` / `"…to about a third"` → no digit → FALSE, so the demand
+   *     repeats. See {@link QUALITATIVE_VALUE_KNOWN_DROPPED} — an explicitly
+   *     pinned gap, not a silent one.
+   *   - `"Update the timeline to 3 months"`, aimed at a DIFFERENT target →
+   *     TRUE, on a message that never mentioned this option or factor.
+   *
+   * So the terminating copy MUST NOT CLAIM POSSESSION OF A NUMBER. It says what
+   * is true of the MODEL — this option has no effect values — which holds
+   * whatever the message contained. Asserting "I have your number" off a
+   * routing regex would be fabricating the user's input, the exact class this
+   * PR exists to close.
    */
   readonly valueAlreadySupplied?: boolean;
+  /**
+   * Whether the run would ACTUALLY proceed on the model as it now stands —
+   * `resolveRunAdmission(...).willProceed`, computed by the caller.
+   *
+   * ⚠⚠ REQUIRED BECAUSE THE UNCONDITIONAL PROMISE WAS THIS PR'S OWN DEFECT ONE
+   * LEVEL DOWN. The first version of the terminating branch said "the analysis
+   * will run on the options that are set" with no knowledge of the graph — so
+   * it said it when a structural blocker co-existed, and when exclusion leaves
+   * fewer than two options. That is *offering a run the server refuses*, in
+   * prose, by a composer whose input could not even express the condition.
+   *
+   * `undefined` means the caller could not determine it, and is treated exactly
+   * like `false`: no promise is made. A claim about whether analysis can run is
+   * never made on a guess.
+   */
+  readonly analysisWillProceed?: boolean;
+  /**
+   * The honest next step when the run would NOT proceed — the admission's own
+   * `strict.nextStep`. Surfaced so the reply can say what to fix instead of
+   * making a promise it cannot keep. Omitted/null ⇒ the copy simply makes no
+   * claim about analysis.
+   */
+  readonly blockedNextStep?: string | null;
 }
+
+/**
+ * The value phrasings this lane KNOWINGLY DOES NOT TERMINATE ON — pinned as an
+ * explicit set rather than left silent (trap 22f's honest-gap protocol).
+ *
+ * `carriesConfigureOptionValuePayload` requires a DIGIT. A qualitative answer
+ * carries a real user intent and no digit, so the demand repeats. Four rounds
+ * of punctuation/lookahead rules on a neighbouring natural-language predicate
+ * proved that "one more regex" oscillates; the honest move is to record the gap
+ * where the suite can see it, so it REDs if the set GROWS **or SHRINKS**.
+ *
+ * Closing it properly means parsing a value bound to THIS option×factor — a
+ * real piece of work, rowed, not smuggled into a copy fix.
+ */
+export const QUALITATIVE_VALUE_KNOWN_DROPPED: readonly string[] = [
+  'Set the X option\'s effect on Y to high',
+  'Set the X option\'s effect on Y to about a third',
+  'Set the X option\'s effect on Y to roughly half',
+  'Set the X option\'s effect on Y to low',
+];
 
 /**
  * A CONCRETE example value, not a placeholder.
@@ -112,11 +169,27 @@ export function composeConfigureOptionClarifyResponse(
   // (`tools/handlers/analysis-ready-core.ts::resolveRunAdmission`), an option
   // with no effect values no longer stops the analysis. It is left out of the
   // comparison and named, which the run already discloses.
+  // THE TERMINATING BRANCH. Every sentence here is a claim about the MODEL, not
+  // about the message: the flag that selects this branch comes from a routing
+  // regex that cannot tell whose value it saw (see `valueAlreadySupplied`), so
+  // "I have your number" would be a fabrication. What IS true either way is
+  // that the option still has no effect values.
+  const analysisSentence =
+    input.analysisWillProceed === true
+      // Only ever said when the caller has DERIVED that the run proceeds.
+      ? `You do not have to set it before analysing: the analysis will run on the options that are set, and it will name "${optionLabel}" as left out of the comparison rather than scoring it.`
+      : typeof input.blockedNextStep === 'string' && input.blockedNextStep.length > 0
+        // No promise. The honest alternative, in the admission's own words.
+        ? `The analysis cannot run on this model yet. ${input.blockedNextStep}`
+        // Nothing derivable ⇒ say nothing about analysis at all. Silence is the
+        // only honest option when the condition is unknown.
+        : null;
+
   const assistant_text = input.valueAlreadySupplied === true
     ? [
-        `I have your number for "${optionLabel}" on ${primaryFactor}, but it has not attached to that link yet, so "${optionLabel}" still has no effect values.`,
-        `You do not have to solve this before analysing: the analysis will run on the options that are set, and it will name "${optionLabel}" as left out of the comparison rather than scoring it.`,
-        `To set the value directly, open "${optionLabel}" on the canvas and enter it on its link to ${primaryFactor}.`,
+        `"${optionLabel}" still has no effect value on ${primaryFactor}, so that link is not carrying anything yet.`,
+        ...(analysisSentence === null ? [] : [analysisSentence]),
+        `To set it directly, open "${optionLabel}" on the canvas and enter the value on its link to ${primaryFactor}.`,
       ].join(' ')
     : [
         `"${optionLabel}" has no effect values yet, so the analysis cannot compare it with the others.`,

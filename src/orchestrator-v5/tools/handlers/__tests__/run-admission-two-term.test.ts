@@ -39,9 +39,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { stripComments } from '../../../../../scripts/ci/strip-source-comments.mjs';
 
 import { assessRouteAdmission } from '../../../../cee/graph-readiness/canonical-readiness.js';
 import { assessAnalysisReadiness, resolveRunAdmission } from '../analysis-ready-core.js';
+import { blockerIssue } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 
 const v3Edge = (id: string, from: string, to: string) => ({
   id,
@@ -312,6 +317,72 @@ describe('a blocker on a SUBMITTED option is never waived', () => {
     const admission = resolveRunAdmission(completed);
     expect(admission.willProceed).toBe(true);
     expect(admission.waivedOptionIds).toEqual(['opt_empty']);
+  });
+});
+
+describe('the waivable-code set carries no unreachable entries', () => {
+  /**
+   * Two codes were removed from `WAIVABLE_BY_EXCLUSION` as dead. An allowlist
+   * entry that can never match reads as coverage it does not provide — these
+   * specs pin the REACHABILITY FACTS the removal rests on, so if either code
+   * ever becomes waivable-shaped, this REDs and the decision is revisited.
+   */
+  it('UNREACHABLE_CONTROLLABLE_FACTOR can never carry an option_id, so it could never have been waived', () => {
+    // Derived from the producer, not from its name: `blockerIssue` emits this
+    // code only inside a branch guarded by `!optionId`.
+    const issue = blockerIssue(
+      { blocker_type: 'missing_value', factor_id: 'fac_x', factor_label: 'X' },
+      0,
+      'needs_user_mapping',
+    );
+    expect(issue?.code).toBe('UNREACHABLE_CONTROLLABLE_FACTOR');
+    expect(issue?.option_id).toBeUndefined();
+
+    // POSITIVE CONTROL — the same producer DOES attach option_id on the codes
+    // that keep it, so the assertion above measures the branch, not the mapper.
+    const withOption = blockerIssue(
+      { blocker_type: 'missing_value', option_id: 'opt_a', factor_id: 'fac_x' },
+      0,
+      'needs_encoding',
+    );
+    expect(withOption?.code).toBe('MISSING_OPTION_VALUE');
+    expect(withOption?.option_id).toBe('opt_a');
+  });
+
+  it('MISSING_OPTION_CONNECTION has no producer in this repo', () => {
+    // The mapper can build it — so the absence claim is about PRODUCERS, not
+    // about the mapper being incapable.
+    expect(
+      blockerIssue({ blocker_type: 'missing_connection', option_id: 'opt_a' }, 0, 'needs_encoding')
+        ?.code,
+    ).toBe('MISSING_OPTION_CONNECTION');
+
+    // Sweep the source for writes of `blocker_type`, with a CONTRAST CONTROL in
+    // the same sweep: absence is only proven when the target reads zero AND a
+    // same-family symbol reads non-zero.
+    const root = join(process.cwd(), 'src');
+    const writes: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== '__tests__' && entry.name !== 'node_modules') walk(p);
+          continue;
+        }
+        if (!entry.name.endsWith('.ts')) continue;
+        // STRIP COMMENTS FIRST. Without this the sweep matched THIS PR own doc
+        // comment describing the absence — a probe reading its own description
+        // and reporting it as evidence. Caught by the test itself.
+        const src = stripComments(readFileSync(p, "utf8"));
+        for (const m of src.matchAll(/blocker_type:\s*["']([a-z_]+)["']/g)) {
+          writes.push(m[1]);
+        }
+      }
+    };
+    walk(root);
+    expect(writes.length, 'sweep found no producers at all — the probe is blind').toBeGreaterThan(0);
+    expect(writes).toContain('missing_value'); // contrast: present
+    expect(writes).not.toContain('missing_connection'); // target: absent
   });
 });
 

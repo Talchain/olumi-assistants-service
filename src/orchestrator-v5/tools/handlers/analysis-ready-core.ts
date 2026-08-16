@@ -127,10 +127,20 @@ export function assessAnalysisReadiness(rawGraph: unknown): ReadinessResult {
  * Map ONE canonical assessment to the neutral verdict.
  *
  * Split out of {@link assessAnalysisReadiness} so {@link resolveRunAdmission}
- * can reuse a single assessment instead of running the assessor twice. Measured
- * on the witnessed mixed graph: the double call cost **+19.5 ms per admission**
- * (12.9 ms → 32.3 ms), on a route the canvas hits on every change. Sharing the
- * assessment also removes the possibility of the two calls disagreeing.
+ * can reuse a single assessment instead of running the assessor twice.
+ *
+ * ⚠ THE PERFORMANCE FIGURE THIS COMMENT ORIGINALLY CARRIED IS WITHDRAWN. It
+ * claimed "+19.5 ms per admission (12.9 → 32.3)". That was measured while a
+ * full test suite and two sibling lanes' suites were running on the same
+ * machine, so it described CPU contention, not this code. Re-measured clean,
+ * warm, 300 iterations on the same graph: removing the duplicate assessment
+ * saves **~4.7%** (5.44 ms → 5.18 ms per route call). Real, and an order of
+ * magnitude smaller than advertised.
+ *
+ * ⭐ THE LOAD-BEARING REASON IS NOT SPEED — it is that two independent
+ * assessments of one graph can, in principle, disagree, and a module whose
+ * entire purpose is "one authority, one answer" must not contain two calls to
+ * the authority. The saving is a bonus; the invariant is the point.
  */
 function readinessResultFrom(
   assessment: ReturnType<typeof assessCanonicalAnalysisReadiness>,
@@ -255,6 +265,18 @@ export function ep2State(result: ReadinessResult): Ep2State {
 export interface RunAdmission {
   /** The strict, whole-model verdict — unchanged, always computed. */
   readonly strict: ReadinessResult;
+  /**
+   * The canonical assessment this admission was derived from.
+   *
+   * EXPOSED so a caller that also needs `analysisReady` / `blockingIssues` can
+   * reuse THIS assessment instead of running the assessor a second time. The
+   * `/graph-readiness` route did exactly that. The saving is modest (~4.7%,
+   * measured clean — see `readinessResultFrom`, whose earlier and much larger
+   * figure was contention and is withdrawn); the REASON is that two independent
+   * calls could in principle disagree about one graph, which is the whole
+   * hazard this module exists to remove.
+   */
+  readonly assessment: ReturnType<typeof assessCanonicalAnalysisReadiness>;
   /** The pre-run projection of the run path's submission decision. */
   readonly plan: ScaffoldPlan;
   /**
@@ -304,12 +326,30 @@ export interface RunAdmission {
  * any pair the strict encoder has already named (`strictEncoderPairs`), so the
  * two classes never collide on one option×factor.
  */
+/**
+ * ⚠ TWO CODES WERE REMOVED FROM THIS SET AS UNREACHABLE, derived at the bytes
+ * with a contrast control in the same sweep (an absence claim needs one):
+ *
+ *   - `UNREACHABLE_CONTROLLABLE_FACTOR` — `analysis-ready-helper.ts:612` emits
+ *     it ONLY inside a branch guarded by `!optionId`, so the issue can never
+ *     carry an `option_id`, so the second conjunct below can never hold. It was
+ *     dead the moment it was written.
+ *   - `MISSING_OPTION_CONNECTION` — requires `blocker_type: 'missing_connection'`,
+ *     which NO producer in this repo emits. Sweep over `blocker_type:` writes:
+ *     `missing_value` × 2 and `constraint_dropped` × 1 (the contrast reads
+ *     non-zero, so the probe can see producers), `missing_connection` × 0.
+ *
+ * They are removed rather than kept-and-commented: an allowlist entry that can
+ * never match reads as coverage it does not provide, and a branch no production
+ * path can reach — kept alive by its own tests — is how a rule quietly stops
+ * being enforced. Removal is also the FAIL-SAFE direction: if either code gains
+ * a producer, the run refuses rather than silently waiving something new. The
+ * two reachability facts are pinned by tests, so they RED if either changes.
+ */
 const WAIVABLE_BY_EXCLUSION: ReadonlySet<string> = new Set<string>([
   'MISSING_OPTION_VALUE',
   'OPTION_NEEDS_ENCODING',
   'OPTION_NEEDS_MAPPING',
-  'MISSING_OPTION_CONNECTION',
-  'UNREACHABLE_CONTROLLABLE_FACTOR',
 ]);
 
 /** A blocker the exclusion can answer: nothing-is-set, and on a touched option. */
@@ -331,7 +371,8 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     scaffolded_option_ids: [],
   };
   // ONE assessment, shared by the strict verdict and the exclusion projection.
-  // Two calls cost +19.5ms per admission and could, in principle, disagree.
+  // Not primarily for speed (~4.7%): two independent assessments of one graph
+  // could disagree, and this module exists to make that impossible.
   let assessment: ReturnType<typeof assessCanonicalAnalysisReadiness>;
   let strict: ReadinessResult;
   try {
@@ -342,6 +383,16 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     // internal catch, so this is belt-and-braces. It builds the refusal INLINE
     // rather than re-calling the function that just threw — a fallback whose
     // first act is to repeat the failing call is not a fallback.
+    // The assessor threw, so there is no assessment to expose. Synthesise the
+    // same refusal shape rather than re-calling it — a fallback whose first act
+    // is to repeat the failing call is not a fallback.
+    const internalIssue: CanonicalReadinessIssue = {
+      issue_id: 'internal_1',
+      code: 'INTERNAL_ERROR',
+      category: 'internal',
+      message: 'This model could not be checked safely.',
+      repairability: 'human_input_required',
+    };
     return {
       strict: {
         status: 'unrecoverable',
@@ -353,6 +404,17 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
         userActionRequired: true,
         canonicalGraph: null,
         nextStep: 'This model could not be checked safely. Review it, then run the analysis again.',
+        issues: [internalIssue],
+      },
+      assessment: {
+        analysisReady: undefined,
+        issues: [internalIssue],
+        blockingIssues: [internalIssue],
+        repairProposal: null,
+        canonicalGraph: null,
+        proposedGraph: null,
+        repairedForAnalysis: false,
+        safeToAnalyse: false,
       },
       plan: empty,
       willProceed: false,
@@ -363,6 +425,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
   if (strict.status !== 'unrecoverable') {
     return {
       strict,
+      assessment,
       plan: empty,
       willProceed: true,
       waivedOptionIds: [],
@@ -373,7 +436,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     const canonicalGraph = assessment.canonicalGraph;
     const wireOptions = assessment.analysisReady?.options ?? [];
     if (wireOptions.length === 0) {
-      return { strict, plan: empty, willProceed: false, waivedOptionIds: [], canonicalGraph: null };
+      return { strict, assessment, plan: empty, willProceed: false, waivedOptionIds: [], canonicalGraph: null };
     }
     // The SAME predicate the route advertises and `run_analysis` executes —
     // `computeScaffoldPlan` delegates to `gateAnalysableOptions` rather than
@@ -399,7 +462,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
       scaleNetEnabled: true,
     });
     if (!plan.will_scaffold_options) {
-      return { strict, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
+      return { strict, assessment, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
     }
     const touched = new Set(plan.scaffolded_option_ids);
     const blockers = assessment.blockingIssues;
@@ -410,10 +473,11 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     // `every` over an empty array is vacuously true, so it is rejected by name
     // rather than left to a silent vacuous pass.
     if (blockers.length === 0 || !blockers.every((i) => isWaivableByExclusion(i, touched))) {
-      return { strict, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
+      return { strict, assessment, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
     }
     return {
       strict,
+      assessment,
       plan,
       willProceed: true,
       waivedOptionIds: [...touched],
@@ -421,7 +485,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     };
   } catch {
     // An admission gate fails toward saying no.
-    return { strict, plan: empty, willProceed: false, waivedOptionIds: [], canonicalGraph: null };
+    return { strict, assessment, plan: empty, willProceed: false, waivedOptionIds: [], canonicalGraph: null };
   }
 }
 
