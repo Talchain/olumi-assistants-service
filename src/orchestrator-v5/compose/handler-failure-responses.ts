@@ -303,13 +303,45 @@ export function composeHandlerFailureBody(
       // chip's own message live-routed to an edge-strength tweak and looped
       // the user forever (2.11 diagnosis, scenario A A6→A7). The copy also
       // says WHAT to tell the assistant, since the capability is now real.
+      // ⚠ 2026-08-16 (P1) — TWO COPY DEFECTS, BOTH FROM PAUL'S MANUAL TEST.
+      //
+      // (a) "intervention values" is INTERNAL SCHEMA VOCABULARY. It is the
+      //     name of a field on the option node. No user has ever used that
+      //     phrase, and the copy contract forbids graph-shape language. The
+      //     plain-English question is "what does this option change?".
+      //
+      // (b) THE CONSEQUENCE WAS NEVER STATED. The copy said the option "needs
+      //     ... to proceed" — which reads as a delay. What actually happens is
+      //     that the option is EXCLUDED FROM RANKING: the analysable-option
+      //     gate drops it, and the user gets a result that silently does not
+      //     contain the option they were asking about. A user who does not
+      //     know that has no reason to act on this message.
+      //
+      // Both branches now name the exclusion, and both statements are true on
+      // BOTH producers — the pre-PLoT guard (`run-analysis.ts:360`, where NO
+      // option is configured) and the PLoT-preflight recovery
+      // (`run-analysis.ts:956`, where ONE named option was rejected). The
+      // labelled branch speaks only about the option it can name; the generic
+      // branch says "at least one", which is the strongest claim true of both.
+      //
+      // ⚠ WHAT THIS COPY STILL CANNOT SAY, and why (reported, not guessed):
+      // it cannot NAME THE MISSING FACTORS. That data does not reach this
+      // site. Both producers build `details` as
+      // `{ handler_id, first_option_label?, option_count | plot_preflight_recovery,
+      // analysis_status }` — no factor list — and the gate's own
+      // `ExcludedOptionRecord` (`analysable-option-gate.ts:133`) carries
+      // `reason: 'no_interventions'`, an ENUM WITH ONE VALUE. Naming the
+      // factors is a PRODUCER change (run-analysis.ts + the
+      // `HandlerFailureDetails` contract), not a copy change, so it is filed
+      // rather than invented here.
       const labelUsable = rawLabel !== null && !entityRef.startsWith('that ');
       if (labelUsable) {
         return {
           body: {
             assistant_text:
-              `Options exist but don't have effects configured yet. ${entityRef} needs intervention values to proceed. ` +
-              `Tell me what ${entityRef} changes and I'll write it into the model.`,
+              `${entityRef} doesn't say what it changes yet, so I can't score it — `
+              + `it won't appear in the comparison until you tell me. `
+              + `Tell me what ${entityRef} changes and I'll write it into the model.`,
             suggested_actions: [buildConfigureOptionChip(entityRef)],
           },
           template_id: 'options_not_configured_with_label',
@@ -319,8 +351,9 @@ export function composeHandlerFailureBody(
       return {
         body: {
           assistant_text:
-            "Options exist but don't have effects configured yet. Add intervention values to at least one option to proceed. " +
-            "Tell me what one of your options changes and I'll write it into the model.",
+            "At least one of your options doesn't say what it changes yet, so I can't score it — "
+            + 'it won\'t appear in the comparison until you tell me. '
+            + "Tell me what your options change and I'll write it into the model.",
           suggested_actions: [{ ...CONFIGURE_OPTION_GENERIC_CHIP }],
         },
         template_id: 'options_not_configured_no_label',
