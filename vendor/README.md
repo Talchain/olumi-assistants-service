@@ -77,28 +77,68 @@ it at the single V5 finaliser seam from values the turn has already computed.
 > keys on ingest. The UI pin bump is its own PR and is the prerequisite for the
 > UI CONSUMING the field (migration step 5), not for CEE emitting it.
 
+> **✔ AND IT CLOSES 0.44.0's OPEN ITEM IN PASSING, MEASURED HERE RATHER THAN
+> EDITED INTO THAT ENTRY.** The 0.44.0 block below still carries its
+> pre-merge caveat — that the bytes were packed from an unmerged branch head and
+> that "these are the published bytes" was asserted, not proven. **It is proven
+> now.** 0.44.0's registry artifact (sha1
+> `f47469ea5e7da2b0f28472788308f653e758c71d`) was downloaded and unpacked
+> alongside the tarball this repo carried at `bacf35d5`, whose sha256 is
+> `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72` —
+> identical to the value recorded in that block — and `diff -r` over every path
+> reported **zero content differences**. The estate rule "no two repos may hold
+> DIFFERENT bytes under one version string" held for 0.44.0.
+>
+> ⚠ THE 0.44.0 BLOCK IS DELIBERATELY LEFT UNEDITED. Open PR **#987** rewrites
+> that exact paragraph. Recording the settlement here instead of there keeps
+> these two PRs free of a textual conflict, and keeps both statements: #987's
+> account of the tagged-tree identity, and this measurement of the published
+> bytes. Whichever merges second should fold them together rather than take one
+> side wholesale.
+
 **Rollback path:** revert this whole PR and run `pnpm install`. Git restores the
 exact 0.44.0 tarball, checksum, pin and lockfile, and the wire returns to the
 shape it had before — no consumer reads `analysis_state`, so nothing downstream
 regresses. Reverting never unpublishes 0.46.0.
 
-### `talchain-schemas-0.44.0.tgz` (historical — no longer vendored)
+### `talchain-schemas-0.44.0.tgz` (historical — no longer vendored as of 0.46.0)
 
-> **✔ SETTLED 2026-08-16 — the pre-merge block that stood here is REPLACED, not
-> deleted, because it recorded a real open obligation and the estate's rule is
-> to say what happened rather than quietly tidy it away.** It read
-> *"PACKED FROM AN UNMERGED BRANCH … REQUIRED BEFORE THIS PR MERGES"*: the
-> bytes had been packed from olumi-schemas #43's branch head
-> `bf53ad8fdea3b3c74e94ee7b2b436ba2ecab0b0b` before anything was published, so
-> "these bytes are the published bytes" was asserted and not yet proven.
+> **⚠⚠ PACKED FROM AN UNMERGED BRANCH — READ THIS BEFORE MERGING THIS PR.**
+> Every other entry in this file records a tarball packed from a **merged,
+> tagged release**. This one cannot, and saying otherwise would be the false
+> label this repo's doctrine exists to prevent.
 >
-> **It is proven now.** 0.44.0 published and tagged; its registry artifact
-> (sha1 `f47469ea5e7da2b0f28472788308f653e758c71d`) was downloaded and unpacked
-> alongside the tarball this repo carried at `bacf35d5`, whose sha256 is
-> `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72` —
-> **identical to the sha256 recorded above** — and `diff -r` over every path
-> reported **zero content differences**. The estate rule "no two repos may hold
-> DIFFERENT bytes under one version string" held for 0.44.0.
+> `@talchain/schemas` **publishes on merge to `main`** — that is its release
+> switch — and the schemas half of this train (olumi-schemas **#43**) is
+> deliberately still OPEN so both halves can be reviewed as one change. The
+> bytes here were therefore packed from that PR's branch head,
+> **`bf53ad8fdea3b3c74e94ee7b2b436ba2ecab0b0b`**, with
+> `package.json.version == 0.44.0` asserted before packing, via
+> `npm ci && npm run build && npm pack` (node 20.19.5 / npm 10.8.2 — the same
+> toolchain the 0.40.0 entry records).
+>
+> sha256 `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72`
+> — 419,086 bytes. A second independent `npm pack` produced **byte-identical**
+> output.
+>
+> **REQUIRED BEFORE THIS PR MERGES — do not skip, and do not treat a green CI
+> as covering it.** CI validates that these bytes match the adjacent `.sha256`;
+> it cannot know whether they match what was PUBLISHED, because nothing was
+> published when they were made.
+>
+> 1. Merge olumi-schemas #43 ⇒ 0.44.0 publishes and is tagged.
+> 2. Re-pack from a fresh blobless clone with `HEAD` asserted equal to
+>    `git rev-list -n1 v0.44.0` *before any read* — fetching a ref is not
+>    checking it out.
+> 3. Assert the sha256 is **identical** to the one above. If it differs, the
+>    published bytes are not these bytes: replace the tarball and the `.sha256`
+>    in this PR rather than reasoning about why the difference is harmless.
+> 4. Then replace this whole block with the normal
+>    "SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE" wording.
+>
+> The estate rule this protects is "no two repos may hold DIFFERENT bytes under
+> one version string". Until step 3 is done, that rule is *asserted here and not
+> yet proven*.
 
 **What CEE adopts here: one transport key, its claim-safety ruling, and a
 two-release version jump.**
