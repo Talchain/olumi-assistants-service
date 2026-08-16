@@ -52,6 +52,8 @@
  *     `option_value`). Apply the slug-shape gate.
  */
 
+import { env } from 'node:process';
+
 import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/boundary';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -109,7 +111,11 @@ export type { SanitiseMatch, SanitiseResult };
  * telemetry so the rate is observable rather than merely survived.
  */
 function isTestEnv(): boolean {
-  const env = process.env;
+  // Same shape as `routing-log.ts::isTestEnv` and `telemetry.ts::setTestSink`,
+  // imported from `node:process` rather than read off the `process` global so
+  // it satisfies the no-direct-process.env lint rule, and read AT CALL TIME
+  // (not module load) so a test can exercise the production strip path by
+  // clearing these for one call.
   return env.NODE_ENV === 'test' || env.VITEST === 'true' || Boolean(env.VITEST);
 }
 

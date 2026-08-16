@@ -17,6 +17,10 @@
  * spelling below is one the drafter prompt or the extractor actually
  * produces — `defaults-v15.ts` stores `unit: "£"`, `provenance/stated-amounts
  * .ts` documents `unit: "GBP"` from `parseNumericValue`.
+ *
+ * The lookup itself is DERIVED from `CURRENCY_SYMBOL_TO_CODE` (ROADMAP 2.972,
+ * the one canonical currency vocabulary), so this corpus is the completeness
+ * half and the derivation is the agreement half. Trap 12d: ship both.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -99,10 +103,27 @@ describe('E — DISCRIMINATING CONTROLS: non-currency bounds are unchanged below
     );
   });
 
-  it('an UNKNOWN currency code degrades to the old rendering, never to a wrong number', () => {
-    // The failure direction of a short map: a missing entry loses the symbol,
-    // it does not corrupt the amount. Grouping still applies.
-    const text = describeOf(addConstraint(200000, 'JPY'));
-    expect(text).toContain('200,000 JPY');
+  it('a NON-currency unit degrades to the old rendering, never to a wrong number', () => {
+    // The failure direction: an unrecognised unit loses the symbol, it does
+    // not corrupt the amount. Grouping still applies.
+    const text = describeOf(addConstraint(200000, 'widgets'));
+    expect(text).toContain('200,000 widgets');
+  });
+
+  it('DERIVATION DIVIDEND — currencies the hand-written map did NOT have now work', () => {
+    // These arrive free from `CURRENCY_SYMBOL_TO_CODE` and are the reason the
+    // union guard insists on derivation rather than a local copy.
+    expect(describeOf(addConstraint(500000, 'JPY'))).toContain('¥500,000');
+    expect(describeOf(addConstraint(500000, 'INR'))).toContain('₹500,000');
+  });
+
+  it('every code in the canonical vocabulary resolves to a symbol (agreement half)', async () => {
+    const { CURRENCY_SYMBOL_TO_CODE } = await import('../../../cee/extraction/numeric-parser.js');
+    const codes = Object.values(CURRENCY_SYMBOL_TO_CODE);
+    expect(codes.length).toBeGreaterThan(6); // non-vacuity
+    for (const code of codes) {
+      const text = describeOf(addConstraint(200000, code));
+      expect(text, `code ${code} rendered as ${text}`).not.toContain(`200,000 ${code}`);
+    }
   });
 });

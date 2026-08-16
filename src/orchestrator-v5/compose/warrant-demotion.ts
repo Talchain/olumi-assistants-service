@@ -30,6 +30,7 @@
  * the two cannot fork.
  */
 
+import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import type { ProposalAction } from '../routing/types.js';
 import type { ProposedChange, ProposedChangeIntent } from '../types/proposed-change.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
@@ -105,28 +106,31 @@ export type WarrantDemotionBuild =
   | { readonly ok: false; readonly reason: 'not_a_proposable_mutation' };
 
 /**
- * Currency units → their display symbol.
+ * Currency units → their display symbol, DERIVED from the one canonical
+ * currency vocabulary (`CURRENCY_SYMBOL_TO_CODE`, ROADMAP 2.972).
  *
- * ⚠ HAND-WRITTEN, AND SAID PLAINLY (CLAUDE.md trap 12d). The repo has two
- * other copies of this knowledge — `CURRENCY_MAP` in `cee/signals/
- * currency-signal.ts` and `currencyPrefix` in `cee/factor-extraction/
- * display-value.ts` — and BOTH ARE MODULE-PRIVATE, so there is nothing to
- * derive from without exporting across the `cee/` ↔ `orchestrator-v5/`
- * boundary, which is a wider change than this copy fix earns. The mitigation
- * is the one trap 12d prescribes for a list that cannot be derived: a
- * hand-written corpus test over real unit spellings, not a self-consistency
- * check. ISO currency symbols do not drift; the risk here is a MISSING entry,
- * which degrades to the pre-existing `200000 GBP` rendering rather than to a
- * wrong number.
+ * ⭐ THIS WAS A HAND-WRITTEN MAP OF SIX ENTRIES AND THE UNION GUARD CAUGHT IT.
+ * `cee/extraction/__tests__/currency-vocabulary.union.test.ts` failed this
+ * file by name with the instruction to derive from the canonical list or
+ * justify an exception at the bytes — which is precisely the trap-12d
+ * completeness check working exactly as designed, on a list I had already
+ * written a "this cannot be derived" comment above. It could. I had searched
+ * two of the three copies and not the registry.
+ *
+ * Deriving costs nothing and buys five currencies the hand-written map did not
+ * have (JPY, INR, AUD, CAD, NZD, CHF, SEK). Both directions are accepted
+ * because both reach this function on the wire: the drafter prompt stores
+ * `unit: "£"` (`defaults-v15.ts`) while `parseNumericValue` yields
+ * `unit: "GBP"` (`provenance/stated-amounts.ts`).
  */
-const CURRENCY_SYMBOL_BY_UNIT: Readonly<Record<string, string>> = Object.freeze({
-  '£': '£',
-  GBP: '£',
-  $: '$',
-  USD: '$',
-  '€': '€',
-  EUR: '€',
-});
+const CURRENCY_SYMBOL_BY_UNIT: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(CURRENCY_SYMBOL_TO_CODE).flatMap(([symbol, code]) => [
+      [symbol, symbol],
+      [code, symbol],
+    ]),
+  ),
+);
 
 /**
  * Thousands separators, computed rather than delegated to `toLocaleString`,
