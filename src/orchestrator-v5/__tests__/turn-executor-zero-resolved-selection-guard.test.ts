@@ -746,9 +746,24 @@ describe('TurnExecutor final guard — byte-identical controls', () => {
       { node_ids: [], edge_ids: [OPAQUE_REAL_EDGE_ID] },
     );
 
+    // ⭐⭐ THE BYTE-IDENTITY ASSERTION IS THE POINT OF THIS TEST AND IT STILL
+    // HOLDS. It is the instrument that caught #992's regression, where an
+    // edges-only selection began triggering the whole-response refusal —
+    // answer and chips replaced by canned copy on every edge selection in the
+    // product. It stayed green through the 2026-08-16 pack-focus change, which
+    // is the evidence that that change informs the MODEL without refusing the
+    // TURN. Do not weaken it.
     expect(JSON.stringify(opaqueRealEdge.response)).toBe(JSON.stringify(noSelection.response));
     expect(opaqueRealEdge.response.assistant_text).toBe(original);
-    expect(opaqueRealEdge.groundedSelection).toBeUndefined();
+    // ⚠ 2026-08-16 — THIS USED TO ASSERT `toBeUndefined()`, pinning the
+    // silence that was the defect: the model was told nothing about an edge
+    // the user had clicked. The grounded selection is now PRESENT and honest —
+    // it names no element and reports `could_not_check`, never `not_in_model`,
+    // because we could not read the address rather than look and find nothing.
+    expect(opaqueRealEdge.groundedSelection).toEqual({
+      element_ids: [],
+      unresolved: 'could_not_check',
+    });
   });
 
   it('leaves a real edge selection unchanged without claiming edge-grounded answering', async () => {

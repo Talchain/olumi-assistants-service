@@ -322,6 +322,7 @@ describe('the prompt never tells a user their node is gone when the read FAILED'
       elements: [],
       unresolved_ids: ['ghost_a'],
       graph_read: graphRead,
+      unreadable_ref_ids: [],
     });
   }
 
@@ -357,5 +358,61 @@ describe('the prompt never tells a user their node is gone when the read FAILED'
     expect(notInModelClause).not.toBe(couldNotCheckClause);
     // And it must forbid the specific lie: asserting absence on a failed read.
     expect(FOCUS_INSTRUCTION.toLowerCase()).toContain('could not read');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EDGES-ONLY SELECTION — the model is TOLD, instead of told nothing
+// ---------------------------------------------------------------------------
+
+/**
+ * P1: GraphV3 has no stable `edge.id`, so the canvas sends producer-local
+ * React Flow tokens (`e5`) for edges. They resolved to no selection at all,
+ * so the pack carried no `focus`, no `FOCUS_INSTRUCTION` was appended, and the
+ * model answered as though nothing had been clicked.
+ *
+ * These are the PROMPT-LEVEL half of the fix: it is not enough that the pack
+ * carries the right verdict — the instruction that teaches the model what
+ * `could_not_check` obliges it to say must actually reach the wire.
+ */
+describe('an edges-only selection reaches the prompt as could_not_check', () => {
+  function edgesOnlySelection(): TurnSelection {
+    const r = resolveTurnSelection([], GRAPH, 'ok_present', ['e5']);
+    if (r === null) throw new Error('fixture: edges-only selection resolved to null');
+    return r;
+  }
+
+  it('the serialised pack carries a focus section', () => {
+    const msg = buildUserMessage(packWith(edgesOnlySelection()), USER_MESSAGE);
+    expect(Object.keys(observeSerialisedPack(msg))).toContain('focus');
+  });
+
+  it('FOCUS_INSTRUCTION is appended — the model is told what it may not claim', () => {
+    const msg = buildUserMessage(packWith(edgesOnlySelection()), USER_MESSAGE);
+    expect(msg).toContain(FOCUS_INSTRUCTION);
+    // Exactly once, matching the sibling assertion above.
+    expect(msg.split(FOCUS_INSTRUCTION)).toHaveLength(2);
+  });
+
+  it('the serialised verdict is could_not_check, and names no element', () => {
+    const msg = buildUserMessage(packWith(edgesOnlySelection()), USER_MESSAGE);
+    const focus = observeSerialisedPack(msg).focus as {
+      unresolved: string;
+      elements: unknown[];
+      requested_count: number;
+    };
+    expect(focus.unresolved).toBe('could_not_check');
+    expect(focus.elements).toEqual([]);
+    expect(focus.requested_count).toBe(1);
+  });
+
+  it('CONTROL — the sanction carried is "could not read", never "not in the model"', () => {
+    // `FOCUS_INSTRUCTION` states both branches; the pin that matters is that
+    // the pack's own verdict selects the honest one. A fix that emitted
+    // `not_in_model` here would satisfy every assertion above except this.
+    const focus = observeSerialisedPack(
+      buildUserMessage(packWith(edgesOnlySelection()), USER_MESSAGE),
+    ).focus as { unresolved: string };
+    expect(focus.unresolved).not.toBe('not_in_model');
   });
 });

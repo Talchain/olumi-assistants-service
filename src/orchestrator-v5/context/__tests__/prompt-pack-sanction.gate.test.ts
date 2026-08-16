@@ -291,6 +291,10 @@ function assembleMaximalPack(
       ],
       unresolved_ids: ['ghost_node'],
       graph_read: 'ok_present',
+      // Required on TurnSelection; empty for every node selection. This fixture
+      // is cast `as never`, so the compiler cannot enforce it here — the
+      // omission surfaced as a RUNTIME throw in this suite, not a type error.
+      unreadable_ref_ids: [],
     } as never,
     coachingContext: {
       analysis_present: true,

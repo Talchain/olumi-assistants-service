@@ -217,6 +217,7 @@ describe('projectFocus — absence', () => {
       elements: [],
       unresolved_ids: [],
       graph_read: 'ok_present',
+      unreadable_ref_ids: [],
     };
     expect(projectFocus(empty, DISPLAY, LABEL_INDEX)).toBeNull();
   });
@@ -267,6 +268,7 @@ describe('projectFocus — `unresolved` never conflates "not there" with "could 
       elements: [],
       unresolved_ids: ['ghost_a', 'ghost_b'],
       graph_read: graphRead,
+      unreadable_ref_ids: [],
     };
   }
 
@@ -370,6 +372,7 @@ describe('projectFocus — everything serialised into a prompt is bounded', () =
       elements: many,
       unresolved_ids: [],
       graph_read: 'ok_present',
+      unreadable_ref_ids: [],
     };
     const focus = projectFocus(selection, DISPLAY, LABEL_INDEX)!;
     expect(focus.elements).toHaveLength(FOCUS_MAX_ELEMENTS);
@@ -398,6 +401,7 @@ describe('projectFocus — everything serialised into a prompt is bounded', () =
       ],
       unresolved_ids: [],
       graph_read: 'ok_present',
+      unreadable_ref_ids: [],
     };
     const focus = projectFocus(selection, DISPLAY, LABEL_INDEX)!;
     const el = focus.elements[0]!;
@@ -414,6 +418,7 @@ describe('projectFocus — everything serialised into a prompt is bounded', () =
       elements: [{ id: 'I'.repeat(40_000), kind: 'factor', label: 'ok' }],
       unresolved_ids: [],
       graph_read: 'ok_present',
+      unreadable_ref_ids: [],
     };
     const focus = projectFocus(selection, DISPLAY, LABEL_INDEX)!;
     expect(JSON.stringify(focus).length).toBeLessThan(2_000);
