@@ -42,7 +42,10 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { stripComments } from '../../../../../scripts/ci/strip-source-comments.mjs';
+import {
+  stripComments,
+  GUARD_WALK_TIMEOUT_MS,
+} from '../../../../../scripts/ci/strip-source-comments.mjs';
 
 import { assessRouteAdmission } from '../../../../cee/graph-readiness/canonical-readiness.js';
 import { assessAnalysisReadiness, resolveRunAdmission } from '../analysis-ready-core.js';
@@ -383,7 +386,7 @@ describe('the waivable-code set carries no unreachable entries', () => {
     expect(writes.length, 'sweep found no producers at all — the probe is blind').toBeGreaterThan(0);
     expect(writes).toContain('missing_value'); // contrast: present
     expect(writes).not.toContain('missing_connection'); // target: absent
-  });
+  }, GUARD_WALK_TIMEOUT_MS);
 });
 
 describe('the route and the run give ONE answer', () => {
