@@ -128,9 +128,10 @@ describe("streamTurnAsStagedSse — the route reports delivery, not just status"
   }
 
   function deliveryLines(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
-    return spy.mock.calls
-      .map((call) => call[0] as Record<string, unknown>)
-      .filter((arg) => arg && arg.event === "cee.streamed_turn.delivered");
+    const calls = spy.mock.calls as unknown[][];
+    return calls
+      .map((call): Record<string, unknown> => call[0] as Record<string, unknown>)
+      .filter((arg): boolean => Boolean(arg) && arg.event === "cee.streamed_turn.delivered");
   }
 
   it("a 200 turn whose socket died mid-stream is reported UNDELIVERED, at warn level", async () => {
