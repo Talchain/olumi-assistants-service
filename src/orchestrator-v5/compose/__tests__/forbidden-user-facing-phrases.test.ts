@@ -584,10 +584,9 @@ describe('V5 coaching — validation chip + composer copy passes forbidden-phras
 
   it('does not embed raw decimals in deterministic composer wrappers', () => {
     // The deterministic wrapper strings (openers, follow-ups, fallbacks)
-    // must never interpolate raw floats. LLM-passthrough strings
-    // (`specific_action`) are sanitised by the decision_review enricher's own
-    // egress filter, but the wrapper
-    // shell here is purely deterministic.
+    // must never interpolate raw floats. The decision_review subtree is
+    // deliberately verbatim; the factor-EVPPI reader fails unsafe optional
+    // `specific_action` prose to null before this deterministic wrapper sees it.
     const wrappers = [
       VALIDATION_CHIP_LABEL,
       VALIDATION_CHIP_MESSAGE,

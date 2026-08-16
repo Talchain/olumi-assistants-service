@@ -226,6 +226,56 @@ describe('selectFactorEvppiPriority', () => {
     ).toBeNull();
   });
 
+  it.each([
+    ['raw entity id', 'Inspect fac_private_signal before relying on it.'],
+    ['raw probability decimal', 'Compare cohorts at 0.73 confidence.'],
+    ['forbidden directive', 'You should choose the enterprise option.'],
+    ['engine jargon', "Inspect Node 'fac_private_signal' before analysis."],
+    ['control character', 'Compare the cohorts.\nThen interview customers.'],
+    ['bidi formatting', 'Compare the cohorts.\u2066'],
+  ])('drops an unsafe optional action carrying %s', (_name, specificAction) => {
+    expect(
+      readFactorEvppiPriorityAction(
+        { evidence_enhancements: { fac_priority: { specific_action: specificAction } } },
+        { outcome: 'selected', factorId: 'fac_priority' },
+      ),
+    ).toBeNull();
+  });
+
+  it('does not mistake an ordinary hyphenated phrase for an entity id', () => {
+    expect(
+      readFactorEvppiPriorityAction(
+        {
+          evidence_enhancements: {
+            fac_priority: { specific_action: 'Compare risk-adjusted scenarios.' },
+          },
+        },
+        { outcome: 'selected', factorId: 'fac_priority' },
+      ),
+    ).toBe('Compare risk-adjusted scenarios.');
+  });
+
+  it('keeps selected factor guidance while dropping an unsafe optional action', () => {
+    expect(
+      selectFactorEvppiPriorityGuidance({
+        factor_evppi: [row('fac_priority', 0.3, 'resolved')],
+        factor_sensitivity: [
+          { factor_id: 'fac_priority', factor_label: 'Delivery reliability' },
+        ],
+        decision_review: {
+          evidence_enhancements: {
+            fac_priority: { specific_action: 'Inspect fac_private_signal.' },
+          },
+        },
+      }),
+    ).toStrictEqual({
+      outcome: 'selected',
+      factorId: 'fac_priority',
+      factorLabel: 'Delivery reliability',
+      specificAction: null,
+    });
+  });
+
   it('joins the selected factor to its exact PLoT label when decision review is absent', () => {
     expect(
       selectFactorEvppiPriorityGuidance({

@@ -25,7 +25,14 @@
 import { EnrichmentFactorEvppiEntrySchema } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
+import { HARD_BAN_PATTERNS } from '../../orchestrator/shared/forbidden-tokens.js';
+import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
+import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
+import {
+  findForbiddenPhraseHit,
+  RAW_DECIMAL_RE,
+} from '../compose/forbidden-user-facing-phrases.js';
 import { isUnsafeLabel } from '../compose/resolve-label.js';
 
 const FactorEvppiPriorityRowSchema = EnrichmentFactorEvppiEntrySchema.pick({
@@ -126,8 +133,10 @@ export function pickLatestFactorEvppiPriorityGuidance(
 /**
  * Join a producer-selected factor identity to the decision-review action for
  * that exact factor. This is deliberately an identity join, not a fallback
- * ranking: missing/malformed action text returns `null` and never promotes a
- * different enhancement or an unranked assumption.
+ * ranking: missing/malformed/unsafe action text returns `null` and never
+ * promotes a different enhancement or an unranked assumption. Decision Review
+ * is a verbatim enrichment subtree, so this reader is the source-local safety
+ * gate before the optional LLM prose enters deterministic factor-EVPPI advice.
  */
 export function readFactorEvppiPriorityAction(
   decisionReview: unknown,
@@ -139,7 +148,15 @@ export function readFactorEvppiPriorityAction(
   const entry = readRecord(enhancements?.[priority.factorId]);
   const action = entry?.specific_action;
   if (typeof action !== 'string' || action.trim().length === 0) return null;
-  return action.trim();
+  const trimmed = action.trim();
+  if (
+    hasUnsafeDisplayCodepoint(trimmed)
+    || findForbiddenPhraseHit(trimmed) !== null
+    || RAW_DECIMAL_RE.test(trimmed)
+    || HARD_BAN_PATTERNS.some((pattern) => pattern.test(trimmed))
+    || containsEntityId(trimmed)
+  ) return null;
+  return trimmed;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -148,7 +165,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function hasUnsafeLabelCodepoint(value: string): boolean {
+function hasUnsafeDisplayCodepoint(value: string): boolean {
   for (const character of value) {
     const codepoint = character.codePointAt(0);
     if (
@@ -162,6 +179,15 @@ function hasUnsafeLabelCodepoint(value: string): boolean {
   return UNSAFE_LABEL_FORMAT_CODEPOINT_RE.test(value);
 }
 
+function containsEntityId(value: string): boolean {
+  const matcher = new RegExp(ENTITY_ID_LEAK_RE.source, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(value)) !== null) {
+    if (isSlugShapedEntityId(match[0])) return true;
+  }
+  return false;
+}
+
 function readSafeFactorLabel(row: Record<string, unknown>, factorId: string): string | null {
   const rawCandidates = [row.factor_label, row.label]
     .filter((value): value is string => typeof value === 'string')
@@ -172,7 +198,7 @@ function readSafeFactorLabel(row: Record<string, unknown>, factorId: string): st
   const label = candidates[0]!;
   if (
     label.length > 160
-    || hasUnsafeLabelCodepoint(label)
+    || hasUnsafeDisplayCodepoint(label)
     || isUnsafeLabel(label, factorId)
   ) return null;
   return label;
