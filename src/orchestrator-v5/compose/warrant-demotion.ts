@@ -105,13 +105,73 @@ export type WarrantDemotionBuild =
   | { readonly ok: false; readonly reason: 'not_a_proposable_mutation' };
 
 /**
+ * Currency units → their display symbol.
+ *
+ * ⚠ HAND-WRITTEN, AND SAID PLAINLY (CLAUDE.md trap 12d). The repo has two
+ * other copies of this knowledge — `CURRENCY_MAP` in `cee/signals/
+ * currency-signal.ts` and `currencyPrefix` in `cee/factor-extraction/
+ * display-value.ts` — and BOTH ARE MODULE-PRIVATE, so there is nothing to
+ * derive from without exporting across the `cee/` ↔ `orchestrator-v5/`
+ * boundary, which is a wider change than this copy fix earns. The mitigation
+ * is the one trap 12d prescribes for a list that cannot be derived: a
+ * hand-written corpus test over real unit spellings, not a self-consistency
+ * check. ISO currency symbols do not drift; the risk here is a MISSING entry,
+ * which degrades to the pre-existing `200000 GBP` rendering rather than to a
+ * wrong number.
+ */
+const CURRENCY_SYMBOL_BY_UNIT: Readonly<Record<string, string>> = Object.freeze({
+  '£': '£',
+  GBP: '£',
+  $: '$',
+  USD: '$',
+  '€': '€',
+  EUR: '€',
+});
+
+/**
+ * Thousands separators, computed rather than delegated to `toLocaleString`,
+ * so the output cannot vary with the host's ICU build or default locale — a
+ * confirmation sentence must render identically everywhere.
+ *
+ * Falls back to the plain spelling above 1e21, where `Number.prototype
+ * .toString` switches to exponential notation and grouping would be
+ * meaningless.
+ */
+function groupThousands(value: number): string {
+  if (Math.abs(value) >= 1e21) return String(value);
+  const sign = value < 0 ? '-' : '';
+  const [whole, fraction] = Math.abs(value).toString().split('.');
+  const grouped = (whole ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${sign}${grouped}${fraction !== undefined ? `.${fraction}` : ''}`;
+}
+
+/**
  * Format a bound for the assistant text. Kept out of the chip copy (see
  * `CHIP_COPY`) so the raw-decimal chip filter never sees it.
+ *
+ * ⚠ 2026-08-16 (P2) — THIS EMITTED RAW MACHINE NUMBERS INTO PROSE. Paul's
+ * manual test caught the sentence
+ *
+ *   "a limit keeping Hiring spend at or below 200000 GBP"
+ *
+ * Two things are wrong with it and both are this function's: the ISO CODE is
+ * printed where the SYMBOL belongs, and a six-figure amount is printed with no
+ * thousands separators, so a reader has to count digits to find out what their
+ * own limit is. It now renders `£200,000`.
+ *
+ * Grouping applies to non-currency bounds too — `200000 users` is exactly as
+ * unreadable as `200000 GBP`, and grouping is invisible below 1,000, so every
+ * percentage and strength value in the suite is untouched.
  */
 function formatBound(value: unknown, unit: unknown): string {
-  const num = typeof value === 'number' && Number.isFinite(value) ? String(value) : null;
-  if (num === null) return 'that level';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'that level';
   const suffix = typeof unit === 'string' && unit.trim().length > 0 ? unit.trim() : '';
+  const symbol = CURRENCY_SYMBOL_BY_UNIT[suffix] ?? CURRENCY_SYMBOL_BY_UNIT[suffix.toUpperCase()];
+  if (symbol !== undefined) {
+    // Sign OUTSIDE the symbol: "-£5,000", never "£-5,000".
+    return value < 0 ? `-${symbol}${groupThousands(Math.abs(value))}` : `${symbol}${groupThousands(value)}`;
+  }
+  const num = groupThousands(value);
   return suffix === '%' ? `${num}%` : suffix.length > 0 ? `${num} ${suffix}` : num;
 }
 
