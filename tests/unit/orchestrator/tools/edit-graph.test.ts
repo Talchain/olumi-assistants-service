@@ -594,12 +594,24 @@ describe("handleEditGraph", () => {
     );
 
     const text = result.assistantText ?? "";
-    // The friendly verb "balanced" survives; banned operator vocabulary
-    // is replaced with [REDACTED].
+    // The friendly verb "balanced" survives; banned operator vocabulary is
+    // replaced with its own NEUTRAL PLAIN-ENGLISH term.
     assertNoBannedInternalTokens(text, (t, re) =>
       expect(t, `assistant_text leaked ${re}: "${t}"`).not.toMatch(re),
     );
-    expect(text).toContain('[REDACTED]'); // proves the scrubber fired
+    // ⚠ 2026-08-16 — THIS ASSERTION USED TO BE `toContain('[REDACTED]')`, i.e.
+    // it certified the very defect that reached a real user's chat. A
+    // placeholder token is operator vocabulary too, and the loudest kind. The
+    // scrubber's firing is now proven by the presence of its NEUTRAL
+    // REPLACEMENTS, bound by identity to the tokens in this fixture's summary.
+    expect(text).not.toContain('[REDACTED]');
+    expect(text).toContain('total 1.0'); // `sum=1.0` fired
+    expect(text).toContain('the budget target'); // `BUDGET_TARGET` fired
+    expect(text).toContain('the total of the average values'); // `Σ|mean|` fired
+    // And the P1 the placeholder was hiding: ordinary English is NOT the
+    // product's to redact. Both words are in this fixture's own summary.
+    expect(text).toContain('inbound');
+    expect(text).toContain('bridge');
     expect(text).toContain('I balanced'); // proves it didn't drop the whole text
   });
 
