@@ -205,6 +205,15 @@ export const DRAFT_GRAPH_NUMERIC_TIMING_KEYS = [
   'repair_llm_ms',
   'repair_deterministic_ms',
   'validation_pipeline_ms',
+  // ROADMAP 2.1250. Present ONLY on a turn whose terminal frame stopped waiting
+  // for Pass 2 (`VALIDATION_ATTACH_WAIT_MS`); mutually exclusive with
+  // `validation_pipeline_ms`, which is the SETTLEMENT duration and is
+  // deliberately not written on that path — a settlement that lands after the
+  // response is built would be a scheduling-dependent number, and an absent
+  // field is honest where a nondeterministic one is not. Read the two together:
+  // `validation_pipeline_ms` = Pass 2 finished in time; this = it did not, and
+  // here is how long the draft waited before shipping without it.
+  'validation_pipeline_abandoned_after_ms',
   'threshold_sweep_ms',
   // Stage 4.5 (v12, lean-draft contract): bounded post-draft coaching pass that
   // re-produces coaching/causal_claims after the structure-only draft call.

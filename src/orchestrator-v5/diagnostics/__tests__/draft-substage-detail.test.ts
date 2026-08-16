@@ -44,6 +44,13 @@ function makeFullTimings(): Record<string, number> {
     repair_llm_ms: 11,
     repair_deterministic_ms: 6,
     validation_pipeline_ms: 2,
+    // ROADMAP 2.1250. At RUNTIME this and `validation_pipeline_ms` are mutually
+    // exclusive — a turn either got its Pass-2 metadata (settlement duration) or
+    // gave up waiting for it (wait duration), never both. Populated together
+    // here on purpose: T3 is a COVERAGE pin over the key list, not a fixture of
+    // a reachable state, and leaving it out would let the writer drop the key
+    // silently — which is the whole defect this file exists to prevent.
+    validation_pipeline_abandoned_after_ms: 9,
     threshold_sweep_ms: 4,
     coaching_pass_ms: 8,
     package_ms: 5,
@@ -190,10 +197,14 @@ describe('ROADMAP 1.77 F1 — draft substage timing detail', () => {
         .filter((traceKey) => !(traceKey in st));
 
       expect(missing).toEqual([]);
-      // 13 since v12 (lean-draft contract): coaching_pass_ms (Stage 4.5) joined
-      // DRAFT_GRAPH_NUMERIC_TIMING_KEYS. Bumped deliberately — this pin forces a
-      // reviewer to acknowledge every new pipeline timing key (anti-drift).
-      expect(keys.length).toBe(13);
+      // 14 since ROADMAP 2.1250: `validation_pipeline_abandoned_after_ms` joined
+      // DRAFT_GRAPH_NUMERIC_TIMING_KEYS when the terminal frame gained a bounded
+      // wait for Pass 2 — without it, an abandoned turn reports NO validation
+      // timing at all and its residual becomes unattributable, the exact hole
+      // this slice closed. (13 since v12: coaching_pass_ms, Stage 4.5.) Bumped
+      // deliberately — this pin forces a reviewer to acknowledge every new
+      // pipeline timing key (anti-drift).
+      expect(keys.length).toBe(14);
     });
   });
 });

@@ -70,15 +70,60 @@ function attachSummaryToGraph(ctx: StageContext, summary: GraphValidationSummary
 // Public API
 // ============================================================================
 
+/** Outcome of one validation-pipeline run. */
+export interface ValidationPipelineOutcome {
+  /**
+   * `true` iff ValidationMetadata was actually written onto the graph. `false`
+   * means the run completed but the caller had already stopped waiting for it
+   * (see `shouldAttach`) and NOTHING was mutated.
+   */
+  readonly attached: boolean;
+  /** Wall time of the Pass-2 model call itself. */
+  readonly pass2LatencyMs: number;
+}
+
+export interface RunValidationPipelineOptions {
+  /**
+   * Asked ONCE, the instant Pass 2 returns and BEFORE any mutation, whether its
+   * result is still wanted (ROADMAP 2.1250).
+   *
+   * ── WHY A PREDICATE AND NOT AN ABORT SIGNAL ─────────────────────────────
+   * The caller cannot simply stop awaiting this pipeline: steps 3–9 below
+   * MUTATE `ctx.graph` edges in place and overwrite `ctx.validationSummary`. A
+   * late landing that the caller had given up on would therefore write into a
+   * graph the response was already being built from — the response bytes would
+   * then depend on whether Package happened to be between two awaits, which is
+   * worse than either outcome (CLAUDE.md: a field whose value depends on
+   * scheduling reads as a measurement).
+   *
+   * Checking here makes the result BINARY and DETERMINISTIC: either the whole
+   * metadata set is attached, or none of it is. That is sound because there is
+   * NO `await` between the Pass-2 call resolving and the end of this function —
+   * steps 3–9 are synchronous, so on Node's single thread they cannot be
+   * interleaved with anything once this check has passed. If an await is ever
+   * added between them, this guarantee needs re-deriving, not just re-reading.
+   *
+   * Omitted ⇒ always attach (every pre-2.1250 caller).
+   */
+  readonly shouldAttach?: () => boolean;
+}
+
 /**
  * Runs the full validation pipeline against the current graph in ctx.
  *
  * On success: attaches ValidationMetadata to each causal edge in ctx.graph
- *             and sets ctx.validationSummary + ctx.graph.validation_summary.
+ *             and sets ctx.validationSummary + ctx.graph.validation_summary,
+ *             and returns `{ attached: true }`.
+ *
+ * On abandonment (`shouldAttach()` returned false): mutates NOTHING and returns
+ *             `{ attached: false }`. Not an error — the caller asked.
  *
  * On failure: throws — caller must catch and continue without metadata.
  */
-export async function runValidationPipeline(ctx: StageContext): Promise<void> {
+export async function runValidationPipeline(
+  ctx: StageContext,
+  options?: RunValidationPipelineOptions,
+): Promise<ValidationPipelineOutcome> {
   const startMs = Date.now();
   const requestId = ctx.requestId;
 
@@ -136,6 +181,23 @@ export async function runValidationPipeline(ctx: StageContext): Promise<void> {
     },
     'cee.validation_pipeline.pass2_received',
   );
+
+  // ── THE ATTACH GATE (ROADMAP 2.1250) ──────────────────────────────────────
+  // Asked exactly here: after the only `await` in this function, and before the
+  // first byte of mutation below. See `RunValidationPipelineOptions.shouldAttach`
+  // for why this position is what makes the outcome all-or-nothing.
+  if (options?.shouldAttach && !options.shouldAttach()) {
+    log.warn(
+      {
+        event: 'cee.validation_pipeline.abandoned',
+        request_id: requestId,
+        pass2_latency_ms: pass2LatencyMs,
+        edge_count: pass2Response.edges.length,
+      },
+      'cee.validation_pipeline.abandoned — Pass 2 landed after the terminal frame stopped waiting; metadata NOT attached',
+    );
+    return { attached: false, pass2LatencyMs };
+  }
 
   // ── 3. Enforcement lints ──────────────────────────────────────────────────
   const { edges: lintedEdges, lintLog } = runEnforcementLints(pass2Response.edges);
@@ -250,6 +312,8 @@ export async function runValidationPipeline(ctx: StageContext): Promise<void> {
     },
     'cee.validation_pipeline.metadata_attached',
   );
+
+  return { attached: true, pass2LatencyMs };
 }
 
 // ============================================================================

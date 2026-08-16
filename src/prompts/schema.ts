@@ -9,6 +9,37 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 /**
+ * An ISO-8601 timestamp, as the STORES ACTUALLY RENDER ONE (ROADMAP 2.1242).
+ *
+ * ⚠ ZOD'S BARE `.datetime()` IS NOT "is this an ISO-8601 timestamp?". Its
+ * no-argument form accepts ONLY a `Z` suffix and REJECTS an explicit numeric
+ * offset — measured against the pinned zod on this checkout:
+ *
+ *     "2026-08-16T10:00:00.123456Z"       → accepted
+ *     "2026-08-16T10:00:00.123456+00:00"  → REJECTED
+ *
+ * The second form is what Postgres/PostgREST renders a `timestamptz` as, and it
+ * is perfectly valid ISO-8601. So every prompt row read back from the Supabase
+ * store threw at the governed boundary's `PromptDefinitionSchema.parse()` —
+ * surfacing as `prompt.seed.error` on boot, with the service then serving
+ * bundled defaults while its own health surface still read fine.
+ *
+ * ⚠ WHY THE SCHEMA AND NOT THE READ SITE. The Postgres store already
+ * hand-normalises (`typeof x === 'string' ? x : x.toISOString()`, four call
+ * sites); the Supabase store does not. Fixing it there would mean maintaining a
+ * fifth, sixth and seventh copy of that expression, one per timestamp field —
+ * a hand-maintained mirror whose drift is silent and which is already
+ * demonstrably drifting, since exactly one of the two stores has it. Widening
+ * the schema, ONCE, states the real contract in the place every store passes
+ * through.
+ *
+ * This is a widening, not a weakening: `{ offset: true }` accepts `Z` AND an
+ * explicit offset, and still rejects a non-timestamp — `"not-a-date"`, `""`,
+ * and the space-separated `"2026-08-16 10:00:00+00"` all remain rejected.
+ */
+const isoTimestamp = () => z.string().datetime({ offset: true });
+
+/**
  * Prompt lifecycle status
  * - draft: Initial state, not used in production
  * - staging: Being tested/validated
@@ -103,7 +134,7 @@ export const PromptTestCaseSchema = z.object({
   /** Last run result */
   lastResult: z.enum(['pass', 'fail', 'pending']).optional(),
   /** Last run timestamp */
-  lastRunAt: z.string().datetime().optional(),
+  lastRunAt: isoTimestamp().optional(),
 });
 export type PromptTestCase = z.infer<typeof PromptTestCaseSchema>;
 
@@ -121,7 +152,7 @@ export const PromptVersionSchema = z.object({
   /** Who created this version */
   createdBy: z.string().min(1).max(128),
   /** When this version was created */
-  createdAt: z.string().datetime(),
+  createdAt: isoTimestamp(),
   /** Optional changelog/reason for this version */
   changeNote: z.string().max(1024).optional(),
   /** Hash of content for integrity verification */
@@ -131,7 +162,7 @@ export const PromptVersionSchema = z.object({
   /** Who approved this version for production (if approval was required) */
   approvedBy: z.string().min(1).max(128).optional(),
   /** When this version was approved */
-  approvedAt: z.string().datetime().optional(),
+  approvedAt: isoTimestamp().optional(),
   /** Golden test cases for this version */
   testCases: z.array(PromptTestCaseSchema).default([]),
 });
@@ -176,9 +207,9 @@ export const PromptDefinitionSchema = z.object({
   /** Tags for organization/filtering */
   tags: z.array(z.string().max(64)).max(20).default([]),
   /** When the prompt was first created */
-  createdAt: z.string().datetime(),
+  createdAt: isoTimestamp(),
   /** When the prompt was last modified */
-  updatedAt: z.string().datetime(),
+  updatedAt: isoTimestamp(),
 });
 export type PromptDefinition = z.infer<typeof PromptDefinitionSchema>;
 
@@ -261,7 +292,7 @@ export const CompiledPromptSchema = z.object({
   promptId: z.string(),
   version: z.number().int().positive(),
   content: z.string(),
-  compiledAt: z.string().datetime(),
+  compiledAt: isoTimestamp(),
   variables: z.record(z.union([z.string(), z.number()])).optional(),
   /** Environment-specific model configuration (if set in prompt definition) */
   modelConfig: ModelConfigSchema,

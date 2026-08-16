@@ -233,6 +233,15 @@ async function runPipeline(opts: {
     }
     attachMetadata(ctx);
     order.push("validation_settled");
+    // ROADMAP 2.1250 — `runValidationPipeline` now RETURNS its outcome, and the
+    // caller derives `validation_status` from `outcome.attached` rather than
+    // from mere resolution (so "the model replied" can no longer be reported as
+    // "metadata attached"). A mock that resolves `undefined` therefore makes the
+    // caller's `.then` throw into its own `.catch` and report a degradation —
+    // which is what this suite's drain test caught. The mock must satisfy the
+    // producer's contract; it is not the production code's job to tolerate a
+    // mock that does not.
+    return { attached: true, pass2LatencyMs: 0 };
   });
 
   const result = await runUnifiedPipeline(baseInput as any, {}, mockRequest, {

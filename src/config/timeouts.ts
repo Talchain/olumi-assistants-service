@@ -539,6 +539,52 @@ export const VALIDATION_PIPELINE_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CEE_VALIDATION_TIMEOUT_MS", 60_000),
 );
 
+/**
+ * How long the TERMINAL FRAME will wait for Pass-2 metadata (ROADMAP 2.1250).
+ *
+ * ⚠ THIS IS NOT PASS 2'S TIMEOUT. `VALIDATION_PIPELINE_TIMEOUT_MS` above bounds
+ * the o4-mini CALL. This bounds the DELIVERY PATH's residual wait for it, at the
+ * await site that sits after the coaching pass — two different questions, and
+ * the estate has been bitten before by one predicate answering both (CLAUDE.md
+ * trap 21). Pass 2 keeps its full 60 s; what changes is that the user's draft
+ * stops being held hostage to the tail of it.
+ *
+ * ── WHY THE WAIT EXISTS AT ALL, AND WHY IT IS NOW BOUNDED ───────────────────
+ * The graph is ALREADY fully validated before Pass 2 is awaited: the
+ * deterministic validator has run and passed
+ * (`graph_validator.complete{phase:"post_enforcement", errorCount:0}`), Repair
+ * has finished, and GRAPH_READY has already been streamed to the client. Pass 2
+ * ATTACHES edge-contested metadata; it does not decide whether the draft is
+ * usable, and on its own timeout the turn ships anyway. So the honest shape is
+ * "attach if it lands in time", not "hold the finished draft until it lands".
+ *
+ * ── THE DERIVATION ──────────────────────────────────────────────────────────
+ * The 2.146 design credited Pass 2 an overlap of ~19.8 s (the coaching pass) and
+ * priced the residual at `max(0, pass2 − overlap)`. That arithmetic held while
+ * Pass 2 cost 10–25 s. It no longer does: Pass-2 latency was measured climbing
+ * 23.8 s → 47.2 s MEAN inside a single day (provider-side), which turns the
+ * residual from ~0 into ~27 s of pure blocking on the delivery path — against a
+ * measured median delivery of ~87 s and a 130 s client ceiling. That is the
+ * headroom this constant buys back.
+ *
+ * 25 s is chosen to sit ABOVE the overlap the design already credits (19.8 s),
+ * so a Pass 2 that behaves as originally measured is never abandoned — the
+ * bound only bites on the degraded tail it was written for — and comfortably
+ * below `VALIDATION_PIPELINE_TIMEOUT_MS`, so the two bounds stay ordered:
+ * the ATTACH deadline gives up first and the turn ships, while Pass 2's own
+ * timeout continues to classify a genuine provider stall as `timeout`.
+ *
+ * ⚠ The saving is bounded by construction and is NOT "up to 60 s": Pass 2 is
+ * fired immediately after Repair and has already been running throughout the
+ * coaching pass by the time this deadline starts. The worst case removed is
+ * `VALIDATION_PIPELINE_TIMEOUT_MS − VALIDATION_ATTACH_WAIT_MS` = 35 s of
+ * terminal-frame delay, and only on turns where Pass 2 was going to run long
+ * anyway.
+ */
+export const VALIDATION_ATTACH_WAIT_MS = clampTimeout(
+  parseTimeoutEnv("CEE_VALIDATION_ATTACH_WAIT_MS", 25_000),
+);
+
 // ---------------------------------------------------------------------------
 // Request budget — single source of truth for draft-graph request lifecycle
 // Intended chain (nesting, not fixed numbers — the live values are env-resolved,
@@ -1496,6 +1542,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     DRAFT_BUDGET_MS,
     REPAIR_TIMEOUT_MS,
     VALIDATION_PIPELINE_TIMEOUT_MS,
+    VALIDATION_ATTACH_WAIT_MS,
     DRAFT_REQUEST_BUDGET_MS,
     LLM_POST_PROCESSING_HEADROOM_MS,
     DRAFT_LLM_TIMEOUT_MS,

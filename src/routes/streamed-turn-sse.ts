@@ -84,6 +84,7 @@ import type { OutgoingHttpHeaders } from "node:http";
 import { runWithStageStream } from "../cee/unified-pipeline/stage-stream-context.js";
 import type { PipelineStageEvent } from "../cee/unified-pipeline/types.js";
 import {
+  resolveSseEndState,
   STAGED_FRAME_CLASSES,
   statusForStage,
   type StagedFrameClass,
@@ -349,27 +350,53 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
 
     writeStage("COMPLETE", { status_code: result.statusCode, payload: payloadValue });
 
+    // ── DID THE CLIENT ACTUALLY GET IT? (ROADMAP 2.1249) ─────────────────────
+    // `socketWritable` is read HERE, after the terminal write, because that is
+    // the only point at which it answers the delivery question: the writer sets
+    // it false either by refusing to write (socket already destroyed) or by
+    // observing `reply.raw.destroyed` immediately after the write — and a
+    // destroyed socket discards whatever Node still had queued.
+    //
+    // Before this branch existed the end state was derived from the status code
+    // ALONE, so the measured incident — a fully-built, persisted draft, 2 of 4
+    // frames emitted, socket dead — was recorded as `sse_end_state: "complete"`
+    // at info level with a 200. The value was already in scope, on the very
+    // next line, being logged. See `resolveSseEndState` for why this is
+    // `undelivered` rather than `error`, and why the event stays `SSECompleted`.
+    const terminalEndState = resolveSseEndState({
+      socketWritable,
+      statusCode: result.statusCode,
+    });
+    const delivered = terminalEndState !== "undelivered";
+
     emit(TelemetryEvents.SSECompleted, {
       correlation_id: requestId,
       stream_duration_ms: Date.now() - start,
-      sse_end_state: result.statusCode >= 400 ? "error" : "complete",
+      sse_end_state: terminalEndState,
       status_code: result.statusCode,
     });
 
-    log.info(
-      {
-        event: "cee.streamed_turn.delivered",
-        request_id: requestId,
-        endpoint,
-        graph_ready_ms: graphReadyAtMs,
-        total_ms: Date.now() - start,
-        progress_frames: progressFrameCount,
-        frames_emitted: seq,
-        status_code: result.statusCode,
-        socket_writable: socketWritable,
-      },
-      "streamed turn delivered",
-    );
+    const deliveryLine = {
+      event: "cee.streamed_turn.delivered",
+      request_id: requestId,
+      endpoint,
+      graph_ready_ms: graphReadyAtMs,
+      total_ms: Date.now() - start,
+      progress_frames: progressFrameCount,
+      frames_emitted: seq,
+      status_code: result.statusCode,
+      socket_writable: socketWritable,
+      delivered,
+      sse_end_state: terminalEndState,
+    };
+    if (delivered) {
+      log.info(deliveryLine, "streamed turn delivered");
+    } else {
+      log.warn(
+        deliveryLine,
+        "streamed turn UNDELIVERED — the turn completed but the terminal frame did not reach the client",
+      );
+    }
   } catch (error) {
     log.error({ err: error, correlation_id: requestId }, "streamed turn failure");
     writeStage("COMPLETE", {
