@@ -2,11 +2,19 @@
 
 Status: **review-ready local freeze; not pushed, merged, deployed or enabled**.
 The CEE branch is based exactly on serving staging
-`424f912912ec8e56edca9091ed39e966be9a6f5f` (tree
-`de7ae6f5818a730c4a0931e7aece380a13291483`), which contains the independently
-accepted Readiness #983 authority. The pre-repair rollback pin is
+`b9389df8796f7e7ddb385e17cac5154b64fd6c58` (tree
+`abcf27c05576864b92fd3297e646d4ba67e075fe`), which contains the independently
+accepted Readiness #983 authority and science-to-reasoning #984. The prior
+reviewed receipt component remains immutable at
+`5597d855ccd23dd52ced7e4aeaf017182bada869` (tree
+`5e5b3f6ee3fec5c0926a18f201dd007a0d470aab`). The pre-repair rollback pin is
 `acaf2d4952c1e58017a0d3ff003371b012a6ac17`; the original foundation remains
 preserved at `62899d5cbbd4dab629cba0ae9cd0170c0d44ff0e`.
+
+The controlled rebase from the prior #983 serving base onto the exact current
+staging tip completed without a conflict. Range-diff showed only the expected
+context movement at the #984 chip-click/turn-executor seam; both the factor
+EVPPI reasoning behavior and the exact-persisted receipt guards are retained.
 
 ## Boundary and completion state
 
@@ -140,6 +148,26 @@ Pipeline readiness remains a semantic detail producer for narration/bias
 material only; it cannot decide returned wire status, Run chips or recovery.
 Receipt-side readiness and hash-state sidecars remain forbidden.
 
+### Draft-local persistence fixed point
+
+The draft route projects its graph exactly once before hold evaluation, graph
+hashing and commit metadata are derived. That reference-idempotent fixed point
+is the sole input to `threadHoldsThroughMutatingCommit`,
+`CommitMetadata.graph`, and `CommitMetadata.graph_hash`. The global persistence
+finaliser remains in place as defense in depth, but cannot create a second
+draft-local candidate.
+
+After an accepted insert, the route validates a canonical receipt from the
+exact `CommitResult.persistedGraph`. The receipt's `analysisGraphHash` must equal
+the precommit fixed-point hash and is then the sole authority for accepted
+freshness, the response top-level hash, and current-hash recovery state. The
+validated persisted object is also used for committed response context,
+narration/chip scrubbing, and receipt egress. Projection-mutating controls prove
+that storage, #983 readiness, receipt carriers, hold survival/lapse and wire
+hashes all follow the committed fixed point rather than the raw draft. No-graph,
+failed append and either replay disposition remain receipt-free and expose no
+committed graph authority.
+
 Required completion sequence:
 
 1. **Complete:** schemas 0.43 is reviewed, guarded-merged, tagged and published;
@@ -224,6 +252,27 @@ after canonicalisation.
 
 ### Frozen verification evidence
 
+- current-base draft fixed-point/route/source-guard set: 5/5 files, 104/104
+  tests;
+- current-base #984 science coexistence set: 8/8 files, 577/577 tests;
+- current-base receipt/readiness/append-ack coexistence set: 21/21 files,
+  333/333 tests;
+- current-base full TypeScript typecheck: green, resolving
+  `@talchain/schemas@0.43.0`;
+- current changed-code lint: 0 errors and 0 warnings;
+- current full lint: 0 errors and two pre-existing unused-disable warnings;
+- current `git diff --check`: clean;
+- one serialized local `test:required` run completed without restart: 1,717
+  files passed, 12 failed and 19 skipped; 30,101 tests passed, 17 failed, 223
+  skipped and 12 remained todo (646.78s). The bounded residual comprised two
+  stale dual-draft compatibility fixtures that still expected raw pre-projection
+  graphs, plus ten host-contention/time-limit failures unrelated to this diff;
+- after correcting only those two stale fixture expectations, the exact
+  recovered 12-file matrix passed 12/12 files and 202/202 tests in 33.03s with
+  one worker. The ten contention-classified files passed unchanged. Per the
+  coordination ruling, the full required suite was not rerun locally; exact-head
+  CI remains the terminal full-suite authority;
+- prior reviewed component evidence, retained as a regression baseline:
 - recovered 66-file compatibility matrix: 66/66 files, 548/548 tests;
 - bounded receipt/readiness/append-ack matrix: 18/18 files, 280/280 tests;
 - D1 adoption plus source guards: 2/2 files, 15/15 tests;

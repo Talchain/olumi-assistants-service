@@ -41,6 +41,7 @@ import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.
 import { loadMostRecentPendingActions } from '../../build-turn-context.js';
 import { GM_HELD_HANDLER_ID } from '../edit-graph-referee-gate.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { setTestSink } from '../../../utils/telemetry.js';
@@ -147,12 +148,21 @@ const invalidatedEvents = () => events.filter((e) => e.name === 'v5.pending_acti
 type CommitMeta = {
   priorPendingActions?: readonly PendingAction[];
   graph_hash?: string;
+  graph?: unknown;
 };
 
 function commitMeta(): CommitMeta {
   const calls = vi.mocked(commitDirectAnswer).mock.calls;
   expect(calls.length).toBe(1);
   return calls[0]![1] as CommitMeta;
+}
+
+function committedDraftHash(): string {
+  const projected = projectGraphForPersistence(NEW_DRAFT_GRAPH);
+  const rawHash = hashOf(NEW_DRAFT_GRAPH);
+  const projectedHash = hashOf(projected);
+  expect(projectedHash).not.toBe(rawHash);
+  return projectedHash;
 }
 
 beforeEach(() => {
@@ -194,7 +204,10 @@ describe('dispatchDraftGraph — holds thread through draft commits (task_2e1b8c
     expect(meta.priorPendingActions).toBeDefined();
     expect((meta.priorPendingActions ?? []).map((p) => p.chip_id)).not.toContain(hold.chip_id);
     // The commit carries the NEW draft's hash for the carry-forward hash rule.
-    expect(meta.graph_hash).toBe(hashOf(NEW_DRAFT_GRAPH));
+    const acceptedHash = committedDraftHash();
+    expect(meta.graph_hash).toBe(acceptedHash);
+    expect(result.response.graph_hash).toBe(acceptedHash);
+    expect(result.freshness?.current_graph_hash).toBe(acceptedHash);
 
     // The lapse notice ships on the FINAL wire response (the committed
     // provisional response is not sent to the client on this path).
@@ -274,7 +287,13 @@ describe('dispatchDraftGraph — holds thread through draft commits (task_2e1b8c
     const threaded = meta.priorPendingActions ?? [];
     expect(threaded).toHaveLength(1);
     expect(threaded[0]!.chip_id).toBe(hold.chip_id);
-    expect(threaded[0]!.preconditions.graph_hash).toBe(hashOf(NEW_DRAFT_GRAPH));
+    const acceptedHash = committedDraftHash();
+    expect(threaded[0]!.preconditions.graph_hash).toBe(acceptedHash);
+    expect(meta.graph_hash).toBe(acceptedHash);
+    expect(projectGraphForPersistence(meta.graph)).toBe(meta.graph);
+    expect(result.response.graph_hash).toBe(acceptedHash);
+    expect(result.freshness?.current_graph_hash).toBe(acceptedHash);
+    expect(hashOf(result.graph)).toBe(acceptedHash);
 
     expect(result.response.assistant_text ?? '').not.toContain('lapsed');
     expect(invalidatedEvents()).toHaveLength(0);

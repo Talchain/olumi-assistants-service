@@ -22,6 +22,9 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../src/orchestrator/tools/analysis-ready-helper.js';
 
 // -------- Mocks --------
 // IMPORTANT: only `runUnifiedPipeline` is mocked here. `dispatchDraftGraph`
@@ -36,7 +39,12 @@ vi.mock('../../../src/cee/unified-pipeline/index.js', () => ({
 // Minimal session-store + LLM-adapter mocks copied from the sibling route
 // test file. We need them because TurnExecutor fallthrough paths import
 // these modules at startup; route-v2 won't compile without them.
-const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
+  id: 'mock-row-id',
+  ...(write.graph != null
+    ? { graph_write_disposition: 'accepted_insert' as const }
+    : {}),
+}));
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,
@@ -112,6 +120,61 @@ const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const LONG_BRIEF =
   'Should we expand the product into the German market next quarter or hold?';
 
+// Deliberately PRE-projection: the canonical top-level options, goal pointer
+// and constraints carriers are absent. The full route must persist and expose
+// the one projected fixed point, never hash/readiness from these raw bytes.
+const PROJECTION_MUTATING_DRAFT = {
+  nodes: [
+    { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+    { id: 'dec_expand', kind: 'decision', label: 'Expand into Germany?' },
+    {
+      id: 'opt_expand',
+      kind: 'option',
+      label: 'Expand now',
+      interventions: {
+        fac_reach: {
+          value: 0.8,
+          source: 'user_specified',
+          target_match: {
+            node_id: 'fac_reach',
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    },
+    {
+      id: 'opt_hold',
+      kind: 'option',
+      label: 'Hold for now',
+      interventions: {
+        fac_reach: {
+          value: 0.2,
+          source: 'user_specified',
+          target_match: {
+            node_id: 'fac_reach',
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    },
+    {
+      id: 'fac_reach',
+      kind: 'factor',
+      label: 'Market reach',
+      category: 'controllable',
+    },
+  ],
+  edges: [
+    { from: 'dec_expand', to: 'opt_expand', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'dec_expand', to: 'opt_hold', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_expand', to: 'fac_reach', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_hold', to: 'fac_reach', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'fac_reach', to: 'goal_growth', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+};
+
 // ──────────────────────────────────────────────────────────────────
 // 2.733-B1: OPTIONS_IDENTICAL fixtures derived from the REAL producer.
 //
@@ -178,6 +241,60 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
   beforeEach(() => {
     runUnifiedPipelineMock.mockReset();
     appendMock.mockClear();
+  });
+
+  it('projection-mutating success keeps storage, receipt, readiness and final wire on one committed hash', async () => {
+    runUnifiedPipelineMock.mockResolvedValueOnce({
+      statusCode: 200,
+      body: {
+        graph: structuredClone(PROJECTION_MUTATING_DRAFT),
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '33333333-3333-4333-8333-3333fc010000',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(appendMock).toHaveBeenCalledOnce();
+    const persisted = appendMock.mock.calls[0]![0]!.graph;
+    const projected = projectGraphForPersistence(PROJECTION_MUTATING_DRAFT);
+    const rawHash = computeAnalysisAffectingGraphHash(PROJECTION_MUTATING_DRAFT as never);
+    const committedHash = computeAnalysisAffectingGraphHash(persisted as never);
+    const canonicalReadiness = buildCanonicalAnalysisReadyFromGraph(persisted);
+
+    expect(persisted).toStrictEqual(projected);
+    expect(projectGraphForPersistence(persisted)).toBe(persisted);
+    expect(committedHash).not.toBeNull();
+    expect(committedHash).not.toBe(rawHash);
+    expect(canonicalReadiness).toBeDefined();
+
+    const body = JSON.parse(res.body);
+    expect(body.graph_hash).toBe(committedHash);
+    expect(body.analysis_ready.current_graph_hash).toBe(committedHash);
+    expect(body.analysis_ready.status).toBe(canonicalReadiness!.status);
+    expect(body.analysis_ready.options).toStrictEqual(canonicalReadiness!.options);
+    for (const carrier of [
+      'nodes',
+      'edges',
+      'options',
+      'goal_node_id',
+      'goal_constraints',
+    ] as const) {
+      expect(body.draft_graph[carrier]).toStrictEqual(
+        (persisted as Record<string, unknown>)[carrier],
+      );
+    }
   });
 
   it('mocked runUnifiedPipeline returns { code: "CEE_LLM_VALIDATION_FAILED" } → real chain produces typed envelope', async () => {

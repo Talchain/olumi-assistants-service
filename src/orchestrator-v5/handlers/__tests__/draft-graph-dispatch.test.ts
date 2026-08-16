@@ -257,7 +257,7 @@ describe('dispatchDraftGraph', () => {
       expect(draftOpts?.requestStartMs).toBe(requestStartMs);
     });
 
-    it('passes graph directly in CommitMetadata to commitDirectAnswer', async () => {
+    it('passes one projected persistence fixed point through hold/hash/CommitMetadata', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
 
@@ -269,9 +269,21 @@ describe('dispatchDraftGraph', () => {
 
       expect(commitDirectAnswer).toHaveBeenCalledOnce();
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      // graph is passed directly (not wrapped in graphToStore); the store
-      // layer forwards it to append_turn_atomic as p_graph.
-      expect(metadata.graph).toEqual(MINIMAL_GRAPH);
+      const projected = projectGraphForPersistence(MINIMAL_GRAPH);
+      const rawHash = computeAnalysisAffectingGraphHash(MINIMAL_GRAPH as never);
+      const projectedHash = computeAnalysisAffectingGraphHash(projected as never);
+
+      // This fixture deliberately lacks top-level canonical options and goal
+      // constraints, so persistence projection is material rather than a
+      // vacuous equality control.
+      expect(projectedHash).not.toBe(rawHash);
+      expect(metadata.graph).toStrictEqual(projected);
+      expect(metadata.graph).not.toBe(MINIMAL_GRAPH);
+      // The graph handed to commit is already the projector's reference fixed
+      // point. commitDirectAnswer's mandatory defence-in-depth pass therefore
+      // cannot move any hold/hash/append bytes.
+      expect(projectGraphForPersistence(metadata.graph)).toBe(metadata.graph);
+      expect(metadata.graph_hash).toBe(projectedHash);
     });
 
     it('sets commitPerformed=true', async () => {
@@ -325,6 +337,10 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.graph_hash).toBe(
         computeAnalysisAffectingGraphHash(persisted as never),
       );
+      expect(result.freshness?.current_graph_hash).toBe(result.response.graph_hash);
+      expect(
+        computeAnalysisAffectingGraphHash(result.graph as never),
+      ).toBe(result.response.graph_hash);
     });
 
     it('draft_graph node_count and edge_count match the FINAL graph arrays', async () => {
@@ -604,6 +620,10 @@ describe('dispatchDraftGraph', () => {
       });
 
       expect(result.response.draft_graph).toBeUndefined();
+      expect(result.response.graph_hash).toBeUndefined();
+      expect(result.analysisReady).toBeUndefined();
+      expect(result.freshness).toBeUndefined();
+      expect(result.graph).toBeNull();
     });
   });
 
@@ -654,6 +674,10 @@ describe('dispatchDraftGraph', () => {
       });
 
       expect(result.response.draft_graph).toBeUndefined();
+      expect(result.response.graph_hash).toBeUndefined();
+      expect(result.analysisReady).toBeUndefined();
+      expect(result.freshness?.current_graph_hash).toBeNull();
+      expect(result.graph).toBeNull();
     });
   });
 
@@ -823,7 +847,7 @@ describe('dispatchDraftGraph', () => {
       });
 
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.graph).toEqual(MINIMAL_GRAPH);
+      expect(metadata.graph).toEqual(projectGraphForPersistence(MINIMAL_GRAPH));
       expect(metadata.briefText).toBe('My decision');
     });
 
@@ -1151,7 +1175,9 @@ describe('dispatchDraftGraph — gated-hybrid coaching wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+      .mockImplementation(async (_response, metadata) =>
+        makeCommitResult(true, metadata.graph) as Awaited<ReturnType<typeof commitDirectAnswer>>,
+      );
   });
 
   const CLEAN_SUMMARY =
@@ -1602,7 +1628,9 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
-      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+      .mockImplementation(async (_response, metadata) =>
+        makeCommitResult(true, metadata.graph) as Awaited<ReturnType<typeof commitDirectAnswer>>,
+      );
   });
 
   // A coachingSummary long enough and clean enough to pass `gateFullResponse`
@@ -1613,12 +1641,11 @@ describe('dispatchDraftGraph — V5 coaching ID scrub (narrow-guard)', () => {
 
   function graphWithNode(node: { id: string; label: string; kind?: string }) {
     return {
+      ...MINIMAL_GRAPH,
       nodes: [
-        { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
-        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        ...MINIMAL_GRAPH.nodes,
         { ...node, kind: node.kind ?? 'risk' },
       ],
-      edges: [{ from: 'dec_launch', to: 'goal_revenue' }],
     };
   }
 

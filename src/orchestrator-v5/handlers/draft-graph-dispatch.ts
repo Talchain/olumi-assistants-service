@@ -73,12 +73,12 @@ import {
 import type { SuggestedAction } from '../compose/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { emitContextBudget } from '../context/context-budget-telemetry.js';
 import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from '../context/freshness.js';
-import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
@@ -647,6 +647,23 @@ export async function dispatchDraftGraph(
     }
     const briefTextForCommit = briefNorm.value;
 
+    // Resolve the draft-local persistence fixed point ONCE, before any
+    // hash-dependent decision. The global commit chokepoint deliberately
+    // projects every graph again as defence in depth, but this early pass is
+    // what makes this dispatch's hold referee, pending pin and metadata.graph
+    // describe the same bytes that append will receive. The projection is
+    // reference-idempotent, so commitDirectAnswer's mandatory second pass
+    // returns this exact object unchanged.
+    const draftGraphForCommit =
+      draftResult.graphOutput === null
+        ? null
+        : projectGraphForPersistence(draftResult.graphOutput, {
+            scenarioId: payload.scenario_id,
+            turnId: payload.turn_id,
+            turnClass: 'direct_answer',
+            source: 'draft_graph',
+          });
+
     // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──
     // Closes the F-HELD round-2 KNOWN RESIDUAL for the draft path: this
     // commit previously threaded NO priorPendingActions, so ANY draft turn
@@ -664,7 +681,7 @@ export async function dispatchDraftGraph(
     const postDraftGraphHash = ((): string | null => {
       try {
         return computeAnalysisAffectingGraphHash(
-          draftResult.graphOutput as GraphStateIngress | null | undefined,
+          draftGraphForCommit as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
         );
       } catch {
         return null;
@@ -672,8 +689,8 @@ export async function dispatchDraftGraph(
     })();
     const holdThread = threadHoldsThroughMutatingCommit({
       priorPendingActions,
-      graphAfterCommit: draftResult.graphOutput ?? null,
-      graphHashAfterCommit: draftResult.graphOutput != null ? postDraftGraphHash : null,
+      graphAfterCommit: draftGraphForCommit,
+      graphHashAfterCommit: draftGraphForCommit !== null ? postDraftGraphHash : null,
       // No per-operation record on a draft — the whole NEW graph IS the
       // mutation. Fulfilment detection (round-3 concern 1) falls back to
       // the post-draft end state: a concept the redraft itself delivered
@@ -742,7 +759,7 @@ export async function dispatchDraftGraph(
         // scenarios and `no_expected`/`not_instrumented` on redrafts — that
         // IS the coverage metric for this path, not a gap to "fix" by
         // trusting the request.
-        graph: draftResult.graphOutput ?? undefined,
+        graph: draftGraphForCommit ?? undefined,
         briefText: briefTextForCommit,
         // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
         // carry-forward runs on this path; graph_hash is the NEW draft's
@@ -753,7 +770,7 @@ export async function dispatchDraftGraph(
         ...(params.consumedPendingRefs !== undefined
           ? { consumedPendingRefs: params.consumedPendingRefs }
           : {}),
-        ...(draftResult.graphOutput != null && postDraftGraphHash !== null
+        ...(draftGraphForCommit !== null && postDraftGraphHash !== null
           ? { graph_hash: postDraftGraphHash }
           : {}),
         // V5 Stage 2B-1b: the route-v2 draft path never runs buildTurnContext,
@@ -768,7 +785,7 @@ export async function dispatchDraftGraph(
     // A draft that produced a graph succeeds on the wire only with an exact
     // persisted receipt. A pipeline result with NO graph still records its
     // honest non-graph turn and remains receipt-free.
-    const shouldEmitCommittedReceipt = draftResult.graphOutput != null;
+    const shouldEmitCommittedReceipt = draftGraphForCommit !== null;
     const committedReceipt = shouldEmitCommittedReceipt
       ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
       : null;
@@ -782,15 +799,28 @@ export async function dispatchDraftGraph(
         commitResult.persistedAnalysisGraphHash === null ||
         committedReceipt === null ||
         canonicalAnalysisReady === undefined ||
-        commitResult.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
+        commitResult.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
+        postDraftGraphHash === null ||
+        postDraftGraphHash !== committedReceipt.analysisGraphHash
       )
     ) {
       throw new Error('draft_graph committed receipt/readiness mismatch');
     }
 
+    // Receipt validation admitted this exact persisted object through both
+    // the permissive ingress and strict canonical carrier contracts. Use it
+    // for all post-commit narration/chip/scrub decisions; returning to the
+    // pipeline candidate here would recreate a pre-/post-projection split.
+    const committedDraftGraph = committedReceipt !== null
+      ? (commitResult.persistedGraph as GraphV3T)
+      : null;
+    const draftResultForCommittedResponse = committedDraftGraph !== null
+      ? { ...draftResult, graphOutput: committedDraftGraph }
+      : draftResult;
+
     let response = {
       ...draftResultToOlumiResponse(
-        draftResult,
+        draftResultForCommittedResponse,
         payload,
         commitResult.graphPersisted,
         requestId,
@@ -835,7 +865,7 @@ export async function dispatchDraftGraph(
     // already-built ModelReceiptBlock (PR B); nothing renders it today.
     const receiptSummaryRaw = baseAnalysisReady
       ? buildModelReceiptSummary({
-          graph: draftResult.graphOutput,
+          graph: committedDraftGraph,
           analysisReady: draftResult.analysisReady ?? null,
           strengthenItems: draftResult.strengthenItems,
           coachingBiasSignals: draftResult.coachingBiasSignals,
@@ -843,7 +873,7 @@ export async function dispatchDraftGraph(
       : null;
     const receiptSummary =
       receiptSummaryRaw !== null
-        ? sanitiseCoachingProse(receiptSummaryRaw, draftResult.graphOutput).text.trim()
+        ? sanitiseCoachingProse(receiptSummaryRaw, committedDraftGraph).text.trim()
         : '';
     const analysisReady: AnalysisReadyPayload | undefined =
       baseAnalysisReady && receiptSummary.length > 0
@@ -867,9 +897,11 @@ export async function dispatchDraftGraph(
     // shape lands on a session with prior facts) surface as a divergence
     // between the wire `none` and any later turn's actual `freshness`
     // verdict — operators have a grep target.
-    // HOLD-WIPE fix: reuse the pre-commit hash of the SAME graph object
-    // (pure function, identical input) instead of re-deriving it here.
-    const currentGraphHash = postDraftGraphHash;
+    // Accepted-state authority comes only from the validated committed
+    // receipt. The pre-commit fixed-point hash above governs hold/pending
+    // decisions and is checked equal after append, but it does not author the
+    // public freshness/top-level hash after the irreversible boundary.
+    const currentGraphHash = committedReceipt?.analysisGraphHash ?? null;
     const freshness: FreshnessDerivation = {
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',
@@ -929,7 +961,7 @@ export async function dispatchDraftGraph(
       response,
       commitPerformed: true,
       analysisReady,
-      graph: draftResult.graphOutput,
+      graph: committedDraftGraph,
       freshness,
       ...(diagnosticTrace !== undefined ? { diagnosticTrace } : {}),
     };
@@ -954,6 +986,6 @@ export async function dispatchDraftGraph(
       effectiveBrief,
       undefined,
     );
-    return { response, commitPerformed: false, graph: draftResult.graphOutput };
+    return { response, commitPerformed: false, graph: null };
   }
 }

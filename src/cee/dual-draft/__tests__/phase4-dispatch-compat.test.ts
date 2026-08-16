@@ -4,13 +4,14 @@
  * Proves the seam invariants the activation gate depends on, WITHOUT
  * activating anything (adapters and commit mocked; enricher mocked to return
  * a merged graph):
- *   - the merged graph is committed ONCE, atomically, and it is the SAME
+ *   - the merged graph is projected once and committed ONCE, atomically; the
+ *     canonical fixed point is the SAME
  *     object the response's draft_graph field and the dispatch-result graph
  *     reference — no stale or intermediate graph state exists anywhere;
  *   - the analysis-affecting graph hash (the freshness source run_analysis
- *     compares against on later turns) is computed from the MERGED graph,
- *     not the M1 graph — uses the REAL graph-hash module (read-only import,
- *     same module the dispatch uses).
+ *     compares against on later turns) is computed from the projected MERGED
+ *     graph, not raw M1/MERGED bytes — uses the REAL graph-hash module
+ *     (read-only import, same module the dispatch uses).
  */
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
@@ -58,6 +59,7 @@ import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { enrichDraftGraph } from '../index.js';
 // REAL graph-hash module — the same one the dispatch calls. Read-only import.
 import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
+import { projectGraphForPersistence } from '../../../orchestrator-v5/persisted-graph-projection.js';
 import type { GraphStateIngress } from '../../../orchestrator-v5/boundary/request-extensions.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -98,6 +100,19 @@ const MERGED_GRAPH = {
     },
   ],
 };
+
+const PROJECTED_M1_GRAPH = projectGraphForPersistence(M1_GRAPH, {
+  scenarioId: SCENARIO_ID,
+  turnId: TURN_ID,
+  turnClass: 'direct_answer',
+  source: 'draft_graph',
+});
+const PROJECTED_MERGED_GRAPH = projectGraphForPersistence(MERGED_GRAPH, {
+  scenarioId: SCENARIO_ID,
+  turnId: TURN_ID,
+  turnClass: 'direct_answer',
+  source: 'draft_graph',
+});
 
 function makePayload() {
   return {
@@ -156,7 +171,8 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
     // Single atomic commit — no intermediate M1 write, no second merged write.
     expect(commitDirectAnswer).toHaveBeenCalledOnce();
     const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-    expect(metadata.graph).toEqual(MERGED_GRAPH);
+    expect(metadata.graph).toStrictEqual(PROJECTED_MERGED_GRAPH);
+    expect(metadata.graph).not.toBe(MERGED_GRAPH);
 
     // The response the user sees references the same merged graph.
     expect(result.response.draft_graph?.nodes).toEqual(MERGED_GRAPH.nodes);
@@ -166,7 +182,7 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
 
     // The dispatch-result graph (used by the egress sanitiser for label
     // resolution) is the merged graph too.
-    expect(result.graph).toEqual(MERGED_GRAPH);
+    expect(result.graph).toStrictEqual(PROJECTED_MERGED_GRAPH);
   });
 
   it('accounting: llm_calls_used=2 on enriched turns, and the M1 narration-count guard is not fired against merged counts', async () => {
@@ -224,18 +240,26 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
     },
   );
 
-  it('freshness current_graph_hash is computed from the MERGED graph, not the M1 graph', async () => {
+  it('freshness current_graph_hash is computed from the projected MERGED fixed point', async () => {
     const result = await dispatchDraftGraph({
       payload: makePayload(),
       requestId: 'req-p4-hash',
       request: STUB_REQUEST,
     });
 
-    const mergedHash = computeAnalysisAffectingGraphHash(MERGED_GRAPH as unknown as GraphStateIngress);
-    const m1Hash = computeAnalysisAffectingGraphHash(M1_GRAPH as unknown as GraphStateIngress);
+    const mergedHash = computeAnalysisAffectingGraphHash(
+      PROJECTED_MERGED_GRAPH as GraphStateIngress,
+    );
+    const m1Hash = computeAnalysisAffectingGraphHash(
+      PROJECTED_M1_GRAPH as GraphStateIngress,
+    );
+    const rawMergedHash = computeAnalysisAffectingGraphHash(
+      MERGED_GRAPH as unknown as GraphStateIngress,
+    );
 
     expect(result.freshness?.current_graph_hash).toBe(mergedHash);
     expect(result.freshness?.current_graph_hash).not.toBe(m1Hash);
+    expect(result.freshness?.current_graph_hash).not.toBe(rawMergedHash);
     // First draft turn: no prior run_analysis fact — freshness verdict `none`.
     expect(result.freshness?.freshness).toBe('none');
   });
@@ -255,10 +279,10 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
 
     expect(commitDirectAnswer).toHaveBeenCalledOnce();
     const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-    expect(metadata.graph).toEqual(M1_GRAPH);
+    expect(metadata.graph).toStrictEqual(PROJECTED_M1_GRAPH);
     expect(result.response.draft_graph?.node_count).toBe(M1_GRAPH.nodes.length);
     expect(result.freshness?.current_graph_hash).toBe(
-      computeAnalysisAffectingGraphHash(M1_GRAPH as unknown as GraphStateIngress),
+      computeAnalysisAffectingGraphHash(PROJECTED_M1_GRAPH as GraphStateIngress),
     );
   });
 
@@ -273,6 +297,6 @@ describe('Phase 4 — merged-graph dispatch compatibility (flag ON, enricher ret
 
     expect(result.commitPerformed).toBe(true);
     const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-    expect(metadata.graph).toEqual(M1_GRAPH);
+    expect(metadata.graph).toStrictEqual(PROJECTED_M1_GRAPH);
   });
 });

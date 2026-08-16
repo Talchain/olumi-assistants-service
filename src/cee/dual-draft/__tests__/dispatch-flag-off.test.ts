@@ -4,10 +4,10 @@
  * Proves the two invariants of the flag-gated enrichment block in
  * dispatchDraftGraph:
  *   1. Flag OFF (default): enrichDraftGraph is never invoked and the M1 graph
- *      reaches commit unchanged — byte-identical to the pre-seam behaviour.
+ *      reaches the one canonical persistence projection unchanged in meaning.
  *   2. Flag ON + no-op enricher (enriched=false): enrichDraftGraph is invoked
  *      exactly once with the M1 graph, and the committed graph is STILL the
- *      untouched M1 graph.
+ *      canonical projection of that M1 graph.
  *
  * The enrichment module is mocked so call-count can be asserted without loading
  * the real (no-op) implementation. Written RED-first: before the dispatch block
@@ -62,6 +62,7 @@ import { dispatchDraftGraph } from '../../../orchestrator-v5/handlers/draft-grap
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../../orchestrator-v5/commit.js';
 import { canonicalCommitResultFixture } from '../../../orchestrator-v5/handlers/__tests__/canonical-commit-result-fixture.js';
+import { projectGraphForPersistence } from '../../../orchestrator-v5/persisted-graph-projection.js';
 import { enrichDraftGraph } from '../index.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -81,6 +82,13 @@ const M1_GRAPH = {
     effect_direction: 'positive' as const,
   }],
 };
+
+const PROJECTED_M1_GRAPH = projectGraphForPersistence(M1_GRAPH, {
+  scenarioId: SCENARIO_ID,
+  turnId: TURN_ID,
+  turnClass: 'direct_answer',
+  source: 'draft_graph',
+});
 
 function makePayload() {
   return {
@@ -136,10 +144,11 @@ describe('dispatchDraftGraph — V6 dual-draft flag gate (Phase 0/1)', () => {
       expect(enrichDraftGraph).not.toHaveBeenCalled();
     });
 
-    it('commits the M1 graph unchanged (byte-identity)', async () => {
+    it('commits the M1 graph through the canonical persistence fixed point', async () => {
       await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-off', request: STUB_REQUEST });
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.graph).toEqual(M1_GRAPH);
+      expect(metadata.graph).toStrictEqual(PROJECTED_M1_GRAPH);
+      expect(metadata.graph).not.toBe(M1_GRAPH);
     });
 
     it('advances stage_indicator to analyse and commitPerformed=true (unchanged behaviour)', async () => {
@@ -168,10 +177,10 @@ describe('dispatchDraftGraph — V6 dual-draft flag gate (Phase 0/1)', () => {
       expect(input.scenarioId).toBe(SCENARIO_ID);
     });
 
-    it('commits the M1 graph unchanged when the enricher returns enriched=false', async () => {
+    it('commits the projected M1 graph when the enricher returns enriched=false', async () => {
       await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-on', request: STUB_REQUEST });
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.graph).toEqual(M1_GRAPH);
+      expect(metadata.graph).toStrictEqual(PROJECTED_M1_GRAPH);
     });
 
     it('commits the MERGED graph when the enricher returns enriched=true (seam swap contract)', async () => {
@@ -190,10 +199,16 @@ describe('dispatchDraftGraph — V6 dual-draft flag gate (Phase 0/1)', () => {
       // Single commit, receives the merged graph.
       expect(commitDirectAnswer).toHaveBeenCalledOnce();
       const [, metadata] = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls[0];
-      expect(metadata.graph).toEqual(MERGED_GRAPH);
+      const projectedMergedGraph = projectGraphForPersistence(MERGED_GRAPH, {
+        scenarioId: SCENARIO_ID,
+        turnId: TURN_ID,
+        turnClass: 'direct_answer',
+        source: 'draft_graph',
+      });
+      expect(metadata.graph).toStrictEqual(projectedMergedGraph);
       // Response counts and dispatch-result graph derive from the merged graph.
       expect(result.response.draft_graph?.node_count).toBe(3);
-      expect(result.graph).toEqual(MERGED_GRAPH);
+      expect(result.graph).toStrictEqual(projectedMergedGraph);
     });
 
     it('does not invoke enrichDraftGraph when the pipeline produced no graph', async () => {

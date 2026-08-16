@@ -297,6 +297,40 @@ describe('V5 draft_graph persistence integration', () => {
     });
   });
 
+  // ── Scenario 2b: same-turn replay is non-authoritative ───────────────────
+
+  describe('Scenario 2b — graph replay acknowledgement emits no receipt', () => {
+    beforeEach(() => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult(MINIMAL_GRAPH_1) as Awaited<ReturnType<typeof handleDraftGraph>>);
+    });
+
+    it.each(['byte_identical_replay', 'divergent_replay'] as const)(
+      '%s fails the draft closed without graph authority',
+      async (graph_write_disposition) => {
+        appendMock.mockResolvedValueOnce({
+          id: 'row-existing',
+          graph_write_disposition,
+        });
+
+        const result = await dispatchDraftGraph({
+          payload: makePayload(TURN_ID_1),
+          requestId: `req-${graph_write_disposition}`,
+          request: STUB_REQUEST,
+        });
+
+        expect(appendMock).toHaveBeenCalledOnce();
+        expect(result.commitPerformed).toBe(false);
+        expect(result.response.stage_indicator).toBe('frame');
+        expect(result.response.draft_graph).toBeUndefined();
+        expect(result.response.graph_hash).toBeUndefined();
+        expect(result.analysisReady).toBeUndefined();
+        expect(result.freshness).toBeUndefined();
+        expect(result.graph).toBeNull();
+      },
+    );
+  });
+
   // ── Scenario 3: no graphOutput produced ────────────────────────────────────
 
   describe('Scenario 3 — pipeline produced no graphOutput: scenarios.graph left unchanged', () => {

@@ -287,4 +287,27 @@ describe('canonical receipt architecture drift guards', () => {
     );
     expect(source).not.toContain('graph: committedParse.data');
   });
+
+  it('pins draft hold/hash/append to one precommit fixed point and accepted hash to the receipt', () => {
+    const source = readFileSync(
+      join(repoRoot, 'src/orchestrator-v5/handlers/draft-graph-dispatch.ts'),
+      'utf8',
+    );
+
+    expect(
+      source.match(/const draftGraphForCommit\s*=\s*[\s\S]*?projectGraphForPersistence\(/g),
+    ).toHaveLength(1);
+    expect(source).toContain('graphAfterCommit: draftGraphForCommit');
+    expect(source).toContain('graph: draftGraphForCommit ?? undefined');
+    expect(source).toContain(
+      'postDraftGraphHash !== committedReceipt.analysisGraphHash',
+    );
+    expect(source).toContain(
+      'const currentGraphHash = committedReceipt?.analysisGraphHash ?? null',
+    );
+    expect(source).toContain('graph: committedDraftGraph');
+    expect(source).not.toMatch(
+      /computeAnalysisAffectingGraphHash\(\s*draftResult\.graphOutput/,
+    );
+  });
 });
