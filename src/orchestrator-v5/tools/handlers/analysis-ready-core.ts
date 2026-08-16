@@ -258,12 +258,52 @@ export interface RunAdmission {
   readonly canonicalGraph: unknown | null;
 }
 
-/** A blocker the exclusion can answer: per-option, and on a touched option. */
+/**
+ * The blocker codes the EXCLUSION genuinely answers — i.e. the ones that mean
+ * *"nothing is set for this option"*.
+ *
+ * ⚠ KEYED ON CODE, NOT ON CATEGORY, AND THE DIFFERENCE IS AN HONESTY DEFECT I
+ * SHIPPED AND A MUTANT CAUGHT. The first version of this predicate waived any
+ * `option_values` / `option_mapping` blocker on a touched option. A mutant that
+ * dropped the category check SURVIVED, which said the category was not doing the
+ * discriminating work — and probing why produced a real case:
+ *
+ *   an option carrying `data.interventions: { fac_budget: { raw_value: 250000 } }`
+ *   on a CAPLESS factor raises `NO_CAP_UNRECOVERABLE`, whose category is
+ *   `option_values`, and whose WIRE projection has empty interventions — so it is
+ *   "touched" by the exclusion plan and the category rule waived it.
+ *
+ * That option HAS a value. Excluding it makes the run proceed while the
+ * disclosure says *"left out of this comparison because it has no values set"* —
+ * **false**. A user's £250,000 becomes a sentence claiming they entered nothing.
+ * Admission may absorb an ABSENCE; it may never absorb a value it cannot read.
+ *
+ * The five codes below are exactly the ones `blockerIssue` and
+ * `appendSemanticIssues` emit when no usable value exists. The excluded ones —
+ * `NO_CAP_UNRECOVERABLE`, `UNIT_MISMATCH`, `OPTION_INTERVENTION_UNRESOLVABLE`,
+ * `AMBIGUOUS_OPTION_VALUE`, `CONSTRAINT_REVIEW_REQUIRED` — every one means a
+ * value or a judgement IS present and is not yet usable. Those keep the refusal,
+ * so the user is told the truth about their own input.
+ *
+ * This rides on a distinction the assessor already draws deliberately:
+ * `analysis-ready-helper.ts` suppresses the duplicate `MISSING_OPTION_VALUE` on
+ * any pair the strict encoder has already named (`strictEncoderPairs`), so the
+ * two classes never collide on one option×factor.
+ */
+const WAIVABLE_BY_EXCLUSION: ReadonlySet<string> = new Set<string>([
+  'MISSING_OPTION_VALUE',
+  'OPTION_NEEDS_ENCODING',
+  'OPTION_NEEDS_MAPPING',
+  'MISSING_OPTION_CONNECTION',
+  'UNREACHABLE_CONTROLLABLE_FACTOR',
+]);
+
+/** A blocker the exclusion can answer: nothing-is-set, and on a touched option. */
 function isWaivableByExclusion(
   issue: CanonicalReadinessIssue,
   touchedOptionIds: ReadonlySet<string>,
 ): boolean {
-  if (issue.category !== 'option_values' && issue.category !== 'option_mapping') return false;
+  if (!WAIVABLE_BY_EXCLUSION.has(issue.code)) return false;
   return typeof issue.option_id === 'string' && touchedOptionIds.has(issue.option_id);
 }
 

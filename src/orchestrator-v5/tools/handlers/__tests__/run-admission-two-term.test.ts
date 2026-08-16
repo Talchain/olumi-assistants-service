@@ -165,6 +165,83 @@ describe('resolveRunAdmission — a blocker the exclusion cannot answer keeps th
   });
 });
 
+describe('admission absorbs an ABSENCE, never a value it cannot read', () => {
+  /**
+   * ⚠ THIS CASE WAS FOUND BY A SURVIVING MUTANT, AND IT WAS A DEFECT IN THE FIX.
+   *
+   * The first version of `isWaivableByExclusion` keyed on issue CATEGORY. A
+   * mutant deleting the category check survived — which said the category was
+   * not discriminating — and probing why produced this graph:
+   *
+   * `opt_unreadable` carries a REAL user value (`raw_value: 250000`) on a
+   * CAPLESS factor. That raises `NO_CAP_UNRECOVERABLE`, whose category is
+   * `option_values`, and whose WIRE projection has EMPTY interventions — so the
+   * exclusion plan "touches" it and the category rule waived it.
+   *
+   * The run would then proceed and the existing disclosure would say the option
+   * was *"left out of this comparison because it has no values set"*. It has a
+   * value. Telling a user who entered £250,000 that they entered nothing is a
+   * fabrication, and it is exactly the class the no-rank ruling exists to stop.
+   */
+  const UNREADABLE_VALUE = {
+    version: '1',
+    nodes: [
+      ...baseNodes(),
+      { id: 'fac_budget', kind: 'factor', label: 'Budget', category: 'controllable' },
+      option('opt_c0', 'Configured 0', { fac_velocity: 0.4 }),
+      option('opt_c1', 'Configured 1', { fac_velocity: 0.8 }),
+      {
+        id: 'opt_unreadable',
+        kind: 'option',
+        label: 'Unreadable',
+        data: { interventions: { fac_budget: { raw_value: 250000 } } },
+      },
+    ],
+    edges: [
+      v3Edge('e1', 'decision', 'opt_c0'),
+      v3Edge('e2', 'decision', 'opt_c1'),
+      v3Edge('e3', 'decision', 'opt_unreadable'),
+      v3Edge('e4', 'opt_c0', 'fac_velocity'),
+      v3Edge('e5', 'opt_c1', 'fac_velocity'),
+      v3Edge('e6', 'opt_unreadable', 'fac_budget'),
+      v3Edge('e7', 'fac_velocity', 'goal'),
+      v3Edge('e8', 'fac_budget', 'goal'),
+    ],
+  };
+
+  it('REFUSES when an option holds a value the model cannot read', () => {
+    const admission = resolveRunAdmission(UNREADABLE_VALUE);
+
+    // PRECONDITIONS PINNED IN-TEST — without these the spec could pass because
+    // the fixture stopped reproducing the state, not because the rule holds.
+    // (1) The exclusion really does want to drop it: it is touched.
+    expect(admission.plan.scaffolded_option_ids).toContain('opt_unreadable');
+    // (2) Its blocker really is in the category the broken rule waived.
+    const issue = (admission.strict.issues ?? []).find((i) => i.option_id === 'opt_unreadable');
+    expect(issue?.code).toBe('NO_CAP_UNRECOVERABLE');
+    expect(issue?.category).toBe('option_values');
+
+    // The verdict under test: a value we cannot read keeps the refusal.
+    expect(admission.willProceed).toBe(false);
+    expect(admission.waivedOptionIds).toEqual([]);
+  });
+
+  it('DISCRIMINATING TWIN — the same graph with that option genuinely EMPTY is admitted', () => {
+    // Identical in every respect except that the value is gone. If the spec
+    // above passed because of the extra factor, the edge count, or anything
+    // else structural, this twin would fail too.
+    const emptied = {
+      ...UNREADABLE_VALUE,
+      nodes: UNREADABLE_VALUE.nodes.map((n) =>
+        n.id === 'opt_unreadable' ? { id: n.id, kind: n.kind, label: n.label } : n,
+      ),
+    };
+    const admission = resolveRunAdmission(emptied);
+    expect(admission.willProceed).toBe(true);
+    expect(admission.waivedOptionIds).toEqual(['opt_unreadable']);
+  });
+});
+
 describe('the route and the run give ONE answer', () => {
   /**
    * The anti-drift property. The panel's offer is
