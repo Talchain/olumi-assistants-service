@@ -21,7 +21,7 @@
  *   - `GraphV3.safeParse` (baseline schema).
  *   - `validateGraphStructure` (cycle / orphan / no-path-to-goal /
  *     option-no-factor-edge / no-goal / no-decision / <2 options).
- *   - `computeStructuralReadiness` (goal_node_id + per-option configured status)
+ *   - canonical `buildAnalysisReadyPayload` projection (whole-model status)
  *     for the options_not_configured completeness check.
  *
  * VALUE-PRESERVATION INVARIANT: `repaired` is permitted ONLY for value-preserving
@@ -29,19 +29,21 @@
  * defaulted / guessed cap / unit / value → `unrecoverable`. (Enforced by #278's
  * `deriveValue`, which defers rather than invents.)
  *
- * TOTALITY: this function MUST NEVER throw — it runs inside freshness derivation
- * (Blocker 2 short-circuit) on EVERY turn, not only explicit run_analysis turns.
- * Any internal failure resolves to `unrecoverable` (INTERNAL_ERROR) with typed
- * telemetry, never an exception that breaks the turn.
+ * TOTALITY: this function MUST NEVER throw — it runs at the load-bearing Run
+ * admission boundary and at graph-management parity checks. Any internal failure
+ * resolves to `unrecoverable` (INTERNAL_ERROR) with a typed verdict, never an
+ * exception that bypasses the recoverable Run response.
  *
  * SCOPE: V5 `/orchestrate/v2/turn` only. Does NOT guard the V4 `/orchestrate/v1/turn`
  * seam (documented residual). No EP1 (write boundary), no EP3 (frontend), no CAS.
  */
-import { GraphV3 } from '../../../schemas/cee-v3.js';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
-import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import type { StructuralViolationCode } from '../../../orchestrator/graph-structure-validator.js';
-import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  assessCanonicalAnalysisReadiness,
+  type CanonicalReadinessIssue,
+  type CanonicalReadinessIssueCode,
+  type CanonicalReadinessRepairProposal,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 
 // ============================================================================
@@ -62,6 +64,7 @@ export type ReadinessReasonCode =
   // which is a present-but-malformed graph. NO_GRAPH means "create a model",
   // SCHEMA_INVALID means "fix the model you have".
   | 'NO_GRAPH'
+  | CanonicalReadinessIssueCode
   | StructuralViolationCode
   | 'INTERNAL_ERROR';
 
@@ -83,6 +86,10 @@ export interface ReadinessResult {
   readonly canonicalGraph: unknown | null;
   /** User-safe, no-internal-ID next step (only when unrecoverable). */
   readonly nextStep: string | null;
+  /** Exhaustive structural + semantic record from the canonical authority. */
+  readonly issues?: readonly CanonicalReadinessIssue[];
+  /** Complete review plan only for a genuine two-or-more blocker state. */
+  readonly repairProposal?: CanonicalReadinessRepairProposal | null;
 }
 
 // ============================================================================
@@ -108,25 +115,41 @@ export function canonicaliseForAnalysis(graph: unknown): unknown {
 // assessAnalysisReadiness — the neutral core (TOTAL)
 // ============================================================================
 
-const STRUCTURAL_NEXT_STEP: Record<StructuralViolationCode, string> = {
-  NO_GOAL: 'Add a goal before this scenario can be analysed.',
-  NO_DECISION: 'Add a decision before this scenario can be analysed.',
-  FEWER_THAN_TWO_OPTIONS: 'Add at least two options before analysing.',
-  ORPHAN_NODE: 'Connect the disconnected item to the rest of the model before analysing.',
-  NO_PATH_TO_GOAL: 'Connect the model so every option reaches the goal, then analyse.',
-  CYCLE_DETECTED: 'Fix the graph structure — a circular dependency was detected.',
-  OPTION_NO_FACTOR_EDGES: 'Give each option at least one factor effect before analysing.',
-  // PR #413 review FIXUP 3 — floating option (no decision → option edge).
-  OPTION_NOT_LINKED_TO_DECISION: 'Connect the decision to each option before analysing.',
-  NODE_LIMIT_EXCEEDED: 'Simplify the model — it has too many items to analyse.',
-  EDGE_LIMIT_EXCEEDED: 'Simplify the model — it has too many connections to analyse.',
-};
-
-function unrecoverable(
-  reasonCodes: readonly ReadinessReasonCode[],
-  reasonCategory: ReadinessReasonCategory,
-  nextStep: string,
-): ReadinessResult {
+/**
+ * Assess whether a persisted graph can be analysed. TOTAL — never throws.
+ */
+export function assessAnalysisReadiness(rawGraph: unknown): ReadinessResult {
+  const assessment = assessCanonicalAnalysisReadiness(rawGraph);
+  if (assessment.safeToAnalyse) {
+    return {
+      status: assessment.repairedForAnalysis ? 'repaired' : 'analysis_ready',
+      reasonCodes: assessment.repairedForAnalysis ? ['OPTION_INTERVENTION_PROMOTED'] : [],
+      reasonCategory: assessment.repairedForAnalysis ? 'option_values' : null,
+      deterministicRecovery: assessment.repairedForAnalysis,
+      safeToAnalyse: true,
+      safeToPersist: true,
+      userActionRequired: false,
+      canonicalGraph: assessment.canonicalGraph,
+      nextStep: null,
+      issues: assessment.issues,
+      repairProposal: null,
+    };
+  }
+  const reasonCodes = [
+    ...new Set(assessment.blockingIssues.map((issue) => issue.code)),
+  ] as ReadinessReasonCode[];
+  const first = assessment.blockingIssues[0];
+  const reasonCategory: ReadinessReasonCategory =
+    first?.category === 'graph_structure'
+      ? 'graph_structure'
+      : first?.category === 'numeric_integrity'
+        ? 'numeric_integrity'
+        : first?.category === 'internal'
+          ? 'internal'
+          : 'option_values';
+  const nextStep = assessment.blockingIssues.length === 1
+    ? first?.message ?? 'Review the model before analysis.'
+    : `Review all ${assessment.blockingIssues.length} readiness issues together before analysis.`;
   return {
     status: 'unrecoverable',
     reasonCodes,
@@ -137,142 +160,9 @@ function unrecoverable(
     userActionRequired: true,
     canonicalGraph: null,
     nextStep,
+    issues: assessment.issues,
+    repairProposal: assessment.repairProposal,
   };
-}
-
-type Dict = Record<string, unknown>;
-function isPlainObject(v: unknown): v is Dict {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
-}
-function finiteNum(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
-}
-
-/**
- * Classify WHY a touched option could not be encoded (read-only; mirrors the
- * decision points in #278 `deriveValue` without re-deriving): no resolvable cap
- * → NO_CAP_UNRECOVERABLE; intervention unit present and incompatible with the
- * factor unit → UNIT_MISMATCH; otherwise the generic unresolvable code. Used
- * only to pick the user-safe reason; the AUTHORITATIVE encodable/defer decision
- * remains #278's.
- */
-function classifyUnresolvedOptions(
-  graph: unknown,
-  unresolvedIds: readonly string[],
-): ReadinessReasonCode {
-  try {
-    if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return 'OPTION_INTERVENTION_UNRESOLVABLE';
-    const factorById = new Map<string, Dict>();
-    for (const n of graph.nodes) {
-      if (isPlainObject(n) && n.kind === 'factor' && typeof n.id === 'string') factorById.set(n.id, n);
-    }
-    const unresolved = new Set(unresolvedIds);
-    for (const node of graph.nodes) {
-      if (!isPlainObject(node) || node.kind !== 'option') continue;
-      if (typeof node.id !== 'string' || !unresolved.has(node.id)) continue;
-      const bundle = isPlainObject(node.data) && isPlainObject(node.data.interventions)
-        ? (node.data.interventions as Dict)
-        : isPlainObject(node.interventions)
-          ? (node.interventions as Dict)
-          : {};
-      for (const [fac, srcRaw] of Object.entries(bundle)) {
-        const src = isPlainObject(srcRaw) ? srcRaw : {};
-        if (finiteNum(src.value) !== undefined) continue; // value present → not the blocker
-        // NO_CAP / UNIT_MISMATCH are honest blockers ONLY when there is actual raw-value
-        // intent to normalise. An empty/malformed entry (no value AND no raw_value) is NOT a
-        // missing-cap or unit problem — it falls through to the generic reason so the recovery
-        // copy never wrongly tells the user the factor "needs a bound". (Codex 4524991061.)
-        if (finiteNum(src.raw_value) === undefined) continue;
-        const factor = factorById.get(fac);
-        // Target factor doesn't resolve (or SHAPE-2 ambiguous): not specifically a cap or
-        // unit problem → fall through to the generic OPTION_INTERVENTION_UNRESOLVABLE reason.
-        if (factor === undefined) continue;
-        const obs = isPlainObject(factor.observed_state) ? factor.observed_state : undefined;
-        const interventionUnit = typeof src.unit === 'string' ? src.unit : undefined;
-        const factorUnit = obs && typeof obs.unit === 'string' ? obs.unit : undefined;
-        if (
-          interventionUnit !== undefined &&
-          factorUnit !== undefined &&
-          interventionUnit.trim().toLowerCase() !== factorUnit.trim().toLowerCase()
-        ) {
-          return 'UNIT_MISMATCH';
-        }
-        const cap = finiteNum(src.cap) ?? (obs ? finiteNum(obs.cap) : undefined);
-        if (cap === undefined) return 'NO_CAP_UNRECOVERABLE';
-      }
-    }
-    return 'OPTION_INTERVENTION_UNRESOLVABLE';
-  } catch {
-    return 'OPTION_INTERVENTION_UNRESOLVABLE';
-  }
-}
-
-const UNRESOLVED_NEXT_STEP: Record<string, string> = {
-  NO_CAP_UNRECOVERABLE: 'Review the option values — this option needs a bound (cap) before it can be analysed.',
-  UNIT_MISMATCH: "Review the option values — the unit doesn't match this factor.",
-  OPTION_INTERVENTION_UNRESOLVABLE: 'Review the option values — at least one option cannot be analysed yet.',
-};
-
-/**
- * Assess whether a persisted graph can be analysed. TOTAL — never throws.
- */
-export function assessAnalysisReadiness(rawGraph: unknown): ReadinessResult {
-  try {
-    if (rawGraph === undefined || rawGraph === null) {
-      // No persisted graph at all (e.g. a guest scenario that never drafted/saved a
-      // model). The honest next step is to CREATE a model, not to fix one — so this
-      // is NO_GRAPH, not SCHEMA_INVALID.
-      return unrecoverable(['NO_GRAPH'], 'graph_structure', 'Draft or save a model first, then run analysis.');
-    }
-
-    // 1. Canonicalise option interventions (value-preserving) + DEFER on unencodable (#278).
-    const enc = encodeOptionInterventionsForEdit(rawGraph); // no touched set → every option may flag
-    if (enc.unresolvedOptionIds.length > 0) {
-      const code = classifyUnresolvedOptions(rawGraph, enc.unresolvedOptionIds);
-      return unrecoverable([code], 'option_values', UNRESOLVED_NEXT_STEP[code] ?? UNRESOLVED_NEXT_STEP.OPTION_INTERVENTION_UNRESOLVABLE);
-    }
-    const canonical = enc.graph;
-    const repaired = canonical !== rawGraph; // #278 returns a clone only when it changed something
-
-    // 2. Baseline schema parse (on the canonical graph).
-    const parsed = GraphV3.safeParse(canonical);
-    if (!parsed.success) {
-      return unrecoverable(['SCHEMA_INVALID'], 'graph_structure', 'This graph cannot be analysed — its structure is invalid.');
-    }
-    const parsedGraph: GraphV3T = parsed.data;
-
-    // 3. Structural validity (cycle / orphan / path-to-goal / option-factor-edge / required kinds).
-    const struct = validateGraphStructure(parsedGraph);
-    if (struct.violations.length > 0) {
-      const code = struct.violations[0].code;
-      return unrecoverable([code], 'graph_structure', STRUCTURAL_NEXT_STEP[code] ?? 'Fix the graph structure before analysing.');
-    }
-
-    // 4. Goal + option completeness (options_not_configured).
-    const readiness = computeStructuralReadiness(parsedGraph);
-    if (!readiness || !readiness.goal_node_id) {
-      return unrecoverable(['NO_GOAL'], 'graph_structure', STRUCTURAL_NEXT_STEP.NO_GOAL);
-    }
-    if (readiness.options.length > 0 && !readiness.options.some((o) => o.status === 'ready')) {
-      return unrecoverable(['OPTIONS_NOT_CONFIGURED'], 'option_values', 'Give at least one option a configured effect (intervention) before analysing.');
-    }
-
-    // 5. Ready / repaired.
-    return {
-      status: repaired ? 'repaired' : 'analysis_ready',
-      reasonCodes: repaired ? ['OPTION_INTERVENTION_PROMOTED'] : [],
-      reasonCategory: repaired ? 'option_values' : null,
-      deterministicRecovery: repaired,
-      safeToAnalyse: true,
-      safeToPersist: true,
-      userActionRequired: false,
-      canonicalGraph: canonical,
-      nextStep: null,
-    };
-  } catch {
-    // TOTALITY: any unexpected failure resolves to unrecoverable, never a throw.
-    return unrecoverable(['INTERNAL_ERROR'], 'internal', 'This graph could not be checked for analysis — please review it.');
-  }
 }
 
 // ============================================================================

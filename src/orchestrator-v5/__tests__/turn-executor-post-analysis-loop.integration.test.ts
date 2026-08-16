@@ -84,23 +84,32 @@ function throwingRoutingAdapter() {
 
 
 /**
- * ROADMAP 2.640 — a graph whose TOP readiness blocker is `too_few_options`
- * (one option, so the "at least 2 options" branch fires first). PARTIAL_GRAPH
- * has two options and its only open item is the goal threshold, which this row
- * leaves deliberately unmapped.
+ * ROADMAP 2.640 — a graph whose canonical recovery is needs_encoding, a
+ * family whose attested remedy lives in the Options section. The active
+ * readiness producer no longer reconstructs a blocker from option count or
+ * absent goal threshold, so the fixture must carry the exact whole-status
+ * discriminator the gesture claims to remedy.
  */
-const BLOCKED_GRAPH = {
+const ENCODING_GRAPH = {
   ...PARTIAL_GRAPH,
-  nodes: PARTIAL_GRAPH.nodes.filter((n) => n.id !== 'opt_status_quo'),
-  edges: PARTIAL_GRAPH.edges.filter((e) => e.from !== 'opt_status_quo'),
+  nodes: PARTIAL_GRAPH.nodes
+    .filter((n) => n.id !== 'fac_delivery_risk')
+    .map((n) => n.id === 'opt_hire'
+      ? {
+          ...n,
+          status: 'needs_encoding' as const,
+          raw_interventions: { fac_capacity: 'high' },
+        }
+      : n),
+  edges: PARTIAL_GRAPH.edges.filter((e) => e.from !== 'fac_delivery_risk'),
 };
-const BLOCKED_GRAPH_HASH = computeAnalysisAffectingGraphHash(BLOCKED_GRAPH as never)!;
+const ENCODING_GRAPH_HASH = computeAnalysisAffectingGraphHash(ENCODING_GRAPH as never)!;
 
-/** The same fresh fact, re-hashed for BLOCKED_GRAPH so freshness stays 'fresh'. */
-function blockedFreshFact(): Record<string, unknown> {
+/** The same fresh fact, re-hashed for ENCODING_GRAPH so freshness stays 'fresh'. */
+function encodingFreshFact(): Record<string, unknown> {
   const fact = makeBlankProjectionFreshFact();
   const result = fact.result as Record<string, unknown>;
-  return { ...fact, result: { ...result, graph_hash_at_run: BLOCKED_GRAPH_HASH } };
+  return { ...fact, result: { ...result, graph_hash_at_run: ENCODING_GRAPH_HASH } };
 }
 
 type Event = { event: string; data: Record<string, unknown> };
@@ -161,23 +170,21 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
   // and no unit test on either side can see that gap.
   // =========================================================================
   it('a blocked-model question ships the answer AND the section that fixes it', async () => {
-    // PARTIAL_GRAPH's only open item is a missing goal threshold, which this
-    // row deliberately leaves UNMAPPED (there is no goal section) — so it is
-    // the wrong fixture for proving the wiring, and using it would have shown
-    // a green "no directive" that proved nothing. BLOCKED_GRAPH drops an option
-    // so the TOP blocker is `too_few_options`, a mapped kind.
+    // PARTIAL_GRAPH's canonical mapping recovery is deliberately UNMAPPED, so
+    // it is the wrong fixture for proving the wiring. ENCODING_GRAPH carries
+    // exact needs_encoding, whose attested surface is Options.
     //
     // The fact's hash is recomputed for THIS graph: the gate only fires on
     // `freshness === 'fresh'`, and a stale hash would silently take the turn
     // down a different path.
-    mockState.persistedGraph = BLOCKED_GRAPH;
-    mockState.priorFacts = [blockedFreshFact()];
+    mockState.persistedGraph = ENCODING_GRAPH;
+    mockState.priorFacts = [encodingFreshFact()];
 
     const adapter = throwingRoutingAdapter();
     const result = await runTurnExecutor(
       mkPayload("What's blocking the analysis?"),
       'req-gate-remedy',
-      { routingAdapter: adapter, graphState: BLOCKED_GRAPH as never },
+      { routingAdapter: adapter, graphState: ENCODING_GRAPH as never },
     );
 
     // Precondition pinned IN-TEST (trap 13b): if the gate stopped matching this

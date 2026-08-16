@@ -43,9 +43,9 @@
       "blocks": [],
       "suggested_actions": [
         {
-          "id": "chip_prompt_set_option_values",
-          "label": "Set values for options",
-          "message": "Help me configure the options for this decision so the analysis can run."
+          "id": "chip_prompt_review_model_gaps",
+          "label": "Review model gaps",
+          "message": "Help me review what is still missing from the model before analysis."
         }
       ],
       "insights": [],

@@ -26,10 +26,10 @@
  *   recorded failure, never a silent scrub.
  */
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-// Deliberate cee → orchestrator/tools import: computeStructuralReadiness is the
-// canonical pure readiness gate and must not be re-implemented here. It has no
-// dual-draft (or orchestrator-v5) dependencies, so no import cycle arises.
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+// Deliberate cee → orchestrator/tools import: this adapter delegates whole-status
+// semantics to buildAnalysisReadyPayload and must not be re-implemented here. It
+// has no dual-draft dependency, so no import cycle arises.
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 /** Node fields M2 may propose. Everything else is value-bearing or pipeline-owned. */
 export const ALLOWED_NODE_DELTA_FIELDS = [
@@ -245,12 +245,16 @@ const READINESS_RANK: Record<string, number> = {
   needs_encoding: 1,
   needs_user_mapping: 2,
   needs_user_input: 3,
+  // Canonical whole-status structural block: known and explicitly worse than
+  // every recoverable input state, but distinct from an unknown future token
+  // or an underivable record.
+  blocked: 4,
 };
-const RANK_UNKNOWN_STATUS = 4;
-const RANK_UNDERIVABLE = 5;
+const RANK_UNKNOWN_STATUS = 5;
+const RANK_UNDERIVABLE = 6;
 
 function readinessRank(graph: GraphV3T): { rank: number; status: string | null } {
-  const payload = computeStructuralReadiness(graph);
+  const payload = buildCanonicalAnalysisReadyFromGraph(graph);
   if (!payload) return { rank: RANK_UNDERIVABLE, status: null };
   const status = String(payload.status);
   return { rank: READINESS_RANK[status] ?? RANK_UNKNOWN_STATUS, status };

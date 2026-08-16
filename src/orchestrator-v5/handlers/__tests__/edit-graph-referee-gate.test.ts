@@ -343,7 +343,10 @@ describe('shadow mode never blocks', () => {
     // (second expected event flipped Held → WouldApply per D-S tunable
     // auto-apply; the per-envelope emit contract itself is unchanged.)
     evaluateEditGraphMutations(baseInput({ mode: 'shadow', operations: [RENAME_OP, FIELD_OP] }));
-    const names = emitSpy.mock.calls.map((c: readonly unknown[]) => c[0]);
+    const mutationCalls = emitSpy.mock.calls.filter((c: readonly unknown[]) =>
+      typeof c[0] === 'string' && c[0].startsWith('v5.candidate_mutation.'),
+    );
+    const names = mutationCalls.map((c: readonly unknown[]) => c[0]);
     expect(names).toEqual([
       telemetry.TelemetryEvents.V5CandidateMutationWouldApply,
       telemetry.TelemetryEvents.V5CandidateMutationWouldApply,
@@ -353,7 +356,7 @@ describe('shadow mode never blocks', () => {
     }
     // Redaction: closed enums / booleans / ids only — never payload values
     // (the would_apply event must not leak the candidate or field values).
-    const fieldPayload = emitSpy.mock.calls[1]![1] as Record<string, unknown>;
+    const fieldPayload = mutationCalls[1]![1] as Record<string, unknown>;
     expect(fieldPayload).toMatchObject({
       verdict: 'would_apply',
       kind: 'update_node_field',

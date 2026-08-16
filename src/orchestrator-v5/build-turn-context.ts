@@ -36,10 +36,15 @@ import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, NodeV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { config } from '../config/index.js';
 import {
-  computeStructuralReadiness,
+  buildCanonicalAnalysisReadyFromGraph,
   mergeInterventionSourceObjects,
 } from '../orchestrator/tools/analysis-ready-helper.js';
-import { assessAnalysisReadiness, AnalysisNotReadyError, type ReadinessResult } from './tools/handlers/analysis-ready-core.js';
+import {
+  assessAnalysisReadiness,
+  canonicaliseForAnalysis,
+  AnalysisNotReadyError,
+  type ReadinessResult,
+} from './tools/handlers/analysis-ready-core.js';
 import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
 import { deriveDecisionContext } from './coaching/decision-context.js';
 import { deriveCoachingState, type CoachingState } from './coaching/coaching-state.js';
@@ -447,7 +452,7 @@ export interface RunAnalysisScenarioSnapshot {
      */
     readonly interventions: Record<string, unknown>;
     /**
-     * The status-quo verdict as settled by `computeStructuralReadiness`
+     * The status-quo verdict carried by the canonical readiness projection
      * (CEE-2): explicit node flag → label heuristic → explicit `false`.
      * Carried through the merge (it used to be dropped) so the PLoT
      * submission gate can distinguish the status quo — for which "hold every
@@ -1035,24 +1040,14 @@ export function deriveDecisionContextGraphHash(graph: unknown | null): string | 
   if (graph == null) return null;
   try {
     let toHash: unknown = graph;
-    // EP2 (V5 Edit Safety Core), gated atomically with the run-time guard. When
-    // ON: (a) an unrecoverable graph short-circuits to null → freshness resolves
-    // as `unknown`/current_graph_hash_unavailable (not fresh), so a prior result is
-    // never shown as current over an un-analysable graph (Blocker 2); (b) a
-    // ready/repaired graph is canonicalised BEFORE hashing so this matches the
-    // run-time `graph_hash_at_run` (brief §6 consistency). Flag OFF ⇒ unchanged.
-    //
-    // UI RESIDUAL (EP2): the backend proves an unrecoverable graph does NOT read
-    // fresh/current (freshness → `unknown`/current_graph_hash_unavailable). On
-    // non-run turns, whether DGAI renders `unknown` as a clear "needs fixing" cue
-    // is NOT verified here — the explicit recovery copy is tied to the run_analysis
-    // `analysis_not_ready` outcome. UI rendering of `unknown` should be checked in
-    // EP3 or a separate read-only UI verification.
-    if (config.cee.analysisReadyGuardEnabled) {
-      const verdict = assessAnalysisReadiness(graph);
-      if (verdict.status === 'unrecoverable') return null;
-      toHash = verdict.canonicalGraph ?? graph;
-    }
+    // Freshness and readiness answer different questions. Canonicalise carrier
+    // shape before hashing so a repaired Run does not read falsely stale, but
+    // do NOT turn a non-ready whole-status into "hash unavailable": freshness
+    // says whether a prior result belongs to these graph bytes, never whether a
+    // new Run is admitted. The unconditional Run reader below owns admission.
+    // The former flag-off branch remains removed; every freshness path applies
+    // the same value-preserving canonicalisation.
+    toHash = canonicaliseForAnalysis(graph);
     const parsed = GraphStateIngressSchema.safeParse(toHash);
     return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
   } catch {
@@ -2076,33 +2071,15 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // RECOVERABLE failure: AnalysisNotReadyError → the run_analysis handler maps it to
     // `analysis_not_ready` (a 200 with an honest "draft a model first" next-step +
     // recovery chip). This throw is BEFORE the PLoT payload build and before any
-    // run_analysis handler fact. INDEPENDENT of EP2 (`analysisReadyGuardEnabled`) — the
-    // deployed path runs EP2 OFF — and gated only by its own default-ON kill-switch
+    // run_analysis handler fact. The whole-model guard is unconditional; this
+    // genuinely-absent state remains gated only by its own default-ON kill-switch
     // (`runAnalysisNullGraphRecoverable`) so a code-free rollback to the raw 500 stays
     // available. A store/RPC failure does NOT reach here (it threw above → propagates
-    // to scenario_read_failed). The EP2 guard below still runs only on a non-null graph.
+    // to scenario_read_failed). Whole-model admission below receives only a present graph.
     if (config.cee.runAnalysisNullGraphRecoverable) {
       throw new AnalysisNotReadyError(assessAnalysisReadiness(null));
     }
     throw new Error(`No persisted graph found for scenario ${scenarioId}`);
-  }
-
-  // EP2 (V5 Edit Safety Core) — read-boundary analysis-ready guard. Behind
-  // `analysisReadyGuardEnabled` (default OFF), canonicalise the persisted graph
-  // BEFORE GraphV3.safeParse strips `node.data` (which would otherwise drop an
-  // autosave-written `node.data.interventions` option → silent options_not_configured),
-  // and block an un-analysable graph as a typed recoverable failure (NOT a 500).
-  // `graphForSnapshot` (= the canonical graph when the guard is on) is also used as
-  // `rawPersistedGraph` so `graph_hash_at_run` is computed from the SAME canonical
-  // projection the freshness side hashes (brief §6 consistency). Flag OFF ⇒
-  // `graphForSnapshot === persistedGraph` ⇒ byte-identical to today.
-  let graphForSnapshot: unknown = persistedGraph;
-  if (config.cee.analysisReadyGuardEnabled) {
-    const verdict = assessAnalysisReadiness(persistedGraph);
-    if (verdict.status === 'unrecoverable') {
-      throw new AnalysisNotReadyError(verdict);
-    }
-    graphForSnapshot = verdict.canonicalGraph ?? persistedGraph;
   }
 
   // W2E-2 round 4 — persisted-sigma floor, BEFORE the GraphV3 parse that
@@ -2123,7 +2100,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   //       contract-valid; anything still out of range refuses honestly below.
   // Telemetry is code-keyed: field path + floor written, never the offending
   // value, never a label (PII rule).
-  const sigmaFloor = floorGraphSigmaForCompute(graphForSnapshot);
+  const sigmaFloor = floorGraphSigmaForCompute(persistedGraph);
   for (const repair of sigmaFloor.repairs) {
     emit(TelemetryEvents.ComputeSigmaFloor, {
       path: repair.path,
@@ -2133,8 +2110,8 @@ export async function loadScenarioSnapshotForRunAnalysis(
     });
   }
 
-  const parsedGraph = GraphV3.safeParse(sigmaFloor.graph);
-  if (!parsedGraph.success) {
+  const computeParsed = GraphV3.safeParse(sigmaFloor.graph);
+  if (!computeParsed.success) {
     // Numeric range violations with NO safe reading (exists_probability
     // outside [0,1] — we cannot know whether 1.4 meant 1.0 or 0.14) must be
     // an HONEST refusal: a typed AnalysisNotReadyError that run_analysis maps
@@ -2148,7 +2125,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // range-violation class; shape/structural failures stay on the existing
     // scenario_read_failed path (a user who HAS a graph must never be told
     // to "draft a model first").
-    const numericRangeIssues = parsedGraph.error.issues.filter(
+    const numericRangeIssues = computeParsed.error.issues.filter(
       (issue) =>
         (issue.code === 'too_small' || issue.code === 'too_big') &&
         'type' in issue &&
@@ -2171,10 +2148,37 @@ export async function loadScenarioSnapshotForRunAnalysis(
       };
       throw new AnalysisNotReadyError(verdict);
     }
+    // A present primitive (notably 0 / "") is corrupt, never an absent model.
+    // Preserve the established typed SCHEMA_INVALID distinction so this state
+    // cannot be misreported as NO_GRAPH, while structured-but-malformed graph
+    // objects remain on the existing scenario_read_failed path below.
+    if (typeof persistedGraph !== 'object') {
+      throw new AnalysisNotReadyError(assessAnalysisReadiness(persistedGraph));
+    }
     throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
 
-  const readiness = computeStructuralReadiness(parsedGraph.data);
+  // EP2 (V5 Edit Safety Core) — the one canonical whole-status authority now
+  // assesses the schema-valid compute projection. The sigma floor is a
+  // deliberately compute-only repair: letting strict readiness inspect the
+  // raw `std = 0` first would turn the safe repair above into dead code and
+  // reject a value the UI legitimately persists. This pre-parse decides only
+  // schema/numeric integrity; structural + semantic Run admission remains
+  // exclusively owned by `assessAnalysisReadiness`.
+  const verdict = assessAnalysisReadiness(sigmaFloor.graph);
+  if (verdict.status === 'unrecoverable') {
+    throw new AnalysisNotReadyError(verdict);
+  }
+  const graphForSnapshot: unknown = verdict.canonicalGraph ?? sigmaFloor.graph;
+  const parsedGraph = GraphV3.safeParse(graphForSnapshot);
+  if (!parsedGraph.success) {
+    // A canonical projection produced from a schema-valid graph must itself
+    // remain GraphV3-valid. Treat an impossible projection drift as the
+    // existing scenario-read failure, never as a second readiness verdict.
+    throw new Error(`Canonical graph failed GraphV3 validation for scenario ${scenarioId}`);
+  }
+
+  const readiness = buildCanonicalAnalysisReadyFromGraph(graphForSnapshot);
   if (!readiness?.goal_node_id) {
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
@@ -2191,9 +2195,12 @@ export async function loadScenarioSnapshotForRunAnalysis(
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,
-    // EP2: canonical graph when the guard is on (graphForSnapshot === persistedGraph
-    // when off) — keeps graph_hash_at_run consistent with the freshness-side hash.
-    rawPersistedGraph: graphForSnapshot,
+    // Canonical admitted graph — keeps graph_hash_at_run consistent with the
+    // freshness-side canonical hash without retaining a flag-off authority.
+    // Canonical carrier projection with the persisted numeric bytes intact:
+    // hash/readback see the same model identity as freshness, while the
+    // compute-only sigma floor cannot silently rewrite that identity.
+    rawPersistedGraph: canonicaliseForAnalysis(persistedGraph),
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
     // constraints added via `add_constraint`. Omitted when absent so
     // run-analysis can use the existing optional-field idiom.
@@ -2250,8 +2257,8 @@ function mergeOptionInterventionObjects(
       label: option.label,
       interventions: rawObjects,
       // The status-quo verdict is settled ONCE, by
-      // `computeStructuralReadiness` (explicit node flag → label heuristic →
-      // `false` for the rest). It was DROPPED here, which is why the PLoT
+      // the canonical readiness projection (explicit node flag → label
+      // heuristic → `false` for the rest). It was DROPPED here, which is why the PLoT
       // submission seam could not tell the status quo from an option the user
       // simply has not configured — and why an unconfigured non-baseline
       // option was being scaffolded into "do nothing" and then RANKED.

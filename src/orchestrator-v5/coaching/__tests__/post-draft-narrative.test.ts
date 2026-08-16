@@ -14,6 +14,8 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
+import { buildAnalysisReadyPayload } from '../../../cee/transforms/analysis-ready.js';
+import { renderDirectionClarifications } from '../../../cee/compound-goal/direction-gate.js';
 import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
@@ -66,7 +68,23 @@ function makeGraph(nodes: GraphV3T['nodes']): GraphV3T {
  * remain readable.
  */
 function textOf(input: Parameters<typeof buildPostDraftNarrative>[0]): string {
-  return buildPostDraftNarrative(input).text;
+  // Most historical builder tests exercise the ready path. Production always
+  // supplies the terminal analysis_ready payload on a persisted draft; make
+  // that premise explicit here so a missing payload can be tested separately
+  // instead of silently meaning "ready" in every fixture.
+  const withExplicitReadiness = Object.prototype.hasOwnProperty.call(input, 'analysisReady')
+    ? input
+    : { ...input, analysisReady: { status: 'ready' as const } };
+  return buildPostDraftNarrative(withExplicitReadiness).text;
+}
+
+function buildReadyNarrative(
+  input: Parameters<typeof buildPostDraftNarrative>[0],
+): ReturnType<typeof buildPostDraftNarrative> {
+  return buildPostDraftNarrative({
+    ...input,
+    analysisReady: { ...input.analysisReady, status: 'ready' },
+  });
 }
 
 const GOAL_NODE = {
@@ -280,12 +298,254 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('always ends with a run-analysis nudge', () => {
+  it('ends with a run-analysis nudge only when the typed readiness authority says ready', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
     });
     expect(text).toMatch(/run the analysis/);
     expect(text).toMatch(/\.$/);
+  });
+
+  it.each(['needs_user_mapping', 'needs_encoding', 'needs_user_input', 'blocked'] as const)(
+    '%s never receives a Run instruction',
+    (status) => {
+      const text = buildPostDraftNarrative({
+        graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
+        analysisReady: { status },
+      }).text;
+      expect(text).not.toMatch(/\brun(?:ning)?\b/i);
+      expect(text).toMatch(/Next,/);
+    },
+  );
+
+  it('missing readiness is unknown, never silently promoted to ready', () => {
+    const text = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
+    }).text;
+    expect(text).not.toMatch(/\brun(?:ning)?\b/i);
+    expect(text).toContain('review the model');
+  });
+
+  it('names only the first typed blocker and leaves the value for the user to choose', () => {
+    const text = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+      analysisReady: {
+        status: 'needs_user_input',
+        blockers: [
+          {
+            option_id: OPTION_A.id,
+            option_label: OPTION_A.label,
+            factor_id: FACTOR_QUALITY.id,
+            factor_label: FACTOR_QUALITY.label,
+            blocker_type: 'missing_value',
+            suggested_action: 'add_value',
+          },
+          {
+            option_id: OPTION_B.id,
+            option_label: OPTION_B.label,
+            factor_id: FACTOR_CAPACITY.id,
+            factor_label: FACTOR_CAPACITY.label,
+            blocker_type: 'missing_value',
+            suggested_action: 'add_value',
+          },
+        ],
+      },
+    }).text;
+
+    const blocks = text.split('\n\n');
+    const nextStep = blocks[blocks.length - 1] ?? '';
+    expect(nextStep).toBe(
+      `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`,
+    );
+    expect(nextStep).toContain(OPTION_A.label);
+    expect(nextStep).toContain(FACTOR_QUALITY.label);
+    expect(nextStep).not.toContain(OPTION_B.label);
+    expect(nextStep).not.toContain(FACTOR_CAPACITY.label);
+    expect(nextStep).not.toMatch(/\b(?:0(?:\.\d+)?|1(?:\.0+)?)\b/);
+    expect(nextStep).not.toMatch(/\brun(?:ning)?\b/i);
+  });
+
+  it('uses mapping recovery for a real producer-built unreachable factor blocker', () => {
+    const optionId = 'opt_existing_route';
+    const reachableFactorId = 'fac_reachable_capacity';
+    const unreachableFactorId = 'fac_unreachable_budget';
+    const producerGraph = {
+      nodes: [
+        { id: 'goal_real', kind: 'goal', label: 'Improve delivery confidence' },
+        { id: optionId, kind: 'option', label: 'Strengthen the current team' },
+        { id: reachableFactorId, kind: 'factor', label: 'Delivery capacity', category: 'controllable' },
+        { id: unreachableFactorId, kind: 'factor', label: 'Budget flexibility', category: 'controllable' },
+      ],
+      edges: [{ from: optionId, to: reachableFactorId }],
+    } as unknown as Parameters<typeof buildAnalysisReadyPayload>[2];
+    const producerOptions = [{
+      id: optionId,
+      label: 'Strengthen the current team',
+      status: 'ready',
+      interventions: {
+        [reachableFactorId]: {
+          value: 0.6,
+          source: 'brief_extraction',
+          target_match: {
+            node_id: reachableFactorId,
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    }] as unknown as Parameters<typeof buildAnalysisReadyPayload>[0];
+
+    const analysisReady = buildAnalysisReadyPayload(
+      producerOptions,
+      'goal_real',
+      producerGraph,
+      { requestId: 'post-draft-real-unreachable-factor' },
+    );
+    const unreachableBlocker = analysisReady.blockers?.find(
+      (blocker) => blocker.factor_id === unreachableFactorId,
+    );
+
+    expect(analysisReady.status).toBe('needs_user_mapping');
+    expect(analysisReady.options).toHaveLength(1);
+    expect(analysisReady.options[0]?.status).toBe('ready');
+    expect(unreachableBlocker).toEqual(expect.objectContaining({
+      factor_id: unreachableFactorId,
+      factor_label: 'Budget flexibility',
+      blocker_type: 'missing_value',
+      suggested_action: 'add_value',
+    }));
+    expect(unreachableBlocker?.option_id).toBeUndefined();
+
+    const result = buildPostDraftNarrative({
+      graph: producerGraph as unknown as GraphV3T,
+      analysisReady,
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.',
+    );
+    expect(nextStep).not.toContain('missing effect value');
+    expect(nextStep).not.toMatch(/\brun(?:ning)?\b/i);
+  });
+
+  it('blocked status cannot be overridden by an incidental precise blocker', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'blocked',
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe('Next, resolve the model issue shown before comparing the options.');
+    expect(nextStep).not.toContain('missing effect value');
+    expect(nextStep).not.toContain(OPTION_A.label);
+    expect(nextStep).not.toContain(FACTOR_QUALITY.label);
+  });
+
+  it.each([
+    [
+      'missing value without an option',
+      {
+        factor_id: FACTOR_QUALITY.id,
+        factor_label: FACTOR_QUALITY.label,
+        blocker_type: 'missing_value',
+        suggested_action: 'add_value',
+      },
+      /missing effect value/i,
+    ],
+    [
+      'ambiguous value without a factor',
+      {
+        option_id: OPTION_A.id,
+        option_label: OPTION_A.label,
+        blocker_type: 'ambiguous_value',
+        suggested_action: 'confirm_value',
+      },
+      /confirm the effect value/i,
+    ],
+    [
+      'missing connection without a factor',
+      {
+        option_id: OPTION_A.id,
+        option_label: OPTION_A.label,
+        blocker_type: 'missing_connection',
+        suggested_action: 'add_edge',
+      },
+      /\bconnect\b/i,
+    ],
+  ])('falls back to named option configuration for %s', (_label, blocker, forbiddenAction) => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'needs_user_input',
+        options: [{ id: OPTION_A.id, label: OPTION_A.label, status: 'needs_user_mapping' }],
+        blockers: [blocker],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      `Next, configure "${OPTION_A.label}" by choosing which factor it changes and by how much.`,
+    );
+    expect(nextStep).not.toMatch(forbiddenAction);
+  });
+
+  it('needs_encoding ignores an incidental value blocker and asks for representation', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'needs_encoding',
+        options: [{ id: OPTION_A.id, label: OPTION_A.label, status: 'needs_encoding' }],
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      `Next, choose how "${OPTION_A.label}" should be represented on the effect scale before comparing the options.`,
+    );
+    expect(nextStep).not.toContain('missing effect value');
+  });
+
+  it('needs_user_mapping ignores an incidental value blocker and names the non-ready option', () => {
+    const result = buildPostDraftNarrative({
+      graph: makeGraph([GOAL_NODE, OPTION_A, FACTOR_QUALITY]),
+      analysisReady: {
+        status: 'needs_user_mapping',
+        options: [{ id: OPTION_A.id, label: OPTION_A.label, status: 'needs_user_mapping' }],
+        blockers: [{
+          option_id: OPTION_A.id,
+          option_label: OPTION_A.label,
+          factor_id: FACTOR_QUALITY.id,
+          factor_label: FACTOR_QUALITY.label,
+          blocker_type: 'missing_value',
+          suggested_action: 'add_value',
+        }],
+      },
+    });
+    const nextStep = result.text.split('\n\n').at(-1);
+
+    expect(nextStep).toBe(
+      `Next, configure "${OPTION_A.label}" by choosing which factor it changes and by how much.`,
+    );
+    expect(nextStep).not.toContain('missing effect value');
   });
 
   it('does not exceed 140 words even with long inputs and a long adjustment reason', () => {
@@ -542,7 +802,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('synergy assumption sits as a point value');
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
@@ -564,7 +824,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('tighten the cost ramp curve');
     expect(result.text).not.toContain('long uninterrupted clause');
@@ -581,7 +841,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('the synergy assumption sits as a point value');
     expect(result.text).not.toContain('Recast it as a 10');
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
@@ -604,7 +864,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.telemetry.assumption_source).toBe('strengthen_item_detail');
     // The whole first sentence (including the decimal) lands in the
     // assumption tail; the decimal is NOT truncated to "$1.".
@@ -709,7 +969,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     const items = [
       { id: 's7', label: 'recommend foo', detail: 'we recommend doing foo', action_type: 'x' },
     ];
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
       strengthenItems: items,
     });
@@ -721,7 +981,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
   });
 
   it('reports `no_candidate` fallback when no source was available at all', () => {
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_CAPACITY]),
     });
     expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
@@ -737,7 +997,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'x',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).not.toContain('fac_cost');
     expect(result.telemetry.assumption_source).not.toBe('strengthen_item_detail');
     assertCleanCopy(result.text);
@@ -747,7 +1007,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
     const signals = [
       { type: 'narrow_framing', detail: 'the intervention modelling looks shaky on the third route' },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, coachingBiasSignals: signals });
+    const result = buildReadyNarrative({ graph: baseGraph, coachingBiasSignals: signals });
     expect(result.text).not.toMatch(/intervention/i);
     expect(result.telemetry.assumption_source).not.toBe('coaching_bias_signal');
   });
@@ -761,7 +1021,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
         action_type: 'add_constraint',
       },
     ];
-    const result = buildPostDraftNarrative({ graph: baseGraph, strengthenItems: items });
+    const result = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(result.text).toContain('go_to_market');
     // Source accepted — the legitimate user-facing label is NOT a
     // matching internal-id prefix and so passes the gate cleanly.
@@ -792,8 +1052,206 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
   });
 });
 
+describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
+  const actionCopy = 'run the analysis before committing to a route';
+  const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
+  const fixedAssumption =
+    "Assumption to check: whether the model's key inputs reflect your real delivery constraints";
+  const typedRecovery =
+    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+  const needsInputReadiness = {
+    status: 'needs_user_input',
+    blockers: [{
+      option_id: OPTION_A.id,
+      option_label: OPTION_A.label,
+      factor_id: FACTOR_QUALITY.id,
+      factor_label: FACTOR_QUALITY.label,
+      blocker_type: 'missing_value',
+      suggested_action: 'add_value',
+    }],
+  } as const;
+
+  const sourceCases: ReadonlyArray<{
+    name: string;
+    input: Parameters<typeof buildPostDraftNarrative>[0];
+  }> = [
+    {
+      name: 'strengthen detail',
+      input: {
+        graph: baseGraph,
+        strengthenItems: [{
+          id: 'freeform-detail',
+          label: 'Check delivery assumptions',
+          detail: actionCopy,
+          action_type: 'add_context',
+        }],
+      },
+    },
+    {
+      name: 'strengthen label',
+      input: {
+        graph: baseGraph,
+        strengthenItems: [{
+          id: 'freeform-label',
+          label: actionCopy,
+          detail: 'recommend option A',
+          action_type: 'add_context',
+        }],
+      },
+    },
+    {
+      name: 'bias finding explanation',
+      input: {
+        graph: baseGraph,
+        analysisReady: {
+          bias_findings: [{
+            id: 'freeform-bias',
+            category: 'action_copy',
+            severity: 'medium',
+            explanation: actionCopy,
+          }],
+        },
+      },
+    },
+    {
+      name: 'coaching bias signal detail',
+      input: {
+        graph: baseGraph,
+        coachingBiasSignals: [{ type: 'action_copy', detail: actionCopy }],
+      },
+    },
+    {
+      name: 'uncertainty driver',
+      input: {
+        graph: makeGraph([
+          GOAL_NODE,
+          OPTION_A,
+          OPTION_B,
+          {
+            ...FACTOR_QUALITY,
+            observed_state: { value: 0.5, uncertainty_drivers: [actionCopy] },
+          },
+          FACTOR_CAPACITY,
+        ]),
+      },
+    },
+  ];
+
+  it.each(sourceCases)('does not read $name bytes when typed readiness is non-ready', ({ input }) => {
+    const result = buildPostDraftNarrative({
+      ...input,
+      analysisReady: {
+        ...needsInputReadiness,
+        ...input.analysisReady,
+        status: 'needs_user_input',
+        blockers: needsInputReadiness.blockers,
+      },
+    });
+
+    expect(result.text.toLowerCase()).not.toContain(actionCopy);
+    expect(result.text).not.toMatch(/\brun the analysis\b/i);
+    expect(result.text).toContain(fixedAssumption);
+    expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.fallback_reason).toBe('no_candidate');
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+    expect(result.telemetry.additional_check_source).toBeNull();
+    expect(result.telemetry.direction_clarifications_surfaced).toBe(0);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+  });
+
+  it.each([
+    ['missing', { bias_findings: [{ explanation: actionCopy }] }],
+    ['unknown', { status: 'future_readiness_state', bias_findings: [{ explanation: actionCopy }] }],
+  ])('fails closed for a %s readiness status before reading freeform coaching', (_name, analysisReady) => {
+    const result = buildPostDraftNarrative({ graph: baseGraph, analysisReady });
+
+    expect(result.text.toLowerCase()).not.toContain(actionCopy);
+    expect(result.text).toContain(fixedAssumption);
+    expect(result.text.split('\n\n').at(-1)).toBe(
+      'Next, review the model and fill any gaps before comparing the options.',
+    );
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+  });
+
+  it.each([
+    ['needs_user_mapping', 'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.'],
+    ['needs_encoding', 'Next, choose how the unresolved option should be represented on the effect scale.'],
+    ['blocked', 'Next, resolve the model issue shown before comparing the options.'],
+  ])('excludes freeform coaching for the %s recovery class', (status, expectedRecovery) => {
+    const result = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: [{ detail: actionCopy }],
+      analysisReady: { status },
+    });
+
+    expect(result.text.toLowerCase()).not.toContain(actionCopy);
+    expect(result.text).toContain(fixedAssumption);
+    expect(result.text.split('\n\n').at(-1)).toBe(expectedRecovery);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+    expect(result.telemetry.additional_checks_surfaced).toBe(0);
+  });
+
+  it('serves a producer-rendered direction clarification only when exact readiness is ready', () => {
+    const [directionCard] = renderDirectionClarifications([{
+      metric_text: 'customer satisfaction',
+      amount_text: '85%',
+      value: 0.85,
+      unit: '%',
+      reason: 'explicit_ambiguity',
+      question: 'Should customer satisfaction stay above or below 85%?',
+      options: ['At least 85%', 'At most 85%'],
+      node_label: 'Customer satisfaction',
+    }]);
+    expect(directionCard).toBeDefined();
+
+    const ready = buildReadyNarrative({ graph: baseGraph, strengthenItems: [directionCard] });
+    expect(ready.text).toContain('Limit to confirm:');
+    expect(ready.text).toContain('You mentioned 85% for customer satisfaction.');
+    expect(ready.telemetry.direction_clarifications_surfaced).toBe(1);
+
+    const nonReady = buildPostDraftNarrative({
+      graph: baseGraph,
+      strengthenItems: [directionCard],
+      analysisReady: needsInputReadiness,
+    });
+    expect(nonReady.text).not.toContain('Limit to confirm:');
+    expect(nonReady.text).not.toContain('85%');
+    expect(nonReady.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(nonReady.telemetry.direction_clarifications_surfaced).toBe(0);
+  });
+});
+
 describe('buildPostDraftNarrative — coachingSummary whole-response replacement', () => {
   const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
+
+  const withReadySummary = (
+    input: Omit<Parameters<typeof buildPostDraftNarrative>[0], 'analysisReady'>,
+  ) => buildPostDraftNarrative({ ...input, analysisReady: { status: 'ready' } });
+
+  const needsInputReadiness = {
+    status: 'needs_user_input',
+    blockers: [{
+      option_id: OPTION_A.id,
+      option_label: OPTION_A.label,
+      factor_id: FACTOR_QUALITY.id,
+      factor_label: FACTOR_QUALITY.label,
+      blocker_type: 'missing_value',
+      suggested_action: 'add_value',
+    }],
+  } as const;
+  const acceptedSummaryMarker =
+    'The review describes a trade-off between delivery speed and quality risk.';
+  const typedRecovery =
+    `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared.`;
+  const gateAcceptedSummary = (modelAction: string) =>
+    `${acceptedSummaryMarker} ${modelAction}`;
+  const withNeedsInputSummary = (coachingSummary: string) => buildPostDraftNarrative({
+    graph: baseGraph,
+    coachingSummary,
+    analysisReady: needsInputReadiness,
+  });
 
   it('replaces the whole response with coachingSummary when it passes the full-response gate', () => {
     // Summary intentionally does NOT use the builder's deterministic
@@ -804,6 +1262,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     // Exact pass-through — no deterministic opener was prepended.
     expect(result.text).toBe(summary);
@@ -822,6 +1281,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     // Five-sentence builder ran — text starts with our deterministic confirm.
     expect(result.text.startsWith("I've built a first decision model for")).toBe(true);
@@ -836,7 +1296,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('ignores coachingSummary missing a next-step token', () => {
     const summary =
       "I've built a decision model for the launch. The options weigh delivery speed against quality risk, with assumptions to consider. One assumption is whether the team can absorb extra overhead under load conditions in the coordination flow.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -848,7 +1308,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('ignores coachingSummary leaking an internal id prefix', () => {
     const summary =
       "I've built a first decision model for your launch. The routes weigh delivery against risk in fac_cost. Next, run the analysis to validate the assumptions across the comparison routes.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -859,9 +1319,9 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   });
 
   it('ignores empty / missing coachingSummary cleanly', () => {
-    const r1 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: '' });
-    const r2 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: null });
-    const r3 = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: '   \n\t  ' });
+    const r1 = withReadySummary({ graph: baseGraph, coachingSummary: '' });
+    const r2 = withReadySummary({ graph: baseGraph, coachingSummary: null });
+    const r3 = withReadySummary({ graph: baseGraph, coachingSummary: '   \n\t  ' });
     for (const r of [r1, r2, r3]) {
       expect(r.telemetry.coaching_summary_present).toBe(false);
       expect(r.telemetry.coaching_summary_passed_gate).toBe(false);
@@ -875,7 +1335,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     const items = [
       { id: 's', label: 'L', detail: 'detail to consider as an assumption worth checking later', action_type: 'x' },
     ];
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
       strengthenItems: items,
@@ -888,7 +1348,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry surfaces coaching_summary_reject_reason when the summary is rejected', () => {
     const summary =
       "I've built a decision model with seven nodes and eight edges. The options weigh cost against risk. Next, run the analysis to validate.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -900,7 +1360,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry surfaces premature_recommendation as the reject reason', () => {
     const summary =
       "I've built a decision model. The best route here is to hire a tech lead. The options weigh cost against risk. Next, run the analysis.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -910,7 +1370,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry surfaces internal_id as the reject reason for factor_* leaks', () => {
     const summary =
       "I've built a decision model. The options weigh delivery speed against risk in factor_delivery_cost. Next, run the analysis to compare the routes.";
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -920,7 +1380,7 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
   it('telemetry reject_reason is null when the summary passes the gate', () => {
     const summary =
       'The routes here weigh delivery speed against quality risk. One assumption worth checking is whether the team can absorb extra coordination overhead in the first quarter. Next, run the analysis to see how the options compare.';
-    const result = buildPostDraftNarrative({
+    const result = withReadySummary({
       graph: baseGraph,
       coachingSummary: summary,
     });
@@ -928,10 +1388,140 @@ describe('buildPostDraftNarrative — coachingSummary whole-response replacement
     expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
   });
 
+  it('falls back when an accepted ready summary exceeds the 140-word narrative budget', () => {
+    const summary =
+      `Options weigh risk ${Array.from({ length: 135 }, () => 'risk').join(' ')}. Next, review the model.`;
+    expect(summary.length).toBeLessThanOrEqual(800);
+    expect(wordCount(summary)).toBeGreaterThan(140);
+
+    const result = withReadySummary({ graph: baseGraph, coachingSummary: summary });
+
+    expect(result.text).not.toBe(summary);
+    expect(result.text.startsWith("I've built a first decision model for")).toBe(true);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('too_long');
+  });
+
   it('telemetry reject_reason is null when the summary is missing entirely', () => {
-    const result = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: null });
+    const result = withReadySummary({ graph: baseGraph, coachingSummary: null });
     expect(result.telemetry.coaching_summary_present).toBe(false);
     expect(result.telemetry.coaching_summary_reject_reason).toBeNull();
+  });
+
+  it.each([
+    ['Start', 'Start the analysis to compare the options under stress.'],
+    ['Begin', 'Begin the analysis to compare the options under stress.'],
+    ['Compare', 'Compare the options to see which assumptions matter.'],
+    ['Analyse', 'Analyse the options to see which route holds up.'],
+    ['Run', 'Next, run the analysis to compare the options.'],
+    ['Explore', 'Next, explore how the options compare under stress.'],
+    ['Stress-test', 'Next, stress-test the options to see which route holds up.'],
+    ['Inspect', 'Next, compare the routes and inspect what shifts the outcome.'],
+    ['Validate', 'Validate the options against the delivery assumptions.'],
+    ['Try', 'Try comparing the options under a tighter delivery constraint.'],
+    ['Check', 'Check how the options respond to the quality risk.'],
+    ['Review', 'Review the options before choosing a route.'],
+    ['Next', 'Next, compare the routes under stress.'],
+    ['Then', 'Then compare the routes under stress.'],
+  ])('drops a gate-accepted %s summary wholesale when non-ready', (_label, modelAction) => {
+    const summary = gateAcceptedSummary(modelAction);
+    const result = withNeedsInputSummary(summary);
+
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toContain(acceptedSummaryMarker);
+    expect(result.text).not.toContain(modelAction);
+    expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(result.text.match(/\bNext,/g) ?? []).toHaveLength(1);
+    expect(wordCount(result.text)).toBeLessThanOrEqual(140);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_present).toBe(true);
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
+  });
+
+  it.each([
+    [
+      'first sentence',
+      `Start the analysis to compare the options under stress. ${acceptedSummaryMarker}`,
+    ],
+    [
+      'middle sentence',
+      'The review describes a trade-off in delivery speed. Compare the options under stress. Quality risk remains uncertain.',
+    ],
+    [
+      'final sentence',
+      `${acceptedSummaryMarker} Begin the analysis to compare the options.`,
+    ],
+    [
+      'quoted action',
+      `${acceptedSummaryMarker} "Analyse the options to see which route holds up."`,
+    ],
+    [
+      'newline action',
+      `${acceptedSummaryMarker}\nTry comparing the options under stress.`,
+    ],
+    [
+      'colon action',
+      `${acceptedSummaryMarker} Next: validate which route holds up under pressure.`,
+    ],
+    [
+      'em-dash action',
+      `${acceptedSummaryMarker} Next — inspect which route holds up under pressure.`,
+    ],
+    [
+      'one sentence',
+      'The review describes a trade-off between delivery speed and quality risk; start the analysis to compare the options under stress.',
+    ],
+  ])('drops the whole accepted summary for the %s form', (_label, summary) => {
+    const result = withNeedsInputSummary(summary);
+
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toContain('The review describes');
+    expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
+    expect(result.text.match(/\bNext,/g) ?? []).toHaveLength(1);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
+  });
+
+  it.each([
+    [
+      'needs_user_mapping',
+      { status: 'needs_user_mapping' },
+      'Next, configure the unresolved mapping by choosing which option changes which factor and by how much.',
+    ],
+    [
+      'needs_encoding',
+      { status: 'needs_encoding' },
+      'Next, choose how the unresolved option should be represented on the effect scale.',
+    ],
+    [
+      'needs_user_input',
+      { status: 'needs_user_input' },
+      'Next, configure the unresolved option by choosing its factor and effect.',
+    ],
+    [
+      'blocked',
+      { status: 'blocked' },
+      'Next, resolve the model issue shown before comparing the options.',
+    ],
+    [
+      'missing',
+      undefined,
+      'Next, review the model and fill any gaps before comparing the options.',
+    ],
+  ])('never serves an accepted summary for %s readiness', (_label, analysisReady, expectedRecovery) => {
+    const summary = gateAcceptedSummary('Start the analysis to compare the options under stress.');
+    const result = buildPostDraftNarrative({ graph: baseGraph, coachingSummary: summary, analysisReady });
+
+    expect(result.text).not.toContain(summary);
+    expect(result.text).not.toContain(acceptedSummaryMarker);
+    expect(result.text.split('\n\n').at(-1)).toBe(expectedRecovery);
+    expect(result.text.match(/\bNext,/g) ?? []).toHaveLength(1);
+    expect(result.telemetry.assumption_source).not.toBe('coaching_summary');
+    expect(result.telemetry.coaching_summary_passed_gate).toBe(false);
+    expect(result.telemetry.coaching_summary_reject_reason).toBe('readiness_conflict');
   });
 });
 
@@ -1116,7 +1706,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
         'A phased pilot is a real third path that the binary framing hides from the comparison',
       ),
     ];
-    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const result = buildReadyNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
     expect(result.text).toContain('Assumption to check:');
     expect(result.text).toContain('Worth a look:');
     expect(result.telemetry.additional_checks_surfaced).toBe(1);
@@ -1130,7 +1720,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
       strengthen('s2', 'L2', 'Second distinct assumption that also merits a closer look before analysis'),
       strengthen('s3', 'L3', 'Third separate point that should not appear because the cap is one extra item'),
     ];
-    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const result = buildReadyNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
     const checkBullets = result.text.split('\n').filter((line) => line.includes('Worth a look:'));
     expect(checkBullets.length).toBe(1);
     expect(result.telemetry.additional_checks_surfaced).toBe(1);
@@ -1144,7 +1734,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
       biasSignal('narrow_framing', 'The brief frames the choice as binary when phased routes also exist'),
       biasSignal('overconfidence', 'The estimate is a single point with no stated uncertainty band'),
     ];
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems,
       coachingBiasSignals,
@@ -1158,7 +1748,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     const strengthenItems = [
       strengthen('s1', 'L1', 'The single coaching point that becomes the assumption bullet only'),
     ];
-    const result = buildPostDraftNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
+    const result = buildReadyNarrative({ graph: TWO_FACTOR_GRAPH, strengthenItems });
     const checkBullets = result.text.split('\n').filter((line) => line.includes('Worth a look:'));
     expect(checkBullets.length).toBe(0);
     expect(result.telemetry.additional_checks_surfaced).toBe(0);
@@ -1178,7 +1768,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     const figure = 'Widen the 23.5M synergy estimate into a downside range before deciding';
 
     // As the primary assumption (single strengthen item).
-    const asAssumption = buildPostDraftNarrative({
+    const asAssumption = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems: [strengthen('s1', 'L1', figure)],
     });
@@ -1186,7 +1776,7 @@ describe('buildPostDraftNarrative — multiple coaching points', () => {
     expect(asAssumption.text).toContain('23.5M');
 
     // As the extra "Worth a look" check (a distinct item[0], the figure at [1]).
-    const asCheck = buildPostDraftNarrative({
+    const asCheck = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems: [
         strengthen('s0', 'L0', 'Confirm the delivery timeline assumption holds under load'),
@@ -1217,7 +1807,7 @@ describe('buildPostDraftNarrative — new copy passes the real egress guards', (
       elements_considered_but_excluded: ['Set aside FX exposure as immaterial at this scale'],
       brief_completeness: 'thin',
     };
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: TWO_FACTOR_GRAPH,
       strengthenItems,
       coachingBiasSignals,
@@ -1249,7 +1839,7 @@ describe('buildPostDraftNarrative — staging-fixture field-to-surface delivery 
   };
 
   it('surfaces structured coaching from a real staging draft into the rendered narrative, leaking no IDs', () => {
-    const result = buildPostDraftNarrative({
+    const result = buildReadyNarrative({
       graph: fixture.graph,
       // Exercise the deterministic sectioned path (summary absent / rejected) —
       // that is where the structured widening / strengthen / bias fields surface.
@@ -1303,6 +1893,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_passed_gate).toBe(true);
@@ -1321,6 +1912,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
     const result = buildPostDraftNarrative({
       graph: baseGraph,
       coachingSummary: summary,
+      analysisReady: { status: 'ready' },
     });
     expect(result.telemetry.assumption_source).toBe('coaching_summary');
     expect(result.telemetry.coaching_summary_style_rewritten).toBe(false);

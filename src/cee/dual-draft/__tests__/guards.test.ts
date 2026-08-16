@@ -27,12 +27,41 @@ function readyGraph(): GraphV3T {
   return {
     nodes: [
       { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+      { id: 'dec_launch', kind: 'decision', label: 'Launch timing' },
       { id: 'opt_launch', kind: 'option', label: 'Launch now', interventions: { fac_price: 0.8 } },
       { id: 'opt_wait', kind: 'option', label: 'Wait 6 months', interventions: { fac_price: 0.2 } },
       { id: 'fac_price', kind: 'factor', label: 'Price point' },
       { id: 'risk_churn', kind: 'risk', label: 'Customer churn' },
     ],
     edges: [
+      {
+        from: 'dec_launch',
+        to: 'opt_launch',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'dec_launch',
+        to: 'opt_wait',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'opt_launch',
+        to: 'fac_price',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'opt_wait',
+        to: 'fac_price',
+        strength: { mean: 0.2, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
       {
         from: 'fac_price',
         to: 'goal_revenue',
@@ -157,13 +186,21 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     const before = readyGraph();
     const after = readyGraph();
     after.nodes.push({ id: 'risk_new', kind: 'risk', label: 'New risk' });
+    after.edges.push({
+      from: 'risk_new',
+      to: 'goal_revenue',
+      strength: { mean: -0.2, std: 0.1 },
+      exists_probability: 0.6,
+      effect_direction: 'negative',
+    });
     expect(optionSurfaceUnchanged(before, after)).toBe(true);
   });
 
   it('optionSurfaceUnchanged is false when an option node is mutated', () => {
     const before = readyGraph();
     const after = readyGraph();
-    (after.nodes[1] as { label: string }).label = 'Launch immediately';
+    (after.nodes.find((node) => node.id === 'opt_launch') as { label: string }).label =
+      'Launch immediately';
     expect(optionSurfaceUnchanged(before, after)).toBe(false);
   });
 
@@ -171,6 +208,22 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     const before = readyGraph();
     const after = readyGraph();
     after.nodes.push({ id: 'opt_new', kind: 'option', label: 'Third way' });
+    after.edges.push(
+      {
+        from: 'dec_launch',
+        to: 'opt_new',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'opt_new',
+        to: 'fac_price',
+        strength: { mean: 0.5, std: 0.1 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+    );
     expect(optionSurfaceUnchanged(before, after)).toBe(false);
   });
 
@@ -178,6 +231,13 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     const before = readyGraph();
     const after = readyGraph();
     after.nodes.push({ id: 'risk_new', kind: 'risk', label: 'New risk' });
+    after.edges.push({
+      from: 'risk_new',
+      to: 'goal_revenue',
+      strength: { mean: -0.2, std: 0.1 },
+      exists_probability: 0.6,
+      effect_direction: 'negative',
+    });
     const res = checkReadinessNoDowngrade(before, after);
     expect(res.ok).toBe(true);
     expect(res.before_status).toBe('ready');
@@ -188,10 +248,26 @@ describe('G12 — option-surface invariance + readiness no-downgrade', () => {
     const before = readyGraph();
     const after = readyGraph();
     after.nodes.push({ id: 'opt_new', kind: 'option', label: 'Third way' });
+    after.edges.push(
+      {
+        from: 'dec_launch',
+        to: 'opt_new',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'opt_new',
+        to: 'fac_price',
+        strength: { mean: 0.5, std: 0.1 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+    );
     const res = checkReadinessNoDowngrade(before, after);
     expect(res.ok).toBe(false);
     expect(res.before_status).toBe('ready');
-    expect(res.after_status).toBe('needs_user_mapping');
+    expect(res.after_status).toBe('needs_user_input');
   });
 
   it('no-downgrade FAILS when the goal node disappears (readiness becomes underivable)', () => {

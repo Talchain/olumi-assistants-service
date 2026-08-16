@@ -9,7 +9,7 @@
  *     before-hash + unrecoverable short-circuit to null.
  *   - the run_analysis handler: blocked → typed `analysis_not_ready` (no PLoT call,
  *     no fact); repaired → analysed with a canonical graph_hash_at_run.
- *   - flag-off parity on BOTH the run-time and freshness paths.
+ *   - the quarantined legacy flag cannot disable either path.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import {
@@ -32,7 +32,7 @@ import type { SessionStore } from '../../../session/store.js';
 
 type Dict = Record<string, unknown>;
 
-function setGuard(on: boolean): void {
+function setLegacyGuardInput(on: boolean): void {
   (config.cee as { analysisReadyGuardEnabled: boolean }).analysisReadyGuardEnabled = on;
 }
 // NULL-graph recoverable kill-switch (default ON). Independent of the EP2 guard.
@@ -40,7 +40,7 @@ function setNullRecoverable(on: boolean): void {
   (config.cee as { runAnalysisNullGraphRecoverable: boolean }).runAnalysisNullGraphRecoverable = on;
 }
 afterEach(() => {
-  setGuard(false); // EP2 default (OFF)
+  setLegacyGuardInput(false); // quarantined compatibility input
   setNullRecoverable(true); // kill-switch default (ON)
 });
 
@@ -75,7 +75,10 @@ function makeBase(): Dict {
       // provenance.)
       { id: 'fac_annual_cost', kind: 'factor', label: 'Annual cost', observed_state: { value: 0.6, raw_value: 90000, unit: '£', cap: 150000 } },
       { id: 'opt_hybrid', kind: 'option', label: 'Hybrid', interventions: { fac_annual_cost: { value: 0.8, source: 'user_specified' } } },
-      { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: {} },
+      // A real admitted control must configure both comparison arms. The old
+      // empty baseline only passed because EP2 admitted "any ready option";
+      // canonical readiness correctly refuses that partial comparison.
+      { id: 'opt_status_quo', kind: 'option', label: 'Status quo', is_baseline: true, interventions: { fac_annual_cost: { value: 0.6, raw_value: 90000, unit: '£' } } },
     ],
     edges: [
       { from: 'dec_1', to: 'opt_hybrid', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1.0, effect_direction: 'positive' },
@@ -99,6 +102,24 @@ function makeUnrecoverableF3(): Dict {
   const g = makeBrokenF1();
   const fac = (g.nodes as Dict[]).find((n) => n.id === 'fac_annual_cost')!;
   fac.observed_state = { value: 0.6, unit: '£' }; // cap removed
+  return g;
+}
+/** Canonical whole-status blocker: controllable factor reaches the goal but no option reaches it. */
+function makeUnreachableControllableFactor(): Dict {
+  const g = makeBase();
+  (g.nodes as Dict[]).push({
+    id: 'fac_delivery_capacity',
+    kind: 'factor',
+    label: 'Delivery capacity',
+    category: 'controllable',
+  });
+  (g.edges as Dict[]).push({
+    from: 'fac_delivery_capacity',
+    to: 'goal_1',
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 1,
+    effect_direction: 'positive',
+  });
   return g;
 }
 function stubStore(graph: unknown): SessionStore {
@@ -147,15 +168,8 @@ function makeHandler(graph: unknown, plotRunCalls: { n: number }) {
 const invocation = { payload: { scenario_id: '11111111-1111-4111-8111-111111111111' }, requestId: 'req1', signal: undefined } as unknown as HandlerInvocation;
 
 describe('EP2 integration — loadScenarioSnapshotForRunAnalysis (run-time seam)', () => {
-  it('guard OFF: the broken node.data option is dropped (the bug EP2 fixes) → not configured', async () => {
-    setGuard(false);
-    const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeBrokenF1()));
-    const opt = snap.options.find((o) => (o as Dict).option_id === 'opt_hybrid') as Dict;
-    expect(Object.keys(optInterventions(opt))).toHaveLength(0); // node.data stripped by GraphV3.safeParse
-  });
-
-  it('guard ON: the broken node.data option is canonicalised before strip → configured (RAW user-scale)', async () => {
-    setGuard(true);
+  it('the legacy false input cannot disable canonicalise-before-strip (RAW user-scale remains configured)', async () => {
+    setLegacyGuardInput(false);
     const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeBrokenF1()));
     const opt = snap.options.find((o) => (o as Dict).option_id === 'opt_hybrid') as Dict;
     // UPDATED round 4 (final-payload enforcement): the loader returns the
@@ -177,23 +191,20 @@ describe('EP2 integration — loadScenarioSnapshotForRunAnalysis (run-time seam)
     expect(parsed.success).toBe(true);
   });
 
-  it('guard ON: an unrecoverable graph throws AnalysisNotReadyError (→ typed blocked, not a read failure)', async () => {
-    setGuard(true);
+  it('an unrecoverable graph throws AnalysisNotReadyError (→ typed blocked, not a read failure)', async () => {
     await expect(loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeUnrecoverableF3())))
       .rejects.toMatchObject({ name: 'AnalysisNotReadyError' });
   });
 
-  it('guard OFF: an unrecoverable-shaped graph does NOT throw AnalysisNotReadyError (parity)', async () => {
-    setGuard(false);
-    // node.data stripped → option simply unconfigured; reader returns a snapshot (no EP2 block).
-    const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeUnrecoverableF3()));
-    expect(snap.goal_node_id).toBe('goal_1');
+  it('the legacy false input cannot reopen an unrecoverable graph', async () => {
+    setLegacyGuardInput(false);
+    await expect(loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeUnrecoverableF3())))
+      .rejects.toMatchObject({ name: 'AnalysisNotReadyError' });
   });
 });
 
 describe('EP2 integration — freshness/hash consistency (deriveDecisionContextGraphHash)', () => {
   it('repaired graph: run-time graph_hash_at_run == freshness-side hash (NOT falsely stale)', async () => {
-    setGuard(true);
     const broken = makeBrokenF1();
     // Run-time hash: exactly how run-analysis.ts computes graph_hash_at_run from snapshot.rawPersistedGraph.
     const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(broken));
@@ -206,7 +217,6 @@ describe('EP2 integration — freshness/hash consistency (deriveDecisionContextG
   });
 
   it('shape-only churn stays the same hash; a real value change shifts it (stale)', () => {
-    setGuard(true);
     const h120 = deriveDecisionContextGraphHash(makeBrokenF1(120000));
     const hTopLevelRawSame = deriveDecisionContextGraphHash((() => {
       // same £120,000 written as a top-level raw-only entry (shape-only churn).
@@ -220,37 +230,49 @@ describe('EP2 integration — freshness/hash consistency (deriveDecisionContextG
     expect(h130).not.toBe(h120); // value change → different hash → stale
   });
 
-  it('unrecoverable graph short-circuits freshness to null (unknown, not fresh)', () => {
-    setGuard(true);
-    expect(deriveDecisionContextGraphHash(makeUnrecoverableF3())).toBeNull();
+  it('non-ready but parseable graph remains hashable — freshness is not Run permission', () => {
+    expect(deriveDecisionContextGraphHash(makeUnrecoverableF3())).not.toBeNull();
   });
 
-  it('flag-off parity: freshness hash equals the raw (un-canonicalised) baseline hash', () => {
+  it('truly malformed graph still has no freshness hash', () => {
+    expect(deriveDecisionContextGraphHash({ nodes: 'not-an-array' })).toBeNull();
+  });
+
+  it('the legacy false input cannot restore the raw uncanonicalised freshness hash', () => {
     const broken = makeBrokenF1();
-    setGuard(false);
+    setLegacyGuardInput(false);
     const off = deriveDecisionContextGraphHash(broken);
-    const baseline = (() => {
+    const rawLegacyHash = (() => {
       const parsed = GraphStateIngressSchema.safeParse(broken);
       return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
     })();
-    expect(off).toBe(baseline); // byte-identical to today when the guard is off
+    expect(off).not.toBeNull();
+    expect(off).not.toBe(rawLegacyHash);
   });
 });
 
 describe('EP2 integration — run_analysis handler blocked/analysed', () => {
-  it('guard ON + unrecoverable → analysis_not_ready (NO PLoT call, no run_analysis fact)', async () => {
-    setGuard(true);
+  it('unreachable controllable factor is blocked in the default/legacy-false posture (NO PLoT, no fact)', async () => {
+    // The compatibility input still defaults false, but no production seam
+    // reads it. This exact canonical whole-status discriminator used to run.
+    setLegacyGuardInput(false);
     const calls = { n: 0 };
-    const handler = makeHandler(makeUnrecoverableF3(), calls);
+    const handler = makeHandler(makeUnreachableControllableFactor(), calls);
+    let outcome: Awaited<ReturnType<typeof handler>> | undefined;
     let err: unknown;
-    try { await handler(invocation); } catch (e) { err = e; }
+    try { outcome = await handler(invocation); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(HandlerInvocationFailedError);
     expect((err as HandlerInvocationFailedError).cause_kind).toBe('analysis_not_ready');
+    expect((err as HandlerInvocationFailedError).details).toMatchObject({
+      // The canonical structural record now names the precise load-bearing
+      // blocker instead of collapsing it into the legacy option-count code.
+      reason_code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
+    });
     expect(calls.n).toBe(0); // PLoT was never called
+    expect(outcome).toBeUndefined(); // no run_analysis fact can exist
   });
 
-  it('guard ON + repaired (broken node.data) → analysed, PLoT called, canonical graph_hash_at_run present', async () => {
-    setGuard(true);
+  it('repaired node.data carrier → analysed, PLoT called, canonical graph_hash_at_run present', async () => {
     const calls = { n: 0 };
     const handler = makeHandler(makeBrokenF1(), calls);
     const outcome = await handler(invocation);
@@ -263,11 +285,10 @@ describe('EP2 integration — run_analysis handler blocked/analysed', () => {
 // ---------------------------------------------------------------------------
 // NULL persisted graph → typed recoverable (the cee-staging 500 fix).
 // Distinct from EP2: this is the genuinely-no-graph branch (no model drafted/
-// saved), gated by its OWN default-ON kill-switch, NOT by analysisReadyGuardEnabled.
+// saved), gated by its OWN default-ON kill-switch.
 // ---------------------------------------------------------------------------
 describe('NULL persisted graph — reader seam (loadScenarioSnapshotForRunAnalysis)', () => {
-  it('kill-switch ON (default) + EP2 OFF: throws AnalysisNotReadyError(NO_GRAPH) — fix is NOT gated on EP2', async () => {
-    setGuard(false); // EP2 off — proves flag-independence from CEE_RUN_ANALYSIS_READY_GUARD
+  it('kill-switch ON (default): throws AnalysisNotReadyError(NO_GRAPH)', async () => {
     let err: unknown;
     try { await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null)); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(AnalysisNotReadyError);
@@ -276,8 +297,8 @@ describe('NULL persisted graph — reader seam (loadScenarioSnapshotForRunAnalys
     expect(verdict.nextStep).toBe('Draft or save a model first, then run analysis.');
   });
 
-  it('kill-switch ON + EP2 ON: still AnalysisNotReadyError — the EP2 guard is downstream of the null branch', async () => {
-    setGuard(true);
+  it('legacy compatibility input has no effect on the null recovery', async () => {
+    setLegacyGuardInput(true);
     await expect(loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(null)))
       .rejects.toMatchObject({ name: 'AnalysisNotReadyError' });
   });
@@ -291,7 +312,6 @@ describe('NULL persisted graph — reader seam (loadScenarioSnapshotForRunAnalys
   });
 
   it('a PRESENT graph is unaffected by the kill-switch (regression: normal load still succeeds)', async () => {
-    setGuard(false);
     const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeBase()));
     expect(snap.goal_node_id).toBe('goal_1');
   });
@@ -300,30 +320,28 @@ describe('NULL persisted graph — reader seam (loadScenarioSnapshotForRunAnalys
     // The strict reader (loadPersistedGraphStrict → store.loadGraph) THROWS on a DB/RPC
     // failure; loadScenarioSnapshotForRunAnalysis must let it PROPAGATE so a transient
     // store outage is never misread as "no model". Kill-switch ON (default).
-    setGuard(false);
     const boom = new SessionReadError('loadGraph failed: supabase RPC down');
     await expect(loadScenarioSnapshotForRunAnalysis('sc', 'req', throwingStore(boom)))
       .rejects.toBe(boom); // exact same error object — not wrapped, not converted to NO_GRAPH
   });
 
-  it('a present-but-corrupt FALSY graph (0, "") is NOT NO_GRAPH — it is malformed, not missing', async () => {
+  it('a present-but-corrupt FALSY graph (0, "") is SCHEMA_INVALID, never NO_GRAPH', async () => {
     // The null branch uses `== null`, so the recovery is scoped to a genuinely absent
     // graph. A corrupt falsy value is present-but-invalid → it must fall through to
-    // GraphV3 validation (→ scenario_read_failed), never be misclassified as "draft a
+    // the unconditional whole-model guard, never be misclassified as "draft a
     // model first" (which a truthy `!persistedGraph` check would have done).
-    setGuard(false);
     for (const corrupt of [0, '']) {
       let err: unknown;
       try { await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(corrupt)); } catch (e) { err = e; }
-      expect(err).not.toBeInstanceOf(AnalysisNotReadyError);
-      expect((err as Error)?.message).toMatch(/GraphV3 validation/);
+      expect(err).toBeInstanceOf(AnalysisNotReadyError);
+      expect((err as AnalysisNotReadyError).verdict.reasonCodes).toEqual(['SCHEMA_INVALID']);
+      expect((err as AnalysisNotReadyError).verdict.reasonCodes).not.toContain('NO_GRAPH');
     }
   });
 });
 
 describe('NULL persisted graph — run_analysis handler (analysis_not_ready, NO PLoT, NO fact)', () => {
-  it('kill-switch ON + EP2 OFF: handler → analysis_not_ready; ZERO PLoT calls; ZERO handler facts', async () => {
-    setGuard(false);
+  it('kill-switch ON: handler → analysis_not_ready; ZERO PLoT calls; ZERO handler facts', async () => {
     const calls = { n: 0 };
     const handler = makeHandler(null, calls);
     let outcome: Awaited<ReturnType<typeof handler>> | undefined;
@@ -339,8 +357,7 @@ describe('NULL persisted graph — run_analysis handler (analysis_not_ready, NO 
     expect(outcome).toBeUndefined();
   });
 
-  it('kill-switch ON + EP2 OFF: the typed failure carries reason_code NO_GRAPH + the draft-a-model next step', async () => {
-    setGuard(false);
+  it('kill-switch ON: the typed failure carries reason_code NO_GRAPH + the draft-a-model next step', async () => {
     const calls = { n: 0 };
     const handler = makeHandler(null, calls);
     let err: unknown;
@@ -351,8 +368,7 @@ describe('NULL persisted graph — run_analysis handler (analysis_not_ready, NO 
     expect(calls.n).toBe(0);
   });
 
-  it('PRESENT graph (EP2 OFF, kill-switch ON = deployed default): analysed normally — PLoT called once, fact produced', async () => {
-    setGuard(false);
+  it('PRESENT ready graph: analysed normally — PLoT called once, fact produced', async () => {
     const calls = { n: 0 };
     const handler = makeHandler(makeBase(), calls);
     const outcome = await handler(invocation);
@@ -367,7 +383,6 @@ describe('NULL persisted graph — run_analysis handler (analysis_not_ready, NO 
     // infra failure instead of a misleading "draft a model first" 200. This exercises
     // the REAL seam the injected-throwing-reader unit test (run-analysis.test.ts) could
     // not prove, because the old non-strict reader swallowed store errors into null.
-    setGuard(false);
     const calls = { n: 0 };
     const handler = makeHandlerForStore(
       throwingStore(new SessionReadError('loadGraph failed: supabase RPC down')),

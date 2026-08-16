@@ -94,6 +94,7 @@ const FALSE_POSITIVE_TEXT =
 const READY_GRAPH = {
   nodes: [
     { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8 },
+    { id: 'dec_growth', kind: 'decision', label: 'Growth approach' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
     { id: 'fac_market', kind: 'factor', label: 'Market demand' },
     { id: 'opt_hire', kind: 'option', label: LEADER_LABEL, interventions: { fac_capacity: 1 } },
@@ -106,6 +107,20 @@ const READY_GRAPH = {
     },
   ],
   edges: [
+    {
+      from: 'dec_growth',
+      to: 'opt_hire',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_growth',
+      to: 'opt_hold',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
     {
       from: 'opt_hire',
       to: 'fac_capacity',

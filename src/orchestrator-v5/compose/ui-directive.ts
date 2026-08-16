@@ -575,14 +575,18 @@ const GATE_REMEDY_FACT_TAG = 'advice_gate_readiness';
  * remedy lives on, or `null` to emit no gesture.
  *
  * ⚠ TOTALITY IS DELIBERATE, AND IT IS THE POINT OF THE `null`s. This is a
- * `Record` over the CLOSED kind union, so adding a fifth kind to
+ * `Record` over the CLOSED kind union, so adding another kind to
  * `ReadinessOpenItem` is a TYPE ERROR here rather than a silent fall-through to
  * "no gesture". A hand-maintained subset that quietly stopped covering a new
  * kind is precisely the drift class this estate keeps paying for (trap 12); an
  * exhaustive record cannot go short without the compiler saying so.
  *
- * Producer semantics (CEE) — routing/readiness-summary.ts:67–96, and the status
- * enum's own doc comment at schemas/analysis-ready.ts:58–64.
+ * Producer semantics (CEE) — the canonical recovery projection in
+ * routing/readiness-summary.ts and the status enum's own doc comment at
+ * schemas/analysis-ready.ts:58–64. `goal_threshold_missing` remains a
+ * quarantined compatibility row. `too_few_options` is active only when the
+ * canonical issue record contains `FEWER_THAN_TWO_OPTIONS`; the producer never
+ * reconstructs either remedy from raw field presence.
  * Surface semantics (UI) — the five section ids are rendered by
  * ModelTabBody.tsx:780–845, one component per id.
  */
@@ -597,6 +601,10 @@ export const REMEDY_SECTION_BY_OPEN_ITEM_KIND: Record<
    * ModelTabBody.tsx:785, fed `optionNodes={grouped.option}`.
    */
   too_few_options: 'options',
+  // A missing goal has no settled dedicated Model-tab section in the current
+  // contract. Preserve the typed remedy for coaching/copy while emitting no
+  // speculative UI gesture.
+  goal_node_missing: null,
 
   /**
    * "X is connected to factors but has no numeric values set"
@@ -638,19 +646,21 @@ export const REMEDY_SECTION_BY_OPEN_ITEM_KIND: Record<
    * the builder must be able to decline.
    */
   goal_threshold_missing: null,
+
+  /**
+   * Canonical blocked/unknown/constraint recovery says only to review or
+   * resolve the model issue. No narrower surface is attested, so a gesture
+   * would add specificity the readiness authority did not provide.
+   */
+  model_needs_review: null,
 };
 
 /**
  * ROADMAP 2.640 §3.4 row 1 — build the readiness gate's remedy gesture.
  *
- * `openItemKind` is the kind of the TOP blocking item, i.e. `open_items[0]`.
- * "Top" is the PRODUCER's own ordering, not a re-ranking by this module:
- * `summariseReadiness` pushes too-few-options first, then per-option items in
- * option order, then the goal threshold (readiness-summary.ts:65–98). Choosing
- * the first item is what makes the gesture agree with the FIRST thing the prose
- * tells the user to fix; re-sorting here would let the sentence and the gesture
- * disagree about which blocker matters most, which is the two-authorities
- * defect (trap 21) waiting to happen.
+ * `openItemKind` is the canonical recovery family from `open_items[0]`.
+ * `summariseReadiness` now emits at most one item from the shared recovery
+ * authority, so this module neither ranks nor reconstructs blockers.
  *
  * Returns `null` (telemetered) when the kind has no mapped surface, or when the
  * built block fails strict boundary validation — never a partially-formed

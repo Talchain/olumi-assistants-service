@@ -84,7 +84,7 @@ import {
 } from "../add-risk-rejection-guidance.js";
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
-import { computeStructuralReadiness } from "./analysis-ready-helper.js";
+import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
 import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
@@ -3756,7 +3756,9 @@ export async function handleEditGraph(
 
     // Compute analysis_ready from post-patch graph (single candidate graph flow)
     const readinessGraph = appliedGraph ?? candidateGraph;
-    const analysisReady = readinessGraph ? computeStructuralReadiness(readinessGraph) : undefined;
+    const analysisReady = readinessGraph
+      ? buildCanonicalAnalysisReadyFromGraph(readinessGraph)
+      : undefined;
 
     // Extract explicit intervention_updates from operations for downstream consumers.
     // Gated behind CEE_EDIT_INTERVENTION_ROUTING_ENABLED.

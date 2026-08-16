@@ -28,10 +28,11 @@
  * No mapping row is asserted from this lane's reading of what a field "ought
  * to" mean.
  *
- * ⚠ THE TWO UNMAPPED KINDS ARE THE POINT, NOT A GAP. `goal_threshold_missing`
+ * ⚠ THE UNMAPPED KINDS ARE THE POINT, NOT A GAP. `goal_threshold_missing`
  * has no section to open (there is no goal section among the five), and
  * `option_needs_mapping` is deliberately undecided pending a derivation of
- * where an option→factor connection is actually created. A directive is an
+ * where an option→factor connection is actually created; canonical
+ * `model_needs_review` is intentionally too broad to name a section. A directive is an
  * implicit claim that the remedy lives where it points, so an unsettled row
  * emits NOTHING and the user still gets the prose. These are pinned as an
  * EXACT known-unmapped set (trap 22f's honest-gap rule): the suite REDs if the
@@ -80,8 +81,10 @@ const suppressed = (reason: string) =>
  * later cannot happen silently.
  */
 const KNOWN_UNMAPPED: ReadonlySet<ReadinessOpenItem['kind']> = new Set([
+  'goal_node_missing',
   'option_needs_mapping',
   'goal_threshold_missing',
+  'model_needs_review',
 ]);
 
 /** The five section ids the 0.39.0 contract admits (blocks.d.ts:1857). */
@@ -103,8 +106,8 @@ const CONTRACT_SECTION_IDS = [
  */
 type ReadinessPayload = Parameters<typeof summariseReadiness>[0];
 
-/** One option only → trips the `too_few_options` branch and nothing else. */
-const READY_TOO_FEW: ReadinessPayload = {
+/** Canonical mapping status; raw option count is deliberately non-authoritative. */
+const READY_MAPPING: ReadinessPayload = {
   goal_node_id: 'goal_1',
   status: 'needs_user_mapping',
   goal_threshold: 0.7,
@@ -118,27 +121,31 @@ const READY_TOO_FEW: ReadinessPayload = {
   ],
 } as ReadinessPayload;
 
-/**
- * Two options (so `too_few_options` does NOT fire) with one of each per-option
- * status, and no goal threshold → trips the other three branches.
- */
-const READY_ALL_PER_OPTION: ReadinessPayload = {
+const READY_ENCODING: ReadinessPayload = {
   goal_node_id: 'goal_1',
-  status: 'needs_user_mapping',
+  status: 'needs_encoding',
+  goal_threshold: 0.7,
   options: [
     {
       option_id: 'opt_a',
       label: 'Hire two senior engineers locally',
-      status: 'needs_user_mapping',
-      interventions: {},
+      status: 'needs_encoding',
+      interventions: { fac_capacity: 0.5 },
     },
     {
       option_id: 'opt_b',
       label: 'Hire one senior engineer overseas',
-      status: 'needs_encoding',
-      interventions: {},
+      status: 'ready',
+      interventions: { fac_capacity: 0.3 },
     },
   ],
+} as ReadinessPayload;
+
+const READY_BLOCKED: ReadinessPayload = {
+  goal_node_id: '',
+  status: 'blocked',
+  options: [],
+  blockers: [{ blocker_type: 'missing_value' }],
 } as ReadinessPayload;
 
 describe('ROADMAP 2.640 — gate-close remedy directive', () => {
@@ -280,29 +287,38 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
       // comes back. A fifth kind added to readiness-summary.ts fails THIS test
       // even if nobody remembers this file exists.
       //
-      // Two payloads are needed, not one: `too_few_options` fires only below
-      // two options, and the per-option kinds need at least two — a single
-      // fixture structurally cannot reach all four, and one that "covers
-      // everything" would be quietly covering three (trap 12d).
+      // Drive every ACTIVE canonical recovery family. The two legacy raw-field
+      // reconstructions remain in the closed type for historical snapshots but
+      // are intentionally not producer outputs.
       const kinds = new Set([
-        ...summariseReadiness(READY_TOO_FEW).open_items.map((i) => i.kind),
-        ...summariseReadiness(READY_ALL_PER_OPTION).open_items.map((i) => i.kind),
+        ...summariseReadiness(READY_MAPPING).open_items.map((i) => i.kind),
+        ...summariseReadiness(READY_ENCODING).open_items.map((i) => i.kind),
+        ...summariseReadiness(READY_BLOCKED).open_items.map((i) => i.kind),
       ]);
 
       // Positive control with an EXACT count, not a floor: if a future edit
       // stopped one branch firing, a `>=` would absorb it silently and this
       // completeness check would quietly weaken (trap 13e — check the
       // magnitude, not just the sign).
-      expect(kinds.size).toBe(4);
+      expect(kinds).toEqual(new Set([
+        'option_needs_mapping',
+        'option_needs_encoding',
+        'model_needs_review',
+      ]));
 
       for (const kind of kinds) {
         expect(REMEDY_SECTION_BY_OPEN_ITEM_KIND).toHaveProperty(kind);
       }
 
-      // And the mapping holds NOTHING BEYOND what the producer can emit — a key
-      // for a kind that cannot occur is dead code masquerading as coverage.
+      // The additional keys are the two compatibility members plus the
+      // canonical missing-goal remedy, which has no speculative UI gesture.
       expect(Object.keys(REMEDY_SECTION_BY_OPEN_ITEM_KIND).sort()).toEqual(
-        [...kinds].sort(),
+        [
+          ...kinds,
+          'too_few_options',
+          'goal_threshold_missing',
+          'goal_node_missing',
+        ].sort(),
       );
     });
 
@@ -328,7 +344,12 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
         .map(([kind]) => kind)
         .sort();
 
-      expect(unmapped).toEqual(['goal_threshold_missing', 'option_needs_mapping']);
+      expect(unmapped).toEqual([
+        'goal_node_missing',
+        'goal_threshold_missing',
+        'model_needs_review',
+        'option_needs_mapping',
+      ]);
     });
   });
 
@@ -357,7 +378,7 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
       } as unknown as Parameters<typeof tryPostAnalysisAdviceGate>[0]);
 
     it('answers the readiness question and names the top blocker for the gesture', () => {
-      const out = askBlocked(READY_TOO_FEW);
+      const out = askBlocked(READY_MAPPING);
 
       // Pin the precondition IN-TEST (trap 13b): if the gate stopped matching
       // this message, every assertion below would be about a state the product
@@ -373,33 +394,33 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
       // Bound by IDENTITY to the producer's own top item, not to a literal a
       // future reordering could silently diverge from.
       expect(matched.remedy_open_item_kind).toBe(
-        summariseReadiness(READY_TOO_FEW).open_items[0].kind,
+        summariseReadiness(READY_MAPPING).open_items[0].kind,
       );
     });
 
     it('tracks the payload rather than reporting a constant', () => {
       // A field hardcoded to one kind would satisfy the test above. Two
       // payloads whose TOP blockers differ is what proves it is derived.
-      const a = askBlocked(READY_TOO_FEW) as Extract<
+      const a = askBlocked(READY_MAPPING) as Extract<
         ReturnType<typeof askBlocked>,
         { matched: true }
       >;
-      const b = askBlocked(READY_ALL_PER_OPTION) as Extract<
+      const b = askBlocked(READY_ENCODING) as Extract<
         ReturnType<typeof askBlocked>,
         { matched: true }
       >;
 
       expect(a.matched).toBe(true);
       expect(b.matched).toBe(true);
-      expect(a.remedy_open_item_kind).toBe('too_few_options');
-      expect(b.remedy_open_item_kind).toBe('option_needs_mapping');
+      expect(a.remedy_open_item_kind).toBe('option_needs_mapping');
+      expect(b.remedy_open_item_kind).toBe('option_needs_encoding');
       expect(a.remedy_open_item_kind).not.toBe(b.remedy_open_item_kind);
     });
 
     it('END TO END — a blocked-model question ships an answer AND the section to fix it', () => {
       // This is the acceptance test for the whole row: gate → kind → directive
       // → composed response → egress, with nothing hand-fed in the middle.
-      const out = askBlocked(READY_TOO_FEW);
+      const out = askBlocked(READY_ENCODING);
       expect(out.matched).toBe(true);
       const matched = out as Extract<typeof out, { matched: true }>;
 

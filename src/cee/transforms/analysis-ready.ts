@@ -32,6 +32,7 @@ import {
 } from "../provenance/stated-amounts.js";
 import { readIsBaseline } from "../baseline-identity.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
 
 // ============================================================================
 // Types
@@ -83,15 +84,26 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   let hasNonNumericRaw = false;
 
   for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
+    const encodedAdmissibility = classifyEncodedInterventionAdmissibility(intervention);
     // Extract the encoded numeric value (always required)
     interventions[factorId] = intervention.value;
+
+    // Explicit/mapped encoded carriers must prove one of the currently
+    // faithful representations before the whole-model producer can call the
+    // option ready. This also catches a claimed encoded type with no raw value.
+    if (encodedAdmissibility === 'inadmissible') {
+      hasNonNumericRaw = true;
+    }
 
     // Check for raw_value in the intervention (Raw+Encoded pattern)
     if (intervention.raw_value !== undefined) {
       rawInterventions[factorId] = intervention.raw_value;
       hasRawValues = true;
       // Track if we have non-numeric raw values (categorical/boolean)
-      if (typeof intervention.raw_value !== "number") {
+      if (
+        typeof intervention.raw_value !== "number"
+        && encodedAdmissibility !== 'admissible'
+      ) {
         hasNonNumericRaw = true;
       }
     }
@@ -300,8 +312,8 @@ export const BASELINE_KEYWORDS = [...BASELINE_IDIOMS, ...AMBIGUOUS_CURRENT_STATE
  */
 /**
  * Test whether a single label matches any BASELINE_KEYWORD at a word boundary.
- * Shared between detectBaselineOptionIndex (CEE pipeline) and
- * computeStructuralReadiness (orchestrator action handlers).
+ * Shared between detectBaselineOptionIndex (CEE pipeline) and the persisted-
+ * graph canonical readiness adapter.
  */
 export function labelMatchesBaseline(label: string): boolean {
   const lower = label.toLowerCase();

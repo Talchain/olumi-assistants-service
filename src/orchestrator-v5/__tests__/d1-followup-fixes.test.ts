@@ -159,10 +159,87 @@ describe('P1-6 — adjust_edge_strength std must be > 0', () => {
 // P0-2: scenario snapshot includes goal_constraints
 // -------------------------------------------------------------------------
 
+/**
+ * Snapshot admission now uses the canonical whole-model gate. The shared D1
+ * handler fixture intentionally has one option and an orphan factor, so extend
+ * it here with the minimum real decision/option/factor paths needed by these
+ * loader tests instead of weakening admission or asserting against a fake
+ * "ready" model.
+ */
+function buildReadyD1SnapshotGraph(): GraphV3T {
+  const base = buildD1Fixture();
+  return {
+    ...base,
+    nodes: [
+      ...base.nodes
+        .filter((node) => node.id !== 'f-uncapped' && node.id !== 'f-quality')
+        .map((node) =>
+          node.id === 'o-launch'
+            ? { ...node, interventions: { 'f-budget': 1, 'f-churn': 0.04 } }
+            : node,
+        ),
+      { id: 'd-launch', kind: 'decision', label: 'Launch timing' },
+      {
+        id: 'o-defer',
+        kind: 'option',
+        label: 'Defer launch',
+        interventions: { 'f-budget': 0, 'f-churn': 0.05 },
+      },
+    ],
+    edges: [
+      ...base.edges.filter(
+        (edge) => edge.from !== 'f-quality' && edge.to !== 'f-quality',
+      ),
+      {
+        from: 'd-launch',
+        to: 'o-launch',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'd-launch',
+        to: 'o-defer',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'o-launch',
+        to: 'f-budget',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'o-defer',
+        to: 'f-budget',
+        strength: { mean: 0.01, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'o-launch',
+        to: 'f-churn',
+        strength: { mean: -0.4, std: 0.05 },
+        exists_probability: 0.9,
+        effect_direction: 'negative',
+      },
+      {
+        from: 'o-defer',
+        to: 'f-churn',
+        strength: { mean: -0.2, std: 0.05 },
+        exists_probability: 0.9,
+        effect_direction: 'negative',
+      },
+    ],
+  };
+}
+
 describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints', () => {
   it('forwards graph.goal_constraints to snapshot.goal_constraints', async () => {
     const graphWithConstraints: GraphV3T = {
-      ...buildD1Fixture(),
+      ...buildReadyD1SnapshotGraph(),
       goal_constraints: [
         {
           constraint_id: 'gc-test-1',
@@ -206,7 +283,7 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
   });
 
   it('omits goal_constraints when the graph has none', async () => {
-    const graphWithoutConstraints = buildD1Fixture();
+    const graphWithoutConstraints = buildReadyD1SnapshotGraph();
     const fakeStore = {
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],

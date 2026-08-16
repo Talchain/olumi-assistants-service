@@ -153,19 +153,83 @@ const GRAPH = {
   version: '1.2',
   nodes: [
     { id: 'goal_4day', kind: 'goal', label: 'Choose a support rota' },
-    { id: 'opt_four_day', kind: 'option', label: 'Move to a four-day week' },
-    { id: 'opt_status_quo', kind: 'option', label: 'Keep the current rota' },
+    // This is deliberately an exact-ready control. Freeform direction cards
+    // are not admitted for non-ready/missing states because their producer
+    // provenance is not structurally carried to the narrative boundary.
+    {
+      id: 'opt_four_day',
+      kind: 'option',
+      label: 'Move to a four-day week',
+      interventions: {
+        fac_support_cost: {
+          value: 0.7,
+          source: 'brief_extraction',
+          reasoning: 'Test fixture value',
+          target_match: {
+            node_id: 'fac_support_cost',
+            confidence: 'high',
+            match_type: 'exact_id',
+          },
+          value_confidence: 'high',
+        },
+      },
+    },
+    {
+      id: 'opt_status_quo',
+      kind: 'option',
+      label: 'Keep the current rota',
+      interventions: {
+        fac_support_cost: {
+          value: 0.3,
+          source: 'brief_extraction',
+          reasoning: 'Test fixture value',
+          target_match: {
+            node_id: 'fac_support_cost',
+            confidence: 'high',
+            match_type: 'exact_id',
+          },
+          value_confidence: 'high',
+        },
+      },
+    },
     { id: 'out_csat', kind: 'outcome', label: 'Customer Satisfaction Score' },
     { id: 'fac_support_cost', kind: 'factor', label: 'Support cost' },
   ],
   edges: [{ id: 'e1', from: 'fac_support_cost', to: 'out_csat', belief: 0.6 }],
 };
 
+// The unified-pipeline producer contract includes analysis_ready beside the
+// graph. This route test deliberately uses a lightweight legacy edge fixture
+// for its unrelated narration concern, so asking draft-graph's graph fallback
+// to reconstruct readiness would make the test depend on an invalid carrier
+// it is not meant to exercise. Carry the exact producer field instead: the
+// served assertion below then proves producer → dispatcher → finaliser → wire.
+const ANALYSIS_READY = {
+  goal_node_id: 'goal_4day',
+  status: 'ready',
+  options: [
+    {
+      id: 'opt_four_day',
+      label: 'Move to a four-day week',
+      status: 'ready',
+      interventions: { fac_support_cost: 0.7 },
+    },
+    {
+      id: 'opt_status_quo',
+      label: 'Keep the current rota',
+      status: 'ready',
+      interventions: { fac_support_cost: 0.3 },
+    },
+  ],
+  bias_findings: [],
+} as const;
+
 function pipelineBody(strengthenItems: unknown[]) {
   return {
     statusCode: 200,
     body: {
       graph: GRAPH,
+      analysis_ready: ANALYSIS_READY,
       coaching: {
         summary: '',
         strengthen_items: strengthenItems,
@@ -194,6 +258,7 @@ async function servedText(app: FastifyInstance, strengthenItems: unknown[]): Pro
   expect(res.statusCode, 'the turn must succeed — a 500 would make every assertion below vacuous').toBe(200);
   const body = JSON.parse(res.body);
   expect(typeof body.assistant_text, 'the served turn must carry assistant_text').toBe('string');
+  expect(body.analysis_ready?.status, 'this direction-delivery control must remain exact-ready').toBe('ready');
   return body.assistant_text as string;
 }
 

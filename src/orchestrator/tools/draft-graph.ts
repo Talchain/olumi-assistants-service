@@ -17,7 +17,7 @@ import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, Orche
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
-import { computeStructuralReadiness } from "./analysis-ready-helper.js";
+import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
@@ -391,13 +391,13 @@ export async function handleDraftGraph(
   };
 
   // Extract analysis_ready from pipeline response (present in V3 schema responses).
-  // Falls back to computeStructuralReadiness() ONLY when analysis_ready is absent
+  // Falls back to the canonical graph projection ONLY when analysis_ready is absent
   // from the pipeline body. If present but invalid, don't fallback — let the upstream
   // validation failure surface rather than masking it with graph-derived readiness.
   const pipelineHasAnalysisReady = 'analysis_ready' in body && body.analysis_ready != null;
   const analysisReady = pipelineHasAnalysisReady
     ? extractAnalysisReady(body)
-    : (graphOutput ? computeStructuralReadiness(graphOutput) : undefined);
+    : (graphOutput ? buildCanonicalAnalysisReadyFromGraph(graph) : undefined);
   if (analysisReady) {
     patchData.analysis_ready = analysisReady;
   }

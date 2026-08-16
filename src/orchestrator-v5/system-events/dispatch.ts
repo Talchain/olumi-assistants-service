@@ -50,7 +50,7 @@ import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from '../context/freshness.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
 import {
   applyEdgeStrengthEdit,
@@ -86,7 +86,7 @@ export interface DispatchSystemEventResult {
    *   factor_value_edit / edge_strength_edit
    *     Graph-mutating ON THE SERVER. Each carries the VALUE, so dispatch can
    *     run the corresponding canonical D1 mutation, commit the graph, and re-derive
-   *     readiness from the COMMITTED bytes via `computeStructuralReadiness`
+   *     readiness from the COMMITTED bytes via the canonical graph adapter
    *     — which is exactly the "future change" the paragraph above
    *     anticipated. Readiness is derived post-commit, never pre-, so it can
    *     never describe a graph that failed to land.
@@ -830,7 +830,7 @@ async function dispatchEdgeStrengthEdit(
   return {
     response,
     commitPerformed: true,
-    analysisReady: computeStructuralReadiness(graphForReadiness),
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
     freshness,
     graph: graphForReadiness,
   };
@@ -1029,7 +1029,7 @@ async function dispatchFactorValueEdit(
 
   // Readiness from the bytes that LANDED, not from our pre-projection copy.
   //
-  // This is not pedantry. `computeStructuralReadiness` reads each option node's
+  // This is not pedantry. The canonical graph adapter reads each option node's
   // merged `interventions`, and `projectGraphForPersistence` runs
   // `normaliseOptionInterventionContract` over exactly that field on the way to
   // the store. Deriving readiness from the un-projected graph can therefore
@@ -1043,7 +1043,7 @@ async function dispatchFactorValueEdit(
   return {
     response,
     commitPerformed: true,
-    analysisReady: computeStructuralReadiness(graphForReadiness),
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
     // Still the full graph: the egress id-leak scrub resolves ids to labels
     // against it, independently of the hash above.
     graph: graphForReadiness,

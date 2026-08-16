@@ -54,7 +54,10 @@
  *
  * Encoded categorical / boolean interventions are NEVER scaled — their `value`
  * is an encoded integer / `0|1` and must reach PLoT verbatim
- * (`rule: 'encoded_verbatim'`). Detection uses ROBUST evidence —
+ * (`rule: 'encoded_verbatim'`). One shared readiness/egress classifier requires
+ * exact raw/type/own-map proof and the currently faithful 0|1 wire domain;
+ * encoded-looking carriers that fail it are retained only for diagnostics and
+ * then fail closed before PLoT. Candidate detection uses ROBUST evidence —
  * `value_type` of `categorical`/`boolean`, OR a present `encoding_map`, OR a
  * boolean `raw_value` — and deliberately NOT a bare string `raw_value`, which
  * is ambiguous (a numeric string like `"5000"` is a real magnitude, not an
@@ -70,6 +73,8 @@
  *   - A genuine raw `[0,1]` value on a capped factor is NOT multiplied (it
  *     fails the factor-evidence check) → passthrough, no corruption.
  */
+
+import { classifyEncodedInterventionAdmissibility } from '../../orchestrator/shared/encoded-intervention-admissibility.js';
 
 /**
  * Factor scale descriptor extracted from a factor node's `observed_state`.
@@ -123,6 +128,8 @@ export interface InterventionScaleResult {
    * their range from their own values).
    */
   readonly codeNotMagnitude?: boolean;
+  /** Encoded-looking carrier failed the singular raw/type/map/domain proof. */
+  readonly invalidEncodedContract?: boolean;
   /**
    * The FAITHFUL unit-interval representation of this emission, when one is
    * KNOWN — the precondition for request-level demotion:
@@ -211,25 +218,6 @@ function coerceFiniteNumber(x: unknown): number | undefined {
 }
 
 /**
- * Detect an encoded categorical/boolean intervention, where `value` is an
- * encoded integer / `0|1` that must NOT be scaled. Uses ROBUST evidence —
- * never a bare string `raw_value`, which is ambiguous (a numeric string like
- * `"5000"` is a real magnitude, not an encoding): an explicit
- * categorical/boolean `value_type`, OR a present `encoding_map`, OR a boolean
- * `raw_value` (an un-encoded flag). A non-numeric string `raw_value` is handled
- * downstream (it neither denormalises via raw_value nor suppresses the
- * factor-evidence path); the normalised-convention gate is the further backstop
- * for genuinely categorical factors (which never exhibit that signature).
- */
-function isEncodedIntervention(obj: Record<string, unknown>): boolean {
-  const vt = obj.value_type;
-  if (vt === 'categorical' || vt === 'boolean') return true;
-  if (obj.encoding_map !== null && typeof obj.encoding_map === 'object') return true;
-  if (typeof obj.raw_value === 'boolean') return true;
-  return false;
-}
-
-/**
  * Resolve the raw user-scale value PLoT should receive for one numeric
  * intervention. Pure — no logging, no graph mutation. See module header for
  * the rule and its double-conversion / no-silent-corruption properties.
@@ -261,8 +249,16 @@ export function resolveRawInterventionValue(
   }
   // Encoded categorical/boolean → preserve verbatim, never scale. A code is
   // NOT a raw magnitude: PLoT re-scaling it corrupts it (Finding B).
-  if (isEncodedIntervention(obj)) {
-    return { value, rule: 'encoded_verbatim', inputValue: value, inconsistent: false, codeNotMagnitude: true };
+  const encodedAdmissibility = classifyEncodedInterventionAdmissibility(obj);
+  if (encodedAdmissibility !== 'not_encoded') {
+    return {
+      value,
+      rule: 'encoded_verbatim',
+      inputValue: value,
+      inconsistent: false,
+      codeNotMagnitude: true,
+      ...(encodedAdmissibility === 'inadmissible' ? { invalidEncodedContract: true } : {}),
+    };
   }
   // Coerce raw_value to a number (accepts numeric strings like "5000"); a
   // non-numeric string falls through to the factor-evidence path.
@@ -512,8 +508,9 @@ export interface RequestScaleProjection {
   /**
    * True when the request is mixed and CEE must NOT auto-resolve it — because the
    * value above 1 is a magnitude CEE does not own (an explicit `raw_value`, an
-   * already-raw passthrough, or an ENCODED category) — or when demotion was chosen
-   * and failed its postcondition. Surfaced loudly; never silently shipped.
+   * already-raw passthrough, or an ENCODED category) — or when an encoded-looking
+   * carrier fails the shared raw/type/map/domain contract, or when demotion was
+   * chosen and failed its postcondition. Surfaced loudly; never silently shipped.
    */
   readonly mixedUnresolved: boolean;
   /**
@@ -632,12 +629,13 @@ export function projectRequestInterventionsToWireScale(
   // without one (bare passthrough, inconsistent pair, encoded code) is a
   // magnitude CEE does not own and blocks the whole demote.
   const undemotable = outsideUnitInterval.filter((r) => r.result.unitIntervalEquivalent === undefined);
-  // An ENCODED code outside [0,1] (e.g. `outsource: 2`) fires PLoT's gate by
-  // itself and is then rescaled BY that gate — measured at b9f6b5a: code 2
-  // reaches ISL as 1, regardless of siblings. Such a value can never cross the
-  // wire faithfully, so its request is unresolvable even with no stranded
-  // sibling (the 15 both-pipelines-corrupt cases in the round-4 differential).
-  const encodedOutside = outsideUnitInterval.filter((r) => r.result.codeNotMagnitude === true);
+  // The same pure encoded-value contract that readiness consumes is rechecked
+  // at the actual PLoT boundary. This catches direct-handler/bypass callers and
+  // owns the code domain too: an out-of-range category is invalid here without
+  // a second PLoT-local domain list.
+  const encodedContractInvalid = present.filter(
+    (r) => r.result.invalidEncodedContract === true,
+  );
   const demote = mixed && undemotable.length === 0;
   const perOption: Array<Record<string, number>> = [];
   const conversions: InterventionConversion[] = [];
@@ -700,7 +698,7 @@ export function projectRequestInterventionsToWireScale(
   for (const r of mixed ? undemotable : []) {
     if (!unresolvedFactorIds.includes(r.factorId)) unresolvedFactorIds.push(r.factorId);
   }
-  for (const r of encodedOutside) {
+  for (const r of encodedContractInvalid) {
     if (!unresolvedFactorIds.includes(r.factorId)) unresolvedFactorIds.push(r.factorId);
   }
   return {
@@ -714,7 +712,10 @@ export function projectRequestInterventionsToWireScale(
     // A mixed request we must NOT auto-resolve, OR one where demotion failed to make
     // the request homogeneous. Either way it is unresolved and must not be shipped as
     // if it were fine.
-    mixedUnresolved: (mixed && undemotable.length > 0) || encodedOutside.length > 0 || postconditionViolated,
+    mixedUnresolved:
+      (mixed && undemotable.length > 0)
+      || encodedContractInvalid.length > 0
+      || postconditionViolated,
     unresolvedFactorIds,
   };
 }

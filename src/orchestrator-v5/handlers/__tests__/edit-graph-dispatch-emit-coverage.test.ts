@@ -7,7 +7,7 @@
  * original exception. Also pins no-double-emit on the normal success path (which
  * now passes through both the inner commit-`finally` and the new outer `finally`).
  *
- * The assembly throw is injected via computeStructuralReadiness (called at the
+ * The assembly throw is injected via buildCanonicalAnalysisReadyFromGraph (called at the
  * tail of the assembly region, only on a successful applied mutation).
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
@@ -49,13 +49,13 @@ vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
 }));
 // The injection point: throw from the assembly tail.
 vi.mock('../../../orchestrator/tools/analysis-ready-helper.js', () => ({
-  computeStructuralReadiness: vi.fn(),
+  buildCanonicalAnalysisReadyFromGraph: vi.fn(),
 }));
 
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
-import { computeStructuralReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
@@ -95,13 +95,17 @@ function makeAppliedResult(): EditGraphResult {
 
 const hg = handleEditGraph as MockedFunction<typeof handleEditGraph>;
 const commit = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
-const csr = computeStructuralReadiness as MockedFunction<typeof computeStructuralReadiness>;
+const buildCanonical = buildCanonicalAnalysisReadyFromGraph as MockedFunction<
+  typeof buildCanonicalAnalysisReadyFromGraph
+>;
 let events: Array<{ event: string; data: Record<string, unknown> }> = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   commit.mockResolvedValue({ response: {}, performed: true, persisted_row_id: 'r', graphPersisted: true } as Awaited<ReturnType<typeof commitDirectAnswer>>);
-  csr.mockReturnValue(undefined as unknown as ReturnType<typeof computeStructuralReadiness>);
+  buildCanonical.mockReturnValue(
+    undefined as unknown as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>,
+  );
   events = [];
   setTestSink((event, data) => events.push({ event, data }));
 });
@@ -124,7 +128,7 @@ describe('R7 NB-1 — assembly-region exactly-once', () => {
   it('emits exactly one event AND propagates the original error when the assembly region throws', async () => {
     hg.mockResolvedValue(makeAppliedResult());
     const boom = new Error('readiness boom');
-    csr.mockImplementation(() => { throw boom; });
+    buildCanonical.mockImplementation(() => { throw boom; });
 
     await expect(run()).rejects.toBe(boom); // original exception surfaces unmasked
     const te = turnEvents();
@@ -137,7 +141,7 @@ describe('R7 NB-1 — assembly-region exactly-once', () => {
   it('a telemetry fault during the assembly-throw emit still cannot mask the original error', async () => {
     hg.mockResolvedValue(makeAppliedResult());
     const boom = new Error('readiness boom');
-    csr.mockImplementation(() => { throw boom; });
+    buildCanonical.mockImplementation(() => { throw boom; });
     setTestSink((event) => { if (event === 'v5.edit_graph.turn') throw new Error('telemetry boom'); });
 
     // The ORIGINAL assembly error must surface, not 'telemetry boom'.
@@ -146,7 +150,9 @@ describe('R7 NB-1 — assembly-region exactly-once', () => {
 
   it('normal success path emits exactly once across both finallys (no double-emit)', async () => {
     hg.mockResolvedValue(makeAppliedResult());
-    csr.mockReturnValue(undefined as unknown as ReturnType<typeof computeStructuralReadiness>);
+    buildCanonical.mockReturnValue(
+      undefined as unknown as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>,
+    );
     const result = await run();
     expect(result.commitPerformed).toBe(true);
     expect(turnEvents()).toHaveLength(1); // inner finally emits; outer finally is a guarded no-op

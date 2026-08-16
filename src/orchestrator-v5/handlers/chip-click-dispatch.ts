@@ -80,8 +80,8 @@ import {
 } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import {
+  buildCanonicalAnalysisReadyFromGraph,
   buildAnalysisRefusalReadiness,
-  computeStructuralReadiness,
 } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
@@ -198,7 +198,7 @@ export function isDeterministicChipClickActionType(actionType: string): boolean 
  * Step 4 (the run_analysis chip-click) to carry `analysis_ready` so the
  * model's gating logic sees a runnability signal.
  *
- * Single-source-of-truth: the `ok` outcome derives structural readiness
+ * Single-source-of-truth: the `ok` outcome derives canonical readiness
  * from the SAME `GraphV3T` reference the run_analysis handler operated
  * on. The dispatcher pre-loads the scenario snapshot once via
  * `loadScenarioSnapshotForRunAnalysis` and injects a one-shot
@@ -693,7 +693,7 @@ export async function dispatchChipClickRunAnalysis(
   // Pre-load the scenario snapshot ONCE here. The handler invocation uses
   // a one-shot scenarioReader that returns this exact cached snapshot, and
   // post-handler readiness derivation reads `snapshot.graph` from the same
-  // reference. This guarantees `computeStructuralReadiness` operates on
+  // reference. This guarantees the canonical readiness adapter operates on
   // the exact GraphV3T the handler operated on — eliminating any
   // TOCTOU window where a concurrent edit-graph dispatch from another
   // session could change the persisted record between two separate reads.
@@ -1322,13 +1322,13 @@ function deriveAnalysisReadyFromSnapshot(
   requestId: string,
   scenarioId: string,
 ): AnalysisReadyPayload | undefined {
-  // `loadScenarioSnapshotForRunAnalysis` already runs the persisted graph
-  // through `GraphV3.safeParse` and only returns successfully when parse
-  // succeeds, so `snapshot.graph` is a valid GraphV3T. The cast is safe.
-  const readiness = computeStructuralReadiness(snapshot.graph as GraphV3T);
+  // Consume the raw persisted carrier so canonical top-level options survive
+  // the GraphV3 parse. Whole status comes from the same canonical builder as
+  // draft production, including unreachable controllable factors.
+  const readiness = buildCanonicalAnalysisReadyFromGraph(snapshot.rawPersistedGraph);
   if (!readiness) {
-    // computeStructuralReadiness returns undefined when no goal node
-    // exists — a structural state that legitimately blocks readiness
+    // The canonical projection returns undefined when no goal node exists —
+    // a structural state that legitimately blocks readiness
     // emission. Surface it as an observable signal so the original
     // baseline regression (analysis_ready missing on Step 4) cannot
     // recur as an unobservable false negative.
@@ -1338,7 +1338,7 @@ function deriveAnalysisReadyFromSnapshot(
         scenario_id: scenarioId,
         analysis_ready_missing_reason: 'no_goal_node',
       },
-      'V5 chip_click run_analysis — computeStructuralReadiness returned undefined; analysis_ready omitted',
+      'V5 chip_click run_analysis — canonical readiness projection returned undefined; analysis_ready omitted',
     );
   }
   return readiness;

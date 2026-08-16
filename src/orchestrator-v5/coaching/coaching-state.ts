@@ -43,7 +43,7 @@
 import type { DecisionContext, HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { selectRunAnalysisFact, type FreshnessDerivation } from '../context/freshness.js';
 import { summariseReadiness } from '../routing/readiness-summary.js';
 
@@ -83,6 +83,7 @@ export type CoachingStateReasonCode =
   | 'too_few_options'
   | 'option_needs_mapping'
   | 'option_needs_encoding'
+  | 'model_needs_review'
   | 'goal_threshold_missing'
   | 'goal_node_missing'
   | 'edge_strength_defaulted'
@@ -154,9 +155,14 @@ const MAX_SIGNALS = 24;
 // Stable readiness-blocker ordering so the derived array is deterministic.
 const READINESS_REASON_ORDER: readonly CoachingStateReasonCode[] = [
   'goal_node_missing',
+  // `too_few_options` / `goal_threshold_missing` are retained below for
+  // historical snapshot compatibility only. The active readiness-summary
+  // producer delegates whole-status to canonical recovery and never derives
+  // either code from raw field presence.
   'too_few_options',
   'option_needs_mapping',
   'option_needs_encoding',
+  'model_needs_review',
   'goal_threshold_missing',
 ];
 
@@ -301,10 +307,13 @@ export function evaluateReadiness(
     const parsed = GraphV3.safeParse(persistedGraph);
     // unparseable → cannot assess structural readiness
     if (!parsed.success) return { evaluable: false, signals: [] };
-    const readiness = computeStructuralReadiness(parsed.data);
+    // Preserve canonical top-level options when present; the parse above is a
+    // validity check, not a licence to strip producer-owned readiness inputs.
+    const readiness = buildCanonicalAnalysisReadyFromGraph(persistedGraph);
     if (readiness === undefined) {
-      // No goal node — the strongest "not ready" structural blocker, which
-      // computeStructuralReadiness reports only by returning undefined.
+      // Legacy absence fallback. Canonical blocked payloads (including a
+      // missing goal) are projected below by summariseReadiness from the typed
+      // issue record, so coaching does not reconstruct whole status here.
       return {
         evaluable: true,
         signals: [
@@ -316,6 +325,13 @@ export function evaluateReadiness(
     // Dedupe by kind (option_needs_* can repeat per option) and order deterministically.
     const kinds = new Set<CoachingStateReasonCode>();
     for (const item of open_items) kinds.add(item.kind);
+    // Missing-goal recovery is projected only from the canonical exhaustive
+    // issue record. Keep this explicit at the coaching boundary so a future
+    // generic recovery fallback cannot erase the actionable reason while the
+    // canonical whole-status remains `blocked`.
+    if (readiness.readiness_issues?.some((issue) => issue.code === 'NO_GOAL')) {
+      kinds.add('goal_node_missing');
+    }
     return {
       evaluable: true,
       signals: READINESS_REASON_ORDER.filter((reason) => kinds.has(reason)).map((reason) =>

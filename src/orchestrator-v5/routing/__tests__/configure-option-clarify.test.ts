@@ -159,11 +159,9 @@ describe('shouldInterceptBeforeEditLane — matches only when it can name a conc
   });
 
   it('DECLINES when the blocked option links only to non-factor nodes', () => {
-    // `computeStructuralReadiness` counts ANY outgoing edge as a connection,
-    // so an option wired straight to the goal is `needs_encoding` — but there
-    // is no FACTOR to name a value for, so there is no concrete next step and
-    // the intercept must stand down rather than emit a remedy with an empty
-    // slot in it.
+    // Canonical readiness does not treat an option→goal edge as an effect
+    // mapping. The option therefore remains needs_user_mapping rather than
+    // needs_encoding, and this value-specific intercept must stand down.
     const g = graph();
     const { result } = tryFor(`Configure ${OPTION_LABEL}`, {
       nodes: g.nodes,
@@ -174,7 +172,7 @@ describe('shouldInterceptBeforeEditLane — matches only when it can name a conc
     });
     expect(result.matched).toBe(false);
     if (result.matched) return;
-    expect(result.reason).toBe('no_candidate_factor');
+    expect(result.reason).toBe('no_unconfigured_option');
   });
 
   it('DECLINES for an option with no links at all — that is needs_user_mapping, a different remedy', () => {

@@ -13,7 +13,7 @@
     "note_a1": "A0 originally expected a FEATURE_NOT_ENABLED envelope. A1 replaced the stub with TurnExecutor, so this fixture now asserts a direct_answer success envelope; the B1 ingress/egress boundary behaviour it was designed to cover is unchanged.",
     "note_v0_7_0": "v5-handler-surface brief updated this fixture to the v0.7.0 discriminated-union shape (kind: 'message', required source).",
     "note_v5_maintenance": "v5-maintenance brief changed stage from 'frame' to 'analyse' and message from 'Should we expand into Germany next quarter?' to a neutral question so the payload does NOT match route-v2's draft_graph dispatch trigger (stage=frame + no graph + decision keywords). This fixture exercises the TurnExecutor text_only path at the B1 boundary; draft_graph has its own dedicated route-v2-draft-graph.test.ts.",
-    "note_v5_context_compose": "Task 2.1 (chip generation) — analyse stage with no analysis and no options in the graph emits a 'Set values for options' conversational prompt (the executable Run analysis chip is gated on options present so it only fires when the run_analysis precondition will hold).",
+    "note_v5_context_compose": "Task 2.1 (chip generation) — analyse stage with no analysis and no graph emits a 'Review model gaps' conversational prompt; the executable Run analysis chip remains gated on exact canonical readiness.",
     "note_roadmap_1132_f1": "ROADMAP 1.132 F1 (PR #616): the deterministic egress answer-shape fallback now synthesises `_answer_shape` for the model's own un-shaped multi-sentence ANSWER prose and SETS assistant_text := deriveAnswerTextFromShape(shape) (headline + blank line + detail) to preserve the sidecar byte-equality tie. Expected assistant_text therefore carries the '\\n\\n' join and the wire now carries the `_answer_shape` sidecar — the identical additive key coach/converse turns have shipped unconditionally since the F1 flag deletion."
   },
   "mock_narrate_output": "Expanding into Germany depends on regulatory readiness, localisation cost, and the payoff of the additional market. Name the biggest uncertainty first.",
@@ -39,9 +39,9 @@
       "blocks": [],
       "suggested_actions": [
         {
-          "id": "chip_prompt_set_option_values",
-          "label": "Set values for options",
-          "message": "Help me configure the options for this decision so the analysis can run."
+          "id": "chip_prompt_review_model_gaps",
+          "label": "Review model gaps",
+          "message": "Help me review what is still missing from the model before analysis."
         }
       ],
       "insights": [],

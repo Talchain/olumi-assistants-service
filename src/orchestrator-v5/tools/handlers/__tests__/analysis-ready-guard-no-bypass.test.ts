@@ -76,20 +76,45 @@ describe('EP2 §11 — V5 graph→PLoT no-bypass', () => {
     expect(chip).toContain('loadScenarioSnapshotForRunAnalysis');
   });
 
-  it('the EP2 guard is invoked INSIDE that seam (assessAnalysisReadiness, behind analysisReadyGuardEnabled)', () => {
+  it('the EP2 guard is invoked UNCONDITIONALLY inside that seam', () => {
     const seam = stripComments(readFileSync(join(V5_ROOT, 'build-turn-context.ts'), 'utf8'));
     expect(seam).toContain('assessAnalysisReadiness');
-    expect(seam).toContain('analysisReadyGuardEnabled');
-    // Ordering inside the seam: EP2 guard → sigma floor → GraphV3 parse.
-    // The guard must wrap the run payload's graph BEFORE GraphV3.safeParse
-    // strips node.data, and the W2E-2 round-4 sigma floor must sit BEFORE the
-    // parse too — a post-parse floor is unreachable for the std<=0 class the
-    // parse rejects (the round-3 dead-code regression this ordering pins out).
-    const guardIdx = seam.indexOf('assessAnalysisReadiness');
-    const floorIdx = seam.indexOf('floorGraphSigmaForCompute(graphForSnapshot)');
-    const parseIdx = seam.indexOf('GraphV3.safeParse(sigmaFloor.graph)');
-    expect(guardIdx).toBeGreaterThan(0);
-    expect(floorIdx).toBeGreaterThan(guardIdx);
-    expect(parseIdx).toBeGreaterThan(floorIdx);
+    // The legacy config input is quarantined in config only. Its name in this
+    // executable seam would mean a deployment value can still disable Run
+    // admission, which is precisely the authority regression this gate owns.
+    expect(seam).not.toContain('analysisReadyGuardEnabled');
+    // Ordering inside the exact serving seam:
+    //   sigma floor → compute-only schema validation → canonical readiness
+    //   → canonical GraphV3 parse.
+    // The first parse decides schema/numeric integrity only; its output is not
+    // fed to readiness. The guard must inspect the carrier-preserving floored
+    // graph before the canonical projection is parsed, otherwise GraphV3 can
+    // strip the option/readiness carriers that the sole admission authority
+    // needs. Scoping the search to this function also prevents an unrelated
+    // earlier GraphV3 parse in the file from satisfying the ordering ratchet.
+    const seamStart = seam.indexOf('export async function loadScenarioSnapshotForRunAnalysis');
+    expect(seamStart).toBeGreaterThan(0);
+    // Bound the ownership assertion at the next top-level function. Slicing to
+    // EOF would let a dead helper appended later donate the expected tokens
+    // after this serving function had removed its real guard.
+    const seamEnd = seam.indexOf('\nfunction mergeOptionInterventionObjects(', seamStart);
+    expect(seamEnd).toBeGreaterThan(seamStart);
+    const servingSeam = seam.slice(seamStart, seamEnd);
+    const floorIdx = servingSeam.indexOf('floorGraphSigmaForCompute(persistedGraph)');
+    const computeParseIdx = servingSeam.indexOf('GraphV3.safeParse(sigmaFloor.graph)');
+    const guardIdx = servingSeam.indexOf('assessAnalysisReadiness(sigmaFloor.graph)');
+    const canonicalParseIdx = servingSeam.indexOf('GraphV3.safeParse(graphForSnapshot)');
+    expect(floorIdx).toBeGreaterThan(0);
+    expect(computeParseIdx).toBeGreaterThan(floorIdx);
+    expect(guardIdx).toBeGreaterThan(computeParseIdx);
+    expect(canonicalParseIdx).toBeGreaterThan(guardIdx);
   });
+
+  it('no V5 production source reads the quarantined flag-off input', () => {
+    const consumers = walkSrc(V5_ROOT)
+      .filter((file) => stripCommentsFile(file).includes('analysisReadyGuardEnabled'))
+      .map((file) => file.slice(V5_ROOT.length + 1))
+      .sort();
+    expect(consumers).toEqual([]);
+  }, GUARD_WALK_TIMEOUT_MS);
 });

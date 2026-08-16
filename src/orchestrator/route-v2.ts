@@ -230,6 +230,7 @@ import {
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
+import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -2816,6 +2817,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // honest fresh-canvas answer (persistedGraph=null path) rather than a
       // 500: a readiness coaching turn should not brick on a transient read.
       let persistedGraph: unknown | null = null;
+      let readinessPriorPendings: readonly PendingAction[] = [];
+      let readinessPendingReadOk = false;
       try {
         const state = await loadPersistedScenarioStateStrict(ingress.scenario_id);
         persistedGraph = state.graph;
@@ -2829,7 +2832,84 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           'S2-L1 readiness arm — persisted-graph read failed; degrading to fresh-canvas answer',
         );
       }
+      try {
+        readinessPriorPendings = await loadMostRecentPendingActionsStrict(
+          ingress.scenario_id,
+          requestId,
+        );
+        readinessPendingReadOk = true;
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'S2-L1 readiness arm — pending read failed; readiness remains available without an apply control',
+        );
+      }
       const readiness = composeReadinessIntakeResponse(persistedGraph, ingress.stage);
+      let readinessResponse = readiness.response;
+      let readinessOffer: ReturnType<typeof buildReadinessRepairOffer> = null;
+      if (readiness.assessment && readinessPendingReadOk && persistedGraph !== null) {
+        try {
+          const graphHash = computeAnalysisAffectingGraphHash(
+            persistedGraph as GraphStateIngress,
+          );
+          if (graphHash === null) throw new Error('readiness graph hash unavailable');
+          readinessOffer = buildReadinessRepairOffer({
+            assessment: readiness.assessment,
+            currentGraphHash: graphHash,
+            scenarioId: ingress.scenario_id,
+          });
+        } catch {
+          readinessOffer = null;
+        }
+      }
+      if (readinessOffer) {
+        readinessResponse = {
+          ...readinessResponse,
+          suggested_actions: [
+            ...readinessResponse.suggested_actions,
+            {
+              id: readinessOffer.chip.id,
+              label: readinessOffer.chip.label,
+              message: readinessOffer.chip.message,
+              ...(readinessOffer.chip.detail ? { detail: readinessOffer.chip.detail } : {}),
+            },
+          ],
+        };
+        try {
+          const committed = await commitDirectAnswer(readinessResponse, {
+            scenario_id: ingress.scenario_id,
+            turn_id: ingress.turn_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(ingress),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - routeStartedAt,
+            handler_facts: [],
+            pending_actions: [readinessOffer.pending],
+            priorPendingActions: readinessPriorPendings,
+            coaching_state: null,
+            userMessage: ingress.message,
+          });
+          readinessResponse = committed.response;
+        } catch (err) {
+          // A review control without a durable pending would be a dead control.
+          // Keep the complete issue explanation, but remove the apply action.
+          readinessResponse = readiness.response;
+          readinessOffer = null;
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S2-L1 readiness arm — repair proposal commit failed; omitting apply control',
+          );
+        }
+      }
       log.info(
         {
           event: 'v5.readiness_intake',
@@ -2844,12 +2924,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         outcome: readiness.outcome,
         message_length: ingress.message.length,
       });
-      // No commit: parity with the process-meta intake answer (no chip, no
-      // commit, scenario stays fresh). graph:null — the composed text carries
-      // option LABELS (via summariseReadiness), never raw node ids, so the
-      // egress label sanitiser has nothing to resolve.
-      return sendFinalised200(reply, requestId, 'readiness_intake', readiness.response, {
+      // A multi-blocker plan with safe canonicalisations persists exactly one
+      // review pending above. Every other readiness answer remains graph-free.
+      return sendFinalised200(reply, requestId, 'readiness_intake', readinessResponse, {
         graph: null,
+        ...(readiness.assessment?.analysisReady
+          ? { analysisReady: readiness.assessment.analysisReady }
+          : {}),
         // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
         // the permission belongs to the fact this response DISPLAYS, not to
         // whether this turn ran an analysis. See turn-claim-safety.ts.

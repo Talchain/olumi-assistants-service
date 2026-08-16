@@ -12,7 +12,7 @@
  *
  * This module is the readiness/coaching arm the type should reach. It consumes
  * the SAME readiness engine the coaching spine uses
- * (`computeStructuralReadiness` + `summariseReadiness`, which
+ * (the canonical graph readiness adapter + `summariseReadiness`, which
  * `coaching-state.ts`'s `evaluateReadiness` also wraps) — no new science — and
  * the SAME honest fresh-canvas answer (`composeProcessMetaIntakeResponse`), now
  * reached by the type. The string-mirror branch and the typed branch collapse
@@ -32,7 +32,11 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  assessCanonicalAnalysisReadiness,
+  type CanonicalReadinessAssessment,
+  type CanonicalReadinessRepairProposal,
+} from '../../orchestrator/tools/analysis-ready-helper.js';
 import { summariseReadiness } from './readiness-summary.js';
 import { composeProcessMetaIntakeResponse } from './process-meta-intake.js';
 
@@ -47,6 +51,7 @@ export type ReadinessIntakeOutcome =
 export interface ReadinessIntakeResult {
   readonly outcome: ReadinessIntakeOutcome;
   readonly response: OlumiResponse;
+  readonly assessment: CanonicalReadinessAssessment | null;
 }
 
 type StageIndicator = OlumiResponse['stage_indicator'];
@@ -78,15 +83,24 @@ function composeGoalMissingResponse(stage: StageIndicator): OlumiResponse {
   } as OlumiResponse;
 }
 
-function composeOpenItemsResponse(prose: string, stage: StageIndicator): OlumiResponse {
+function composeOpenItemsResponse(
+  prose: string,
+  stage: StageIndicator,
+  proposal: CanonicalReadinessRepairProposal | null,
+): OlumiResponse {
   // `prose` is the reviewed, deterministic readiness-summary text (the SAME
   // string the post-analysis advice gate ships). It already opens with
   // "Here's what's still open before this can run cleanly: …" and never echoes
   // a numeric readiness percentage, so it is safe to surface verbatim as the
   // whole answer. We prepend nothing structural to avoid drift with that gate.
+  const planCopy = proposal === null
+    ? ''
+    : proposal.changes.length > 0
+      ? `\n\nI have grouped the ${proposal.changes.length} safe model ${proposal.changes.length === 1 ? 'fix' : 'fixes'} into one reviewable change. ${proposal.unresolved_inputs.length} ${proposal.unresolved_inputs.length === 1 ? 'item still needs' : 'items still need'} your judgement; I will not invent missing values or relationships.`
+      : `\n\nI have grouped all ${proposal.unresolved_inputs.length} open items into one review plan. They need your judgement, so I will not invent missing values or relationships.`;
   return {
     response_version: 2,
-    assistant_text: prose,
+    assistant_text: `${prose}${planCopy}`,
     blocks: [],
     suggested_actions: [],
     insights: [],
@@ -119,8 +133,8 @@ function composeReadyResponse(stage: StageIndicator): OlumiResponse {
  *   - no graph / empty / unparseable  → the honest fresh-canvas checklist
  *     (`composeProcessMetaIntakeResponse`), now reached by the type. This is
  *     the unification with the string-mirror branch.
- *   - populated, no goal node         → `computeStructuralReadiness` returns
- *     undefined (its strongest "not ready" blocker) → name the missing goal.
+ *   - populated, no goal node         → the canonical assessment emits a
+ *     blocked wire status and this composer names the missing goal.
  *   - populated, open readiness items → surface `summariseReadiness`'s prose.
  *   - populated, nothing open         → say the model looks ready to analyse.
  */
@@ -129,22 +143,32 @@ export function composeReadinessIntakeResponse(
   stage: StageIndicator,
 ): ReadinessIntakeResult {
   if (persistedGraph == null) {
-    return { outcome: 'fresh_canvas', response: composeProcessMetaIntakeResponse() };
+    return { outcome: 'fresh_canvas', response: composeProcessMetaIntakeResponse(), assessment: null };
   }
   const parsed = GraphV3.safeParse(persistedGraph);
   // Unparseable, or parseable but structurally empty (no nodes): we cannot
   // assess readiness, so give the honest fresh-canvas answer rather than a
   // misleading populated-canvas claim.
   if (!parsed.success || parsed.data.nodes.length === 0) {
-    return { outcome: 'fresh_canvas', response: composeProcessMetaIntakeResponse() };
+    return { outcome: 'fresh_canvas', response: composeProcessMetaIntakeResponse(), assessment: null };
   }
-  const readiness = computeStructuralReadiness(parsed.data);
-  if (readiness === undefined) {
-    return { outcome: 'goal_missing', response: composeGoalMissingResponse(stage) };
+  // Preserve canonical top-level options when present; GraphV3 parsing is the
+  // validity gate but its projection may intentionally omit those carriers.
+  const assessment = assessCanonicalAnalysisReadiness(persistedGraph);
+  const readiness = assessment.analysisReady;
+  if (
+    readiness === undefined
+    || assessment.blockingIssues.some((issue) => issue.code === 'NO_GOAL')
+  ) {
+    return { outcome: 'goal_missing', response: composeGoalMissingResponse(stage), assessment };
   }
   const summary = summariseReadiness(readiness);
   if (summary.open_items.length > 0) {
-    return { outcome: 'readiness_open', response: composeOpenItemsResponse(summary.prose, stage) };
+    return {
+      outcome: 'readiness_open',
+      response: composeOpenItemsResponse(summary.prose, stage, assessment.repairProposal),
+      assessment,
+    };
   }
-  return { outcome: 'readiness_ready', response: composeReadyResponse(stage) };
+  return { outcome: 'readiness_ready', response: composeReadyResponse(stage), assessment };
 }

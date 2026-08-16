@@ -57,7 +57,7 @@
  */
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import {
   carriesConfigureOptionValuePayload,
@@ -147,10 +147,10 @@ function resolveConfigureOptionFacts(params: {
   const graph = parsed.data;
 
   // DERIVED (trap 12): "which options are unconfigured" is not re-implemented
-  // here — it is read off the SAME `computeStructuralReadiness` payload that
+  // here — it is read off the SAME canonical readiness payload that
   // composes the gate reason the user is looking at. The remedy therefore
   // cannot disagree with the blocker copy about which option is blocked.
-  const readiness = computeStructuralReadiness(graph);
+  const readiness = buildCanonicalAnalysisReadyFromGraph(params.graph);
   if (readiness === undefined) return decline('no_readiness');
 
   const unconfigured = readiness.options.filter((o) => o.status === 'needs_encoding');

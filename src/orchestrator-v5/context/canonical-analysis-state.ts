@@ -10,7 +10,7 @@
  *     verdict, but consumes prior-turn facts only.
  *   - the chip floor's `hasAnyRunAnalysisFact` — presence check that ORs
  *     current-turn handlerFacts AND priorFacts.
- *   - `computeStructuralReadiness(graph)` — status + blockers, graph-only.
+ *   - canonical analysis-ready payload — status + blockers, graph-projected.
  *
  * Concrete symptom: on the turn `run_analysis` just ran,
  * `hasAnyRunAnalysisFact === true` while `deriveAnalysisFreshness` returns
@@ -27,9 +27,7 @@
  *     `selectDegradedRunAnalysisFact` (context/freshness.ts) for the
  *     fact-driven freshness verdict, the selected fact and degraded
  *     detection;
- *   - the readiness payload (`computeStructuralReadiness` output, which
- *     conforms to the shared `AnalysisReadyPayload` contract) for status +
- *     blockers.
+ *   - the canonical readiness payload for status + blockers.
  *
  * The unification fix for the documented split: current-turn handlerFacts
  * and prior-turn facts are merged into ONE ordered chain (current first =
@@ -147,7 +145,7 @@ const ANALYSIS_READY_STATUSES: ReadonlySet<string> = new Set([
 /**
  * Coerce a producer-supplied readiness status string to a known
  * AnalysisReadyStatus, or null for absent / unrecognised values. Different
- * producers type `status` differently (the structural readiness helper uses
+ * producers type `status` differently (the canonical readiness projection uses
  * the enum; the egress-emit payload widens it to `string`), so we validate
  * here rather than trusting the inbound type.
  */
@@ -190,14 +188,13 @@ function normaliseDegradedStatus(raw: string | null): string | null {
 
 /**
  * Minimal structural view of the readiness payload the selector reads.
- * Both `computeStructuralReadiness` output and the full
- * `AnalysisReadyPayload` satisfy it — the selector only needs status,
+ * Canonical and boundary `AnalysisReadyPayload` carriers satisfy it — the selector only needs status,
  * blockers, model adjustments and the goal node id. Kept structural so
  * the selector does not couple to any one producer's concrete type.
  */
 /**
  * Read a blocker's `blocker_type` defensively. Blockers arrive either as
- * schema-typed `AnalysisBlocker[]` (from computeStructuralReadiness) or as
+ * schema-typed `AnalysisBlocker[]` (from canonical readiness) or as
  * `unknown[]` (the egress-emit payload types them that way). This is the
  * single place that normalises both — returns null for any shape that does
  * not carry a string `blocker_type`.

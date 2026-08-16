@@ -70,7 +70,7 @@ import {
 } from './edit-graph-referee-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
-import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
+import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { log } from '../../utils/telemetry.js';
 
 // ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ export function buildUnconfiguredOptionsNotice(
 
 /**
  * Structural view of one option row from the readiness payload
- * (`computeStructuralReadiness` → `AnalysisReadyPayload['options']`). The
+ * (canonical readiness projection → `AnalysisReadyPayload['options']`). The
  * real payload carries `option_id` alongside `label`/`status`; the shape is
  * declared here (rather than `{label, status}` only) so callers passing the
  * genuine payload — including test fixtures shaped like it — satisfy the
@@ -186,7 +186,7 @@ export interface GmReadinessOption {
 /**
  * ROADMAP 2.11 / P1-3 — option labels that block analysis, derived from the
  * SAME readiness computation the commit path already runs
- * (`computeStructuralReadiness`): any option not `ready` (needs_encoding /
+ * (canonical readiness projection): any option not `ready` (needs_encoding /
  * needs_user_mapping) fails PLoT's per-option intervention preflight.
  * Labels are graph labels (render-safe at source); id-shaped or empty
  * labels are dropped rather than leaked.
@@ -230,9 +230,8 @@ export function buildGmHeldAppliedChips(
     | undefined,
 ): Array<{ id: string; label: string; message: string; action_type?: 'run_analysis' }> {
   if (readiness?.status === 'ready') return [{ ...GM_HELD_APPLIED_RERUN_CHIP }];
-  const unconfigured = deriveUnconfiguredOptionLabels(readiness);
-  if (unconfigured.length > 0) return [buildConfigureOptionChip(unconfigured[0]!)];
-  return [];
+  const recovery = buildReadinessRecoveryChip(readiness);
+  return recovery ? [recovery] : [];
 }
 
 // ---------------------------------------------------------------------------

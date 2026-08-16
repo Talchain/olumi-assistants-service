@@ -37,6 +37,7 @@ const GRAPH = {
 function narrate(briefText: string | null, completeness: "thin" | "partial" | "complete") {
   return buildPostDraftNarrative({
     graph: GRAPH,
+    analysisReady: { status: "ready" },
     wideningLog: { brief_completeness: completeness } as any,
     briefText,
   });

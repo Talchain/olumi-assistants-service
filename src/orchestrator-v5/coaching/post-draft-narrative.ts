@@ -10,9 +10,10 @@
  *
  *   1. coachingSummary replacement. When `coachingSummary` is present
  *      and passes the strict whole-response gate in
- *      {@link ../coaching/copy-quality-gate.ts}, the summary is used
- *      verbatim as the entire assistant_text. No deterministic opener
- *      is prepended — the summary stands alone or it does not run.
+ *      {@link ../coaching/copy-quality-gate.ts}, readiness remains the final
+ *      authority over its next step. A ready, in-budget summary is used
+ *      verbatim. Every non-ready or readiness-missing summary is discarded;
+ *      the deterministic builder supplies the canonical typed recovery.
  *
  *   2. Sectioned narrative. When the summary is missing or rejected,
  *      the builder assembles up to four blocks separated by blank
@@ -37,8 +38,9 @@
  *          quality gate before being adopted. The block is omitted
  *          entirely when no factor / risk / assumption survives.
  *
- *        Block 4 — Run-analysis nudge
- *          A short call-to-action.
+ *        Block 4 — Readiness-derived next step
+ *          Run analysis only when the typed payload is ready; otherwise name
+ *          one typed blocker/recovery without choosing a value for the user.
  *
  * Style invariants enforced by construction and by the gate:
  *   - British English ("summarise", "favour", "behaviour").
@@ -75,6 +77,7 @@ import {
   gateFullResponse,
   type GateRejectReason,
 } from './copy-quality-gate.js';
+import { buildReadinessNextStep } from './readiness-recovery.js';
 
 /**
  * RC4 proportionate remedies: run a candidate through
@@ -295,9 +298,16 @@ interface NodeLite {
  * `AnalysisReadyPayloadT` (from `src/schemas/analysis-ready.ts`) or the
  * `GraphPatchBlockData['analysis_ready']` shape — whose `options[]`
  * entries use `option_id` instead of `id` — without a type-cast at the
- * call site. Neither `options` nor any option-keyed field is read here.
+ * call site. The narrative reads status as the sole Run authority, then at
+ * most one typed blocker (or one non-ready option fallback) for its CTA.
  */
 export interface PostDraftAnalysisReadyLite {
+  /** Sole authority for whether a Run instruction may be served. */
+  readonly status?: string | undefined;
+  /** Ordered typed recovery candidates; the narrative names at most one. */
+  readonly blockers?: ReadonlyArray<unknown> | undefined;
+  /** Used only for a named fallback when a non-ready payload has no blocker. */
+  readonly options?: ReadonlyArray<unknown> | undefined;
   readonly model_adjustments?: ReadonlyArray<unknown> | undefined;
   readonly bias_findings?: ReadonlyArray<unknown> | undefined;
 }
@@ -325,17 +335,20 @@ export type AssumptionSource =
  */
 export type FallbackReason = 'gate_rejected' | 'no_candidate' | null;
 
+/** Copy-gate failures plus a typed-readiness contradiction after acceptance. */
+export type CoachingSummaryRejectReason = GateRejectReason | 'readiness_conflict';
+
 export interface PostDraftNarrativeTelemetry {
   readonly assumption_source: AssumptionSource;
   readonly coaching_summary_present: boolean;
+  /** True only when the accepted whole response shipped verbatim. */
   readonly coaching_summary_passed_gate: boolean;
   /**
-   * When `coachingSummary` was present but rejected by
-   * {@link gateFullResponse}, the category of the first failing rule.
-   * `null` when the summary was missing or accepted. Category-only —
-   * never carries raw user or coaching text.
+   * The first copy-gate failure, or `readiness_conflict` when typed readiness
+   * prevents an otherwise acceptable summary from shipping. `null` when
+   * missing or when the whole response shipped unchanged.
    */
-  readonly coaching_summary_reject_reason: GateRejectReason | null;
+  readonly coaching_summary_reject_reason: CoachingSummaryRejectReason | null;
   /**
    * RC4 proportionate remedies: true when the accepted coachingSummary was
    * shipped with a deterministic STYLE rewrite applied in place (em/en
@@ -423,6 +436,8 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const summaryCandidate =
     typeof coachingSummary === 'string' ? coachingSummary.trim() : '';
   const coachingSummaryPresent = summaryCandidate.length > 0;
+  const nodes = (graph?.nodes ?? []) as readonly NodeLite[];
+  const nextStep = buildReadinessNextStep(analysisReady, nodes);
 
   // Run the full-response gate once so we can capture both the
   // pass/fail and (on fail) the categorical reject reason for ops
@@ -430,45 +445,52 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const summaryGateResult = coachingSummaryPresent
     ? gateFullResponse(summaryCandidate)
     : null;
-  const summaryRejectReason: GateRejectReason | null =
+  let summaryRejectReason: CoachingSummaryRejectReason | null =
     summaryGateResult && !summaryGateResult.accept
       ? (summaryGateResult.rejectReason ?? null)
       : null;
 
-  // Short-circuit: coachingSummary may replace the WHOLE response when
-  // it passes the strict full-response gate. No deterministic opener is
-  // prepended — the summary stands alone or it does not run.
-  // RC4: render the gate's SANITISED text (style offences such as em/en
-  // dashes are rewritten in place), never the raw candidate.
+  // The copy gate is necessary but not sufficient: typed readiness is the sole
+  // authority for the whole-summary shortcut. Only an exact `ready` status may
+  // ship the gate's sanitised summary. Every non-ready or missing status drops
+  // all model-authored summary bytes and falls through to the deterministic
+  // builder, whose final action is derived only from typed readiness.
   if (summaryGateResult && summaryGateResult.accept) {
-    return {
-      text: summaryGateResult.text ?? summaryCandidate,
-      telemetry: {
-        assumption_source: 'coaching_summary',
-        coaching_summary_present: true,
-        coaching_summary_passed_gate: true,
-        coaching_summary_reject_reason: null,
-        coaching_summary_style_rewritten: summaryGateResult.styleRewritten === true,
-        fallback_reason: null,
-        strengthen_items_count: strengthenItemsCount,
-        bias_findings_count: biasFindingsCount,
-        coaching_bias_signals_count: coachingBiasSignalsCount,
-        // Verbatim-summary path renders no deterministic blocks.
-        widening_log_present: wideningLogPresent,
-        brief_completeness: briefCompleteness,
-        brief_completeness_surfaced: false,
-        additional_checks_surfaced: 0,
-        additional_check_source: null,
-        direction_clarifications_surfaced: 0,
-      },
-    };
-  }
+    const acceptedSummary = summaryGateResult.text ?? summaryCandidate;
+    const isReady = analysisReady?.status === 'ready';
 
-  const nodes = (graph?.nodes ?? []) as readonly NodeLite[];
+    if (isReady && countWords(acceptedSummary) <= MAX_WORDS) {
+      return {
+        text: acceptedSummary,
+        telemetry: {
+          assumption_source: 'coaching_summary',
+          coaching_summary_present: true,
+          coaching_summary_passed_gate: true,
+          coaching_summary_reject_reason: null,
+          coaching_summary_style_rewritten: summaryGateResult.styleRewritten === true,
+          fallback_reason: null,
+          strengthen_items_count: strengthenItemsCount,
+          bias_findings_count: biasFindingsCount,
+          coaching_bias_signals_count: coachingBiasSignalsCount,
+          // Verbatim-summary paths render no deterministic evidence blocks.
+          widening_log_present: wideningLogPresent,
+          brief_completeness: briefCompleteness,
+          brief_completeness_surfaced: false,
+          additional_checks_surfaced: 0,
+          additional_check_source: null,
+          direction_clarifications_surfaced: 0,
+        },
+      };
+    }
+
+    summaryRejectReason = isReady ? 'too_long' : 'readiness_conflict';
+  }
 
   if (nodes.length === 0) {
     return {
-      text: 'Your decision model is ready to explore.',
+      text: analysisReady?.status === 'ready'
+        ? 'Your decision model is ready to explore.'
+        : nextStep,
       telemetry: {
         assumption_source: 'deterministic_fallback',
         coaching_summary_present: coachingSummaryPresent,
@@ -500,24 +522,41 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const optionsBlock = buildOptionsBlock(options);
 
   const tradeOffBullet = buildTradeOffBullet(factors, risks);
+  const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
   // the general-purpose pickers below. Leaving it in both would surface the
   // same question twice, and leaving it ONLY in the generic pool is the defect
-  // being fixed — see `pickDirectionClarifications`.
-  const directionBullets = pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
-    (t) => toDirectionBullet(t),
-  );
-  const generalStrengthenItems = Array.isArray(strengthenItems)
+  // being fixed — see `pickDirectionClarifications`. Non-ready turns cannot
+  // trust it, however: at this boundary a producer-built clarification and an
+  // LLM item are distinguished only by a spoofable ID prefix, and package
+  // deduplication can let the latter occupy that ID. Until provenance is
+  // carried structurally, direction copy follows the same ready-only policy.
+  const directionBullets = mayServeFreeformCoaching
+    ? pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
+        (text) => toDirectionBullet(text),
+      )
+    : [];
+  const generalStrengthenItems = mayServeFreeformCoaching && Array.isArray(strengthenItems)
     ? strengthenItems.filter((i) => !isDirectionClarificationItem(i))
-    : strengthenItems;
+    : [];
 
-  const assumption = pickAssumption({
-    nodes,
-    analysisReady,
-    strengthenItems: generalStrengthenItems,
-    coachingBiasSignals,
-  });
+  // Freeform coaching fragments can contain action copy that the fragment gate
+  // is not designed to classify. For every non-ready or missing status, do not
+  // inspect those bytes at all: graph labels/trade-off, the fixed generic
+  // assumption and typed readiness recovery are the complete narrative.
+  const assumption: AssumptionPick = mayServeFreeformCoaching
+    ? pickAssumption({
+        nodes,
+        analysisReady,
+        strengthenItems: generalStrengthenItems,
+        coachingBiasSignals,
+      })
+    : {
+        text: FIXED_GENERIC_ASSUMPTION,
+        source: 'deterministic_fallback',
+        fallbackReason: 'no_candidate',
+      };
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
   // One extra "check" bullet from the next unused coaching signal. Seed the
@@ -525,12 +564,14 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // so the same signal is never surfaced twice.
   const usedTexts = new Set<string>();
   if (assumptionBullet) usedTexts.add(normaliseForDedup(stripBulletLabel(assumptionBullet)));
-  const additionalChecks = pickAdditionalChecks({
-    strengthenItems: generalStrengthenItems,
-    coachingBiasSignals,
-    alreadyUsed: usedTexts,
-    limit: MAX_ADDITIONAL_CHECKS,
-  });
+  const additionalChecks = mayServeFreeformCoaching
+    ? pickAdditionalChecks({
+        strengthenItems: generalStrengthenItems,
+        coachingBiasSignals,
+        alreadyUsed: usedTexts,
+        limit: MAX_ADDITIONAL_CHECKS,
+      })
+    : [];
   const additionalBullets = additionalChecks.map((c) => toCheckBullet(c.text));
 
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
@@ -554,9 +595,6 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // Brief-completeness advisory (own droppable block). Only the enum is read;
   // it is mapped to a calm advisory phrase and never emitted verbatim.
   const completenessBlock = buildBriefCompletenessLine(wideningLog, briefText);
-
-  const nextStep =
-    'Next, run the analysis to see how the options compare and what could shift the outcome.';
 
   const sectioned = assembleSectionedNarrative({
     confirm: confirmSentence,
@@ -612,13 +650,12 @@ export interface ModelReceiptSummaryInput {
 
 /**
  * Derive the short, pre-analysis "assumption to check" sentence for the F1
- * model-understanding receipt (`analysis_ready.coaching_summary`). Reuses the
- * SAME gated source-priority chain as the post-draft narrative's assumption
- * bullet ({@link pickAssumption}: strengthen → bias finding → coaching bias
- * signal → uncertainty driver), so the structured receipt insight and the
- * chat narrative stay consistent and copy-safe by construction — every
- * non-fallback candidate has passed {@link gateAssumptionFragment} (no IDs,
- * no graph-shape words, no recommendation / winner language).
+ * model-understanding receipt (`analysis_ready.coaching_summary`). Exact typed
+ * readiness is the admission authority: non-ready, missing and unknown states
+ * return `null` before any freeform source is read. Ready states reuse the same
+ * gated source-priority chain as the post-draft narrative's assumption bullet
+ * ({@link pickAssumption}: strengthen → bias finding → coaching bias signal →
+ * uncertainty driver).
  *
  * Returns `null` when only the deterministic generic fallback applies — the
  * receipt must not surface a weak, contentless insight. (The chat narrative
@@ -631,6 +668,8 @@ export interface ModelReceiptSummaryInput {
  * dispatch site rather than inside the builder.
  */
 export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): string | null {
+  if (input.analysisReady?.status !== 'ready') return null;
+
   const nodes = (input.graph?.nodes ?? []) as readonly NodeLite[];
   const pick = pickAssumption({
     nodes,
@@ -641,6 +680,8 @@ export function buildModelReceiptSummary(input: ModelReceiptSummaryInput): strin
   if (pick.source === 'deterministic_fallback') return null;
   return pick.text;
 }
+
+// ----- readiness-controlled next step --------------------------------------
 
 // ----- sentence builders ----------------------------------------------------
 
