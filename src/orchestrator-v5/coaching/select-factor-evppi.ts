@@ -35,8 +35,8 @@ const FactorEvppiPriorityRowSchema = EnrichmentFactorEvppiEntrySchema.pick({
 });
 
 const FACTOR_EVPPI_PARTIAL_WARNING_CODE = 'FACTOR_EVPPI_PARTIAL';
-const UNSAFE_LABEL_CODEPOINT_RE =
-  /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
+const UNSAFE_LABEL_FORMAT_CODEPOINT_RE =
+  /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
 
 type FactorEvppiPriorityRow = ReturnType<typeof FactorEvppiPriorityRowSchema.parse>;
 
@@ -146,6 +146,20 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function hasUnsafeLabelCodepoint(value: string): boolean {
+  for (const character of value) {
+    const codepoint = character.codePointAt(0);
+    if (
+      codepoint !== undefined
+      && ((codepoint >= 0x00 && codepoint <= 0x1f)
+        || (codepoint >= 0x7f && codepoint <= 0x9f))
+    ) {
+      return true;
+    }
+  }
+  return UNSAFE_LABEL_FORMAT_CODEPOINT_RE.test(value);
+}
+
 function readSafeFactorLabel(row: Record<string, unknown>, factorId: string): string | null {
   const rawCandidates = [row.factor_label, row.label]
     .filter((value): value is string => typeof value === 'string')
@@ -156,7 +170,7 @@ function readSafeFactorLabel(row: Record<string, unknown>, factorId: string): st
   const label = candidates[0]!;
   if (
     label.length > 160
-    || UNSAFE_LABEL_CODEPOINT_RE.test(label)
+    || hasUnsafeLabelCodepoint(label)
     || isUnsafeLabel(label, factorId)
   ) return null;
   return label;
