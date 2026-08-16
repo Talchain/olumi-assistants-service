@@ -45,6 +45,7 @@ import {
 } from "../../src/orchestrator-v5/compose.js";
 import {
   WITHHELD_DROPPED_ENRICHMENT_BLOBS,
+  WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS,
   projectTransportEnrichmentForWithheldClaim,
 } from "../../src/orchestrator-v5/compose/withheld-claim-projection.js";
 import { ENRICHMENT_PRODUCER_MANIFEST } from "../../src/orchestrator-v5/context/enrichment-manifest.js";
@@ -208,8 +209,8 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("decision_brief");
   });
 
-  it("keep-list is exactly the CEE compose.ts P0B list (17 keys)", () => {
-    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(17);
+  it("keep-list is exactly the CEE compose.ts P0B list (18 keys)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(18);
   });
 });
 
@@ -547,6 +548,22 @@ const WITHHELD_RULING_BY_TRANSPORT_KEY: ReadonlyMap<string, WithheldRuling> =
     // claim and is the most useful thing still true on such a turn — the same
     // anti-over-suppression ruling that keeps per-option win_probability.
     ["critiques", "projected"],
+    // schemas 0.44.0 — `conditional_winners`. `projected`, and like `critiques`
+    // this ruling had to be DERIVED rather than inherited from the VOI family
+    // above it. Those entries are `pass_through` precisely BECAUSE no field of
+    // those shapes names an option; a ConditionalWinner row names one FOUR
+    // TIMES PER BUCKET (`winner_id`, `winner_label`, `runner_up_id`,
+    // `runner_up_label` — derived at PLoT's `ConditionalBucket`, staging
+    // `a5345a5e`). Passing a row through would name which option leads in each
+    // bucket, on the exact turn the verdict declined to name one.
+    //
+    // Projected rather than DROPPED, deliberately: the claim being withheld is
+    // "which option leads". "This factor flips the answer at 42.5" is a
+    // different claim and is among the most useful things still true on such a
+    // turn — the same anti-over-suppression ruling that keeps per-option
+    // win_probability. `winner_flips` survives because it says THAT the winner
+    // changes, never WHICH option it changes to.
+    ["conditional_winners", "projected"],
   ]);
 
 describe("CEE→UI: every transport key has an explicit withheld ruling", () => {
@@ -572,6 +589,38 @@ describe("CEE→UI: every transport key has an explicit withheld ruling", () => 
       user_message: "Option 'Bravo' does not change anything yet.",
       affected_option_ids: ["opt_b"],
       affected_node_ids: ["n1"],
+    },
+  ];
+  // `conditional_winners` is an ARRAY of rows whose claim lives in two NESTED
+  // buckets, so the generic `{ probe_marker }` above cannot exercise it — it
+  // would be returned untouched and read as `pass_through`, silently
+  // contradicting the declared ruling. Shape derived from PLoT's producer
+  // interface (`src/types/engine-v3.ts` ConditionalWinner / ConditionalBucket,
+  // staging `a5345a5e`), carrying BOTH the option-identity members (removed)
+  // and the factor-level science (kept), so it comes back changed-but-present.
+  probe.conditional_winners = [
+    {
+      factor_id: "factor_unit_cost",
+      factor_label: "Unit cost",
+      split_value: 42.5,
+      split_unit: "GBP",
+      low_bucket: {
+        winner_id: "opt_a",
+        winner_label: "Alpha",
+        runner_up_id: "opt_b",
+        runner_up_label: "Bravo",
+        win_probability: 0.62,
+        mean_outcome: 128000,
+      },
+      high_bucket: {
+        winner_id: "opt_b",
+        winner_label: "Bravo",
+        runner_up_id: "opt_a",
+        runner_up_label: "Alpha",
+        win_probability: 0.55,
+        mean_outcome: 96000,
+      },
+      winner_flips: true,
     },
   ];
 
@@ -615,5 +664,150 @@ describe("CEE→UI: every transport key has an explicit withheld ruling", () => 
     expect(observed.get("decision_review")).toBe("dropped");
     expect(observed.get("decision_brief")).toBe("projected");
     expect(observed.get("factor_evppi")).toBe("pass_through");
+  });
+});
+
+// ============================================================================
+// schemas 0.44.0 — `conditional_winners`: the PROJECTED SHAPE, pinned.
+//
+// WHY THIS BLOCK EXISTS AND WHAT IT ADDS OVER THE RULING REGISTRY ABOVE. That
+// registry proves the key's FATE is `projected` — i.e. the projection changed
+// it somehow. It cannot prove the projection changed the RIGHT THING. A
+// projection that dropped `win_probability` and kept `winner_label` would be
+// recorded `projected` and pass, while shipping the exact leak this ruling
+// exists to prevent, and suppressing the science it exists to preserve.
+//
+// So this block asserts the two halves separately, BY IDENTITY (CLAUDE.md trap
+// 19 — never by a value predicate another member could satisfy):
+//   1. every option-identity member is ABSENT from both buckets, at any depth;
+//   2. every factor-level measurement SURVIVES, with its value intact.
+//
+// The fixture is derived from PLoT's producer interface, not invented: a
+// fixture you wrote yourself is not evidence about the wire (trap 16-inverse),
+// so the shape below mirrors `ConditionalWinner` / `ConditionalBucket` at
+// `src/types/engine-v3.ts`, PLoT staging `a5345a5e`.
+// ============================================================================
+describe("CEE→UI: conditional_winners is projected, not passed through", () => {
+  /** PLoT's real row shape, with a genuine flip between the two buckets. */
+  const plotRow = {
+    factor_id: "factor_unit_cost",
+    factor_label: "Unit cost",
+    split_value: 42.5,
+    split_unit: "GBP",
+    low_bucket: {
+      winner_id: "opt_a",
+      winner_label: "Alpha",
+      runner_up_id: "opt_b",
+      runner_up_label: "Bravo",
+      win_probability: 0.62,
+      mean_outcome: 128000,
+    },
+    high_bucket: {
+      winner_id: "opt_b",
+      winner_label: "Bravo",
+      runner_up_id: "opt_a",
+      runner_up_label: "Alpha",
+      win_probability: 0.55,
+      mean_outcome: 96000,
+    },
+    winner_flips: true,
+  } as const;
+
+  const project = (rows: unknown): Record<string, unknown>[] => {
+    const out = projectTransportEnrichmentForWithheldClaim({
+      conditional_winners: rows,
+    });
+    return (out?.conditional_winners ?? []) as Record<string, unknown>[];
+  };
+
+  /** Every string anywhere in the projected payload, for the leak scan. */
+  const allStrings = (value: unknown, acc: string[] = []): string[] => {
+    if (typeof value === "string") acc.push(value);
+    else if (Array.isArray(value)) value.forEach((v) => allStrings(v, acc));
+    else if (value !== null && typeof value === "object") {
+      Object.values(value as Record<string, unknown>).forEach((v) => allStrings(v, acc));
+    }
+    return acc;
+  };
+
+  it("PRECONDITION — the fixture really does name options (else the test is vacuous)", () => {
+    // Pins the test's own precondition in-test (CLAUDE.md trap 13b): without
+    // this, every absence assertion below would pass just as happily against a
+    // fixture that never carried an option identity in the first place.
+    const names = allStrings(plotRow);
+    expect(names).toContain("opt_a");
+    expect(names).toContain("Alpha");
+    expect(names).toContain("opt_b");
+    expect(names).toContain("Bravo");
+    for (const member of WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS) {
+      expect(Object.keys(plotRow.low_bucket)).toContain(member);
+      expect(Object.keys(plotRow.high_bucket)).toContain(member);
+    }
+  });
+
+  it("every option-identity MEMBER is absent from both buckets", () => {
+    const [row] = project([plotRow]);
+    for (const bucketKey of ["low_bucket", "high_bucket"] as const) {
+      const bucket = row[bucketKey] as Record<string, unknown>;
+      expect(bucket, `${bucketKey} must survive the projection`).toBeDefined();
+      for (const member of WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS) {
+        expect(
+          Object.prototype.hasOwnProperty.call(bucket, member),
+          `${bucketKey}.${member} leaked through the withheld projection — this ` +
+            `names which option leads on a turn whose verdict withheld exactly ` +
+            `that claim`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("no option ID OR LABEL survives anywhere in the projected payload", () => {
+    // The member-name check above can only see members it knows to look for.
+    // This one is value-based and depth-agnostic, so a bucket member added by a
+    // future PLoT release under a NEW name is caught the day it carries an
+    // option identity — the member list is not trusted to stay complete.
+    const strings = allStrings(project([plotRow]));
+    for (const identity of ["opt_a", "opt_b", "Alpha", "Bravo"]) {
+      expect(strings, `option identity ${identity} survived the projection`).not.toContain(
+        identity,
+      );
+    }
+  });
+
+  it("the factor-level science SURVIVES, values intact (not over-suppression)", () => {
+    // The other half of the ruling, and the half a leak-only test cannot see.
+    // Dropping these would make the projection "safe" and useless, which is the
+    // over-suppression failure the acceptance criteria weight equally.
+    const [row] = project([plotRow]);
+    expect(row.factor_id).toBe("factor_unit_cost");
+    expect(row.factor_label).toBe("Unit cost");
+    expect(row.split_value).toBe(42.5);
+    expect(row.split_unit).toBe("GBP");
+    // `winner_flips` says THAT the winner changes, never WHICH option it
+    // changes to — it is the single most useful survivor on a withheld turn.
+    expect(row.winner_flips).toBe(true);
+    for (const bucketKey of ["low_bucket", "high_bucket"] as const) {
+      const bucket = row[bucketKey] as Record<string, unknown>;
+      expect(bucket.win_probability).toBe(plotRow[bucketKey].win_probability);
+      expect(bucket.mean_outcome).toBe(plotRow[bucketKey].mean_outcome);
+    }
+  });
+
+  it("a PERMITTED turn is untouched — the projection is the only thing that strips", () => {
+    // Binds the suppression to the WITHHELD path by identity. Without this, a
+    // projection that stripped identity unconditionally would pass every
+    // assertion above while silently breaking the ordinary rendered card.
+    const transported = toSafeTransportEnrichment({
+      conditional_winners: [plotRow],
+    } as Record<string, unknown>);
+    expect(transported?.conditional_winners).toEqual([plotRow]);
+  });
+
+  it("an empty array and a non-array payload are not corrupted", () => {
+    expect(project([])).toEqual([]);
+    const out = projectTransportEnrichmentForWithheldClaim({
+      conditional_winners: "not-an-array",
+    });
+    expect(out?.conditional_winners).toBe("not-an-array");
   });
 });

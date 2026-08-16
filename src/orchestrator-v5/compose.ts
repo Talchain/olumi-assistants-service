@@ -729,7 +729,20 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   //   - `option_comparison_status` — fixture-proven top-level (value 'computed').
   //   - `conditional_probabilities` — emitted by PLoT for constraint-bearing
   //     analyses (V5 forwards goal_constraints); read with no fallback.
-  // (`conditional_winners` stays a follow-up: valuable but not currently read.)
+  // ⚠ CORRECTED (2026-08-16, ROADMAP 2.177). This line used to read
+  // "`conditional_winners` stays a follow-up: valuable but not currently read."
+  // THE SECOND HALF IS NO LONGER TRUE, and a stale "nothing reads it" sentence
+  // is exactly what keeps a built capability dark: DGAI #728 (UI staging
+  // `8e6f7629`) reads the key at TWO sites — `mapV5AnalysisToReport` takes the
+  // top-level slot with a nested `robustness.conditional_winners` fallback, and
+  // `ConditionalWinnerCards` is mounted on the live arm gated on `length > 0`.
+  // The follow-up is now taken: the key is keep-listed below, with a `projected`
+  // withheld ruling rather than the pass-through the VOI family gets.
+  // ⚠ THE LOCK-STEP WARNING STILL APPLIES, and it now applies to this key too:
+  // this list must equal `CEE_UI_ENRICHMENT_KEEP_LIST` from @talchain/schemas
+  // element-for-element, so it only ever changes in the same train as a schemas
+  // release (0.44.0 here) — see the drift bolt in
+  // tests/contract/cee-to-ui.contract.test.ts.
   'option_comparison_status',
   'conditional_probabilities',
   // Top-level PLoT V2 science fields, confirmed present at this seam against a
@@ -823,6 +836,37 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // backstop because that backstop is bypassed wholesale when
   // CEE_TURN_DEBUG_ENABLED is on — this seam is debug-independent.
   'critiques',
+  // schemas 0.44.0 (ROADMAP 2.177) — per-factor conditional winners. PLoT emits
+  // this at the TOP LEVEL of the /v2/run envelope (`src/routes/v2/run.ts`,
+  // sibling of `edge_e_values`; row shape `src/types/engine-v3.ts`
+  // ConditionalWinner / ConditionalBucket, derived at PLoT staging `a5345a5e`),
+  // and this key's absence from THIS list was where it died — the same one-hop
+  // death the VOI family and `critiques` each had. The UI consumer shipped
+  // FIRST and has been waiting: DGAI #728 (UI staging `8e6f7629`).
+  //
+  // ⚠ THIS KEY NAMES OPTIONS. ITS WITHHELD RULING IS `projected`, NOT
+  // PASS-THROUGH, AND THE VOI FAMILY'S LICENCE ABOVE DOES NOT EXTEND TO IT.
+  // That licence is stated as "no field of any of these shapes names an OPTION
+  // — rows carry a factor id and numbers only". A ConditionalWinner row carries
+  // `low_bucket` / `high_bucket`, each with `winner_id`, `winner_label`,
+  // `runner_up_id`, `runner_up_label` — raw option identity. Passing a row
+  // through a withheld turn would name which option leads in each bucket, which
+  // is precisely the claim the verdict just declined to make.
+  //
+  // So the row is PROJECTED per bucket by
+  // `projectConditionalWinnersForWithheldClaim`: the four identity members go,
+  // and the factor-level science stays (`factor_id`, `factor_label`,
+  // `split_value`, `split_unit`, `winner_flips`, and the now-anonymous
+  // `win_probability` / `mean_outcome`). `winner_flips` says THAT the winner
+  // changes across the split, never WHICH option it changes to.
+  //
+  // Projected rather than DROPPED, deliberately, and for the same reason
+  // `critiques` is: the claim being withheld is "which option leads". "This
+  // factor flips the answer at 42.5" is a different claim and is among the most
+  // useful things still true on such a turn — dropping the key whole would be
+  // the over-suppression failure the acceptance criteria weight equally with
+  // the leak.
+  'conditional_winners',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
@@ -831,9 +875,14 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
 // render today; the value-led coaching contract should decide which to surface
 // (cleaned) rather than this transport shape deciding by omission:
 //   decision_quality, improvement_guidance, review_cards,
-//   insights, decision_brief, conditional_winners, identifiability,
+//   insights, identifiability,
 //   robustness_synthesis, m1_review, m1_coaching, factor_stability,
 //   edge_sensitivity.
+// ⚠ `decision_brief` (schemas 0.19.0) and `conditional_winners` (schemas
+// 0.44.0) were removed from this list when they were keep-listed above. A
+// "dropped fields" comment that still names a transported key is the
+// hand-maintained mirror this file is full of warnings about, and it reads as
+// evidence that a live capability is dark.
 // Tracked as a separate coaching-contract workstream item.
 // NOTE: `confidence_tier` and `flip_thresholds` were previously listed here but
 // are now transported via the keep-list above — proven top-level + leak-free

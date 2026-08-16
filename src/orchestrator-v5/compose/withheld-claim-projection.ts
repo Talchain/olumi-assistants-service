@@ -415,6 +415,47 @@ export function keyDesignatesOrdinalPosition(key: string): boolean {
 export const WITHHELD_DROPPED_OPTION_MEMBERS: readonly string[] = Object.freeze(['rank']);
 
 /**
+ * The `conditional_winners[].{low,high}_bucket` members that designate an
+ * option by CONTAINER rather than by key name (schemas 0.44.0, ROADMAP 2.177).
+ *
+ * ⚠ WHY THIS IS A CONTAINER-SCOPED LIST AND NOT A NEW KEY-NAME PATTERN — this
+ * is the load-bearing derivation of the whole ruling, and getting it wrong in
+ * either direction breaks something live.
+ *
+ * `keyDesignatesLeadingOption` does NOT match `winner_id` / `winner_label`, and
+ * that is DELIBERATE, not a gap to be closed here. Its `key_winning_option`
+ * pattern is `^(?:winning|winner|best|preferred|chosen)_option(_id|_label|_name)?$`
+ * — anchored, and matching `winner_option_id`, never a bare `winner_id`. The
+ * anchor is doing live work: `robustness.fragile_edges[].alternative_winner_id`
+ * / `alternative_winner_label` are on EVERY body and are explicitly NOT leader
+ * designations (they name the counterfactual winner if that edge flips, which
+ * is science the withheld disclosure invites the user to act on, and which
+ * PR #717 shipped a fix to carry through). **Widening the shared family to catch
+ * `winner_id` would suppress those too, and the shared family is what the
+ * Layer-3 egress alarm scans with — so the damage would land in two modules at
+ * once.**
+ *
+ * In a conditional-winner bucket the key name is innocent and the CONTAINER
+ * makes the claim: "the winner OF THIS BUCKET" IS an option designation. That
+ * is exactly the case {@link projectLeaderDesignatingMembers}' second parameter
+ * exists for, and the same shape `near_tie` already uses.
+ *
+ * The runner-up members ride along for the same container reason, and by the
+ * same logic that keeps `second_option_id` off the key-name family: naming the
+ * runner-up of a bucket is naming an option's rank within it.
+ *
+ * Exported for the drift test, which asserts each entry really is dropped by
+ * the projection — a declared list the code does not honour is the mirror
+ * failure this file's own docstring warns about (CLAUDE.md trap #12).
+ */
+export const WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS: readonly string[] = Object.freeze([
+  'winner_id',
+  'winner_label',
+  'runner_up_id',
+  'runner_up_label',
+]);
+
+/**
  * The `robustness` members recognised by NAME rather than by container, listed
  * here for the drift test ONLY — the projection does not read this constant, it
  * reads {@link keyDesignatesLeadingOption}. The test asserts the shared reader
@@ -741,6 +782,17 @@ export function projectTransportEnrichmentForWithheldClaim(
       if (critiques !== undefined) out[key] = critiques;
       continue;
     }
+    // schemas 0.44.0 — `conditional_winners` names an option in each of its two
+    // buckets (`winner_id` / `winner_label` / `runner_up_*`), so like
+    // `critiques` and unlike the 0.30.0 VOI family it cannot pass through a
+    // withheld turn unchanged. See
+    // {@link WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS} for why these are
+    // container-scoped rather than a widening of the shared key-name family.
+    if (key === 'conditional_winners') {
+      const winners = projectConditionalWinnersForWithheldClaim(value);
+      if (winners !== undefined) out[key] = winners;
+      continue;
+    }
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -813,6 +865,62 @@ function projectDecisionBriefForWithheldClaim(brief: unknown): Record<string, un
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Remove option identity from one `conditional_winners[]` row's two buckets,
+ * keeping every factor-level measurement verbatim (schemas 0.44.0).
+ *
+ * WHAT SURVIVES AND WHY. `factor_id`, `factor_label`, `split_value`,
+ * `split_unit` and `winner_flips` are all factor-level and name nobody —
+ * `winner_flips` says THAT the winning option changes across the split, never
+ * WHICH option it changes to. Inside each bucket the four identity members go
+ * and `win_probability` / `mean_outcome` stay: stripped of the name, a bucket
+ * probability measures the split without ranking the options, and the
+ * 2026-07-27 anti-over-suppression ruling keeps per-option probabilities on a
+ * withheld turn deliberately.
+ *
+ * WHY THE ROWS ARE KEPT AT ALL. The claim being withheld is "which option
+ * leads". "This factor flips the answer, and it flips at 42.5" is a different
+ * claim, and it is among the most useful things still true on a turn where a
+ * recommendation is being withheld — the same reasoning that keeps `critiques`
+ * rows and per-option `win_probability`. Dropping the key whole would be the
+ * over-suppression failure the acceptance criteria weight equally with the leak.
+ *
+ * A non-object row, and a non-array payload, are returned UNTOUCHED rather than
+ * dropped — deliberately different from the sibling `decision_brief` /
+ * `robustness` branches, and worth stating because the inconsistency is only
+ * apparent. Those two branches inspect a BLOB whose members are the claim, so
+ * an uninspectable blob cannot be shown. Here the claim lives strictly inside
+ * `low_bucket` / `high_bucket`; a row shape we cannot walk carries no bucket we
+ * failed to strip, and `projectLeaderDesignatingMembers` already refuses a
+ * non-object bucket by returning `undefined`, which omits the key. The egress
+ * alarm remains the backstop for anything neither reaches.
+ *
+ * A bucket that projects to nothing is OMITTED, never emitted as `{}` — the
+ * same decision `near_tie` makes, for the same reason: an empty object
+ * positively asserts an empty analysis, and absence is the shape a consumer
+ * already tolerates.
+ */
+export function projectConditionalWinnersForWithheldClaim(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((row) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const src = row as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, member] of Object.entries(src)) {
+      if (key !== 'low_bucket' && key !== 'high_bucket') {
+        out[key] = member;
+        continue;
+      }
+      const bucket = projectLeaderDesignatingMembers(
+        member,
+        WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS,
+      );
+      if (bucket !== undefined) out[key] = bucket;
+    }
+    return out;
+  });
 }
 
 /**
