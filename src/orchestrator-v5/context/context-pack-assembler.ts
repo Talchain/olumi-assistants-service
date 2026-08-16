@@ -908,7 +908,15 @@ export function projectFocus(
   if (selection === undefined) return null;
   // An EMPTY selection is not a selection: a truthy object on every turn would
   // make every turn look selection-aware.
-  if (selection.requested_ids.length === 0) return null;
+  //
+  // ⚠ A selection carrying ONLY unreadable references is still a selection —
+  // the user clicked something. It resolves to no elements and discloses
+  // `could_not_check` rather than going quiet, which is the whole point of the
+  // channel. Node selections are unaffected: `unreadable_ref_ids` is empty for
+  // every one of them, so this predicate is byte-identical there.
+  if (selection.requested_ids.length === 0 && selection.unreadable_ref_ids.length === 0) {
+    return null;
+  }
 
   const capped = selection.elements.slice(0, FOCUS_MAX_ELEMENTS);
   const omitted = selection.elements.length - capped.length;
@@ -948,8 +956,13 @@ export function projectFocus(
   return {
     elements,
     unresolved: deriveUnresolved(selection),
-    requested_count: selection.requested_ids.length,
-    unresolved_count: selection.unresolved_ids.length,
+    // Counts describe what the USER selected, so an unreadable reference is
+    // counted as requested AND unresolved — reporting 0 requested for a turn
+    // where someone clicked an edge would be the same silence one field over.
+    // Both addends are 0 for every node selection, so this is byte-identical
+    // there.
+    requested_count: selection.requested_ids.length + selection.unreadable_ref_ids.length,
+    unresolved_count: selection.unresolved_ids.length + selection.unreadable_ref_ids.length,
     ...(omitted > 0 ? { elements_omitted: omitted } : {}),
   };
 }
@@ -960,7 +973,17 @@ export function projectFocus(
  * ENTIRELY on whether the graph was actually read.
  */
 function deriveUnresolved(selection: TurnSelection): ContextPackFocus['unresolved'] {
-  if (selection.unresolved_ids.length === 0) return 'none';
+  if (selection.unresolved_ids.length === 0) {
+    // ⭐ TWO QUESTIONS, KEPT APART (see `TurnSelection.unreadable_ref_ids`).
+    // Nothing failed to RESOLVE, but a reference may have been unreadable —
+    // the user pointed at something whose address we cannot parse. That is
+    // `could_not_check`: we did not look and find nothing, we could not look.
+    // Claiming `not_in_model` here would assert an absence we never tested.
+    return selection.unreadable_ref_ids.length === 0 ? 'none' : 'could_not_check';
+  }
+  // Unchanged, and deliberately still keyed on `graph_read` ALONE: for a
+  // reference we COULD read, the only question left is whether the model was
+  // readable. Byte-identical for every node selection.
   return selection.graph_read === 'degraded' ? 'could_not_check' : 'not_in_model';
 }
 

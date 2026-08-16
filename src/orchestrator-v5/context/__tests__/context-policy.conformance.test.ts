@@ -138,6 +138,9 @@ function assembleAnchorPack(overrideBrief: string | null = ANCHOR_BRIEF): Contex
       elements: [{ id: 'opt_hire_local', kind: 'option', label: 'Hire locally' }],
       unresolved_ids: [],
       graph_read: 'ok_present',
+      // Required on TurnSelection; empty for every node selection (the `as never`
+      // cast means the compiler cannot enforce it at this site).
+      unreadable_ref_ids: [],
     } as never,
   });
 }

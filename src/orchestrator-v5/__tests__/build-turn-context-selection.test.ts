@@ -339,10 +339,56 @@ describe('buildTurnContext — the selected element becomes groundable context',
     });
 
     // React Flow can identify the real fixture edge as `e5`, but GraphV3 has
-    // no stable edge.id. Ignoring that opaque token preserves the prior
-    // behaviour without making it answer-bearing or falsely declaring it gone.
-    expect('selection' in ctx).toBe(false);
+    // no stable edge.id, so the token is not an ADDRESS we can resolve.
+    //
+    // ⚠ 2026-08-16 — THIS USED TO ASSERT `'selection' in ctx === false`, i.e.
+    // it pinned SILENCE. The comment beside it said ignoring the token
+    // "preserves the prior behaviour without making it answer-bearing or
+    // falsely declaring it gone" — two of those three goals are still met and
+    // the third was never a goal worth having. Paul's manual test caught the
+    // cost: the pack carried no `focus`, no `FOCUS_INSTRUCTION` was appended,
+    // and the model answered as though nothing had been clicked. The user had
+    // clicked an edge and asked about it.
+    //
+    // The token is STILL not an honesty authority: nothing resolves, nothing
+    // is answer-bearing, and nothing is declared gone. What changed is that we
+    // now SAY we could not read it, via `unreadable_ref_ids` →
+    // `focus.unresolved: 'could_not_check'`.
+    expect('selection' in ctx).toBe(true);
+    expect(ctx.selection?.unreadable_ref_ids).toEqual([OPAQUE_REAL_EDGE_ID]);
+    // Nothing resolved, nothing invented — the original guarantee, intact.
+    expect(ctx.selection?.elements).toEqual([]);
+    expect(ctx.selection?.requested_ids).toEqual([]);
+    expect(ctx.selection?.unresolved_ids).toEqual([]);
+    // ⭐ AND `selectionHonesty` STAYS ABSENT, which is what keeps the turn
+    // ANSWERABLE. Its only consumer is the turn-executor's zero-resolved
+    // projection, which replaces the whole response with a refusal; populating
+    // it here is exactly the regression #992 shipped and reverted. The model
+    // is informed through the pack, not through a refusal.
     expect('selectionHonesty' in ctx).toBe(false);
+  });
+
+  it('SCOPING PIN — a MIXED selection does NOT populate the unreadable channel', async () => {
+    // The edges-only scoping is load-bearing: it is what keeps the resolved
+    // node path byte-identical. A mixed selection already produces a truthful
+    // focus about its nodes, and folding unreadable edge refs in would change
+    // `unresolved` for ordinary node selections carrying a stray edge id.
+    //
+    // ⭐ THIS TEST EXISTS BECAUSE A MUTANT SURVIVED WITHOUT IT. Flattening the
+    // producer scoping (populating for MIXED too) passed the whole suite —
+    // the assembler-level mixed assertions pin the CONTRACT with hand-built
+    // fixtures, and nothing drove the PRODUCER. A survivor is a claim either
+    // way, so it is demonstrated here rather than asserted equivalent.
+    const ctx = await buildTurnContext(BASE, 'req-mixed-scoping', {
+      sessionStore: storeWithGraph(persistedGraph()),
+      selectedElements: selection(['factor_price'], [OPAQUE_REAL_EDGE_ID]),
+    });
+
+    expect(ctx.selection?.unreadable_ref_ids).toEqual([]);
+    // PRECONDITION PIN — the node half genuinely resolved, so this is a
+    // statement about the scoping and not about an empty selection.
+    expect(ctx.selection?.requested_ids).toEqual(['factor_price']);
+    expect(ctx.selection?.elements).toHaveLength(1);
   });
 
   it('STABLE MODEL: resolution does not mutate the persisted graph', async () => {

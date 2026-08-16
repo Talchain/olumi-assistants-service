@@ -286,6 +286,7 @@ describe('projectGroundedSelection — `unresolved` never conflates "not there" 
       elements: [],
       unresolved_ids: ['ghost_a', 'ghost_b'],
       graph_read: graphRead,
+      unreadable_ref_ids: [],
     };
   }
 

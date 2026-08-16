@@ -414,6 +414,33 @@ export interface TurnSelection {
    * `degraded`   — the read FAILED. Unresolved means UNKNOWN, not absent.
    */
   readonly graph_read: CanonicalGraphReadState['status'];
+  /**
+   * References the turn carried that we could not READ into a canonical
+   * identity at all — producer-local tokens such as React Flow's `e5`, which
+   * GraphV3 cannot address because it has no stable `edge.id`.
+   *
+   * ⭐⭐ THIS IS A DIFFERENT QUESTION FROM `graph_read`, AND THE TWO MUST NOT
+   * COLLAPSE — the same rule `graph_read`'s own docblock states, one level
+   * out. Ask them separately:
+   *
+   *   · `graph_read`          — "could we read THE MODEL?"
+   *   · `unreadable_ref_ids`  — "could we read WHAT THE USER POINTED AT?"
+   *
+   * Both can yield `could_not_check` downstream, and they are still not the
+   * same observation: a degraded read means we could not look anything up, an
+   * unreadable ref means the lookup was fine and the ADDRESS was not ours to
+   * parse. Expressing the second by pretending the first happened would have
+   * been the cheap fix here, and it would have corrupted every other consumer
+   * of `graph_read` — which is precisely the conflation this estate has
+   * already paid for twice.
+   *
+   * ⚠ EMPTY FOR EVERY NODE SELECTION, and that is load-bearing: it is what
+   * makes the resolved-node path byte-identical across this change. Populated
+   * ONLY for an EDGES-ONLY selection (see `buildTurnContext`), because a mixed
+   * selection already produces a truthful focus about its nodes and widening
+   * it there would move the hot path for no reported defect.
+   */
+  readonly unreadable_ref_ids: readonly string[];
 }
 
 /**
@@ -776,10 +803,36 @@ export async function buildTurnContext(
   // second view of the graph that could disagree with the one the rest of the
   // turn reasons over. Pure and read-only: `resolveTurnSelection` copies out of
   // the persisted nodes and writes nothing back.
+  // ⚠ 2026-08-16 — AN EDGES-ONLY SELECTION USED TO REACH THE MODEL AS SILENCE.
+  //
+  // GraphV3 has no stable `edge.id`, so the ids the canvas sends for edges are
+  // producer-local React Flow tokens (`e5`). Nothing here can address them, so
+  // `resolveTurnSelection` produced no selection, the pack carried no `focus`
+  // key, `FOCUS_INSTRUCTION` was never appended, and the model answered as
+  // though the user had clicked nothing. The user HAD clicked an edge and
+  // asked about it.
+  //
+  // Silence is the wrong failure mode; `could_not_check` is the right one, and
+  // the pack already has the vocabulary for it. Nothing is resolved and nothing
+  // is guessed — we simply say we could not read the address.
+  //
+  // ⭐ SCOPED TO EDGES-ONLY, deliberately. A selection that also carries node
+  // ids already produces a truthful focus about those nodes; folding unreadable
+  // edge refs into it would change `unresolved` for ordinary node selections
+  // that happen to carry a stray edge id, which is a hot-path behaviour change
+  // with no reported defect behind it. The mixed case stays exactly as it was
+  // and is reported rather than widened.
+  const selectedNodeIds = options.selectedElements?.node_ids ?? [];
+  const selectedEdgeIds = options.selectedElements?.edge_ids ?? [];
+  const unreadableEdgeRefIds =
+    selectedNodeIds.length === 0
+      ? selectedEdgeIds.filter((id) => normaliseSelectedEdgeIdentity(id) === null)
+      : [];
   const turnSelection = resolveTurnSelection(
-    options.selectedElements?.node_ids ?? [],
+    selectedNodeIds,
     scenarioState.graph,
     scenarioState.read.status,
+    unreadableEdgeRefIds,
   );
   // Edge selections participate ONLY in this existence classification. The
   // node-only `turnSelection` above remains the sole answer-grounding input,
@@ -860,8 +913,16 @@ export function resolveTurnSelection(
   nodeIds: readonly string[],
   persistedGraph: unknown | null,
   graphRead: CanonicalGraphReadState['status'],
+  /**
+   * References the turn carried that could not be READ into a canonical
+   * identity (see {@link TurnSelection.unreadable_ref_ids}). Defaulted so the
+   * three-argument node-selection call stays exactly as it was.
+   */
+  unreadableRefIds: readonly string[] = [],
 ): TurnSelection | null {
-  if (nodeIds.length === 0) return null;
+  // An edges-only selection has no node ids and still needs a selection
+  // object, so the model can be told we could not read what it pointed at.
+  if (nodeIds.length === 0 && unreadableRefIds.length === 0) return null;
 
   const wanted = new Set(nodeIds);
   const elements: SelectedElementContext[] = [];
@@ -902,6 +963,7 @@ export function resolveTurnSelection(
     elements,
     unresolved_ids: nodeIds.filter((id) => !found.has(id)),
     graph_read: graphRead,
+    unreadable_ref_ids: [...unreadableRefIds],
   };
 }
 
