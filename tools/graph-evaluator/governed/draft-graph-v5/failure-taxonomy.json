@@ -1,0 +1,51 @@
+{
+  "schema_version": "olumi.draft_graph.eval_failures.v1",
+  "classes": {
+    "provenance": [
+      "PACK_BASE_MISMATCH",
+      "PROMPT_HASH_MISMATCH",
+      "CODE_LAYER_DRIFT",
+      "CORPUS_DRIFT",
+      "MODEL_ROUTE_DRIFT",
+      "LEGACY_UNDISPOSITIONED"
+    ],
+    "provider": [
+      "AUTH_FAILED",
+      "RATE_LIMITED",
+      "TIMEOUT",
+      "PROVIDER_5XX",
+      "STRUCTURED_OUTPUTS_REJECTED",
+      "MAX_TOKENS_TRUNCATION",
+      "NON_JSON"
+    ],
+    "records_contract": [
+      "RECORD_SET_SCHEMA_INVALID",
+      "RECORD_PROJECTION_FAILED",
+      "COMPLETION_FAILED_DEGRADED",
+      "COMPLETION_REGRESSED",
+      "RECORD_DISCLOSURE_UNSURFACED"
+    ],
+    "graph_contract": [
+      "GRAPH_SCHEMA_INVALID",
+      "STRUCTURAL_INVALID",
+      "CANONICAL_READINESS_BLOCKED",
+      "CANONICAL_READINESS_INTERNAL",
+      "PROVENANCE_MISSING"
+    ],
+    "comparison": [
+      "PAIR_INCOMPLETE",
+      "MODEL_CONFIG_MISMATCH",
+      "QUALITY_GAIN_BELOW_THRESHOLD",
+      "STRUCTURAL_REGRESSION",
+      "READINESS_REGRESSION",
+      "PROVENANCE_REGRESSION"
+    ]
+  },
+  "rules": [
+    "Provider and pack failures are not quality losses and must not be scored as zero-quality cases.",
+    "A completion failure is fail-soft only when pass-one projection survives; otherwise classify the records contract failure.",
+    "A candidate cannot pass on mean quality while any structural, readiness or provenance non-regression gate fails.",
+    "An unbased AI inference is a governed comparison metric, not an automatic case failure; a candidate may not increase its matched total.",
+    "An incomplete or configuration-mismatched pair is HOLD, never PASS or FAIL."
+  ]
+}

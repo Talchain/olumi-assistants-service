@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/cli.ts",
+    "governed:draft-graph:verify": "tsx src/governed-draft-graph-cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

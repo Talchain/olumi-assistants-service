@@ -1,0 +1,178 @@
+{
+  "schema_version": "olumi.draft_graph.governed_eval.v1",
+  "component": "draft_graph_prompt_quality",
+  "status": "BASELINE_REQUIRED",
+  "candidate_status": "HOLD_UNTIL_EXACT_BASELINE",
+  "captured_at": "2026-08-16T07:30:00Z",
+  "serving": {
+    "environment": "staging",
+    "health_url": "https://cee-staging.onrender.com/healthz",
+    "route": "/assist/v1/draft-graph",
+    "task_id": "draft_graph",
+    "operation": "draft_graph",
+    "git_sha": "424f912912ec8e56edca9091ed39e966be9a6f5f",
+    "git_tree": "de7ae6f5818a730c4a0931e7aece380a13291483",
+    "health_build": "424f912",
+    "service_version": "1.12.0"
+  },
+  "prompt": {
+    "prompt_id": "draft_graph_default",
+    "store_version": 195,
+    "source": "pms",
+    "disposition": "live",
+    "critical": true,
+    "path": "baseline/pms-draft-graph-v195.txt",
+    "sha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+    "bytes": 59637,
+    "characters": 59293
+  },
+  "model": {
+    "provider": "anthropic",
+    "model_id": "claude-sonnet-4-6",
+    "assignment_authority": "pms_model_config",
+    "staging": "claude-sonnet-4-6",
+    "production": "claude-sonnet-4-6",
+    "model_config_path": "models/claude-sonnet-4-6.json",
+    "model_config_sha256": "e31464efb4cf1a558f09b3ef18a386ad0f5afe06180fe0258ae5e43605e8abca",
+    "thinking": "disabled",
+    "temperature_policy": "anthropicTemperatureFor(model, { thinking: false })",
+    "structured_outputs": "required",
+    "structured_outputs_evidence": "Serving v195 traces record structured_outputs_used=true; every governed result must independently attest this field.",
+    "primary_calls_per_arm": 14,
+    "completion_calls_per_arm_max": 14
+  },
+  "composition": {
+    "system_block_order": [
+      "pms_v195",
+      "draft_records_instruction"
+    ],
+    "user_suffix_order": [
+      "untrusted_brief_envelope",
+      "draft_compliance_reminder"
+    ],
+    "layers": [
+      {
+        "id": "draft_records_instruction",
+        "authority": "code",
+        "source_path": "src/cee/draft/records/instruction.ts",
+        "source_sha256": "b3c337fcc6fc4189e3d589aaf360c18efe8bea0e0501c09ab31de49792aafc7f",
+        "content_sha256": "37f271b2377bc1f8a84c8b822af1a626aea22832ca767cfa8f897076f8c69af8",
+        "bytes": 6748,
+        "characters": 6704
+      },
+      {
+        "id": "draft_records_grammar",
+        "authority": "code",
+        "source_path": "src/cee/draft/records/grammar.ts",
+        "source_sha256": "54b9efa0b5dca2a6eeb1eca9fe17e661c3842fd6c1a86ca09f245240db3c66c7",
+        "content_sha256": "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7"
+      },
+      {
+        "id": "draft_records_projection",
+        "authority": "code",
+        "source_path": "src/cee/draft/records/projector.ts",
+        "source_sha256": "f202b56b53bbad26b2505ffdd849b1952907ea776e36d31d2e28b50356b8eec1"
+      },
+      {
+        "id": "draft_records_seam",
+        "authority": "code",
+        "source_path": "src/cee/draft/records/seam.ts",
+        "source_sha256": "5d702beea4a60ba8be99118e0b7ffcd9a16c75027710d631c219e583b17828e8"
+      },
+      {
+        "id": "draft_records_completion",
+        "authority": "code",
+        "source_path": "src/cee/draft/records/completion.ts",
+        "source_sha256": "de392066aac7cb9446fdf5e0917238481864dd9a6f6675c01e3adff0132e0183"
+      },
+      {
+        "id": "draft_compliance_reminder",
+        "authority": "code",
+        "source_path": "src/adapters/llm/anthropic.ts",
+        "source_sha256": "eeba67ec115f9f03aac86dc75c2a7ddc151ee37f589b7984b7de28fb23a690f3",
+        "content_sha256": "3ca1ca9c4c6460344f197876c82f3247251952522e1fe43dc4d7c457cb9bb898",
+        "bytes": 288,
+        "characters": 280
+      },
+      {
+        "id": "untrusted_brief_envelope",
+        "authority": "code",
+        "source_path": "src/adapters/llm/untrusted-envelope.ts",
+        "source_sha256": "a0e6a672c3e988fdb098651b4365c643c35c4c8401712253a6335ddc9d0b6a55"
+      },
+      {
+        "id": "canonical_analysis_readiness",
+        "authority": "code",
+        "source_path": "src/orchestrator/tools/analysis-ready-helper.ts",
+        "source_sha256": "8cd37bad059d1fb3e891c55caab9e016ac90913c78bdff2597dd4b0fb0840a2a"
+      }
+    ]
+  },
+  "corpus": {
+    "directory": "briefs",
+    "cardinality": 14,
+    "order": [
+      { "id": "01-simple-binary", "sha256": "7a63255c11c4b78172e215a0357606a2d51482e3900f10e1e20fc0b9af3e2254" },
+      { "id": "02-multi-option-constrained", "sha256": "259032ae2da09dca344083b859472a4d7f49e1ab9475fe8bb5bfd5457960e4d3" },
+      { "id": "03-vague-underspecified", "sha256": "8859a4576204bd6a32081c19c9baed06c696c8dafd5e4e05cb6daa78780cd498" },
+      { "id": "04-conflicting-constraints", "sha256": "9d4a8bfeedbea9474a290fb46361badceea53bbc00ca14f079e837c2ef66f8c2" },
+      { "id": "05-product-feature", "sha256": "eb7d41a6f6124659f12e51a3fcd7f5f38527d81d6a463f7d4f4c6618d6618325" },
+      { "id": "06-operations-warehouse", "sha256": "510322557b1e9644d376f1561e040c8d2d0d295ade4948ef5cdd6644c5579f42" },
+      { "id": "07-cloud-migration", "sha256": "06fa0bf3500bfe51576827fa8ce0135bdfd308344d7795f8c9b46984b8e31520" },
+      { "id": "08-channel-strategy", "sha256": "18ca35802197312f3ccc6138e1f2e6ba6bf7c448ceab893d92639b48885db738" },
+      { "id": "09-nested-subdecision", "sha256": "06ba7269d4b137de1895d573f8fa1effdc4c93ae0c45bd4785b70a1b6dc4d086" },
+      { "id": "10-many-observables", "sha256": "4265ae06cfe0eb4e41382cc14f4abb2432038c022da5fca0b633579661a6fcdb" },
+      { "id": "11-feedback-loop-trap", "sha256": "6a423c7fef197d326e75c74e3d266645fb44dce10c6bb0c93e0b7e46bb03fef1" },
+      { "id": "12-similar-options", "sha256": "fd0164dbbab7fefa9fb6b443e5fb938019d2e7548040f2853a717799b56204a7" },
+      { "id": "13-forced-binary", "sha256": "43e485155c3f1c631139cd0397bb8ea15834f30187fd2326353d59904840c31a" },
+      { "id": "14-qualitative-strategy", "sha256": "c958cd32cb5f6b14ca1d57cf9f8aa5298b2a43687b1ee47f99d73790f738b8fc" }
+    ],
+    "excluded_noncanonical_files": [
+      "hiring-staging.md",
+      "pricing-staging.md"
+    ]
+  },
+  "rubric": {
+    "id": "draft-graph-governed-v1",
+    "legacy_signal": "draft-graph-rubric-2.0.0",
+    "legacy_scorer_source_sha256": "49dbb9f0e16a17236b964ebe02506439503a8293e3d40ac96faa81f6da014203",
+    "legacy_validator_source_sha256": "6fdd1ca837703b308f5a725116a8fd4c544ede2d041c907a9898aadcbf7b503f",
+    "required_axes": [
+      "production_records_adapter_success",
+      "structural_validity",
+      "canonical_analysis_readiness",
+      "provenance_coverage",
+      "record_disclosure_preservation",
+      "legacy_quality_signal"
+    ],
+    "meaningful_gain": {
+      "minimum_mean_legacy_delta": 0.03,
+      "minimum_case_wins": 8,
+      "maximum_case_losses": 3,
+      "maximum_single_case_legacy_regression": 0.10
+    },
+    "non_regression": {
+      "adapter_success_count": true,
+      "structural_valid_count": true,
+      "canonical_ready_count": true,
+      "canonical_blocking_issue_count": true,
+      "missing_provenance_count": true,
+      "unbased_inference_count": true
+    },
+    "known_legacy_rubric_limits": [
+      "The legacy runner bypasses the records grammar, projection and completion path.",
+      "The legacy default corpus loads 16 Markdown files although its documentation claims 14.",
+      "No canonical brief activates expected_constraints, ratio_metrics or expect_external_factor, making 30 percent of the legacy composite not-applicable full credit.",
+      "The records contract does not emit the retired coaching block, so the legacy coaching dimension is not an authority for this component."
+    ]
+  },
+  "governance": {
+    "external_state_mutation": false,
+    "pms_write": false,
+    "model_or_environment_change": false,
+    "candidate_path": null,
+    "candidate_sha256": null,
+    "legacy_disposition_path": "legacy-disposition.json",
+    "failure_taxonomy_path": "failure-taxonomy.json"
+  }
+}
