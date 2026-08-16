@@ -157,18 +157,33 @@ describe('the loop terminates', () => {
     expect(text).toContain(`"${OPTION}" still has no effect value on ${FACTOR}`);
   });
 
-  it('C2 — KNOWN-DROPPED: the qualitative no-digit class does NOT terminate, and the set is exactly this', () => {
-    // Trap 22f's honest-gap protocol: a gap the suite can SEE. REDs if the set
-    // grows (a new phrasing started failing) OR shrinks (one started working
-    // and the record went stale). Closing it needs a value parsed for THIS
-    // option×factor — real work, rowed, not smuggled into a copy fix.
-    const stillDropped = QUALITATIVE_VALUE_KNOWN_DROPPED.filter(
-      (phrasing) => !carriesConfigureOptionValuePayload(phrasing),
-    );
-    expect(stillDropped).toEqual([...QUALITATIVE_VALUE_KNOWN_DROPPED]);
+  it('C2 — KNOWN-DROPPED: the recorded set is EXACTLY these four phrasings', () => {
+    // ⚠ THE FIRST VERSION OF THIS TEST WAS A GUARD AGREEING WITH ITSELF, and a
+    // mutant caught it: it filtered the constant and compared the result to the
+    // SAME constant, so deleting a member shrank both sides and it stayed
+    // green. A derived check can prove the members still behave as recorded; it
+    // can never prove the RECORD is complete. That needs a hand-written list —
+    // the one place trap 12d says a mirror is the right instrument.
+    expect([...QUALITATIVE_VALUE_KNOWN_DROPPED]).toEqual([
+      "Set the X option's effect on Y to high",
+      "Set the X option's effect on Y to about a third",
+      "Set the X option's effect on Y to roughly half",
+      "Set the X option's effect on Y to low",
+    ]);
+  });
 
-    // POSITIVE CONTROL — the probe can see the other answer, so the assertion
-    // above is a measurement and not a predicate that always returns false.
+  it('C2 — KNOWN-DROPPED: every recorded phrasing genuinely still fails to terminate', () => {
+    // Trap 22f's honest-gap protocol: a gap the suite can SEE. This half REDs
+    // when a phrasing starts WORKING (the record went stale and the gap has
+    // partly closed); the half above REDs when the record is edited. Closing
+    // the gap needs a value parsed for THIS option×factor — real work, rowed,
+    // not smuggled into a copy fix.
+    for (const phrasing of QUALITATIVE_VALUE_KNOWN_DROPPED) {
+      expect(carriesConfigureOptionValuePayload(phrasing), phrasing).toBe(false);
+    }
+
+    // POSITIVE CONTROL — the probe can see the other answer, so the loop above
+    // is a measurement and not a predicate that always returns false.
     expect(
       carriesConfigureOptionValuePayload("Set the X option's effect on Y to 0.6"),
     ).toBe(true);
