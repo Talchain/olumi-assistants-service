@@ -201,6 +201,7 @@
  * PURE. Never throws, never mutates its input, and returns a new record.
  */
 
+import { EnrichmentConditionalWinnerSchema } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
@@ -454,6 +455,16 @@ export const WITHHELD_DROPPED_CONDITIONAL_BUCKET_MEMBERS: readonly string[] = Ob
   'runner_up_id',
   'runner_up_label',
 ]);
+
+/**
+ * The published 0.44 row contract, lifted to the whole transport array.
+ *
+ * Validation must happen before projecting any row. Accepting the valid prefix
+ * of a malformed array would turn a producer-contract failure into a partial
+ * scientific claim, while passing an uninspectable row through would preserve
+ * exactly the option identity this withheld-turn gate exists to remove.
+ */
+const WithheldConditionalWinnersInputSchema = EnrichmentConditionalWinnerSchema.array();
 
 /**
  * The `robustness` members recognised by NAME rather than by container, listed
@@ -887,25 +898,26 @@ function projectDecisionBriefForWithheldClaim(brief: unknown): Record<string, un
  * rows and per-option `win_probability`. Dropping the key whole would be the
  * over-suppression failure the acceptance criteria weight equally with the leak.
  *
- * A non-object row, and a non-array payload, are returned UNTOUCHED rather than
- * dropped — deliberately different from the sibling `decision_brief` /
- * `robustness` branches, and worth stating because the inconsistency is only
- * apparent. Those two branches inspect a BLOB whose members are the claim, so
- * an uninspectable blob cannot be shown. Here the claim lives strictly inside
- * `low_bucket` / `high_bucket`; a row shape we cannot walk carries no bucket we
- * failed to strip, and `projectLeaderDesignatingMembers` already refuses a
- * non-object bucket by returning `undefined`, which omits the key. The egress
- * alarm remains the backstop for anything neither reaches.
+ * MALFORMED INPUT FAILS CLOSED AS ONE UNIT. The PLoT response seam and the
+ * persisted enrichment carrier are intentionally open records, and the final
+ * wire schema does not validate this nested value. A non-array payload or one
+ * invalid/null/primitive/missing-bucket row is therefore not safe evidence that
+ * the remaining rows mean what they claim. The whole key is omitted on a
+ * withheld turn; no valid prefix is surfaced and no uninspectable value reaches
+ * the browser. Permitted turns never call this projection and stay byte-exact.
  *
  * A bucket that projects to nothing is OMITTED, never emitted as `{}` — the
  * same decision `near_tie` makes, for the same reason: an empty object
  * positively asserts an empty analysis, and absence is the shape a consumer
  * already tolerates.
  */
-export function projectConditionalWinnersForWithheldClaim(value: unknown): unknown {
-  if (!Array.isArray(value)) return value;
-  return value.map((row) => {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+export function projectConditionalWinnersForWithheldClaim(
+  value: unknown,
+): unknown[] | undefined {
+  const parsed = WithheldConditionalWinnersInputSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+
+  return parsed.data.map((row) => {
     const src = row as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [key, member] of Object.entries(src)) {
