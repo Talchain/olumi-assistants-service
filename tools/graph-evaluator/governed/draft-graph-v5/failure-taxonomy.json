@@ -41,8 +41,9 @@
       "PAIR_INCOMPLETE",
       "MODEL_CONFIG_MISMATCH",
       "DISCLOSURE_EVIDENCE_HOLD",
+      "SCORE_EVIDENCE_MISMATCH",
       "QUALITY_EVIDENCE_INCOMPLETE",
-      "QUALITY_GAIN_BELOW_THRESHOLD",
+      "QUALITY_AUTHORITY_UNAVAILABLE",
       "STRUCTURAL_REGRESSION",
       "READINESS_REGRESSION",
       "PROVENANCE_REGRESSION"
@@ -51,10 +52,11 @@
   "rules": [
     "Provider and pack failures are not quality losses and must not be scored as zero-quality cases.",
     "A completion failure is fail-soft only when pass-one projection survives; otherwise classify the records contract failure.",
-    "A candidate cannot pass on mean quality while any structural, readiness or provenance non-regression gate fails.",
+    "Structural, readiness and provenance are non-regression guards; improvements on those axes are not positive-quality promotion authority.",
     "An unbased AI inference is a governed comparison metric, not an automatic case failure; a candidate may not increase its matched total.",
     "An incomplete or configuration-mismatched pair is HOLD, never PASS or FAIL.",
     "Missing, non-integer, non-finite, negative, or over-generated served-disclosure counts fail closed; any unsurfaced disclosure keeps comparison on HOLD.",
-    "Incomplete 14-case legacy quality evidence is HOLD and is never converted into a quality FAIL."
+    "Stored scores and summaries are untrusted: verifier and comparator must recompute them from exact captures and briefs and reject any mismatch.",
+    "The legacy scorer is executable diagnostic-only. Complete or incomplete legacy gains cannot produce PASS or a quality FAIL; until a grounding-sensitive positive-quality authority exists, eligible comparisons remain HOLD with QUALITY_AUTHORITY_UNAVAILABLE."
   ]
 }

@@ -205,14 +205,9 @@
       "canonical_analysis_readiness",
       "provenance_coverage",
       "record_disclosure_preservation",
-      "legacy_quality_signal"
+      "grounding_sensitive_positive_quality_authority"
     ],
-    "meaningful_gain": {
-      "minimum_mean_legacy_delta": 0.03,
-      "minimum_case_wins": 8,
-      "maximum_case_losses": 3,
-      "maximum_single_case_legacy_regression": 0.10
-    },
+    "legacy_disposition": "diagnostic_only",
     "non_regression": {
       "adapter_success_count": true,
       "structural_valid_count": true,
@@ -237,7 +232,7 @@
     "legacy_disposition_path": "legacy-disposition.json",
     "legacy_disposition_sha256": "ce1ea6ef1e16366ca22b41686ba862323a64690661530ff74f87ac6c222d091c",
     "failure_taxonomy_path": "failure-taxonomy.json",
-    "failure_taxonomy_sha256": "09fb7403b08f027ea2881fc8a8e921c2dbd3809b89aba2d622837e0a5d616241",
+    "failure_taxonomy_sha256": "a48c6f3a7b28c222e5ee4f2fa12e2f5023f3f981894308ab737e989c1f60f8c2",
     "deployed_evidence_path": "deployed-evidence.json",
     "deployed_evidence_sha256": "a23706029f5e21ecbb83eba445ecbe1dbf107f9f960f733b6517397de3b722e5"
   }

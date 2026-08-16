@@ -20,17 +20,17 @@ Total primary-path latency was 360.3 seconds: mean 25.7s, p50 23.1s, p95 37.1s, 
 
 - Only the forced-binary brief was canonically ready. Richer strategic work is materially less likely to reach downstream science, while narrow framing is easiest to operationalise.
 - The exact serving SHA produced `draft_graph_cee_graph_invalid` in automatic run 31931611366, then succeeded minutes later in run 31931789517. The same failure also occurred before the science change in run 31876646668. Reliability is stochastic and cannot be erased by selecting the successful rerun.
-- The old scalar quality measure has only 5/14 coverage on the current records contract. A candidate cannot honestly demonstrate the required matched 14-case gain until that informational signal is replaced or made contract-compatible.
+- The old scalar quality measure has only 5/14 coverage and can reward ungrounded numeric diversity or superficial completeness. It is executable for diagnosis only: even complete matched gains cannot authorize promotion until a grounding-sensitive positive-quality authority is governed.
 - The live wrapper suppresses all generated projector disclosures. Improving prompt bytes while users remain unable to see refused assertions would optimize around a downstream authority loss.
 
 The frozen result, including safe graph captures, per-case scores, exact identity, failure taxonomy, latency, token and cost evidence, is `baseline/run-b9389df-claude-sonnet-4-6.json` and is hash-pinned by `manifest.json`.
 
 ## Reproducible workflow
 
-1. Run `npm run governed:draft-graph:verify`. Any prompt, code-layer, corpus, model, evidence, disposition, or result hash drift is a hard stop.
+1. Run `npm run governed:draft-graph:verify`. Any prompt, code-layer, corpus, model, evidence, disposition, or result hash drift is a hard stop. Verification deterministically re-scores every frozen capture and recomputes the summary, so re-hashing edited precomputed values does not establish trust.
 2. Use `npm run governed:draft-graph:rescore` only to re-run deterministic local scoring over the frozen captures. It makes no provider call; a controlled manifest hash update is required afterward.
 3. Do not re-run the live baseline, manually retry a case, or add a candidate arm without a new bounded authorization and a newly frozen result identity.
-4. A future candidate must have a distinct path and SHA-256 pin, then use the same 14 briefs in exact order, model, production adapter, records grammar, completion policy, composition and rubric. It must deliver a meaningful matched gain with no adapter, structure, readiness, provenance, or disclosure regression; incomplete legacy coverage or any unsurfaced disclosure remains HOLD.
+4. A future candidate must have a distinct path and SHA-256 pin, then use the same 14 briefs in exact order, model, production adapter, records grammar, completion policy and composition. The comparator re-scores both capture sets and enforces adapter, structure, readiness, provenance and disclosure non-regression. It always returns `HOLD: QUALITY_AUTHORITY_UNAVAILABLE` after those checks until a separate grounding-sensitive positive-quality authority is governed; legacy score gains never produce `PASS` or a quality `FAIL`.
 
 ## Legacy disposition
 

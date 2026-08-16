@@ -108,12 +108,7 @@ export interface GovernedDraftManifest {
     readonly legacy_signal: string;
     readonly legacy_scorer_source_sha256: string;
     readonly legacy_validator_source_sha256: string;
-    readonly meaningful_gain: {
-      readonly minimum_mean_legacy_delta: number;
-      readonly minimum_case_wins: number;
-      readonly maximum_case_losses: number;
-      readonly maximum_single_case_legacy_regression: number;
-    };
+    readonly legacy_disposition: "diagnostic_only";
   };
   readonly governance: {
     readonly candidate_path: string | null;
@@ -266,6 +261,7 @@ interface GovernedBaselineArtifactEnvelope {
   readonly baseline_status?: unknown;
   readonly candidate_status?: unknown;
   readonly run?: unknown;
+  readonly summary?: unknown;
 }
 
 function isGovernedRun(value: unknown): value is GovernedRun {
@@ -284,6 +280,16 @@ function exactStrings(
 ): boolean {
   return actual.length === expected.length &&
     actual.every((value, index) => value === expected[index]);
+}
+
+/**
+ * Governed evidence is generated deterministically. Requiring the stored JSON
+ * value to match the freshly generated value exactly makes a re-hashed score or
+ * summary edit fail closed instead of turning precomputed diagnostics into an
+ * authority.
+ */
+function exactJsonValue(actual: unknown, expected: unknown): boolean {
+  return JSON.stringify(actual) === JSON.stringify(expected);
 }
 
 function hasExactRunCoverage(
@@ -432,6 +438,7 @@ export async function verifyGovernedPack(
       equivalence_scope?: unknown;
       equivalence_excludes?: unknown;
     };
+    rubric?: { legacy_disposition?: unknown };
   };
   if (
     runtimeManifest.status !== "BASELINE_FROZEN" ||
@@ -442,12 +449,13 @@ export async function verifyGovernedPack(
     runtimeManifest.baseline.candidate_calls !== 0 ||
     runtimeManifest.baseline.equivalence_scope !==
       "first_primary_prompt_composition_and_model_under_pinned_direct_adapter_configuration" ||
-    runtimeManifest.baseline.equivalence_excludes !== "whole_route_and_request_bytes"
+    runtimeManifest.baseline.equivalence_excludes !== "whole_route_and_request_bytes" ||
+    runtimeManifest.rubric?.legacy_disposition !== "diagnostic_only"
   ) {
     problem(
       problems,
       "GOVERNANCE_STATUS_INVALID",
-      "the frozen baseline must remain BASELINE_FROZEN + HOLD_WITH_EVIDENCE with 14 baseline calls, no retries, and zero candidate calls",
+      "the frozen baseline must remain BASELINE_FROZEN + HOLD_WITH_EVIDENCE with 14 baseline calls, no retries, zero candidate calls, and a diagnostic-only legacy scorer",
     );
   }
 
@@ -721,8 +729,13 @@ export async function verifyGovernedPack(
         "the frozen baseline artifact must remain COMPLETE + HOLD_WITH_EVIDENCE",
       );
     }
-    if (
-      !isGovernedRun(baselineRun) ||
+    if (!isGovernedRun(baselineRun)) {
+      problem(
+        problems,
+        "GOVERNANCE_ARTIFACT_DRIFT",
+        "baseline result does not contain the exact complete hash-pinned 14-case baseline run",
+      );
+    } else if (
       baselineRun.arm !== "baseline" ||
       JSON.stringify(baselineRun.identity) !== JSON.stringify(expectedIdentity) ||
       !hasExactRunCoverage(baselineRun, expectedIds) ||
@@ -737,6 +750,32 @@ export async function verifyGovernedPack(
         "GOVERNANCE_ARTIFACT_DRIFT",
         "baseline result does not contain the exact complete hash-pinned 14-case baseline run",
       );
+    } else {
+      // Never trust the stored score/summary, even when a rewritten artifact has
+      // been re-hashed in the manifest. Replay the exact captures against the
+      // hash-pinned briefs and production readiness authority, then require the
+      // precomputed evidence to be byte-for-byte JSON-equivalent.
+      const recomputedRun = await scoreGovernedRun(
+        "baseline",
+        baselineRun.identity,
+        baselineRun.cases,
+        manifest,
+      );
+      const recomputedSummary = summariseGovernedScores(recomputedRun.scores);
+      if (!exactJsonValue(baselineRun.scores, recomputedRun.scores)) {
+        problem(
+          problems,
+          "GOVERNANCE_ARTIFACT_DRIFT",
+          "baseline precomputed scores differ from deterministic capture replay",
+        );
+      }
+      if (!exactJsonValue(artifact.summary, recomputedSummary)) {
+        problem(
+          problems,
+          "GOVERNANCE_ARTIFACT_DRIFT",
+          "baseline precomputed summary differs from deterministic capture replay",
+        );
+      }
     }
   } catch (error) {
     problem(
@@ -1155,11 +1194,11 @@ function comparisonIdentity(identity: GovernedRunIdentity): string {
   });
 }
 
-export function compareGovernedRuns(
+export async function compareGovernedRuns(
   baseline: GovernedRun,
   candidate: GovernedRun,
   manifest: GovernedDraftManifest,
-): GovernedComparison {
+): Promise<GovernedComparison> {
   const reasons: string[] = [];
   const expectedIds = manifest.corpus.order.map((item) => item.id);
   const manifestHasCanonical14 = manifest.corpus.cardinality === 14 &&
@@ -1210,8 +1249,52 @@ export function compareGovernedRuns(
       "CANDIDATE_IDENTITY_INVALID: candidate prompt identity must match the manifest's complete distinct path/hash pin, use candidate version, and match every case capture",
     );
   }
-  const baselineSummary = summariseGovernedScores(baseline.scores);
-  const candidateSummary = summariseGovernedScores(candidate.scores);
+
+  // The comparator is a trust boundary: stored scores are diagnostics, not
+  // inputs to a promotion decision. Re-score both exact capture sets against
+  // the pinned briefs and reject any supplied-score mismatch. Every summary and
+  // legacy delta below is derived only from these replayed runs.
+  let recomputedBaseline: GovernedRun | undefined;
+  let recomputedCandidate: GovernedRun | undefined;
+  if (baselineCoverageExact) {
+    try {
+      recomputedBaseline = await scoreGovernedRun(
+        "baseline",
+        baseline.identity,
+        baseline.cases,
+        manifest,
+      );
+      if (!exactJsonValue(baseline.scores, recomputedBaseline.scores)) {
+        reasons.push(
+          "SCORE_EVIDENCE_MISMATCH: baseline precomputed scores differ from deterministic capture replay",
+        );
+      }
+    } catch (error) {
+      reasons.push(`PAIR_INCOMPLETE: baseline capture replay failed: ${String(error)}`);
+    }
+  }
+  if (candidateCoverageExact) {
+    try {
+      recomputedCandidate = await scoreGovernedRun(
+        "candidate",
+        candidate.identity,
+        candidate.cases,
+        manifest,
+      );
+      if (!exactJsonValue(candidate.scores, recomputedCandidate.scores)) {
+        reasons.push(
+          "SCORE_EVIDENCE_MISMATCH: candidate precomputed scores differ from deterministic capture replay",
+        );
+      }
+    } catch (error) {
+      reasons.push(`PAIR_INCOMPLETE: candidate capture replay failed: ${String(error)}`);
+    }
+  }
+
+  const baselineScores = recomputedBaseline?.scores ?? [];
+  const candidateScores = recomputedCandidate?.scores ?? [];
+  const baselineSummary = summariseGovernedScores(baselineScores);
+  const candidateSummary = summariseGovernedScores(candidateScores);
   const baselineDisclosures = captureDisclosureEvidence(baseline.cases);
   const candidateDisclosures = captureDisclosureEvidence(candidate.cases);
   if (baselineDisclosures.invalid_count > 0 || candidateDisclosures.invalid_count > 0) {
@@ -1238,25 +1321,27 @@ export function compareGovernedRuns(
     ["missing_provenance_count", "missing provenance", "at_most"],
     ["unbased_inference_count", "unbased inference", "at_most"],
   ];
-  for (const [key, label, direction] of hardPairs) {
-    const before = baselineSummary[key];
-    const after = candidateSummary[key];
-    if (typeof before !== "number" || typeof after !== "number") continue;
-    if (direction === "at_least" ? after < before : after > before) {
-      const family = label.includes("provenance") ||
-        label.includes("inference")
-        ? "PROVENANCE_REGRESSION"
-        : label.includes("readiness") || label.includes("blocking")
-          ? "READINESS_REGRESSION"
-          : "STRUCTURAL_REGRESSION";
-      reasons.push(`${family}: ${label} moved ${before} -> ${after}`);
+  if (recomputedBaseline && recomputedCandidate) {
+    for (const [key, label, direction] of hardPairs) {
+      const before = baselineSummary[key];
+      const after = candidateSummary[key];
+      if (typeof before !== "number" || typeof after !== "number") continue;
+      if (direction === "at_least" ? after < before : after > before) {
+        const family = label.includes("provenance") ||
+          label.includes("inference")
+          ? "PROVENANCE_REGRESSION"
+          : label.includes("readiness") || label.includes("blocking")
+            ? "READINESS_REGRESSION"
+            : "STRUCTURAL_REGRESSION";
+        reasons.push(`${family}: ${label} moved ${before} -> ${after}`);
+      }
     }
   }
 
   const deltas: number[] = [];
   for (let index = 0; index < manifest.corpus.cardinality; index += 1) {
-    const before = baseline.scores[index]?.legacy.overall_score;
-    const after = candidate.scores[index]?.legacy.overall_score;
+    const before = baselineScores[index]?.legacy.overall_score;
+    const after = candidateScores[index]?.legacy.overall_score;
     if (typeof before !== "number" || typeof after !== "number") continue;
     deltas.push(after - before);
   }
@@ -1266,9 +1351,10 @@ export function compareGovernedRuns(
   const wins = deltas.filter((value) => value > 0).length;
   const losses = deltas.filter((value) => value < 0).length;
   const worst = deltas.length > 0 ? Math.min(...deltas) : null;
-  const gate = manifest.rubric.meaningful_gain;
   const qualityEvidenceComplete = baselineCoverageExact &&
     candidateCoverageExact &&
+    recomputedBaseline !== undefined &&
+    recomputedCandidate !== undefined &&
     baselineSummary.legacy_scored_count === manifest.corpus.cardinality &&
     candidateSummary.legacy_scored_count === manifest.corpus.cardinality &&
     deltas.length === manifest.corpus.cardinality;
@@ -1276,28 +1362,23 @@ export function compareGovernedRuns(
     reasons.push(
       `QUALITY_EVIDENCE_INCOMPLETE: legacy coverage baseline=${baselineSummary.legacy_scored_count}/${manifest.corpus.cardinality}, candidate=${candidateSummary.legacy_scored_count}/${manifest.corpus.cardinality}, paired=${deltas.length}/${manifest.corpus.cardinality}`,
     );
-  } else if (
-    meanDelta === null ||
-    meanDelta < gate.minimum_mean_legacy_delta ||
-    wins < gate.minimum_case_wins ||
-    losses > gate.maximum_case_losses ||
-    worst === null ||
-    worst < -gate.maximum_single_case_legacy_regression
-  ) {
-    reasons.push(
-      `QUALITY_GAIN_BELOW_THRESHOLD: mean=${meanDelta ?? "incomplete"}, wins=${wins}, losses=${losses}, worst=${worst ?? "incomplete"}`,
-    );
   }
 
-  const isHold = reasons.some((item) =>
-    item.startsWith("PAIR_INCOMPLETE") ||
-    item.startsWith("MODEL_CONFIG_MISMATCH") ||
-    item.startsWith("CANDIDATE_IDENTITY_INVALID") ||
-    item.startsWith("DISCLOSURE_EVIDENCE_HOLD") ||
-    item.startsWith("QUALITY_EVIDENCE_INCOMPLETE"),
+  // The legacy composite rewards ungrounded numeric diversity and superficial
+  // completeness. It remains executable for diagnosis, but cannot make either
+  // a positive or negative quality claim. Until a grounding-sensitive positive
+  // authority is governed, even an otherwise eligible complete pair is HOLD.
+  reasons.push(
+    "QUALITY_AUTHORITY_UNAVAILABLE: the retired legacy scorer is diagnostic-only and no grounding-sensitive positive-quality promotion authority is governed",
+  );
+
+  const hasHardRegression = reasons.some((item) =>
+    item.startsWith("STRUCTURAL_REGRESSION") ||
+    item.startsWith("READINESS_REGRESSION") ||
+    item.startsWith("PROVENANCE_REGRESSION"),
   );
   return {
-    verdict: reasons.length === 0 ? "PASS" : isHold ? "HOLD" : "FAIL",
+    verdict: hasHardRegression ? "FAIL" : "HOLD",
     reasons,
     mean_legacy_delta: meanDelta,
     wins,
