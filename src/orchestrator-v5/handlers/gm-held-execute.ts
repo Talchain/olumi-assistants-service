@@ -68,6 +68,7 @@ import {
   GM_HELD_HANDLER_ID,
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
+import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
@@ -167,6 +168,30 @@ export function buildUnconfiguredOptionsNotice(
     `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write in the real numbers.`
   );
 }
+
+/**
+ * P0 (2026-08-16) — the honest decline for a confirmed hold that could not be
+ * applied. provisional_doctrine_v0; no em dash, no internal tokens.
+ *
+ * It replaces the generic proposed-change 'invalid' copy ("The offer I had
+ * open is no longer valid"), which was FALSE on this path twice over: the
+ * offer WAS valid, and the graph had NOT moved (the hash precondition passed
+ * to reach the apply at all). What actually happened is that the confirmed
+ * operations could not be applied to the model.
+ *
+ * Three things this sentence must do, all learned from the live failure:
+ *  - state the true outcome (the change did not go through);
+ *  - state the model is unchanged, so the user is not left guessing whether a
+ *    partial edit landed (nothing is ever partially persisted here — the
+ *    batch is refused whole);
+ *  - name a next step the user can actually take. The failure is
+ *    DETERMINISTIC given the same batch and the same graph, so "try the chip
+ *    again" is precisely the futile instruction that produced the loop;
+ *    restating the change is the only thing that can succeed.
+ */
+export const GM_HELD_APPLY_FAILED_ASSISTANT_TEXT =
+  'I could not apply that change to the model, so nothing has changed. Tell me ' +
+  'the change again and I will work it out against the model as it stands now.';
 
 /**
  * Structural view of one option row from the readiness payload
@@ -323,6 +348,68 @@ export type GmHeldExecuteOutcome =
 // ---------------------------------------------------------------------------
 
 /**
+ * ⭐ DOES A MATCHED CONFIRMATION SATISFY THIS GOVERNING VERDICT? — the confirm
+ * path's contract, stated ONCE and by name.
+ *
+ * This was previously an inline `governing !== 'held' && governing !== 'proceed'`
+ * with a one-line comment. The behaviour was right and the CONTRACT was
+ * implicit, which is how the P0 was misdiagnosed: the resume re-emits
+ * `v5.candidate_mutation.held` for every candidate, so the deployed logs read
+ * as though the confirmation had been re-blocked, when in fact a governing
+ * `held` is ACCEPTED here by design. Naming the predicate makes the two
+ * questions impossible to conflate (CLAUDE.md trap 21):
+ *
+ *   the referee asks   "would this candidate apply WITHOUT a confirmation?"
+ *   this predicate asks "does the confirmation the user just gave answer it?"
+ *
+ * THE CLASSES, and why each falls where it does:
+ *
+ *  ACCEPT — the confirmation answers the blocker by construction. The pending
+ *  was minted FOR this change set and the caller has already proven the graph
+ *  has not moved (`preconditions.graph_hash` vs a like-for-like recompute), so
+ *  the confirmation is scoped to exactly these operations on exactly this
+ *  base. It is not a blanket bypass: it cannot license a DIFFERENT change set,
+ *  and it cannot license this one against a moved graph.
+ *    - `held`    — the confirmation-class postures (REMOVE_UNCONFIRMED,
+ *                  STRUCTURAL_APPLY_HELD, USER_PROTECTED_ENTITY) plus the
+ *                  three "we cannot establish authority" rungs
+ *                  (FRAME_UNAVAILABLE, CURRENT_GRAPH_UNREADABLE,
+ *                  FRESHNESS_UNRESOLVED). ⚠ The latter three ASK rather than
+ *                  refuse BY RATIFIED DESIGN — RULING A4 (Paul, 2026-08-05),
+ *                  stated at the producer in reason-codes.ts: they "HOLD for
+ *                  confirmation rather than refusing". A yes IS their answer.
+ *    - `proceed` — nothing blocked it in the first place.
+ *
+ *  DECLINE — re-validated on every resume, and a yes can never override them.
+ *    - `stale`            — BASE_HASH_DIVERGED. The graph moved; the
+ *                           confirmation was for a base that no longer exists.
+ *    - `rejected`         — integrity / field-safety. The change is impossible
+ *                           or forbidden, and consent does not make it either.
+ *    - `clarify_required` — the batch does not express a mutation to confirm.
+ *
+ * Exhaustive over `EditGmGoverningVerdict` on purpose: the compiler, not this
+ * comment, is what forces a new verdict to be classified here rather than
+ * silently falling into whichever branch the inequality happened to give it.
+ */
+export function confirmationSatisfies(governing: EditGmGoverningVerdict): boolean {
+  switch (governing) {
+    case 'held':
+    case 'proceed':
+      return true;
+    case 'stale':
+    case 'rejected':
+    case 'clarify_required':
+      return false;
+    default: {
+      // Fail closed: an unclassified verdict is never satisfied by a confirm.
+      const _never: never = governing;
+      void _never;
+      return false;
+    }
+  }
+}
+
+/**
  * Re-referee + apply + receipt for a confirmed hold. Pure with respect to
  * storage; never throws.
  */
@@ -346,7 +433,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     requestId: input.requestId,
     dispatchPath: 'gm_held_resume',
   });
-  if (decision.governing !== 'held' && decision.governing !== 'proceed') {
+  if (!confirmationSatisfies(decision.governing)) {
     return { status: 'referee_blocked', governing: decision.governing };
   }
 
@@ -412,6 +499,39 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     input.currentGraph,
   );
 
+  // ── 2c. Cascade-redundant remove_edge elision (P0, 2026-08-16) ─────────
+  // `applyRemoveNode` cascade-removes every edge incident to the node it
+  // removes. A confirmed delete batch that orders the node removal BEFORE its
+  // incident edge removals therefore hands the applier ops whose target the
+  // cascade has already taken out, and `applyRemoveEdge` throws
+  // EDGE_NOT_FOUND — refusing a deletion the user explicitly confirmed
+  // (deployed logs, scenario 0f9c4469, 5-op option delete).
+  //
+  // Only ops a remove_node EARLIER IN THIS BATCH provably cascaded are
+  // elided; the end state is identical either way (see cascade-removes.ts).
+  // An edge absent for any OTHER reason still reaches the applier and still
+  // declines the batch honestly — pinned by case (b2) of
+  // gm-confirm-resume-apply-p0.test.ts.
+  //
+  // ⚠ The atomicity guard below is deliberately still run against the FULL
+  // confirmed batch (`opsToApply`), NOT this elided view: eliding an op from
+  // the APPLY must not excuse it from the POSTCONDITION. Every edge the user
+  // confirmed removing must be absent from the persisted graph, whether the
+  // applier removed it directly or the cascade did.
+  const cascadeElision = elideCascadeRedundantRemoveEdges(opsToApply);
+  const opsForApplier: PatchOperation[] = [...cascadeElision.operations];
+  if (cascadeElision.elidedEdgePaths.length > 0) {
+    log.info(
+      {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        elided_edge_count: cascadeElision.elidedEdgePaths.length,
+        operations_count: opsToApply.length,
+      },
+      'GM held-execute — elided remove_edge ops already cascaded by a remove_node in the same confirmed batch',
+    );
+  }
+
   // ── 3. Apply through the existing apply path ──────────────────────────
   let mutatedGraph: PersistedGraphV3T;
   // P1b — the applier's RAW candidate (before the GraphV3 re-parse strips
@@ -420,7 +540,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   let rawAppliedGraph: GraphV3T | null = null;
   try {
     const applied = applyAndValidateMutation(input.currentGraph, (clone) => {
-      const candidate = applyPatchOperations(clone, opsToApply);
+      const candidate = applyPatchOperations(clone, opsForApplier);
       rawAppliedGraph = candidate;
       clone.nodes = candidate.nodes;
       clone.edges = candidate.edges;

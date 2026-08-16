@@ -220,6 +220,7 @@ import {
 } from './routing/proposed-change-synthesis.js';
 import {
   buildGmHeldAppliedReceipt,
+  GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
   buildGmHeldAppliedChips,
   deriveUnconfiguredOptionLabels,
   executeGmHeldResume,
@@ -2906,13 +2907,30 @@ export async function runTurnExecutor(
       const commitProposedChangeRecovery = async (
         decisionStatus: 'superseded' | 'already_applied' | 'invalid',
         pathTag: string,
+        /**
+         * P0 (2026-08-16) — honest-decline overrides for the GM held-execute
+         * resume. The generic 'invalid' copy ("the offer I had open is no
+         * longer valid") is FALSE on that path: the offer was valid and the
+         * graph had not moved (the hash precondition passed to reach the
+         * apply), so the user was told their confirmation expired when in
+         * fact the apply failed. Worse, the generic recovery commits WITHOUT
+         * consuming the pending, so the confirm chip survived a deterministic
+         * failure and every subsequent click reproduced it identically.
+         * Callers that know better supply the true sentence and retire the
+         * dead confirmation.
+         */
+        overrides?: {
+          readonly assistantText?: string;
+          readonly consumedPendingRefs?: readonly string[];
+        },
       ): Promise<TurnExecutorRunResult> => {
         const recoveryAssistantText =
-          decisionStatus === 'superseded'
+          overrides?.assistantText ??
+          (decisionStatus === 'superseded'
             ? PROPOSAL_SUPERSEDED_RESPONSE
             : decisionStatus === 'already_applied'
               ? PROPOSAL_ALREADY_APPLIED_RESPONSE
-              : 'The offer I had open is no longer valid. Tell me what to explore next.';
+              : 'The offer I had open is no longer valid. Tell me what to explore next.');
         const recoveryResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: recoveryAssistantText,
@@ -2936,6 +2954,9 @@ export async function runTurnExecutor(
             llm_calls_used: 0,
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
+            ...(overrides?.consumedPendingRefs !== undefined
+              ? { consumedPendingRefs: [...overrides.consumedPendingRefs] }
+              : {}),
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
@@ -3305,7 +3326,29 @@ export async function runTurnExecutor(
             },
             'GM held-execute — confirmed hold declined (fail-closed); nothing persisted',
           );
-          return commitProposedChangeRecovery('invalid', `gm_held_execute_${outcome.status}`);
+          // P0 (2026-08-16) — an honest decline, and a RETIRED confirmation.
+          //
+          // The generic 'invalid' recovery told the user "the offer I had open
+          // is no longer valid" and left the pending live. Both halves were
+          // wrong: the offer was valid (the hash precondition passed to get
+          // here), and because the failure is DETERMINISTIC given the same
+          // batch and the same graph, leaving the chip live meant every
+          // subsequent click reproduced the identical failure. The user
+          // confirmed, was told the offer had expired, watched the change come
+          // back, and had no way out.
+          //
+          // Consuming the spent confirmation is the honest half of the fix:
+          // the chip cannot do what it says, so it must not remain on offer.
+          // The copy names the true outcome and the one next step that can
+          // actually succeed.
+          return commitProposedChangeRecovery(
+            'invalid',
+            `gm_held_execute_${outcome.status}`,
+            {
+              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              consumedPendingRefs: [heldPending.chip_id],
+            },
+          );
         }
         // Honest applied path. The receipt text ships ONLY when the commit
         // below succeeds (a throw surfaces STATE_COMMIT_FAILED instead).
@@ -3485,6 +3528,19 @@ export async function runTurnExecutor(
         const appliedFacts: ExecutedGmOutcome['fact'][] = [];
         const consumedRefs: string[] = [];
         const declinedLabels: string[] = [];
+        /**
+         * P0 (2026-08-16) — chips of holds that were ATTEMPTED and declined.
+         *
+         * Consumed ONLY on the all-declined branch, where nothing applied and
+         * the graph is therefore unchanged, making every decline deterministic
+         * and its chip futile to re-offer. On the partially-applied path the
+         * graph MOVED, so a decline is genuinely re-assessable and the pending
+         * lifecycle owns it — see the `consumedPendingRefs` comment there.
+         *
+         * A hold the chain never REACHED (mid-chain hash-derivation failure)
+         * is not recorded here at all: it was never spent.
+         */
+        const attemptedDeclinedRefs: string[] = [];
         let lastExecuted: ExecutedGmOutcome | null = null;
         for (let i = 0; i < holds.length; i += 1) {
           if (workingHash === null) {
@@ -3518,6 +3574,8 @@ export async function runTurnExecutor(
               'GM held-execute (all) — one confirmed hold declined (fail-closed); the others are unaffected',
             );
             declinedLabels.push(resolveProposalRenderCopy(holds[i]!.action).label);
+            // Attempted and refused — the chip is spent (see the declaration).
+            attemptedDeclinedRefs.push(holds[i]!.chip_id);
             continue;
           }
           emit(TelemetryEvents.PendingActionMatched, {
@@ -3543,9 +3601,23 @@ export async function runTurnExecutor(
           }
         }
         if (lastExecuted === null) {
-          // Every hold declined at re-referee / apply — fail-closed, the
-          // sanctioned decline copy, nothing persisted.
-          return commitProposedChangeRecovery('invalid', 'consent_all_all_declined');
+          // P0 (2026-08-16) — every hold declined. This branch previously
+          // returned the GENERIC 'invalid' recovery, which reproduced the
+          // single-resume defect verbatim on the consent-all route: the false
+          // "the offer I had open is no longer valid" (the offers were valid
+          // and every pin was checked against the working hash above), and no
+          // consumption, so EVERY chip stayed live to reproduce a
+          // deterministic failure on the next click. Same honest treatment as
+          // the single resume: name the true outcome, and retire the
+          // confirmations that were actually spent.
+          return commitProposedChangeRecovery(
+            'invalid',
+            'consent_all_all_declined',
+            {
+              assistantText: GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
+              consumedPendingRefs: attemptedDeclinedRefs,
+            },
+          );
         }
         // Honest applied path (mirrors the single-resume commit exactly).
         // Receipt names every applied change; per-name decline sentence
@@ -3597,6 +3669,20 @@ export async function runTurnExecutor(
             // Every APPLIED hold is consumed (zombie-chip guard); declined
             // holds keep the existing pending lifecycle and its honest
             // outcomes.
+            //
+            // ⭐ WHY DECLINED HOLDS ARE **NOT** RETIRED HERE, unlike on the
+            // all-declined branch above. On THIS path at least one hold
+            // applied, so the graph MOVED underneath the chain. A hold that
+            // declined at step 2 was judged against an intermediate graph that
+            // no longer exists, so its failure is NOT deterministic — the
+            // commit's hold-threading re-assesses it against the FINAL graph
+            // and either threads it re-pinned or lapses it honestly. Retiring
+            // it here would pre-empt that re-assessment and could destroy a
+            // consent the user could still legitimately act on. Pinned by
+            // consent-clarity-route-level.test.ts ("apply-all with a mid-chain
+            // referee decline"). The all-declined branch is the opposite case
+            // BY CONSTRUCTION: nothing applied, so the graph is unchanged and
+            // every decline there IS deterministic.
             consumedPendingRefs: consumedRefs,
           });
           commitPerformed = committed.performed;
