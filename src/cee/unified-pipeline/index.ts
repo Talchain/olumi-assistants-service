@@ -29,7 +29,11 @@ import { buildCeeErrorResponse } from "../validation/pipeline.js";
 import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import { decideEnforcementAutoRetry, applyEnforcementRetryExhaustedCopy } from "./draft-auto-retry.js";
 import { isEnforcementBlockedResult } from "./stages/repair/graph-enforcement.js";
-import { MIN_DRAFT_RETRY_BUDGET_MS } from "../../config/timeouts.js";
+import {
+  MIN_DRAFT_RETRY_BUDGET_MS,
+  VALIDATION_ATTACH_WAIT_MS,
+  VALIDATION_PIPELINE_TIMEOUT_MS,
+} from "../../config/timeouts.js";
 import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-timings.js";
 
 import { runStageParse } from "./stages/parse.js";
@@ -770,6 +774,15 @@ async function runUnifiedPipelineAttempt(
   // pre-fire failure then await nothing.
   let validationPromise: Promise<void> = Promise.resolve();
 
+  // ── PASS-2 ATTACH DEADLINE (ROADMAP 2.1250) ───────────────────────────────
+  // Set true by the bounded await below when the terminal frame stops waiting
+  // for Pass 2. Once true it is the AUTHORITY: the pipeline mutates nothing,
+  // and every one of the promise's own handlers becomes a no-op — otherwise a
+  // late settlement would write `validation_status` / `timings` after the
+  // response body had been built, which is the exact nondeterminism the drain
+  // in the outer catch exists to prevent.
+  let validationAttachAbandoned = false;
+
   try {
     // Stage 1: Parse — LLM draft + adapter normalisation
     const t1 = stageStart();
@@ -1011,13 +1024,30 @@ async function runUnifiedPipelineAttempt(
     // reviewer, catches it.
     if (config.cee.validationPipelineEnabled) {
       const tValidation = stageStart();
-      validationPromise = runValidationPipeline(ctx).then(() => {
-        ctx.pipelineOutcome.validation_status = 'passed';
+      validationPromise = runValidationPipeline(ctx, {
+        // 2.1250 — the pipeline asks this the instant Pass 2 returns, before it
+        // mutates anything. Reading the flag through a closure (rather than
+        // passing its value) is load-bearing: the value is decided ~25 s after
+        // this call is made.
+        shouldAttach: () => !validationAttachAbandoned,
+      }).then((outcome) => {
+        // ⚠ GUARDED, and this is the whole reason `validationAttachAbandoned`
+        // is not local to the await site. After abandonment the response body
+        // has already been built from `ctx.pipelineOutcome`; a write here would
+        // land or not land depending on scheduling. The abandonment site owns
+        // the status in that case and has already set it.
+        if (validationAttachAbandoned) return;
+        // ⚠ `passed` means METADATA ATTACHED, not "the model replied". Deriving
+        // it from `outcome.attached` rather than from mere resolution is what
+        // stops this becoming the same class of lie as an SSE stream reporting
+        // `complete` on a dead socket.
+        ctx.pipelineOutcome.validation_status = outcome.attached ? 'passed' : 'failed_degraded';
       }).catch((err: unknown) => {
         // Extracted to classifyValidationFailure (validation-pipeline/
         // validate-graph.ts) so it is pinnable. The inline version this
         // replaces could not see a real UpstreamTimeoutError and filed every
         // timeout as api_error; it had zero test coverage.
+        if (validationAttachAbandoned) return; // see the guard above
         const errorType = classifyValidationFailure(err);
         log.warn(
           {
@@ -1058,6 +1088,14 @@ async function runUnifiedPipelineAttempt(
         // await sits. `.finally` rather than a copy in both handlers: two
         // `stageElapsed` calls would be a mirror of each other, and the one that
         // drifts is always the error arm nobody exercises.
+        //
+        // ⚠ 2.1250 — NOT written after abandonment. `validation_pipeline_ms` is
+        // read as "how long Pass 2 took ON THIS TURN"; once the turn has shipped
+        // without it, writing a settlement duration would be a value that may or
+        // may not reach the wire depending on scheduling. The abandonment site
+        // records `validation_pipeline_abandoned_after_ms` instead — an absent
+        // field is honest, a nondeterministic one is not.
+        if (validationAttachAbandoned) return;
         timings.validation_pipeline_ms = stageElapsed(tValidation);
       });
     } else {
@@ -1223,7 +1261,67 @@ async function runUnifiedPipelineAttempt(
     // own settlement, in the `.finally` at the fire site. That is what makes
     // `validation_pipeline_ms` mean Pass 2's duration rather than "whatever
     // elapsed before someone chose to await" — review A1.
-    await validationPromise;
+    //
+    // ── BOUNDED SINCE ROADMAP 2.1250 ──────────────────────────────────────
+    // The await above was UNBOUNDED: it inherited Pass 2's own 60 s cap, so the
+    // terminal COMPLETE frame — carrying a graph that was fully validated
+    // before Pass 2 was even awaited — could be held for up to ~40 s past the
+    // coaching pass. The 2.146 arithmetic that made this affordable assumed
+    // Pass 2 cost 10–25 s; it was measured at a 47.2 s mean, and the residual
+    // it prices at ~0 became ~27 s of blocking on the delivery path.
+    //
+    // What this does NOT do: it does not weaken validation. The deterministic
+    // validator has already passed the graph, Repair has finished, and
+    // GRAPH_READY has already streamed. Pass 2 attaches edge-contested
+    // METADATA; on its own timeout the turn ships without it today. So the only
+    // change is WHOSE clock decides — Pass 2's provider-side tail, or the
+    // user's draft.
+    const attachDeadlineStartedAt = Date.now();
+    let attachDeadlineHandle: NodeJS.Timeout | undefined;
+    const attachDeadline = new Promise<'attach_deadline'>((resolve) => {
+      attachDeadlineHandle = setTimeout(
+        () => resolve('attach_deadline'),
+        VALIDATION_ATTACH_WAIT_MS,
+      );
+    });
+    const validationRace = await Promise.race([
+      validationPromise.then(() => 'settled' as const),
+      attachDeadline,
+    ]);
+    if (attachDeadlineHandle) clearTimeout(attachDeadlineHandle);
+
+    if (validationRace === 'attach_deadline') {
+      // Order matters: set the flag FIRST. Between this line and the pipeline's
+      // own `shouldAttach()` check there is nothing but the event loop, and the
+      // flag is what makes a landing in that window a no-op rather than a write
+      // into a graph the response is about to be built from.
+      validationAttachAbandoned = true;
+      const waitedMs = Date.now() - attachDeadlineStartedAt;
+      // Nothing awaits the promise from here on, so its own rejection would
+      // become an unhandled rejection. (It cannot reject today — the fire-site
+      // `.catch()` handles Pass 2's failures — but that is a fact two handlers
+      // away, and the whole point of this branch is that we no longer hold the
+      // promise.) Absorbed explicitly, like the streamed-turn route does for its
+      // late inject rejection.
+      validationPromise.catch(() => {});
+      ctx.pipelineOutcome.validation_status = 'failed_degraded';
+      ctx.pipelineOutcome.warnings.push({
+        stage: 'validation_pipeline',
+        error: 'abandoned_deadline',
+        degraded: true,
+      });
+      timings.validation_pipeline_abandoned_after_ms = waitedMs;
+      log.warn(
+        {
+          event: 'cee.validation_pipeline.attach_deadline_exceeded',
+          request_id: ctx.requestId,
+          waited_ms: waitedMs,
+          attach_wait_budget_ms: VALIDATION_ATTACH_WAIT_MS,
+          pass2_timeout_ms: VALIDATION_PIPELINE_TIMEOUT_MS,
+        },
+        'cee.validation_pipeline.attach_deadline_exceeded — shipping the validated draft without Pass-2 metadata',
+      );
+    }
 
     // Stage 5: Package — Quality + warnings + caps + trace
     // Soft gate: both the verification pipeline inside Package and the
@@ -1343,7 +1441,14 @@ async function runUnifiedPipelineAttempt(
     // relocation created. Swallowing here is correct: the error that brought us
     // into this catch is the one being reported, and a second copy of it must not
     // replace the response with a stack trace.
-    await validationPromise.catch(() => {});
+    //
+    // ⚠ 2.1250 — SKIPPED once the attach deadline has fired. The drain exists
+    // solely to make a PENDING WRITE deterministic; after abandonment every one
+    // of the promise's handlers is a guarded no-op, so there is no write to
+    // drain — and draining anyway would re-import the exact latency the bounded
+    // await removed, onto the error path, where the user is waiting for a
+    // failure message.
+    if (!validationAttachAbandoned) await validationPromise.catch(() => {});
     const result = mapPipelineError(error, ctx);
     attachPipelineOutcome(result.body, ctx.pipelineOutcome);
     finalise(result.body);

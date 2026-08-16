@@ -145,6 +145,60 @@ export function statusForStage(stage: StagedFrameClass): "in_progress" | "comple
 }
 
 /**
+ * The `sse_end_state` vocabulary, and the ONE derivation of it (ROADMAP 2.1249).
+ *
+ * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
+ * Both staged routes already track whether the client's socket is still
+ * writable (`socketWritable`, flipped by the frame writer the moment
+ * `reply.raw` is destroyed or a write throws). They already LOGGED it, on the
+ * delivery line, beside `frames_emitted`. And then they derived
+ * `sse_end_state` from the STATUS CODE ALONE — so a turn whose socket died
+ * after 2 of 4 frames, with a fully-built persisted draft the user never
+ * received, was recorded as `sse_end_state: "complete"` at `log.info` with a
+ * 200. Measured on a live incident: success telemetry for a draft nobody got.
+ *
+ * The status code answers "did the SERVER produce a good turn?". It cannot
+ * answer "did the CLIENT receive the terminal frame?" — and `sse_end_state` is
+ * read as the second question, by the SLO
+ * (`sse.completed{sse_end_state:complete} / sse.completed{env:prod}`, see
+ * config/datadog-slos.json) and by every operator scanning for stream health.
+ *
+ * ── WHY `undelivered` RATHER THAN `error` ───────────────────────────────────
+ * The turn is not an error. It ran, it committed, its body is correct — the
+ * DELIVERY failed. Filing it as `error` would blame the pipeline and, worse,
+ * would move the sample out of the SSE-completed metric family entirely, which
+ * is why the emitting sites keep using `SSECompleted`: the sample must stay in
+ * the SLO's DENOMINATOR while failing its numerator. Re-filing an undelivered
+ * turn as an error event would make the delivery SLO go UP as delivery got
+ * worse.
+ *
+ * ── PRECEDENCE ──────────────────────────────────────────────────────────────
+ * Undelivered WINS over the status code, both ways round. A 200 nobody
+ * received is not a success, and a 500 nobody received is not an error the
+ * client ever saw — in both cases the honest fact about the STREAM is that its
+ * terminal frame did not land. The status code stays on the event as its own
+ * field, so nothing is lost.
+ */
+export type SseEndState = "complete" | "error" | "undelivered";
+
+/**
+ * Derive the terminal `sse_end_state` from BOTH facts the route holds.
+ *
+ * `socketWritable` must be read AFTER the terminal COMPLETE frame has been
+ * written: the writer sets it false either by refusing to write (socket already
+ * gone) or by observing `reply.raw.destroyed` immediately after the write, and
+ * a destroyed socket discards anything still queued. Reading it before the
+ * terminal write answers a different, weaker question.
+ */
+export function resolveSseEndState(input: {
+  readonly socketWritable: boolean;
+  readonly statusCode: number;
+}): SseEndState {
+  if (!input.socketWritable) return "undelivered";
+  return input.statusCode >= 400 ? "error" : "complete";
+}
+
+/**
  * Lift `salvaged_from_truncation` out of the response body for the terminal
  * frame, so a client can tell a salvaged (partial) draft from a whole one
  * without reaching into the payload.
@@ -556,14 +610,24 @@ export default async function route(app: FastifyInstance) {
         payload: responseBody,
       });
 
+      // ROADMAP 2.1249 — the terminal end state is derived from the SOCKET as
+      // well as the status code. `socketWritable` is read HERE, after the
+      // COMPLETE write, because that is the only point at which it answers
+      // "did the terminal frame reach the client?".
+      const terminalEndState = resolveSseEndState({ socketWritable, statusCode });
+      const delivered = terminalEndState !== "undelivered";
+
       emit(TelemetryEvents.SSECompleted, {
         correlation_id: requestId,
         stream_duration_ms: Date.now() - start,
-        sse_end_state: sseEndState,
+        sse_end_state: terminalEndState,
         status_code: statusCode,
       });
 
-      log.info({
+      // The event NAME is unchanged on purpose (dashboards key on it) and now
+      // carries an explicit `delivered` boolean; the LEVEL is what moves, so an
+      // undelivered draft stops reading as an info-level success.
+      const deliveryLine = {
         event: "cee.staged_draft.delivered",
         request_id: requestId,
         graph_ready_ms: graphReadyAtMs,
@@ -571,7 +635,17 @@ export default async function route(app: FastifyInstance) {
         progress_frames: progressFrameCount,
         frames_emitted: seq,
         socket_writable: socketWritable,
-      }, "staged draft delivered");
+        delivered,
+        sse_end_state: terminalEndState,
+      };
+      if (delivered) {
+        log.info(deliveryLine, "staged draft delivered");
+      } else {
+        log.warn(
+          deliveryLine,
+          "staged draft UNDELIVERED — the turn completed but the terminal frame did not reach the client",
+        );
+      }
 
       logCeeCall({
         requestId,

@@ -135,6 +135,12 @@ describe("ROADMAP 2.146 — Pass 2 runs on the SHIPPED default (no env var prese
     });
     (runValidationPipeline as any).mockImplementation(async (ctx: any) => {
       for (const edge of ctx.graph.edges) edge[VALIDATION_EDGE_METADATA_KEY] = fakeMetadata;
+      // ROADMAP 2.1250 — the producer now RETURNS its outcome and the caller
+      // derives `validation_status` from `outcome.attached`. Nothing in this
+      // suite asserts that field today, so a `undefined`-resolving mock still
+      // reads green — which is exactly why it is corrected here rather than
+      // left for whoever adds the first assertion on it.
+      return { attached: true, pass2LatencyMs: 0 };
     });
   });
 

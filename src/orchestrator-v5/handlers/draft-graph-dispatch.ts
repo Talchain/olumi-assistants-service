@@ -523,6 +523,84 @@ export async function dispatchDraftGraph(
     throw err;
   }
 
+  // ── EMPTY-DRAFT GATE (ROADMAP 2.1252) ─────────────────────────────────────
+  // NOTHING on the success path asserted that the draft contains a graph. The
+  // pipeline can return 200 with zero nodes, and from here on every downstream
+  // step treats that as a success: the graph is committed, `graphPersisted`
+  // comes back true, and `draftResultToOlumiResponse` builds the post-draft
+  // narrative — which opens "I've built a first decision model from your
+  // brief." over an empty canvas. That is the guarantee-theatre shape: a
+  // confident sentence about a thing that is not there.
+  //
+  // Latent, not observed — which is exactly why it is cheap to close now and
+  // expensive to discover later, and why the gate is written against the
+  // POSTCONDITION ("a draft has at least one node") rather than against a
+  // reproduction.
+  //
+  // ── WHERE, AND WHY NOT ELSEWHERE ────────────────────────────────────────
+  // HERE, before the commit: an empty graph must never reach `p_graph`, so the
+  // gate has to precede `commitDirectAnswer`. Not in
+  // `draftResultToOlumiResponse` — that function is a pure mapper and is also
+  // called on the commit-failure path, where throwing would replace a specific
+  // failure with this one. And NOT as `.min(1)` on the shared graph schema:
+  // that schema is also the edit and persistence contract, where a graph
+  // legitimately passes through states this dispatch never sees.
+  //
+  // The throw is shaped exactly like `handleDraftGraph`'s own pipeline-failure
+  // throw (`pipelineStatusCode` + `pipelineErrorCode` + `pipelineRecovery`), so
+  // route-v2's existing catch maps it through `mapDraftGraphPipelineReason`
+  // into the CEE_GRAPH_INVALID envelope users already receive for an
+  // undraftable brief. No new error code, no new wire shape, no new consumer
+  // branch.
+  //
+  // `retryable: true` is the PRODUCER declaring what it knows (2.718's
+  // producer-authoritative promotion): a model that returned an empty structure
+  // for a brief the pipeline otherwise accepted is stochastic under-generation,
+  // and the same brief drafts on a rerun. Telling that user to rewrite their
+  // brief would be the cruel inversion the truncation arm already documents.
+  //
+  // ⚠ SCOPED TO A GRAPH THAT EXISTS AND IS EMPTY — deliberately NOT to
+  // `(graphOutput?.nodes?.length ?? 0) === 0`, which the same count expression
+  // downstream computes and which would ALSO capture `graphOutput === null`.
+  // A null graph is a DIFFERENT, already-modelled path: `handleDraftGraph`
+  // returns null when the pipeline body is not a GraphV3, the commit is
+  // deliberately still made (so `scenarios.brief_text` is seeded — the V5
+  // Phase 3A `no_brief` failure this dispatch's own comments describe), and
+  // `draft-graph-dispatch.test.ts` pins that behaviour explicitly. Two absences
+  // under one predicate would be trap 21 in miniature: "no graph was produced"
+  // and "a graph was produced and it is empty" are different facts with
+  // different honest answers, and only the second one reaches the success
+  // narrative this gate exists to stop.
+  const finalGraph = draftResult.graphOutput;
+  if (finalGraph !== null && (finalGraph.nodes?.length ?? 0) === 0) {
+    log.error(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        graph_produced: true,
+        node_count: 0,
+        edge_count: finalGraph.edges?.length ?? 0,
+      },
+      'V5 draft_graph dispatch — pipeline returned a draft with no nodes; refusing to commit or narrate it',
+    );
+    throw Object.assign(
+      new Error('Draft pipeline returned a graph with no nodes'),
+      {
+        pipelineStatusCode: 422,
+        pipelineErrorCode: 'CEE_GRAPH_INVALID',
+        pipelineReason: 'empty_draft_graph',
+        pipelineRetryable: true,
+        pipelineRecovery: {
+          suggestion: 'The model returned an empty decision model. Try again — this usually succeeds on a second attempt.',
+          hints: [
+            'Rerun the draft with the same brief',
+            'If it happens twice, state the decision and 2-3 options you are weighing',
+          ],
+        },
+      },
+    );
+  }
+
   try {
     // Context v2 S0 (ROADMAP 1.73, 03 §2): draft is INSTRUMENTED but NOT
     // re-budgeted (the 58,564-char draft prompt is ROADMAP 1.75's scope).

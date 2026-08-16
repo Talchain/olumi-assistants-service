@@ -695,6 +695,41 @@ export function clearPromptCache(): void {
  * This ensures the sync `getSystemPrompt()` returns managed prompts
  * instead of falling back to defaults.
  *
+ * ── BOUNDED AND CONCURRENT SINCE ROADMAP 2.1253 ─────────────────────────────
+ * This function is `await`ed inside `build()`, which is `await`ed before
+ * `app.listen()` — so every millisecond it spends is a millisecond during which
+ * the deploying instance answers NOTHING, health checks included. It used to
+ * walk its ~22 task ids SERIALLY with NO per-fetch timeout, which measured as a
+ * multi-minute deploy blackout whenever the store was slow, and made
+ * `POST /assist/v1/prompts/warm` take 12.5–13.2 s against a UI that abandons at
+ * 5 s.
+ *
+ * Two changes, and the second is what makes the first mean anything:
+ *
+ *   1. Each fetch is raced against `PROMPT_STORE_FETCH_TIMEOUT_MS` using the
+ *      SAME idiom the per-request cache-miss path already uses (see
+ *      `STORE_FETCH_TIMEOUT_MS` above) — one bound, derived from one constant,
+ *      rather than a second notion of "too slow".
+ *   2. The fetches run CONCURRENTLY. A per-fetch bound on a serial loop bounds
+ *      the warm at `22 × 5 s`, which is not a bound anyone would call one; run
+ *      concurrently the whole warm is bounded by a SINGLE timeout. That is the
+ *      property worth having and the one the test asserts.
+ *
+ * The tasks are independent by construction — distinct cache keys, no shared
+ * mutable state between iterations, and the loop body never read a value an
+ * earlier iteration wrote. Ordering was incidental, not load-bearing.
+ *
+ * ⚠ DELIBERATELY STILL AWAITED AT BOOT, rather than moved after `listen()`.
+ * Three consumers run immediately after it and read what it produced —
+ * `logStartupHealthCheck()`, `buildRoutingPromptSnapshot()` (whose own comment
+ * states it must run after the warm so PMS content wins the first resolution)
+ * and `getCriticalPromptCoverage('startup')`, which emits a LOUD warn listing
+ * offenders when a critical prompt is on a bundled default. Detaching the warm
+ * would race all three and turn that warn into a broken alarm that fires on
+ * every healthy boot. With the warm bounded by one timeout, the boot cost it can
+ * impose is ~`PROMPT_STORE_FETCH_TIMEOUT_MS`, which is not a blackout — so
+ * detaching buys nothing and costs an alarm.
+ *
  * @returns Statistics about the warming operation
  */
 export async function warmPromptCacheFromStore(): Promise<{
@@ -715,9 +750,33 @@ export async function warmPromptCacheFromStore(): Promise<{
   let skipped = 0;
   let usedStaging = 0;
 
-  for (const taskId of taskIds) {
+  const WARM_FETCH_TIMEOUT_MS = PROMPT_STORE_FETCH_TIMEOUT_MS;
+
+  await Promise.all(taskIds.map(async (taskId) => {
+    let timeoutHandle: NodeJS.Timeout | undefined;
     try {
-      const loaded = await loadPrompt(taskId, { useStaging });
+      const fetchPromise = loadPrompt(taskId, { useStaging });
+      // The losing promise keeps running. If it later REJECTS with nothing
+      // awaiting it, that is an unhandled rejection — attach the absorber now,
+      // not after the race, because the rejection can arrive at any point.
+      fetchPromise.catch(() => { /* absorbed — the race below owns the outcome */ });
+      const timeoutPromise = new Promise<null>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve(null), WARM_FETCH_TIMEOUT_MS);
+      });
+      const loaded = await Promise.race([fetchPromise, timeoutPromise]);
+
+      if (loaded === null) {
+        // Counted as FAILED, not skipped: `skipped` means "no managed prompt
+        // exists", a settled answer. A timeout is an unknown, and folding an
+        // unknown into a settled bucket is how a store outage comes to read as
+        // a healthy warm.
+        failed++;
+        log.warn(
+          { taskId, timeoutMs: WARM_FETCH_TIMEOUT_MS, useStaging },
+          'Prompt cache warm timed out for task — leaving it to the per-request path',
+        );
+        return;
+      }
 
       const promptHash = createHash('sha256').update(loaded.content).digest('hex');
 
@@ -748,8 +807,14 @@ export async function warmPromptCacheFromStore(): Promise<{
     } catch (error) {
       failed++;
       log.warn({ taskId, error: String(error) }, 'Failed to warm cache for task');
+    } finally {
+      // Cleared on EVERY path. 22 uncleared 5 s timers would hold the event loop
+      // open past the warm's own completion — invisible in a long-lived server,
+      // and exactly the kind of thing that makes a boot or a test run look slow
+      // for reasons nobody can find.
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     }
-  }
+  }));
 
   // Update cache warming state for readiness checks
   cacheWarmingState.completed = true;
