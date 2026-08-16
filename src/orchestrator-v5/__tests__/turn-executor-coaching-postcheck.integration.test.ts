@@ -220,14 +220,17 @@ describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)'
     nodes: [
       { id: 'goal_g', kind: 'goal', label: 'Goal' },
       { id: 'dec_d', kind: 'decision', label: 'Decision' },
-      { id: 'opt_plan_a', kind: 'option', label: 'Plan A' },
-      { id: 'opt_plan_b', kind: 'option', label: 'Plan B' },
+      { id: 'opt_plan_a', kind: 'option', label: 'Plan A', interventions: { f_pricing: 1 } },
+      { id: 'opt_plan_b', kind: 'option', label: 'Plan B', interventions: { f_pricing: 0 } },
       { id: 'f_pricing', kind: 'factor', label: 'Pricing' },
     ],
     goal_node_id: 'goal_g',
     edges: [
       { from: 'dec_d', to: 'opt_plan_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
-      { from: 'opt_plan_a', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'dec_d', to: 'opt_plan_b', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'opt_plan_a', to: 'f_pricing', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'opt_plan_b', to: 'f_pricing', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
+      { from: 'f_pricing', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     ],
   };
 
@@ -255,5 +258,4 @@ describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)'
     expect(postcheckEvent()?.data.violation).toBe('invented_mutation_success');
   });
 });
-
 

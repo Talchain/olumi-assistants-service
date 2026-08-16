@@ -285,11 +285,14 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
     const graph = {
       nodes: [
         { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'dec_1', kind: 'decision', label: 'Choose an approach' },
         { id: 'opt_change', kind: 'option', label: 'Hire Tech Lead', interventions: { fac_x: 1 } },
         { id: 'opt_sq', kind: 'option', label: 'Stay As We Are', is_baseline: true, interventions: { fac_x: 0.5 } },
         { id: 'fac_x', kind: 'factor', label: 'X', category: 'controllable', observed_state: { value: 1, extractionType: 'explicit', factor_type: 'other' } },
       ],
       edges: [
+        { from: 'dec_1', to: 'opt_change', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'dec_1', to: 'opt_sq', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
         { from: 'opt_change', to: 'fac_x', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
         { from: 'opt_sq', to: 'fac_x', strength: { mean: 0.5, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
         { from: 'fac_x', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
@@ -314,11 +317,14 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
     const graph = {
       nodes: [
         { id: 'goal_1', kind: 'goal', label: 'Goal' },
+        { id: 'dec_1', kind: 'decision', label: 'Choose an approach' },
         { id: 'opt_a', kind: 'option', label: 'A', interventions: { fac_x: 1 } },
         { id: 'opt_b', kind: 'option', label: 'B', interventions: { fac_x: 0.5 } },
         { id: 'fac_x', kind: 'factor', label: 'X', category: 'controllable', observed_state: { value: 1, extractionType: 'explicit', factor_type: 'other' } },
       ],
       edges: [
+        { from: 'dec_1', to: 'opt_a', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'dec_1', to: 'opt_b', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
         { from: 'opt_a', to: 'fac_x', strength: { mean: 1.0, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
         { from: 'opt_b', to: 'fac_x', strength: { mean: 0.5, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
         { from: 'fac_x', to: 'goal_1', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },

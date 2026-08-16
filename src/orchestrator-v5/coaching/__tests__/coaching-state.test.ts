@@ -262,12 +262,17 @@ describe('deriveCoachingState — analysis freshness', () => {
 
 describe('deriveCoachingState — readiness blockers', () => {
   it('emits readiness_blocker signals from a parseable graph with open items', () => {
-    // Canonical whole-status is mapping. Raw option count and absent threshold
-    // no longer mint sibling whole-status blockers.
+    // Canonical whole-status enumerates both the structural model defects and
+    // the unresolved option input; coaching projects both typed remedies from
+    // that one record.
     const state = base({ freshness: FRESH, persistedGraph: buildD1Fixture() });
     const blockers = state.signals.filter((s) => s.kind === 'readiness_blocker');
     const reasons = blockers.map((s) => s.reason_code).sort();
-    expect(reasons).toEqual(['option_needs_mapping']);
+    expect(reasons).toEqual([
+      'model_needs_review',
+      'option_needs_mapping',
+      'too_few_options',
+    ]);
     for (const b of blockers) {
       expect(b.status).toBe('active');
       expect(b.source).toBe('analysis_readiness');
@@ -279,7 +284,7 @@ describe('deriveCoachingState — readiness blockers', () => {
     const noGoal = { ...graph, nodes: graph.nodes.filter((n) => n.kind !== 'goal') };
     const state = base({ freshness: FRESH, persistedGraph: noGoal });
     const blockers = state.signals.filter((s) => s.kind === 'readiness_blocker');
-    expect(blockers.map((s) => s.reason_code)).toEqual(['goal_node_missing']);
+    expect(blockers.map((s) => s.reason_code)).toContain('goal_node_missing');
   });
 
   it('emits NO readiness signals from an unparseable graph (fail closed)', () => {

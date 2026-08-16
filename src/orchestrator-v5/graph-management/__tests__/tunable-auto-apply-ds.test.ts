@@ -205,20 +205,11 @@ describe('A4 — the freshness rung is class-independent (generalising the D-S r
 });
 
 describe('D-S rails — R6 non-downgrade and fail-closed builds still govern tunables', () => {
-  /** Ready graph where ONLY o-a is configured: emptying o-a's interventions
-   *  leaves zero ready options → EP2 OPTIONS_NOT_CONFIGURED (blocked). */
-  function singleConfiguredOptionGraph(): GraphV3T {
+  it('a tunable that DOWNGRADES readiness (empties a configured option) → held READINESS_DOWNGRADE', () => {
+    // Start from a genuinely canonical-ready graph. The former fixture had
+    // already removed o-b's value, so the "before" record was non-ready and
+    // emptying o-a could not constitute a downgrade.
     const g = buildReadyGraph();
-    return {
-      ...g,
-      nodes: g.nodes.map((n) =>
-        n.id === 'o-b' ? { id: n.id, kind: n.kind, label: n.label } : n,
-      ),
-    };
-  }
-
-  it('a tunable that DOWNGRADES readiness (empties the only configured option) → held READINESS_DOWNGRADE', () => {
-    const g = singleConfiguredOptionGraph();
     const raw = makeEnvelope(
       'update_node_field',
       { node_id: 'o-a', field: 'interventions', from: { 'f-spend': { value: 0.6 } }, to: {} },

@@ -15,7 +15,7 @@ import {
   toOptionV3,
 } from "../../src/cee/extraction/intervention-extractor.js";
 import { transformOptionToAnalysisReady } from "../../src/cee/transforms/analysis-ready.js";
-import type { NodeV3T, EdgeV3T } from "../../src/schemas/cee-v3.js";
+import type { NodeV3T, EdgeV3T, OptionV3T } from "../../src/schemas/cee-v3.js";
 
 describe("Categorical Extraction", () => {
   describe("extractCategoricalInterventions", () => {
@@ -382,6 +382,47 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
       exists_probability: 0.9,
     },
   ];
+
+  function categoricalWithProof(
+    encodingMap?: Record<string, number>,
+  ): OptionV3T {
+    return {
+      id: 'opt_region',
+      label: 'Launch in UK',
+      status: 'ready',
+      interventions: {
+        factor_region: {
+          value: 1,
+          raw_value: 'UK',
+          value_type: 'categorical',
+          ...(encodingMap !== undefined ? { encoding_map: encodingMap } : {}),
+          source: 'user_specified',
+          target_match: {
+            node_id: 'factor_region',
+            match_type: 'exact_id',
+            confidence: 'high',
+          },
+        },
+      },
+    };
+  }
+
+  it('accepts a categorical Raw+Encoded carrier only when its map proves the exact numeric code', () => {
+    const analysisReady = transformOptionToAnalysisReady(categoricalWithProof({ UK: 1 }));
+    expect(analysisReady.status).toBe('ready');
+    expect(analysisReady.interventions.factor_region).toBe(1);
+    expect(analysisReady.raw_interventions?.factor_region).toBe('UK');
+  });
+
+  it('keeps a categorical raw value non-ready when encoding proof is absent', () => {
+    expect(transformOptionToAnalysisReady(categoricalWithProof()).status).toBe('needs_encoding');
+  });
+
+  it('keeps a categorical raw value non-ready when its map disagrees with the numeric code', () => {
+    expect(transformOptionToAnalysisReady(categoricalWithProof({ UK: 0 })).status).toBe(
+      'needs_encoding',
+    );
+  });
 
   it("flattens categorical interventions to plain numbers", () => {
     // Extract categorical option

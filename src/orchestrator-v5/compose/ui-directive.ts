@@ -575,7 +575,7 @@ const GATE_REMEDY_FACT_TAG = 'advice_gate_readiness';
  * remedy lives on, or `null` to emit no gesture.
  *
  * ⚠ TOTALITY IS DELIBERATE, AND IT IS THE POINT OF THE `null`s. This is a
- * `Record` over the CLOSED kind union, so adding a fifth kind to
+ * `Record` over the CLOSED kind union, so adding another kind to
  * `ReadinessOpenItem` is a TYPE ERROR here rather than a silent fall-through to
  * "no gesture". A hand-maintained subset that quietly stopped covering a new
  * kind is precisely the drift class this estate keeps paying for (trap 12); an
@@ -583,9 +583,10 @@ const GATE_REMEDY_FACT_TAG = 'advice_gate_readiness';
  *
  * Producer semantics (CEE) — the canonical recovery projection in
  * routing/readiness-summary.ts and the status enum's own doc comment at
- * schemas/analysis-ready.ts:58–64. `too_few_options` and
- * `goal_threshold_missing` remain quarantined compatibility rows; the active
- * producer no longer reconstructs either from raw field presence.
+ * schemas/analysis-ready.ts:58–64. `goal_threshold_missing` remains a
+ * quarantined compatibility row. `too_few_options` is active only when the
+ * canonical issue record contains `FEWER_THAN_TWO_OPTIONS`; the producer never
+ * reconstructs either remedy from raw field presence.
  * Surface semantics (UI) — the five section ids are rendered by
  * ModelTabBody.tsx:780–845, one component per id.
  */
@@ -600,6 +601,10 @@ export const REMEDY_SECTION_BY_OPEN_ITEM_KIND: Record<
    * ModelTabBody.tsx:785, fed `optionNodes={grouped.option}`.
    */
   too_few_options: 'options',
+  // A missing goal has no settled dedicated Model-tab section in the current
+  // contract. Preserve the typed remedy for coaching/copy while emitting no
+  // speculative UI gesture.
+  goal_node_missing: null,
 
   /**
    * "X is connected to factors but has no numeric values set"

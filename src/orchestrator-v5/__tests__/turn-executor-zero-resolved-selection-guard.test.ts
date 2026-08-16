@@ -50,6 +50,7 @@ const OTHER_OPTION_ID = 'opt_offshore';
 const OTHER_OPTION_LABEL = 'Use an offshore partner';
 const FACTOR_ID = 'factor_salary';
 const FACTOR_LABEL = 'Engineer salary';
+const CONTROLLED_FACTOR_ID = 'factor_team_size';
 const GHOST_ID = 'node_fabricated_selected_id';
 const REAL_EDGE_ID = `${FACTOR_ID}→goal_growth`;
 const GHOST_EDGE_ID = `${GHOST_ID}→goal_growth`;
@@ -65,11 +66,54 @@ const PERSISTED_GRAPH = {
       category: 'external',
       observed_state: { value: 95000, unit: '£', source: 'user_edited' },
     },
-    { id: OPTION_ID, kind: 'option', label: OPTION_LABEL },
-    { id: OTHER_OPTION_ID, kind: 'option', label: OTHER_OPTION_LABEL },
+    {
+      id: CONTROLLED_FACTOR_ID,
+      kind: 'factor',
+      label: 'Team size',
+      category: 'controllable',
+      observed_state: { value: 8, source: 'user_edited' },
+    },
+    { id: 'decision_hiring', kind: 'decision', label: 'Hiring approach' },
+    { id: OPTION_ID, kind: 'option', label: OPTION_LABEL, interventions: { [CONTROLLED_FACTOR_ID]: 8 } },
+    { id: OTHER_OPTION_ID, kind: 'option', label: OTHER_OPTION_LABEL, interventions: { [CONTROLLED_FACTOR_ID]: 6 } },
     { id: 'goal_growth', kind: 'goal', label: 'Revenue growth' },
   ],
   edges: [
+    {
+      from: 'decision_hiring',
+      to: OPTION_ID,
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: 'decision_hiring',
+      to: OTHER_OPTION_ID,
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: OPTION_ID,
+      to: CONTROLLED_FACTOR_ID,
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: OTHER_OPTION_ID,
+      to: CONTROLLED_FACTOR_ID,
+      strength: { mean: 0.8, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
+    {
+      from: CONTROLLED_FACTOR_ID,
+      to: 'goal_growth',
+      strength: { mean: 0.5, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive',
+    },
     {
       from: FACTOR_ID,
       to: 'goal_growth',

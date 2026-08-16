@@ -38,9 +38,11 @@ import { detectConfigureOptionIntent } from '../configure-option-intent.js';
 import {
   buildConfigureOptionAdvisedFormat,
   CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE,
+  CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX,
   SET_OPTION_VALUES_CHIP,
 } from '../../configure-option-chip-text.js';
 import { generateChips, type ChipGeneratorInput } from '../../compose/chip-generator.js';
+import { buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
 import type { HandlerValidationRegistry } from '../validator.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -254,9 +256,11 @@ const cases: readonly (readonly [string, ChipGeneratorInput])[] = [
    * carries a blocked message). It is vacuous unless the inputs provably
    * PRODUCE the chip under test. At least one case must mint it.
    */
-  it('positive control — at least one input actually mints a set-option-values chip', () => {
+  it('positive control — at least one input actually mints a configure-option chip', () => {
     const minted = cases.filter(([, input]) =>
-      generateChips(input).some((chip) => chip.message === SET_OPTION_VALUES_CHIP.message),
+      generateChips(input).some((chip) =>
+        chip.message.startsWith(CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX),
+      ),
     );
     expect(minted.length, 'no input minted the chip — the sweep below would test nothing').toBeGreaterThan(0);
   });
@@ -270,9 +274,9 @@ const cases: readonly (readonly [string, ChipGeneratorInput])[] = [
       }
     });
 
-    it(`${name}: every minted "Set values for options" chip routes AND survives the negative gate`, () => {
+    it(`${name}: every minted configure-option chip routes AND survives the negative gate`, () => {
       const setValueChips = generateChips(input).filter(
-        (chip) => chip.label === SET_OPTION_VALUES_CHIP.label,
+        (chip) => chip.message.startsWith(CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX),
       );
       for (const chip of setValueChips) {
         expect(
@@ -291,8 +295,10 @@ const cases: readonly (readonly [string, ChipGeneratorInput])[] = [
     const chips = generateChips(
       chipInput({ analysisReady: readiness('needs_encoding'), graphOptionCount: 1 }),
     );
-    const floor = chips.find((chip) => chip.label === SET_OPTION_VALUES_CHIP.label);
-    expect(floor, 'no set-option-values chip on the needs_encoding turn').toBeDefined();
-    expect(floor!.message).toBe(SET_OPTION_VALUES_CHIP.message);
+    const floor = chips.find((chip) =>
+      chip.message.startsWith(CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX),
+    );
+    expect(floor, 'no configure-option chip on the needs_encoding turn').toBeDefined();
+    expect(floor).toEqual(buildReadinessRecoveryChip(readiness('needs_encoding')));
   });
 });

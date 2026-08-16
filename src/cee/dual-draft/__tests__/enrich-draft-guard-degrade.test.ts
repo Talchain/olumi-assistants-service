@@ -36,11 +36,40 @@ function baseGraph(): GraphV3T {
   return {
     nodes: [
       { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+      { id: 'dec_launch', kind: 'decision', label: 'Launch timing' },
       { id: 'opt_launch', kind: 'option', label: 'Launch now', interventions: { fac_price: 0.8 } },
       { id: 'opt_wait', kind: 'option', label: 'Wait 6 months', interventions: { fac_price: 0.2 } },
       { id: 'fac_price', kind: 'factor', label: 'Price point' },
     ],
     edges: [
+      {
+        from: 'dec_launch',
+        to: 'opt_launch',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'dec_launch',
+        to: 'opt_wait',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'opt_launch',
+        to: 'fac_price',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
+      {
+        from: 'opt_wait',
+        to: 'fac_price',
+        strength: { mean: 0.2, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      },
       {
         from: 'fac_price',
         to: 'goal_revenue',
@@ -104,7 +133,8 @@ describe('enrichDraftGraph — post-merge fail-open safety net', () => {
 
   it('option surface mutated by merge → M1 returned (option_surface_changed, G12i)', async () => {
     const mutated = baseGraph();
-    (mutated.nodes[1] as { label: string }).label = 'Launch immediately';
+    (mutated.nodes.find((node) => node.id === 'opt_launch') as { label: string }).label =
+      'Launch immediately';
     (mergeProposals as MockedFunction<typeof mergeProposals>).mockReturnValue({
       merged: mutated,
       report: report(),

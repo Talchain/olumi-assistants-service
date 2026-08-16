@@ -245,9 +245,13 @@ const READINESS_RANK: Record<string, number> = {
   needs_encoding: 1,
   needs_user_mapping: 2,
   needs_user_input: 3,
+  // Canonical whole-status structural block: known and explicitly worse than
+  // every recoverable input state, but distinct from an unknown future token
+  // or an underivable record.
+  blocked: 4,
 };
-const RANK_UNKNOWN_STATUS = 4;
-const RANK_UNDERIVABLE = 5;
+const RANK_UNKNOWN_STATUS = 5;
+const RANK_UNDERIVABLE = 6;
 
 function readinessRank(graph: GraphV3T): { rank: number; status: string | null } {
   const payload = buildCanonicalAnalysisReadyFromGraph(graph);

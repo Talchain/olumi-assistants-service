@@ -71,11 +71,14 @@ const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const READY_GRAPH = {
   nodes: [
     { id: 'goal_crm', kind: 'goal', label: 'CRM outcome' },
+    { id: 'dec_crm', kind: 'decision', label: 'CRM approach' },
     { id: 'fac_market', kind: 'factor', label: 'Market Conditions' },
     { id: 'opt_hubspot', kind: 'option', label: 'Adopt HubSpot', interventions: { fac_market: 1 } },
     { id: 'opt_hold', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_market: 0 } },
   ],
   edges: [
+    { from: 'dec_crm', to: 'opt_hubspot', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' as const },
+    { from: 'dec_crm', to: 'opt_hold', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_hubspot', to: 'fac_market', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'opt_hold', to: 'fac_market', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },
     { from: 'fac_market', to: 'goal_crm', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const },

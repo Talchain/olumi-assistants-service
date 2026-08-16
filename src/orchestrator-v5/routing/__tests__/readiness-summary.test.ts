@@ -85,4 +85,44 @@ describe('summariseReadiness — canonical status/blocker projection', () => {
     expect(summary.prose).toContain('resolve the model issue');
     expect(summary.prose).not.toContain('effect value');
   });
+
+  it('projects a missing-goal remedy only from the canonical typed issue', () => {
+    const readiness = {
+      status: 'blocked',
+      goal_node_id: '',
+      options: [],
+      readiness_issues: [{
+        issue_id: 'structural_1',
+        code: 'NO_GOAL',
+        category: 'graph_structure',
+        message: 'The model would have no goal node.',
+        repairability: 'human_input_required',
+      }],
+    } as ReadinessPayload;
+
+    expect(summariseReadiness(readiness).open_items).toEqual([{
+      kind: 'goal_node_missing',
+      description: 'The model would have no goal node',
+    }]);
+  });
+
+  it('projects too-few-options only from the canonical typed issue', () => {
+    const readiness = {
+      status: 'blocked',
+      goal_node_id: 'goal_growth',
+      options: READY_OPTIONS.slice(0, 1),
+      readiness_issues: [{
+        issue_id: 'structural_1',
+        code: 'FEWER_THAN_TWO_OPTIONS',
+        category: 'graph_structure',
+        message: 'The model would have fewer than two options.',
+        repairability: 'human_input_required',
+      }],
+    } as ReadinessPayload;
+
+    expect(summariseReadiness(readiness).open_items).toEqual([{
+      kind: 'too_few_options',
+      description: 'The model would have fewer than two options',
+    }]);
+  });
 });

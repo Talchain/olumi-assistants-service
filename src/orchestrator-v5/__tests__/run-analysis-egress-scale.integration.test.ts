@@ -92,8 +92,10 @@ function buildGraph() {
           fac_already_raw: { value: 0.45, raw_value: 9000, unit: '£', source: 'user_specified', target_match: tm('fac_already_raw') },
           // uncapped factor → passthrough 0.3.
           fac_rate: { value: 0.3, source: 'user_specified', target_match: tm('fac_rate') },
-          // categorical encoded value → passthrough 1, never scaled.
-          fac_region: { value: 1, value_type: 'categorical', raw_value: 'UK', source: 'user_specified', target_match: tm('fac_region') },
+          // Explicit Raw+Encoded categorical proof → passthrough 1, never
+          // scaled. Canonical readiness verifies UK→1 exactly; absent or
+          // mismatched proof remains needs_encoding in the transformer controls.
+          fac_region: { value: 1, value_type: 'categorical', raw_value: 'UK', encoding_map: { UK: 1 }, source: 'user_specified', target_match: tm('fac_region') },
           // [0,1] on a capped factor with NO evidence → passthrough 0.4 (NO corruption).
           fac_ambiguous: { value: 0.4, unit: '£', source: 'user_specified', target_match: tm('fac_ambiguous') },
         },

@@ -92,6 +92,7 @@ const BASE_PAYLOAD = makeMessagePayload({
 const READY_GRAPH = {
   nodes: [
     { id: 'goal_q3', kind: 'goal', label: 'Goal' },
+    { id: 'dec_q3', kind: 'decision', label: 'Resourcing choice' },
     { id: 'fac_capacity', kind: 'factor', label: 'Engineering Capacity' },
     {
       id: 'opt_hire',
@@ -108,6 +109,20 @@ const READY_GRAPH = {
     },
   ],
   edges: [
+    {
+      from: 'dec_q3',
+      to: 'opt_hire',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_q3',
+      to: 'opt_status_quo',
+      strength: { mean: 1, std: 0.01 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
     {
       from: 'opt_hire',
       to: 'fac_capacity',

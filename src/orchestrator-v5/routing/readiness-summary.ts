@@ -25,15 +25,17 @@ type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
  * Single canonical recovery item. `description` is user-safe prose produced
  * by `projectReadinessRecovery` from status + blockers.
  *
- * `too_few_options` and `goal_threshold_missing` are quarantined compatibility
- * members for historical coaching-state/directive readers. This producer no
- * longer emits them: option count and threshold presence are not independent
- * whole-status authorities. Exact `analysis_ready.status === 'ready'` wins,
- * including the valid ready-without-threshold case.
+ * `goal_threshold_missing` is a quarantined compatibility member for historical
+ * coaching-state/directive readers and is no longer emitted. `too_few_options`
+ * is emitted only by projecting an exact canonical `FEWER_THAN_TWO_OPTIONS`
+ * issue; this layer never re-derives option count or whole status. Exact
+ * `analysis_ready.status === 'ready'` wins, including the valid
+ * ready-without-threshold case.
  */
 export interface ReadinessOpenItem {
   readonly kind:
     | 'too_few_options'
+    | 'goal_node_missing'
     | 'option_needs_mapping'
     | 'option_needs_encoding'
     | 'goal_threshold_missing'
@@ -103,18 +105,28 @@ export function summariseReadiness(
         (issue) => issue && typeof issue.message === 'string' && issue.message.trim().length > 0,
       )
     : [];
-  if (analysisReady.repair_proposal && canonicalIssues.length >= 2) {
+  const hasSpecificStructuralRecovery = canonicalIssues.some(
+    (issue) => issue.code === 'NO_GOAL' || issue.code === 'FEWER_THAN_TWO_OPTIONS',
+  );
+  if (
+    (analysisReady.repair_proposal && canonicalIssues.length >= 2)
+    || hasSpecificStructuralRecovery
+  ) {
     const openItems: ReadinessOpenItem[] = canonicalIssues
       .filter((issue) => issue.repairability === 'human_input_required')
       .map((issue) => ({
-      kind:
-        issue.category === 'option_mapping'
-          ? 'option_needs_mapping'
-          : issue.category === 'option_values' || issue.category === 'numeric_integrity'
-            ? 'option_needs_encoding'
-            : 'model_needs_review',
-      description: asDescription(issue.message),
-      ...(issue.option_label ? { option_label: issue.option_label } : {}),
+        kind:
+          issue.code === 'NO_GOAL'
+            ? 'goal_node_missing'
+            : issue.code === 'FEWER_THAN_TWO_OPTIONS'
+              ? 'too_few_options'
+              : issue.category === 'option_mapping'
+                ? 'option_needs_mapping'
+                : issue.category === 'option_values' || issue.category === 'numeric_integrity'
+                  ? 'option_needs_encoding'
+                  : 'model_needs_review',
+        description: asDescription(issue.message),
+        ...(issue.option_label ? { option_label: issue.option_label } : {}),
       }));
     return { open_items: openItems, prose: composeReadinessProse(openItems) };
   }

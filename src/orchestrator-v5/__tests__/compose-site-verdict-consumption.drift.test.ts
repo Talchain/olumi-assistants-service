@@ -356,6 +356,10 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     why: 'Clarify copy built from candidate labels.',
   },
   '`I can apply those one at a time': { stance: 'structural', why: 'Literal one-at-a-time copy.' },
+  '`Confirmed. I applied ${appliedCount} value-preserving model ${applied': {
+    stance: 'structural',
+    why: 'Canonical readiness-repair receipt. Interpolates only applied/unresolved counts after hash/CAS-protected commit and readback; it names no option, ranking or analysis claim.',
+  },
   PROPOSAL_DISMISSAL_RESPONSE: { stance: 'structural', why: 'Module constant.' },
   '`Got it: I can add ${riskLabel} as a risk with ${driverLabel} as its m': {
     stance: 'structural',
@@ -974,7 +978,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // ⚠ ELICITED REFERENCE CLASS (ROADMAP 2.688 slice 1): 38 -> 39. ONE compose
     // site added in turn-executor.ts — the reference-class pre-route. Explicit
     // `assistant_text:` form, so keyable by the same regex and in scope here.
-    expect(compared, 'the re-key comparison compared nothing').toBe(40);
+    // Canonical readiness repair adds one explicit assistant_text compose site.
+    expect(compared, 'the re-key comparison compared nothing').toBe(41);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1161,8 +1166,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // found the omission rather than a human remembering it. Fourth instance
     // of the mechanism working; the note stays because the next author will
     // not remember either.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(42);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(38);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(43);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(39);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',

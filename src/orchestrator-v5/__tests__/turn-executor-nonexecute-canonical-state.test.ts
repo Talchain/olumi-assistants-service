@@ -83,10 +83,18 @@ function conversePayload(message: string) {
 const REQUEST_2OPT: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
-    { id: 'opt_a', kind: 'option', label: 'A' },
-    { id: 'opt_b', kind: 'option', label: 'B' },
+    { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
+    { id: 'f1', kind: 'factor', label: 'Commercial impact' },
+    { id: 'opt_a', kind: 'option', label: 'A', interventions: { f1: { value: 1 } } },
+    { id: 'opt_b', kind: 'option', label: 'B', interventions: { f1: { value: 0 } } },
   ],
-  edges: [],
+  edges: [
+    { from: 'dec_1', to: 'opt_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'dec_1', to: 'opt_b', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_a', to: 'f1', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_b', to: 'f1', strength: { mean: 0.01, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'f1', to: 'goal_1', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
   options: [
     { id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } },
     { id: 'opt_b', status: 'ready', interventions: { f1: { value: 0 } } },
@@ -97,10 +105,33 @@ const REQUEST_2OPT: GraphStateIngress = {
 const PERSISTED_1OPT: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
-    { id: 'opt_a', kind: 'option', label: 'A' },
+    { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
+    { id: 'f1', kind: 'factor', label: 'Commercial impact' },
+    { id: 'opt_a', kind: 'option', label: 'A', interventions: { f1: { value: 1 } } },
   ],
-  edges: [],
+  edges: [
+    { from: 'dec_1', to: 'opt_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_a', to: 'f1', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'f1', to: 'goal_1', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
   options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
+} as GraphStateIngress;
+
+// A distinct but still canonical-ready persisted graph. Used for the stale
+// analysis control so freshness divergence is tested independently of the
+// one-option structural block above.
+const PERSISTED_2OPT_CHANGED: GraphStateIngress = {
+  ...REQUEST_2OPT,
+  nodes: REQUEST_2OPT.nodes.map((node) =>
+    node.id === 'opt_b'
+      ? { ...node, interventions: { f1: { value: 0.2 } } }
+      : node,
+  ),
+  options: REQUEST_2OPT.options?.map((option) =>
+    option.id === 'opt_b'
+      ? { ...option, interventions: { f1: { value: 0.2 } } }
+      : option,
+  ),
 } as GraphStateIngress;
 
 // The 2-option graph hash — used as a prior fact's graph_hash_at_run to drive
@@ -236,9 +267,10 @@ describe('TurnExecutor — non-execute canonical-state fallback (finalizeRun)', 
     const control = await runConverse('req-nx-authority-control', { persisted: REQUEST_2OPT });
 
     // The non-execute fallback derives readiness from the persisted authority
-    // (1-option → needs_user_input); the 2-option control does not.
-    expect(stale.canonicalState!.status).toBe('needs_user_input');
-    expect(control.canonicalState!.status).not.toBe('needs_user_input');
+    // (1-option → blocked by the canonical structural record); the genuine
+    // 2-option control remains ready.
+    expect(stale.canonicalState!.status).toBe('blocked');
+    expect(control.canonicalState!.status).toBe('ready');
 
     // Read-only posture: ONLY the diagnostic differs — prose + actions identical.
     expect(stale.response.assistant_text).toBe(control.response.assistant_text);
@@ -260,7 +292,7 @@ describe('TurnExecutor — non-execute canonical-state fallback (finalizeRun)', 
 
   it('prior stale analysis (graph diverged since the run) → freshness stale, rerun required, chips withheld', async () => {
     const result = await runConverse('req-nx-stale', {
-      persisted: PERSISTED_1OPT, // current persisted graph
+      persisted: PERSISTED_2OPT_CHANGED, // changed but still ready current graph
       priorFactHash: HASH_2OPT, // fact ran against the OLD 2-option graph
     });
     expect(result.canonicalState!.freshness).toBe('stale');

@@ -26,7 +26,7 @@ vi.mock("../../../src/schemas/analysis-ready.js", () => ({
 }));
 
 vi.mock("../../../src/orchestrator/tools/analysis-ready-helper.js", () => ({
-  computeStructuralReadiness: () => undefined,
+  buildCanonicalAnalysisReadyFromGraph: () => undefined,
 }));
 
 import { handleDraftGraph } from "../../../src/orchestrator/tools/draft-graph.js";

@@ -311,8 +311,9 @@ export function evaluateReadiness(
     // validity check, not a licence to strip producer-owned readiness inputs.
     const readiness = buildCanonicalAnalysisReadyFromGraph(persistedGraph);
     if (readiness === undefined) {
-      // No goal node — the strongest "not ready" structural blocker, which
-      // The canonical graph adapter reports only by returning undefined.
+      // Legacy absence fallback. Canonical blocked payloads (including a
+      // missing goal) are projected below by summariseReadiness from the typed
+      // issue record, so coaching does not reconstruct whole status here.
       return {
         evaluable: true,
         signals: [
@@ -324,6 +325,13 @@ export function evaluateReadiness(
     // Dedupe by kind (option_needs_* can repeat per option) and order deterministically.
     const kinds = new Set<CoachingStateReasonCode>();
     for (const item of open_items) kinds.add(item.kind);
+    // Missing-goal recovery is projected only from the canonical exhaustive
+    // issue record. Keep this explicit at the coaching boundary so a future
+    // generic recovery fallback cannot erase the actionable reason while the
+    // canonical whole-status remains `blocked`.
+    if (readiness.readiness_issues?.some((issue) => issue.code === 'NO_GOAL')) {
+      kinds.add('goal_node_missing');
+    }
     return {
       evaluable: true,
       signals: READINESS_REASON_ORDER.filter((reason) => kinds.has(reason)).map((reason) =>

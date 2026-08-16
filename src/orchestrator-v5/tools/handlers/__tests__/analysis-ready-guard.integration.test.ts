@@ -264,7 +264,9 @@ describe('EP2 integration — run_analysis handler blocked/analysed', () => {
     expect(err).toBeInstanceOf(HandlerInvocationFailedError);
     expect((err as HandlerInvocationFailedError).cause_kind).toBe('analysis_not_ready');
     expect((err as HandlerInvocationFailedError).details).toMatchObject({
-      reason_code: 'OPTIONS_NOT_CONFIGURED',
+      // The canonical structural record now names the precise load-bearing
+      // blocker instead of collapsing it into the legacy option-count code.
+      reason_code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
     });
     expect(calls.n).toBe(0); // PLoT was never called
     expect(outcome).toBeUndefined(); // no run_analysis fact can exist

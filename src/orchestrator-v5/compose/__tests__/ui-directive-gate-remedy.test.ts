@@ -81,6 +81,7 @@ const suppressed = (reason: string) =>
  * later cannot happen silently.
  */
 const KNOWN_UNMAPPED: ReadonlySet<ReadinessOpenItem['kind']> = new Set([
+  'goal_node_missing',
   'option_needs_mapping',
   'goal_threshold_missing',
   'model_needs_review',
@@ -309,13 +310,14 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
         expect(REMEDY_SECTION_BY_OPEN_ITEM_KIND).toHaveProperty(kind);
       }
 
-      // The two extra keys are the explicitly quarantined historical members,
-      // retained so old coaching-state/directive snapshots stay readable.
+      // The additional keys are the two compatibility members plus the
+      // canonical missing-goal remedy, which has no speculative UI gesture.
       expect(Object.keys(REMEDY_SECTION_BY_OPEN_ITEM_KIND).sort()).toEqual(
         [
           ...kinds,
           'too_few_options',
           'goal_threshold_missing',
+          'goal_node_missing',
         ].sort(),
       );
     });
@@ -343,6 +345,7 @@ describe('ROADMAP 2.640 — gate-close remedy directive', () => {
         .sort();
 
       expect(unmapped).toEqual([
+        'goal_node_missing',
         'goal_threshold_missing',
         'model_needs_review',
         'option_needs_mapping',

@@ -406,7 +406,14 @@ function buildReadyMultiOptionFixture(): ReturnType<typeof buildD1Fixture> {
   return {
     ...base,
     nodes: [
-      ...base.nodes,
+      ...base.nodes.filter(
+        (node) => node.id !== 'f-uncapped' && node.id !== 'f-quality',
+      ),
+      {
+        id: 'd-launch',
+        kind: 'decision',
+        label: 'Launch timing',
+      } as never,
       {
         id: 'o-defer',
         kind: 'option',
@@ -415,17 +422,58 @@ function buildReadyMultiOptionFixture(): ReturnType<typeof buildD1Fixture> {
         // mergeInterventionSources reads this as the lowest-precedence
         // numeric source and feeds it through to `status: 'ready'`
         // (helper line 174–180).
-        interventions: { 'f-budget': 0 },
+        interventions: { 'f-budget': 0, 'f-churn': 0.05 },
       } as never,
     ],
     edges: [
-      ...base.edges,
+      ...base.edges.filter(
+        (edge) =>
+          edge.from === 'f-budget'
+          || edge.to === 'f-budget'
+          || edge.from === 'f-churn'
+          || edge.to === 'f-churn',
+      ),
+      {
+        from: 'd-launch',
+        to: 'o-launch',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      } as never,
+      {
+        from: 'd-launch',
+        to: 'o-defer',
+        strength: { mean: 1, std: 0.01 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      } as never,
+      {
+        from: 'o-launch',
+        to: 'f-budget',
+        strength: { mean: 1, std: 0.05 },
+        exists_probability: 1,
+        effect_direction: 'positive',
+      } as never,
       {
         from: 'o-defer',
         to: 'f-budget',
         strength: { mean: 0.2, std: 0.05 },
         exists_probability: 0.9,
         effect_direction: 'positive',
+      } as never,
+      {
+        from: 'o-launch',
+        to: 'f-churn',
+        strength: { mean: -0.4, std: 0.05 },
+        exists_probability: 0.9,
+        effect_direction: 'negative',
+      } as never,
+      {
+        from: 'o-defer',
+        to: 'f-churn',
+        strength: { mean: -0.2, std: 0.05 },
+        exists_probability: 0.9,
+        effect_direction: 'negative',
       } as never,
     ],
     // The existing o-launch option also needs numeric interventions
@@ -443,7 +491,7 @@ function buildReadyMultiOptionFixtureWithInterventions(): ReturnType<typeof buil
     ...base,
     nodes: base.nodes.map((n) =>
       n.id === 'o-launch'
-        ? ({ ...n, interventions: { 'f-budget': 1 } } as never)
+        ? ({ ...n, interventions: { 'f-budget': 1, 'f-churn': 0.04 } } as never)
         : n,
     ),
   }

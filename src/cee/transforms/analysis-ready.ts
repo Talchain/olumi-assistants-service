@@ -67,6 +67,27 @@ export interface AnalysisReadyValidationResult {
 // ============================================================================
 
 /**
+ * A non-numeric raw value is analysis-ready only when the carrier proves the
+ * exact numeric encoding it will send to PLoT. Merely carrying a numeric
+ * `value` is insufficient (that field is schema-required even while encoding
+ * is unresolved); the explicit type and raw→code map make the claim
+ * independently checkable. Missing or mismatched proof therefore continues to
+ * fail closed as `needs_encoding`.
+ */
+function hasProvenRawEncoding(intervention: OptionV3T['interventions'][string]): boolean {
+  const raw = intervention.raw_value;
+  if (typeof raw !== 'string' && typeof raw !== 'boolean') return false;
+  if (intervention.value_type !== 'categorical' && intervention.value_type !== 'boolean') {
+    return false;
+  }
+  if (!Number.isFinite(intervention.value) || intervention.encoding_map === undefined) {
+    return false;
+  }
+  const encoded = intervention.encoding_map[String(raw)];
+  return typeof encoded === 'number' && Number.isFinite(encoded) && encoded === intervention.value;
+}
+
+/**
  * Transform a V3 option to analysis-ready format.
  * Flattens InterventionV3 objects to plain numeric values.
  *
@@ -91,7 +112,10 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
       rawInterventions[factorId] = intervention.raw_value;
       hasRawValues = true;
       // Track if we have non-numeric raw values (categorical/boolean)
-      if (typeof intervention.raw_value !== "number") {
+      if (
+        typeof intervention.raw_value !== "number"
+        && !hasProvenRawEncoding(intervention)
+      ) {
         hasNonNumericRaw = true;
       }
     }

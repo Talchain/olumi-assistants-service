@@ -2082,22 +2082,6 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`No persisted graph found for scenario ${scenarioId}`);
   }
 
-  // EP2 (V5 Edit Safety Core) — unconditional read-boundary analysis-ready
-  // guard. Canonicalise the persisted graph
-  // BEFORE GraphV3.safeParse strips `node.data` (which would otherwise drop an
-  // autosave-written `node.data.interventions` option → silent options_not_configured),
-  // and block an un-analysable graph as a typed recoverable failure (NOT a 500).
-  // `graphForSnapshot` (= the canonical admitted graph) is also used as
-  // `rawPersistedGraph` so `graph_hash_at_run` is computed from the SAME canonical
-  // projection the freshness side hashes (brief §6 consistency). The former
-  // flag-off branch is removed: exact canonical whole-status is load-bearing
-  // admission policy, not an experiment.
-  const verdict = assessAnalysisReadiness(persistedGraph);
-  if (verdict.status === 'unrecoverable') {
-    throw new AnalysisNotReadyError(verdict);
-  }
-  const graphForSnapshot: unknown = verdict.canonicalGraph ?? persistedGraph;
-
   // W2E-2 round 4 — persisted-sigma floor, BEFORE the GraphV3 parse that
   // used to kill the turn. `EdgeStrengthV3.std` is `z.number().positive()`,
   // but the live UI writer floors at ZERO (`Math.max(0, strengthStdValue)`),
@@ -2116,7 +2100,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   //       contract-valid; anything still out of range refuses honestly below.
   // Telemetry is code-keyed: field path + floor written, never the offending
   // value, never a label (PII rule).
-  const sigmaFloor = floorGraphSigmaForCompute(graphForSnapshot);
+  const sigmaFloor = floorGraphSigmaForCompute(persistedGraph);
   for (const repair of sigmaFloor.repairs) {
     emit(TelemetryEvents.ComputeSigmaFloor, {
       path: repair.path,
@@ -2126,8 +2110,8 @@ export async function loadScenarioSnapshotForRunAnalysis(
     });
   }
 
-  const parsedGraph = GraphV3.safeParse(sigmaFloor.graph);
-  if (!parsedGraph.success) {
+  const computeParsed = GraphV3.safeParse(sigmaFloor.graph);
+  if (!computeParsed.success) {
     // Numeric range violations with NO safe reading (exists_probability
     // outside [0,1] — we cannot know whether 1.4 meant 1.0 or 0.14) must be
     // an HONEST refusal: a typed AnalysisNotReadyError that run_analysis maps
@@ -2141,7 +2125,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // range-violation class; shape/structural failures stay on the existing
     // scenario_read_failed path (a user who HAS a graph must never be told
     // to "draft a model first").
-    const numericRangeIssues = parsedGraph.error.issues.filter(
+    const numericRangeIssues = computeParsed.error.issues.filter(
       (issue) =>
         (issue.code === 'too_small' || issue.code === 'too_big') &&
         'type' in issue &&
@@ -2164,7 +2148,34 @@ export async function loadScenarioSnapshotForRunAnalysis(
       };
       throw new AnalysisNotReadyError(verdict);
     }
+    // A present primitive (notably 0 / "") is corrupt, never an absent model.
+    // Preserve the established typed SCHEMA_INVALID distinction so this state
+    // cannot be misreported as NO_GRAPH, while structured-but-malformed graph
+    // objects remain on the existing scenario_read_failed path below.
+    if (typeof persistedGraph !== 'object') {
+      throw new AnalysisNotReadyError(assessAnalysisReadiness(persistedGraph));
+    }
     throw new Error(`Persisted graph failed GraphV3 validation for scenario ${scenarioId}`);
+  }
+
+  // EP2 (V5 Edit Safety Core) — the one canonical whole-status authority now
+  // assesses the schema-valid compute projection. The sigma floor is a
+  // deliberately compute-only repair: letting strict readiness inspect the
+  // raw `std = 0` first would turn the safe repair above into dead code and
+  // reject a value the UI legitimately persists. This pre-parse decides only
+  // schema/numeric integrity; structural + semantic Run admission remains
+  // exclusively owned by `assessAnalysisReadiness`.
+  const verdict = assessAnalysisReadiness(sigmaFloor.graph);
+  if (verdict.status === 'unrecoverable') {
+    throw new AnalysisNotReadyError(verdict);
+  }
+  const graphForSnapshot: unknown = verdict.canonicalGraph ?? sigmaFloor.graph;
+  const parsedGraph = GraphV3.safeParse(graphForSnapshot);
+  if (!parsedGraph.success) {
+    // A canonical projection produced from a schema-valid graph must itself
+    // remain GraphV3-valid. Treat an impossible projection drift as the
+    // existing scenario-read failure, never as a second readiness verdict.
+    throw new Error(`Canonical graph failed GraphV3 validation for scenario ${scenarioId}`);
   }
 
   const readiness = buildCanonicalAnalysisReadyFromGraph(graphForSnapshot);
@@ -2186,7 +2197,10 @@ export async function loadScenarioSnapshotForRunAnalysis(
     goal_node_id: readiness.goal_node_id,
     // Canonical admitted graph — keeps graph_hash_at_run consistent with the
     // freshness-side canonical hash without retaining a flag-off authority.
-    rawPersistedGraph: graphForSnapshot,
+    // Canonical carrier projection with the persisted numeric bytes intact:
+    // hash/readback see the same model identity as freshness, while the
+    // compute-only sigma floor cannot silently rewrite that identity.
+    rawPersistedGraph: canonicaliseForAnalysis(persistedGraph),
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
     // constraints added via `add_constraint`. Omitted when absent so
     // run-analysis can use the existing optional-field idiom.

@@ -416,7 +416,12 @@ function projectCanonicalPayloadToWire(
         label: option.label,
         status: option.status,
         interventions,
-        ...(option.is_baseline !== undefined ? { is_baseline: option.is_baseline } : {}),
+        // The canonical builder has already run baseline detection for every
+        // option. Preserve that complete result on the wire: absence means
+        // "the producer did not evaluate this field", while `false` means it
+        // did and this option is not the baseline. Downstream admission and
+        // readback rely on that distinction.
+        is_baseline: option.is_baseline === true,
         ...(option.intervention_details !== undefined
           ? { intervention_details: option.intervention_details }
           : {}),

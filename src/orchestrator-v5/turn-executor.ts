@@ -1752,12 +1752,13 @@ export async function runTurnExecutor(
                 analysisReadyForTurn,
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
-              // Option-identity guard: same raw graph source as the
-              // routing-freshness hash. undefined when the flag is off.
+              // Option-identity guard: read the SAME active graph authority
+              // as readiness + the routing-freshness hash. This matters after
+              // an atomic repair commit: `context.persistedGraph` is the
+              // pre-repair read and must not be paired with post-repair
+              // readiness/hash inside one canonical frame.
               currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
-                ? extractGraphOptionIds(
-                    context.persistedGraph ?? graphStateForTurn ?? null,
-                  )
+                ? extractGraphOptionIds(canonicalReadinessGraphForRun)
                 : undefined,
             });
     }
@@ -3145,13 +3146,27 @@ export async function runTurnExecutor(
           } catch {
             postApplyHash = null;
           }
-          freshness = deriveAnalysisFreshness(
-            context.prior_facts,
-            postApplyHash,
-            config.cee.optionIdentityFreshnessGuard
-              ? extractGraphOptionIds(committed.persistedGraph)
-              : undefined,
-          );
+          // Reuse the shared canonical state selector for post-repair
+          // freshness/readiness. The repair fact is not a run_analysis fact,
+          // so keep it out of the fact chain: including it would shift the
+          // selected prior fact index without changing the selected analysis.
+          // This is also the canonical frame returned by finalisation; wire,
+          // Run admission and diagnostics therefore read one record.
+          currentAnalysisGraphHashForTurn = postApplyHash;
+          canonicalReadinessGraphForRun = committed.persistedGraph;
+          // Invalidate the pre-repair memo, then reuse the already-approved
+          // per-turn canonical assembly seam. Adding another direct selector
+          // call here would create a parallel context authority.
+          nonExecuteCanonicalMemo = undefined;
+          canonicalStateForRun = canonicalStateForNonExecute()!;
+          freshness = {
+            freshness: canonicalStateForRun.freshness,
+            reason: canonicalStateForRun.freshness_reason,
+            selected_fact_index: canonicalStateForRun.selected_fact_index,
+            computed_at: canonicalStateForRun.computed_at,
+            graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
+            current_graph_hash: canonicalStateForRun.current_graph_hash,
+          };
           try {
             emit(TelemetryEvents.PendingActionConsumed, {
               request_id: requestId,
