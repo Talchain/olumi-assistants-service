@@ -930,15 +930,51 @@ export function resolveSelectionHonesty(
   graphRead: CanonicalGraphReadState['status'],
 ): SelectionHonesty | null {
   const nodeIds = selectedElements?.node_ids ?? [];
+  const rawEdgeIds = selectedElements?.edge_ids ?? [];
   // GraphV3 has no stable edge.id, so opaque producer-local tokens such as
   // React Flow's `e5` cannot prove presence OR absence in canonical state.
-  // Preserve their prior no-focus behaviour; only the existing composite
-  // relationship grammar may enter this deterministic honesty authority.
-  const edgeIds = (selectedElements?.edge_ids ?? []).filter(
-    (id) => normaliseSelectedEdgeIdentity(id) !== null,
-  );
+  // Only the existing composite relationship grammar may enter the resolution
+  // path below — this filter stays exactly as strict as it was.
+  const edgeIds = rawEdgeIds.filter((id) => normaliseSelectedEdgeIdentity(id) !== null);
   const requestedCount = nodeIds.length + edgeIds.length;
-  if (requestedCount === 0) return null;
+  if (requestedCount === 0) {
+    // ⚠ 2026-08-16 (P1) — AN EDGES-ONLY SELECTION USED TO VANISH HERE.
+    //
+    // When every selected edge id was opaque, this filtered to nothing,
+    // `requestedCount` hit zero, and the function returned `null` — NO focus
+    // section. The model was told nothing about the selection and answered as
+    // though the user had clicked nothing. The user had clicked an edge and
+    // asked about it; the product acted as if the click never happened.
+    //
+    // Silence is the WRONG failure mode here, and `FOCUS_INSTRUCTION` already
+    // carries the right one: `could_not_check` teaches the model to say it
+    // could not read the selection, and explicitly forbids claiming the
+    // element is missing. So we disclose instead of going quiet.
+    //
+    // ⭐ HONESTY-ONLY — NO RESOLUTION SCHEME IS INVENTED. We still cannot tell
+    // whether `e5` exists; the change is that we now SAY that rather than
+    // saying nothing. Teaching this authority to resolve producer-local edge
+    // ids belongs to the analysis-state/contract wave, not here.
+    //
+    // Scoped to the EDGES-ONLY case deliberately. When nodes are also selected
+    // the focus section exists and is truthful about the nodes; opaque edge
+    // ids alongside them are still dropped silently, which is the same defect
+    // one size smaller and is reported rather than fixed here — widening this
+    // would change `unresolved` for ordinary node selections that happen to
+    // carry a stray edge id, which is a behaviour change this honesty fix has
+    // no evidence to justify.
+    if (nodeIds.length === 0 && rawEdgeIds.length > 0) {
+      return {
+        // What the USER selected, not what we could parse. Reporting zero here
+        // would be the same lie one field over.
+        requested_count: rawEdgeIds.length,
+        resolved_count: 0,
+        unresolved_count: rawEdgeIds.length,
+        unresolved: 'could_not_check',
+      };
+    }
+    return null;
+  }
 
   // A non-empty node request always produces TurnSelection. The fallbacks keep
   // this fail-closed if a future refactor violates that invariant.
