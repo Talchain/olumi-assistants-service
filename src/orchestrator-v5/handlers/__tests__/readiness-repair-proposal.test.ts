@@ -134,9 +134,49 @@ describe('canonical readiness authority', () => {
 
     const assessment = assessCanonicalAnalysisReadiness(graph);
     expect(assessment.blockingIssues).toHaveLength(1);
-    expect(assessment.blockingIssues[0]?.code).toBe('NO_CAP_UNRECOVERABLE');
+    expect(assessment.blockingIssues[0]).toMatchObject({
+      code: 'NO_CAP_UNRECOVERABLE',
+      option_id: 'opt_a',
+      factor_id: 'fac_cost',
+    });
     expect(assessment.repairProposal).toBeNull();
     expect(assessAnalysisReadiness(graph).nextStep).toContain('real bound');
+  });
+
+  it('preserves two missing factor inputs on the same option as two blockers', () => {
+    const graph = baseGraph();
+    const optionA = node(graph, 'opt_a');
+    delete optionA.interventions;
+    const optionB = node(graph, 'opt_b');
+    optionB.interventions = {
+      ...(optionB.interventions as Dict),
+      fac_quality: { value: 0.7, source: 'user_specified' },
+    };
+    (graph.nodes as Dict[]).push({
+      id: 'fac_quality',
+      kind: 'factor',
+      label: 'Delivery quality',
+      category: 'controllable',
+    });
+    (graph.edges as Dict[]).push(
+      edge('opt_a', 'fac_quality'),
+      edge('opt_b', 'fac_quality'),
+      edge('fac_quality', 'goal_1'),
+    );
+
+    const assessment = assessCanonicalAnalysisReadiness(graph);
+    expect(assessment.blockingIssues).toHaveLength(2);
+    expect(assessment.blockingIssues.map((issue) => ({
+      code: issue.code,
+      option_id: issue.option_id,
+      factor_id: issue.factor_id,
+    }))).toEqual([
+      { code: 'MISSING_OPTION_VALUE', option_id: 'opt_a', factor_id: 'fac_cost' },
+      { code: 'MISSING_OPTION_VALUE', option_id: 'opt_a', factor_id: 'fac_quality' },
+    ]);
+    expect(assessment.repairProposal?.unresolved_inputs).toHaveLength(2);
+    expect(assessment.repairProposal?.unresolved_inputs.map((input) => input.factor_id))
+      .toEqual(['fac_cost', 'fac_quality']);
   });
 });
 

@@ -458,48 +458,97 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+interface UnresolvedOptionDetail {
+  readonly code: 'NO_CAP_UNRECOVERABLE' | 'UNIT_MISMATCH' | 'OPTION_INTERVENTION_UNRESOLVABLE';
+  readonly factorId?: string;
+  readonly factorLabel?: string;
+}
+
 /** Refines the encoder's defer without second-guessing its defer decision. */
 function classifyUnresolvedOption(
   graph: unknown,
   optionId: string,
-): 'NO_CAP_UNRECOVERABLE' | 'UNIT_MISMATCH' | 'OPTION_INTERVENTION_UNRESOLVABLE' {
+): UnresolvedOptionDetail {
+  const generic = (factorId?: string, factorLabel?: string): UnresolvedOptionDetail => ({
+    code: 'OPTION_INTERVENTION_UNRESOLVABLE',
+    ...(factorId ? { factorId } : {}),
+    ...(factorLabel ? { factorLabel } : {}),
+  });
   try {
     if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) {
-      return 'OPTION_INTERVENTION_UNRESOLVABLE';
+      return generic();
     }
     const option = graph.nodes.find(
       (node) => isPlainObject(node) && node.kind === 'option' && node.id === optionId,
     );
-    if (!isPlainObject(option)) return 'OPTION_INTERVENTION_UNRESOLVABLE';
+    if (!isPlainObject(option)) return generic();
     const factorById = new Map<string, Dict>();
     for (const node of graph.nodes) {
       if (isPlainObject(node) && node.kind === 'factor' && typeof node.id === 'string') {
         factorById.set(node.id, node);
       }
     }
-    const bundle = isPlainObject(option.data) && isPlainObject(option.data.interventions)
-      ? option.data.interventions
-      : isPlainObject(option.interventions)
-        ? option.interventions
-        : {};
-    for (const [factorId, raw] of Object.entries(bundle)) {
-      if (!isPlainObject(raw) || finiteNumber(raw.value) !== undefined) continue;
-      if (finiteNumber(raw.raw_value) === undefined) continue;
+    // Recover factor identity with the encoder's carrier precedence. This does
+    // not re-decide whether the option is unresolved—the strict encoder already
+    // did that—it only lets semantic blockers be compared at option×factor
+    // granularity instead of collapsing every factor on the same option.
+    const candidates = new Map<string, unknown>();
+    if (isPlainObject(option.data) && isPlainObject(option.data.interventions)) {
+      for (const [factorId, raw] of Object.entries(option.data.interventions)) {
+        candidates.set(factorId, raw);
+      }
+    }
+    for (const [key, raw] of Object.entries(option)) {
+      const match = key.match(/^data\/interventions\/(.+)$/);
+      if (match?.[1] && !candidates.has(match[1])) candidates.set(match[1], raw);
+    }
+    if (isPlainObject(option.interventions)) {
+      for (const [factorId, raw] of Object.entries(option.interventions)) {
+        if (!candidates.has(factorId)) candidates.set(factorId, raw);
+      }
+    }
+    if (candidates.size === 0 && Array.isArray(graph.edges)) {
+      const targets = graph.edges
+        .filter(
+          (edge): edge is Dict =>
+            isPlainObject(edge)
+            && edge.from === optionId
+            && typeof edge.to === 'string'
+            && factorById.has(edge.to),
+        )
+        .map((edge) => edge.to as string);
+      const hasNodeLevelIntent = finiteNumber(option.value) !== undefined
+        || finiteNumber(option.raw_value) !== undefined;
+      if (hasNodeLevelIntent && targets.length === 1) {
+        candidates.set(targets[0]!, {
+          value: option.value,
+          raw_value: option.raw_value,
+          unit: option.unit,
+          cap: option.cap,
+        });
+      }
+    }
+
+    let firstGeneric: UnresolvedOptionDetail | null = null;
+    for (const [factorId, raw] of candidates) {
+      if (isPlainObject(raw) && finiteNumber(raw.value) !== undefined) continue;
       const factor = factorById.get(factorId);
-      if (!factor) continue;
+      const factorLabel = readNonEmptyString(factor?.label) ?? undefined;
+      if (firstGeneric === null) firstGeneric = generic(factorId, factorLabel);
+      if (!isPlainObject(raw) || finiteNumber(raw.raw_value) === undefined || !factor) continue;
       const observed = isPlainObject(factor.observed_state) ? factor.observed_state : undefined;
       const sourceUnit = readNonEmptyString(raw.unit);
       const factorUnit = readNonEmptyString(observed?.unit);
       if (sourceUnit && factorUnit && sourceUnit.toLowerCase() !== factorUnit.toLowerCase()) {
-        return 'UNIT_MISMATCH';
+        return { code: 'UNIT_MISMATCH', factorId, ...(factorLabel ? { factorLabel } : {}) };
       }
       if (finiteNumber(raw.cap) === undefined && finiteNumber(observed?.cap) === undefined) {
-        return 'NO_CAP_UNRECOVERABLE';
+        return { code: 'NO_CAP_UNRECOVERABLE', factorId, ...(factorLabel ? { factorLabel } : {}) };
       }
     }
-    return 'OPTION_INTERVENTION_UNRESOLVABLE';
+    return firstGeneric ?? generic();
   } catch {
-    return 'OPTION_INTERVENTION_UNRESOLVABLE';
+    return generic();
   }
 }
 
@@ -716,22 +765,44 @@ function appendSemanticIssues(
   out: CanonicalReadinessIssue[],
 ): void {
   if (!payload || payload.status === 'ready') return;
-  // A strict encoder issue already explains why that option is non-ready.
-  // Counting the producer's derived option status again would turn one real
-  // blocker into an artificial multi-blocker proposal. Seed the coverage from
-  // issues already found, then add only genuinely distinct semantic issues.
+  const exactKey = (issue: CanonicalReadinessIssue): string => [
+    issue.option_id ?? '',
+    issue.factor_id ?? '',
+    issue.code,
+  ].join('::');
+  const optionFactorKey = (issue: CanonicalReadinessIssue): string | null =>
+    issue.option_id && issue.factor_id
+      ? `${issue.option_id}::${issue.factor_id}`
+      : null;
+  const strictEncoderPairs = new Set(
+    out
+      .filter((issue) =>
+        issue.code === 'NO_CAP_UNRECOVERABLE'
+        || issue.code === 'UNIT_MISMATCH'
+        || issue.code === 'OPTION_INTERVENTION_UNRESOLVABLE')
+      .map(optionFactorKey)
+      .filter((key): key is string => key !== null),
+  );
+  const seenExact = new Set(out.map(exactKey));
+  for (const [index, blocker] of (payload.blockers ?? []).entries()) {
+    const issue = blockerIssue(blocker, out.length + index, payload.status);
+    if (!issue) continue;
+    const pair = optionFactorKey(issue);
+    // The semantic producer sees an unencoded raw carrier as a missing value.
+    // When the strict encoder has already named that exact option×factor, they
+    // are two views of one blocker. Do not suppress any other factor or any
+    // distinct blocker code on the same pair.
+    if (issue.code === 'MISSING_OPTION_VALUE' && pair && strictEncoderPairs.has(pair)) continue;
+    const key = exactKey(issue);
+    if (seenExact.has(key)) continue;
+    seenExact.add(key);
+    out.push(issue);
+  }
   const coveredOptionIds = new Set(
     out
       .map((issue) => issue.option_id)
       .filter((id): id is string => typeof id === 'string'),
   );
-  for (const [index, blocker] of (payload.blockers ?? []).entries()) {
-    const issue = blockerIssue(blocker, out.length + index, payload.status);
-    if (!issue) continue;
-    if (issue.option_id && coveredOptionIds.has(issue.option_id)) continue;
-    if (issue.option_id) coveredOptionIds.add(issue.option_id);
-    out.push(issue);
-  }
   for (const option of payload.options) {
     if (option.status === 'ready' || coveredOptionIds.has(option.option_id)) continue;
     const mapping = option.status === 'needs_user_mapping';
@@ -839,7 +910,8 @@ export function assessCanonicalAnalysisReadiness(
     const blockingIssues: CanonicalReadinessIssue[] = [];
     for (const optionId of strictEncoding.unresolvedOptionIds) {
       const label = labels.get(optionId);
-      const code = classifyUnresolvedOption(graph, optionId);
+      const detail = classifyUnresolvedOption(graph, optionId);
+      const code = detail.code;
       const message = code === 'NO_CAP_UNRECOVERABLE'
         ? label
           ? `Review the effect values for "${label}"; a real bound is required before its raw value can be normalised.`
@@ -861,6 +933,8 @@ export function assessCanonicalAnalysisReadiness(
         repairability: 'human_input_required',
         option_id: optionId,
         ...(label ? { option_label: label } : {}),
+        ...(detail.factorId ? { factor_id: detail.factorId } : {}),
+        ...(detail.factorLabel ? { factor_label: detail.factorLabel } : {}),
       });
     }
     const structural = validateGraphStructure(parsed.data);
