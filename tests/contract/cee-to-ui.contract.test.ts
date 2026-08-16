@@ -38,9 +38,11 @@ import { fileURLToPath } from "node:url";
 import {
   AnalysisEnrichmentSchema,
   CEE_UI_ENRICHMENT_KEEP_LIST,
+  OlumiResponseSchema,
 } from "@talchain/schemas/boundary";
 import {
   P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP,
+  composeDirectAnswerResponse,
   toSafeTransportEnrichment,
 } from "../../src/orchestrator-v5/compose.js";
 import {
@@ -797,17 +799,93 @@ describe("CEE→UI: conditional_winners is projected, not passed through", () =>
     // Binds the suppression to the WITHHELD path by identity. Without this, a
     // projection that stripped identity unconditionally would pass every
     // assertion above while silently breaking the ordinary rendered card.
-    const transported = toSafeTransportEnrichment({
+    const producerEnrichment = {
       conditional_winners: [plotRow],
-    } as Record<string, unknown>);
+    } as Record<string, unknown>;
+    const producerBytes = JSON.stringify(producerEnrichment);
+    const transported = toSafeTransportEnrichment(producerEnrichment);
     expect(transported?.conditional_winners).toEqual([plotRow]);
+    expect(JSON.stringify(transported)).toBe(producerBytes);
   });
 
-  it("an empty array and a non-array payload are not corrupted", () => {
+  it("a valid empty array remains an explicit empty scientific result", () => {
     expect(project([])).toEqual([]);
+  });
+
+  const missingLowBucket = (() => {
+    const row: Record<string, unknown> = { ...plotRow };
+    delete row.low_bucket;
+    return row;
+  })();
+
+  it.each([
+    ["null payload", null],
+    ["string payload", "not-an-array"],
+    ["non-array object payload", { rows: [plotRow] }],
+    ["null row", [null]],
+    ["primitive string row", ["opaque-row"]],
+    ["array row", [[plotRow]]],
+    ["malformed typed row", [{ ...plotRow, factor_id: 42 }]],
+    ["missing required bucket row", [missingLowBucket]],
+    [
+      "malformed required bucket",
+      [{ ...plotRow, high_bucket: { winner_id: "opt_b" } }],
+    ],
+  ])("omits the whole key for a %s while preserving unrelated enrichment", (_label, rows) => {
+    const factorEvppi = [{ factor_id: "factor_unit_cost", evppi: 0.17 }];
     const out = projectTransportEnrichmentForWithheldClaim({
-      conditional_winners: "not-an-array",
+      factor_evppi: factorEvppi,
+      conditional_winners: rows,
     });
-    expect(out?.conditional_winners).toBe("not-an-array");
+
+    expect(out).toStrictEqual({ factor_evppi: factorEvppi });
+    expect(Object.prototype.hasOwnProperty.call(out, "conditional_winners")).toBe(false);
+  });
+
+  const composeAnalysisWire = (enrichment: Record<string, unknown> | undefined) =>
+    composeDirectAnswerResponse({
+      assistant_text: "No option can be put forward yet.",
+      stage: "analyse",
+      answerKind: "substantive",
+      blocks: [
+        {
+          type: "analysis_result",
+          summary: "The available analysis remains conditional.",
+          leading_option_id: null,
+          ...(enrichment === undefined ? {} : { enrichment }),
+        },
+      ],
+    });
+
+  it("omits a malformed conditional-winner array from the composed withheld wire", () => {
+    const enrichment = projectTransportEnrichmentForWithheldClaim({
+      conditional_winners: [plotRow, null],
+    });
+    const response = composeAnalysisWire(enrichment);
+    const parsed = OlumiResponseSchema.safeParse(response);
+
+    expect(parsed.success).toBe(true);
+    const wire = JSON.stringify(response);
+    expect(wire).not.toContain("conditional_winners");
+    expect(wire).not.toContain("winner_id");
+    expect(wire).not.toContain("opt_a");
+    expect(wire).not.toContain("Alpha");
+  });
+
+  it("keeps valid science on the composed withheld wire without winner identity", () => {
+    const enrichment = projectTransportEnrichmentForWithheldClaim({
+      conditional_winners: [plotRow],
+    });
+    const response = composeAnalysisWire(enrichment);
+    const parsed = OlumiResponseSchema.safeParse(response);
+
+    expect(parsed.success).toBe(true);
+    const wire = JSON.stringify(response);
+    expect(wire).toContain("conditional_winners");
+    expect(wire).toContain("winner_flips");
+    expect(wire).not.toContain("winner_id");
+    expect(wire).not.toContain("runner_up_id");
+    expect(wire).not.toContain("opt_a");
+    expect(wire).not.toContain("Alpha");
   });
 });
