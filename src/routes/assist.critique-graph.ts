@@ -1,9 +1,11 @@
 import { Buffer } from "node:buffer";
 import type { FastifyInstance } from "fastify";
 import { CritiqueGraphInput, CritiqueGraphOutput, ErrorV1 } from "../schemas/assist.js";
-import { getAdapter } from "../adapters/llm/router.js";
-import { getSystemPromptMeta } from "../adapters/llm/prompt-loader.js";
+import { getAdapterWithResolution } from "../adapters/llm/router.js";
+import { getSystemPromptSnapshot } from "../adapters/llm/prompt-loader.js";
 import { shouldUseStagingPrompts } from "../config/index.js";
+import { ModelAssignmentError } from "../config/model-assignment.js";
+import { recordModelResolution } from "../orchestrator-v5/debug/turn-debug-store.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
 import { CRITIQUE_TIMEOUT_MS } from "../config/timeouts.js";
@@ -130,17 +132,43 @@ export default async function route(app: FastifyInstance) {
 
       // Get adapter via router (env-driven or config)
       // Model selection priority: prompt config > task default
+      const promptSnapshot = await getSystemPromptSnapshot('critique_graph');
       let modelOverride: string | undefined;
-      const promptMeta = getSystemPromptMeta('critique_graph');
+      const promptMeta = promptSnapshot.meta;
+      const promptEnvironment = shouldUseStagingPrompts() ? 'staging' : 'production';
       if (promptMeta.modelConfig) {
-        const env = shouldUseStagingPrompts() ? 'staging' : 'production';
-        const promptModel = promptMeta.modelConfig[env];
+        const promptModel = promptMeta.modelConfig[promptEnvironment];
         if (promptModel) {
           modelOverride = promptModel;
-          log.info({ task: 'critique_graph', env, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
+          log.info({ task: 'critique_graph', env: promptEnvironment, promptModel, promptId: promptMeta.promptId }, 'Using model from prompt config');
         }
       }
-      const adapter = getAdapter('critique_graph', modelOverride);
+      const { adapter, resolution } = getAdapterWithResolution(
+        'critique_graph',
+        modelOverride,
+        modelOverride ? 'store_model_config' : undefined,
+      );
+      log.debug({
+        event: 'model.resolution',
+        task: resolution.task,
+        resolved_model: resolution.resolved_model,
+        provider: resolution.provider,
+        resolution_source: resolution.resolution_source,
+        request_id: requestId,
+      }, 'Model resolution recorded for LLM call');
+      recordModelResolution(requestId, requestId, {
+        task: resolution.task,
+        resolved_model: resolution.resolved_model,
+        provider: resolution.provider,
+        resolution_source: resolution.resolution_source,
+      });
+      const modelSelectionReason = resolution.resolution_source === 'store_model_config'
+        ? (promptEnvironment === 'staging' ? 'prompt_config_staging' : 'prompt_config_production')
+        : resolution.resolution_source === 'per_call'
+          ? 'explicit_override'
+          : resolution.resolution_source === 'task_default' || resolution.resolution_source === 'env_var'
+            ? 'task_default'
+            : 'provider_default';
 
       emit(TelemetryEvents.CritiqueStart, {
         ...telemetryCtx,
@@ -163,6 +191,11 @@ export default async function route(app: FastifyInstance) {
           requestId,
           timeoutMs: CRITIQUE_TIMEOUT_MS,
           observabilityCollector,
+          preloadedSystemPrompt: {
+            operation: 'critique_graph',
+            content: promptSnapshot.content,
+            meta: promptSnapshot.meta,
+          },
         }
       );
 
@@ -174,7 +207,7 @@ export default async function route(app: FastifyInstance) {
           step: "critique_graph",
           model: adapter.model,
           provider: (adapter.name === "anthropic" || adapter.name === "openai") ? adapter.name : "anthropic",
-          model_selection_reason: "task_default", // Uses TASK_MODEL_DEFAULTS
+          model_selection_reason: modelSelectionReason,
           tokens: {
             input: result.usage.input_tokens,
             output: result.usage.output_tokens,
@@ -258,6 +291,20 @@ export default async function route(app: FastifyInstance) {
         ...telemetryCtx,
         error: err.message,
       });
+
+      if (error instanceof ModelAssignmentError) {
+        reply.code(400);
+        return reply.send(ErrorV1.parse({
+          schema: "error.v1",
+          code: "BAD_INPUT",
+          message: "invalid_model_configuration",
+          details: {
+            reason: error.code,
+            model: error.model,
+            hint: error.message,
+          },
+        }));
+      }
 
       // Capability mapping: provider not supported -> 400 BAD_INPUT with hint
       if (err.message && err.message.includes("_not_supported")) {

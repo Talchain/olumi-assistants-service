@@ -1,190 +1,139 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { ModelRoutingSnapshot } from '../../adapters/llm/model-routing-report.js';
 
-// Mutable mock config
-const mockConfig = {
-  cee: {
-    models: {} as Record<string, string | undefined>,
-    modelSelection: {
-      taskModels: {} as Record<string, string | undefined>,
-    },
-  },
-};
-
-const logInfoCalls: Array<{ obj: Record<string, unknown>; msg: string }> = [];
-const logWarnCalls: Array<{ obj: Record<string, unknown>; msg: string }> = [];
-const mockLog = {
-  info: vi.fn((obj: Record<string, unknown>, msg: string) => {
-    logInfoCalls.push({ obj, msg });
-  }),
-  warn: vi.fn((obj: Record<string, unknown>, msg: string) => {
-    logWarnCalls.push({ obj, msg });
-  }),
-};
-
-vi.mock('../../config/index.js', () => ({ config: mockConfig }));
-vi.mock('../../utils/telemetry.js', () => ({ log: mockLog }));
+const info = vi.fn();
+const warn = vi.fn();
+vi.mock('../../utils/telemetry.js', () => ({ log: { info, warn } }));
 
 const { logResolvedTaskModels } = await import('../model-resolution-logger.js');
-const { AI_TASK_LIFECYCLE, TASK_MODEL_DEFAULTS } = await import('../model-routing.js');
 
-// DERIVED from TASK_MODEL_DEFAULTS, not re-listed (CLAUDE.md trap 12). The
-// hand-typed version of this array was a mirror of the implementation's own
-// `ALL_CEE_TASKS`. Derive the executable subset from the lifecycle authority.
-const ALL_TASKS = (Object.keys(TASK_MODEL_DEFAULTS) as Array<keyof typeof AI_TASK_LIFECYCLE>).filter(
-  (task) => AI_TASK_LIFECYCLE[task].executable,
-);
-const EXPECTED_EXCLUDED_FROM_STARTUP_LOG = [
-  'routing',
-  'repair_graph',
-  'm2_graph_review',
-  'clarification',
-  'explainer',
-] as const;
+const snapshot: ModelRoutingSnapshot = {
+  default_provider: 'anthropic',
+  tasks: [
+    {
+      task: 'draft_graph',
+      model: 'claude-sonnet-5',
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+      registry_model_id: 'claude-sonnet-5',
+      executable: true,
+      has_executable_path: true,
+      lifecycle_state: 'executable_route',
+      runtime_availability: 'available',
+      source: 'default',
+      source_key: 'TASK_MODEL_DEFAULTS.draft_graph',
+    },
+    {
+      task: 'repair_graph',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      availability: 'explicit_alias',
+      registry_model_id: 'gpt-4.1-2025-04-14',
+      executable: false,
+      has_executable_path: false,
+      lifecycle_state: 'inert_compatibility',
+      runtime_availability: 'not_executable',
+      source: 'env_override',
+      source_key: 'CEE_MODEL_REPAIR',
+    },
+    {
+      task: 'm2_graph_review',
+      model: 'claude-sonnet-4-6',
+      provider: 'anthropic',
+      availability: 'registry_enabled',
+      registry_model_id: 'claude-sonnet-4-6',
+      executable: false,
+      has_executable_path: true,
+      lifecycle_state: 'feature_gated_default_off',
+      runtime_availability: 'feature_gated_default_off',
+      source: 'default',
+      source_key: 'TASK_MODEL_DEFAULTS.m2_graph_review',
+    },
+    {
+      task: 'critique_graph',
+      model: 'gpt-5.2',
+      provider: 'openai',
+      availability: 'configuration_error',
+      registry_model_id: 'gpt-5.2',
+      configuration_error: {
+        code: 'MODEL_PROVIDER_MISMATCH',
+        message: 'unsupported provider',
+      },
+      executable: true,
+      has_executable_path: true,
+      lifecycle_state: 'executable_route',
+      runtime_availability: 'available',
+      source: 'default',
+      source_key: 'TASK_MODEL_DEFAULTS.critique_graph',
+    },
+  ],
+};
 
 describe('logResolvedTaskModels', () => {
   beforeEach(() => {
-    logInfoCalls.length = 0;
-    logWarnCalls.length = 0;
-    mockLog.info.mockClear();
-    mockLog.warn.mockClear();
-    mockConfig.cee.models = {};
-    mockConfig.cee.modelSelection.taskModels = {};
+    info.mockClear();
+    warn.mockClear();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
+  it('logs only an available, valid executable path as effective', () => {
+    logResolvedTaskModels(snapshot);
+
+    const effective = info.mock.calls
+      .filter(([fields]) => fields.event === 'model.task_resolved')
+      .map(([fields]) => fields.task);
+    expect(effective).toEqual(['draft_graph']);
+
+    const notEffective = info.mock.calls
+      .filter(([fields]) => fields.event === 'model.task_not_effective')
+      .map(([fields]) => fields.task);
+    expect(notEffective).toEqual([
+      'repair_graph',
+      'm2_graph_review',
+      'critique_graph',
+    ]);
   });
 
-  it('emits exactly one log line per CeeTask (Gate 6)', () => {
-    logResolvedTaskModels();
-    const taskLines = logInfoCalls.filter((c) => c.obj['event'] === 'model.task_resolved');
-    // EXACTLY one — count AND set, so a duplicate line cannot cancel out a
-    // missing one (the old hard-coded count could not tell those apart either).
-    expect(taskLines).toHaveLength(ALL_TASKS.length);
-    expect([...taskLines.map((c) => c.obj['task'] as string)].sort()).toEqual(
-      [...ALL_TASKS].sort(),
+  it('preserves the complete lifecycle/config-error evidence in status logs', () => {
+    logResolvedTaskModels(snapshot);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'model.task_not_effective',
+        task: 'critique_graph',
+        configuration_error: expect.objectContaining({
+          code: 'MODEL_PROVIDER_MISMATCH',
+        }),
+      }),
+      'Task model is not currently effective',
     );
   });
 
-  it('excludes display-only, gated-off and inert compatibility rows', () => {
-    logResolvedTaskModels();
-    const tasks = logInfoCalls
-      .filter((c) => c.obj['event'] === 'model.task_resolved')
-      .map((c) => c.obj['task'] as string);
-    for (const excluded of EXPECTED_EXCLUDED_FROM_STARTUP_LOG) {
-      expect(tasks).not.toContain(excluded);
-    }
-  });
-
-  it('emits one caveat note line before task lines', () => {
-    logResolvedTaskModels();
-    expect(logInfoCalls[0].obj['event']).toBe('model.startup_resolution_note');
-  });
-
-  it('emits refined caveat wording naming per-request logs as source of truth', () => {
-    logResolvedTaskModels();
-    const note = logInfoCalls.find((c) => c.obj['event'] === 'model.startup_resolution_note');
-    expect(note?.msg).toBe(
-      'Startup values are advisory. Per-request logs are the source of truth for store overrides applied after boot.',
+  it('warns only for an effective checked-in default', () => {
+    logResolvedTaskModels(snapshot);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'model.default_fallback',
+        task: 'draft_graph',
+        source_key: 'TASK_MODEL_DEFAULTS.draft_graph',
+      }),
+      expect.stringContaining('serving checked-in default'),
     );
   });
 
-  it('covers every CeeTask value that is not display-only', () => {
-    logResolvedTaskModels();
-    const resolvedTasks = logInfoCalls
-      .filter((c) => c.obj['event'] === 'model.task_resolved')
-      .map((c) => c.obj['task'] as string);
-    for (const task of ALL_TASKS) {
-      expect(resolvedTasks).toContain(task);
-    }
-  });
-
-  it('reports env_task_tier when CEE_MODEL_TASK_* is set', () => {
-    mockConfig.cee.modelSelection.taskModels = { draftGraph: 'gpt-custom-task' };
-    logResolvedTaskModels();
-    const draftLine = logInfoCalls.find(
-      (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'draft_graph',
+  it('takes a resolved snapshot and contains no parallel CEE_MODEL_TASK authority', () => {
+    const root = fileURLToPath(new URL('../..', import.meta.url));
+    const loggerSource = readFileSync(
+      `${root}/config/model-resolution-logger.ts`,
+      'utf8',
     );
-    expect(draftLine?.obj['source']).toBe('env_task_tier');
-    expect(draftLine?.obj['model']).toBe('gpt-custom-task');
-  });
-
-  it('reports env_legacy_tier when CEE_MODEL_* (legacy) is set and task tier is absent', () => {
-    mockConfig.cee.models = { draft: 'claude-sonnet-4-6' };
-    logResolvedTaskModels();
-    const draftLine = logInfoCalls.find(
-      (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'draft_graph',
+    const reportSource = readFileSync(
+      `${root}/adapters/llm/model-routing-report.ts`,
+      'utf8',
     );
-    expect(draftLine?.obj['source']).toBe('env_legacy_tier');
-    expect(draftLine?.obj['model']).toBe('claude-sonnet-4-6');
-  });
-
-  it('reports code_default when no env override is set', () => {
-    logResolvedTaskModels();
-    const orchLine = logInfoCalls.find(
-      (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'orchestrator',
-    );
-    expect(orchLine?.obj['source']).toBe('code_default');
-    expect(typeof orchLine?.obj['model']).toBe('string');
-  });
-
-  it('task tier takes precedence over legacy tier', () => {
-    mockConfig.cee.models = { draft: 'gpt-legacy' };
-    mockConfig.cee.modelSelection.taskModels = { draftGraph: 'gpt-task-tier' };
-    logResolvedTaskModels();
-    const draftLine = logInfoCalls.find(
-      (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'draft_graph',
-    );
-    expect(draftLine?.obj['source']).toBe('env_task_tier');
-    expect(draftLine?.obj['model']).toBe('gpt-task-tier');
-  });
-
-  describe('loud fallback WARN (dropped/unset CEE_MODEL_* visibility)', () => {
-    it('WARNs for a legacy-mapped task running on the checked-in default', () => {
-      // No env overrides set → orchestrator (legacy key 'orchestrator') falls to
-      // its code default. That is the dropped-var signal.
-      logResolvedTaskModels();
-      const warn = logWarnCalls.find(
-        (c) => c.obj['event'] === 'model.default_fallback' && c.obj['task'] === 'orchestrator',
-      );
-      expect(warn).toBeDefined();
-      expect(warn?.obj['config_key']).toBe('orchestrator');
-      expect(typeof warn?.obj['model']).toBe('string');
-      // The task_resolved INFO line is still emitted alongside the WARN.
-      const info = logInfoCalls.find(
-        (c) => c.obj['event'] === 'model.task_resolved' && c.obj['task'] === 'orchestrator',
-      );
-      expect(info?.obj['source']).toBe('code_default');
-    });
-
-    it('does NOT WARN when the legacy CEE_MODEL_* override IS set', () => {
-      mockConfig.cee.models = { orchestrator: 'claude-sonnet-5' };
-      logResolvedTaskModels();
-      const warn = logWarnCalls.find(
-        (c) => c.obj['event'] === 'model.default_fallback' && c.obj['task'] === 'orchestrator',
-      );
-      expect(warn).toBeUndefined();
-    });
-
-    it('does NOT WARN for tasks with no CEE_MODEL_* mechanism (nothing to drop)', () => {
-      // preflight has only a task-tier key and no legacy CEE_MODEL_* var — it
-      // always serves its default by design, so it must not cry wolf.
-      logResolvedTaskModels();
-      const warn = logWarnCalls.find(
-        (c) => c.obj['event'] === 'model.default_fallback' && c.obj['task'] === 'preflight',
-      );
-      expect(warn).toBeUndefined();
-    });
-
-    it('names task and model in every fallback WARN', () => {
-      logResolvedTaskModels();
-      const warns = logWarnCalls.filter((c) => c.obj['event'] === 'model.default_fallback');
-      expect(warns.length).toBeGreaterThan(0);
-      for (const w of warns) {
-        expect(typeof w.obj['task']).toBe('string');
-        expect(typeof w.obj['model']).toBe('string');
-        expect(w.msg).toContain('CEE_MODEL_');
-      }
-    });
+    expect(loggerSource).not.toMatch(/config\.cee\.modelSelection|process\.env\.CEE_MODEL_TASK/);
+    expect(reportSource).not.toMatch(/modelSelection\.taskModels/);
+    expect(reportSource).toContain('Historical');
   });
 });

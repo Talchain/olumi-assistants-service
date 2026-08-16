@@ -486,12 +486,26 @@ export function validateModelRegistered(
   ];
   const registryId = aliasTarget ?? modelId;
   if (!isKnownModel(registryId)) {
+    if (kind === 'inert_inventory') {
+      errors.push(
+        `The inert inventory model "${modelId}" for "${label}" is neither an enabled registry id nor an explicit alias. ` +
+        'This value has no serving authority; remove/fix the inventory value before attaching it to a live shared resolver.',
+      );
+      return errors;
+    }
     errors.push(
       `The ${kind === 'operator_override' ? 'configured' : 'resolved default'} model ` +
         `"${modelId}" for "${label}" is neither an enabled registry id nor an explicit alias. ` +
         'Runtime resolution will reject it before an adapter call.',
     );
   } else if (!isModelEnabled(registryId)) {
+    if (kind === 'inert_inventory') {
+      errors.push(
+        `The inert inventory model "${modelId}" for "${label}" resolves to registry row "${registryId}", which is DISABLED. ` +
+        'This value has no serving authority; do not promote it into a live resolver.',
+      );
+      return errors;
+    }
     errors.push(
       `The ${kind === 'operator_override' ? 'configured' : 'resolved default'} model ` +
         `"${modelId}" for "${label}" resolves to registry row "${registryId}", which is DISABLED. ` +
@@ -523,8 +537,12 @@ export function validateModelsRegistered(
  * needs correction:
  *   - `checked_in_default`  a value in this repo — drift/typo in our own source
  *   - `operator_override`   a live `CEE_MODEL_*` env value
+ *   - `inert_inventory`     parsed/audited legacy inventory with no serving consumer
  */
-export type ModelRegistryCheckKind = 'checked_in_default' | 'operator_override';
+export type ModelRegistryCheckKind =
+  | 'checked_in_default'
+  | 'operator_override'
+  | 'inert_inventory';
 
 /** One labelled model id awaiting the boot registry check. */
 export interface ModelRegistryCheckEntry {
@@ -561,13 +579,10 @@ export interface ModelRegistryCheckEntry {
  * passed as a MAP (so a whole new env tier is one line at the seam, not a
  * rewrite here).
  *
- * ⚠ THE SECOND LEVEL EXISTS BECAUSE THE FIRST CUT MISSED A WHOLE RECORD (A2,
- * review 2026-07-31). It walked only `config.cee.models` (14 keys) while
- * claiming any new `CEE_MODEL_*` key was covered. False: `config.cee.
- * modelSelection.taskModels` is a SECOND record of ten `CEE_MODEL_TASK_*` keys
- * (config/index.ts:1664-1675), and `model-resolution-logger.ts`
- * `resolveTaskModel` ranks it ABOVE the legacy tier. The claim was nearly
- * true, which is the most dangerous kind.
+ * Historical `CEE_MODEL_TASK_*` values are no longer passed to this serving
+ * batch: their selector has no importers. `buildBootModelRegistryBatch` audits
+ * them separately as `inert_inventory`, while the shared runtime/admin routing
+ * projection is the only source allowed to make serving claims.
  *
  * Unset / empty / whitespace env values are SKIPPED, not reported: an unset
  * `CEE_MODEL_*` is the normal posture (the task lands on its checked-in

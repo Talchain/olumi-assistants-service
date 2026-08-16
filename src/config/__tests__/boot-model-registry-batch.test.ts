@@ -75,21 +75,18 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
    * The first cut walked only `config.cee.models` (the legacy tier, 14 keys) while
    * claiming "a NEW CEE_MODEL_* key is covered without a code edit". That claim
    * was FALSE: `config.cee.modelSelection.taskModels` is a second record of ten
-   * `CEE_MODEL_TASK_*` keys (config/index.ts:1664-1675), and
-   * `model-resolution-logger.ts` `resolveTaskModel` ranks it ABOVE the legacy
-   * tier (`env_task_tier` is checked before `env_legacy_tier`).
+   * `CEE_MODEL_TASK_*` keys (config/index.ts:1664-1675).
    *
    * Verified independently at the bytes rather than inherited: the tier's only
    * runtime consumer, `selectModel` (`services/model-selector.ts:124`), has
    * ZERO importers — scope `rg -a` for `selectModel(` / `model-selector` over
    * `src/` and `tools/`, one hit, its own definition. So the tier is dead at the
-   * ROUTER today. It is NOT dead at the startup LOG: `resolveTaskModel` reads it
-   * live, so a `CEE_MODEL_TASK_*` set to an unregistered id already changes what
-   * the boot log claims serves a task.
+   * ROUTER today. The shared startup/admin projection does not read it either,
+   * so it is audited explicitly as non-serving inventory.
    *
-   * Disposition: WALK BOTH RECORDS (the review's preferred option). The dead tier
-   * will not stay dead, walking it cannot produce a false verdict, and it makes
-   * the derive-don't-mirror claim true rather than nearly true.
+   * Disposition: keep walking both records, but label the dead tier INERT. It
+   * may not change serving claims without first acquiring a shared live
+   * resolver and capability validation.
    */
   it('A2: the TASK tier (CEE_MODEL_TASK_*) is walked too — the second record is not invisible', () => {
     vi.stubEnv('CEE_MODEL_TASK_DRAFT_GRAPH', 'gpt-4.1-not-registered');
@@ -97,7 +94,7 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
     const errors = validateModelsRegistered(buildBootModelRegistryBatch());
 
     expect(
-      errors.some((e) => e.includes('env_task_model:draftGraph') && e.includes('"gpt-4.1-not-registered"')),
+      errors.some((e) => e.includes('inert_env_inventory:draftGraph') && e.includes('"gpt-4.1-not-registered"')),
       `expected the task tier to be validated — got:\n${errors.join('\n')}`,
     ).toBe(true);
   });
@@ -109,10 +106,11 @@ describe('buildBootModelRegistryBatch — the BOOT SEAM, driven by real env', ()
     const errors = validateModelsRegistered(buildBootModelRegistryBatch());
 
     expect(errors.some((e) => e.includes('env_model:critique'))).toBe(true);
-    expect(errors.some((e) => e.includes('env_task_model:critiqueGraph'))).toBe(true);
+    expect(errors.some((e) => e.includes('inert_env_inventory:critiqueGraph'))).toBe(true);
     // The labels must not collide — an operator has to know WHICH env var to fix.
     expect(errors.some((e) => e.includes('unregistered-legacy-tier'))).toBe(true);
     expect(errors.some((e) => e.includes('unregistered-task-tier'))).toBe(true);
+    expect(errors.find((e) => e.includes('unregistered-task-tier'))).toMatch(/no serving authority/i);
   });
 });
 

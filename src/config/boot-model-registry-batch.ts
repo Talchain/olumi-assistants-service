@@ -33,15 +33,13 @@
  * tiers are walked, not one (A2):
  *
  *   - `config.cee.models`                      the legacy `CEE_MODEL_*` tier
- *   - `config.cee.modelSelection.taskModels`   the `CEE_MODEL_TASK_*` tier,
- *     ranked ABOVE the legacy tier by `model-resolution-logger.ts`
- *     `resolveTaskModel`
+ *   - `config.cee.modelSelection.taskModels`   historical `CEE_MODEL_TASK_*`
+ *     values, retained as explicitly INERT inventory only
  *
- * The task tier's only ROUTER-side consumer (`selectModel`,
- * `services/model-selector.ts`) currently has zero importers, so it is dead on
- * the request path today — but it is live in the startup LOG, and a dead tier
- * with live env plumbing is exactly the thing that comes back. Walking it costs
- * nothing and cannot produce a false verdict.
+ * The task tier's only selector (`selectModel`, services/model-selector.ts)
+ * has zero importers. Startup and admin routing consume the shared router
+ * projection instead, so these values are audited but never presented as a
+ * serving authority.
  */
 
 import { config } from './index.js';
@@ -63,14 +61,13 @@ export function buildBootModelRegistryBatch(
 ): ModelRegistryCheckEntry[] {
   const cee = config.cee;
   const legacyTier = cee.models ?? {};
-  return buildModelRegistryCheckBatch(
+  const servingBatch = buildModelRegistryCheckBatch(
     {
       ...TASK_MODEL_DEFAULTS,
       ...AUXILIARY_MODEL_DEFAULTS,
     },
     {
       env_model: legacyTier,
-      env_task_model: cee.modelSelection?.taskModels ?? {},
     },
     [
       // Effective draft model (env override applied) — preserves the Lane-F
@@ -85,4 +82,19 @@ export function buildBootModelRegistryBatch(
       ...routerBypassDefaults,
     ],
   );
+
+  const inertTaskInventory = Object.entries(
+    cee.modelSelection?.taskModels ?? {},
+  )
+    .filter(
+      (pair): pair is [string, string] =>
+        typeof pair[1] === 'string' && pair[1].trim().length > 0,
+    )
+    .map(([key, modelId]) => ({
+      label: `inert_env_inventory:${key}`,
+      modelId,
+      kind: 'inert_inventory' as const,
+    }));
+
+  return [...servingBatch, ...inertTaskInventory];
 }

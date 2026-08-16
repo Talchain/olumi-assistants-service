@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _resetConfigCache } from '../../src/config/index.js';
@@ -11,12 +11,18 @@ import {
 } from '../../src/config/model-routing.js';
 import { resolveTaskRouting } from '../../src/routes/admin.models.js';
 import {
+  buildEffectiveTaskModels,
+  getReportedModelTasks,
+  resolveModelRoutingSnapshot,
+} from '../../src/adapters/llm/model-routing-report.js';
+import {
   PROVIDER_DEFAULT_MODELS,
   resetAdapterCache,
 } from '../../src/adapters/llm/router.js';
 
 const MANAGED_ENV = [
   'CEE_MODEL_SUMMARY',
+  'CEE_MODEL_TASK_DRAFT_GRAPH',
   'CEE_MODEL_DECISION_REVIEW_HAIKU',
   'CEE_MODEL_CLARIFICATION',
   'CEE_MODEL_CRITIQUE',
@@ -34,6 +40,53 @@ afterEach(() => {
 });
 
 describe('admin runtime model-routing authority', () => {
+  it('feeds admin/startup from one complete reporting projection', () => {
+    const snapshot = resolveModelRoutingSnapshot();
+    expect(snapshot.tasks.map((row) => row.task)).toEqual(getReportedModelTasks());
+    for (const task of EXECUTABLE_RUNTIME_TASKS) {
+      expect(snapshot.tasks.some((row) => row.task === task)).toBe(true);
+    }
+
+    const effective = buildEffectiveTaskModels(snapshot);
+    expect(effective).not.toHaveProperty('repair_graph');
+    expect(effective).not.toHaveProperty('m2_graph_review');
+    expect(effective).not.toHaveProperty('decision_review_decompose');
+    for (const row of snapshot.tasks) {
+      if (row.availability === 'configuration_error') {
+        expect(effective).not.toHaveProperty(row.task);
+      }
+    }
+  });
+
+  it('keeps CEE_MODEL_TASK_* as inert inventory with no serving precedence', () => {
+    const before = resolveTaskRouting('draft_graph');
+    process.env.CEE_MODEL_TASK_DRAFT_GRAPH = 'gpt-4o';
+    _resetConfigCache();
+    resetAdapterCache();
+    const after = resolveTaskRouting('draft_graph');
+
+    expect(after).toEqual(before);
+    expect(after.source_key).not.toContain('CEE_MODEL_TASK');
+  });
+
+  it('wires both startup and admin to the shared adapter-free snapshot', () => {
+    const server = readFileSync('src/server.ts', 'utf8');
+    const adminRoute = readFileSync('src/routes/admin.models.ts', 'utf8');
+    const report = readFileSync(
+      'src/adapters/llm/model-routing-report.ts',
+      'utf8',
+    );
+
+    expect(server).toContain('resolveModelRoutingSnapshot()');
+    expect(server).toContain('buildEffectiveTaskModels(modelRoutingSnapshot)');
+    expect(server).toContain('logResolvedTaskModels(modelRoutingSnapshot)');
+    expect(server).not.toMatch(/const effectiveTaskModels\s*=\s*\{/);
+    expect(adminRoute).toContain('resolveModelRoutingSnapshot()');
+    expect(adminRoute).not.toContain('resolveConfiguredRouterPlan');
+    expect(report).not.toMatch(/\bgetAdapter(?:WithResolution)?\s*\(/);
+    expect(report).not.toMatch(/new\s+(?:Anthropic|OpenAI|Fixtures)Adapter/);
+  });
+
   it('derives the complete static executable-path set from runtime authority', () => {
     expect(EXECUTABLE_RUNTIME_TASKS).toEqual(
       Object.entries(RUNTIME_AI_TASK_AUTHORITY)
@@ -63,6 +116,9 @@ describe('admin runtime model-routing authority', () => {
         code: 'MODEL_PROVIDER_MISMATCH',
       },
     });
+    expect(
+      buildEffectiveTaskModels(resolveModelRoutingSnapshot()),
+    ).not.toHaveProperty('critique_graph');
   });
 
   it('reports critique env overrides through the shared provider capability', () => {
@@ -76,6 +132,9 @@ describe('admin runtime model-routing authority', () => {
       source: 'env_override',
       source_key: 'CEE_MODEL_CRITIQUE',
     });
+    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+      critique_graph: 'claude-sonnet-4-6',
+    });
 
     process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
     _resetConfigCache();
@@ -88,6 +147,9 @@ describe('admin runtime model-routing authority', () => {
       source_key: 'CEE_MODEL_CRITIQUE',
       configuration_error: { code: 'MODEL_PROVIDER_MISMATCH' },
     });
+    expect(
+      buildEffectiveTaskModels(resolveModelRoutingSnapshot()),
+    ).not.toHaveProperty('critique_graph');
   });
 
   it('gives failover precedence and reports only task-capable members in order', () => {
@@ -113,6 +175,9 @@ describe('admin runtime model-routing authority', () => {
           availability: 'fixture_only',
         },
       ],
+    });
+    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+      critique_graph: PROVIDER_DEFAULT_MODELS.anthropic,
     });
   });
 

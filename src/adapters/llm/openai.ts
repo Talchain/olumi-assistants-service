@@ -411,17 +411,25 @@ export class OpenAIAdapter implements LLMAdapter {
   async draftGraph(args: DraftGraphArgs, opts: CallOpts): Promise<DraftGraphResult> {
     const { brief, docs = [], seed } = args;
     const collector = opts.collector;
+    const preloadedDraftPrompt =
+      opts.preloadedSystemPrompt?.operation === 'draft_graph'
+        ? opts.preloadedSystemPrompt
+        : undefined;
 
     // Cache bypass support: invalidate and force fresh load from Supabase
-    if (opts.bypassCache) {
+    if (opts.bypassCache && !preloadedDraftPrompt) {
       invalidatePromptCache('draft_graph', 'header_refresh');
       log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via bypass flag (OpenAI)');
     }
 
     // V4: Use shared prompt management system (same as Anthropic adapter)
     // If forceDefault is true, skip store/cache and use hardcoded default directly
-    const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
-    const promptMeta = getSystemPromptMeta('draft_graph');
+    const systemPrompt = preloadedDraftPrompt
+      ? preloadedDraftPrompt.content
+      : await getSystemPrompt('draft_graph', { forceDefault: opts.forceDefault });
+    const promptMeta = preloadedDraftPrompt
+      ? preloadedDraftPrompt.meta
+      : getSystemPromptMeta('draft_graph');
 
     // Build user content with brief and documents (defense-in-depth 60k cap)
     let docContext = "";

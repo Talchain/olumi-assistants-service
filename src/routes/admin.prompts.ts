@@ -62,6 +62,7 @@ import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { ModelAssignmentError, resolveModelAssignment } from '../config/model-assignment.js';
+import { requireTaskModelAssignmentCapability } from '../config/model-routing.js';
 import {
   getGovernedPromptObservationCapability,
   PromptGovernanceError,
@@ -235,6 +236,7 @@ const VersionParamsSchema = z.object({
  * Returns validation errors if any model IDs are invalid
  */
 function validateModelConfig(
+  taskId: string,
   modelConfig: { staging?: string; production?: string } | null | undefined
 ): string[] {
   const errors: string[] = [];
@@ -244,11 +246,14 @@ function validateModelConfig(
     const model = modelConfig[environment];
     if (!model) continue;
     try {
-      resolveModelAssignment(model);
+      requireTaskModelAssignmentCapability(
+        taskId,
+        resolveModelAssignment(model),
+      );
     } catch (error) {
       errors.push(
         error instanceof ModelAssignmentError
-          ? `${environment} model '${model}': ${error.message}`
+          ? `${environment} model '${model}' [${error.code}]: ${error.message}`
           : `${environment} model '${model}' could not be validated`,
       );
     }
@@ -382,7 +387,10 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Validate modelConfig against MODEL_REGISTRY
-    const modelConfigErrors = validateModelConfig(body.data.modelConfig);
+    const modelConfigErrors = validateModelConfig(
+      body.data.taskId,
+      body.data.modelConfig,
+    );
     if (modelConfigErrors.length > 0) {
       return reply.status(400).send({
         error: 'validation_error',
@@ -498,18 +506,6 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // Validate modelConfig against MODEL_REGISTRY (if provided)
-    if (body.data.modelConfig !== undefined) {
-      const modelConfigErrors = validateModelConfig(body.data.modelConfig);
-      if (modelConfigErrors.length > 0) {
-        return reply.status(400).send({
-          error: 'validation_error',
-          message: modelConfigErrors.join('; '),
-          field: 'modelConfig',
-        });
-      }
-    }
-
     try {
       const store = getPromptStore();
       const beforePrompt = await store.get(params.data.id);
@@ -519,6 +515,22 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
           error: 'not_found',
           message: `Prompt '${params.data.id}' not found`,
         });
+      }
+
+      // A prompt task is immutable, so PATCH validation must consume the
+      // existing record's task capability before any governed mutation runs.
+      if (body.data.modelConfig !== undefined) {
+        const modelConfigErrors = validateModelConfig(
+          beforePrompt.taskId,
+          body.data.modelConfig,
+        );
+        if (modelConfigErrors.length > 0) {
+          return reply.status(400).send({
+            error: 'validation_error',
+            message: modelConfigErrors.join('; '),
+            field: 'modelConfig',
+          });
+        }
       }
 
       const actor = getActorFromRequest(request);

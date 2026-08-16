@@ -198,6 +198,40 @@ describe("PATCH /admin/prompts/:id", () => {
     }
   });
 
+  it("rejects an OpenAI critique modelConfig atomically using the task capability", async () => {
+    const id = "critique_graph_default";
+    const before = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(before.statusCode).toBe(200);
+
+    const rejected = await app.inject({
+      method: "PATCH",
+      url: `/admin/prompts/${id}`,
+      headers: ADMIN_HEADERS,
+      payload: {
+        modelConfig: { staging: "gpt-4o", production: "gpt-4o" },
+      },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toMatchObject({
+      error: "validation_error",
+      field: "modelConfig",
+    });
+    expect(rejected.json().message).toContain("MODEL_PROVIDER_MISMATCH");
+    expect(rejected.json().message).toContain("does not implement task 'critique_graph'");
+
+    const after = await app.inject({
+      method: "GET",
+      url: `/admin/prompts/${id}`,
+      headers: { "X-Admin-Key": ADMIN_KEY },
+    });
+    expect(after.statusCode).toBe(200);
+    expect(after.json().modelConfig).toEqual(before.json().modelConfig);
+  });
+
   it("atomically blocks unevaluated bytes for a gated task while allowing the exact evaluated version", async () => {
     const id = "decision_review_default";
     const canonical = readFileSync(

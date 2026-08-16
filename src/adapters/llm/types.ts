@@ -9,6 +9,7 @@ import type { GraphT } from "../../schemas/graph.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
 import type { ObservabilityCollector } from "../../cee/observability/index.js";
+import type { SystemPromptMeta } from "./prompt-loader.js";
 import type { BuiltDraftAttachment } from "./draft-attachment.js";
 
 /**
@@ -411,6 +412,12 @@ export interface CallOpts {
   signal?: AbortSignal;
   bypassCache?: boolean; // Bypass prompt cache: invalidates cache and forces fresh load from Supabase (?supa=1 or X-CEE-Refresh-Prompt header)
   forceDefault?: boolean; // Force use of hardcoded default prompt instead of store prompt (?default=1 URL param)
+  /** Prompt bytes resolved before model selection for prompt-configured routes. */
+  preloadedSystemPrompt?: {
+    readonly operation: 'draft_graph' | 'suggest_options' | 'critique_graph';
+    readonly content: string;
+    readonly meta: SystemPromptMeta;
+  };
   /**
    * Upper bound on the draft call's derived max_tokens (the "runaway sentinel").
    * When set, the adapter caps the timeout-derived affordable budget at this

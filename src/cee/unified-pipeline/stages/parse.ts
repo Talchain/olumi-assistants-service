@@ -20,7 +20,10 @@ import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
 import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
-import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
+import {
+  getSystemPromptSnapshot,
+  invalidatePromptCache,
+} from "../../../adapters/llm/prompt-loader.js";
 import { config, shouldUseStagingPrompts } from "../../../config/index.js";
 import { createEdgeFieldStash } from "../edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../transforms/graph-normalisation.js";
@@ -185,13 +188,19 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   }
 
   // ── Step 4: Model override resolution ───────────────────────────────────
+  if (ctx.opts.refreshPrompts) {
+    invalidatePromptCache('draft_graph', 'header_refresh');
+  }
+  const draftPromptSnapshot = await getSystemPromptSnapshot('draft_graph', {
+    forceDefault: ctx.opts.forceDefault,
+  });
   let effectiveModelOverride = (ctx.input as any).model as string | undefined;
   // Origin distinguishes a store modelConfig override from a client-body
   // override. The router sees both as modelOverride; this flag preserves
   // the semantic distinction for resolution_source logging.
   let overrideOrigin: 'per_call' | 'store_model_config' = 'per_call';
   if (!effectiveModelOverride) {
-    const promptMeta = getSystemPromptMeta("draft_graph");
+    const promptMeta = draftPromptSnapshot.meta;
     if (promptMeta.modelConfig) {
       const env = shouldUseStagingPrompts() ? "staging" : "production";
       const promptModel = promptMeta.modelConfig[env];
@@ -221,6 +230,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       task: draftResolution.task,
       resolved_model: draftResolution.resolved_model,
       resolution_source: draftResolution.resolution_source,
+      provider: draftResolution.provider,
       request_id: ctx.requestId,
     },
     'Model resolution recorded for LLM call',
@@ -229,6 +239,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     task: draftResolution.task,
     resolved_model: draftResolution.resolved_model,
     resolution_source: draftResolution.resolution_source,
+    provider: draftResolution.provider,
   });
 
   // ── Step 5b: attachment / adapter compatibility (fail-closed, F-1) ────────
@@ -427,6 +438,11 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           collector: ctx.collector,
           bypassCache: ctx.opts.refreshPrompts,
           forceDefault: ctx.opts.forceDefault,
+          preloadedSystemPrompt: {
+            operation: 'draft_graph',
+            content: draftPromptSnapshot.content,
+            meta: draftPromptSnapshot.meta,
+          },
           signal: ctx.opts.signal,
           // ROADMAP 1.204 M1 — bridge the adapter's mid-draft label stream onto
           // the pipeline's staged-emission seam. Added ONLY when a stage

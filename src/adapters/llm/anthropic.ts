@@ -445,7 +445,10 @@ function measureTruncatedDraftAnatomy(text: string): {
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
 
-async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string; attachmentBlocks?: Anthropic.ContentBlockParam[] }> {
+async function buildDraftPrompt(
+  args: DraftArgs,
+  opts?: { forceDefault?: boolean; preloadedSystemPrompt?: string },
+): Promise<{ system: AnthropicSystemBlock[]; userContent: string; attachmentBlocks?: Anthropic.ContentBlockParam[] }> {
   let docContext = "";
   if (args.docs.length) {
     const parts: string[] = [];
@@ -483,7 +486,7 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
-  const systemPrompt = await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
+  const systemPrompt = opts?.preloadedSystemPrompt ?? await getSystemPrompt('draft_graph', { forceDefault: opts?.forceDefault });
 
   // ── DRAFT-BY-RECORDS: the output-shape instruction ──────────────────────
   // Appended as a SECOND system block, AFTER the block carrying the
@@ -543,7 +546,7 @@ async function buildSuggestPrompt(args: {
   goal: string;
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
-}): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+}, preloadedSystemPrompt?: string): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const existingContext = args.existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${args.existingOptions.map((o) => `- ${o}`).join("\n")}`
     : "";
@@ -555,7 +558,7 @@ async function buildSuggestPrompt(args: {
   const userContent = `## Goal\n${args.goal}${constraintsContext}${existingContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('suggest_options');
+  const systemPrompt = preloadedSystemPrompt ?? await getSystemPrompt('suggest_options');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "suggest_options" }),
@@ -713,21 +716,29 @@ export async function draftGraphWithAnthropic(
     signal?: AbortSignal;
     timeoutMs?: number;
     maxTokensCeiling?: number;
+    preloadedSystemPrompt?: CallOpts['preloadedSystemPrompt'];
     /** ROADMAP 1.204 M1 — see CallOpts.onDraftProgress. Optional; absent ⇒ the
      *  streaming loop is byte-identical to before (no scanner constructed). */
     onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
   }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
+  const preloadedDraftPrompt =
+    opts?.preloadedSystemPrompt?.operation === 'draft_graph'
+      ? opts.preloadedSystemPrompt
+      : undefined;
 
   // X-CEE-Refresh-Prompt support: invalidate cache to force fresh load from Supabase
-  if (opts?.refreshPrompts) {
+  if (opts?.refreshPrompts && !preloadedDraftPrompt) {
     invalidatePromptCache('draft_graph', 'header_refresh');
     log.info({ taskId: 'draft_graph' }, 'Prompt cache invalidated via X-CEE-Refresh-Prompt header');
   }
 
-  const prompt = await buildDraftPrompt(args, { forceDefault: opts?.forceDefault });
-  const promptMeta = getSystemPromptMeta('draft_graph');
+  const prompt = await buildDraftPrompt(args, {
+    forceDefault: opts?.forceDefault,
+    preloadedSystemPrompt: preloadedDraftPrompt?.content,
+  });
+  const promptMeta = preloadedDraftPrompt?.meta ?? getSystemPromptMeta('draft_graph');
   // Derive the last-resort fallback from the checked-in draft default rather
   // than a hard-copied literal (1.185(a) rec-2 derive-don't-mirror). Pinned by
   // model-resolution-table.test.ts (claude-sonnet-5 since 2026-08-08); every
@@ -2629,11 +2640,11 @@ export async function suggestOptionsWithAnthropic(args: {
   constraints?: Record<string, unknown>;
   existingOptions?: string[];
   model?: string;
-}): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
-  const prompt = await buildSuggestPrompt(args);
+}, opts?: { preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> }): Promise<{ options: Array<{ id: string; title: string; pros: string[]; cons: string[]; evidence_to_gather: string[] }>; usage: UsageMetrics }> {
+  const prompt = await buildSuggestPrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('suggest_options') ?? 2048;
-  const suggestPromptMeta = getSystemPromptMeta('suggest_options');
+  const suggestPromptMeta = opts?.promptMeta ?? getSystemPromptMeta('suggest_options');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -3045,7 +3056,10 @@ Also provide:
 
 Respond ONLY with valid JSON.`;
 
-async function buildCritiquePrompt(args: CritiqueArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+async function buildCritiquePrompt(
+  args: CritiqueArgs,
+  preloadedSystemPrompt?: string,
+): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const graphJson = JSON.stringify(
     {
       nodes: args.graph.nodes,
@@ -3065,7 +3079,7 @@ ${graphJson}
 ${briefContext}${focusContext}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('critique_graph');
+  const systemPrompt = preloadedSystemPrompt ?? await getSystemPrompt('critique_graph');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "critique_graph" }),
@@ -3074,12 +3088,13 @@ ${briefContext}${focusContext}`;
 }
 
 export async function critiqueGraphWithAnthropic(
-  args: CritiqueArgs
+  args: CritiqueArgs,
+  opts?: { preloadedSystemPrompt?: string; promptMeta?: ReturnType<typeof getSystemPromptMeta> },
 ): Promise<{ issues: Array<{ level: "BLOCKER" | "IMPROVEMENT" | "OBSERVATION"; note: string; target?: string }>; suggested_fixes: string[]; overall_quality?: "poor" | "fair" | "good" | "excellent"; usage: UsageMetrics }> {
-  const prompt = await buildCritiquePrompt(args);
+  const prompt = await buildCritiquePrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('critique_graph') ?? 2048;
-  const critiquePromptMeta = getSystemPromptMeta('critique_graph');
+  const critiquePromptMeta = opts?.promptMeta ?? getSystemPromptMeta('critique_graph');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -4402,7 +4417,15 @@ export class AnthropicAdapter implements LLMAdapter {
         // Native document attachment (D-59-7). Anthropic-native; carried through.
         attachment: args.attachment,
       },
-      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs, maxTokensCeiling: opts.maxTokensCeiling }
+      {
+        collector: opts.collector,
+        refreshPrompts: opts.bypassCache,
+        forceDefault: opts.forceDefault,
+        signal: opts.signal ?? opts.abortSignal,
+        timeoutMs: opts.timeoutMs,
+        maxTokensCeiling: opts.maxTokensCeiling,
+        preloadedSystemPrompt: opts.preloadedSystemPrompt,
+      }
     );
 
     return {
@@ -4415,10 +4438,19 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async suggestOptions(args: SuggestOptionsArgs, _opts: CallOpts): Promise<SuggestOptionsResult> {
+  async suggestOptions(args: SuggestOptionsArgs, opts: CallOpts): Promise<SuggestOptionsResult> {
     const result = await suggestOptionsWithAnthropic({
       ...args,
       model: this.model,
+    }, {
+      preloadedSystemPrompt:
+        opts.preloadedSystemPrompt?.operation === 'suggest_options'
+          ? opts.preloadedSystemPrompt.content
+          : undefined,
+      promptMeta:
+        opts.preloadedSystemPrompt?.operation === 'suggest_options'
+          ? opts.preloadedSystemPrompt.meta
+          : undefined,
     });
 
     return {
@@ -4448,15 +4480,27 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async critiqueGraph(args: CritiqueGraphArgs, _opts: CallOpts): Promise<CritiqueGraphResult> {
+  async critiqueGraph(args: CritiqueGraphArgs, opts: CallOpts): Promise<CritiqueGraphResult> {
     const { graph, brief, focus_areas } = args;
 
-    const result = await critiqueGraphWithAnthropic({
-      graph,
-      brief,
-      focus_areas,
-      model: this.model,
-    });
+    const result = await critiqueGraphWithAnthropic(
+      {
+        graph,
+        brief,
+        focus_areas,
+        model: this.model,
+      },
+      {
+        preloadedSystemPrompt:
+          opts.preloadedSystemPrompt?.operation === 'critique_graph'
+            ? opts.preloadedSystemPrompt.content
+            : undefined,
+        promptMeta:
+          opts.preloadedSystemPrompt?.operation === 'critique_graph'
+            ? opts.preloadedSystemPrompt.meta
+            : undefined,
+      },
+    );
 
     return {
       issues: result.issues,
