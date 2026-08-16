@@ -454,6 +454,32 @@ export const CEEGraphReadinessResponseV1Schema = z
         option_count: z.number().int().min(0).optional(),
       })
       .optional(),
+    /**
+     * Per-option, per-factor blockers from the canonical admission assessor.
+     * ADDITIVE — optional here so a consumer pinned to an older shape keeps
+     * validating.
+     *
+     * This is what makes `can_run_analysis: false` ACTIONABLE. The route
+     * previously offered only a count ("1 option(s) blocked"), which cannot
+     * drive the UI's draft-missing-values affordance: it names no option and no
+     * field. `option_id` + `factor_id` + a human `message` do.
+     */
+    readiness_issues: z
+      .array(
+        z
+          .object({
+            code: z.string(),
+            category: z.string(),
+            message: z.string(),
+            repairability: z.string(),
+            option_id: z.string().optional(),
+            option_label: z.string().optional(),
+            factor_id: z.string().optional(),
+            factor_label: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     trace: CEETraceMetaSchema,
   })
   .passthrough();

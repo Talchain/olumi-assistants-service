@@ -88,8 +88,10 @@ describe("CEE Graph Readiness Assessment", () => {
 
         expect(result.readiness_level).toBe("ready");
         expect(result.readiness_score).toBeGreaterThanOrEqual(70);
-        expect(result.can_run_analysis).toBe(true);
-        expect(result.blocker_reason).toBeUndefined();
+        // NB: this assessor no longer reports `can_run_analysis` / `blocker_reason`
+        // — see the note on `GraphReadinessAssessment`. Admission is
+        // `assessRouteAdmission`'s question, pinned in
+        // src/cee/graph-readiness/__tests__/canonical-readiness.test.ts.
       });
 
       it("returns high confidence for substantial graphs", () => {
@@ -130,7 +132,6 @@ describe("CEE Graph Readiness Assessment", () => {
         expect(result.readiness_level).toBe("fair");
         expect(result.readiness_score).toBeGreaterThanOrEqual(40);
         expect(result.readiness_score).toBeLessThan(70);
-        expect(result.can_run_analysis).toBe(true);
       });
 
       it("provides actionable recommendations", () => {
@@ -188,8 +189,13 @@ describe("CEE Graph Readiness Assessment", () => {
 
         const result = assessGraphReadiness(graph);
 
-        expect(result.can_run_analysis).toBe(false);
-        expect(result.blocker_reason).toContain("option");
+        // Structural insufficiency now shows up as a COACHING verdict, not as
+        // an admission one: score floored, level needs_work, no quality factors
+        // to offer. Whether analysis may RUN is answered elsewhere.
+        expect(result.readiness_level).toBe("needs_work");
+        expect(result.readiness_score).toBe(0);
+        expect(result.quality_factors).toEqual([]);
+        expect(result.confidence_explanation).toContain("option");
       });
 
       it("blocks analysis for graph without decision", () => {
@@ -200,8 +206,9 @@ describe("CEE Graph Readiness Assessment", () => {
 
         const result = assessGraphReadiness(graph);
 
-        expect(result.can_run_analysis).toBe(false);
-        expect(result.blocker_reason).toContain("decision");
+        expect(result.readiness_level).toBe("needs_work");
+        expect(result.readiness_score).toBe(0);
+        expect(result.confidence_explanation).toContain("decision");
       });
 
       it("blocks analysis for empty graph", () => {
@@ -209,8 +216,9 @@ describe("CEE Graph Readiness Assessment", () => {
 
         const result = assessGraphReadiness(graph);
 
-        expect(result.can_run_analysis).toBe(false);
-        expect(result.blocker_reason).toBeTruthy();
+        expect(result.readiness_level).toBe("needs_work");
+        expect(result.readiness_score).toBe(0);
+        expect(result.confidence_explanation).toBeTruthy();
       });
     });
   });

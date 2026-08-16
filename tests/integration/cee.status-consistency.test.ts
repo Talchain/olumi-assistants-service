@@ -70,18 +70,39 @@ describe("CEE Status Consistency", () => {
         version: "1",
         default_seed: 17,
         nodes: [
+          // ⚠ THIS USED TO APPEND THE OPTIONS A SECOND TIME.
+          //
+          // `draftResult.nodes` ALREADY contains the option nodes (measured:
+          // a pricing-brief draft returns opt_1/opt_2 as kind "option"). The
+          // block that followed re-added every entry of
+          // `analysisReady.options` as a fresh node, so the readiness request
+          // carried DUPLICATE options — `options_total` of 4 for a 2-option
+          // model.
+          //
+          // That defect was invisible for as long as the route read options
+          // from `analysis_ready` rather than from the graph: the duplicates
+          // sat in a part of the payload nothing counted. The unification made
+          // the graph the authority, and the duplication surfaced immediately
+          // as 4-vs-2.
+          //
+          // Options now come through exactly once, from the draft's own nodes,
+          // carrying the `interventions` those nodes hold — the same carrier
+          // the deployed UI populates (DecisionGuideAI #734). Both endpoints
+          // therefore derive their answer from ONE model, which is the only
+          // thing that makes "consistency" a meaningful claim: two endpoints
+          // agreeing because one read the other's answer back off the wire was
+          // never consistency.
           ...draftResult.nodes.map((n: any) => ({
             id: n.id,
             kind: n.kind,
             label: n.label,
             ...(n.data ? { data: n.data } : {}),
             ...(n.category ? { category: n.category } : {}),
-          })),
-          // Add option nodes back (graph-readiness checks them against analysis_ready)
-          ...analysisReady.options.map((o: any) => ({
-            id: o.id,
-            kind: "option",
-            label: o.label,
+            ...(n.kind === "option" &&
+            n.interventions &&
+            Object.keys(n.interventions).length > 0
+              ? { interventions: n.interventions }
+              : {}),
           })),
         ],
         edges: draftResult.edges.map((e: any) => ({

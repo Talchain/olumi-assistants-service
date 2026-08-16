@@ -294,21 +294,33 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   });
 
   // ==========================================================================
-  // F4 — readiness↔run gate drift: scaffold_plan on the V3 response.
+  // scaffold_plan, now derived from the GRAPH.
   //
-  // RED-first: before the route wiring, the V3 response carried NO scaffold_plan
-  // for a mixed-configured graph, so the pre-run panel had only
-  // can_run_analysis:false to read → "1 option(s) blocked" while run_analysis
-  // scaffolds the same option and succeeds. These pin the additive field AND
-  // that can_run_analysis stays honest (the field never flips the verdict).
+  // ⚠ WHAT CHANGED AND WHY THE OLD TESTS HERE ARE GONE.
   //
-  // Provenance note (verified at the schema): the /graph-readiness `Graph`
-  // input rejects factor `observed_state` (constraint-shaped only) and PRESERVES
-  // `prior` via passthrough — so these graphs give the scaffold its neutral
-  // values through the `prior` rung, the provenance readiness can actually
-  // receive.
+  // This block used to hold ~8 tests that drove `scaffold_plan` from the
+  // request's `analysis_ready.options[]` — reconstructing "intervention intent"
+  // from the client's cached payload via `buildReadinessRawPersistedGraph`.
+  // That whole mechanism existed to paper over TWO assessors disagreeing, and
+  // both it and the second assessor are deleted. Those tests are not weakened
+  // or skipped; the behaviour they described is no longer a behaviour this
+  // route has.
+  //
+  // The question they were really asking — "will the run proceed even though
+  // not every option is configured?" — is still asked, and still answered by
+  // the SAME predicate the run path uses (`computeScaffoldPlan` →
+  // `gateAnalysableOptions`). It is now fed the CANONICAL options, so the
+  // pre-run panel and the run still cannot drift, and the answer no longer
+  // depends on what the caller happened to cache.
+  //
+  // Per-option scaffold semantics (hold vs exclude, the two-option floor) stay
+  // pinned at the unit level in
+  // `src/orchestrator-v5/tools/handlers/__tests__/scaffold-plan-readiness.test.ts`.
+  // They are not duplicated here: this suite shares one rate-limit budget
+  // across its injections, and the route only serialises the plan.
   // ==========================================================================
-  function makeMixedV3Graph() {
+  function makeGraphWithOptions(configuredIds: string[]) {
+    const optionIds = ["opt_a", "opt_c", "opt_b"];
     return {
       version: "1",
       nodes: [
@@ -321,85 +333,55 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           category: "controllable",
           prior: { distribution: "uniform", range_min: 10, range_max: 30 },
         },
-        { id: "opt_a", kind: "option", label: "Premium" },
-        // ⚠ ADDED BY THE NO-RANK RULING (2026-08-14). `opt_b` is now EXCLUDED
-        // rather than filled, so with only two options the run would REFUSE
-        // ("one option is not a comparison") and `will_scaffold_options` —
-        // which answers "will the run proceed even though not every option is
-        // configured?" — would honestly be false. A third configured option
-        // restores the shape these specs are actually about.
-        //
-        // The two-option answer is pinned at the UNIT level, by
-        // `scaffold-plan-readiness.test.ts` → "⭐ TWIN — exclusion that leaves
-        // fewer than two options says the run will NOT proceed". It is NOT
-        // duplicated here: this route's suite shares one rate-limit budget
-        // across its injections, and the route only serialises the plan the
-        // unit twin already measures.
-        { id: "opt_c", kind: "option", label: "Value" },
-        { id: "opt_b", kind: "option", label: "Unconfigured" },
+        ...optionIds.map((id, i) => ({
+          id,
+          kind: "option",
+          label: `Option ${id}`,
+          // The carrier the deployed UI now populates (DecisionGuideAI #734).
+          ...(configuredIds.includes(id) ? { interventions: { fac_price: 0.9 - i * 0.3 } } : {}),
+        })),
       ],
       edges: [
-        { id: "e1", from: "decision", to: "opt_a" },
-        { id: "e2", from: "decision", to: "opt_b" },
-        { id: "e3", from: "opt_a", to: "fac_price" },
-        { id: "e4", from: "opt_b", to: "fac_price" },
-        { id: "e5", from: "decision", to: "opt_c" },
-        { id: "e6", from: "opt_c", to: "fac_price" },
+        ...optionIds.flatMap((id) => [
+          { id: `e_d_${id}`, from: "decision", to: id },
+          { id: `e_${id}_f`, from: id, to: "fac_price" },
+        ]),
+        { id: "e_f_g", from: "fac_price", to: "goal" },
       ],
     };
   }
 
-  it("F4: mixed-configured V3 graph → scaffold_plan.will_scaffold_options=true, can_run_analysis stays honest", async () => {
+  it("mixed-configured GRAPH → will_scaffold_options=true, and can_run_analysis stays honest", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/graph-readiness",
       headers: headersF4,
-      payload: {
-        graph: makeMixedV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "needs_user_mapping",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            // opt_b: added WITHOUT configuration — the exact symptom.
-            { id: "opt_b", label: "Unconfigured", status: "needs_user_mapping", interventions: {} },
-          ],
-          user_questions: ["Which factors and values for: Unconfigured?"],
-        },
-      },
+      payload: { graph: makeGraphWithOptions(["opt_a", "opt_c"]) },
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
 
-    // The run path WOULD scaffold opt_b → the panel now knows it.
+    // The run WOULD proceed (two configured options survive) → the panel knows.
     expect(body.scaffold_plan).toBeDefined();
     expect(body.scaffold_plan.will_scaffold_options).toBe(true);
     expect(body.scaffold_plan.option_count).toBe(1);
 
-    // ...but can_run_analysis stays HONEST — an unconfigured option is not
-    // "ready"; scaffold_plan is additive and must never flip the verdict.
+    // ...but the verdict stays HONEST. scaffold_plan is additive and must never
+    // flip it: an unconfigured option is genuinely not ready.
     expect(body.can_run_analysis).toBe(false);
+    // And the blocker names the unconfigured option BY IDENTITY, not by count.
+    expect(
+      (body.readiness_issues as Array<Record<string, unknown>>).some((i) => i.option_id === "opt_b"),
+    ).toBe(true);
   });
 
-  it("F4: fully-configured V3 graph → will_scaffold_options=false, option_count omitted", async () => {
+  it("fully-configured GRAPH → will_scaffold_options=false, option_count omitted, analysis admitted", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/graph-readiness",
-      headers: headersF4,
-      payload: {
-        graph: makeMixedV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "ready",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            { id: "opt_b", label: "Volume", status: "ready", interventions: { fac_price: 0.2 } },
-          ],
-        },
-      },
+      headers: headersF4b,
+      payload: { graph: makeGraphWithOptions(["opt_a", "opt_c", "opt_b"]) },
     });
 
     expect(res.statusCode).toBe(200);
@@ -407,225 +389,135 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     expect(body.scaffold_plan).toBeDefined();
     expect(body.scaffold_plan.will_scaffold_options).toBe(false);
     expect(body.scaffold_plan.option_count).toBeUndefined();
-    // Two distinct ready options + valid goal → analysis can run.
     expect(body.can_run_analysis).toBe(true);
+    expect(body.readiness_issues).toEqual([]);
   });
 
-  // --- F4 over-report repro (review P1) -------------------------------------
-  // The proven defect: readiness must EXACTLY equal the run path's scaffold
-  // decision on the SAME graph state — no over-report in the PERMISSIVE
-  // direction (that reopens the readiness↔run drift, flipped).
+  // ==========================================================================
+  // THE ACCEPTANCE PAIR — the whole point of the unification.
   //
-  // Same graph state: opt_b was CONFIGURED by the user with a NON-NUMERIC value
-  // (a categorical "UK"). On the persisted graph its node carries intervention
-  // INTENT (data.interventions), so the run path's scaffolder leaves it on the
-  // honest configure path (collectInterventionIntentOptionIds → never scaffold
-  // over intent) and the run stays blocked. The pre-run panel must AGREE it is
-  // NOT will_scaffold-to-runnable.
+  // The route used to select its assessor from the REQUEST BODY SHAPE, and the
+  // UI populates `analysis_ready` only from its own CACHED state. So a FRESH
+  // session and a WARMED session received OPPOSITE verdicts for the SAME graph:
+  // the verdict was a function of client cache, not of the model.
   //
-  // On the wire that intent reaches readiness through analysis_ready: a
-  // configured-but-non-numeric option is status:"needs_encoding" with the
-  // original value under raw_interventions (interventions carries no numeric).
-  // The request `graph` (parsed) cannot carry a non-numeric data.interventions
-  // (the OptionData schema is numeric-only), so readiness's ONLY intent
-  // authority for this option is analysis_ready — exactly the provenance the
-  // over-report ignored.
-  it("F4 over-report: configured-but-non-numeric option (needs_encoding + raw_interventions) → the run PROCEEDS WITHOUT it, and the panel says so", async () => {
+  // `trace` is excluded from the byte comparison, and ONLY `trace`: it carries
+  // the per-request id, which is supposed to differ between two distinct HTTP
+  // requests. Every other field is compared byte-for-byte.
+  // ==========================================================================
+  function analysisReadyFor(graph: ReturnType<typeof makeGraphWithOptions>) {
+    return {
+      goal_node_id: "goal",
+      status: "ready",
+      options: graph.nodes
+        .filter((n: any) => n.kind === "option")
+        .map((n: any) => ({
+          id: n.id,
+          label: n.label,
+          status: n.interventions ? "ready" : "needs_user_mapping",
+          interventions: n.interventions ?? {},
+        })),
+    };
+  }
+
+  async function verdictFor(payload: unknown, headers: Record<string, string>) {
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/graph-readiness",
-      headers: headersF4,
-      payload: {
-        graph: makeMixedV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "needs_encoding",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            // opt_b: the user DID configure it — with a categorical value that
-            // has not been encoded to a number yet. This is intervention INTENT,
-            // not an empty option; the run path will NOT scaffold over it.
-            {
-              id: "opt_b",
-              label: "UK launch",
-              status: "needs_encoding",
-              interventions: {},
-              raw_interventions: { fac_price: "UK" },
-            },
-          ],
-        },
-      },
+      headers,
+      payload: payload as Record<string, unknown>,
     });
-
     expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.scaffold_plan).toBeDefined();
-    // ⚠ RE-PINNED BY THE NO-RANK RULING (2026-08-14), and the property under
-    // test is UNCHANGED: the panel says exactly what the run path will do,
-    // because they are one computation.
-    //
-    // What changed is what the run path DOES. It used to leave opt_b on the
-    // wire unconfigured and BLOCK on PLoT's preflight, so the honest answer was
-    // "will not proceed". Now it EXCLUDES opt_b and compares the other two, so
-    // the honest answer is "will proceed" — and reporting `false` would be the
-    // same F4 drift in the RESTRICTIVE direction: a panel blocking a run that
-    // succeeds.
-    //
-    // Intent is still never written over. That is now visible as opt_b being
-    // EXCLUDED (named, disclosed, one configure step away) rather than held at
-    // values CEE chose in place of the user's.
-    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
-    expect(body.scaffold_plan.option_count).toBe(1);
-    // can_run_analysis stays HONEST and unchanged (#612's invariant).
-    expect(body.can_run_analysis).toBe(false);
+    const { trace: _trace, ...rest } = res.json() as Record<string, unknown>;
+    return { verdict: rest, version: res.headers["x-cee-api-version"] };
+  }
+
+  it("ACCEPTANCE PAIR — mixed-configured graph: both request shapes give a BYTE-IDENTICAL verdict", async () => {
+    const graph = makeGraphWithOptions(["opt_a", "opt_c"]);
+
+    const fresh = await verdictFor({ graph }, headersF4c);
+    const warmed = await verdictFor({ graph, analysis_ready: analysisReadyFor(graph) }, headersF4c);
+
+    expect(JSON.stringify(warmed.verdict)).toBe(JSON.stringify(fresh.verdict));
+    // One assessor ⇒ one version. This used to be 'v1' vs 'v3'.
+    expect(warmed.version).toBe(fresh.version);
+    expect(fresh.version).toBe("v1");
   });
 
-  it("F4 over-report control: raw_interventions intent also blocks scaffold even when status is not needs_encoding", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/assist/v1/graph-readiness",
-      headers: headersF4b,
-      payload: {
-        graph: makeMixedV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "needs_user_mapping",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            // Intent present via raw_interventions (a value the user typed that
-            // failed numeric projection) — the run path treats ANY intervention
-            // entry, numeric or not, as intent. Readiness must too.
-            {
-              id: "opt_b",
-              label: "Bespoke",
-              status: "needs_user_mapping",
-              interventions: {},
-              raw_interventions: { fac_price: "tbd" },
-            },
-          ],
-        },
-      },
-    });
+  it("ACCEPTANCE PAIR — fully-configured graph: both request shapes give a BYTE-IDENTICAL verdict", async () => {
+    const graph = makeGraphWithOptions(["opt_a", "opt_c", "opt_b"]);
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    // Same re-pin as its sibling above: raw_interventions intent is still never
-    // written over — the option is EXCLUDED — and the run proceeds on the two
-    // options that are configured.
-    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
-    expect(body.scaffold_plan.option_count).toBe(1);
-    expect(body.can_run_analysis).toBe(false);
+    const fresh = await verdictFor({ graph }, headersF4d);
+    const warmed = await verdictFor({ graph, analysis_ready: analysisReadyFor(graph) }, headersF4d);
+
+    expect(JSON.stringify(warmed.verdict)).toBe(JSON.stringify(fresh.verdict));
+    expect((fresh.verdict as Record<string, unknown>).can_run_analysis).toBe(true);
   });
 
-  // --- F4 #2 — the UNDER-report the synthetic intent key created (Paul, 28 Jul)
-  //
-  // The defect this pins, end to end on the route:
-  //   1. A user adds an option by chat. It is created with NO effect values.
-  //   2. `reconcile-top-level-options.ts` stamps it `status: "needs_encoding"`
-  //      — that producer stamps `needs_encoding` on ANY option lacking a numeric
-  //      value, INCLUDING one with no values at all. It is NOT the narrow
-  //      documented meaning ("raw values awaiting numeric encoding",
-  //      `schemas/analysis-ready.ts`), and CEE's OWN payload validator flags this
-  //      exact wire state as an inconsistency
-  //      (`OPTION_NEEDS_ENCODING_WITHOUT_RAW`, `transforms/analysis-ready.ts`).
-  //   3. `buildReadinessRawPersistedGraph` used to READ that status as if it
-  //      carried the narrow meaning and FABRICATE an intervention-intent key for
-  //      it, even with `interventions: {}` and NO `raw_interventions`.
-  //   4. Intent is never scaffolded over (`analysable-option-gate.ts`), so
-  //      the fabricated intent suppressed the scaffold →
-  //      `will_scaffold_options: false` → the UI's OR-term collapsed → the run
-  //      was refused.
-  //
-  // It is a FALSE NEGATIVE: `run_analysis` reads the REAL persisted graph, which
-  // carries no such key, so it scaffolds the option and the analysis succeeds.
-  // F4 was re-created inside the code written to close F4.
-  //
-  // Live one-variable control (deployed CEE d6a765d, 28 Jul): flipping ONLY
-  // `opt_b.status` "needs_encoding" → "ready", `interventions` still `{}`,
-  // flipped `will_scaffold_options` false → true. The status was the sole
-  // discriminating variable.
-  //
-  // This is the exact wire shape captured live from the app's own request.
-  // RED before the fix: will_scaffold_options === false.
-  it("F4 #2 RED-first: needs_encoding with NO values at all (interventions {} and no raw_interventions) → will_scaffold_options=true (the run path DOES scaffold it)", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/assist/v1/graph-readiness",
-      headers: headersF4e,
-      payload: {
-        graph: makeMixedV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "needs_encoding",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            // opt_b: added by chat, never configured. NOTHING was set — no
-            // numeric intervention, no raw value. There is no user intent here
-            // to protect; the run path scaffolds it and succeeds.
-            {
-              id: "opt_b",
-              label: "Partner with a specialist consultancy",
-              status: "needs_encoding",
-              interventions: {},
-            },
-          ],
-        },
-      },
-    });
+  it("a CONTRADICTORY analysis_ready cache cannot move the verdict", async () => {
+    // The sharpest form: the graph says one option is unconfigured, while the
+    // cache insists every option is ready. Under the old mode branch this
+    // payload took the strict V3 path and answered from the cache. The graph is
+    // the model; the cache is not.
+    const graph = makeGraphWithOptions(["opt_a", "opt_c"]);
+    const lyingCache = {
+      goal_node_id: "goal",
+      status: "ready",
+      options: ["opt_a", "opt_c", "opt_b"].map((id) => ({
+        id,
+        label: `Option ${id}`,
+        status: "ready",
+        interventions: { fac_price: 0.5 },
+      })),
+    };
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.scaffold_plan).toBeDefined();
-    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
-    expect(body.scaffold_plan.option_count).toBe(1);
-    // can_run_analysis stays HONEST and unchanged (#612's invariant): the option
-    // genuinely is not "ready". The panel's runnability comes from the OR with
-    // scaffold_plan, never from readiness lying.
-    expect(body.can_run_analysis).toBe(false);
-    // The structured fields the UI must compose its blocked/runnable copy from
-    // stay truthful and specific — never "add a decision, a goal and at least
-    // two options" when five options are present.
-    expect(body.options_total).toBe(3);
-    expect(body.options_ready).toBe(2);
-    expect(body.issues).toContain('Option "opt_b" has no interventions');
+    const honest = await verdictFor({ graph }, headersF4e);
+    const lied = await verdictFor({ graph, analysis_ready: lyingCache }, headersF4e);
+
+    expect(JSON.stringify(lied.verdict)).toBe(JSON.stringify(honest.verdict));
+    expect((lied.verdict as Record<string, unknown>).can_run_analysis).toBe(false);
   });
 
-  // Control (the near neighbour that must NOT change): the same empty option
-  // with an EXPLICIT empty raw_interventions map. Same absence of intent, same
-  // answer — the fix must not depend on whether the caller omitted the field or
-  // sent it empty.
-  it("F4 #2 control: needs_encoding with an explicitly EMPTY raw_interventions → will_scaffold_options=true", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/assist/v1/graph-readiness",
-      headers: headersF4f,
-      payload: {
-        graph: makeMixedV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "needs_encoding",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            {
-              id: "opt_b",
-              label: "Partner with a specialist consultancy",
-              status: "needs_encoding",
-              interventions: {},
-              raw_interventions: {},
-            },
-          ],
-        },
-      },
-    });
+  // ==========================================================================
+  // DO-NO-HARM — the response shape the deployed UI reads must survive.
+  // Field-for-field on a HEALTHY graph, so a silent drop cannot pass.
+  // ==========================================================================
+  it("DO-NO-HARM — a healthy graph returns every field the UI reads, on both shapes", async () => {
+    const graph = makeGraphWithOptions(["opt_a", "opt_c", "opt_b"]);
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
-    expect(body.scaffold_plan.option_count).toBe(1);
+    for (const payload of [{ graph }, { graph, analysis_ready: analysisReadyFor(graph) }]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/assist/v1/graph-readiness",
+        headers: headersF4f,
+        payload,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+
+      // Hard-fail-if-dropped, then silent-regression-if-dropped (derived from
+      // the UI's only reader, readinessStore's explicit object literal).
+      expect(typeof body.can_run_analysis).toBe("boolean");
+      expect(["ready", "fair", "needs_work"]).toContain(body.readiness_level);
+      expect(typeof body.readiness_score).toBe("number");
+      expect(typeof body.confidence_explanation).toBe("string");
+      expect(typeof body.scaffold_plan.will_scaffold_options).toBe("boolean");
+      expect(typeof body.options_ready).toBe("number");
+      expect(typeof body.options_total).toBe("number");
+      expect(typeof body.goal_node_valid).toBe("boolean");
+
+      // Fields the UI does not currently read, but which the published contract
+      // carries — dropping them would still be a breaking change.
+      expect(["high", "medium", "low"]).toContain(body.confidence_level);
+      expect(Array.isArray(body.quality_factors)).toBe(true);
+      expect(Array.isArray(body.issues)).toBe(true);
+      expect(Array.isArray(body.readiness_issues)).toBe(true);
+      expect(typeof body.ready).toBe("boolean");
+      expect(typeof body.total_factor_count).toBe("number");
+      expect(typeof body.user_question_count).toBe("number");
+      expect(typeof body.factor_count).toBe("number");
+      expect(body.trace).toBeDefined();
+    }
   });
 
   // --- F4 #1b — the observed_state under-report residual (A2-coordinated) -----
@@ -656,7 +548,12 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
           // (raw_value_used) → a concrete neutral wire number, never ambiguous.
           observed_state: { value: 0.4, raw_value: 200 },
         },
-        { id: "opt_a", kind: "option", label: "Premium" },
+        // Two CONFIGURED options carry their values on the graph (the carrier
+        // the deployed UI populates since DecisionGuideAI #734) so the run has
+        // a real comparison to proceed with; opt_b is the unconfigured one the
+        // scaffold must pick up off fac_price's observed_state neutral value.
+        { id: "opt_a", kind: "option", label: "Premium", interventions: { fac_price: 0.9 } },
+        { id: "opt_c", kind: "option", label: "Value", interventions: { fac_price: 0.4 } },
         { id: "opt_b", kind: "option", label: "Unconfigured" },
       ],
       edges: [
@@ -664,6 +561,8 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
         { id: "e2", from: "decision", to: "opt_b" },
         { id: "e3", from: "opt_a", to: "fac_price" },
         { id: "e4", from: "opt_b", to: "fac_price" },
+        { id: "e5", from: "decision", to: "opt_c" },
+        { id: "e6", from: "opt_c", to: "fac_price" },
       ],
     };
   }
@@ -675,20 +574,11 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     const res = await app.inject({
       method: "POST",
       url: "/assist/v1/graph-readiness",
-      headers: headersF4c,
-      payload: {
-        graph: makeObservedStateV3Graph(),
-        analysis_ready: {
-          goal_node_id: "goal",
-          status: "needs_user_mapping",
-          options: [
-            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
-            { id: "opt_c", label: "Value", status: "ready", interventions: { fac_price: 0.4 } },
-            { id: "opt_b", label: "Unconfigured", status: "needs_user_mapping", interventions: {} },
-          ],
-          user_questions: ["Which factors and values for: Unconfigured?"],
-        },
-      },
+      headers: headersMin,
+      // No `analysis_ready`: the graph now carries the option values itself, so
+      // the cache is not needed to express a configured model — and is no
+      // longer read for the verdict in any case.
+      payload: { graph: makeObservedStateV3Graph() },
     });
 
     expect(res.statusCode).toBe(200);
