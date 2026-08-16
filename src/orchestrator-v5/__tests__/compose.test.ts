@@ -485,7 +485,8 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
 
   it('keeps the evidence_priority review card as a fallback when the richer evidence block cannot be built', () => {
     const fact = phase3Fact({ withEvppiPriority: true });
-    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    const enrichment = (fact.result as Record<string, unknown>)
+      .enrichment as Record<string, unknown>;
     enrichment.factor_sensitivity = [
       { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
     ];
@@ -514,7 +515,8 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
 
   it('uses one deterministic factor card instead of the generic lens when Decision Review has no action', () => {
     const fact = phase3Fact({ withEvppiPriority: true });
-    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    const enrichment = (fact.result as Record<string, unknown>)
+      .enrichment as Record<string, unknown>;
     enrichment.factor_sensitivity = [
       { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
     ];
@@ -539,7 +541,9 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
       (b) => b.type === 'review_card' && b.card_kind === 'evidence_priority',
     );
     expect(priorityCards).toHaveLength(1);
-    expect(priorityCards[0]?.body).toContain('gather relevant data or expert judgement');
+    const priorityCard = priorityCards[0];
+    if (priorityCard?.type !== 'review_card') throw new Error('narrowing');
+    expect(priorityCard.body).toContain('gather relevant data or expert judgement');
     expect(parsed.blocks.some((b) => b.type === 'evidence')).toBe(false);
   });
 
@@ -550,7 +554,8 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     '$name readiness suppresses factor-EVPPI priority while preserving ordinary Phase 3 content',
     ({ status }) => {
       const fact = phase3Fact({ withEvppiPriority: true });
-      const enrichment = fact.result.enrichment as Record<string, unknown>;
+      const enrichment = (fact.result as Record<string, unknown>)
+        .enrichment as Record<string, unknown>;
       enrichment.factor_evppi = [
         { factor_id: 'fac_cost_overrun', evppi: 0.4, status: 'resolved' },
         { factor_id: 'fac_delivery_risk', evppi: 0.2, status: 'resolved' },
