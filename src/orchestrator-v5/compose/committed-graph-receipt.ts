@@ -1,11 +1,13 @@
 /**
  * Canonical committed-graph receipt.
  *
- * This is the ONE post-commit graph transport builder. Its only admissible
- * source is `CommitResult.persistedGraph`: the exact object handed to the
- * atomic store after persistence projection. Pre-commit `appliedGraph`, a
- * caller's `committedParse.data`, or a request graph can all differ in
- * analysis-affecting fields and must never reach this helper.
+ * This is the ONE canonical graph transport builder. Its only admissible
+ * source is commit.ts's final persistence projection: the exact object that
+ * will be handed to the atomic store. It is invoked before append, then its
+ * result is released through `CommitResult.canonicalGraphReceipt` only after
+ * `accepted_insert`. A caller's `appliedGraph`, `committedParse.data`, request
+ * graph, or post-commit rebuild can differ or throw too late and must never
+ * reach this helper.
  *
  * The existing GraphStateIngressSchema is the structural/numeric admission
  * authority. We deliberately do NOT parse via GraphV3: GraphV3 currently
@@ -75,7 +77,7 @@ function hasOwn(record: Record<string, unknown>, key: string): boolean {
 }
 
 /**
- * Build and validate the canonical receipt from exact persisted bytes.
+ * Build and validate the canonical receipt from exact to-be-persisted bytes.
  *
  * The persisted projection must already own every hash carrier. This helper is
  * a validator/transporter, never the first author of `[]` / `null`: accepting

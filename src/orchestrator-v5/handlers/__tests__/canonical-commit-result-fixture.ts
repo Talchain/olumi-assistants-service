@@ -1,8 +1,10 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import type { CommitResult } from '../../commit.js';
+import { buildCanonicalCommittedGraphReceipt } from '../../compose/committed-graph-receipt.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 const EMPTY_PENDING_LIFECYCLE = {
   priorCount: 0,
@@ -47,5 +49,11 @@ export function canonicalCommitResultFixture(
     pendingLifecycle: EMPTY_PENDING_LIFECYCLE,
     persistedAnalysisGraphHash,
     persistedGraph,
+    canonicalGraphReceipt: persistedGraph === null
+      ? null
+      : buildCanonicalCommittedGraphReceipt(persistedGraph),
+    canonicalAnalysisReady: persistedGraph === null
+      ? null
+      : (buildCanonicalAnalysisReadyFromGraph(persistedGraph) ?? null),
   };
 }

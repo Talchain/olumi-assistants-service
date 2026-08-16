@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import {
@@ -230,62 +231,116 @@ describe('canonical receipt architecture drift guards', () => {
     expect(source).not.toMatch(/analysis_ready\s*:/);
   });
 
-  it('pins every turn receipt to one defined canonical readiness result from the exact persistence projection', () => {
+  it('makes commit.ts the sole pre-append receipt/readiness authority', () => {
     const source = readFileSync(
+      join(repoRoot, 'src/orchestrator-v5/commit.ts'),
+      'utf8',
+    );
+    const receiptBuild = source.indexOf(
+      'const canonicalGraphReceipt = buildCanonicalCommittedGraphReceipt(graphForStore);',
+    );
+    const readinessBuild = source.indexOf(
+      'const canonicalAnalysisReady = buildCanonicalAnalysisReadyFromGraph(graphForStore);',
+    );
+    const responseDerivation = source.indexOf(
+      'if (metadata.deriveResponseFromPersistedGraph !== undefined)',
+    );
+    const append = source.indexOf('const appendResult = await store.append({');
+
+    expect(source.match(/buildCanonicalCommittedGraphReceipt\(/g)).toHaveLength(1);
+    expect(source.match(/buildCanonicalAnalysisReadyFromGraph\(/g)).toHaveLength(1);
+    expect(receiptBuild).toBeGreaterThan(source.indexOf('const effectiveGraphHash'));
+    expect(readinessBuild).toBeGreaterThan(receiptBuild);
+    expect(responseDerivation).toBeGreaterThan(readinessBuild);
+    expect(append).toBeGreaterThan(responseDerivation);
+    expect(source).toContain(
+      'canonicalGraphReceipt.analysisGraphHash !== persistedAnalysisGraphHash',
+    );
+    expect(source).toContain(
+      'graphSnapshotAfterReceiptValidation !== graphSnapshotBeforeReceiptValidation',
+    );
+  });
+
+  it('pins every production graph writer to an explicit exact intent', () => {
+    const writers: Array<{
+      readonly file: string;
+      readonly line: number;
+      readonly intent: string | null;
+    }> = [];
+
+    for (const relative of productionFiles) {
+      const source = readFileSync(join(repoRoot, relative), 'utf8');
+      const file = ts.createSourceFile(
+        relative,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
+      );
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          (node.expression.text === 'commitTurn' ||
+            node.expression.text === 'commitDirectAnswer')
+        ) {
+          const metadata = node.arguments[1];
+          if (metadata !== undefined && ts.isObjectLiteralExpression(metadata)) {
+            const graph = metadata.properties.find(
+              (property) => property.name?.getText(file) === 'graph',
+            );
+            if (graph !== undefined) {
+              const intent = metadata.properties.find(
+                (property) => property.name?.getText(file) === 'graphReceiptIntent',
+              );
+              writers.push({
+                file: relative,
+                line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+                intent:
+                  intent !== undefined && ts.isPropertyAssignment(intent)
+                    ? intent.initializer.getText(file)
+                    : null,
+              });
+            }
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(file);
+    }
+
+    expect(writers).toHaveLength(8);
+    expect(writers.every((writer) => writer.intent !== null)).toBe(true);
+    expect(
+      writers.filter((writer) => writer.intent?.includes("'canonical_mutation'")),
+    ).toHaveLength(8);
+    const adoptionWriters = writers.filter((writer) =>
+      writer.intent?.includes("'receipt_free_adoption'"),
+    );
+    expect(adoptionWriters).toHaveLength(1);
+    expect(adoptionWriters[0]?.file).toBe('src/orchestrator-v5/turn-executor.ts');
+  });
+
+  it('has no caller-side postcommit receipt/readiness builder seam', () => {
+    for (const relative of productionFiles) {
+      const source = readFileSync(join(repoRoot, relative), 'utf8');
+      expect(source).not.toContain('buildCanonicalCommittedGraphReceipt(');
+      expect(source).not.toMatch(
+        /buildCanonicalAnalysisReadyFromGraph\(\s*(?:committed\.persistedGraph|persistedGraphBytes)/,
+      );
+    }
+
+    const turnExecutor = readFileSync(
       join(repoRoot, 'src/orchestrator-v5/turn-executor.ts'),
       'utf8',
     );
-
-    // Readiness repair and routed D1 can derive after append because their
-    // response has no readiness-dependent durable chip/pending decision.
+    expect(turnExecutor.match(/deriveResponseFromPersistedGraph:/g)).toHaveLength(4);
     expect(
-      source.match(
-        /const committedAnalysisReady = buildCanonicalAnalysisReadyFromGraph\(\s*committed\.persistedGraph,\s*\)/g,
-      ),
+      turnExecutor.match(/_persistedGraph,\s*canonicalReadiness,/g),
     ).toHaveLength(2);
-    expect(source.match(/committedAnalysisReady === undefined/g)).toHaveLength(2);
-    // Held single/all must derive the response atomically: the optional
-    // commit callback receives the exact projected object before durable
-    // assistant/chip/pending assembly, and its one #983 result is exposed only
-    // after the accepted append and receipt/hash validation.
-    expect(source.match(/deriveResponseFromPersistedGraph: \(persistedGraph\) =>/g))
-      .toHaveLength(2);
-    expect(
-      source.match(
-        /const canonicalReadiness =\s*buildCanonicalAnalysisReadyFromGraph\(persistedGraph\);/g,
-      ),
-    ).toHaveLength(2);
-    expect(source.match(/canonicalReadiness === undefined/g)).toHaveLength(2);
-    expect(source.match(/committedAnalysisReady === null/g)).toHaveLength(2);
-    expect(source).toMatch(
-      /const committedReceiptRequired = handlerOutcome\?\.mutated_graph != null;[\s\S]*if \(committedReceiptRequired\) \{[\s\S]*committedAnalysisReady === undefined/,
+    expect(turnExecutor).toContain(
+      'analysisReadyForTurn = committedAnalysisReady ?? undefined;',
     );
-    expect(source).toMatch(
-      /analysisReadyForTurn = committedAnalysisReady;/,
-    );
-    expect(source).not.toMatch(/GraphV3\.safeParse\(\s*committed\.persistedGraph\s*\)/);
-    expect(source).not.toMatch(
-      /buildCanonicalAnalysisReadyFromGraph\((?:outcome|lastExecuted)\.appliedGraph\)/,
-    );
-    expect(source).not.toContain('persistedGraphParse');
-    expect(source).not.toContain('wire analysis_ready left at its pre-mutation value');
-  });
-
-  it('keeps edge/factor post-commit readiness and scrub context on the exact persisted object', () => {
-    const source = readFileSync(
-      join(repoRoot, 'src/orchestrator-v5/system-events/dispatch.ts'),
-      'utf8',
-    );
-
-    expect(
-      source.match(
-        /buildCanonicalAnalysisReadyFromGraph\(persistedGraphBytes\)/g,
-      ),
-    ).toHaveLength(2);
-    expect(source).not.toMatch(
-      /GraphV3\.safeParse\(\s*persistedGraphBytes\s*\)/,
-    );
-    expect(source).not.toContain('graph: committedParse.data');
   });
 
   it('pins draft hold/hash/append to one precommit fixed point and accepted hash to the receipt', () => {
@@ -299,9 +354,9 @@ describe('canonical receipt architecture drift guards', () => {
     ).toHaveLength(1);
     expect(source).toContain('graphAfterCommit: draftGraphForCommit');
     expect(source).toContain('graph: draftGraphForCommit ?? undefined');
-    expect(source).toContain(
-      'postDraftGraphHash !== committedReceipt.analysisGraphHash',
-    );
+    expect(source).toContain("? 'canonical_mutation' : undefined");
+    expect(source).toContain('commitResult.canonicalGraphReceipt');
+    expect(source).toContain('commitResult.canonicalAnalysisReady');
     expect(source).toContain(
       'const currentGraphHash = committedReceipt?.analysisGraphHash ?? null',
     );

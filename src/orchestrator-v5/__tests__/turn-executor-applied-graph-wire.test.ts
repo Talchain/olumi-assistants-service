@@ -66,7 +66,7 @@ let mockedPendingActions: ReadonlyArray<PendingAction> = [];
 let appendError: Error | null = null;
 
 const canonicalReadinessControl = vi.hoisted(() => ({
-  unavailableAfterGraphAppend: false,
+  unavailableBeforeGraphAppend: false,
   graphAppendOccurred: false,
 }));
 
@@ -77,8 +77,8 @@ vi.mock('../../orchestrator/tools/analysis-ready-helper.js', async (importOrigin
   return {
     ...actual,
     buildCanonicalAnalysisReadyFromGraph: vi.fn((graph: unknown) =>
-      canonicalReadinessControl.unavailableAfterGraphAppend &&
-      canonicalReadinessControl.graphAppendOccurred
+      canonicalReadinessControl.unavailableBeforeGraphAppend &&
+      !canonicalReadinessControl.graphAppendOccurred
         ? undefined
         : actual.buildCanonicalAnalysisReadyFromGraph(graph),
     ),
@@ -374,7 +374,7 @@ beforeEach(() => {
   appendCalls.length = 0;
   mockedPendingActions = [];
   appendError = null;
-  canonicalReadinessControl.unavailableAfterGraphAppend = false;
+  canonicalReadinessControl.unavailableBeforeGraphAppend = false;
   canonicalReadinessControl.graphAppendOccurred = false;
 });
 
@@ -428,8 +428,8 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     expect(result.analysisReady).toBeDefined();
   });
 
-  it('fails closed without a receipt when D1 postcommit canonical readiness is unavailable', async () => {
-    canonicalReadinessControl.unavailableAfterGraphAppend = true;
+  it('fails closed before append when D1 canonical readiness is unavailable', async () => {
+    canonicalReadinessControl.unavailableBeforeGraphAppend = true;
     const result = await runTurnExecutor(
       payload('Set the budget to £45,000'),
       'req-applied-graph-status-unavailable',
@@ -439,8 +439,8 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
       },
     );
 
-    expect(appendCalls.some((write) => write.graph != null)).toBe(true);
-    expect(result.telemetry.commit_performed).toBe(true);
+    expect(appendCalls.some((write) => write.graph != null)).toBe(false);
+    expect(result.telemetry.commit_performed).toBe(false);
     expect(result.response.draft_graph).toBeUndefined();
     expect(result.response.graph_hash).toBeUndefined();
     const errorBlock = (

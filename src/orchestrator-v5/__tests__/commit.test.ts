@@ -61,10 +61,9 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
   });
 
   describe('exact persisted-graph response derivation', () => {
-    const canonicalReadiness = {
-      status: 'ready' as const,
-      options: [],
-      goal_node_id: '',
+    const canonicalGraph = {
+      nodes: [{ id: 'goal_value', kind: 'goal', label: 'Value' }],
+      edges: [],
     };
 
     function makeSpyStore(): {
@@ -86,12 +85,17 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     }
 
     it('invokes once on the exact projected object before response, chip, pending and append bytes are fixed', async () => {
-      const inputGraph = { nodes: [], edges: [] };
+      const inputGraph = canonicalGraph;
       const inputSnapshot = JSON.stringify(inputGraph);
       const { store, appendCalls } = makeSpyStore();
       let callbackGraph: Readonly<Record<string, unknown>> | null = null;
-      const derive = vi.fn((persistedGraph: Readonly<Record<string, unknown>>) => {
+      let callbackReadiness: unknown = null;
+      const derive = vi.fn((
+        persistedGraph: Readonly<Record<string, unknown>>,
+        canonicalReadiness: unknown,
+      ) => {
         callbackGraph = persistedGraph;
+        callbackReadiness = canonicalReadiness;
         return {
           response: composeDirectAnswerResponse({
             answerKind: 'functional',
@@ -104,7 +108,6 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
               action_type: 'run_analysis' as const,
             }],
           }),
-          analysisReady: canonicalReadiness,
         };
       });
 
@@ -117,6 +120,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
         {
           ...META,
           graph: inputGraph,
+          graphReceiptIntent: 'canonical_mutation',
           deriveResponseFromPersistedGraph: derive,
         },
         store,
@@ -125,6 +129,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       expect(derive).toHaveBeenCalledTimes(1);
       expect(appendCalls).toHaveLength(1);
       expect(callbackGraph).toBe(result.persistedGraph);
+      expect(callbackReadiness).toBe(result.canonicalAnalysisReady);
       expect(appendCalls[0]!.graph).toBe(result.persistedGraph);
       expect(result.response.assistant_text).toBe(
         'Derived from the graph that will be stored.',
@@ -155,7 +160,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
           }),
           {
             ...META,
-            graph: { nodes: [], edges: [] },
+            graph: canonicalGraph,
+            graphReceiptIntent: 'canonical_mutation',
             deriveResponseFromPersistedGraph: () => undefined,
           },
           store,
@@ -165,7 +171,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     });
 
     it('callback mutation is detected as graph drift and aborts before append', async () => {
-      const inputGraph = { nodes: [], edges: [] };
+      const inputGraph = canonicalGraph;
       const inputSnapshot = JSON.stringify(inputGraph);
       const { store, appendCalls } = makeSpyStore();
       await expect(
@@ -178,6 +184,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
           {
             ...META,
             graph: inputGraph,
+            graphReceiptIntent: 'canonical_mutation',
             deriveResponseFromPersistedGraph: (persistedGraph) => {
               (persistedGraph as Record<string, unknown>).goal_constraints = [
                 { id: 'mutant' },
@@ -188,7 +195,6 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
                   assistant_text: 'Mutant response.',
                   stage: 'analyse',
                 }),
-                analysisReady: canonicalReadiness,
               };
             },
           },
@@ -261,7 +267,12 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
       const { store, appendCalls } = makeSpyStore();
       await commitDirectAnswer(
         composed,
-        { ...META, graph, briefText: 'brief' },
+        {
+          ...META,
+          graph,
+          graphReceiptIntent: 'receipt_free_adoption',
+          briefText: 'brief',
+        },
         store,
       );
       expect(appendCalls[0].graph).toEqual(projectGraphForPersistence(graph));
@@ -304,6 +315,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
         {
           ...META,
           graph: { nodes: [], edges: [] },
+          graphReceiptIntent: 'receipt_free_adoption',
           expectedGraphIdentityHash: identity,
           expectedGraphAnalysisHash: analysis,
         },
@@ -323,6 +335,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
         {
           ...META,
           graph: { nodes: [], edges: [] },
+          graphReceiptIntent: 'receipt_free_adoption',
           expectedGraphIdentityHash: null,
           expectedGraphAnalysisHash: null,
         },
@@ -609,7 +622,16 @@ answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       options: [{ id: 'opt_a' }],
     };
     const { store, appendCalls } = makeSpyStore();
-    await commitDirectAnswer(composed(), { ...META, graph: dirtyGraph, handler_id: 'set_factor_value' as never }, store);
+    await commitDirectAnswer(
+      composed(),
+      {
+        ...META,
+        graph: dirtyGraph,
+        graphReceiptIntent: 'receipt_free_adoption',
+        handler_id: 'set_factor_value' as never,
+      },
+      store,
+    );
     setTestSink(null);
 
     const persisted = appendCalls[0]!.graph as typeof dirtyGraph;
@@ -638,7 +660,11 @@ answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
     setTestSink((event) => events.push(event));
     const clean = { nodes: [{ id: 'fac_c', kind: 'factor', observed_state: { value: 0.2 } }], edges: [], goal_node_id: 'g' };
     const { store, appendCalls } = makeSpyStore();
-    await commitDirectAnswer(composed(), { ...META, graph: clean }, store);
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: clean, graphReceiptIntent: 'receipt_free_adoption' },
+      store,
+    );
     setTestSink(null);
     expect(appendCalls[0]!.graph).toEqual(projectGraphForPersistence(clean));
     expect(events.filter((e) => e === 'v5.graph_persist.intercept_repair')).toHaveLength(0);
@@ -658,7 +684,16 @@ answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
     };
     const { store, appendCalls } = makeSpyStore();
     try {
-      await commitDirectAnswer(composed(), { ...META, graph: dirtyGraph, handler_id: 'set_factor_value' as never }, store);
+      await commitDirectAnswer(
+        composed(),
+        {
+          ...META,
+          graph: dirtyGraph,
+          graphReceiptIntent: 'receipt_free_adoption',
+          handler_id: 'set_factor_value' as never,
+        },
+        store,
+      );
     } finally {
       setTestSink(null);
     }

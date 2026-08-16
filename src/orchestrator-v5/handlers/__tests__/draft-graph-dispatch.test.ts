@@ -49,6 +49,8 @@ import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { Stage } from '@talchain/schemas/boundary';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { buildCanonicalCommittedGraphReceipt } from '../../compose/committed-graph-receipt.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -203,6 +205,12 @@ function makeCommitResult(graphPersisted: boolean, graph: unknown = MINIMAL_GRAP
       ? computeAnalysisAffectingGraphHash(
           persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
         )
+      : null,
+    canonicalGraphReceipt: graphPersisted
+      ? buildCanonicalCommittedGraphReceipt(persistedGraph)
+      : null,
+    canonicalAnalysisReady: graphPersisted
+      ? (buildCanonicalAnalysisReadyFromGraph(persistedGraph) ?? null)
       : null,
   };
 }

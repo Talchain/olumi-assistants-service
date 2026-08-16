@@ -67,6 +67,12 @@ const GRAPH = {
   ],
 };
 
+const GRAPH_META = {
+  ...META,
+  graph: GRAPH,
+  graphReceiptIntent: 'canonical_mutation' as const,
+};
+
 function composed() {
   return composeDirectAnswerResponse({
 answerKind: 'functional', assistant_text: 'hi', stage: 'frame' });
@@ -113,7 +119,7 @@ describe('flag OFF — byte-identical commit path', () => {
     setFlag(false);
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({ appendId: 'row-1' }),
     );
     await drainMicrotasks();
@@ -128,7 +134,7 @@ describe('flag ON', () => {
     setFlag(true);
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({ appendId: 'row-2' }),
     );
     await drainMicrotasks();
@@ -160,8 +166,8 @@ describe('flag ON', () => {
 
   it('deterministic event_id: two commits of the SAME turn id carry the SAME event_id (idempotent re-drive)', async () => {
     setFlag(true);
-    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, createNoopSessionStore());
-    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, createNoopSessionStore());
+    await commitDirectAnswer(composed(), GRAPH_META, createNoopSessionStore());
+    await commitDirectAnswer(composed(), GRAPH_META, createNoopSessionStore());
     await drainMicrotasks();
     const ids = serviceMock.saveVersion.mock.calls.map(
       (c) => (c[0] as { event_id: string }).event_id,
@@ -182,7 +188,7 @@ describe('flag ON', () => {
     serviceMock.throwOnGet = true;
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({ appendId: 'row-3' }),
     );
     await drainMicrotasks();
@@ -195,7 +201,7 @@ describe('flag ON', () => {
     serviceMock.saveVersion.mockRejectedValue(new Error('rpc down'));
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({ appendId: 'row-4' }),
     );
     await drainMicrotasks();
@@ -214,7 +220,7 @@ describe('flag ON', () => {
         event_id: null,
       },
     });
-    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, createNoopSessionStore());
+    await commitDirectAnswer(composed(), GRAPH_META, createNoopSessionStore());
     await drainMicrotasks();
     const mmEvents = emitSpy.mock.calls.filter(
       (c: readonly unknown[]) => c[0] === telemetry.TelemetryEvents.V5ModelVersionCreated,
@@ -232,7 +238,7 @@ describe('guest pre-check (ROADMAP 1.25 item 2)', () => {
     setFlag(true);
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({
         appendId: 'row-guest',
         getScenarioOwnerBehaviour: { value: null },
@@ -250,7 +256,7 @@ describe('guest pre-check (ROADMAP 1.25 item 2)', () => {
     setFlag(true);
     await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({
         getScenarioOwnerBehaviour: { value: 'owner-user-id' },
       }),
@@ -264,7 +270,7 @@ describe('guest pre-check (ROADMAP 1.25 item 2)', () => {
     // createNoopSessionStore's default omits getScenarioOwner entirely.
     await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({ appendId: 'row-no-precheck' }),
     );
     await drainMicrotasks();
@@ -275,7 +281,7 @@ describe('guest pre-check (ROADMAP 1.25 item 2)', () => {
     setFlag(true);
     await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH },
+      GRAPH_META,
       createNoopSessionStore({
         getScenarioOwnerBehaviour: { throws: new Error('read failed') },
       }),
@@ -296,7 +302,7 @@ describe('racing-pointer CAS threading (ROADMAP 1.25 item 4)', () => {
     setFlag(true);
     await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH, expectedGraphIdentityHash: EXPECTED_HASH },
+      { ...GRAPH_META, expectedGraphIdentityHash: EXPECTED_HASH },
       createNoopSessionStore(),
     );
     await drainMicrotasks();
@@ -306,7 +312,7 @@ describe('racing-pointer CAS threading (ROADMAP 1.25 item 4)', () => {
 
   it('metadata.expectedGraphIdentityHash undefined (uninstrumented path) → key omitted, byte-identical to pre-fix', async () => {
     setFlag(true);
-    await commitDirectAnswer(composed(), { ...META, graph: GRAPH }, createNoopSessionStore());
+    await commitDirectAnswer(composed(), GRAPH_META, createNoopSessionStore());
     await drainMicrotasks();
     const req = serviceMock.saveVersion.mock.calls[0]![0] as Record<string, unknown>;
     expect('expected_graph_identity_hash' in req).toBe(false);
@@ -316,7 +322,7 @@ describe('racing-pointer CAS threading (ROADMAP 1.25 item 4)', () => {
     setFlag(true);
     await commitDirectAnswer(
       composed(),
-      { ...META, graph: GRAPH, expectedGraphIdentityHash: null },
+      { ...GRAPH_META, expectedGraphIdentityHash: null },
       createNoopSessionStore(),
     );
     await drainMicrotasks();

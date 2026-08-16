@@ -86,8 +86,6 @@ import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/p
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
-import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
-import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -334,13 +332,14 @@ export function draftResultToOlumiResponse(
 
   // The committed graph is NOT composed here. `result.graphOutput` is the
   // pre-persistence candidate and can differ from the bytes the atomic append
-  // receives after projection. `dispatchDraftGraph` attaches the singular
-  // canonical receipt only after commit, from `CommitResult.persistedGraph`.
+  // receives after projection. `dispatchDraftGraph` consumes the singular
+  // prevalidated canonical receipt only after accepted_insert, from
+  // `CommitResult.canonicalGraphReceipt`.
   // Keeping this manual composer graph-free prevents a second/lossy receipt
   // path from surviving beside the canonical one.
 
   // V5 finaliser contract: this composer must NOT set `analysis_ready`. The
-  // dispatcher surfaces the canonical post-commit whole status on
+  // dispatcher surfaces the accepted prevalidated whole status on
   // `DispatchDraftGraphResult`
   // (when graphPersisted), and the response-finaliser stamps it onto the
   // wire envelope after composition, before egress validation. The chip
@@ -760,6 +759,8 @@ export async function dispatchDraftGraph(
         // IS the coverage metric for this path, not a gap to "fix" by
         // trusting the request.
         graph: draftGraphForCommit ?? undefined,
+        graphReceiptIntent:
+          draftGraphForCommit !== null ? 'canonical_mutation' : undefined,
         briefText: briefTextForCommit,
         // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
         // carry-forward runs on this path; graph_hash is the NEW draft's
@@ -787,25 +788,11 @@ export async function dispatchDraftGraph(
     // honest non-graph turn and remains receipt-free.
     const shouldEmitCommittedReceipt = draftGraphForCommit !== null;
     const committedReceipt = shouldEmitCommittedReceipt
-      ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
+      ? commitResult.canonicalGraphReceipt
       : null;
     const canonicalAnalysisReady = shouldEmitCommittedReceipt
-      ? buildCanonicalAnalysisReadyFromGraph(commitResult.persistedGraph)
+      ? (commitResult.canonicalAnalysisReady ?? undefined)
       : undefined;
-    if (
-      shouldEmitCommittedReceipt &&
-      (
-        !commitResult.graphPersisted ||
-        commitResult.persistedAnalysisGraphHash === null ||
-        committedReceipt === null ||
-        canonicalAnalysisReady === undefined ||
-        commitResult.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-        postDraftGraphHash === null ||
-        postDraftGraphHash !== committedReceipt.analysisGraphHash
-      )
-    ) {
-      throw new Error('draft_graph committed receipt/readiness mismatch');
-    }
 
     // Receipt validation admitted this exact persisted object through both
     // the permissive ingress and strict canonical carrier contracts. Use it

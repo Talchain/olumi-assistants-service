@@ -85,7 +85,7 @@ function healthyGraph() {
       { id: 'goal', kind: 'goal', label: 'Goal' },
       { id: 'fac_a', kind: 'factor', label: 'A' },
     ],
-    edges: [{ from: 'fac_a', to: 'goal', edge_type: 'causal' }],
+    edges: [{ from: 'fac_a', to: 'goal', edge_type: 'directed' }],
     goal_node_id: 'goal',
   };
 }
@@ -103,7 +103,7 @@ describe('checkPersistedGraphInvariants — positive control (each code fires)',
 
   it('EDGE_ENDPOINT_MISSING fires on an edge naming a node that does not exist', () => {
     const g = healthyGraph();
-    g.edges.push({ from: 'ghost_factor', to: 'goal', edge_type: 'causal' });
+    g.edges.push({ from: 'ghost_factor', to: 'goal', edge_type: 'directed' });
     const report = checkPersistedGraphInvariants(g, { baseGraph: healthyGraph() });
     expect(report.status).toBe('violated');
     expect(report.violations.map((v) => v.code)).toContain('EDGE_ENDPOINT_MISSING');
@@ -133,12 +133,17 @@ describe('checkPersistedGraphInvariants — positive control (each code fires)',
     expect(report.violations).toEqual([]);
   });
 
-  it('an observation does NOT refuse the commit (the demotion is real, not cosmetic)', async () => {
+  it('canonical mutation receipt authority refuses an unresolved goal before append', async () => {
     const g = { ...healthyGraph(), goal_node_id: 'goal_that_was_deleted' };
     const { store, appendCalls } = makeSpyStore();
-    const result = await commitDirectAnswer(composed(), { ...META, graph: g }, store);
-    expect(result.performed).toBe(true);
-    expect(appendCalls).toHaveLength(1);
+    await expect(
+      commitDirectAnswer(
+        composed(),
+        { ...META, graph: g, graphReceiptIntent: 'canonical_mutation' },
+        store,
+      ),
+    ).rejects.toThrow('goal_identity_invalid');
+    expect(appendCalls).toHaveLength(0);
   });
 
   it('DUPLICATE_OPTION_ID fires on two options[] entries sharing an id', () => {
@@ -207,7 +212,7 @@ describe('checkPersistedGraphInvariants — positive control (each code fires)',
 /** A graph carrying a dangling edge endpoint — pure referential corruption. */
 function corruptGraph() {
   const g = healthyGraph();
-  g.edges.push({ from: 'ghost_factor', to: 'goal', edge_type: 'causal' });
+  g.edges.push({ from: 'ghost_factor', to: 'goal', edge_type: 'directed' });
   return g;
 }
 
@@ -217,7 +222,12 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     await expect(
       commitDirectAnswer(
         composed(),
-        { ...META, graph: corruptGraph(), baseGraphForInvariants: healthyGraph() },
+        {
+          ...META,
+          graph: corruptGraph(),
+          graphReceiptIntent: 'receipt_free_adoption',
+          baseGraphForInvariants: healthyGraph(),
+        },
         store,
       ),
     ).rejects.toBeInstanceOf(PersistedGraphInvariantError);
@@ -232,7 +242,12 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     await expect(
       commitDirectAnswer(
         composed(),
-        { ...META, graph: corruptGraph(), baseGraphForInvariants: healthyGraph() },
+        {
+          ...META,
+          graph: corruptGraph(),
+          graphReceiptIntent: 'receipt_free_adoption',
+          baseGraphForInvariants: healthyGraph(),
+        },
         store,
       ),
     ).rejects.toThrow(/EDGE_ENDPOINT_MISSING.*ghost_factor/s);
@@ -242,7 +257,12 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     const { store, appendCalls } = makeSpyStore();
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: healthyGraph(), baseGraphForInvariants: healthyGraph() },
+      {
+        ...META,
+        graph: healthyGraph(),
+        graphReceiptIntent: 'receipt_free_adoption',
+        baseGraphForInvariants: healthyGraph(),
+      },
       store,
     );
     expect(result.performed).toBe(true);
@@ -271,7 +291,12 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     const { store, appendCalls } = makeSpyStore();
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: edited, baseGraphForInvariants: base },
+      {
+        ...META,
+        graph: edited,
+        graphReceiptIntent: 'receipt_free_adoption',
+        baseGraphForInvariants: base,
+      },
       store,
     );
 
@@ -291,7 +316,7 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     // unlimited new corruption behind one inherited instance.
     const base = corruptGraph(); // 1 dangling endpoint
     const edited = corruptGraph();
-    edited.edges.push({ from: 'second_ghost', to: 'goal', edge_type: 'causal' });
+    edited.edges.push({ from: 'second_ghost', to: 'goal', edge_type: 'directed' });
 
     const report = checkPersistedGraphInvariants(edited, { baseGraph: base });
     expect(report.status).toBe('violated');
@@ -301,7 +326,12 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     await expect(
       commitDirectAnswer(
         composed(),
-        { ...META, graph: edited, baseGraphForInvariants: base },
+        {
+          ...META,
+          graph: edited,
+          graphReceiptIntent: 'receipt_free_adoption',
+          baseGraphForInvariants: base,
+        },
         store,
       ),
     ).rejects.toBeInstanceOf(PersistedGraphInvariantError);
@@ -315,7 +345,7 @@ describe('commitDirectAnswer — the terminal check is wired and fails CLOSED on
     const { store, appendCalls } = makeSpyStore();
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: corruptGraph() },
+      { ...META, graph: corruptGraph(), graphReceiptIntent: 'receipt_free_adoption' },
       store,
     );
     expect(result.performed).toBe(true);
@@ -345,7 +375,7 @@ function graphWithDuplicateIntercept() {
         observed_state: { value: 42 },
       },
     ],
-    edges: [{ from: 'fac_a', to: 'goal', edge_type: 'causal' }],
+    edges: [{ from: 'fac_a', to: 'goal', edge_type: 'directed' }],
     goal_node_id: 'goal',
   };
 }
@@ -392,6 +422,7 @@ describe('commitDirectAnswer — §3.2: decisions are made against the hash of w
       {
         ...META,
         graph: g,
+        graphReceiptIntent: 'receipt_free_adoption',
         // Exactly what the edit dispatch advertised: the hash of the
         // pre-projection graph. The commit must NOT trust it over the bytes.
         graph_hash: unprojectedHash,
@@ -415,6 +446,7 @@ describe('commitDirectAnswer — §3.2: decisions are made against the hash of w
       {
         ...META,
         graph: g,
+        graphReceiptIntent: 'receipt_free_adoption',
         priorPendingActions: [pendingPinnedTo('hash_of_some_other_graph')],
       },
       store,
@@ -428,7 +460,12 @@ describe('commitDirectAnswer — §3.2: decisions are made against the hash of w
     const { store, appendCalls } = makeSpyStore();
     const result = await commitDirectAnswer(
       composed(),
-      { ...META, graph: g, graph_hash: hash(g)! },
+      {
+        ...META,
+        graph: g,
+        graphReceiptIntent: 'receipt_free_adoption',
+        graph_hash: hash(g)!,
+      },
       store,
     );
 
@@ -443,7 +480,11 @@ describe('commitDirectAnswer — §3.2: decisions are made against the hash of w
   it('B3: the appended graph IS the projected form (nothing mutates after the check)', async () => {
     const g = graphWithDuplicateIntercept();
     const { store, appendCalls } = makeSpyStore();
-    await commitDirectAnswer(composed(), { ...META, graph: g }, store);
+    await commitDirectAnswer(
+      composed(),
+      { ...META, graph: g, graphReceiptIntent: 'receipt_free_adoption' },
+      store,
+    );
 
     const appended = appendCalls[0]!.graph;
     // Re-projecting the persisted bytes is a fixed point: the graph we stored

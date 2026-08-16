@@ -70,7 +70,6 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { AnalysisStateIngress, GraphStateIngress } from '../boundary/request-extensions.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
 import {
   buildTurnContext,
   loadMostRecentPendingActions,
@@ -3887,6 +3886,8 @@ export async function dispatchEditGraph(
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: graphForCommit,
+      graphReceiptIntent:
+        graphForCommit !== undefined ? 'canonical_mutation' : undefined,
       // Terminal-invariant DELTA baseline: the pre-edit graph this turn built
       // on — the strict server read when it loaded, else the ingress echo (the
       // same frame-authority base the referee gate uses). Threading it lets the
@@ -3937,28 +3938,16 @@ export async function dispatchEditGraph(
     const shouldEmitCommittedReceipt =
       effectiveAppliedMutation && !goalTargetSwapWithheldGraph;
     const committedReceiptForWire = shouldEmitCommittedReceipt
-      ? buildCanonicalCommittedGraphReceipt(commitResult.persistedGraph)
+      ? commitResult.canonicalGraphReceipt
       : null;
     const committedAnalysisReady = shouldEmitCommittedReceipt
-      ? buildCanonicalAnalysisReadyFromGraph(commitResult.persistedGraph)
+      ? (commitResult.canonicalAnalysisReady ?? undefined)
       : undefined;
-    if (
-      shouldEmitCommittedReceipt &&
-      (
-        !commitResult.graphPersisted ||
-        commitResult.persistedAnalysisGraphHash === null ||
-        committedReceiptForWire === null ||
-        committedAnalysisReady === undefined ||
-        commitResult.persistedAnalysisGraphHash !==
-          committedReceiptForWire.analysisGraphHash
-      )
-    ) {
-      throw new Error('edit_graph committed receipt/readiness mismatch');
-    }
     if (committedAnalysisReady !== undefined) {
-      // Whole-status authority is post-commit and reads the exact append
-      // bytes. The earlier projection remains useful only while composing
-      // pre-commit semantic detail; it cannot authorize the returned wire.
+      // Whole-status authority was prevalidated from the exact append bytes
+      // before persistence and released only after accepted_insert. The
+      // earlier edit-local projection remains detail-only; it cannot authorize
+      // the returned wire.
       analysisReady = committedAnalysisReady;
     }
     // HOLD-WIPE fix — stored copy == wire copy: with priors now threaded,

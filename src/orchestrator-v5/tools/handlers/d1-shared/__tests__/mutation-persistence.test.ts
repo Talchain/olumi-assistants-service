@@ -96,6 +96,7 @@ describe('D1 mutation persistence end-to-end', () => {
         duration_ms: 12,
         handler_facts: [] as readonly HandlerFact[],
         graph: mutated, // simulating turn-executor's `graphForCommit`
+        graphReceiptIntent: 'canonical_mutation',
       },
       store,
     );

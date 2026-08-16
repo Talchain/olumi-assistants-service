@@ -41,7 +41,11 @@ import {
   loadPriorFactsQuietly,
   loadPriorFactsWithReadState,
 } from '../build-turn-context.js';
-import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import {
+  commitDirectAnswer,
+  computeRequestHash,
+  type CommitResult,
+} from '../commit.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -50,8 +54,6 @@ import {
   emitFreshnessTelemetry,
   type FreshnessDerivation,
 } from '../context/freshness.js';
-import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
 import {
   applyEdgeStrengthEdit,
   isCanonicalCarrierSafeProvenanceOnlyEdgeConfirmation,
@@ -85,11 +87,11 @@ export interface DispatchSystemEventResult {
    *
    *   factor_value_edit / edge_strength_edit
    *     Graph-mutating ON THE SERVER. Each carries the VALUE, so dispatch can
-   *     run the corresponding canonical D1 mutation, commit the graph, and re-derive
-   *     readiness from the COMMITTED bytes via the canonical graph adapter
+   *     run the corresponding canonical D1 mutation and prevalidate readiness
+   *     from the exact to-be-committed bytes via the canonical graph adapter
    *     — which is exactly the "future change" the paragraph above
-   *     anticipated. Readiness is derived post-commit, never pre-, so it can
-   *     never describe a graph that failed to land.
+   *     anticipated. CommitResult releases that readiness only after
+   *     accepted_insert, so it can never describe a graph that failed to land.
    *
    * Type is `AnalysisReadyPayload | undefined` (not literal `undefined`)
    * so future implementations can populate it without a type-shape change.
@@ -664,6 +666,8 @@ async function dispatchEdgeStrengthEdit(
   let persistedGraphBytes: unknown = null;
   let graphPersisted = false;
   let committedResponse: OlumiResponse = result.response;
+  let committedReceipt: CommitResult['canonicalGraphReceipt'] = null;
+  let canonicalAnalysisReady: AnalysisReadyPayload | null = null;
   try {
     // The trusted expected base includes both edge mean and direction in its
     // analysis projection and every persisted field in its identity projection.
@@ -680,6 +684,7 @@ async function dispatchEdgeStrengthEdit(
       duration_ms: Date.now() - startedAt,
       handler_facts: result.handlerFacts,
       graph: result.mutatedGraph,
+      graphReceiptIntent: 'canonical_mutation',
       baseGraphForInvariants: result.baseGraph,
       pending_actions: [],
       priorPendingActions: priorPendingActions,
@@ -696,6 +701,8 @@ async function dispatchEdgeStrengthEdit(
     persistedGraphBytes = commitResult.persistedGraph;
     graphPersisted = commitResult.graphPersisted;
     committedResponse = commitResult.response;
+    committedReceipt = commitResult.canonicalGraphReceipt;
+    canonicalAnalysisReady = commitResult.canonicalAnalysisReady;
   } catch (err) {
     if (err instanceof GraphStaleWriteError) {
       log.warn(
@@ -733,23 +740,6 @@ async function dispatchEdgeStrengthEdit(
     return { response: result.response, commitPerformed: false, graph: null };
   }
 
-  let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt>;
-  try {
-    committedReceipt = buildCanonicalCommittedGraphReceipt(persistedGraphBytes);
-  } catch (err) {
-    log.error(
-      {
-        request_id: requestId,
-        event_kind: event.kind,
-        scenario_id: payload.scenario_id,
-        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-      },
-      'V5 edge_strength_edit — exact persisted receipt unavailable; withholding success',
-    );
-    return { response: result.response, commitPerformed: false, graph: null };
-  }
-  const canonicalAnalysisReady =
-    buildCanonicalAnalysisReadyFromGraph(persistedGraphBytes);
   const exactTargetReadback = isExactCommittedEdgeReadback({
     projected: result.graph,
     committed: persistedGraphBytes,
@@ -771,8 +761,9 @@ async function dispatchEdgeStrengthEdit(
   if (
     graphPersisted !== true ||
     persistedAnalysisGraphHash === null ||
+    committedReceipt === null ||
     persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-    canonicalAnalysisReady === undefined ||
+    canonicalAnalysisReady === null ||
     !exactTargetReadback ||
     !confirmationStillProvenanceOnly
   ) {
@@ -783,7 +774,7 @@ async function dispatchEdgeStrengthEdit(
         scenario_id: payload.scenario_id,
         graph_persisted: graphPersisted,
         has_analysis_hash: persistedAnalysisGraphHash !== null,
-        canonical_readiness_available: canonicalAnalysisReady !== undefined,
+        canonical_readiness_available: canonicalAnalysisReady !== null,
         exact_target_readback: exactTargetReadback,
         confirmation_provenance_only: confirmationStillProvenanceOnly,
       },
@@ -966,6 +957,8 @@ async function dispatchFactorValueEdit(
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
   let graphPersisted = false;
+  let committedReceipt: CommitResult['canonicalGraphReceipt'] = null;
+  let canonicalAnalysisReady: AnalysisReadyPayload | null = null;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const commitResult = await commitDirectAnswer(result.response, {
@@ -986,6 +979,7 @@ async function dispatchFactorValueEdit(
       // the persisted bytes. Omitting it is precisely the old behaviour whose
       // symptom was a hash that never moved.
       graph: result.mutatedGraph,
+      graphReceiptIntent: 'canonical_mutation',
       baseGraphForInvariants: result.baseGraph,
       ...(cas.expectedGraphIdentityHash !== null
         ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
@@ -998,6 +992,8 @@ async function dispatchFactorValueEdit(
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
     graphPersisted = commitResult.graphPersisted;
+    committedReceipt = commitResult.canonicalGraphReceipt;
+    canonicalAnalysisReady = commitResult.canonicalAnalysisReady;
   } catch (err) {
     log.error(
       {
@@ -1025,24 +1021,10 @@ async function dispatchFactorValueEdit(
     'V5 factor_value_edit committed — graph written, hash recomputed',
   );
 
-  let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt>;
-  try {
-    committedReceipt = buildCanonicalCommittedGraphReceipt(persistedGraphBytes);
-  } catch (err) {
-    log.error(
-      {
-        request_id: requestId,
-        event_kind: event.kind,
-        scenario_id: payload.scenario_id,
-        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-      },
-      'V5 factor_value_edit — exact persisted receipt unavailable; withholding success',
-    );
-    return { response: result.response, commitPerformed: false, graph: null };
-  }
   if (
     graphPersisted !== true ||
     persistedAnalysisGraphHash === null ||
+    committedReceipt === null ||
     persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash
   ) {
     log.error(
@@ -1091,15 +1073,13 @@ async function dispatchFactorValueEdit(
   // the store. Deriving readiness from the un-projected graph can therefore
   // publish a readiness verdict for a graph that was never stored — the same
   // "advertised state != persisted state" class as the hash defect above.
-  const canonicalAnalysisReady =
-    buildCanonicalAnalysisReadyFromGraph(persistedGraphBytes);
-  if (canonicalAnalysisReady === undefined) {
+  if (canonicalAnalysisReady === null) {
     log.error(
       {
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
-        canonical_readiness_available: canonicalAnalysisReady !== undefined,
+        canonical_readiness_available: canonicalAnalysisReady !== null,
       },
       'V5 factor_value_edit — persisted graph/readiness mismatch; withholding success',
     );

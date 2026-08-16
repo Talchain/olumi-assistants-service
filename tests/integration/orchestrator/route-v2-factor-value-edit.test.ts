@@ -48,16 +48,16 @@ function buildPersistedGraph() {
   };
 }
 
+const commitReceiptState = vi.hoisted(() => ({
+  mode: 'normal' as 'normal' | 'invalid_canonical_graph' | 'ack_missing',
+}));
 const appendMock = vi.fn(async (write: { graph?: unknown }) => ({
   id: 'mock-row-id',
-  ...(write.graph != null
+  ...(write.graph != null && commitReceiptState.mode !== 'ack_missing'
     ? { graph_write_disposition: 'accepted_insert' as const }
     : {}),
 }));
 let persisted: unknown = buildPersistedGraph();
-const commitReceiptState = vi.hoisted(() => ({
-  mode: 'normal' as 'normal' | 'graph_null' | 'graph_not_persisted',
-}));
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
@@ -83,14 +83,21 @@ vi.mock('../../../src/orchestrator-v5/commit.js', async (importOriginal) => {
     commitDirectAnswer: async (
       ...args: Parameters<typeof original.commitDirectAnswer>
     ) => {
-      const result = await original.commitDirectAnswer(...args);
-      if (commitReceiptState.mode === 'graph_null') {
-        return { ...result, persistedGraph: null };
+      if (commitReceiptState.mode === 'invalid_canonical_graph') {
+        const [response, metadata, store] = args;
+        return original.commitDirectAnswer(
+          response,
+          {
+            ...metadata,
+            graph: {
+              ...(metadata.graph as Record<string, unknown>),
+              goal_node_id: 'missing_goal',
+            },
+          },
+          store,
+        );
       }
-      if (commitReceiptState.mode === 'graph_not_persisted') {
-        return { ...result, graphPersisted: false };
-      }
-      return result;
+      return original.commitDirectAnswer(...args);
     },
   };
 });
@@ -294,8 +301,8 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(body.assistant_text.length).toBeGreaterThan(0);
   });
 
-  it('fails closed when the commit has no persisted graph receipt', async () => {
-    commitReceiptState.mode = 'graph_null';
+  it('fails closed before append when canonical receipt authority rejects the graph', async () => {
+    commitReceiptState.mode = 'invalid_canonical_graph';
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -315,10 +322,11 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     const body = JSON.parse(res.body) as Record<string, unknown>;
     expect(Object.hasOwn(body, 'draft_graph')).toBe(false);
     expect(Object.hasOwn(body, 'graph_hash')).toBe(false);
+    expect(appendMock).not.toHaveBeenCalled();
   });
 
-  it('fails closed when the commit does not attest that the graph persisted', async () => {
-    commitReceiptState.mode = 'graph_not_persisted';
+  it('fails closed when the strict graph append acknowledgement is missing', async () => {
+    commitReceiptState.mode = 'ack_missing';
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -341,6 +349,7 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     const body = JSON.parse(res.body) as Record<string, unknown>;
     expect(Object.hasOwn(body, 'draft_graph')).toBe(false);
     expect(Object.hasOwn(body, 'graph_hash')).toBe(false);
+    expect(appendMock).toHaveBeenCalledOnce();
   });
 
   it('derives the user-unit input from `value` and the STORED cap when raw_value is absent', async () => {

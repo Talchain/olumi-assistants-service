@@ -74,6 +74,7 @@ const metadata = {
   duration_ms: 42,
   handler_facts: [analysisFact],
   graph,
+  graphReceiptIntent: 'canonical_mutation' as const,
 };
 
 function response() {
@@ -179,10 +180,91 @@ describe('graph append replay is rejected before every post-insert side effect',
     });
     expect(committed.persistedGraph).not.toBeNull();
     expect(committed.persistedAnalysisGraphHash).not.toBeNull();
+    expect(committed.canonicalGraphReceipt?.analysisGraphHash).toBe(
+      committed.persistedAnalysisGraphHash,
+    );
+    expect(committed.canonicalAnalysisReady).not.toBeNull();
     expect(telemetryEvents).toContain(TelemetryEvents.PendingActionCreated);
     expect(modelServiceSpy).toHaveBeenCalledOnce();
     expect(saveVersionSpy).toHaveBeenCalledOnce();
     expect(decisionRecordSpy).toHaveBeenCalledOnce();
     expect(maintainSummarySpy).toHaveBeenCalledOnce();
+  });
+});
+
+describe('canonical mutation receipt/readiness fail before append', () => {
+  it.each([
+    {
+      name: 'unresolved goal identity',
+      graph: {
+        nodes: [{ id: 'goal_value', kind: 'goal', label: 'Value' }],
+        edges: [],
+        options: [],
+        goal_node_id: 'missing_goal',
+        goal_constraints: [],
+      },
+    },
+    {
+      name: 'multiple goals without a singular identity',
+      graph: {
+        nodes: [
+          { id: 'goal_value', kind: 'goal', label: 'Value' },
+          { id: 'goal_resilience', kind: 'goal', label: 'Resilience' },
+        ],
+        edges: [],
+        options: [],
+        goal_constraints: [],
+      },
+    },
+  ])('$name has append=0, hooks=0 and honest commitPerformed=false', async ({ graph }) => {
+    const store = createNoopSessionStore({
+      appendId: ROW_ID,
+      getScenarioOwnerBehaviour: { value: 'owner-user-id' },
+    });
+    const appendSpy = vi.spyOn(store, 'append');
+    let commitPerformed = false;
+
+    try {
+      await commitDirectAnswer(
+        response(),
+        { ...metadata, graph },
+        store,
+      );
+      commitPerformed = true;
+    } catch {
+      // Expected: canonical authority refused the mutation before append.
+    }
+    await drainFireAndForget();
+
+    expect(commitPerformed).toBe(false);
+    expect(appendSpy).not.toHaveBeenCalled();
+    expect(telemetryEvents).toEqual([]);
+    expect(modelServiceSpy).not.toHaveBeenCalled();
+    expect(saveVersionSpy).not.toHaveBeenCalled();
+    expect(decisionRecordSpy).not.toHaveBeenCalled();
+    expect(maintainSummarySpy).not.toHaveBeenCalled();
+  });
+
+  it('explicit receipt-free first-touch adoption succeeds without invented receipt/readiness', async () => {
+    const store = createNoopSessionStore({ appendId: ROW_ID });
+    const appendSpy = vi.spyOn(store, 'append');
+
+    const committed = await commitDirectAnswer(
+      response(),
+      {
+        ...metadata,
+        graph: { nodes: [], edges: [] },
+        graphReceiptIntent: 'receipt_free_adoption',
+      },
+      store,
+    );
+
+    expect(appendSpy).toHaveBeenCalledOnce();
+    expect(committed).toMatchObject({
+      performed: true,
+      graphPersisted: true,
+      canonicalGraphReceipt: null,
+      canonicalAnalysisReady: null,
+    });
   });
 });

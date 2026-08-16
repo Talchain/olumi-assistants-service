@@ -82,7 +82,6 @@ import { composeRecoverableValidationResponse } from './compose/recoverable-vali
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
-import { buildCanonicalCommittedGraphReceipt } from './compose/committed-graph-receipt.js';
 import {
   collectValidEntityLabels,
   neutraliseUnvalidatedBoldEntities,
@@ -1215,7 +1214,12 @@ export async function runTurnExecutor(
         },
         'V5 consent backstop — the user withheld consent to apply; refusing the graph write',
       );
-      meta = { ...meta, graph: undefined };
+      meta = {
+        ...meta,
+        graph: undefined,
+        graphReceiptIntent: undefined,
+        deriveResponseFromPersistedGraph: undefined,
+      };
     }
 
     // ⭐⭐ LAYER 2 (INV-1) — THE WARRANT GUARANTEE. Same closure, same
@@ -1279,7 +1283,12 @@ export async function runTurnExecutor(
         },
         'V5 warrant backstop — the user requested no change; refusing the graph write',
       );
-      meta = { ...meta, graph: undefined };
+      meta = {
+        ...meta,
+        graph: undefined,
+        graphReceiptIntent: undefined,
+        deriveResponseFromPersistedGraph: undefined,
+      };
     }
 
     // A3 graph CAS observe-mode: derive the expected-base hashes ONLY from
@@ -3126,24 +3135,13 @@ export async function runTurnExecutor(
             duration_ms: Date.now() - startedAt,
             handler_facts: [outcome.fact],
             graph: outcome.mutatedGraph,
+            graphReceiptIntent: 'canonical_mutation',
             consumedPendingRefs: [repairPending.chip_id],
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          const committedReceipt = buildCanonicalCommittedGraphReceipt(
-            committed.persistedGraph,
-          );
-          const committedAnalysisReady = buildCanonicalAnalysisReadyFromGraph(
-            committed.persistedGraph,
-          );
-          if (
-            !committed.graphPersisted ||
-            committed.persistedAnalysisGraphHash === null ||
-            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-            committedAnalysisReady === undefined
-          ) {
-            throw new Error('readiness repair committed receipt/readiness mismatch');
-          }
+          const committedReceipt = committed.canonicalGraphReceipt!;
+          const committedAnalysisReady = committed.canonicalAnalysisReady!;
           analysisReadyForTurn = committedAnalysisReady;
           response = {
             ...committed.response,
@@ -3335,9 +3333,6 @@ export async function runTurnExecutor(
         // carries a graph. The post-commit graphPersisted result remains the
         // finaliser's authority; a rejected commit restores this observation.
         handlerEmittedMutatedGraph = true;
-        let persistedGraphReadiness: NonNullable<
-          ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
-        > | null = null;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3352,14 +3347,13 @@ export async function runTurnExecutor(
             duration_ms: Date.now() - startedAt,
             handler_facts: [outcome.fact],
             graph: outcome.mutatedGraph,
-            deriveResponseFromPersistedGraph: (persistedGraph) => {
-              const canonicalReadiness =
-                buildCanonicalAnalysisReadyFromGraph(persistedGraph);
-              if (canonicalReadiness === undefined) return undefined;
-              persistedGraphReadiness = canonicalReadiness;
+            graphReceiptIntent: 'canonical_mutation',
+            deriveResponseFromPersistedGraph: (
+              _persistedGraph,
+              canonicalReadiness,
+            ) => {
               return {
                 response: buildHeldSingleAppliedResponse(canonicalReadiness),
-                analysisReady: canonicalReadiness,
               };
             },
             // Consumed proposal never carries forward (zombie-chip guard).
@@ -3367,18 +3361,8 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          const committedReceipt = buildCanonicalCommittedGraphReceipt(
-            committed.persistedGraph,
-          );
-          const committedAnalysisReady = persistedGraphReadiness;
-          if (
-            !committed.graphPersisted ||
-            committed.persistedAnalysisGraphHash === null ||
-            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-            committedAnalysisReady === null
-          ) {
-            throw new Error('GM held apply committed receipt/readiness mismatch');
-          }
+          const committedReceipt = committed.canonicalGraphReceipt!;
+          const committedAnalysisReady = committed.canonicalAnalysisReady!;
           // Attach only the exact post-projection persisted receipt. The old
           // path used outcome.appliedGraph and could advertise options/goal/
           // intercept bytes that the atomic append never stored.
@@ -3584,9 +3568,6 @@ export async function runTurnExecutor(
         // to commitTurn before it chooses the durable assistant bytes. The
         // actual graphPersisted result still gates the final wire exception.
         handlerEmittedMutatedGraph = true;
-        let persistedGraphReadiness: NonNullable<
-          ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>
-        > | null = null;
         try {
           const committed = await commitTurn(appliedResponse, {
             scenario_id: context.session_id,
@@ -3598,14 +3579,13 @@ export async function runTurnExecutor(
             duration_ms: Date.now() - startedAt,
             handler_facts: appliedFacts,
             graph: lastExecuted.mutatedGraph,
-            deriveResponseFromPersistedGraph: (persistedGraph) => {
-              const canonicalReadiness =
-                buildCanonicalAnalysisReadyFromGraph(persistedGraph);
-              if (canonicalReadiness === undefined) return undefined;
-              persistedGraphReadiness = canonicalReadiness;
+            graphReceiptIntent: 'canonical_mutation',
+            deriveResponseFromPersistedGraph: (
+              _persistedGraph,
+              canonicalReadiness,
+            ) => {
               return {
                 response: buildHeldAllAppliedResponse(canonicalReadiness),
-                analysisReady: canonicalReadiness,
               };
             },
             // Every APPLIED hold is consumed (zombie-chip guard); declined
@@ -3615,18 +3595,8 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          const committedReceipt = buildCanonicalCommittedGraphReceipt(
-            committed.persistedGraph,
-          );
-          const committedAnalysisReady = persistedGraphReadiness;
-          if (
-            !committed.graphPersisted ||
-            committed.persistedAnalysisGraphHash === null ||
-            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-            committedAnalysisReady === null
-          ) {
-            throw new Error('GM held apply-all committed receipt/readiness mismatch');
-          }
+          const committedReceipt = committed.canonicalGraphReceipt!;
+          const committedAnalysisReady = committed.canonicalAnalysisReady!;
           response = {
             ...committed.response,
             graph_hash: committedReceipt.analysisGraphHash,
@@ -11218,7 +11188,7 @@ export async function runTurnExecutor(
       // this commit is about to persist ONCE, ahead of the commit, so the
       // committed-graph projection can be applied in the right order at
       // both seams it feeds (see the pre-commit assignment below and the
-      // post-commit readiness re-projection after `commitTurn`).
+      // accepted prevalidated authority consumed after `commitTurn`).
       const preCommitGraphParse =
         graphForCommit !== null && graphForCommit !== undefined
           ? GraphV3.safeParse(graphForCommit)
@@ -11246,6 +11216,12 @@ export async function runTurnExecutor(
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
         graph: graphForCommit,
+        graphReceiptIntent:
+          graphForCommit !== null && graphForCommit !== undefined
+            ? handlerOutcome?.mutated_graph != null
+              ? 'canonical_mutation'
+              : 'receipt_free_adoption'
+            : undefined,
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
           ? { pending_actions: pendingForCommit }
@@ -11280,27 +11256,12 @@ export async function runTurnExecutor(
       // the deliberately-permissive ingress graph contract, which can be a
       // legacy partial graph that #983 cannot strictly assess (for example,
       // edges without the later GraphV3 readiness fields). Such an adoption
-      // still persists and hashes the exact projected bytes; it carries the
-      // canonical status only when #983 can derive one and otherwise carries
-      // no status. It must never reuse a precommit/request readiness verdict.
-      const committedReceiptRequired = handlerOutcome?.mutated_graph != null;
-      let committedReceipt: ReturnType<typeof buildCanonicalCommittedGraphReceipt> | null = null;
+      // still persists and hashes the exact projected bytes, but deliberately
+      // carries no receipt and no readiness. It must never reuse a
+      // precommit/request readiness verdict.
+      const committedReceipt = committed.canonicalGraphReceipt;
       if (committed.graphPersisted) {
-        const committedAnalysisReady = buildCanonicalAnalysisReadyFromGraph(
-          committed.persistedGraph,
-        );
-        if (committedReceiptRequired) {
-          committedReceipt = buildCanonicalCommittedGraphReceipt(
-            committed.persistedGraph,
-          );
-          if (
-            committed.persistedAnalysisGraphHash === null ||
-            committed.persistedAnalysisGraphHash !== committedReceipt.analysisGraphHash ||
-            committedAnalysisReady === undefined
-          ) {
-            throw new Error('routed D1 committed receipt/readiness mismatch');
-          }
-        }
+        const committedAnalysisReady = committed.canonicalAnalysisReady;
         // Preserve the raw persisted object here: GraphV3's parsed value strips
         // top-level options/goal identity and would make the egress/hash view
         // describe a lossy projection. For a mutation receipt the receipt
@@ -11313,7 +11274,7 @@ export async function runTurnExecutor(
         // Assignment is deliberately unconditional: `undefined` clears any
         // precommit/request status on a permissive legacy adoption instead of
         // silently falling back to a verdict about different bytes.
-        analysisReadyForTurn = committedAnalysisReady;
+        analysisReadyForTurn = committedAnalysisReady ?? undefined;
       }
       // Only a genuine persisted mutation attaches an apply-to-canvas receipt.
       // A graph write intentionally withheld by a warrant/selection guard keeps

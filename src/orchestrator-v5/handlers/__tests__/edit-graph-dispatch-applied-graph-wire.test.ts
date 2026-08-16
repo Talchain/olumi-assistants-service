@@ -51,6 +51,8 @@ import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { buildCanonicalCommittedGraphReceipt } from '../../compose/committed-graph-receipt.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -165,6 +167,12 @@ function commitOk(persistedGraph: unknown) {
     persistedGraph: graphPersisted ? persistedGraph : null,
     persistedAnalysisGraphHash: graphPersisted
       ? computeAnalysisAffectingGraphHash(persistedGraph as GraphStateIngress)
+      : null,
+    canonicalGraphReceipt: graphPersisted
+      ? buildCanonicalCommittedGraphReceipt(persistedGraph)
+      : null,
+    canonicalAnalysisReady: graphPersisted
+      ? (buildCanonicalAnalysisReadyFromGraph(persistedGraph) ?? null)
       : null,
   };
 }

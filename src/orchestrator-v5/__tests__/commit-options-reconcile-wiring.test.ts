@@ -35,6 +35,7 @@ const META = {
   llm_calls_used: 1,
   duration_ms: 42,
   handler_facts: [],
+  graphReceiptIntent: 'canonical_mutation' as const,
 };
 
 function makeSpyStore(): {
@@ -78,7 +79,7 @@ describe('commitDirectAnswer — canonical options[] reconcile wiring', () => {
     // option-NODE (the live add path) but is missing from top-level options[].
     const graph = {
       nodes: [
-        { id: 'dec', kind: 'decision', label: 'Decision' },
+        { id: 'dec', kind: 'goal', label: 'Goal' },
         {
           id: 'opt_status_quo',
           kind: 'option',
@@ -142,7 +143,7 @@ describe('commitDirectAnswer — canonical options[] reconcile wiring', () => {
     // the option node into it.
     const graph = {
       nodes: [
-        { id: 'dec', kind: 'decision' },
+        { id: 'dec', kind: 'decision', label: 'Decision' },
         {
           id: 'opt_a',
           kind: 'option',

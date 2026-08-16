@@ -359,6 +359,7 @@ describe('chip-click run_analysis — real enricher integration', () => {
         duration_ms: 5,
         handler_facts: [],
         graph: { nodes: [], edges: [] },
+        graphReceiptIntent: 'receipt_free_adoption',
         briefText: BRIEF,
       },
       store,
@@ -422,6 +423,7 @@ describe('chip-click run_analysis — real enricher integration', () => {
         duration_ms: 5,
         handler_facts: [],
         graph: { nodes: [], edges: [] },
+        graphReceiptIntent: 'receipt_free_adoption',
         briefText: BRIEF,
       },
       store,
@@ -494,6 +496,7 @@ describe('chip-click run_analysis — real enricher integration', () => {
         duration_ms: 5,
         handler_facts: [],
         graph: { nodes: [], edges: [] },
+        graphReceiptIntent: 'receipt_free_adoption',
         briefText: BRIEF,
       },
       store,
@@ -565,7 +568,8 @@ describe('F10 — chip_run makes ZERO decision_review calls with the await flag 
       {
         scenario_id: SCENARIO_ID, turn_id: DRAFT_TURN_ID, turn_class: 'direct_answer',
         handler_id: null, request_hash: 'sha256:draft', llm_calls_used: 1, duration_ms: 5,
-        handler_facts: [], graph: { nodes: [], edges: [] }, briefText: BRIEF,
+        handler_facts: [], graph: { nodes: [], edges: [] },
+        graphReceiptIntent: 'receipt_free_adoption', briefText: BRIEF,
       },
       store,
     );

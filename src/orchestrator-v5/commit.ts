@@ -61,7 +61,14 @@ import {
 } from './session/pending-action.js';
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
-import type { AnalysisReadyPayload } from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  type AnalysisReadyPayload,
+} from '../orchestrator/tools/analysis-ready-helper.js';
+import {
+  buildCanonicalCommittedGraphReceipt,
+  type BuiltCanonicalCommittedGraphReceipt,
+} from './compose/committed-graph-receipt.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
@@ -73,13 +80,23 @@ import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 /**
  * Result of the one optional response derivation over the final persistence
  * projection. The callback is deliberately synchronous: it may only derive
- * public response/readiness data from the supplied read-only graph and cannot
- * start another write or create a second commit authority.
+ * public response data from the supplied read-only graph plus the already
+ * prevalidated canonical readiness and cannot start another write or create a
+ * second receipt/readiness authority.
  */
 export interface PersistedGraphResponseDerivation {
   readonly response: OlumiResponse;
-  readonly analysisReady: AnalysisReadyPayload;
 }
+
+/**
+ * Explicit authority contract for a graph-bearing commit.
+ *
+ * `canonical_mutation` means this turn changed canonical graph state and must
+ * have its receipt and readiness proven before append. `receipt_free_adoption`
+ * is reserved for a pure first-touch adoption of already-canonical state: it
+ * persists the graph but must not invent a mutation receipt or readiness.
+ */
+export type GraphReceiptIntent = 'canonical_mutation' | 'receipt_free_adoption';
 
 export interface CommitMetadata {
   readonly scenario_id: string;
@@ -98,6 +115,12 @@ export interface CommitMetadata {
    */
   readonly graph?: unknown;
   /**
+   * Required whenever `graph` is provided; forbidden on graph-free commits.
+   * Runtime checks keep spread-built metadata honest even where TypeScript
+   * cannot express the relationship between these two optional fields.
+   */
+  readonly graphReceiptIntent?: GraphReceiptIntent;
+  /**
    * Optional, narrowly-scoped response derivation over the exact graph object
    * that this commit will pass to `SessionStore.append`. It runs exactly once
    * after `projectGraphForPersistence` and before assistant text, chips,
@@ -110,6 +133,7 @@ export interface CommitMetadata {
    */
   readonly deriveResponseFromPersistedGraph?: (
     persistedGraph: Readonly<Record<string, unknown>>,
+    canonicalAnalysisReady: AnalysisReadyPayload,
   ) => PersistedGraphResponseDerivation | undefined;
   /**
    * User-supplied free-text decision brief to persist atomically with the
@@ -388,20 +412,27 @@ export interface CommitResult {
    * The graph bytes ACTUALLY WRITTEN to `scenarios.graph` — the output of
    * `projectGraphForPersistence`, not the caller's input.
    *
-   * Exposed because `persistedAnalysisGraphHash` alone is not enough for a
-   * caller that must DERIVE something else from the committed state. The persist
-   * passes mutate `intercept`, node `interventions` and top-level `options[]`,
-   * and at least one downstream derivation reads exactly those: canonical
-   * readiness reads option nodes' merged interventions. A
-   * caller deriving readiness from its own pre-projection copy can therefore
-   * publish a readiness verdict describing a graph that was never stored —
-   * the same "advertised state != persisted state" class the hash field above
-   * exists to prevent, one field over.
+   * Exposed for exact committed-state egress/readback and entity-label scrub
+   * context. Receipt/readiness consumers MUST use `canonicalGraphReceipt` and
+   * `canonicalAnalysisReady` below; rebuilding either from this field after
+   * append would reopen a failure seam after durable state changed.
    *
    * `null` when this commit wrote no graph. Do NOT treat it as a general
    * read-back: it is this commit's own input after projection, not a re-read.
    */
   readonly persistedGraph: unknown | null;
+  /**
+   * Receipt prevalidated from the exact persistence projection before append,
+   * then released only after an `accepted_insert` acknowledgement. Present
+   * only for an explicit `canonical_mutation` graph commit.
+   */
+  readonly canonicalGraphReceipt: BuiltCanonicalCommittedGraphReceipt | null;
+  /**
+   * Sole #983 whole-status projection paired with `canonicalGraphReceipt`.
+   * It is built and purity-checked before append, then released only after the
+   * graph write is accepted. Receipt-free adoption deliberately returns null.
+   */
+  readonly canonicalAnalysisReady: AnalysisReadyPayload | null;
 }
 
 /**
@@ -798,6 +829,56 @@ export async function commitDirectAnswer(
     ? (persistedAnalysisGraphHash ?? undefined)
     : metadata.graph_hash;
 
+  // FIX-FIRST receipt authority. A canonical mutation is not allowed to cross
+  // the irreversible append boundary until BOTH public attestations have been
+  // derived from the exact object that will be stored. The builders are pure
+  // validation/projection authorities; snapshotting around both ensures a
+  // future regression cannot mutate even a non-hash carrier before append.
+  //
+  // A pure first-touch adoption is deliberately receipt/readiness-free. It is
+  // still explicit so a missing caller annotation can never silently bypass
+  // canonical mutation validation.
+  let prevalidatedCanonicalGraphReceipt: BuiltCanonicalCommittedGraphReceipt | null = null;
+  let prevalidatedCanonicalAnalysisReady: AnalysisReadyPayload | null = null;
+  if (writesGraph) {
+    if (metadata.graphReceiptIntent === undefined) {
+      throw new Error('graph commit requires explicit receipt intent');
+    }
+
+    if (metadata.graphReceiptIntent === 'canonical_mutation') {
+      const graphSnapshotBeforeReceiptValidation = JSON.stringify(graphForStore);
+      if (typeof graphSnapshotBeforeReceiptValidation !== 'string') {
+        throw new Error('canonical graph receipt could not snapshot graph');
+      }
+
+      const canonicalGraphReceipt = buildCanonicalCommittedGraphReceipt(graphForStore);
+      const canonicalAnalysisReady = buildCanonicalAnalysisReadyFromGraph(graphForStore);
+      if (canonicalAnalysisReady === undefined) {
+        throw new Error('canonical graph readiness unavailable');
+      }
+      if (
+        persistedAnalysisGraphHash === null ||
+        canonicalGraphReceipt.analysisGraphHash !== persistedAnalysisGraphHash
+      ) {
+        throw new Error('canonical graph receipt hash does not match persisted graph');
+      }
+
+      const graphSnapshotAfterReceiptValidation = JSON.stringify(graphForStore);
+      if (
+        graphSnapshotAfterReceiptValidation !== graphSnapshotBeforeReceiptValidation
+      ) {
+        throw new Error('canonical graph receipt validation mutated graph');
+      }
+
+      prevalidatedCanonicalGraphReceipt = canonicalGraphReceipt;
+      prevalidatedCanonicalAnalysisReady = canonicalAnalysisReady;
+    } else if (metadata.graphReceiptIntent !== 'receipt_free_adoption') {
+      throw new Error('graph commit receipt intent is invalid');
+    }
+  } else if (metadata.graphReceiptIntent !== undefined) {
+    throw new Error('graph-free commit must not declare receipt intent');
+  }
+
   // Held-apply receipts need their public recovery copy and chips to follow
   // the exact persistence projection, not the handler's pre-projection graph.
   // Run this optional derivation at the only safe atomic point: the final graph
@@ -810,6 +891,8 @@ export async function commitDirectAnswer(
   if (metadata.deriveResponseFromPersistedGraph !== undefined) {
     if (
       !writesGraph ||
+      metadata.graphReceiptIntent !== 'canonical_mutation' ||
+      prevalidatedCanonicalAnalysisReady === null ||
       graphForStore === null ||
       typeof graphForStore !== 'object' ||
       Array.isArray(graphForStore)
@@ -822,14 +905,13 @@ export async function commitDirectAnswer(
     }
     const derived = metadata.deriveResponseFromPersistedGraph(
       graphForStore as Readonly<Record<string, unknown>>,
+      prevalidatedCanonicalAnalysisReady,
     );
     if (
       derived === undefined ||
       derived === null ||
       typeof derived !== 'object' ||
-      !derived.response ||
-      derived.analysisReady === undefined ||
-      derived.analysisReady === null
+      !derived.response
     ) {
       throw new Error('persisted graph response derivation returned no canonical result');
     }
@@ -1399,6 +1481,8 @@ export async function commitDirectAnswer(
   return {
     persistedAnalysisGraphHash,
     persistedGraph: writesGraph ? graphForStore : null,
+    canonicalGraphReceipt: prevalidatedCanonicalGraphReceipt,
+    canonicalAnalysisReady: prevalidatedCanonicalAnalysisReady,
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume

@@ -47,6 +47,7 @@ const META = {
   llm_calls_used: 1,
   duration_ms: 5,
   handler_facts: [],
+  graphReceiptIntent: 'canonical_mutation' as const,
 };
 
 const nodeById = (g: AnyGraph, id: string): AnyNode => {
@@ -103,11 +104,11 @@ const buildCombinedGraph = (): AnyGraph => ({
     },
   ],
   edges: [
-    { from: 'dec_d', to: 'opt_draft' },
-    { from: 'dec_d', to: 'opt_hybrid' },
-    { from: 'opt_draft', to: 'fac_a' },
-    { from: 'opt_hybrid', to: 'fac_a' },
-    { from: 'opt_hybrid', to: 'fac_b' },
+    { from: 'dec_d', to: 'opt_draft', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'dec_d', to: 'opt_hybrid', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_draft', to: 'fac_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_hybrid', to: 'fac_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_hybrid', to: 'fac_b', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
 });
 

@@ -257,6 +257,8 @@ beforeEach(() => {
     // COMMITTED graph rather than its own pre-projection copy. An echo mock
     // writes nothing, so there are no committed bytes to hand back.
     persistedGraph: null,
+    canonicalGraphReceipt: null,
+    canonicalAnalysisReady: null,
     pendingLifecycle: {
       priorCount: 0,
       consumedCount: 0,
