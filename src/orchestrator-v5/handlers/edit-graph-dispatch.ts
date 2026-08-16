@@ -177,7 +177,14 @@ import { randomUUID } from 'node:crypto';
  * Branches:
  *   - `analytical_fresh`        — analytical intent + fresh run_analysis fact.
  *   - `analytical_stale`        — analytical intent + stale run_analysis fact.
- *   - `analytical_none`         — analytical intent + no run_analysis fact.
+ *   - `analytical_none`         — analytical intent + no run_analysis fact,
+ *                                  and the freshness authority CONFIRMS there
+ *                                  is none (`freshness: 'none'`).
+ *   - `analytical_indeterminate`— analytical intent + no run_analysis fact,
+ *                                  but `freshness: 'unknown'` — the read
+ *                                  failed, so absence is UNPROVEN. Discloses
+ *                                  that we cannot confirm; never claims the
+ *                                  user has not analysed (ROADMAP 2.1237).
  *   - `vague_edit`              — no analytical intent, no concrete mutation
  *                                  signal (message looks edit-like but vague).
  *   - `explore_factor`          — message contains a known graph node label,
@@ -206,6 +213,11 @@ type NoOpRecoveryBranch =
   | 'analytical_fresh'
   | 'analytical_stale'
   | 'analytical_none'
+  // ROADMAP 2.1237 — analytical intent, no run_analysis fact, AND the
+  // freshness authority could not determine whether one exists. Distinct from
+  // `analytical_none` on purpose: that branch CLAIMS the absence, this one
+  // discloses that we cannot see.
+  | 'analytical_indeterminate'
   | 'vague_edit'
   | 'explore_factor'
   | 'explore_factor_stale'
@@ -307,6 +319,20 @@ const NO_OP_NONE_GRAPH_READY_TEXT =
 const NO_OP_NONE_GRAPH_NOT_READY_TEXT =
   "I haven't changed the model. Once the model is ready, run analysis "
   + "and I'll explain what drove the outcome.";
+
+// ROADMAP 2.1237 — the DEGRADED-READ copy. Says what we know ("I haven't
+// changed the model") and what we do not ("I can't confirm whether an
+// analysis has run"), and asserts nothing about the user's history. No
+// internal vocabulary: the user never hears "degraded" or "freshness".
+const NO_OP_INDETERMINATE_GRAPH_READY_TEXT =
+  "I haven't changed the model. I can't confirm whether an analysis has "
+  + "already run for this decision. Running one now will give us a result "
+  + 'either way.';
+
+const NO_OP_INDETERMINATE_GRAPH_NOT_READY_TEXT =
+  "I haven't changed the model. I can't confirm whether an analysis has "
+  + 'already run for this decision. Once the model is ready we can run one '
+  + 'and find out.';
 
 // PR #218 smoke follow-up (Fix B): the prior copy said "Tell me which
 // factor or edge you want to adjust" — "factor or edge" leaks internal
@@ -552,6 +578,42 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
       };
     }
     if (!hasRunAnalysisFact) {
+      // ⚠ 2026-08-16 (P1, ROADMAP 2.1237) — AN EMPTY FACT ARRAY IS NOT
+      // EVIDENCE OF ABSENCE WHEN THE READ ITSELF FAILED.
+      //
+      // `hasRunAnalysisFact` is a RAW `priorFacts.some(...)`. When the facts
+      // read came back DEGRADED, `priorFacts` is empty because the lookup
+      // failed — not because nothing is there — and this branch then told the
+      // user "Run analysis first", a claim about their history we had no
+      // evidence for.
+      //
+      // ⭐ THE HONEST VERDICT WAS ALREADY IN THIS INPUT OBJECT. The freshness
+      // authority emits `'unknown'` precisely when it could not determine the
+      // answer, and it is passed in beside the facts. This branch simply did
+      // not read it.
+      //
+      // ⭐ `'none'` AND `'unknown'` MUST NOT COLLAPSE — they are different
+      // facts. `'none'` means we looked and there is no successful run, so
+      // `analytical_none` is TRUE and stays exactly as it was. `'unknown'`
+      // means we could not look. Suppressing on empty facts alone would take
+      // BOTH out and stop telling a genuinely-new user to run their first
+      // analysis — the opposite harm, and the one-directional trade CLAUDE.md
+      // trap 22b exists to prevent. Both directions are pinned by test.
+      if (input.freshness === 'unknown') {
+        return {
+          branch: 'analytical_indeterminate',
+          intent_class: intentClass,
+          has_run_analysis_fact: false,
+          assistantText: input.graphReady
+            ? NO_OP_INDETERMINATE_GRAPH_READY_TEXT
+            : NO_OP_INDETERMINATE_GRAPH_NOT_READY_TEXT,
+          // Same readiness gating as `analytical_none` below: a run_analysis
+          // chip that would fail on click is worse than no chip. Running an
+          // analysis is a safe way forward either way — it asserts nothing
+          // about whether one has already happened.
+          suggestedActions: input.graphReady ? [RUN_ANALYSIS_CHIP] : [],
+        };
+      }
       // Mirror `tryNoAnalysisGuard`'s graph-readiness gating: suppress
       // the `run_analysis` chip when the graph is not ready (clicking
       // it would fail), and use the matching copy variant.

@@ -174,6 +174,11 @@ describe('decideNoOpRecovery — universal safe-text invariant', () => {
     { message: 'Let me change it.', priorFacts: NO_FACTS, freshness: 'fresh', graphReady: true },
     { message: 'Delivery risk', priorFacts: [SUCCESS_RUN_ANALYSIS_FACT], freshness: 'fresh', graphReady: true, nodes: [{ label: 'Delivery risk' }] },
     { message: 'Thanks, that all looks good.', priorFacts: NO_FACTS, freshness: 'unknown', graphReady: true },
+    // ROADMAP 2.1237 — the `analytical_indeterminate` branch (degraded read:
+    // analytical intent, no facts, freshness unknown). Added with the branch,
+    // so its copy is covered by this invariant from the day it exists.
+    { message: ANALYTICAL_MSG, priorFacts: NO_FACTS, freshness: 'unknown', graphReady: true },
+    { message: ANALYTICAL_MSG, priorFacts: NO_FACTS, freshness: 'unknown', graphReady: false },
     { message: '', priorFacts: NO_FACTS, freshness: 'fresh', graphReady: true },
   ];
 

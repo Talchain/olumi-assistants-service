@@ -1869,9 +1869,16 @@ export const TelemetryEvents = {
   // clarification when the message looks edit-like but vague. Payload:
   // structural enums + booleans only. `intent_class` is the
   // AnalyticalIntentClass enum or null; `branch_taken` is the recovery
-  // branch enum:
-  //   analytical_fresh / analytical_stale / analytical_none / vague_edit
-  //   / explore_factor / explore_factor_stale / ambiguous
+  // branch enum.
+  //
+  // ⚠ THE BRANCH LIST THAT USED TO BE SPELLED OUT HERE IS DELETED, NOT
+  // EXTENDED (CLAUDE.md trap 12 — the hand-maintained mirror). It named seven
+  // branches while the type carried eleven: `proposal_stage_one`,
+  // `proposal_stage_two`, `noop_clarification_preserved` and
+  // `noop_fallback_copy` had all been added without it. THE TYPE IS THE
+  // SOURCE OF TRUTH — read `NoOpRecoveryBranch` in
+  // `orchestrator-v5/handlers/edit-graph-dispatch.ts`, which carries a
+  // per-branch note beside each member.
   // The `explore_factor` / `explore_factor_stale` pair was added as a
   // safety net for label-shaped no-op messages that slip past the
   // upstream `tryPostAnalysisLabelIntercept` (V5PostAnalysisLabelIntercept
