@@ -77,7 +77,7 @@ export interface ComposeConfigureOptionClarifyInput {
  * placeholder form was. The 0-to-1 meaning is still glossed in the next
  * sentence — the gloss was never the problem; the placeholder was.
  */
-const EXAMPLE_VALUE = '0.6';
+export const CONFIGURE_OPTION_EXAMPLE_VALUE = '0.6';
 
 /** Join labels as readable English: "A", "A and B", "A, B and C". */
 function joinLabels(labels: readonly string[]): string {
@@ -102,7 +102,7 @@ export function composeConfigureOptionClarifyResponse(
   const example = buildConfigureOptionAdvisedFormat(
     optionLabel,
     primaryFactor,
-    EXAMPLE_VALUE,
+    CONFIGURE_OPTION_EXAMPLE_VALUE,
   );
 
   // THE TERMINATING BRANCH. The user already gave a number and it did not

@@ -43,7 +43,10 @@ import {
   extractAdvisedExemplars,
   findNonRoutableConfigureAdvice,
 } from '../configure-option-advice.js';
-import { composeConfigureOptionClarifyResponse } from '../../compose/configure-option-clarify-response.js';
+import {
+  composeConfigureOptionClarifyResponse,
+  CONFIGURE_OPTION_EXAMPLE_VALUE,
+} from '../../compose/configure-option-clarify-response.js';
 
 // Positive control for the extractor itself (trap-13: an absence/coverage
 // assertion is vacuous unless the mechanism provably sees a presence).
@@ -156,13 +159,26 @@ describe('configure-option copy ↔ detector contract', () => {
       stage: 'analyse',
     }).assistant_text;
 
-    // Derived from the builder, never transcribed: a change to the advised
-    // phrasing moves both halves of this assertion together.
-    const advised = buildConfigureOptionAdvisedFormat(optionLabel, factorLabel, '<0-1>');
+    // Derived from the builder AND from the shipped example value, never
+    // transcribed: a change to the advised phrasing or to the example number
+    // moves both halves of this assertion together.
+    //
+    // ⚠ THE VALUE WAS `'<0-1>'` UNTIL 2026-08-16 AND THAT PLACEHOLDER REACHED
+    // REAL USER COPY (NEW-5). The value slot now carries a concrete number, so
+    // the advised sentence is directly copyable rather than a template the user
+    // must expand by hand. Deriving it from the exported constant is what stops
+    // this contract from re-pinning a literal that has moved.
+    const advised = buildConfigureOptionAdvisedFormat(
+      optionLabel,
+      factorLabel,
+      CONFIGURE_OPTION_EXAMPLE_VALUE,
+    );
     expect(copy).toContain(advised);
+    // The example is a real number, not a placeholder — pinned against the
+    // CLASS so any future `<...>` slot REDs here too.
+    expect(CONFIGURE_OPTION_EXAMPLE_VALUE).not.toMatch(/[<>]/);
 
-    // And the thing it advises is a thing the product accepts. `<0-1>` is a
-    // placeholder the user replaces, so route the realistic filled form too.
+    // And the thing it advises is a thing the product accepts.
     expect(detectConfigureOptionIntent(advised, []).matched).toBe(true);
     expect(
       detectConfigureOptionIntent(
