@@ -674,7 +674,9 @@ function projectSemanticAnalysisReadyFromGraph(
   const parsed = GraphV3.safeParse(graph);
   if (!parsed.success) return undefined;
 
-  const rawGraph = isPlainObject(graph) ? graph : parsed.data as unknown as Dict;
+  const rawGraph: Dict = isPlainObject(graph)
+    ? graph
+    : { nodes: parsed.data.nodes, edges: parsed.data.edges };
   const goalNodes = parsed.data.nodes.filter((node) => node.kind === 'goal');
   const suppliedGoalId = readNonEmptyString(rawGraph.goal_node_id);
   const goalNodeId = suppliedGoalId && goalNodes.some((node) => node.id === suppliedGoalId)

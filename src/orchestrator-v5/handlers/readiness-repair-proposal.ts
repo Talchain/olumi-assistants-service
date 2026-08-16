@@ -103,6 +103,21 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+type ReadinessRequiredInputKind =
+  CanonicalReadinessRepairProposal['unresolved_inputs'][number]['kind'];
+const READINESS_REQUIRED_INPUT_KINDS: ReadonlySet<ReadinessRequiredInputKind> = new Set([
+  'model_structure',
+  'option_mapping',
+  'option_effect_value',
+  'value_scale',
+  'constraint_review',
+]);
+
+function isReadinessRequiredInputKind(value: unknown): value is ReadinessRequiredInputKind {
+  return typeof value === 'string'
+    && READINESS_REQUIRED_INPUT_KINDS.has(value as ReadinessRequiredInputKind);
+}
+
 function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null {
   if (!isRecord(value)) return null;
   if (value.proposal_version !== 'readiness_repair_v1' || value.complete !== true) return null;
@@ -110,6 +125,7 @@ function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null 
     return null;
   }
   if (!Array.isArray(value.changes) || value.changes.length === 0) return null;
+  const changes: CanonicalReadinessRepairProposal['changes'] = [];
   for (const change of value.changes) {
     if (
       !isRecord(change)
@@ -119,17 +135,40 @@ function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null 
       || !nonEmpty(change.option_label)
       || !nonEmpty(change.description)
     ) return null;
+    changes.push({
+      change_id: change.change_id,
+      kind: change.kind,
+      option_id: change.option_id,
+      option_label: change.option_label,
+      description: change.description,
+    });
   }
   if (!Array.isArray(value.unresolved_inputs)) return null;
+  const unresolvedInputs: CanonicalReadinessRepairProposal['unresolved_inputs'] = [];
   for (const unresolved of value.unresolved_inputs) {
     if (!isRecord(unresolved) || !nonEmpty(unresolved.issue_id) || !nonEmpty(unresolved.prompt)) {
       return null;
     }
-    if (!['model_structure', 'option_mapping', 'option_effect_value', 'value_scale', 'constraint_review'].includes(String(unresolved.kind))) {
-      return null;
-    }
+    if (!isReadinessRequiredInputKind(unresolved.kind)) return null;
+    if (
+      (unresolved.option_id !== undefined && !nonEmpty(unresolved.option_id))
+      || (unresolved.factor_id !== undefined && !nonEmpty(unresolved.factor_id))
+    ) return null;
+    unresolvedInputs.push({
+      issue_id: unresolved.issue_id,
+      kind: unresolved.kind,
+      prompt: unresolved.prompt,
+      ...(unresolved.option_id ? { option_id: unresolved.option_id } : {}),
+      ...(unresolved.factor_id ? { factor_id: unresolved.factor_id } : {}),
+    });
   }
-  return value as unknown as CanonicalReadinessRepairProposal;
+  return {
+    proposal_version: 'readiness_repair_v1',
+    complete: true,
+    issue_ids: [...value.issue_ids],
+    changes,
+    unresolved_inputs: unresolvedInputs,
+  };
 }
 
 export type ReadinessRepairResumeRead =

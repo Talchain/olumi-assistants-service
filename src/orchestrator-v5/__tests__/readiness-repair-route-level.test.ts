@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -56,7 +57,11 @@ const GRAPH: Dict = {
   ],
 };
 
-const HASH = computeAnalysisAffectingGraphHash(GRAPH as never);
+const PARSED_GRAPH = GraphStateIngressSchema.parse(GRAPH);
+const HASH = computeAnalysisAffectingGraphHash(PARSED_GRAPH);
+if (HASH === null) throw new Error('readiness fixture must have an analysis hash');
+const IDENTITY_HASH = computeGraphIdentityHash(PARSED_GRAPH);
+if (IDENTITY_HASH === null) throw new Error('readiness fixture must have an identity hash');
 const ASSESSMENT = assessCanonicalAnalysisReadiness(GRAPH);
 const OFFER = buildReadinessRepairOffer({
   assessment: ASSESSMENT,
@@ -133,7 +138,7 @@ describe('readiness multi-repair through TurnExecutor', () => {
     expect(appendCalls).toHaveLength(1);
     const write = appendCalls[0]!;
     expect(write.graph).toBeDefined();
-    expect(write.expectedGraphIdentityHash).toBe(computeGraphIdentityHash(GRAPH).value);
+    expect(write.expectedGraphIdentityHash).toBe(IDENTITY_HASH.value);
     expect(write.expectedGraphAnalysisHash).toBe(HASH);
     expect((write.handler_facts as Array<{ fact_type?: string }>)[0]?.fact_type).toBe('edit_graph');
     expect(write.pending_actions).toEqual([]);
