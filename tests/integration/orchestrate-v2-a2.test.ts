@@ -252,11 +252,11 @@ describe('POST /orchestrate/v2/turn — slice A2 clarify fixtures', () => {
     const parsed = OlumiResponseSchema.parse(body);
     expect(parsed.assistant_text).toBe(fx.expected.body!.assistant_text);
     expect(parsed.blocks).toEqual([]);
-    // ROADMAP 1.148 C3 re-pin: at stage 'analyse' with no analysable graph
-    // the deterministic chip floor offers the curated set-option-values
-    // prompt chip on the clarify compose path (was `[]` at frame stage).
+    // ROADMAP 1.148 C3 re-pin: at stage 'analyse' with no graph, canonical
+    // readiness is unknown and the clarify compose path fails closed to the
+    // model-review recovery prompt (was `[]` at frame stage).
     expect(parsed.suggested_actions.map((a) => a.id)).toEqual([
-      'chip_prompt_set_option_values',
+      'chip_prompt_review_model_gaps',
     ]);
     expect(parsed.insights).toEqual([]);
     // ROADMAP 1.148 C3: fixture now runs at stage 'analyse' (see the

@@ -169,15 +169,19 @@ describe('V5 draft_graph persistence integration', () => {
         request: STUB_REQUEST,
       });
 
-      // Decision-coach narrative: names the goal, surfaces the single
-      // factor as a key consideration, and ends with a run-analysis nudge.
+      // Decision-coach narrative: names the goal, surfaces the single factor,
+      // and ends with the canonical non-ready recovery because this fixture
+      // has no options and cannot yet run analysis.
       // Handler narration is no longer surfaced — graph-shaped wording in
       // the fixture is silently discarded.
       const text = result.response.assistant_text;
       expect(text).toContain("I've built a first decision model");
       expect(text).toContain('"Revenue target"');
       expect(text).toContain('Market readiness');
-      expect(text).toContain('run the analysis');
+      expect(text).toContain(
+        'Next, review the model and fill any gaps before comparing the options.',
+      );
+      expect(text).not.toContain('run the analysis');
       expect(text).not.toContain('nodes');
       expect(text).not.toContain('edges');
     });

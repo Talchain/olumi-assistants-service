@@ -34,7 +34,7 @@
  *      call site MUST do the computation and pass it in.
  *   3. If `analysisReady` is undefined, readiness is unknown and the
  *      executable chip MUST NOT render. Fall back to a conversational
- *      prompt. The `graphOptionCount` hint still drives fallback copy.
+ *      "Review model gaps" prompt; `graphOptionCount` is not authority.
  *
  * The executable chip emits iff `analysisReady.status === 'ready'` — the
  * canonical producer already verifies the whole model.
@@ -55,13 +55,10 @@ import { buildScaffoldConfigureChip } from '../coaching/scaffold-disclosure.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
-// ROADMAP 2.308 / S2(b) — the "Set values for options" chip copy is DERIVED,
-// never re-typed. All four sites below (the readiness floor, which fires on
-// `needs_encoding` — the 2.308 blocked state — plus the three stage
-// fallbacks) previously carried a hand-typed literal that was blocked twice:
-// NO_MATCH at `detectConfigureOptionIntent` AND a hit on
-// EDIT_GRAPH_NEGATIVE_REGEX's "set up". `configure-option-product-copy-routes.test.ts`
-// pins `generateChips` OUTPUT, not just the constant.
+// Canonical typed readiness derives the sole recovery chip here; call sites
+// do not re-type readiness copy or infer an executable action from option
+// count. `configure-option-product-copy-routes.test.ts` pins `generateChips`
+// OUTPUT, not just the shared recovery source.
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
@@ -93,10 +90,9 @@ export interface ChipGeneratorInput {
    */
   readonly analysisReady?: AnalysisReadyPayload;
   /**
-   * Legacy hint: count of option nodes on the graph. Retained for
-   * conversational-fallback copy selection (so "Set values for options"
-   * vs "Run the analysis" depends on whether ANY options exist). NOT a
-   * readiness signal on its own — see `analysisReady` above.
+   * Legacy hint: count of option nodes on the graph. Retained for call-site
+   * compatibility and branch diagnostics. It is not readiness authority and
+   * never permits executable Run; canonical `analysisReady` owns recovery.
    */
   readonly graphOptionCount?: number;
   /**
@@ -302,10 +298,9 @@ function excludeRecentlyOfferedChips(
  *   3. Any run_analysis fact present (current or prior) → conversational
  *      "What could change the outcome?" prompt. Routes through the
  *      existing post-analysis advice gate as plain text.
- *   4. `analysisReady.status` in {`needs_user_input`, `needs_user_mapping`,
- *      `needs_encoding`} → conversational "Set values for options"
- *      prompt. Does NOT emit the executable `run_analysis` chip here —
- *      the upstream readiness gate would reject it.
+ *   4. Any canonical non-ready `analysisReady.status` → its typed
+ *      conversational recovery prompt. Does NOT emit the executable
+ *      `run_analysis` chip here — the upstream readiness gate would reject it.
  *   5. None of the above → empty preserved; `V5ChipsEmptyIntentional`
  *      emitted with `reason: 'no_safe_floor'`.
  */
@@ -816,10 +811,9 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // PRECONDITION_UNMET or an options_not_configured handler failure on
   // click.
   //
-  // When readiness is unknown (undefined or any non-'ready' status), we
-  // emit a conversational fallback — steering copy depends on what IS
-  // present (some options vs none) so the user always has a visible
-  // next step.
+  // Known non-ready statuses select their typed recovery. Missing readiness
+  // fails closed to the neutral model-review prompt; option count never
+  // authorises Run.
   if (input.stage === 'analyse' && !hasAnalysis && handlerJustRan == null) {
     const readyStatus = input.analysisReady?.status;
     const isReady = readyStatus === 'ready';
@@ -849,8 +843,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // in this branch loop-baited Sonnet back toward a run_analysis call
     // that validator would reject (200 coaching under hardening, but a
     // wasted round-trip either way). The truly-unknown readiness case
-    // (analysisReady undefined) is handled in the final branch below
-    // with a distinct neutral decision-framing prompt.
+    // (analysisReady undefined) is handled below with the neutral
+    // model-review recovery prompt.
     if (readyStatus != null && readyStatus !== 'ready') {
       const recovery = buildReadinessRecoveryChip(input.analysisReady);
       return recovery ? cap([recovery]) : [];
@@ -860,10 +854,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // emitted "Run the analysis" which nudged Sonnet toward an action
     // whose graph precondition is structurally impossible. Under the
     // Phase 2.2 recoverable-validator pattern this wouldn't 500, but it
-    // would still waste a round-trip. A neutral decision-framing
-    // prompt keeps the user (and the model) focused on whatever
-    // structural step is actually next — usually "tell me about the
-    // decision" at frame stage.
+    // would still waste a round-trip. The neutral model-review prompt
+    // keeps the user focused on resolving the unknown structural gap.
     const recovery = buildReadinessRecoveryChip(input.analysisReady);
     return recovery ? cap([recovery]) : [];
   }
