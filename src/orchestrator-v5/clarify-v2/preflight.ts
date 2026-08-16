@@ -1014,16 +1014,28 @@ export function composeClarifyV2Response(
           ? 'Before I draft the model, one quick question will make it sharper.'
           : 'Before I draft the model, a few quick questions will make it sharper.'
         : followUpAck;
+  // ⚠ 2026-08-16 (P1) — THIS WAS `.join(' ')` AND IT PRODUCED A WALL OF TEXT.
+  //
+  // The first thing a new user ever reads from Olumi is this response, and it
+  // shipped as ONE unbroken paragraph with "1." "2." "3." buried inside it.
+  // Paul's manual test: the questions were all there and none of them were
+  // legible. Not one word of copy changes here — only the shape.
+  //
+  // Newlines survive to the wire: `sanitiseOlumiResponseForEgress` (the single
+  // V5 chokepoint this response ships through) does not touch them, and
+  // `orchestrator-v5/sanitise.ts` — which is on other paths — collapses only
+  // `[ \t]+`. Pinned by `__tests__/clarify-question-shape.spec.ts`, which
+  // drives the real chokepoint rather than asserting it from this comment.
   const numbered = questions
     .map((q, i) => `${i + 1}. ${q.text} (${q.impact})`)
-    .join(' ');
+    .join('\n');
   // TRACK-1 INTAKE FIX: honest escape-hatch copy — there are no stored
   // defaults (INTAKE-FUNNEL §3); on "go ahead" the drafter fills the gaps
   // with its own assumptions, all editable on the canvas.
   const tail =
     'Answer whichever matters most — tap an option below or type your own — ' +
     "or say “go ahead” and I'll draft now, filling any gaps with my own assumptions.";
-  const assistantText = `${lead} ${numbered} ${tail}`;
+  const assistantText = `${lead}\n\n${numbered}\n\n${tail}`;
 
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,

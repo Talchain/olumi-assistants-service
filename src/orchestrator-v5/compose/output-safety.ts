@@ -52,6 +52,8 @@
  *     `option_value`). Apply the slug-shape gate.
  */
 
+import { env } from 'node:process';
+
 import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/boundary';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -76,8 +78,100 @@ import {
   type SanitiseResult,
 } from '../../orchestrator/shared/output-safety.js';
 
+import { FORBIDDEN_USER_FACING_REDACTION_MARKER } from '../../orchestrator/shared/repair-vocabulary-denylist.js';
+
 export { sanitiseUserFacingText, sanitiseCoachingProse };
 export type { SanitiseMatch, SanitiseResult };
+
+// ----------------------------------------------------------------------------
+// Redaction-marker egress net
+// ----------------------------------------------------------------------------
+
+/**
+ * ⚠ 2026-08-16 (P1) — `[REDACTED]` REACHED A REAL USER'S CHAT.
+ *
+ * `enforceRepairVocabularyDenylist` used to substitute the literal string
+ * `[REDACTED]` into user-facing prose, and four of its twelve patterns were
+ * ordinary English, so the scrubber redacted the user's own words back at
+ * them. Both halves are fixed at the source (every rule now carries a neutral
+ * plain-English replacement). This is the net UNDER that fix.
+ *
+ * ⭐ WHY A NET AT ALL, given the source is fixed: `[REDACTED]` is emitted by
+ * FOUR other modules in this repo (`utils/redaction.ts`, `utils/logger-config.ts`
+ * as `REDACT_CENSOR`, and the enrichment strip in `compose.ts`), all of which
+ * are correct in their own layer — LOGS and DROPPED ENRICHMENT FIELDS may
+ * absolutely carry it. What must never happen is one of those values crossing
+ * into `assistant_text`. A marker there is never legitimate user-facing data,
+ * so the test is exact-substring and needs no judgement call.
+ *
+ * FAIL LOUD IN TESTS, STRIP IN PRODUCTION — deliberately asymmetric. A throw
+ * on a live turn would convert a cosmetic leak into a dead conversation, which
+ * is a worse outcome for the user than a slightly-clipped sentence; a silent
+ * strip in CI would let the next regression ship. The production path emits
+ * telemetry so the rate is observable rather than merely survived.
+ */
+function isTestEnv(): boolean {
+  // Same shape as `routing-log.ts::isTestEnv` and `telemetry.ts::setTestSink`,
+  // imported from `node:process` rather than read off the `process` global so
+  // it satisfies the no-direct-process.env lint rule, and read AT CALL TIME
+  // (not module load) so a test can exercise the production strip path by
+  // clearing these for one call.
+  return env.NODE_ENV === 'test' || env.VITEST === 'true' || Boolean(env.VITEST);
+}
+
+/**
+ * Remove any redaction marker from user-facing prose, closing the whitespace
+ * it leaves behind so the sentence does not ship a double space or a space
+ * before its full stop.
+ *
+ * Exported for direct test: the rule is a concept with its own mutants, not an
+ * expression buried in a walk nobody can point at.
+ */
+export function stripRedactionMarker(text: string): string {
+  if (!text.includes(FORBIDDEN_USER_FACING_REDACTION_MARKER)) return text;
+  return text
+    .split(FORBIDDEN_USER_FACING_REDACTION_MARKER)
+    .join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([.,;:!?])/g, '$1')
+    .trim();
+}
+
+/**
+ * The egress assertion. Returns the text that may ship.
+ *
+ * @throws in test environments, so a regression is a RED and not a warning.
+ */
+export function assertNoRedactionMarkerInAssistantText(
+  text: string,
+  opts: { readonly requestId: string; readonly exitPath: string },
+): string {
+  if (!text.includes(FORBIDDEN_USER_FACING_REDACTION_MARKER)) return text;
+
+  if (isTestEnv()) {
+    throw new Error(
+      `assistant_text carried the redaction marker ${FORBIDDEN_USER_FACING_REDACTION_MARKER} at egress `
+        + `(exit_path=${opts.exitPath}). A placeholder token is never legitimate user-facing copy — `
+        + 'give the producing rule a neutral plain-English replacement instead. '
+        + 'See src/orchestrator/shared/repair-vocabulary-denylist.ts.',
+    );
+  }
+
+  const stripped = stripRedactionMarker(text);
+  log.warn(
+    {
+      event: 'v5.egress_redaction_marker_stripped',
+      request_id: opts.requestId,
+      exit_path: opts.exitPath,
+      // Lengths only — never the raw text, which still contains whatever the
+      // producing layer was trying to hide.
+      text_length_before: text.length,
+      text_length_after: stripped.length,
+    },
+    'V5 egress: redaction marker removed from assistant_text',
+  );
+  return stripped;
+}
 
 // ----------------------------------------------------------------------------
 // Envelope-level walk
@@ -199,7 +293,12 @@ export function sanitiseOlumiResponseForEgress(
 
   const sanitised: OlumiResponse = {
     ...response,
-    assistant_text: collect(response.assistant_text),
+    // The redaction-marker net runs AFTER the entity-id scrub, so it sees the
+    // same bytes the wire would carry rather than a pre-scrub draft.
+    assistant_text: assertNoRedactionMarkerInAssistantText(collect(response.assistant_text), {
+      requestId: opts.requestId,
+      exitPath: opts.exitPath,
+    }),
     blocks: response.blocks.map((b) => sanitiseBlock(b, collect)),
     // Spread the finalizer + loop-guard readonly result into the mutable wire array.
     suggested_actions: [...loopGuarded],

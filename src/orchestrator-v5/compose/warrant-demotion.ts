@@ -30,6 +30,7 @@
  * the two cannot fork.
  */
 
+import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import type { ProposalAction } from '../routing/types.js';
 import type { ProposedChange, ProposedChangeIntent } from '../types/proposed-change.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
@@ -105,13 +106,76 @@ export type WarrantDemotionBuild =
   | { readonly ok: false; readonly reason: 'not_a_proposable_mutation' };
 
 /**
+ * Currency units → their display symbol, DERIVED from the one canonical
+ * currency vocabulary (`CURRENCY_SYMBOL_TO_CODE`, ROADMAP 2.972).
+ *
+ * ⭐ THIS WAS A HAND-WRITTEN MAP OF SIX ENTRIES AND THE UNION GUARD CAUGHT IT.
+ * `cee/extraction/__tests__/currency-vocabulary.union.test.ts` failed this
+ * file by name with the instruction to derive from the canonical list or
+ * justify an exception at the bytes — which is precisely the trap-12d
+ * completeness check working exactly as designed, on a list I had already
+ * written a "this cannot be derived" comment above. It could. I had searched
+ * two of the three copies and not the registry.
+ *
+ * Deriving costs nothing and buys five currencies the hand-written map did not
+ * have (JPY, INR, AUD, CAD, NZD, CHF, SEK). Both directions are accepted
+ * because both reach this function on the wire: the drafter prompt stores
+ * `unit: "£"` (`defaults-v15.ts`) while `parseNumericValue` yields
+ * `unit: "GBP"` (`provenance/stated-amounts.ts`).
+ */
+const CURRENCY_SYMBOL_BY_UNIT: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(CURRENCY_SYMBOL_TO_CODE).flatMap(([symbol, code]) => [
+      [symbol, symbol],
+      [code, symbol],
+    ]),
+  ),
+);
+
+/**
+ * Thousands separators, computed rather than delegated to `toLocaleString`,
+ * so the output cannot vary with the host's ICU build or default locale — a
+ * confirmation sentence must render identically everywhere.
+ *
+ * Falls back to the plain spelling above 1e21, where `Number.prototype
+ * .toString` switches to exponential notation and grouping would be
+ * meaningless.
+ */
+function groupThousands(value: number): string {
+  if (Math.abs(value) >= 1e21) return String(value);
+  const sign = value < 0 ? '-' : '';
+  const [whole, fraction] = Math.abs(value).toString().split('.');
+  const grouped = (whole ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${sign}${grouped}${fraction !== undefined ? `.${fraction}` : ''}`;
+}
+
+/**
  * Format a bound for the assistant text. Kept out of the chip copy (see
  * `CHIP_COPY`) so the raw-decimal chip filter never sees it.
+ *
+ * ⚠ 2026-08-16 (P2) — THIS EMITTED RAW MACHINE NUMBERS INTO PROSE. Paul's
+ * manual test caught the sentence
+ *
+ *   "a limit keeping Hiring spend at or below 200000 GBP"
+ *
+ * Two things are wrong with it and both are this function's: the ISO CODE is
+ * printed where the SYMBOL belongs, and a six-figure amount is printed with no
+ * thousands separators, so a reader has to count digits to find out what their
+ * own limit is. It now renders `£200,000`.
+ *
+ * Grouping applies to non-currency bounds too — `200000 users` is exactly as
+ * unreadable as `200000 GBP`, and grouping is invisible below 1,000, so every
+ * percentage and strength value in the suite is untouched.
  */
 function formatBound(value: unknown, unit: unknown): string {
-  const num = typeof value === 'number' && Number.isFinite(value) ? String(value) : null;
-  if (num === null) return 'that level';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'that level';
   const suffix = typeof unit === 'string' && unit.trim().length > 0 ? unit.trim() : '';
+  const symbol = CURRENCY_SYMBOL_BY_UNIT[suffix] ?? CURRENCY_SYMBOL_BY_UNIT[suffix.toUpperCase()];
+  if (symbol !== undefined) {
+    // Sign OUTSIDE the symbol: "-£5,000", never "£-5,000".
+    return value < 0 ? `-${symbol}${groupThousands(Math.abs(value))}` : `${symbol}${groupThousands(value)}`;
+  }
+  const num = groupThousands(value);
   return suffix === '%' ? `${num}%` : suffix.length > 0 ? `${num} ${suffix}` : num;
 }
 
