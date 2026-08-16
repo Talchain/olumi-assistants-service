@@ -213,6 +213,25 @@ export interface ContextTruncationArgs {
   readonly strategy: string;
   /** Whether the LLM can SEE that the cut happened (in-band disclosure). */
   readonly disclosed: boolean;
+  /**
+   * Whole-pack accounting for a cut driven by a call site's TOTAL budget
+   * rather than by a per-section cap (Context/Memory V5 defect 3,
+   * `enforceContextPackCeiling`). ABSENT on section-driven cuts, so every
+   * pre-existing producer is unchanged. Present together or not at all: they
+   * are one measurement (pack chars before → after, against the ceiling that
+   * fired), and reading `after` without `budget` would invite the reader to
+   * supply a number of their own.
+   */
+  readonly pack_total_chars_before?: number;
+  readonly pack_total_chars_after?: number;
+  readonly pack_total_budget?: number;
+  /**
+   * Present-and-true when the cut stopped at its RETENTION FLOOR while the
+   * pack was still over the ceiling — the honest "this did not fit" signal.
+   * Absent when the cut reached the target (never a noisy `false`), matching
+   * the key-absence disclosure doctrine used across this pack.
+   */
+  readonly floor_reached?: true;
   readonly request_id?: string | null;
   readonly scenario_id?: string | null;
 }
@@ -227,6 +246,14 @@ export function emitContextTruncation(args: ContextTruncationArgs): void {
       kept_chars: args.kept_chars,
       ...(args.original_records === undefined ? {} : { original_records: args.original_records }),
       ...(args.kept_records === undefined ? {} : { kept_records: args.kept_records }),
+      ...(args.pack_total_chars_before === undefined
+        ? {}
+        : { pack_total_chars_before: args.pack_total_chars_before }),
+      ...(args.pack_total_chars_after === undefined
+        ? {}
+        : { pack_total_chars_after: args.pack_total_chars_after }),
+      ...(args.pack_total_budget === undefined ? {} : { pack_total_budget: args.pack_total_budget }),
+      ...(args.floor_reached === undefined ? {} : { floor_reached: args.floor_reached }),
       strategy: args.strategy,
       disclosed: args.disclosed,
       request_id: args.request_id ?? null,

@@ -1761,6 +1761,15 @@ export async function runTurnExecutor(
               currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
                 ? extractGraphOptionIds(canonicalReadinessGraphForRun)
                 : undefined,
+              // CONTEXT/MEMORY V5 defect 4 — the non-execute path has NO
+              // current-turn facts (`handlerFacts: []`), so `context.prior_facts`
+              // is the whole chain. That makes it precisely the path where a
+              // thrown prior-fact read is indistinguishable from a scenario that
+              // has never been analysed, and where `'none'` would be a positive
+              // claim we cannot support.
+              ...(context.prior_facts_read_ok === undefined
+                ? {}
+                : { priorFactsReadOk: context.prior_facts_read_ok }),
             });
     }
     return nonExecuteCanonicalMemo ?? undefined;
@@ -2285,6 +2294,13 @@ export async function runTurnExecutor(
       context.prior_facts,
       currentAnalysisGraphHashForTurn,
       currentGraphOptionIdsForTurn,
+      // PR #981 review P1b: ONE authority for one question. Threading the
+      // degraded-read flag only into the canonical selector made a single turn
+      // emit pack 'unknown' and turn_outcome 'none' simultaneously. Every raw
+      // derivation over context.prior_facts now threads the same flag.
+      context.prior_facts_read_ok === undefined
+        ? undefined
+        : { priorFactsReadOk: context.prior_facts_read_ok },
     );
     // Until the post-dispatch re-derivation runs, the wire-bound
     // `freshness` defaults to the routing view — this covers exit paths
@@ -2541,6 +2557,14 @@ export async function runTurnExecutor(
         // did you make?") have no human-readable receipt to ground
         // Sonnet's answer and fall to the legacy `edit_graph` catch-all.
         priorFacts: context.prior_facts,
+        // CONTEXT/MEMORY V5 defect 4 — the assembler derives its OWN canonical
+        // analysis state from these facts (`deriveContextPackAnalysisState` →
+        // `selectCanonicalAnalysisState`); this call passes no `canonicalState`,
+        // so that derivation is the pack's authority. Thread the read state or a
+        // thrown read reaches the LLM-facing pack as "never analysed".
+        ...(context.prior_facts_read_ok === undefined
+          ? {}
+          : { priorFactsReadOk: context.prior_facts_read_ok }),
         // Lane 28 — brief pipeline (dossier gap G2): the persisted decision
         // brief (`scenarios.brief_text`, loaded once per turn by
         // buildTurnContext in the same round trip as the graph). Projected
@@ -3378,6 +3402,11 @@ export async function runTurnExecutor(
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(outcome.mutatedGraph)
               : undefined,
+          
+            // PR #981 review P1b: same flag, same question (see routingFreshness).
+            context.prior_facts_read_ok === undefined
+              ? undefined
+              : { priorFactsReadOk: context.prior_facts_read_ok },
           );
           emit(TelemetryEvents.PendingActionConsumed, {
             request_id: requestId,
@@ -3594,6 +3623,11 @@ export async function runTurnExecutor(
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(lastExecuted.mutatedGraph)
               : undefined,
+          
+            // PR #981 review P1b: same flag, same question (see routingFreshness).
+            context.prior_facts_read_ok === undefined
+              ? undefined
+              : { priorFactsReadOk: context.prior_facts_read_ok },
           );
           for (const ref of consumedRefs) {
             const consumedHold = holds.find((h) => h.chip_id === ref)!;
@@ -9669,6 +9703,13 @@ export async function runTurnExecutor(
         unifiedFactsForPostHandler,
         hashForPostHandlerFreshness,
         currentGraphOptionIdsForPostHandler,
+        // PR #981 review P1b: same flag, same question. Nearly always inert
+        // here (this turn's own facts are first in the unified chain) — it
+        // matters only when the handler produced no usable fact AND the prior
+        // read degraded, where 'none' would again be an unsupported claim.
+        context.prior_facts_read_ok === undefined
+          ? undefined
+          : { priorFactsReadOk: context.prior_facts_read_ok },
       );
       // T1 claim safety — REFINE the turn-entry read (ROADMAP 1.233, see the
       // declaration) over the SAME fact array and via the SAME canonical
@@ -9770,6 +9811,15 @@ export async function runTurnExecutor(
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
         currentGraphOptionIds: currentGraphOptionIdsForPostHandler,
+        // Defect 4. Threaded here too for consistency, though it is nearly
+        // always inert on this path: the execute branch carries this turn's
+        // own `handlerFactsForCommit`, which are selected first. It matters
+        // only for an execute turn that produced no usable run_analysis fact
+        // AND could not read the prior chain — where `'none'` would again be
+        // an unsupported claim rather than an honest `'unknown'`.
+        ...(context.prior_facts_read_ok === undefined
+          ? {}
+          : { priorFactsReadOk: context.prior_facts_read_ok }),
       });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not

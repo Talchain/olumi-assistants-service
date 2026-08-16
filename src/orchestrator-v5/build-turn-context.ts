@@ -158,6 +158,22 @@ export interface EnrichedTurnContext extends TurnContext {
    */
   readonly prior_facts: readonly HandlerFact[];
   /**
+   * CONTEXT/MEMORY V5 defect 4 — did the `prior_facts` read SUCCEED?
+   *
+   * `prior_facts` above is `[]` in four situations: no session store, no prior
+   * turns, no eligible row ids, and a THROWN read. The first three are genuine
+   * emptiness; the fourth is ignorance. Without this flag they are
+   * indistinguishable, and `deriveAnalysisFreshness` reads all four as
+   * `'none' / no_successful_run_analysis_fact` — a positive claim that the
+   * scenario has never been analysed, which on a thrown read is simply not
+   * known and which clears state downstream.
+   *
+   * `false` ONLY on a thrown read. Deliberately mirrors the existing
+   * `newest_analysis_fact_read_ok` pattern above rather than inventing a
+   * second vocabulary for the same idea.
+   */
+  readonly prior_facts_read_ok?: boolean;
+  /**
    * Same facts as `prior_facts` but each entry pairs the fact with
    * its parent turn's row id and creation timestamp via the FK
    * `v5_handler_facts.v5_conversation_turn_id`. Consumed by the
@@ -587,7 +603,11 @@ export async function buildTurnContext(
       prior_turn_count: 0,
     });
   }
-  const { facts: priorFacts, factsWithTurn: priorFactsWithTurn } = await fetchPriorFacts(
+  const {
+    facts: priorFacts,
+    factsWithTurn: priorFactsWithTurn,
+    readOk: priorFactsReadOk,
+  } = await fetchPriorFacts(
     priorTurns,
     requestId,
     payload.scenario_id,
@@ -662,6 +682,19 @@ export async function buildTurnContext(
     config.cee.optionIdentityFreshnessGuard
       ? extractGraphOptionIds(scenarioState.graph)
       : undefined,
+    // CONTEXT/MEMORY V5 defect 4 — THE PERSIST HALF. Without this, a THROWN
+    // prior-fact read reaches here as `[]`, derives `'none' /
+    // no_successful_run_analysis_fact`, and `deriveAnalysisSignals` turns that
+    // into an ACTIVE `analysis_missing` coaching signal. That signal is not
+    // merely displayed: it is carried on `context.coaching_state`, committed
+    // via `commit.ts` into the `coaching_state` JSONB column, and read back on
+    // LATER turns as `prior_coaching_state`. Because the loader selects
+    // `coaching_state IS NOT NULL ORDER BY created_at DESC LIMIT 1`, a single
+    // degraded read could persist "this scenario has never been analysed" and
+    // have it replayed indefinitely — long after the store recovered.
+    // Threading the read state makes the degraded case `'unknown' /
+    // derivation_failed`, which maps to an `unavailable` signal instead.
+    priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
   );
   const coachingState = deriveCoachingState({
     decisionContext,
@@ -785,6 +818,7 @@ export async function buildTurnContext(
     newest_analysis_fact: newestAnalysisFactRead.fact,
     newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
     prior_facts: priorFacts,
+    prior_facts_read_ok: priorFactsReadOk,
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
@@ -1591,6 +1625,16 @@ async function fetchPriorFacts(
 ): Promise<{
   readonly facts: readonly HandlerFact[];
   readonly factsWithTurn: readonly HandlerFactWithTurn[];
+  /**
+   * CONTEXT/MEMORY V5 defect 4 — `false` ONLY when the fact read THREW.
+   *
+   * The three "nothing to read" early returns below (no store, no prior turns,
+   * no row ids) are genuine, successful emptiness and keep `readOk: true`.
+   * Only the catch sets `false`. Freshness consumes this to tell "no analysis
+   * has been run" (`none`) apart from "the store could not be read"
+   * (`unknown`) — the same distinction CEE #977 built for the pending path.
+   */
+  readonly readOk: boolean;
 }> {
   // Critical correctness fix: `readFactsFor` filters against
   // `v5_handler_facts.v5_conversation_turn_id`, which is the FK to the
@@ -1642,7 +1686,7 @@ async function fetchPriorFacts(
     },
     'V5 buildTurnContext: fact chain trace (verbose)',
   );
-  const empty = { facts: [] as readonly HandlerFact[], factsWithTurn: [] as readonly HandlerFactWithTurn[] };
+  const empty = { facts: [] as readonly HandlerFact[], factsWithTurn: [] as readonly HandlerFactWithTurn[], readOk: true };
   if (!store) return empty;
   if (priorTurns.length === 0) return empty;
   if (priorTurnRowIds.length === 0) return empty;
@@ -1673,7 +1717,7 @@ async function fetchPriorFacts(
       },
       'V5 buildTurnContext: prior_facts loaded',
     );
-    return { facts, factsWithTurn };
+    return { facts, factsWithTurn, readOk: true };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -1687,7 +1731,8 @@ async function fetchPriorFacts(
       error_code: errorCode ?? 'unknown',
       severity: 'warning',
     });
-    return empty;
+    // NOT `empty`: this is the one path where emptiness is uninformative.
+    return { ...empty, readOk: false };
   }
 }
 

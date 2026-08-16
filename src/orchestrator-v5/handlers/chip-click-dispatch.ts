@@ -473,6 +473,20 @@ function pickWireSafeFailureDetails(
 function deriveChipClickFreshness(
   cachedSnapshot: RunAnalysisScenarioSnapshot | null,
   facts: readonly HandlerFact[],
+  /**
+   * CONTEXT/MEMORY V5 defect 4 — did the read that produced the PRIOR half of
+   * `facts` succeed? `false` ONLY on a thrown read; `undefined` ⇒ pre-fix
+   * behaviour.
+   *
+   * Threaded rather than derived here because this helper never reads the
+   * store — its callers own the read. On the post-dispatch call `facts` is the
+   * UNIFIED array (`[...enrichedFacts, ...context.prior_facts]`), so the flag
+   * describes only the prior half; that is sound, because the degraded branch
+   * in `deriveAnalysisFreshness` fires only when NO fact was selected at all,
+   * which on that path means `enrichedFacts` was empty too and the emptiness of
+   * the prior half is therefore genuinely unexplained.
+   */
+  priorFactsReadOk?: boolean,
 ): FreshnessDerivation {
   let currentGraphHash: string | null = null;
   if (
@@ -495,6 +509,7 @@ function deriveChipClickFreshness(
     config.cee.optionIdentityFreshnessGuard
       ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
       : undefined,
+    priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
   );
 }
 
@@ -838,7 +853,16 @@ export async function dispatchChipClickRunAnalysis(
           turnAbort.signal.aborted,
           // ROADMAP 2.1085 (root 2.1041) D2 — PRIOR facts only: this turn refused and
           // produced none. Same derivation function the `ok` exit uses.
-          cachedSnapshot ? deriveChipClickFreshness(cachedSnapshot, context.prior_facts) : undefined,
+          // Defect 4 — this refusal path derives from the PRIOR chain alone, so a
+          // degraded read here is exactly the "cannot tell" case that must not
+          // become "never analysed".
+          cachedSnapshot
+            ? deriveChipClickFreshness(
+                cachedSnapshot,
+                context.prior_facts,
+                context.prior_facts_read_ok,
+              )
+            : undefined,
         );
         if (recovered) return recovered;
         log.warn(
@@ -1236,7 +1260,14 @@ export async function dispatchChipClickRunAnalysis(
         ...enrichedFacts,
         ...context.prior_facts,
       ];
-      const freshness = deriveChipClickFreshness(cachedSnapshot, postDispatchFacts);
+      // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
+      // selected first), but it matters for a rerun that produced no usable
+      // run_analysis fact AND could not read the prior chain.
+      const freshness = deriveChipClickFreshness(
+        cachedSnapshot,
+        postDispatchFacts,
+        context.prior_facts_read_ok,
+      );
       emitFreshnessTelemetry(
         freshness,
         {

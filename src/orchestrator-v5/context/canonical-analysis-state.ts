@@ -323,6 +323,20 @@ export interface SelectCanonicalAnalysisStateInput {
   readonly currentGraphOptionIds?: readonly string[] | null;
   /** True when persisted scenario state asserts an analysis exists. */
   readonly scenarioClaimsAnalysis?: boolean;
+  /**
+   * CONTEXT/MEMORY V5 defect 4 — did the PRIOR-fact read succeed?
+   *
+   * `false` ONLY when `fetchPriorFacts` threw, in which case an empty unified
+   * fact chain is uninformative rather than evidence of "never analysed".
+   * Omitted ⇒ byte-identical to the pre-fix derivation, so an unwired caller
+   * cannot be silently changed.
+   *
+   * Note the interaction with `handlerFacts`: the unified chain puts
+   * current-turn facts FIRST, so a run_analysis that just ran is selected
+   * regardless of this flag. The degraded branch is reachable only when
+   * NEITHER source yielded a usable fact — which is exactly the ambiguous case.
+   */
+  readonly priorFactsReadOk?: boolean;
 }
 
 /** Defensive read of a fact's run-time `computed_at`. */
@@ -358,6 +372,11 @@ export function selectCanonicalAnalysisState(
     unifiedFacts,
     input.currentGraphHash,
     input.currentGraphOptionIds,
+    // Defect 4: distinguishes "the store says no analysis" from "the store
+    // could not be read". Absent => pre-fix behaviour, by construction.
+    input.priorFactsReadOk === undefined
+      ? undefined
+      : { priorFactsReadOk: input.priorFactsReadOk },
   );
   const selected = selectRunAnalysisFact(unifiedFacts);
   const degraded = selectDegradedRunAnalysisFact(unifiedFacts);

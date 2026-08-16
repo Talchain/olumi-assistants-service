@@ -93,6 +93,24 @@ export type FreshnessReason =
   | 'analysis_refused_currency_unverified';
 
 /**
+ * Optional read-state the caller may thread into {@link deriveAnalysisFreshness}.
+ *
+ * OMITTING IT IS BACK-COMPATIBLE BY DESIGN: every existing caller gets exactly
+ * the pre-fix verdict, so wiring this is a per-caller decision rather than a
+ * silent estate-wide behaviour change. Only a caller that can genuinely
+ * distinguish "the store said there is nothing" from "the store could not be
+ * read" should pass it — CEE #977's `PriorFactsReadResult` is that distinction.
+ */
+export interface DeriveAnalysisFreshnessOptions {
+  /**
+   * `false` ⇒ the prior-fact read DEGRADED (threw), so an empty fact list is
+   * uninformative. `true` ⇒ the read succeeded and an empty list genuinely
+   * means no analysis has been run. Absent ⇒ pre-fix behaviour.
+   */
+  readonly priorFactsReadOk?: boolean;
+}
+
+/**
  * Verdict + provenance. `computed_at` is the selected fact's run-time
  * timestamp, threaded into analysis_ready so explain/direct-answer turns
  * cannot restamp it.
@@ -600,10 +618,40 @@ export function deriveAnalysisFreshness(
   priorFacts: readonly HandlerFact[],
   currentGraphHash: string | null,
   currentGraphOptionIds?: readonly string[] | null,
+  opts?: DeriveAnalysisFreshnessOptions,
 ): FreshnessDerivation {
   const selected = selectRunAnalysisFact(priorFacts);
 
   if (selected === null) {
+    // CONTEXT/MEMORY V5 defect 4 — AN EMPTY FACT LIST IS AMBIGUOUS, AND ONLY
+    // THE READER KNOWS WHICH KIND OF EMPTY IT IS.
+    //
+    // `fetchPriorFacts` returns `[]` for four different situations — no
+    // session store, no prior turns, no row ids, and `readFactsFor` THREW.
+    // Reading all four as `none` makes a store failure claim "this scenario
+    // has never been analysed", which is a POSITIVE assertion we cannot
+    // support and which clears state downstream (an orphaned-result banner
+    // over valid results; `chip-generator.ts:135` branches on it).
+    //
+    // `unknown` is this vocabulary's own word for "freshness could not be
+    // derived", and `derivation_failed` already documents itself as
+    // "dispatcher attempted derivation and failed (session-store error…)".
+    // Nothing reached it from this path until now.
+    //
+    // Scope is deliberately narrow: this speaks ONLY to the absence of facts.
+    // A fact that WAS read stays authoritative and the hash comparison below
+    // decides — a degraded flag must never blank out a good analysis.
+    if (opts?.priorFactsReadOk === false) {
+      const degraded: FreshnessDerivation = {
+        freshness: 'unknown',
+        reason: 'derivation_failed',
+        selected_fact_index: null,
+        graph_hash_at_run: null,
+        current_graph_hash: currentGraphHash,
+        computed_at: null,
+      };
+      return enforceInvariants(degraded);
+    }
     const noFact: FreshnessDerivation = {
       freshness: 'none',
       reason: 'no_successful_run_analysis_fact',

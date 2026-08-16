@@ -25,6 +25,7 @@ import {
   tippingRiskPhrase,
   voiBandPhrase,
   DISPLAY_ANALYSIS_CHAR_BUDGET,
+  ANALYSIS_UNVERIFIED_NOTE,
   GOAL_FIT_NOT_SCORED_LINE,
   VOI_NOT_SCORED_NOTE,
   type DisplaySafeAnalysis,
@@ -180,6 +181,15 @@ describe('formatAnalysisForContext', () => {
         { label: 'Demand', influence: 'moderate negative influence' },
       ],
       fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
+      // Context/Memory V5 defect 2 — this call wires NO freshness verdict, and
+      // the disclosure is fail-closed on absence (the same rule the flip-point
+      // licence already used). Absence gets the UNVERIFIED variant, not the
+      // stale one: with no verdict there is no licence to claim "an earlier
+      // analysis run" or prescribe a re-run (PR #981 review, P0 — a note
+      // asserting a run that never happened). A caller that forgets to wire
+      // the verdict gets figures marked unconfirmed — never figures presented
+      // as current on an unverified premise.
+      analysis_not_current_note: ANALYSIS_UNVERIFIED_NOTE,
       // ROADMAP 2.54 (b) — VOI absence is DISCLOSED, never silent, so the
       // LLM cannot narrate sensitivity as "the highest value of information".
       value_of_information_note: VOI_NOT_SCORED_NOTE,

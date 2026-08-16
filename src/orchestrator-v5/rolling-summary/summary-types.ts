@@ -144,6 +144,32 @@ export interface RollingSummaryEntry {
    *  before speaker-scoped citation units existed, and on entries that cited
    *  nothing. Consumed by retention.ts's attribution gate. */
   readonly source_speakers?: readonly SummarySpeaker[];
+  /**
+   * CARRY-FORWARD VISIBILITY. Present-and-true when assemble.ts restored this
+   * entry from the PRIOR summary because THIS pass emptied a slot whose
+   * retention is required — i.e. the entry is prior record that the latest
+   * pass did not restate, not something the latest pass confirmed.
+   *
+   * Why it exists: carry-forward is a REPAIR (assemble.ts), and until now it
+   * was a SILENT one. The restored entry was byte-indistinguishable from a
+   * freshly-confirmed one, so a re-injected constraint could masquerade as
+   * current confirmation — including in the one case where the summariser was
+   * RIGHT to empty the slot (a genuine withdrawal), where the repair returns a
+   * stale figure wearing its original provenance. This flag does not decide
+   * which of those happened; it makes the fact of the repair legible so
+   * inject.ts can qualify the entry instead of asserting it.
+   *
+   * ABSENT (not false) on a fresh entry — byte-stable stored JSONB for the
+   * common case, same posture as `history_capped`.
+   *
+   * ⚠ IT MUST BE DECLARED IN `RollingSummaryEntrySchema` BELOW OR IT DOES NOT
+   * SURVIVE STORAGE. `parseStoredRollingSummary` is the read path for every
+   * consumer including inject.ts, and a bare `z.object` STRIPS unknown keys
+   * silently (zod 3 default) — it does not reject them. "The readers tolerate
+   * an extra field" is therefore true and useless: an undeclared field is
+   * written to JSONB, read back, and dropped without a single error.
+   */
+  readonly carried_forward?: boolean;
 }
 
 export interface RollingSummarySlotBlock {
@@ -188,6 +214,11 @@ const RollingSummaryEntrySchema = z.object({
   // "cited nothing" (the attribution gate treats an absent set as UNKNOWN, not
   // as proof of a user-only citation).
   source_speakers: z.array(z.enum(SUMMARY_SPEAKERS)).optional(),
+  // Optional, not defaulted: absent means "written fresh by this pass" and is
+  // the common case. DECLARED because a bare z.object strips unknown keys —
+  // without this line the stamp assemble.ts writes would be silently dropped
+  // on every read and inject.ts could never qualify a carried entry.
+  carried_forward: z.boolean().optional(),
 });
 
 const RollingSummarySlotBlockSchema = z.object({

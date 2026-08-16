@@ -43,6 +43,12 @@ import {
   type ContextBudgetDisclosure,
 } from './context-budget-enforcement.js';
 import { emitContextTruncation } from './context-budget-telemetry.js';
+import {
+  CONTEXT_PACK_CEILING_CUT_ORDER,
+  CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+  CONTEXT_POLICY,
+  type ContextPackCeilingCutSection,
+} from './context-policy.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
 import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
@@ -611,6 +617,20 @@ export interface AssembleContextPackInput {
    * follow-up state-queries can be grounded.
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * CONTEXT/MEMORY V5 defect 4 — did the read that produced `priorFacts`
+   * SUCCEED? Threaded from `EnrichedTurnContext.prior_facts_read_ok`.
+   *
+   * `priorFacts === undefined` (facts never wired) is already handled above by
+   * omitting the canonical state entirely. This flag covers the OTHER empty:
+   * facts WERE wired, the read THREW, and the array is `[]`. Without it
+   * `deriveContextPackAnalysisState` reads that as canonical `'none'` and puts
+   * "never analysed" into the LLM-facing pack.
+   *
+   * `false` ONLY on a thrown read; absent ⇒ pre-fix behaviour. Deliberately
+   * mirrors `prior_facts_read_ok` rather than inventing a second vocabulary.
+   */
+  readonly priorFactsReadOk?: boolean;
   /**
    * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
    * scenario, threaded by the turn-executor from
@@ -1281,6 +1301,12 @@ function deriveContextPackAnalysisState(
       ? extractGraphOptionIds(rawGraph)
       : undefined,
     scenarioClaimsAnalysis: input.analysis != null,
+    // CONTEXT/MEMORY V5 defect 4 — the pack's canonical state is LLM-facing
+    // and diagnostic-facing. A thrown prior-fact read arrives here as `[]`,
+    // which is indistinguishable from "never analysed" without this flag.
+    ...(input.priorFactsReadOk === undefined
+      ? {}
+      : { priorFactsReadOk: input.priorFactsReadOk }),
   });
   return summariseCanonicalAnalysisState(canonical);
 }
@@ -1447,9 +1473,19 @@ export function assembleContextPackWithSummary(
   // Coaching Context Pack v1: additive, flag-gated. When the caller supplies
   // the pack (flag on), surface it verbatim; otherwise the field is absent so
   // the assembled pack is byte-identical to today (flag-off byte-identity).
-  const contextPack: ContextPack = input.coachingContext
+  const assembled: ContextPack = input.coachingContext
     ? { ...withSegments, coaching_context: input.coachingContext }
     : withSegments;
+  // Context/Memory V5 defect 3 — the WHOLE-PACK ceiling, enforced. Runs on the
+  // finished pack (every section placed, every conditional key resolved), so
+  // the number it measures is the pack that ships, not a proxy for it. Under
+  // budget it returns the SAME object by reference: no cut, no key, no event,
+  // byte-identity preserved (pinned by the O-3 golden).
+  const contextPack = enforceContextPackCeiling({
+    pack: assembled,
+    priorTurnsTotalKnown: isKnownPriorTurnsTotal(input.priorTurnsTotal),
+    scenarioId: input.payload.scenario_id ?? null,
+  });
   // Non-production contract gate. Production assembly path stays cost-free
   // — `safeParse` is only invoked when `isProduction()` is false, so live
   // traffic pays the price of a single config read and nothing more. See
@@ -2195,8 +2231,7 @@ export function projectConversation(
   // scenario produced "Total turn count on record for this conversation is
   // 20". Unknown total ⇒ fall back to the window length for the numbers but
   // NEVER let the disclosure claim it is the whole conversation.
-  const totalKnown =
-    typeof totalStored === 'number' && Number.isFinite(totalStored) && totalStored >= 0;
+  const totalKnown = isKnownPriorTurnsTotal(totalStored);
   // A total below the window length is incoherent (rows cannot vanish between
   // the two reads in a way that shrinks history) — most likely a stale or
   // wrong count. Take the larger: never report FEWER turns than are visibly
@@ -2219,6 +2254,20 @@ export function projectConversation(
       ...(notice !== null ? { notice } : {}),
     },
   };
+}
+
+/**
+ * Is the scenario's pre-cap turn total KNOWN this turn?
+ *
+ * ONE authority, deliberately: `projectConversation` and the whole-pack
+ * ceiling trim (`enforceContextPackCeiling`) must agree about this, because it
+ * selects which of the two {@link conversationWindowNotice} sentences renders.
+ * A second inline copy of the predicate at the trim site is exactly the
+ * hand-maintained mirror that would let a trimmed window claim a total the
+ * untrimmed window refused to claim.
+ */
+function isKnownPriorTurnsTotal(totalStored?: number | null): boolean {
+  return typeof totalStored === 'number' && Number.isFinite(totalStored) && totalStored >= 0;
 }
 
 /**
@@ -2259,4 +2308,239 @@ function conversationWindowNotice(args: {
     `Do not describe the turns above as the whole conversation; if asked how many turns or ` +
     `exchanges are on record, the true total is ${total}.]`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Whole-pack ceiling enforcement (Context/Memory V5 defect 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a ceiling cutter needs to know that it cannot read off the pack.
+ * Currently one fact: whether the scenario's pre-cap turn total was KNOWN this
+ * turn, which selects which disclosure sentence renders. Derived from the SAME
+ * predicate `projectConversation` used ({@link isKnownPriorTurnsTotal}), never
+ * re-inferred here.
+ */
+interface CeilingCutContext {
+  readonly priorTurnsTotalKnown: boolean;
+}
+
+/**
+ * One ceiling-cuttable section. `cutOne` removes exactly ONE unit and returns
+ * the new pack, or `null` when the section is at its floor / has nothing left
+ * to give — which is how the pass terminates without a timeout or a step
+ * counter.
+ */
+interface CeilingSectionCutter {
+  /** Serialised size of the section, for the disclosure record. */
+  readonly chars: (pack: ContextPack) => number;
+  /** Item count (turn-pairs, records, …) for the disclosure record. */
+  readonly records: (pack: ContextPack) => number;
+  /** The `v5.context_truncation` strategy this cut reports. */
+  readonly strategy: string;
+  readonly cutOne: (pack: ContextPack, ctx: CeilingCutContext) => ContextPack | null;
+}
+
+/**
+ * Remove the OLDEST retained turn-pair from the verbatim window and re-derive
+ * the window disclosure.
+ *
+ * Three things make this honest rather than a silent drop:
+ *   - `recent_turns` is newest-first (the store reads `created_at DESC`), so
+ *     the oldest retained turn is the LAST element — the user keeps the turns
+ *     the current question is most likely about;
+ *   - `shown` is re-stamped and the notice is RE-RENDERED by
+ *     {@link conversationWindowNotice}, the same builder that owns the
+ *     untrimmed disclosure, so the sentence and the numbers cannot drift (a
+ *     stale notice is explicitly dropped, never carried through the spread);
+ *   - `available` / `turn_count` describe the CONVERSATION, not the window, so
+ *     a trim must not move them.
+ */
+function cutOldestConversationTurnPair(
+  pack: ContextPack,
+  ctx: CeilingCutContext,
+): ContextPack | null {
+  const conversation = pack.conversation;
+  const retained = conversation.recent_turns;
+  if (retained.length <= CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS) return null;
+  const kept = retained.slice(0, retained.length - 1);
+  const total = conversation.window?.available ?? conversation.turn_count;
+  const notice = conversationWindowNotice({
+    shown: kept.length,
+    total,
+    totalKnown: ctx.priorTurnsTotalKnown,
+    // We have just removed turns this pack was holding, so history beyond the
+    // window is a fact of THIS pack regardless of what the read window looked
+    // like — the unknown-total sentence must still say turns are missing.
+    windowCapped: true,
+  });
+  // Spread-and-replace rather than re-listing the window's fields: anything
+  // else riding the window (e.g. the O-2 `summarised` count) survives a trim
+  // without this function having to know about it. Only `notice` is dropped
+  // first, because a stale sentence would outlive the numbers it describes.
+  const { notice: _staleNotice, ...carried } = conversation.window ?? {
+    shown: kept.length,
+    available: total,
+  };
+  return {
+    ...pack,
+    conversation: {
+      ...conversation,
+      recent_turns: kept,
+      window: {
+        ...carried,
+        shown: kept.length,
+        available: total,
+        ...(notice !== null ? { notice } : {}),
+      },
+    },
+  };
+}
+
+/**
+ * The cutter for every section named in {@link CONTEXT_PACK_CEILING_CUT_ORDER}.
+ * Typed as a TOTAL record over that const, so adding a section to the order
+ * fails to COMPILE until its cutter exists — the declared order and the
+ * executed one cannot diverge (the defect shape
+ * `DISPLAY_ANALYSIS_TRUNCATION_ORDER` has: a declared order sitting beside a
+ * separately hand-written drops list).
+ */
+const CEILING_CUTTERS: Readonly<Record<ContextPackCeilingCutSection, CeilingSectionCutter>> = {
+  conversation: {
+    chars: (pack) => JSON.stringify(pack.conversation).length,
+    records: (pack) => pack.conversation.recent_turns.length,
+    strategy: 'window_slice',
+    cutOne: cutOldestConversationTurnPair,
+  },
+};
+
+interface CeilingCutRecord {
+  readonly section: ContextPackCeilingCutSection;
+  readonly strategy: string;
+  readonly originalChars: number;
+  readonly keptChars: number;
+  readonly originalRecords: number;
+  readonly keptRecords: number;
+  /** The cut stopped because the section reached its floor, not because it fit. */
+  readonly stoppedAtFloor: boolean;
+}
+
+/**
+ * Enforce the coach_converse WHOLE-PACK char ceiling (Context/Memory V5
+ * defect 3).
+ *
+ * Before this pass, `CONTEXT_POLICY.coach_converse.total_char_budget` was
+ * REPORTED and never ENFORCED: `computeOverBudget` flagged a `'total'` overrun
+ * on the `v5.context_budget` stream and nothing acted on it, while the only
+ * cut machinery (`orchestrator/context/budget.ts`) is allocated 25% of a
+ * 120,000-TOKEN budget for the graph and cannot fire below ~120,000 chars.
+ *
+ * Contract:
+ *   - the budget is CONSUMED from the policy, never re-typed here;
+ *   - UNDER budget the input pack is returned BY REFERENCE — no cut, no key,
+ *     no event, byte-identity preserved (pinned by the O-3 golden);
+ *   - over budget, sections are cut in {@link CONTEXT_PACK_CEILING_CUT_ORDER},
+ *     one unit at a time, re-measuring after each, stopping the moment the
+ *     pack fits;
+ *   - a section that reaches its floor while the pack is STILL over budget
+ *     stops there and says so (`floor_reached`) rather than stripping the pack
+ *     to nothing — a pack whose non-conversation content alone blows the
+ *     ceiling is the graph/analysis valve's problem, not this pass's;
+ *   - never throws: a budgeting fault degrades to "pack unchanged", the same
+ *     posture as `applyContextBudgetToAssemblyInputs`.
+ *
+ * ⚠ SCOPE, stated precisely: this bounds `JSON.stringify(pack).length`. The
+ * `v5.context_budget` telemetry measures `buildUserMessage(pack, message)
+ * .length` — the exact embedded prompt, which is LARGER (2-space indentation
+ * plus the code-owned instruction blocks). A pack this pass judges to fit can
+ * therefore still report a `'total'` overrun on that stream. The ceiling is
+ * enforced on the PACK, not on the rendered prompt.
+ */
+export function enforceContextPackCeiling(args: {
+  readonly pack: ContextPack;
+  readonly priorTurnsTotalKnown: boolean;
+  readonly scenarioId: string | null;
+}): ContextPack {
+  const { pack, scenarioId } = args;
+  try {
+    const budget = CONTEXT_POLICY.coach_converse.total_char_budget;
+    if (budget === null) return pack;
+    let chars = JSON.stringify(pack).length;
+    if (chars <= budget) return pack;
+
+    const charsBefore = chars;
+    const ctx: CeilingCutContext = { priorTurnsTotalKnown: args.priorTurnsTotalKnown };
+    let current = pack;
+    const cuts: CeilingCutRecord[] = [];
+
+    for (const section of CONTEXT_PACK_CEILING_CUT_ORDER) {
+      if (chars <= budget) break;
+      const cutter = CEILING_CUTTERS[section];
+      const originalChars = cutter.chars(current);
+      const originalRecords = cutter.records(current);
+      let stoppedAtFloor = false;
+      while (chars > budget) {
+        const next = cutter.cutOne(current, ctx);
+        if (next === null) {
+          stoppedAtFloor = true;
+          break;
+        }
+        // Progress guard: `cutOne` must STRICTLY shrink its section, so this
+        // loop is bounded by the section's item count. A cutter that returned
+        // a same-sized pack would otherwise spin forever — the one failure
+        // mode a re-measuring loop can have.
+        if (cutter.records(next) >= cutter.records(current)) {
+          stoppedAtFloor = true;
+          break;
+        }
+        current = next;
+        chars = JSON.stringify(current).length;
+      }
+      if (cutter.records(current) < originalRecords) {
+        cuts.push({
+          section,
+          strategy: cutter.strategy,
+          originalChars,
+          keptChars: cutter.chars(current),
+          originalRecords,
+          keptRecords: cutter.records(current),
+          stoppedAtFloor,
+        });
+      }
+    }
+
+    // Nothing could be cut (every section already at its floor): return the
+    // ORIGINAL reference and claim no truncation. An event asserting a cut
+    // that did not happen is the fabrication class, not a diagnostic.
+    if (cuts.length === 0) return pack;
+
+    for (const cut of cuts) {
+      emitContextTruncation({
+        site: 'context-pack-assembler.enforceContextPackCeiling',
+        section: cut.section,
+        original_chars: cut.originalChars,
+        kept_chars: cut.keptChars,
+        original_records: cut.originalRecords,
+        kept_records: cut.keptRecords,
+        strategy: cut.strategy,
+        // The re-stamped `window.shown` + re-rendered notice ARE the in-band
+        // disclosure — the LLM reads them in the serialised pack.
+        disclosed: true,
+        scenario_id: scenarioId,
+        pack_total_chars_before: charsBefore,
+        pack_total_chars_after: chars,
+        pack_total_budget: budget,
+        // Only true when the pass ran out of room AND the pack still does not
+        // fit — the honest "this could not be made to fit" signal.
+        ...(cut.stoppedAtFloor && chars > budget ? { floor_reached: true as const } : {}),
+      });
+    }
+    return current;
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'context-pack ceiling: enforcement failed — assembling the unbounded pack (turn must not fail)',
+    );
+    return pack;
+  }
 }
