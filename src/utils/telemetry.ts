@@ -1470,6 +1470,12 @@ export const TelemetryEvents = {
   V5DecisionReviewSkipped: "v5.decision_review.skipped",
   V5DecisionReviewFailed: "v5.decision_review.failed",
 
+  // R2 (2026-08-16) — post-draft auto-run of a provisional analysis
+  // (auto-run-after-draft.ts). ONE event, discriminated by `outcome`:
+  // 'skipped' (+ reason: not_admissible | already_analysed), 'dispatched'
+  // (+ dispatch_outcome, commit_performed, run_turn_id), or 'failed'.
+  V5AutoRunAfterDraft: "v5.run_analysis.auto_run_after_draft",
+
   // Phase 3A content-thinness diagnostic (F1, 2026-05-18). Fires once the
   // decision_review LLM call returned a non-null parsed output AND the
   // enrichment has been successfully sanitised and attached to the
