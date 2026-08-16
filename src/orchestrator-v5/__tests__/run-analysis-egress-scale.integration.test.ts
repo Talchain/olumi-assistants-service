@@ -216,7 +216,7 @@ describe('GraphV3.safeParse shape — what the egress reader actually sees', () 
 });
 
 describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-level)', () => {
-  function makeCapturingHandler() {
+  function makeCapturingHandler(graph: unknown = buildGraph()) {
     let capturedPayload: Record<string, unknown> | undefined;
     const plotClient = {
       run: vi.fn(
@@ -234,7 +234,7 @@ describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-le
       validatePatch: vi.fn().mockResolvedValue({}),
     } as unknown as PLoTClient;
 
-    const store = createNoopSessionStore({ loadGraphResult: buildGraph() });
+    const store = createNoopSessionStore({ loadGraphResult: graph });
     const scenarioReader: ScenarioReader = (scenarioId, _signal) =>
       loadScenarioSnapshotForRunAnalysis(scenarioId, REQUEST_ID, store);
     const handler = createRunAnalysisHandler({ plotClient, scenarioReader });
@@ -267,6 +267,48 @@ describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-le
 
     return { handler, plotClient, invocation, getPayload: () => capturedPayload };
   }
+
+  it.each([
+    [
+      'absent map',
+      { value: 1, raw_value: 'UK', value_type: 'categorical' },
+    ],
+    [
+      'map mismatch',
+      { value: 1, raw_value: 'UK', value_type: 'categorical', encoding_map: { UK: 0 } },
+    ],
+    [
+      'fractional category code',
+      { value: 0.5, raw_value: 'UK', value_type: 'categorical', encoding_map: { UK: 0.5 } },
+    ],
+    [
+      'cross-kind raw value',
+      { value: 1, raw_value: true, value_type: 'categorical', encoding_map: { true: 1 } },
+    ],
+    [
+      'category code above the faithful PLoT domain',
+      { value: 2, raw_value: 'UK', value_type: 'categorical', encoding_map: { UK: 2 } },
+    ],
+  ])('blocks %s at the egress boundary before PLoT', async (_label, intervention) => {
+    const graph = buildGraph();
+    const option = graph.nodes.find((node) => node.id === 'opt_edit');
+    if (!option || !('interventions' in option) || option.interventions === undefined) {
+      throw new Error('encoded test fixture missing opt_edit interventions');
+    }
+    const interventions: Record<string, unknown> = option.interventions;
+    interventions.fac_region = {
+      ...intervention,
+      source: 'user_specified',
+      target_match: tm('fac_region'),
+    };
+    const { handler, plotClient, invocation } = makeCapturingHandler(graph);
+
+    await expect(handler(invocation)).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_ready',
+    });
+    expect(plotClient.run).not.toHaveBeenCalled();
+  });
 
   it('sends the /v2/run payload in ONE COHERENT SCALE — unit here, because stranded siblings force a demote (round 4)', async () => {
     // ROUND 4 REFINEMENT of "sends RAW user-scale values unconditionally".

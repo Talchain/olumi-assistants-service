@@ -334,7 +334,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
         id: 'opt_a', kind: 'option', label: 'Committed',
         interventions: {
           f_cd: { value: 0.72, raw_value: 72000 },
-          f_enc: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+          f_enc: { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
         },
       }],
       [
@@ -352,7 +352,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
           id: 'opt_a', option_id: 'opt_a', label: 'Committed',
           interventions: {
             f_cd: { value: 0.72, raw_value: 72000 },
-            f_enc: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+            f_enc: { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
           },
         },
       ],
@@ -379,7 +379,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
         id: 'opt_a', kind: 'option', label: 'Committed',
         interventions: {
           f_cd: { value: 72000 },
-          f_enc: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+          f_enc: { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
         },
       }],
       [
@@ -397,7 +397,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
           id: 'opt_a', option_id: 'opt_a', label: 'Committed',
           interventions: {
             f_cd: { value: 72000 },
-            f_enc: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+            f_enc: { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
           },
         },
       ],
@@ -422,7 +422,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
         id: 'opt_a', kind: 'option', label: 'Committed',
         interventions: {
           f_amb: { value: 0.72 },
-          f_enc: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+          f_enc: { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
         },
       }],
       [
@@ -440,7 +440,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
           id: 'opt_a', option_id: 'opt_a', label: 'Committed',
           interventions: {
             f_amb: { value: 0.72 },
-            f_enc: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+            f_enc: { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
           },
         },
       ],

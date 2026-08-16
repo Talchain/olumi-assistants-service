@@ -32,6 +32,7 @@ import {
 } from "../provenance/stated-amounts.js";
 import { readIsBaseline } from "../baseline-identity.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
 
 // ============================================================================
 // Types
@@ -67,27 +68,6 @@ export interface AnalysisReadyValidationResult {
 // ============================================================================
 
 /**
- * A non-numeric raw value is analysis-ready only when the carrier proves the
- * exact numeric encoding it will send to PLoT. Merely carrying a numeric
- * `value` is insufficient (that field is schema-required even while encoding
- * is unresolved); the explicit type and raw→code map make the claim
- * independently checkable. Missing or mismatched proof therefore continues to
- * fail closed as `needs_encoding`.
- */
-function hasProvenRawEncoding(intervention: OptionV3T['interventions'][string]): boolean {
-  const raw = intervention.raw_value;
-  if (typeof raw !== 'string' && typeof raw !== 'boolean') return false;
-  if (intervention.value_type !== 'categorical' && intervention.value_type !== 'boolean') {
-    return false;
-  }
-  if (!Number.isFinite(intervention.value) || intervention.encoding_map === undefined) {
-    return false;
-  }
-  const encoded = intervention.encoding_map[String(raw)];
-  return typeof encoded === 'number' && Number.isFinite(encoded) && encoded === intervention.value;
-}
-
-/**
  * Transform a V3 option to analysis-ready format.
  * Flattens InterventionV3 objects to plain numeric values.
  *
@@ -104,8 +84,16 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
   let hasNonNumericRaw = false;
 
   for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
+    const encodedAdmissibility = classifyEncodedInterventionAdmissibility(intervention);
     // Extract the encoded numeric value (always required)
     interventions[factorId] = intervention.value;
+
+    // Explicit/mapped encoded carriers must prove one of the currently
+    // faithful representations before the whole-model producer can call the
+    // option ready. This also catches a claimed encoded type with no raw value.
+    if (encodedAdmissibility === 'inadmissible') {
+      hasNonNumericRaw = true;
+    }
 
     // Check for raw_value in the intervention (Raw+Encoded pattern)
     if (intervention.raw_value !== undefined) {
@@ -114,7 +102,7 @@ export function transformOptionToAnalysisReady(option: OptionV3T): OptionForAnal
       // Track if we have non-numeric raw values (categorical/boolean)
       if (
         typeof intervention.raw_value !== "number"
-        && !hasProvenRawEncoding(intervention)
+        && encodedAdmissibility !== 'admissible'
       ) {
         hasNonNumericRaw = true;
       }

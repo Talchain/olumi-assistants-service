@@ -98,6 +98,7 @@ function graphWithOptionInterventions(): GraphV3T {
         value: 1,
         raw_value: true,
         value_type: 'boolean',
+        encoding_map: { true: 1, false: 0 },
         source: 'user_specified',
         target_match: tm,
       },

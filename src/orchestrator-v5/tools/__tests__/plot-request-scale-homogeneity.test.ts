@@ -227,7 +227,12 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
   // draft ingest boundary, and this module's own suite already pins
   // `{ value: 2, rule: 'encoded_verbatim' }`.
   // -------------------------------------------------------------------------
-  const encodedIv = (value: number) => ({ value, value_type: 'categorical', encoding_map: { build: 0, buy: 1, outsource: 2 } });
+  const encodedIv = (value: number) => ({
+    value,
+    raw_value: value === 0 ? 'build' : value === 1 ? 'buy' : 'outsource',
+    value_type: 'categorical',
+    encoding_map: { build: 0, buy: 1, outsource: 2 },
+  });
   const CATEGORY = 'fac_build_vs_buy';
   const categoryNode = { id: CATEGORY, kind: 'factor', observed_state: { value: 1 } };
 
@@ -547,7 +552,7 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
     // help (a code has no unit form), and no stranded sibling is needed for the
     // corruption: the code corrupts ITSELF.
     const map = buildFactorScaleMap([capabilityNodePct, categoryNode]);
-    const req = [{ [CAPABILITY]: iv(0.8), [CATEGORY]: { value: 2, value_type: 'categorical', encoding_map: { build: 0, buy: 1, outsource: 2 } } }];
+    const req = [{ [CAPABILITY]: iv(0.8), [CATEGORY]: encodedIv(2) }];
     const out = projectRequestInterventionsToWireScale(req, map);
     expect(out.demoted).toBe(false);
     expect(out.mixedUnresolved, 'a code that cannot cross the wire faithfully must be surfaced').toBe(true);
@@ -555,7 +560,7 @@ describe('projectRequestInterventionsToWireScale — request-level homogeneity (
 
     // Twin: the same code WITHIN [0,1] beside the same promotion is stranded-
     // mixed (already covered) — and codes 0/1 with no outside sibling ship fine.
-    const okReq = [{ [CATEGORY]: { value: 1, value_type: 'categorical', encoding_map: { build: 0, buy: 1, outsource: 2 } } }];
+    const okReq = [{ [CATEGORY]: encodedIv(1) }];
     const okOut = projectRequestInterventionsToWireScale(okReq, map);
     expect(okOut.mixedUnresolved, 'a code within [0,1] with no gate-firing sibling is fine').toBe(false);
   });

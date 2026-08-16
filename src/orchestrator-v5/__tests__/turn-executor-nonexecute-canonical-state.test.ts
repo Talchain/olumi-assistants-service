@@ -127,11 +127,21 @@ const PERSISTED_2OPT_CHANGED: GraphStateIngress = {
       ? { ...node, interventions: { f1: { value: 0.2 } } }
       : node,
   ),
-  options: REQUEST_2OPT.options?.map((option) =>
-    option.id === 'opt_b'
-      ? { ...option, interventions: { f1: { value: 0.2 } } }
-      : option,
-  ),
+  options: Array.isArray(REQUEST_2OPT.options)
+    ? REQUEST_2OPT.options.map((option) => {
+        if (
+          option === null ||
+          typeof option !== 'object' ||
+          Array.isArray(option) ||
+          !('id' in option)
+        ) {
+          return option;
+        }
+        return option.id === 'opt_b'
+          ? { ...option, interventions: { f1: { value: 0.2 } } }
+          : option;
+      })
+    : undefined,
 } as GraphStateIngress;
 
 // The 2-option graph hash — used as a prior fact's graph_hash_at_run to drive

@@ -97,7 +97,13 @@ describe('renormaliseOptionInterventionsForCapChange — cap INCREASE', () => {
 
 describe('renormaliseOptionInterventionsForCapChange — untouched classes', () => {
   it('encoded boolean entries are never scaled', () => {
-    const original = { value: 1, raw_value: true, value_type: 'boolean', target_match: TM };
+    const original = {
+      value: 1,
+      raw_value: true,
+      value_type: 'boolean',
+      encoding_map: { true: 1, false: 0 },
+      target_match: TM,
+    };
     const graph = graphWith({ ...original });
     const count = renormaliseOptionInterventionsForCapChange(graph, 'fac_x', 100000, 50000);
     expect(count).toBe(0);

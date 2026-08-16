@@ -2,7 +2,7 @@
 
 ## Frozen objective
 
-Integration base: `3254d6910bb14ac724e809ec70f0ceedb565c967`
+Integration base: `dfb5bd708c81a3c5e5a455a4f2e8b74897c2d3ca`
 (`origin/staging`, re-fetched 16 August 2026 before the freeze).
 
 One canonical whole-model assessment must decide both the `analysis_ready`
@@ -35,6 +35,7 @@ against the current persisted graph with zero graph writes.
 | `buildAnalysisReadyPayload` | **KEEP — semantic sub-producer** | Owns option/value semantics and unreachable controllable-factor detection. |
 | `validateGraphStructure` | **KEEP — structural sub-producer** | Exhaustive cycle, reachability, decision, option-count and link checks. |
 | carrier precedence and exact top-level option bijection in `analysis-ready-helper.ts` | **KEEP** | Prevents stale mirrors or duplicate ids from replacing real option arms. |
+| shared encoded-intervention admissibility classifier | **KEEP — singular contract** | Readiness and PLoT egress agree on raw/type/map proof and the currently faithful encoded domain. |
 | `assessAnalysisReadiness` | **REPLACE as authority; KEEP as thin Run adapter** | It no longer re-runs its own structural/semantic policy. |
 | `buildCanonicalAnalysisReadyFromGraph` | **REPLACE as authority; KEEP as thin wire adapter** | It returns the canonical assessment's wire projection only. |
 | `computeStructuralReadiness` | **QUARANTINE, test compatibility only** | No production caller remains. Historical tests still exercise its narrow per-option projection; migrate then remove separately. |
@@ -71,6 +72,7 @@ untouched.
 - stale-pin and malformed-proposal route controls prove zero graph writes plus regeneration;
 - valid confirm control proves one canonical graph commit, trusted-base identity + analysis CAS anchors, edit receipt, pending consumption and committed-graph readback;
 - JSONB key-reordering control proves exact proposal matching is semantic, not object insertion-order dependent.
+- encoded-value controls prove valid categorical/boolean carriers remain ready, while absent/mismatched maps, fractional/cross-kind values and codes above the currently faithful domain block both wire readiness and Run before PLoT.
 
 ## Rollback
 

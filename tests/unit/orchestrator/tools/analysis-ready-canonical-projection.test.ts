@@ -35,6 +35,50 @@ function edge(from: string, to: string) {
   };
 }
 
+function encodedReadinessGraph(intervention: Record<string, unknown>) {
+  const targetMatch = {
+    node_id: 'fac_mode',
+    match_type: 'exact_id',
+    confidence: 'high',
+  };
+  const carried = {
+    source: 'user_specified',
+    target_match: targetMatch,
+    ...intervention,
+  };
+  const alternative = {
+    value: 0,
+    raw_value: 'build',
+    value_type: 'categorical',
+    encoding_map: { build: 0, buy: 1 },
+    source: 'user_specified',
+    target_match: targetMatch,
+  };
+  return {
+    goal_node_id: 'goal_growth',
+    nodes: [
+      { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+      { id: 'dec_route', kind: 'decision', label: 'Choose a route' },
+      { id: 'opt_a', kind: 'option', label: 'A', interventions: { fac_mode: carried } },
+      { id: 'opt_b', kind: 'option', label: 'B', interventions: { fac_mode: alternative } },
+      {
+        id: 'fac_mode',
+        kind: 'factor',
+        label: 'Operating mode',
+        category: 'controllable',
+        observed_state: { value: 0 },
+      },
+    ],
+    edges: [
+      edge('dec_route', 'opt_a'),
+      edge('dec_route', 'opt_b'),
+      edge('opt_a', 'fac_mode'),
+      edge('opt_b', 'fac_mode'),
+      edge('fac_mode', 'goal_growth'),
+    ],
+  };
+}
+
 function unreachableFactorFixture(): {
   graph: GraphV3T & { options: OptionV3T[]; goal_node_id: string };
   options: OptionV3T[];
@@ -93,6 +137,55 @@ function unreachableFactorFixture(): {
 }
 
 describe('canonical persisted-graph readiness projection', () => {
+  it.each([
+    [
+      'categorical',
+      { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } },
+    ],
+    [
+      'boolean',
+      { value: 1, raw_value: true, value_type: 'boolean', encoding_map: { false: 0, true: 1 } },
+    ],
+  ])('keeps a faithfully encoded %s carrier wire-ready and Run-admissible', (_label, intervention) => {
+    const graph = encodedReadinessGraph(intervention);
+    expect(buildCanonicalAnalysisReadyFromGraph(graph)?.status).toBe('ready');
+    expect(assessAnalysisReadiness(graph)).toMatchObject({
+      status: 'analysis_ready',
+      safeToAnalyse: true,
+    });
+  });
+
+  it.each([
+    [
+      'absent map',
+      { value: 1, raw_value: 'buy', value_type: 'categorical' },
+    ],
+    [
+      'map mismatch',
+      { value: 1, raw_value: 'buy', value_type: 'categorical', encoding_map: { buy: 0 } },
+    ],
+    [
+      'fractional category code',
+      { value: 0.5, raw_value: 'buy', value_type: 'categorical', encoding_map: { buy: 0.5 } },
+    ],
+    [
+      'cross-kind raw value',
+      { value: 1, raw_value: true, value_type: 'categorical', encoding_map: { true: 1 } },
+    ],
+    [
+      'category code above the faithful PLoT domain',
+      { value: 2, raw_value: 'outsource', value_type: 'categorical', encoding_map: { outsource: 2 } },
+    ],
+  ])('blocks %s on both canonical wire readiness and Run admission', (_label, intervention) => {
+    const graph = encodedReadinessGraph(intervention);
+    expect(buildCanonicalAnalysisReadyFromGraph(graph)?.status).toBe('needs_encoding');
+    expect(assessAnalysisReadiness(graph)).toMatchObject({
+      status: 'unrecoverable',
+      safeToAnalyse: false,
+      canonicalGraph: null,
+    });
+  });
+
   it('merges intervention carriers per factor with data > slash-keyed > top-level precedence', () => {
     const graph = {
       goal_node_id: 'goal_growth',

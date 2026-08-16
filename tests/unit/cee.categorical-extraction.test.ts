@@ -383,8 +383,8 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
     },
   ];
 
-  function categoricalWithProof(
-    encodingMap?: Record<string, number>,
+  function encodedWithProof(
+    overrides: Partial<OptionV3T['interventions'][string]> = {},
   ): OptionV3T {
     return {
       id: 'opt_region',
@@ -395,34 +395,67 @@ describe("Analysis-Ready Contract (transformOptionToAnalysisReady)", () => {
           value: 1,
           raw_value: 'UK',
           value_type: 'categorical',
-          ...(encodingMap !== undefined ? { encoding_map: encodingMap } : {}),
+          encoding_map: { UK: 1 },
           source: 'user_specified',
           target_match: {
             node_id: 'factor_region',
             match_type: 'exact_id',
             confidence: 'high',
           },
+          ...overrides,
         },
       },
     };
   }
 
   it('accepts a categorical Raw+Encoded carrier only when its map proves the exact numeric code', () => {
-    const analysisReady = transformOptionToAnalysisReady(categoricalWithProof({ UK: 1 }));
+    const analysisReady = transformOptionToAnalysisReady(encodedWithProof());
     expect(analysisReady.status).toBe('ready');
     expect(analysisReady.interventions.factor_region).toBe(1);
     expect(analysisReady.raw_interventions?.factor_region).toBe('UK');
   });
 
+  it('accepts a boolean Raw+Encoded carrier only with exact boolean/map/0|1 proof', () => {
+    const analysisReady = transformOptionToAnalysisReady(encodedWithProof({
+      value: 1,
+      raw_value: true,
+      value_type: 'boolean',
+      encoding_map: { true: 1, false: 0 },
+    }));
+    expect(analysisReady.status).toBe('ready');
+    expect(analysisReady.interventions.factor_region).toBe(1);
+    expect(analysisReady.raw_interventions?.factor_region).toBe(true);
+  });
+
   it('keeps a categorical raw value non-ready when encoding proof is absent', () => {
-    expect(transformOptionToAnalysisReady(categoricalWithProof()).status).toBe('needs_encoding');
+    expect(transformOptionToAnalysisReady(encodedWithProof({ encoding_map: undefined })).status)
+      .toBe('needs_encoding');
   });
 
   it('keeps a categorical raw value non-ready when its map disagrees with the numeric code', () => {
-    expect(transformOptionToAnalysisReady(categoricalWithProof({ UK: 0 })).status).toBe(
+    expect(transformOptionToAnalysisReady(encodedWithProof({ encoding_map: { UK: 0 } })).status).toBe(
       'needs_encoding',
     );
   });
+
+  it('requires the raw-to-code proof to be an own encoding-map property', () => {
+    const inheritedMap = Object.create({ UK: 1 }) as Record<string, number>;
+    expect(transformOptionToAnalysisReady(encodedWithProof({ encoding_map: inheritedMap })).status)
+      .toBe('needs_encoding');
+  });
+
+  it.each([
+    ['fractional categorical code', { value: 0.5, encoding_map: { UK: 0.5 } }],
+    ['categorical carrier with boolean raw value', { raw_value: true, encoding_map: { true: 1 } }],
+    ['boolean carrier with string raw value', { value_type: 'boolean', raw_value: 'UK', encoding_map: { UK: 1 } }],
+    ['categorical code above the faithful PLoT domain', { value: 2, encoding_map: { UK: 2 } }],
+  ] satisfies Array<[string, Partial<OptionV3T['interventions'][string]>]>) (
+    'keeps %s non-ready',
+    (_label, overrides) => {
+      expect(transformOptionToAnalysisReady(encodedWithProof(overrides)).status)
+        .toBe('needs_encoding');
+    },
+  );
 
   it("flattens categorical interventions to plain numbers", () => {
     // Extract categorical option

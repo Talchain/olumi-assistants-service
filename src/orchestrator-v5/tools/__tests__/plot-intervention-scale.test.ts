@@ -171,18 +171,37 @@ describe('resolveRawInterventionValue — passthrough (already-raw)', () => {
 });
 
 describe('resolveRawInterventionValue — encoded categorical/boolean preservation (encoded_verbatim)', () => {
-  it('never scales a categorical encoded value, even with evidence', () => {
+  it('preserves but marks a categorical code above the faithful domain invalid', () => {
     const r = resolveRawInterventionValue(
       { value: 2, value_type: 'categorical', raw_value: 'UK', encoding_map: { UK: 2 } },
       proven(5),
     );
-    expect(r).toMatchObject({ value: 2, rule: 'encoded_verbatim', inputValue: 2, inconsistent: false });
+    expect(r).toMatchObject({
+      value: 2,
+      rule: 'encoded_verbatim',
+      inputValue: 2,
+      inconsistent: false,
+      invalidEncodedContract: true,
+    });
+  });
+
+  it('preserves an exactly-proven categorical code in the faithful domain', () => {
+    const r = resolveRawInterventionValue(
+      { value: 1, value_type: 'categorical', raw_value: 'UK', encoding_map: { UK: 1 } },
+      proven(5),
+    );
+    expect(r).toMatchObject({ value: 1, rule: 'encoded_verbatim', codeNotMagnitude: true });
+    expect(r.invalidEncodedContract).toBeUndefined();
   });
 
   it('never scales a boolean encoded value', () => {
-    const r = resolveRawInterventionValue({ value: 1, value_type: 'boolean', raw_value: true }, proven(10));
+    const r = resolveRawInterventionValue(
+      { value: 1, value_type: 'boolean', raw_value: true, encoding_map: { true: 1, false: 0 } },
+      proven(10),
+    );
     expect(r.rule).toBe('encoded_verbatim');
     expect(r.value).toBe(1);
+    expect(r.invalidEncodedContract).toBeUndefined();
   });
 
   it('a non-numeric string raw_value alone is NOT treated as encoded (no silent under-reporting)', () => {
@@ -197,12 +216,14 @@ describe('resolveRawInterventionValue — encoded categorical/boolean preservati
     const r = resolveRawInterventionValue({ value: 1, raw_value: false }, proven(100));
     expect(r.rule).toBe('encoded_verbatim');
     expect(r.value).toBe(1);
+    expect(r.invalidEncodedContract).toBe(true);
   });
 
   it('detects encoding WITHOUT value_type via a present encoding_map', () => {
     const r = resolveRawInterventionValue({ value: 1, encoding_map: { Developers: 0, Lead: 1 } }, proven(100));
     expect(r.rule).toBe('encoded_verbatim');
     expect(r.value).toBe(1);
+    expect(r.invalidEncodedContract).toBe(true);
   });
 
   it('a bare encoded 1 with no metadata on a non-normalised factor is NOT scaled (evidence backstop)', () => {
