@@ -1,18 +1,18 @@
 {
   "schema_version": "olumi.draft_graph.governed_eval.v1",
   "component": "draft_graph_prompt_quality",
-  "status": "BASELINE_REQUIRED",
-  "candidate_status": "HOLD_UNTIL_EXACT_BASELINE",
-  "captured_at": "2026-08-16T07:30:00Z",
+  "status": "BASELINE_FROZEN",
+  "candidate_status": "HOLD_WITH_EVIDENCE",
+  "captured_at": "2026-08-16T07:20:00Z",
   "serving": {
     "environment": "staging",
     "health_url": "https://cee-staging.onrender.com/healthz",
     "route": "/assist/v1/draft-graph",
     "task_id": "draft_graph",
     "operation": "draft_graph",
-    "git_sha": "424f912912ec8e56edca9091ed39e966be9a6f5f",
-    "git_tree": "de7ae6f5818a730c4a0931e7aece380a13291483",
-    "health_build": "424f912",
+    "git_sha": "b9389df8796f7e7ddb385e17cac5154b64fd6c58",
+    "git_tree": "abcf27c05576864b92fd3297e646d4ba67e075fe",
+    "health_build": "b9389df",
     "service_version": "1.12.0"
   },
   "prompt": {
@@ -25,6 +25,15 @@
     "sha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
     "bytes": 59637,
     "characters": 59293
+  },
+  "baseline": {
+    "status": "complete",
+    "executed_at": "2026-08-16T07:16:35.160Z",
+    "result_path": "baseline/run-b9389df-claude-sonnet-4-6.json",
+    "result_sha256": "dab1fe78c09a33a500a00ff64c8ddb09f1dfa824b726547d9b5cf15206908938",
+    "logical_primary_calls": 14,
+    "manual_retries": 0,
+    "candidate_calls": 0
   },
   "model": {
     "provider": "anthropic",
@@ -41,6 +50,22 @@
     "primary_calls_per_arm": 14,
     "completion_calls_per_arm_max": 14
   },
+  "invocation": {
+    "seed": 17,
+    "documents": "none",
+    "attachment": "none",
+    "system_directive": "none",
+    "timeout_ms": 110000,
+    "max_tokens_ceiling": 8550,
+    "completion_max_tokens": 3000,
+    "completion_wall_ms": 35000,
+    "external_spend_cap_usd": 3.4,
+    "prompt_cache": "enabled",
+    "draft_compliance_reminder": "enabled",
+    "brief_signals_header": "disabled",
+    "currency_context": "derived_from_each_brief",
+    "manual_retries": 0
+  },
   "composition": {
     "system_block_order": [
       "pms_v195",
@@ -48,7 +73,8 @@
     ],
     "user_suffix_order": [
       "untrusted_brief_envelope",
-      "draft_compliance_reminder"
+      "draft_compliance_reminder",
+      "currency_context"
     ],
     "layers": [
       {
@@ -105,6 +131,40 @@
         "authority": "code",
         "source_path": "src/orchestrator/tools/analysis-ready-helper.ts",
         "source_sha256": "8cd37bad059d1fb3e891c55caab9e016ac90913c78bdff2597dd4b0fb0840a2a"
+      },
+      {
+        "id": "canonical_v1_to_v3_transform",
+        "authority": "code",
+        "source_path": "src/cee/transforms/schema-v3.ts",
+        "source_sha256": "d0df2b8d330ddb6602e6e1a5083a45d61262bfdeaf479e0fb2e8a0dbcd659843"
+      },
+      {
+        "id": "draft_graph_route_composition",
+        "authority": "code",
+        "source_path": "src/routes/assist.v1.draft-graph.ts",
+        "source_sha256": "461d831608e82c066b2ec17c1628cd0d0dcf7f840646898dbfc9271905d0fee5"
+      },
+      {
+        "id": "currency_context",
+        "authority": "code",
+        "source_path": "src/cee/signals/currency-signal.ts",
+        "source_sha256": "6221785eb359687b7efc0b8466f4a85dff136c2ec9d95ef9679a7083e966939f"
+      }
+    ],
+    "excluded_layers": [
+      {
+        "id": "attached_documents",
+        "reason": "The canonical 14 briefs have no documents or native attachment."
+      },
+      {
+        "id": "brief_signals_header",
+        "reason": "Code default is disabled and no positive serving evidence establishes an override for b9389df.",
+        "source_path": "src/cee/signals/brief-header.ts",
+        "source_sha256": "66a73a63d7fca210876c1e2de741fffc16d38a6471414fa9d0a72f33b36c0d46"
+      },
+      {
+        "id": "system_directive",
+        "reason": "Normal first attempts do not carry a retry-only corrective directive."
       }
     ]
   },
@@ -173,6 +233,10 @@
     "candidate_path": null,
     "candidate_sha256": null,
     "legacy_disposition_path": "legacy-disposition.json",
-    "failure_taxonomy_path": "failure-taxonomy.json"
+    "legacy_disposition_sha256": "ce1ea6ef1e16366ca22b41686ba862323a64690661530ff74f87ac6c222d091c",
+    "failure_taxonomy_path": "failure-taxonomy.json",
+    "failure_taxonomy_sha256": "bf3df2996320ce73d3fb389ffb241c70851af5b403c14e330d5cb2560d7b1e73",
+    "deployed_evidence_path": "deployed-evidence.json",
+    "deployed_evidence_sha256": "a23706029f5e21ecbb83eba445ecbe1dbf107f9f960f733b6517397de3b722e5"
   }
 }

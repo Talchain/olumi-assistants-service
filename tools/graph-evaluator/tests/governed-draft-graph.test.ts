@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   compareGovernedRuns,
+  buildGovernedRunIdentity,
   loadGovernedBriefs,
   readGovernedManifest,
   scoreGovernedCase,
@@ -129,9 +130,73 @@ describe("governed draft_graph V5 pack", () => {
     expect(result.provenance.unbased_inference_count).toBe(0);
   });
 
+  it("does not confuse the retired topology validator with production records structure", async () => {
+    const manifest = await readGovernedManifest();
+    const [brief] = await loadGovernedBriefs(manifest);
+    const stated = { provenance_class: "stated", source_quote: "brief" };
+    const inferred = {
+      provenance_class: "ai_inferred",
+      source: "hypothesis",
+      quote: "inferred",
+      basis: ["stated_0"],
+      unbased: false,
+    };
+    const structural = {
+      provenance_class: "projector_structural",
+      source: "synthetic",
+      quote: "scaffold",
+    };
+    const graph = {
+      version: "1",
+      nodes: [
+        { id: "dec", kind: "decision", label: "Choose", provenance: structural },
+        { id: "a", kind: "option", label: "Act", data: { interventions: { lever: 1 } }, provenance: stated },
+        { id: "b", kind: "option", label: "Status Quo", data: { interventions: { lever: 0 } }, provenance: stated },
+        { id: "lever", kind: "factor", label: "Lever", category: "controllable", provenance: inferred },
+        { id: "goal", kind: "goal", label: "Goal", provenance: stated },
+      ],
+      edges: [
+        ["dec", "a", structural],
+        ["dec", "b", structural],
+        ["a", "lever", inferred],
+        ["b", "lever", inferred],
+        // Current production allows the factor-to-goal form; the retired raw
+        // topology validator labels it FORBIDDEN_EDGE.
+        ["lever", "goal", inferred],
+      ].map(([from, to, provenance]) => ({
+        from,
+        to,
+        strength_mean: 0.5,
+        strength_std: 0.1,
+        belief_exists: 0.9,
+        effect_direction: "positive",
+        provenance,
+      })),
+    };
+
+    const result = await scoreGovernedCase(
+      {
+        brief_id: brief!.id,
+        status: "success",
+        model_id: manifest.model.model_id,
+        prompt_sha256: manifest.prompt.sha256,
+        structured_outputs_used: true,
+        graph,
+        record_disclosures: [{ reason: "withheld" }],
+        serving_record_disclosures_count: 0,
+      },
+      brief!,
+    );
+
+    expect(result.structural_valid).toBe(true);
+    expect(result.legacy_structural_valid).toBe(false);
+    expect(result.failures).not.toContain("STRUCTURAL_INVALID");
+    expect(result.failures).toContain("RECORD_DISCLOSURE_UNSURFACED");
+  });
+
   it("accepts a meaningful matched gain only when hard gates do not regress", async () => {
     const manifest = await readGovernedManifest();
-    const identity = makeIdentity(manifest);
+    const identity = buildGovernedRunIdentity(manifest);
     const baseline = makeRun("baseline", identity, manifest, 0.60);
     const candidate = makeRun("candidate", { ...identity, prompt_sha256: "candidate" }, manifest, 0.64);
 
@@ -144,7 +209,7 @@ describe("governed draft_graph V5 pack", () => {
 
   it("rejects mean gain when canonical readiness or provenance regresses", async () => {
     const manifest = await readGovernedManifest();
-    const identity = makeIdentity(manifest);
+    const identity = buildGovernedRunIdentity(manifest);
     const baseline = makeRun("baseline", identity, manifest, 0.60);
     const candidate = makeRun("candidate", { ...identity, prompt_sha256: "candidate" }, manifest, 0.66);
     const first = candidate.scores[0]!;
@@ -173,24 +238,6 @@ describe("governed draft_graph V5 pack", () => {
   });
 });
 
-function makeIdentity(manifest: GovernedDraftManifest): GovernedRunIdentity {
-  const layers = new Map(manifest.composition.layers.map((layer) => [layer.id, layer] as const));
-  return {
-    manifest_schema_version: manifest.schema_version,
-    serving_base_sha: manifest.serving.git_sha,
-    prompt_id: manifest.prompt.prompt_id,
-    prompt_version: manifest.prompt.store_version,
-    prompt_sha256: manifest.prompt.sha256,
-    model_id: manifest.model.model_id,
-    provider: manifest.model.provider,
-    records_instruction_sha256: layers.get("draft_records_instruction")!.content_sha256!,
-    records_grammar_sha256: layers.get("draft_records_grammar")!.content_sha256!,
-    compliance_reminder_sha256: layers.get("draft_compliance_reminder")!.content_sha256!,
-    structured_outputs_required: true,
-    corpus_ids: manifest.corpus.order.map((item) => item.id),
-  };
-}
-
 function legacyScore(value: number): ScoreResult {
   return {
     rubric_version: "draft-graph-rubric-2.0.0",
@@ -215,6 +262,7 @@ function makeScore(id: string, value: number): GovernedCaseScore {
     adapter_success: true,
     structured_outputs_attested: true,
     structural_valid: true,
+    legacy_structural_valid: true,
     legacy: legacyScore(value),
     canonical_ready: true,
     canonical_status: "ready",
@@ -228,6 +276,8 @@ function makeScore(id: string, value: number): GovernedCaseScore {
       structural_count: 5,
       unbased_inference_count: 0,
       disclosure_count: 0,
+      serving_disclosure_count: 0,
+      unsurfaced_disclosure_count: 0,
     },
     failures: [],
   };

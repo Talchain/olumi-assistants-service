@@ -1,30 +1,40 @@
-# Governed draft_graph V5 evaluation pack
+# Governed `draft_graph` V5 evaluation pack
 
-This directory is the only evaluation authority for a `draft_graph` prompt-quality claim on serving build `424f912`. It freezes the exact PMS v195 bytes, the ordered code-owned prompt layers, the prompt-specific model assignment, the production records contract, canonical readiness, and exactly 14 ordered briefs.
+This directory is the only evaluation authority for a `draft_graph` prompt-quality claim on serving build `b9389df`. It freezes the exact PMS v195 bytes, ordered code-owned prompt layers, model assignment, production records contract, V1-to-V3 transform, canonical readiness authority, and exactly 14 ordered briefs.
 
-Status: **HOLD — exact baseline not yet executed.** No candidate prompt bytes are admitted until the baseline completes under this pack. This is deliberate: deriving a candidate first would optimise against an evaluator that has not yet proved it can reproduce the serving contract.
+Status: **BASELINE FROZEN — CANDIDATE HOLD WITH EVIDENCE.** No candidate prompt bytes were created and no PMS, model, cache, environment, or serving configuration was changed.
 
-## Why the legacy evaluator is not an authority
+## Frozen baseline outcome
 
-The legacy draft path sends one raw graph prompt straight to a provider. Serving sends PMS v195 as system block one and the code-owned records instruction as system block two, constrains the response with the records grammar, validates and projects the record set, may run one additive completion turn, and only then exposes a graph. The legacy path also loads 16 Markdown files by default despite documenting a 14-brief corpus.
+The single authorised pass used `claude-sonnet-4-6`, exactly 14 logical primary calls, no manual retries, and at most one adapter-owned additive completion per case. All 14 calls returned through the production records adapter with structured outputs attested, but only 1 of 14 projected graphs passed canonical analysis readiness. The readiness authority reported 91 blocking findings: 46 missing option values, 26 orphan nodes, and smaller sets of unreachable controllable factors, graph-cap breaches, missing goals, unmapped options, missing option-to-factor edges, and one missing path to the goal.
 
-The old scorer remains an informational matched-pair signal. It cannot independently approve a candidate: 30% of its composite is not-applicable full credit on every canonical brief, and its coaching dimension addresses a field the records draft no longer emits. Structural validity, canonical readiness and provenance are hard non-regression gates in this pack.
+Provenance classes were present on every node and edge, but 136 AI-inferred elements were unbased. The projector emitted 156 refusal disclosures; the live `AnthropicAdapter` wrapper drops that sidecar, so none survives to the serving route. This is reported as `RECORD_DISCLOSURE_UNSURFACED`, not hidden or scored as a prompt success.
+
+The retired raw-graph rubric could score only 5 of 14 records-contract graphs. Its topology validator rejected legitimate/current shapes such as factor-to-goal links, so its 0.6423 mean over the five scorable cases is informational only and cannot authorize promotion. Production adapter success, canonical readiness, provenance and disclosure survival are the governing axes.
+
+Total primary-path latency was 360.3 seconds: mean 25.7s, p50 23.1s, p95 37.1s, maximum 38.1s. Reported usage was 28,522 regular input tokens, 19,934 output tokens, 17,566 cache-creation input tokens, and 228,358 cache-read input tokens. Applying the model file's base rates to all reported input categories gives a $1.122 configured-rate estimate; exact cache-tier and additive-completion costs are not surfaced by the adapter result. The run remained below the authorised $3.40 cap.
+
+## Why candidate work is held
+
+- Only the forced-binary brief was canonically ready. Richer strategic work is materially less likely to reach downstream science, while narrow framing is easiest to operationalise.
+- The exact serving SHA produced `draft_graph_cee_graph_invalid` in automatic run 31931611366, then succeeded minutes later in run 31931789517. The same failure also occurred before the science change in run 31876646668. Reliability is stochastic and cannot be erased by selecting the successful rerun.
+- The old scalar quality measure has only 5/14 coverage on the current records contract. A candidate cannot honestly demonstrate the required matched 14-case gain until that informational signal is replaced or made contract-compatible.
+- The live wrapper suppresses all generated projector disclosures. Improving prompt bytes while users remain unable to see refused assertions would optimize around a downstream authority loss.
+
+The frozen result, including safe graph captures, per-case scores, exact identity, failure taxonomy, latency, token and cost evidence, is `baseline/run-b9389df-claude-sonnet-4-6.json` and is hash-pinned by `manifest.json`.
 
 ## Reproducible workflow
 
-1. Run the pack verifier. Any hash, order, route, model or disposition drift is a hard stop.
-2. Run one baseline arm: 14 primary calls, one per pinned brief, on `claude-sonnet-4-6`. The production adapter may make at most one additive completion call per case.
-3. Freeze the baseline results and failure classification. Provider failures are infrastructure failures, not zero-quality scores.
-4. Only then derive one coherent candidate. Run it against the same 14 briefs, model, production adapter, records grammar, completion policy and rubric.
-5. Accept only a meaningful matched quality gain and no structural, canonical-readiness or provenance regression. Otherwise HOLD WITH EVIDENCE.
-
-No command in this pack writes to PMS, changes a serving model or environment, or promotes a prompt.
+1. Run `npm run governed:draft-graph:verify`. Any prompt, code-layer, corpus, model, evidence, disposition, or result hash drift is a hard stop.
+2. Use `npm run governed:draft-graph:rescore` only to re-run deterministic local scoring over the frozen captures. It makes no provider call; a controlled manifest hash update is required afterward.
+3. Do not re-run the live baseline, manually retry a case, or add a candidate arm without a new bounded authorization and a newly frozen result identity.
+4. A future candidate must use the same 14 briefs, model, production adapter, records grammar, completion policy, composition and rubric. It must deliver a meaningful matched gain with no adapter, structure, readiness, provenance, or disclosure regression.
 
 ## Legacy disposition
 
-- **KEEP:** the exact v195 baseline snapshot.
-- **REPLACE:** the raw draft runner/adapter for any quality or promotion claim.
+- **KEEP:** exact v195 baseline snapshot, current production records/readiness authorities, and the old scorer only as a labelled informational diagnostic.
+- **REPLACE:** the raw draft runner and raw provider adapter for any governed quality or promotion claim.
 - **QUARANTINE:** historical prompt experiments and the stale topology-plan reminder; archaeology only.
-- **REMOVE:** one byte-identical v175 duplicate and the two ad-hoc staging briefs from the governed selection. Their files are left untouched until controlled review; the verifier proves they cannot enter the canonical 14.
+- **REMOVE:** one byte-identical v175 duplicate and the two ad-hoc staging briefs from governed selection. Files remain untouched pending controlled review; the verifier proves they cannot enter the canonical 14.
 
-See `legacy-disposition.json` for the complete itemised matrix and `failure-taxonomy.json` for failure semantics.
+See `legacy-disposition.json` for the itemised matrix, `failure-taxonomy.json` for failure semantics, and `deployed-evidence.json` for the pinned staging observations.

@@ -6,6 +6,10 @@
       {
         "path": "governed/draft-graph-v5/baseline/pms-draft-graph-v195.txt",
         "reason": "Exact serving PMS snapshot and the sole baseline prompt authority."
+      },
+      {
+        "path": "src/scorer.ts",
+        "reason": "Keep its per-dimension signals as explicitly informational diagnostics; it cannot authorize a records-contract prompt promotion."
       }
     ],
     "REPLACE": [
@@ -19,6 +23,10 @@
       }
     ],
     "QUARANTINE": [
+      {
+        "path": "src/validator.ts",
+        "reason": "Its retired raw-graph topology accepts only 5/14 current records-contract captures; quarantine it from structural and promotion authority."
+      },
       { "path": "prompts/draft-v175-B.txt", "reason": "Historical pre-records prompt; reproduction only." },
       { "path": "prompts/draft-v175-gpt41-v2.txt", "reason": "Historical provider-specific prompt; reproduction only." },
       { "path": "prompts/draft-v175-gpt41.txt", "reason": "Historical provider-specific prompt; reproduction only." },

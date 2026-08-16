@@ -43,6 +43,15 @@ export interface GovernedDraftManifest {
     readonly bytes: number;
     readonly characters: number;
   };
+  readonly baseline: {
+    readonly status: "complete";
+    readonly executed_at: string;
+    readonly result_path: string;
+    readonly result_sha256: string;
+    readonly logical_primary_calls: 14;
+    readonly manual_retries: 0;
+    readonly candidate_calls: 0;
+  };
   readonly model: {
     readonly provider: string;
     readonly model_id: string;
@@ -56,6 +65,22 @@ export interface GovernedDraftManifest {
     readonly primary_calls_per_arm: number;
     readonly completion_calls_per_arm_max: number;
   };
+  readonly invocation: {
+    readonly seed: number;
+    readonly documents: "none";
+    readonly attachment: "none";
+    readonly system_directive: "none";
+    readonly timeout_ms: number;
+    readonly max_tokens_ceiling: number;
+    readonly completion_max_tokens: number;
+    readonly completion_wall_ms: number;
+    readonly external_spend_cap_usd: number;
+    readonly prompt_cache: "enabled";
+    readonly draft_compliance_reminder: "enabled";
+    readonly brief_signals_header: "disabled";
+    readonly currency_context: "derived_from_each_brief";
+    readonly manual_retries: 0;
+  };
   readonly composition: {
     readonly system_block_order: readonly string[];
     readonly user_suffix_order: readonly string[];
@@ -64,6 +89,10 @@ export interface GovernedDraftManifest {
       readonly content_sha256?: string;
       readonly bytes?: number;
       readonly characters?: number;
+    })[];
+    readonly excluded_layers: readonly (Partial<HashPinnedPath> & {
+      readonly id: string;
+      readonly reason: string;
     })[];
   };
   readonly corpus: {
@@ -88,7 +117,11 @@ export interface GovernedDraftManifest {
     readonly candidate_path: string | null;
     readonly candidate_sha256: string | null;
     readonly legacy_disposition_path: string;
+    readonly legacy_disposition_sha256: string;
     readonly failure_taxonomy_path: string;
+    readonly failure_taxonomy_sha256: string;
+    readonly deployed_evidence_path: string;
+    readonly deployed_evidence_sha256: string;
   };
 }
 
@@ -106,7 +139,9 @@ export interface PackProblem {
     | "CODE_LAYER_DRIFT"
     | "CORPUS_DRIFT"
     | "MODEL_ROUTE_DRIFT"
-    | "LEGACY_UNDISPOSITIONED";
+    | "LEGACY_UNDISPOSITIONED"
+    | "DEPLOYED_EVIDENCE_DRIFT"
+    | "GOVERNANCE_ARTIFACT_DRIFT";
   readonly detail: string;
 }
 
@@ -144,11 +179,23 @@ export interface GovernedCaseCapture {
   readonly model_id: string;
   readonly prompt_sha256: string;
   readonly structured_outputs_used?: boolean;
+  readonly prompt_version?: string;
+  readonly prompt_store_version?: number | null;
   readonly graph?: unknown;
   readonly record_disclosures?: readonly unknown[];
+  /** Count after the live AnthropicAdapter field projection. */
+  readonly serving_record_disclosures_count?: number;
   readonly latency_ms?: number;
+  readonly provider_latency_ms?: number;
   readonly input_tokens?: number;
   readonly output_tokens?: number;
+  readonly cache_creation_input_tokens?: number;
+  readonly cache_read_input_tokens?: number;
+  readonly finish_reason?: string;
+  readonly streamed?: boolean;
+  readonly salvaged_from_truncation?: boolean;
+  readonly runaway_abort_count?: number;
+  readonly runaway_abort_triggers?: readonly string[];
   readonly estimated_cost_usd?: number;
 }
 
@@ -160,13 +207,18 @@ export interface ProvenanceAssessment {
   readonly structural_count: number;
   readonly unbased_inference_count: number;
   readonly disclosure_count: number;
+  readonly serving_disclosure_count: number;
+  readonly unsurfaced_disclosure_count: number;
 }
 
 export interface GovernedCaseScore {
   readonly brief_id: string;
   readonly adapter_success: boolean;
   readonly structured_outputs_attested: boolean;
+  /** Production records adapter returned a GraphT-shaped graph. */
   readonly structural_valid: boolean;
+  /** Informational only: the retired raw-graph topology validator's result. */
+  readonly legacy_structural_valid: boolean;
   readonly legacy: ScoreResult;
   readonly canonical_ready: boolean;
   readonly canonical_status: string | null;
@@ -270,7 +322,14 @@ function assertManifestShape(raw: unknown): GovernedDraftManifest {
   if (manifest.schema_version !== "olumi.draft_graph.governed_eval.v1") {
     throw new Error("unsupported governed draft manifest schema");
   }
-  if (!manifest.prompt || !manifest.model || !manifest.composition || !manifest.corpus) {
+  if (
+    !manifest.prompt ||
+    !manifest.baseline ||
+    !manifest.model ||
+    !manifest.invocation ||
+    !manifest.composition ||
+    !manifest.corpus
+  ) {
     throw new Error("governed draft manifest is incomplete");
   }
   return manifest as GovernedDraftManifest;
@@ -333,6 +392,18 @@ export async function verifyGovernedPack(
         problems,
         "CODE_LAYER_DRIFT",
         `${layer.id} source hash is ${actual}, expected ${layer.source_sha256}`,
+      );
+    }
+  }
+  for (const layer of manifest.composition.excluded_layers) {
+    if (!layer.source_path || !layer.source_sha256) continue;
+    const content = await readFile(join(REPO_ROOT, layer.source_path));
+    const actual = sha256(content);
+    if (actual !== layer.source_sha256) {
+      problem(
+        problems,
+        "CODE_LAYER_DRIFT",
+        `${layer.id} excluded-layer source hash is ${actual}, expected ${layer.source_sha256}`,
       );
     }
   }
@@ -447,6 +518,42 @@ export async function verifyGovernedPack(
     );
   }
 
+  const deployedEvidence = await readFile(
+    join(packRoot, manifest.governance.deployed_evidence_path),
+  );
+  const deployedEvidenceHash = sha256(deployedEvidence);
+  if (deployedEvidenceHash !== manifest.governance.deployed_evidence_sha256) {
+    problem(
+      problems,
+      "DEPLOYED_EVIDENCE_DRIFT",
+      `deployed evidence hash is ${deployedEvidenceHash}, expected ${manifest.governance.deployed_evidence_sha256}`,
+    );
+  }
+
+  const governanceArtifacts: readonly [string, string, string][] = [
+    [
+      "legacy disposition",
+      manifest.governance.legacy_disposition_path,
+      manifest.governance.legacy_disposition_sha256,
+    ],
+    [
+      "failure taxonomy",
+      manifest.governance.failure_taxonomy_path,
+      manifest.governance.failure_taxonomy_sha256,
+    ],
+    ["baseline result", manifest.baseline.result_path, manifest.baseline.result_sha256],
+  ];
+  for (const [label, relativePath, expectedHash] of governanceArtifacts) {
+    const actualHash = sha256(await readFile(join(packRoot, relativePath)));
+    if (actualHash !== expectedHash) {
+      problem(
+        problems,
+        "GOVERNANCE_ARTIFACT_DRIFT",
+        `${label} hash is ${actualHash}, expected ${expectedHash}`,
+      );
+    }
+  }
+
   return {
     ok: problems.length === 0,
     manifest,
@@ -456,6 +563,34 @@ export async function verifyGovernedPack(
     prompt_characters: promptText.length,
     brief_ids: manifest.corpus.order.map((item) => item.id),
     layer_content_hashes: layerContentHashes,
+  };
+}
+
+export function buildGovernedRunIdentity(
+  manifest: GovernedDraftManifest,
+): GovernedRunIdentity {
+  const layers = new Map(
+    manifest.composition.layers.map((layer) => [layer.id, layer] as const),
+  );
+  const instruction = layers.get("draft_records_instruction")?.content_sha256;
+  const grammar = layers.get("draft_records_grammar")?.content_sha256;
+  const compliance = layers.get("draft_compliance_reminder")?.content_sha256;
+  if (!instruction || !grammar || !compliance) {
+    throw new Error("governed run identity is missing a content-pinned prompt layer");
+  }
+  return {
+    manifest_schema_version: manifest.schema_version,
+    serving_base_sha: manifest.serving.git_sha,
+    prompt_id: manifest.prompt.prompt_id,
+    prompt_version: manifest.prompt.store_version,
+    prompt_sha256: manifest.prompt.sha256,
+    model_id: manifest.model.model_id,
+    provider: manifest.model.provider,
+    records_instruction_sha256: instruction,
+    records_grammar_sha256: grammar,
+    compliance_reminder_sha256: compliance,
+    structured_outputs_required: true,
+    corpus_ids: manifest.corpus.order.map((item) => item.id),
   };
 }
 
@@ -539,6 +674,7 @@ function toLegacyGraph(graph: unknown): ParsedGraph | undefined {
 function assessProvenance(
   graph: unknown,
   disclosures: readonly unknown[] | undefined,
+  servingDisclosuresCount: number | undefined,
 ): ProvenanceAssessment {
   const record = graph && typeof graph === "object" ? graph as Record<string, unknown> : {};
   const elements = [
@@ -563,6 +699,8 @@ function assessProvenance(
     } else if (cls === "projector_structural") structural += 1;
     else missing += 1;
   }
+  const disclosureCount = disclosures?.length ?? 0;
+  const servingDisclosureCount = servingDisclosuresCount ?? disclosureCount;
   return {
     element_count: elements.length,
     missing_count: missing,
@@ -570,7 +708,9 @@ function assessProvenance(
     inferred_count: inferred,
     structural_count: structural,
     unbased_inference_count: unbased,
-    disclosure_count: disclosures?.length ?? 0,
+    disclosure_count: disclosureCount,
+    serving_disclosure_count: servingDisclosureCount,
+    unsurfaced_disclosure_count: Math.max(0, disclosureCount - servingDisclosureCount),
   };
 }
 
@@ -642,7 +782,12 @@ export async function scoreGovernedCase(
         latency_ms: capture.latency_ms ?? 0,
       };
   const legacy = score(response, brief);
-  const provenance = assessProvenance(capture.graph, capture.record_disclosures);
+  const productionStructuralValid = capture.status === "success" && legacyGraph !== undefined;
+  const provenance = assessProvenance(
+    capture.graph,
+    capture.record_disclosures,
+    capture.serving_record_disclosures_count,
+  );
   let canonicalReady = false;
   let canonicalStatus: string | null = null;
   let blockingCodes: string[] = [];
@@ -669,16 +814,20 @@ export async function scoreGovernedCase(
   const failures: string[] = [];
   if (capture.status !== "success") failures.push(capture.failure_code ?? "PROVIDER_FAILURE");
   if (capture.structured_outputs_used !== true) failures.push("STRUCTURED_OUTPUTS_REJECTED");
-  if (!legacy.structural_valid) failures.push("STRUCTURAL_INVALID");
+  if (!productionStructuralValid) failures.push("STRUCTURAL_INVALID");
   if (!canonicalReady) failures.push("CANONICAL_READINESS_BLOCKED");
   if (blockingCodes.includes("INTERNAL_ERROR")) failures.push("CANONICAL_READINESS_INTERNAL");
   if (provenance.missing_count > 0) failures.push("PROVENANCE_MISSING");
+  if (provenance.unsurfaced_disclosure_count > 0) {
+    failures.push("RECORD_DISCLOSURE_UNSURFACED");
+  }
 
   return {
     brief_id: capture.brief_id,
     adapter_success: capture.status === "success" && legacyGraph !== undefined,
     structured_outputs_attested: capture.structured_outputs_used === true,
-    structural_valid: legacy.structural_valid,
+    structural_valid: productionStructuralValid,
+    legacy_structural_valid: legacy.structural_valid,
     legacy,
     canonical_ready: canonicalReady,
     canonical_status: canonicalStatus,
@@ -718,11 +867,17 @@ export function summariseGovernedScores(scores: readonly GovernedCaseScore[]): {
   adapter_success_count: number;
   structured_outputs_count: number;
   structural_valid_count: number;
+  legacy_structural_valid_count: number;
+  legacy_scored_count: number;
   canonical_ready_count: number;
   canonical_blocking_issue_count: number;
   missing_provenance_count: number;
   unbased_inference_count: number;
+  record_disclosure_count: number;
+  serving_record_disclosure_count: number;
+  unsurfaced_record_disclosure_count: number;
   mean_legacy_score: number | null;
+  mean_legacy_score_scored_cases: number | null;
 } {
   const legacy = scores
     .map((item) => item.legacy.overall_score)
@@ -731,6 +886,8 @@ export function summariseGovernedScores(scores: readonly GovernedCaseScore[]): {
     adapter_success_count: scores.filter((item) => item.adapter_success).length,
     structured_outputs_count: scores.filter((item) => item.structured_outputs_attested).length,
     structural_valid_count: scores.filter((item) => item.structural_valid).length,
+    legacy_structural_valid_count: scores.filter((item) => item.legacy_structural_valid).length,
+    legacy_scored_count: legacy.length,
     canonical_ready_count: scores.filter((item) => item.canonical_ready).length,
     canonical_blocking_issue_count: scores.reduce(
       (sum, item) => sum + item.canonical_blocking_issue_count,
@@ -744,7 +901,22 @@ export function summariseGovernedScores(scores: readonly GovernedCaseScore[]): {
       (sum, item) => sum + item.provenance.unbased_inference_count,
       0,
     ),
+    record_disclosure_count: scores.reduce(
+      (sum, item) => sum + item.provenance.disclosure_count,
+      0,
+    ),
+    serving_record_disclosure_count: scores.reduce(
+      (sum, item) => sum + item.provenance.serving_disclosure_count,
+      0,
+    ),
+    unsurfaced_record_disclosure_count: scores.reduce(
+      (sum, item) => sum + item.provenance.unsurfaced_disclosure_count,
+      0,
+    ),
     mean_legacy_score: legacy.length === scores.length && legacy.length > 0
+      ? legacy.reduce((sum, value) => sum + value, 0) / legacy.length
+      : null,
+    mean_legacy_score_scored_cases: legacy.length > 0
       ? legacy.reduce((sum, value) => sum + value, 0) / legacy.length
       : null,
   };
@@ -792,13 +964,16 @@ export function compareGovernedRuns(
     ["canonical_blocking_issue_count", "canonical blocking issues", "at_most"],
     ["missing_provenance_count", "missing provenance", "at_most"],
     ["unbased_inference_count", "unbased inference", "at_most"],
+    ["unsurfaced_record_disclosure_count", "unsurfaced record disclosures", "at_most"],
   ];
   for (const [key, label, direction] of hardPairs) {
     const before = baselineSummary[key];
     const after = candidateSummary[key];
     if (typeof before !== "number" || typeof after !== "number") continue;
     if (direction === "at_least" ? after < before : after > before) {
-      const family = label.includes("provenance") || label.includes("inference")
+      const family = label.includes("provenance") ||
+        label.includes("inference") ||
+        label.includes("disclosure")
         ? "PROVENANCE_REGRESSION"
         : label.includes("readiness") || label.includes("blocking")
           ? "READINESS_REGRESSION"
