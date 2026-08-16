@@ -414,7 +414,7 @@ export interface CallOpts {
   forceDefault?: boolean; // Force use of hardcoded default prompt instead of store prompt (?default=1 URL param)
   /** Prompt bytes resolved before model selection for prompt-configured routes. */
   preloadedSystemPrompt?: {
-    readonly operation: 'draft_graph' | 'suggest_options' | 'critique_graph';
+    readonly operation: 'draft_graph' | 'suggest_options' | 'clarify_brief' | 'critique_graph';
     readonly content: string;
     readonly meta: SystemPromptMeta;
   };

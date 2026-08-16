@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ClarifyBriefInput, ClarifyBriefOutput, ErrorV1 } from "../schemas/assist.js";
 import { getAdapter } from "../adapters/llm/router.js";
+import { getSystemPromptSnapshot } from "../adapters/llm/prompt-loader.js";
 import { emit, log, calculateCost, TelemetryEvents } from "../utils/telemetry.js";
 import { getRequestId } from "../utils/request-id.js";
 import { CLARIFY_BRIEF_TIMEOUT_MS } from "../config/timeouts.js";
@@ -61,6 +62,11 @@ export default async function route(app: FastifyInstance) {
       // Compress previous answers for history context
       const compressedHistory = compressPreviousAnswers(input.previous_answers);
 
+      // Resolve one exact governed prompt authority before the caching/routing
+      // boundary. The adapter must consume these same bytes; promotion cannot
+      // reuse a response created under a previous snapshot.
+      const promptSnapshot = await getSystemPromptSnapshot('clarify_brief');
+
       // Get adapter via router (env-driven or config)
       const adapter = getAdapter('clarify_brief');
 
@@ -89,6 +95,11 @@ export default async function route(app: FastifyInstance) {
         {
           requestId: `clarify_${Date.now()}`,
           timeoutMs: CLARIFY_BRIEF_TIMEOUT_MS,
+          preloadedSystemPrompt: {
+            operation: 'clarify_brief',
+            content: promptSnapshot.content,
+            meta: promptSnapshot.meta,
+          },
         }
       );
 

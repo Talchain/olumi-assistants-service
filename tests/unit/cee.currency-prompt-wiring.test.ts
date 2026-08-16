@@ -88,6 +88,22 @@ describe("Anthropic adapter — currency instruction in prompts", () => {
     expect(result.userContent).not.toContain("[CURRENCY_CONTEXT]");
   });
 
+  it("buildClarifyPrompt consumes the exact preloaded governed bytes", async () => {
+    const promptLoader = await import("../../src/adapters/llm/prompt-loader.js");
+    const getSystemPrompt = vi.mocked(promptLoader.getSystemPrompt);
+    getSystemPrompt.mockClear();
+
+    const result = await buildClarifyPrompt({
+      brief: "Test brief",
+      round: 1,
+    }, "EXACT GOVERNED CLARIFY PROMPT");
+
+    expect(result.system).toEqual([
+      { type: "text", text: "EXACT GOVERNED CLARIFY PROMPT" },
+    ]);
+    expect(getSystemPrompt).not.toHaveBeenCalled();
+  });
+
   it("null signal produces default £ instruction in draft prompt", async () => {
     const instruction = buildCurrencyInstruction(null);
     const result = await buildDraftPrompt({

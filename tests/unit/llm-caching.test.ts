@@ -7,13 +7,34 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { CachingAdapter } from "../../src/adapters/llm/caching.js";
+import { FailoverAdapter } from "../../src/adapters/llm/failover.js";
 import type { LLMAdapter, CallOpts, DraftGraphArgs, DraftGraphResult } from "../../src/adapters/llm/types.js";
+
+const redisEntries = vi.hoisted(() => new Map<string, string>());
+
+vi.mock("../../src/platform/redis.js", () => ({
+  getRedis: vi.fn(async () => ({
+    get: vi.fn(async (key: string) => redisEntries.get(key) ?? null),
+    set: vi.fn(async (key: string, value: string) => {
+      redisEntries.set(key, value);
+      return "OK";
+    }),
+    scan: vi.fn(async () => ["0", [...redisEntries.keys()]]),
+    del: vi.fn(async (...keys: string[]) => {
+      for (const key of keys) redisEntries.delete(key);
+      return keys.length;
+    }),
+  })),
+}));
 
 // Mock adapter for testing
 class MockAdapter implements LLMAdapter {
-  readonly name = "mock";
-  readonly model = "mock-v1";
   private callCount = 0;
+
+  constructor(
+    readonly name = "mock",
+    readonly model = "mock-v1",
+  ) {}
 
   async draftGraph(args: DraftGraphArgs, _opts: CallOpts): Promise<DraftGraphResult> {
     this.callCount++;
@@ -29,10 +50,10 @@ class MockAdapter implements LLMAdapter {
     };
   }
 
-  async suggestOptions(_args: any, _opts: CallOpts): Promise<any> {
+  async suggestOptions(args: any, _opts: CallOpts): Promise<any> {
     this.callCount++;
     return {
-      options: [{ id: "opt_1", title: "Option 1", pros: [], cons: [], evidence_to_gather: [] }],
+      options: [{ id: "opt_1", title: args.goal, pros: [], cons: [], evidence_to_gather: [] }],
       usage: { input_tokens: 10, output_tokens: 20 },
     };
   }
@@ -91,11 +112,38 @@ describe("CachingAdapter", () => {
     timeoutMs: 30000,
   };
 
+  type CacheableOperation = NonNullable<CallOpts["preloadedSystemPrompt"]>["operation"];
+
+  const governedOpts = (
+    operation: CacheableOperation,
+    content = `${operation.toUpperCase()} SYSTEM PROMPT`,
+    version = 1,
+  ): CallOpts => ({
+    ...defaultOpts,
+    preloadedSystemPrompt: {
+      operation,
+      content,
+      meta: {
+        taskId: operation,
+        source: "store",
+        promptId: `${operation}_default`,
+        version,
+        prompt_version: `${operation}_default@v${version}`,
+        prompt_hash: `sha256-${operation}-${version}-${content}`,
+        modelConfig: {
+          staging: "mock-v1",
+          production: "mock-v1",
+        },
+      },
+    },
+  });
+
   let originalEnv: typeof process.env;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
     vi.unstubAllEnvs();
+    redisEntries.clear();
   });
 
   afterEach(() => {
@@ -108,8 +156,8 @@ describe("CachingAdapter", () => {
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    const result1 = await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
-    const result2 = await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    const result1 = await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
+    const result2 = await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
 
     expect(result1.graph.nodes).toHaveLength(1);
     expect(result2.graph.nodes).toHaveLength(1);
@@ -124,12 +172,23 @@ describe("CachingAdapter", () => {
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    const result1 = await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
-    const result2 = await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    const result1 = await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
+    const result2 = await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
 
     expect(result1.graph.nodes).toHaveLength(1);
     expect(result2.graph.nodes).toHaveLength(1);
     expect(mock.getCallCount()).toBe(1); // Second call from cache
+  });
+
+  it("bypasses reuse when no immutable response authority is supplied", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    const mock = new MockAdapter();
+    const caching = new CachingAdapter(mock);
+
+    await caching.explainDiff({ patch: { adds: {}, updates: [], removes: [] } }, defaultOpts);
+    await caching.explainDiff({ patch: { adds: {}, updates: [], removes: [] } }, defaultOpts);
+
+    expect(mock.getCallCount()).toBe(2);
   });
 
   it("should differentiate cache entries by args", async () => {
@@ -137,8 +196,8 @@ describe("CachingAdapter", () => {
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    await caching.draftGraph({ brief: "Test A", seed: 17 }, defaultOpts);
-    await caching.draftGraph({ brief: "Test B", seed: 17 }, defaultOpts);
+    await caching.draftGraph({ brief: "Test A", seed: 17 }, governedOpts("draft_graph"));
+    await caching.draftGraph({ brief: "Test B", seed: 17 }, governedOpts("draft_graph"));
 
     expect(mock.getCallCount()).toBe(2); // Different briefs = different cache keys
   });
@@ -205,13 +264,103 @@ describe("CachingAdapter", () => {
     expect(mock.getCallCount()).toBe(4);
   });
 
+  it("does not alias the former Aa/BB fast-hash collision", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    const mock = new MockAdapter();
+    const caching = new CachingAdapter(mock);
+    const opts = governedOpts("suggest_options");
+
+    const aa = await caching.suggestOptions({ goal: "Aa" }, opts);
+    const bb = await caching.suggestOptions({ goal: "BB" }, opts);
+    const aaAgain = await caching.suggestOptions({ goal: "Aa" }, opts);
+
+    expect(aa.options[0].title).toBe("Aa");
+    expect(bb.options[0].title).toBe("BB");
+    expect(aaAgain.options[0].title).toBe("Aa");
+    expect(mock.getCallCount()).toBe(2);
+  });
+
+  it("misses when the exact clarify prompt version changes and hits when it does not", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    const mock = new MockAdapter();
+    const caching = new CachingAdapter(mock);
+    const args = { brief: "Same brief", round: 0 };
+
+    await caching.clarifyBrief(args, governedOpts("clarify_brief", "CLARIFY V1", 1));
+    await caching.clarifyBrief(args, governedOpts("clarify_brief", "CLARIFY V2", 2));
+    await caching.clarifyBrief(args, governedOpts("clarify_brief", "CLARIFY V2", 2));
+
+    expect(mock.getCallCount()).toBe(2);
+  });
+
+  it("binds Redis reuse to the ordered provider/model failover topology", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    vi.stubEnv("REDIS_PROMPT_CACHE_ENABLED", "true");
+    vi.stubEnv("REDIS_URL", "redis://cache.test");
+
+    const anthropicOpenAi = new MockAdapter("anthropic", "claude-sonnet-5");
+    const first = new CachingAdapter(new FailoverAdapter([
+      anthropicOpenAi,
+      new MockAdapter("openai", "gpt-5.2"),
+    ], "suggest_options"));
+    const anthropicFixtures = new MockAdapter("anthropic", "claude-sonnet-5");
+    const second = new CachingAdapter(new FailoverAdapter([
+      anthropicFixtures,
+      new MockAdapter("fixtures", "fixtures-v1"),
+    ], "suggest_options"));
+    const sameTopologyPrimary = new MockAdapter("anthropic", "claude-sonnet-5");
+    const sameAsFirst = new CachingAdapter(new FailoverAdapter([
+      sameTopologyPrimary,
+      new MockAdapter("openai", "gpt-5.2"),
+    ], "suggest_options"));
+    const opts = governedOpts("suggest_options");
+
+    await first.suggestOptions({ goal: "Topology" }, opts);
+    await second.suggestOptions({ goal: "Topology" }, opts);
+    await sameAsFirst.suggestOptions({ goal: "Topology" }, opts);
+
+    expect(anthropicOpenAi.getCallCount()).toBe(1);
+    expect(anthropicFixtures.getCallCount()).toBe(1);
+    expect(sameTopologyPrimary.getCallCount()).toBe(0);
+    expect([...redisEntries.keys()]).toHaveLength(2);
+    expect([...redisEntries.keys()]).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^pc:v2:suggest_options:[a-f0-9]{64}$/),
+      ]),
+    );
+  });
+
+  it("binds reuse to stable generation configuration", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    const mock = new MockAdapter();
+    const caching = new CachingAdapter(mock);
+    const args = { brief: "Same brief", seed: 17 };
+
+    await caching.draftGraph(args, {
+      ...governedOpts("draft_graph"),
+      maxTokensCeiling: 1_200,
+    });
+    await caching.draftGraph(args, {
+      ...governedOpts("draft_graph"),
+      maxTokensCeiling: 800,
+    });
+    await caching.draftGraph(args, {
+      ...governedOpts("draft_graph"),
+      maxTokensCeiling: 800,
+      requestId: "different-request-only-id",
+      timeoutMs: 1_234,
+    });
+
+    expect(mock.getCallCount()).toBe(2);
+  });
+
   it("should differentiate cache entries by operation", async () => {
     vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
-    await caching.suggestOptions({ goal: "Test" }, defaultOpts);
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
+    await caching.suggestOptions({ goal: "Test" }, governedOpts("suggest_options"));
 
     expect(mock.getCallCount()).toBe(2); // Different operations = different cache keys
   });
@@ -221,8 +370,11 @@ describe("CachingAdapter", () => {
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
-    await caching.draftGraph({ brief: "Test", seed: 17 }, { ...defaultOpts, bypassCache: true });
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
+    await caching.draftGraph(
+      { brief: "Test", seed: 17 },
+      { ...governedOpts("draft_graph"), bypassCache: true },
+    );
 
     expect(mock.getCallCount()).toBe(2); // Bypass cache = both calls hit adapter
   });
@@ -233,12 +385,12 @@ describe("CachingAdapter", () => {
     const caching = new CachingAdapter(mock);
 
     // Draft graph
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
 
     // Suggest options
-    await caching.suggestOptions({ goal: "Test" }, defaultOpts);
-    await caching.suggestOptions({ goal: "Test" }, defaultOpts);
+    await caching.suggestOptions({ goal: "Test" }, governedOpts("suggest_options"));
+    await caching.suggestOptions({ goal: "Test" }, governedOpts("suggest_options"));
 
     // (repairGraph removed — ROADMAP 2.763)
     const testGraph = {
@@ -250,12 +402,12 @@ describe("CachingAdapter", () => {
     };
 
     // Clarify brief
-    await caching.clarifyBrief({ brief: "Test", round: 0 }, defaultOpts);
-    await caching.clarifyBrief({ brief: "Test", round: 0 }, defaultOpts);
+    await caching.clarifyBrief({ brief: "Test", round: 0 }, governedOpts("clarify_brief"));
+    await caching.clarifyBrief({ brief: "Test", round: 0 }, governedOpts("clarify_brief"));
 
     // Critique graph
-    await caching.critiqueGraph({ graph: testGraph }, defaultOpts);
-    await caching.critiqueGraph({ graph: testGraph }, defaultOpts);
+    await caching.critiqueGraph({ graph: testGraph }, governedOpts("critique_graph"));
+    await caching.critiqueGraph({ graph: testGraph }, governedOpts("critique_graph"));
 
     // Explain diff
     await caching.explainDiff({
@@ -265,9 +417,9 @@ describe("CachingAdapter", () => {
       patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
     }, defaultOpts);
 
-    // Each operation called twice, but second call from cache
-    // 5 (was 6 — repairGraph retired by ROADMAP 2.763), 1 adapter call each
-    expect(mock.getCallCount()).toBe(5);
+    // Four prompt-governed operations hit; explain_diff has no immutable
+    // prompt/code fingerprint at this boundary and therefore bypasses twice.
+    expect(mock.getCallCount()).toBe(6);
   });
 
   it("should expose cache statistics", () => {
@@ -291,18 +443,18 @@ describe("CachingAdapter", () => {
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
     expect(mock.getCallCount()).toBe(1);
 
     // Cache hit
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
     expect(mock.getCallCount()).toBe(1); // Still 1 (cached)
 
     // Clear cache
     caching.clearCache();
 
     // Cache miss after clear
-    await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
     expect(mock.getCallCount()).toBe(2); // New call after clear
   });
 
@@ -324,8 +476,8 @@ describe("CachingAdapter", () => {
     const args1 = { brief: "Test", seed: 17, flags: { a: 1, b: 2 } };
     const args2 = { brief: "Test", seed: 17, flags: { a: 1, b: 2 } };
 
-    await caching.draftGraph(args1, defaultOpts);
-    await caching.draftGraph(args2, defaultOpts);
+    await caching.draftGraph(args1, governedOpts("draft_graph"));
+    await caching.draftGraph(args2, governedOpts("draft_graph"));
 
     expect(mock.getCallCount()).toBe(1); // Same args = cache hit
   });
@@ -338,8 +490,8 @@ describe("CachingAdapter", () => {
     const args1 = { brief: "Test", seed: 17, flags: { a: 1 } };
     const args2 = { brief: "Test", seed: 17, flags: { a: 2 } };
 
-    await caching.draftGraph(args1, defaultOpts);
-    await caching.draftGraph(args2, defaultOpts);
+    await caching.draftGraph(args1, governedOpts("draft_graph"));
+    await caching.draftGraph(args2, governedOpts("draft_graph"));
 
     expect(mock.getCallCount()).toBe(2); // Different flags = different cache keys
   });
@@ -362,7 +514,7 @@ describe("CachingAdapter", () => {
     const caching = new CachingAdapter(mock);
 
     // First call - caches result
-    const result1 = await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    const result1 = await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
     expect(mock.getCallCount()).toBe(1);
 
     // Mutate the returned result (common in draft pipeline)
@@ -373,7 +525,7 @@ describe("CachingAdapter", () => {
     });
 
     // Second call - should get clean cached result (not mutated)
-    const result2 = await caching.draftGraph({ brief: "Test", seed: 17 }, defaultOpts);
+    const result2 = await caching.draftGraph({ brief: "Test", seed: 17 }, governedOpts("draft_graph"));
     expect(mock.getCallCount()).toBe(1); // Still 1 (cached)
 
     // Verify cached result is NOT mutated

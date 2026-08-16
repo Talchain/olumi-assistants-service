@@ -1102,7 +1102,8 @@ const ConfigSchema = z.object({
       fallbackEnabled: booleanString.default(true), // Enable fallback to higher tier on failure
       qualityGateEnabled: booleanString.default(true), // Prevent downgrade of quality-required tasks
       latencyAnomalyThresholdMs: z.coerce.number().int().positive().default(10000), // Alert threshold
-      // Per-task model defaults (override TASK_MODEL_DEFAULTS from model-routing.ts)
+      // Historical CEE_MODEL_TASK_* inventory. Audited at startup but inert for
+      // serving; the runtime/admin routing projection is the sole authority.
       taskModels: z.object({
         clarification: z.string().optional(),
         preflight: z.string().optional(),

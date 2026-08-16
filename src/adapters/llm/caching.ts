@@ -14,10 +14,11 @@
  *   - PROMPT_CACHE_MAX_SIZE: Max LRU entries (default: 100, only for memory mode)
  *   - PROMPT_CACHE_TTL_MS: Entry TTL in milliseconds (default: 3600000 = 1 hour)
  *
- * Redis key pattern: pc:{operation}:{hash16}
+ * Redis key pattern: pc:v2:{operation}:{sha256}
  * Note: Streaming responses are NOT cached (bypasses cache)
  */
 
+import { createHash } from "node:crypto";
 import { LruTtlCache } from "../../utils/cache.js";
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { fastHash } from "../../utils/hash.js";
@@ -43,6 +44,43 @@ import type {
   CallOpts,
   DraftStreamEvent,
 } from "./types.js";
+
+const RESPONSE_CACHE_NAMESPACE = "pc:v2";
+
+interface ResponseAuthority {
+  readonly prompt: {
+    readonly operation: string;
+    readonly content: string;
+    readonly taskId: string;
+    readonly source: string;
+    readonly promptId: string | null;
+    readonly version: number | null;
+    readonly promptVersion: string;
+    readonly promptHash: string | null;
+    readonly isStaging: boolean | null;
+    readonly useStagingMode: boolean | null;
+    readonly modelConfig: unknown;
+  };
+  readonly routingTopology: ReadonlyArray<{
+    readonly provider: string;
+    readonly model: string;
+  }>;
+  readonly generationConfig: {
+    readonly configuredMaxTokens: number | null;
+    readonly maxTokensCeiling: number | null;
+    readonly anthropicStructuredOutputs: boolean | null;
+    readonly draftComplianceReminderEnabled: boolean | null;
+  };
+}
+
+interface FailoverMetadataProvider {
+  getFailoverMetadata(): {
+    readonly topology?: ReadonlyArray<{
+      readonly provider: string;
+      readonly model: string;
+    }>;
+  };
+}
 
 // Cache configuration helpers (using centralized config)
 function getCacheEnabled(): boolean {
@@ -75,6 +113,42 @@ function getCacheMaxSize(): number {
 
 function getCacheTtlMs(): number {
   return config.promptCache.ttlMs;
+}
+
+function getConfiguredMaxTokens(operation: string): number | null {
+  const key = {
+    draft_graph: "draft",
+    suggest_options: "options",
+    clarify_brief: "clarification",
+    critique_graph: "critique",
+  }[operation] as "draft" | "options" | "clarification" | "critique" | undefined;
+
+  if (!key) return null;
+  return config.cee.maxTokens[key] ?? null;
+}
+
+function hasFailoverMetadata(adapter: LLMAdapter): adapter is LLMAdapter & FailoverMetadataProvider {
+  return typeof (adapter as Partial<FailoverMetadataProvider>).getFailoverMetadata === "function";
+}
+
+function getRoutingTopology(adapter: LLMAdapter): ResponseAuthority["routingTopology"] {
+  if (hasFailoverMetadata(adapter)) {
+    const topology = adapter.getFailoverMetadata().topology;
+    if (
+      topology?.length &&
+      topology.every(
+        (entry) =>
+          typeof entry.provider === "string" &&
+          entry.provider.length > 0 &&
+          typeof entry.model === "string" &&
+          entry.model.length > 0,
+      )
+    ) {
+      return topology.map(({ provider, model }) => ({ provider, model }));
+    }
+  }
+
+  return [{ provider: adapter.name, model: adapter.model }];
 }
 
 /**
@@ -130,52 +204,69 @@ export class CachingAdapter implements LLMAdapter {
    * Generate cache key from operation and args
    * Uses canonical JSON to ensure stable keys regardless of property order
    *
-   * Key pattern: pc:{operation}:{hash16}
-   * (Redis keyPrefix will prepend namespace, e.g., "olumi:pc:draft_graph:a3f5c7d1...")
+   * Key pattern: pc:v2:{operation}:{sha256}
+   * (Redis keyPrefix will prepend its deployment namespace.)
    */
-  private getCacheKey(operation: string, args: unknown, opts: CallOpts): string {
-    // Create a deterministic key from the response-authority inputs available
-    // at this boundary. Prompt-managed routes resolve an exact immutable
-    // snapshot before adapter selection; including its stable identity, bytes
-    // and modelConfig prevents promotion/invalidation from reusing output
-    // generated under the previous authority.
-    // Uses module-level sortedReplacer for efficiency
-    const promptAuthority = opts.preloadedSystemPrompt
-      ? {
-          operation: opts.preloadedSystemPrompt.operation,
-          content: opts.preloadedSystemPrompt.content,
-          taskId: opts.preloadedSystemPrompt.meta.taskId,
-          source: opts.preloadedSystemPrompt.meta.source,
-          promptId: opts.preloadedSystemPrompt.meta.promptId ?? null,
-          version: opts.preloadedSystemPrompt.meta.version ?? null,
-          promptVersion: opts.preloadedSystemPrompt.meta.prompt_version,
-          promptHash: opts.preloadedSystemPrompt.meta.prompt_hash ?? null,
-          isStaging: opts.preloadedSystemPrompt.meta.isStaging ?? null,
-          useStagingMode:
-            opts.preloadedSystemPrompt.meta.use_staging_mode ?? null,
-          modelConfig: opts.preloadedSystemPrompt.meta.modelConfig ?? null,
-        }
-      : null;
-    // Request IDs, deadlines, abort signals and observability hooks are not
-    // response authority and must not destroy cache reuse. `forceDefault` is
-    // retained for legacy direct callers that do not provide a snapshot.
-    const executionConfig = {
-      forceDefault: opts.forceDefault ?? false,
-    };
+  private getCacheKey(operation: string, args: unknown, authority: ResponseAuthority): string {
     const keyData = JSON.stringify(
       {
+        namespace: RESPONSE_CACHE_NAMESPACE,
         operation,
         args,
-        model: this.model,
-        promptAuthority,
-        executionConfig,
+        authority,
       },
       sortedReplacer,
     );
-    const hash = fastHash(keyData, 16);
+    const hash = createHash("sha256").update(keyData, "utf8").digest("hex");
 
-    // Redis key pattern: pc:{operation}:{hash16}
-    return `pc:${operation}:${hash}`;
+    return `${RESPONSE_CACHE_NAMESPACE}:${operation}:${hash}`;
+  }
+
+  /**
+   * Build the immutable response authority required for safe cross-request
+   * reuse. Operations without an exact governed prompt/code fingerprint are
+   * deliberately not cached (notably the current inline explain_diff path).
+   */
+  private getResponseAuthority(operation: string, opts: CallOpts): ResponseAuthority | null {
+    const snapshot = opts.preloadedSystemPrompt;
+    if (
+      !snapshot ||
+      snapshot.operation !== operation ||
+      snapshot.meta.taskId !== operation
+    ) {
+      return null;
+    }
+
+    const prompt = {
+      operation: snapshot.operation,
+      content: snapshot.content,
+      taskId: snapshot.meta.taskId,
+      source: snapshot.meta.source,
+      promptId: snapshot.meta.promptId ?? null,
+      version: snapshot.meta.version ?? null,
+      promptVersion: snapshot.meta.prompt_version,
+      promptHash: snapshot.meta.prompt_hash ?? null,
+      isStaging: snapshot.meta.isStaging ?? null,
+      useStagingMode: snapshot.meta.use_staging_mode ?? null,
+      modelConfig: snapshot.meta.modelConfig ?? null,
+    };
+
+    return {
+      prompt,
+      routingTopology: getRoutingTopology(this.adapter),
+      generationConfig: {
+        configuredMaxTokens: getConfiguredMaxTokens(operation),
+        maxTokensCeiling: opts.maxTokensCeiling ?? null,
+        anthropicStructuredOutputs:
+          operation === "draft_graph" || operation === "critique_graph"
+            ? config.cee.anthropicStructuredOutputs
+            : null,
+        draftComplianceReminderEnabled:
+          operation === "draft_graph"
+            ? config.cee.draftComplianceReminderEnabled
+            : null,
+      },
+    };
   }
 
   /**
@@ -198,7 +289,12 @@ export class CachingAdapter implements LLMAdapter {
       return fn();
     }
 
-    const cacheKey = this.getCacheKey(operation, args, opts);
+    const authority = this.getResponseAuthority(operation, opts);
+    if (!authority) {
+      return fn();
+    }
+
+    const cacheKey = this.getCacheKey(operation, args, authority);
 
     // Try Redis first if enabled
     if (this.redisEnabled) {
@@ -364,10 +460,13 @@ export class CachingAdapter implements LLMAdapter {
           let totalDeleted = 0;
 
           do {
+            // V1 `pc:{operation}:*` entries are quarantined: never read them
+            // and do not mutate them from request/runtime code. Operators may
+            // retire that namespace separately after the v2 deployment.
             const [newCursor, keys] = await redis.scan(
               cursor,
               "MATCH",
-              "pc:*",
+              `${RESPONSE_CACHE_NAMESPACE}:*`,
               "COUNT",
               100
             );

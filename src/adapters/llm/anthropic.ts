@@ -2822,7 +2822,10 @@ Also provide:
 
 Respond ONLY with valid JSON.`;
 
-async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+async function buildClarifyPrompt(
+  args: ClarifyArgs,
+  preloadedSystemPrompt?: string,
+): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
   const previousContext = args.previous_answers?.length
     ? `\n\n## Previous Q&A (Round ${args.round})\n${args.previous_answers.map((qa, i) => `${i + 1}. Q: ${qa.question}\n   A: ${qa.answer}`).join("\n")}`
     : "";
@@ -2832,7 +2835,7 @@ async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: Anthropi
 ${previousContext}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('clarify_brief');
+  const systemPrompt = preloadedSystemPrompt ?? await getSystemPrompt('clarify_brief');
 
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "clarify_brief" }),
@@ -2841,12 +2844,16 @@ ${previousContext}${currencyInstruction}`;
 }
 
 export async function clarifyBriefWithAnthropic(
-  args: ClarifyArgs
+  args: ClarifyArgs,
+  opts?: {
+    preloadedSystemPrompt?: string;
+    promptMeta?: ReturnType<typeof getSystemPromptMeta>;
+  },
 ): Promise<{ questions: Array<{ question: string; choices?: string[]; why_we_ask: string; impacts_draft: string }>; confidence: number; should_continue: boolean; usage: UsageMetrics }> {
-  const prompt = await buildClarifyPrompt(args);
+  const prompt = await buildClarifyPrompt(args, opts?.preloadedSystemPrompt);
   const model = resolveAnthropicModel(args.model);
   const maxTokens = getMaxTokensFromConfig('clarify_brief') ?? 2048;
-  const clarifyPromptMeta = getSystemPromptMeta('clarify_brief');
+  const clarifyPromptMeta = opts?.promptMeta ?? getSystemPromptMeta('clarify_brief');
 
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
@@ -4432,7 +4439,7 @@ export class AnthropicAdapter implements LLMAdapter {
     };
   }
 
-  async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
+  async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {
     const { brief, round, previous_answers, seed, currencyInstruction } = args;
 
     const result = await clarifyBriefWithAnthropic({
@@ -4442,7 +4449,16 @@ export class AnthropicAdapter implements LLMAdapter {
       seed,
       model: this.model,
       currencyInstruction,
-    } as any);
+    } as any, {
+      preloadedSystemPrompt:
+        opts.preloadedSystemPrompt?.operation === 'clarify_brief'
+          ? opts.preloadedSystemPrompt.content
+          : undefined,
+      promptMeta:
+        opts.preloadedSystemPrompt?.operation === 'clarify_brief'
+          ? opts.preloadedSystemPrompt.meta
+          : undefined,
+    });
 
     return {
       questions: result.questions,
