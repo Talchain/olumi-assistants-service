@@ -66,6 +66,7 @@ interface ResponseAuthority {
     readonly model: string;
   }>;
   readonly generationConfig: {
+    readonly timeoutMs: number;
     readonly configuredMaxTokens: number | null;
     readonly maxTokensCeiling: number | null;
     readonly anthropicStructuredOutputs: boolean | null;
@@ -237,6 +238,18 @@ export class CachingAdapter implements LLMAdapter {
       return null;
     }
 
+    const routingTopology = getRoutingTopology(this.adapter);
+    // Anthropic consumes the exact clarify snapshot carried in CallOpts.
+    // OpenAI and fixtures currently serve provider-owned inline/code prompts,
+    // so a topology that can reach either provider has no single immutable
+    // prompt authority at this boundary and must bypass response caching.
+    if (
+      operation === "clarify_brief" &&
+      routingTopology.some(({ provider }) => provider !== "anthropic")
+    ) {
+      return null;
+    }
+
     const prompt = {
       operation: snapshot.operation,
       content: snapshot.content,
@@ -253,8 +266,11 @@ export class CachingAdapter implements LLMAdapter {
 
     return {
       prompt,
-      routingTopology: getRoutingTopology(this.adapter),
+      routingTopology,
       generationConfig: {
+        // timeoutMs is response authority: draft max_tokens is derived from
+        // this live window, and shorter windows can also alter failover.
+        timeoutMs: opts.timeoutMs,
         configuredMaxTokens: getConfiguredMaxTokens(operation),
         maxTokensCeiling: opts.maxTokensCeiling ?? null,
         anthropicStructuredOutputs:

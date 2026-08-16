@@ -185,8 +185,12 @@ describe("CachingAdapter", () => {
     const mock = new MockAdapter();
     const caching = new CachingAdapter(mock);
 
-    await caching.explainDiff({ patch: { adds: {}, updates: [], removes: [] } }, defaultOpts);
-    await caching.explainDiff({ patch: { adds: {}, updates: [], removes: [] } }, defaultOpts);
+    await caching.explainDiff({
+      patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
+    }, defaultOpts);
+    await caching.explainDiff({
+      patch: { adds: { nodes: [], edges: [] }, updates: [], removes: [] },
+    }, defaultOpts);
 
     expect(mock.getCallCount()).toBe(2);
   });
@@ -282,15 +286,47 @@ describe("CachingAdapter", () => {
 
   it("misses when the exact clarify prompt version changes and hits when it does not", async () => {
     vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
-    const mock = new MockAdapter();
-    const caching = new CachingAdapter(mock);
+    const primary = new MockAdapter("anthropic", "claude-sonnet-5");
+    const caching = new CachingAdapter(new FailoverAdapter([
+      primary,
+      new MockAdapter("anthropic", "claude-haiku-4-5"),
+    ], "clarify_brief"));
     const args = { brief: "Same brief", round: 0 };
 
     await caching.clarifyBrief(args, governedOpts("clarify_brief", "CLARIFY V1", 1));
     await caching.clarifyBrief(args, governedOpts("clarify_brief", "CLARIFY V2", 2));
     await caching.clarifyBrief(args, governedOpts("clarify_brief", "CLARIFY V2", 2));
 
-    expect(mock.getCallCount()).toBe(2);
+    expect(primary.getCallCount()).toBe(2);
+  });
+
+  it("bypasses clarify reuse when any possible provider lacks the governed snapshot", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    const args = { brief: "Same brief", round: 0 };
+    const opts = governedOpts("clarify_brief");
+
+    const openAi = new MockAdapter("openai", "gpt-5.2");
+    const openAiCaching = new CachingAdapter(openAi);
+    await openAiCaching.clarifyBrief(args, opts);
+    await openAiCaching.clarifyBrief(args, opts);
+    expect(openAi.getCallCount()).toBe(2);
+
+    const anthropicPrimary = new MockAdapter("anthropic", "claude-sonnet-5");
+    const openAiFallback = new MockAdapter("openai", "gpt-5.2");
+    const mixedFailoverCaching = new CachingAdapter(new FailoverAdapter([
+      anthropicPrimary,
+      openAiFallback,
+    ], "clarify_brief"));
+    await mixedFailoverCaching.clarifyBrief(args, opts);
+    await mixedFailoverCaching.clarifyBrief(args, opts);
+    expect(anthropicPrimary.getCallCount()).toBe(2);
+    expect(openAiFallback.getCallCount()).toBe(0);
+
+    const fixtures = new MockAdapter("fixtures", "fixtures-v1");
+    const fixturesCaching = new CachingAdapter(fixtures);
+    await fixturesCaching.clarifyBrief(args, opts);
+    await fixturesCaching.clarifyBrief(args, opts);
+    expect(fixtures.getCallCount()).toBe(2);
   });
 
   it("binds Redis reuse to the ordered provider/model failover topology", async () => {
@@ -330,10 +366,14 @@ describe("CachingAdapter", () => {
     );
   });
 
-  it("binds reuse to stable generation configuration", async () => {
+  it("binds failover reuse to the exact generation window while ignoring request noise", async () => {
     vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
-    const mock = new MockAdapter();
-    const caching = new CachingAdapter(mock);
+    const primary = new MockAdapter("anthropic", "claude-sonnet-5");
+    const fallback = new MockAdapter("openai", "gpt-5.2");
+    const caching = new CachingAdapter(new FailoverAdapter([
+      primary,
+      fallback,
+    ], "draft_graph"));
     const args = { brief: "Same brief", seed: 17 };
 
     await caching.draftGraph(args, {
@@ -350,8 +390,15 @@ describe("CachingAdapter", () => {
       requestId: "different-request-only-id",
       timeoutMs: 1_234,
     });
+    await caching.draftGraph(args, {
+      ...governedOpts("draft_graph"),
+      maxTokensCeiling: 800,
+      requestId: "another-request-only-id",
+      timeoutMs: 1_234,
+    });
 
-    expect(mock.getCallCount()).toBe(2);
+    expect(primary.getCallCount()).toBe(3);
+    expect(fallback.getCallCount()).toBe(0);
   });
 
   it("should differentiate cache entries by operation", async () => {
@@ -381,7 +428,7 @@ describe("CachingAdapter", () => {
 
   it("should support all LLM operations", async () => {
     vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
-    const mock = new MockAdapter();
+    const mock = new MockAdapter("anthropic", "claude-sonnet-5");
     const caching = new CachingAdapter(mock);
 
     // Draft graph

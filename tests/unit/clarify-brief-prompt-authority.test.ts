@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 
 const harness = vi.hoisted(() => {
-  const clarifyBrief = vi.fn(async () => ({
+  const clarifyBrief = vi.fn(async (_args: unknown, _opts: unknown) => ({
     questions: [{
       question: "Which outcome matters most to the team?",
       choices: ["Growth", "Resilience"],
@@ -75,7 +75,7 @@ describe("clarify brief prompt authority", () => {
       harness.getAdapter.mock.invocationCallOrder[0],
     );
     expect(harness.clarifyBrief).toHaveBeenCalledTimes(1);
-    expect(harness.clarifyBrief.mock.calls[0][1]).toMatchObject({
+    expect(harness.clarifyBrief.mock.calls[0]?.[1]).toMatchObject({
       preloadedSystemPrompt: {
         operation: "clarify_brief",
         content: "EXACT CLARIFY SNAPSHOT V2",
