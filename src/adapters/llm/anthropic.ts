@@ -515,33 +515,6 @@ async function buildDraftPrompt(
   };
 }
 
-const _SUGGEST_SYSTEM_PROMPT = `You are an expert at generating strategic options for decisions.
-
-## Your Task
-Generate 3-5 distinct, actionable options. For each option provide:
-- id: short lowercase identifier (e.g., "extend_trial", "in_app_nudges")
-- title: concise name (3-8 words)
-- pros: 2-3 advantages
-- cons: 2-3 disadvantages or risks
-- evidence_to_gather: 2-3 data points or metrics to collect
-
-IMPORTANT: Each option must be distinct. Do not duplicate existing options or create near-duplicates.
-
-## Output Format (JSON)
-{
-  "options": [
-    {
-      "id": "extend_trial",
-      "title": "Extend free trial period",
-      "pros": ["Experiential value", "Low dev cost"],
-      "cons": ["Cost exposure", "Expiry dip risk"],
-      "evidence_to_gather": ["Trial→upgrade funnel", "Usage lift during trial"]
-    }
-  ]
-}
-
-Respond ONLY with valid JSON.`;
-
 async function buildSuggestPrompt(args: {
   goal: string;
   constraints?: Record<string, unknown>;

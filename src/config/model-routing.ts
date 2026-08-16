@@ -528,11 +528,12 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     hasExecutablePath: true,
     modelAuthority: 'router_task_chain',
     checkedInModel: TASK_MODEL_DEFAULTS.suggest_options,
-    promptAuthority: 'provider_specific_pms_or_inline_constant',
+    promptAuthority: 'pms_or_checked_in_default',
     promptTask: 'suggest_options',
-    promptIdentity: 'provider_specific_runtime_or_code_hash',
+    promptIdentity: 'runtime_source_version_hash',
     structuredContract: 'SuggestOptionsOutput schema',
-    fallback: 'OpenAI serves its inline prompt; Anthropic serves PMS/default suggest_options bytes',
+    fallback:
+      'Anthropic and OpenAI serve the exact PMS/default suggest_options snapshot; fixtures remain deterministic',
     promotionGate: 'none_no_real_pack',
   },
   critique_graph: {

@@ -10,7 +10,6 @@ import {
   getAdapterWithResolution,
   resetAdapterCache,
 } from '../../src/adapters/llm/router.js';
-import { ModelAssignmentError } from '../../src/config/model-assignment.js';
 
 const TASK_CASES = [
   {
@@ -217,7 +216,7 @@ describe('cold/post-invalidation prompt model pins', () => {
     expect(() =>
       getAdapterWithResolution('critique_graph', pin, 'store_model_config'),
     ).toThrowError(
-      expect.objectContaining<ModelAssignmentError>({
+      expect.objectContaining({
         code: 'MODEL_PROVIDER_MISMATCH',
         model: 'gpt-4o',
       }),

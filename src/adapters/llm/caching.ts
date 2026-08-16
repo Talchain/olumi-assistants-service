@@ -133,10 +133,45 @@ export class CachingAdapter implements LLMAdapter {
    * Key pattern: pc:{operation}:{hash16}
    * (Redis keyPrefix will prepend namespace, e.g., "olumi:pc:draft_graph:a3f5c7d1...")
    */
-  private getCacheKey(operation: string, args: unknown): string {
-    // Create deterministic key from operation + args + model
+  private getCacheKey(operation: string, args: unknown, opts: CallOpts): string {
+    // Create a deterministic key from the response-authority inputs available
+    // at this boundary. Prompt-managed routes resolve an exact immutable
+    // snapshot before adapter selection; including its stable identity, bytes
+    // and modelConfig prevents promotion/invalidation from reusing output
+    // generated under the previous authority.
     // Uses module-level sortedReplacer for efficiency
-    const keyData = JSON.stringify({ operation, args, model: this.model }, sortedReplacer);
+    const promptAuthority = opts.preloadedSystemPrompt
+      ? {
+          operation: opts.preloadedSystemPrompt.operation,
+          content: opts.preloadedSystemPrompt.content,
+          taskId: opts.preloadedSystemPrompt.meta.taskId,
+          source: opts.preloadedSystemPrompt.meta.source,
+          promptId: opts.preloadedSystemPrompt.meta.promptId ?? null,
+          version: opts.preloadedSystemPrompt.meta.version ?? null,
+          promptVersion: opts.preloadedSystemPrompt.meta.prompt_version,
+          promptHash: opts.preloadedSystemPrompt.meta.prompt_hash ?? null,
+          isStaging: opts.preloadedSystemPrompt.meta.isStaging ?? null,
+          useStagingMode:
+            opts.preloadedSystemPrompt.meta.use_staging_mode ?? null,
+          modelConfig: opts.preloadedSystemPrompt.meta.modelConfig ?? null,
+        }
+      : null;
+    // Request IDs, deadlines, abort signals and observability hooks are not
+    // response authority and must not destroy cache reuse. `forceDefault` is
+    // retained for legacy direct callers that do not provide a snapshot.
+    const executionConfig = {
+      forceDefault: opts.forceDefault ?? false,
+    };
+    const keyData = JSON.stringify(
+      {
+        operation,
+        args,
+        model: this.model,
+        promptAuthority,
+        executionConfig,
+      },
+      sortedReplacer,
+    );
     const hash = fastHash(keyData, 16);
 
     // Redis key pattern: pc:{operation}:{hash16}
@@ -163,7 +198,7 @@ export class CachingAdapter implements LLMAdapter {
       return fn();
     }
 
-    const cacheKey = this.getCacheKey(operation, args);
+    const cacheKey = this.getCacheKey(operation, args, opts);
 
     // Try Redis first if enabled
     if (this.redisEnabled) {

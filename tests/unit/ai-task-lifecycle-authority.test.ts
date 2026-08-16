@@ -255,7 +255,8 @@ describe('AI task lifecycle authority', () => {
       'decision_review_hash_bound_eval',
     );
     expect(RUNTIME_AI_TASK_AUTHORITY.suggest_options).toMatchObject({
-      promptAuthority: 'provider_specific_pms_or_inline_constant',
+      promptAuthority: 'pms_or_checked_in_default',
+      promptIdentity: 'runtime_source_version_hash',
       checkedInModel: 'gpt-5.2',
     });
     expect(RUNTIME_AI_TASK_AUTHORITY.clarify_brief.promptAuthority).toBe(

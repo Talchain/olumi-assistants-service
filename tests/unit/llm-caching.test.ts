@@ -143,6 +143,68 @@ describe("CachingAdapter", () => {
     expect(mock.getCallCount()).toBe(2); // Different briefs = different cache keys
   });
 
+  it("binds cached output to the exact preloaded prompt authority", async () => {
+    vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
+    const mock = new MockAdapter();
+    const caching = new CachingAdapter(mock);
+    const args = { brief: "Same request", seed: 17 };
+    const defaultModelConfig = {
+      staging: "claude-sonnet-5",
+      production: "claude-sonnet-5",
+    };
+    const snapshot = (
+      content: string,
+      version: number,
+      modelConfig = defaultModelConfig,
+    ) => ({
+      operation: "draft_graph" as const,
+      content,
+      meta: {
+        taskId: "draft_graph" as const,
+        source: "store" as const,
+        promptId: "draft_graph_default",
+        version,
+        prompt_version: `draft_graph_default@v${version} (staging)`,
+        prompt_hash: `hash-${content}`,
+        modelConfig,
+      },
+    });
+
+    await caching.draftGraph(args, {
+      ...defaultOpts,
+      requestId: "prompt-a",
+      preloadedSystemPrompt: snapshot("PROMPT-A", 1),
+    });
+    await caching.draftGraph(args, {
+      ...defaultOpts,
+      requestId: "prompt-b",
+      preloadedSystemPrompt: snapshot("PROMPT-B", 2),
+    });
+    await caching.draftGraph(args, {
+      ...defaultOpts,
+      requestId: "prompt-b-repeat",
+      preloadedSystemPrompt: snapshot("PROMPT-B", 2),
+    });
+    await caching.draftGraph(args, {
+      ...defaultOpts,
+      requestId: "prompt-b-promoted-version",
+      preloadedSystemPrompt: snapshot("PROMPT-B", 3),
+    });
+    await caching.draftGraph(args, {
+      ...defaultOpts,
+      requestId: "prompt-b-new-config",
+      preloadedSystemPrompt: snapshot("PROMPT-B", 3, {
+        staging: "gpt-5.2",
+        production: "claude-sonnet-5",
+      }),
+    });
+
+    // A promotion/invalidation that changes exact bytes, stable served
+    // identity or prompt configuration misses; request-only metadata does not
+    // prevent a repeat of the same authority from hitting the cache.
+    expect(mock.getCallCount()).toBe(4);
+  });
+
   it("should differentiate cache entries by operation", async () => {
     vi.stubEnv("PROMPT_CACHE_ENABLED", "true");
     const mock = new MockAdapter();
