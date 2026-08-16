@@ -109,7 +109,7 @@ function makeClient(
       };
       chain.limit = () => Promise.resolve(execute());
       chain.then = (
-        resolve: (value: { data: unknown; error: null }) => unknown,
+        resolve: (value: ReturnType<typeof execute>) => unknown,
         reject?: (error: unknown) => unknown,
       ) => Promise.resolve(execute()).then(resolve, reject);
       return chain as never;

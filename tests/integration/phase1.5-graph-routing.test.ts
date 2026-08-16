@@ -418,7 +418,10 @@ describe('Phase 1.5 — direct runTurnExecutor with graph and real fixture graph
     // The fixture's graph_state has 13 nodes + 16 edges, and an option node.
     // We add an options[] array on graph_state so the precondition passes.
     const graphState = {
-      ...(UI_FIXTURE.graph_state as Record<string, unknown>),
+      ...(UI_FIXTURE.graph_state as Record<string, unknown> & {
+        nodes: unknown[];
+        edges: unknown[];
+      }),
       options: [
         { id: 'opt_1', status: 'ready', interventions: { fac_1: { value: 0.8, source: 'user_specified' } } },
       ],

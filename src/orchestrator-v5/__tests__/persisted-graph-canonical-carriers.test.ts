@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { buildCanonicalCommittedGraphReceipt } from '../compose/committed-graph-receipt.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { parseRequestExtensions } from '../boundary/request-extensions.js';
+import {
+  parseRequestExtensions,
+  type GraphStateIngress,
+} from '../boundary/request-extensions.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -14,7 +17,10 @@ const goal = { id: 'goal_1', kind: 'goal', label: 'Goal' };
 
 describe('canonical persisted graph hash carriers', () => {
   it('authors explicit carrier state before append and derives the unambiguous goal', () => {
-    const projected = projectGraphForPersistence({ nodes: [goal], edges: [] });
+    const projected = projectGraphForPersistence<GraphStateIngress>({
+      nodes: [goal],
+      edges: [],
+    });
 
     expect(projected).toEqual({
       nodes: [goal],
@@ -55,7 +61,7 @@ describe('canonical persisted graph hash carriers', () => {
   });
 
   it('round-trips a canonical no-goal projection through next-turn ingress, lookup, current hash, and canonical readiness', () => {
-    const projected = projectGraphForPersistence({
+    const projected = projectGraphForPersistence<GraphStateIngress>({
       nodes: [{ id: 'fac_1', kind: 'factor', label: 'Factor' }],
       edges: [],
     });
@@ -111,7 +117,10 @@ describe('canonical persisted graph hash carriers', () => {
       label: 'Option',
       interventions: { fac_1: 0.6 },
     };
-    const projected = projectGraphForPersistence({ nodes: [goal, option], edges: [] });
+    const projected = projectGraphForPersistence<GraphStateIngress>({
+      nodes: [goal, option],
+      edges: [],
+    });
 
     expect(projected.options).toEqual([
       {
