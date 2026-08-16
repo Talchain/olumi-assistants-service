@@ -56,8 +56,11 @@ function baseNodes() {
   ];
 }
 
+/** Either edge projection — the canonical nested one or the deployed UI's flat one. */
+type EdgeFactory = (id: string, from: string, to: string) => Record<string, unknown>;
+
 /** A fully-configured model: both options carry their effect values. */
-function configuredGraph(edge = v3Edge) {
+function configuredGraph(edge: EdgeFactory = v3Edge) {
   return {
     version: "1",
     nodes: [
@@ -76,7 +79,7 @@ function configuredGraph(edge = v3Edge) {
 }
 
 /** The same model with ONE option left unconfigured — `opt_b`. */
-function oneUnconfiguredGraph(edge = v3Edge) {
+function oneUnconfiguredGraph(edge: EdgeFactory = v3Edge) {
   const g = configuredGraph(edge);
   return {
     ...g,
