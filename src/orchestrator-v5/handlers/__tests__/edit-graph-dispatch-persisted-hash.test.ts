@@ -55,6 +55,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 
 const SCENARIO_ID = '7c1f6f42-0f4e-4a3a-9a1f-2b8c5d3e9a11';
 const TURN_ID = '2a9c4d8e-5b1f-4c7a-8e3d-6f0a1b2c3d4e';
@@ -115,27 +116,6 @@ function makeInterceptDuplicateEditResult(): EditGraphResult {
   };
 }
 
-function makeCommitResult(persistedGraph: unknown) {
-  return {
-    response: {},
-    performed: true as const,
-    persisted_row_id: 'row-hash',
-    graphPersisted: true,
-    persistedGraph,
-    persistedAnalysisGraphHash: hash(persistedGraph),
-    pendingLifecycle: {
-      priorCount: 0,
-      consumedCount: 0,
-      supersededCount: 0,
-      expiredWallCount: 0,
-      expiredTurnsCount: 0,
-      hashInvalidatedCount: 0,
-      capDroppedCount: 0,
-      survivedCount: 0,
-    },
-  };
-}
-
 const makePayload = () => ({
   kind: 'message' as const,
   scenario_id: SCENARIO_ID,
@@ -174,9 +154,9 @@ describe('dispatchEditGraph — §3.2: the advertised hash describes the PERSIST
     vi.clearAllMocks();
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockImplementation(
       async (_response, metadata) =>
-        makeCommitResult(metadata.graph) as unknown as Awaited<
-          ReturnType<typeof commitDirectAnswer>
-        >,
+        canonicalCommitResultFixture(metadata.graph ?? null, {
+          persistedRowId: 'row-hash',
+        }),
     );
   });
 

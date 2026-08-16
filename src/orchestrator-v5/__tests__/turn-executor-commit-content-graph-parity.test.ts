@@ -297,10 +297,12 @@ describe('STEP 7 commit — contentGraph ordering parity + fail-open telemetry (
 
     const result = await runRescaleTurn('req-reprojection-fail-open');
 
-    // The injected append still lands before the post-commit witness runs…
-    expect(result.telemetry.commit_performed).toBe(true);
-    // …but the exact receipt barrier fails the turn closed and reverts the
-    // internal egress graph rather than attesting malformed persisted bytes.
+    // Receipt/readiness authority now runs before the irreversible append:
+    // malformed canonical bytes fail closed without writing a turn or graph.
+    expect(result.telemetry.commit_performed).toBe(false);
+    expect(appendCalls).toHaveLength(0);
+    // The internal egress graph also reverts rather than attesting malformed
+    // bytes that were never persisted.
     expect(result.telemetry.failure_type).toBe('INTERNAL_ERROR');
     expect(
       computeAnalysisAffectingGraphHash(result.effectiveGraph as never),

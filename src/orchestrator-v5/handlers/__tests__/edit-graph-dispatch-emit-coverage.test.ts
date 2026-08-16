@@ -7,8 +7,9 @@
  * original exception. Also pins no-double-emit on the normal success path (which
  * now passes through both the inner commit-`finally` and the new outer `finally`).
  *
- * The assembly throw is injected via buildCanonicalAnalysisReadyFromGraph (called at the
- * tail of the assembly region, only on a successful applied mutation).
+ * The assembly throw is injected through the live final egress phrase guard,
+ * immediately before readiness assembly and outside the commit try. This keeps
+ * the test independent of the central receipt/readiness authority.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
@@ -24,6 +25,20 @@ vi.mock('../../commit.js', () => ({
 vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapter: vi.fn().mockReturnValue({}),
 }));
+
+const egressGuardFault = vi.hoisted(() => ({ error: null as Error | null }));
+vi.mock('../../compose/forbidden-user-facing-phrases.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../compose/forbidden-user-facing-phrases.js')
+  >();
+  return {
+    ...actual,
+    applyEgressForbiddenPhraseGuard: (text: string) => {
+      if (egressGuardFault.error !== null) throw egressGuardFault.error;
+      return actual.applyEgressForbiddenPhraseGuard(text);
+    },
+  };
+});
 
 // V5-PERSIST-FIX-01: stub ONLY the strict persisted read so applied
 // mutations do not fail closed against the unconfigured test store.
@@ -47,15 +62,9 @@ vi.mock('../../../adapters/llm/prompt-loader.js', () => ({
     prompt_hash: '313665a4',
   })),
 }));
-// The injection point: throw from the assembly tail.
-vi.mock('../../../orchestrator/tools/analysis-ready-helper.js', () => ({
-  buildCanonicalAnalysisReadyFromGraph: vi.fn(),
-}));
-
 import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
-import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { canonicalCommitResultFixture } from './canonical-commit-result-fixture.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
@@ -96,15 +105,6 @@ function makeAppliedResult(): EditGraphResult {
 
 const hg = handleEditGraph as MockedFunction<typeof handleEditGraph>;
 const commit = commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>;
-const buildCanonical = buildCanonicalAnalysisReadyFromGraph as MockedFunction<
-  typeof buildCanonicalAnalysisReadyFromGraph
->;
-const CANONICAL_BLOCKED_READINESS = {
-  status: 'blocked',
-  goal_node_id: 'goal_revenue',
-  options: [],
-  blocked_reason: 'FEWER_THAN_TWO_OPTIONS',
-} as ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>;
 let events: Array<{ event: string; data: Record<string, unknown> }> = [];
 
 beforeEach(() => {
@@ -112,7 +112,7 @@ beforeEach(() => {
   commit.mockResolvedValue(
     canonicalCommitResultFixture(POST_EDIT_GRAPH, { persistedRowId: 'r' }),
   );
-  buildCanonical.mockReturnValue(CANONICAL_BLOCKED_READINESS);
+  egressGuardFault.error = null;
   events = [];
   setTestSink((event, data) => events.push({ event, data }));
 });
@@ -134,8 +134,8 @@ async function run() {
 describe('R7 NB-1 — assembly-region exactly-once', () => {
   it('emits exactly one event AND propagates the original error when the assembly region throws', async () => {
     hg.mockResolvedValue(makeAppliedResult());
-    const boom = new Error('readiness boom');
-    buildCanonical.mockImplementation(() => { throw boom; });
+    const boom = new Error('egress guard boom');
+    egressGuardFault.error = boom;
 
     await expect(run()).rejects.toBe(boom); // original exception surfaces unmasked
     const te = turnEvents();
@@ -147,8 +147,8 @@ describe('R7 NB-1 — assembly-region exactly-once', () => {
 
   it('a telemetry fault during the assembly-throw emit still cannot mask the original error', async () => {
     hg.mockResolvedValue(makeAppliedResult());
-    const boom = new Error('readiness boom');
-    buildCanonical.mockImplementation(() => { throw boom; });
+    const boom = new Error('egress guard boom');
+    egressGuardFault.error = boom;
     setTestSink((event) => { if (event === 'v5.edit_graph.turn') throw new Error('telemetry boom'); });
 
     // The ORIGINAL assembly error must surface, not 'telemetry boom'.
@@ -157,7 +157,6 @@ describe('R7 NB-1 — assembly-region exactly-once', () => {
 
   it('normal success path emits exactly once across both finallys (no double-emit)', async () => {
     hg.mockResolvedValue(makeAppliedResult());
-    buildCanonical.mockReturnValue(CANONICAL_BLOCKED_READINESS);
     const result = await run();
     expect(result.commitPerformed).toBe(true);
     expect(turnEvents()).toHaveLength(1); // inner finally emits; outer finally is a guarded no-op
