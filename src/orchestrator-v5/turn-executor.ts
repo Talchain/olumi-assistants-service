@@ -2549,6 +2549,14 @@ export async function runTurnExecutor(
         // did you make?") have no human-readable receipt to ground
         // Sonnet's answer and fall to the legacy `edit_graph` catch-all.
         priorFacts: context.prior_facts,
+        // CONTEXT/MEMORY V5 defect 4 — the assembler derives its OWN canonical
+        // analysis state from these facts (`deriveContextPackAnalysisState` →
+        // `selectCanonicalAnalysisState`); this call passes no `canonicalState`,
+        // so that derivation is the pack's authority. Thread the read state or a
+        // thrown read reaches the LLM-facing pack as "never analysed".
+        ...(context.prior_facts_read_ok === undefined
+          ? {}
+          : { priorFactsReadOk: context.prior_facts_read_ok }),
         // Lane 28 — brief pipeline (dossier gap G2): the persisted decision
         // brief (`scenarios.brief_text`, loaded once per turn by
         // buildTurnContext in the same round trip as the graph). Projected

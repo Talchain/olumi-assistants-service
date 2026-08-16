@@ -2920,6 +2920,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           addOptionFreshness = deriveAnalysisFreshness(
             turnContext.prior_facts,
             addOptionGraphHash,
+            undefined,
+            // CONTEXT/MEMORY V5 defect 4 — the add-option route performs its own
+            // `buildTurnContext` read, independent of the turn-executor's. A
+            // thrown fact read does NOT reject that promise (the catch inside
+            // `fetchPriorFacts` swallows it and reports `readOk: false`), so the
+            // surrounding catch below never fires and `prior_facts` is `[]`.
+            // Without this flag that empty reads as "never analysed" and feeds
+            // `dispatchAddOptionTransaction`'s gate.
+            turnContext.prior_facts_read_ok === undefined
+              ? undefined
+              : { priorFactsReadOk: turnContext.prior_facts_read_ok },
           ).freshness;
         } catch (err) {
           log.warn(

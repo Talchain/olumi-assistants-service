@@ -618,6 +618,20 @@ export interface AssembleContextPackInput {
    */
   readonly priorFacts?: readonly HandlerFact[];
   /**
+   * CONTEXT/MEMORY V5 defect 4 — did the read that produced `priorFacts`
+   * SUCCEED? Threaded from `EnrichedTurnContext.prior_facts_read_ok`.
+   *
+   * `priorFacts === undefined` (facts never wired) is already handled above by
+   * omitting the canonical state entirely. This flag covers the OTHER empty:
+   * facts WERE wired, the read THREW, and the array is `[]`. Without it
+   * `deriveContextPackAnalysisState` reads that as canonical `'none'` and puts
+   * "never analysed" into the LLM-facing pack.
+   *
+   * `false` ONLY on a thrown read; absent ⇒ pre-fix behaviour. Deliberately
+   * mirrors `prior_facts_read_ok` rather than inventing a second vocabulary.
+   */
+  readonly priorFactsReadOk?: boolean;
+  /**
    * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
    * scenario, threaded by the turn-executor from
    * `EnrichedTurnContext.scenarioBriefText` (loaded once per turn by
@@ -1287,6 +1301,12 @@ function deriveContextPackAnalysisState(
       ? extractGraphOptionIds(rawGraph)
       : undefined,
     scenarioClaimsAnalysis: input.analysis != null,
+    // CONTEXT/MEMORY V5 defect 4 — the pack's canonical state is LLM-facing
+    // and diagnostic-facing. A thrown prior-fact read arrives here as `[]`,
+    // which is indistinguishable from "never analysed" without this flag.
+    ...(input.priorFactsReadOk === undefined
+      ? {}
+      : { priorFactsReadOk: input.priorFactsReadOk }),
   });
   return summariseCanonicalAnalysisState(canonical);
 }

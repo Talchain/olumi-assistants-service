@@ -2396,6 +2396,22 @@ export async function dispatchEditGraph(
 
   let freshness: FreshnessDerivation;
   let priorFactsForRecovery: readonly HandlerFact[] = [];
+  // CONTEXT/MEMORY V5 defect 4 — the read state for `priorFactsForRecovery`,
+  // surfaced out of the try for exactly the reason `currentGraphHashForRecovery`
+  // below is: the recovery derivations at the bottom of this function re-derive
+  // freshness from `priorFactsForRecovery` after `turnContext` has left scope.
+  //
+  // ⚠ THE `derivation_failed` GUARDS ON THOSE SITES DO NOT COVER THIS.
+  // `fetchPriorFacts` CATCHES a store throw and returns `readOk: false` rather
+  // than rethrowing, so `buildTurnContext` SUCCEEDS, the try below completes
+  // normally, and the catch branch never runs. Without this flag every one of
+  // those re-derivations reads the resulting `[]` as a positive
+  // `'none' / no_successful_run_analysis_fact` claim.
+  //
+  // `undefined` when the try never reached the assignment (the catch branch
+  // fired) — which is pre-fix behaviour and correct: that path has no read
+  // state to describe.
+  let priorFactsReadOkForRecovery: boolean | undefined;
   // V5 P0 — captured proposed concept from the prior turn's pending
   // actions, used by the no-op recovery layer to drive the deterministic
   // Stage 1 / Stage 2 clarifier. Null when no prior proposal exists, when
@@ -2421,6 +2437,7 @@ export async function dispatchEditGraph(
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
+    priorFactsReadOkForRecovery = turnContext.prior_facts_read_ok;
     // V5-PERSIST-FIX-01: the merge base was already resolved above via the
     // strict persisted read (so a degraded read fails closed). buildTurnContext
     // is used here only for prior_facts / pending actions — NOT for the base.
@@ -2483,6 +2500,12 @@ export async function dispatchEditGraph(
       config.cee.optionIdentityFreshnessGuard
         ? extractGraphOptionIds(persistedPostEditGraph)
         : undefined,
+      // CONTEXT/MEMORY V5 defect 4 — a degraded prior-fact read reaches here as
+      // `[]`. Untreated, this is the derivation that seeds the `'none'` verdict
+      // the recovery re-derivations below then repeat.
+      turnContext.prior_facts_read_ok === undefined
+        ? undefined
+        : { priorFactsReadOk: turnContext.prior_facts_read_ok },
     );
     emitFreshnessTelemetry(
       freshness,
@@ -2718,7 +2741,17 @@ export async function dispatchEditGraph(
     const gmFreshness: FrameFreshness =
       freshness.reason === 'derivation_failed'
         ? 'unknown'
-        : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash).freshness;
+        : deriveAnalysisFreshness(
+            priorFactsForRecovery,
+            gmCurrentHash,
+            undefined,
+            // Defect 4 — the `derivation_failed` short-circuit above does NOT
+            // cover a degraded read (that path returns `readOk: false` without
+            // throwing, so `freshness.reason` is `no_successful_run_analysis_fact`).
+            priorFactsReadOkForRecovery === undefined
+              ? undefined
+              : { priorFactsReadOk: priorFactsReadOkForRecovery },
+          ).freshness;
     // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
     //
     // Read off the SAME freshness verdict the gate is about to use, so the
@@ -2801,6 +2834,11 @@ export async function dispatchEditGraph(
         config.cee.optionIdentityFreshnessGuard
           ? extractGraphOptionIds(gmFrameBase)
           : undefined,
+        // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
+        // `derivation_failed`, which a degraded read does NOT produce.
+        priorFactsReadOkForRecovery === undefined
+          ? undefined
+          : { priorFactsReadOk: priorFactsReadOkForRecovery },
       );
     }
     ev.branch = 'part_accounting_substitution_blocked';
@@ -2887,6 +2925,11 @@ export async function dispatchEditGraph(
         config.cee.optionIdentityFreshnessGuard
           ? extractGraphOptionIds(gmFrameBase)
           : undefined,
+        // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
+        // `derivation_failed`, which a degraded read does NOT produce.
+        priorFactsReadOkForRecovery === undefined
+          ? undefined
+          : { priorFactsReadOk: priorFactsReadOkForRecovery },
       );
     }
     // R7 per-turn event honesty: the mutation did not apply.
@@ -3764,6 +3807,11 @@ export async function dispatchEditGraph(
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(gmFrameBase)
               : undefined,
+            // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above
+            // screens `derivation_failed`, which a degraded read does NOT produce.
+            priorFactsReadOkForRecovery === undefined
+              ? undefined
+              : { priorFactsReadOk: priorFactsReadOkForRecovery },
           );
         }
       }

@@ -677,6 +677,19 @@ export async function buildTurnContext(
     config.cee.optionIdentityFreshnessGuard
       ? extractGraphOptionIds(scenarioState.graph)
       : undefined,
+    // CONTEXT/MEMORY V5 defect 4 — THE PERSIST HALF. Without this, a THROWN
+    // prior-fact read reaches here as `[]`, derives `'none' /
+    // no_successful_run_analysis_fact`, and `deriveAnalysisSignals` turns that
+    // into an ACTIVE `analysis_missing` coaching signal. That signal is not
+    // merely displayed: it is carried on `context.coaching_state`, committed
+    // via `commit.ts` into the `coaching_state` JSONB column, and read back on
+    // LATER turns as `prior_coaching_state`. Because the loader selects
+    // `coaching_state IS NOT NULL ORDER BY created_at DESC LIMIT 1`, a single
+    // degraded read could persist "this scenario has never been analysed" and
+    // have it replayed indefinitely — long after the store recovered.
+    // Threading the read state makes the degraded case `'unknown' /
+    // derivation_failed`, which maps to an `unavailable` signal instead.
+    priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
   );
   const coachingState = deriveCoachingState({
     decisionContext,
