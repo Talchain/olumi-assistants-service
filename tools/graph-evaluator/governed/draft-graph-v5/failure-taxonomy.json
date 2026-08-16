@@ -1,0 +1,63 @@
+{
+  "schema_version": "olumi.draft_graph.eval_failures.v1",
+  "classes": {
+    "provenance": [
+      "PACK_BASE_MISMATCH",
+      "PROMPT_HASH_MISMATCH",
+      "CODE_LAYER_DRIFT",
+      "CORPUS_DRIFT",
+      "MODEL_ROUTE_DRIFT",
+      "LEGACY_UNDISPOSITIONED",
+      "DEPLOYED_EVIDENCE_DRIFT",
+      "PROMPT_IDENTITY_MISMATCH",
+      "GOVERNANCE_STATUS_INVALID",
+      "CANDIDATE_IDENTITY_INVALID"
+    ],
+    "provider": [
+      "AUTH_FAILED",
+      "RATE_LIMITED",
+      "TIMEOUT",
+      "PROVIDER_5XX",
+      "STRUCTURED_OUTPUTS_REJECTED",
+      "MAX_TOKENS_TRUNCATION",
+      "NON_JSON"
+    ],
+    "records_contract": [
+      "RECORD_SET_SCHEMA_INVALID",
+      "RECORD_PROJECTION_FAILED",
+      "COMPLETION_FAILED_DEGRADED",
+      "COMPLETION_REGRESSED",
+      "RECORD_DISCLOSURE_UNSURFACED",
+      "SERVING_DISCLOSURE_COUNT_INVALID"
+    ],
+    "graph_contract": [
+      "GRAPH_SCHEMA_INVALID",
+      "STRUCTURAL_INVALID",
+      "CANONICAL_READINESS_BLOCKED",
+      "CANONICAL_READINESS_INTERNAL",
+      "PROVENANCE_MISSING"
+    ],
+    "comparison": [
+      "PAIR_INCOMPLETE",
+      "MODEL_CONFIG_MISMATCH",
+      "DISCLOSURE_EVIDENCE_HOLD",
+      "SCORE_EVIDENCE_MISMATCH",
+      "QUALITY_EVIDENCE_INCOMPLETE",
+      "QUALITY_AUTHORITY_UNAVAILABLE",
+      "STRUCTURAL_REGRESSION",
+      "READINESS_REGRESSION",
+      "PROVENANCE_REGRESSION"
+    ]
+  },
+  "rules": [
+    "Provider and pack failures are not quality losses and must not be scored as zero-quality cases.",
+    "A completion failure is fail-soft only when pass-one projection survives; otherwise classify the records contract failure.",
+    "Structural, readiness and provenance are non-regression guards; improvements on those axes are not positive-quality promotion authority.",
+    "An unbased AI inference is a governed comparison metric, not an automatic case failure; a candidate may not increase its matched total.",
+    "An incomplete or configuration-mismatched pair is HOLD, never PASS or FAIL.",
+    "Missing, non-integer, non-finite, negative, or over-generated served-disclosure counts fail closed; any unsurfaced disclosure keeps comparison on HOLD.",
+    "Stored scores and summaries are untrusted: verifier and comparator must recompute them from exact captures and briefs and reject any mismatch.",
+    "Identity, configuration, exact-coverage, stored-evidence and disclosure eligibility failures are HOLD and dominate simultaneous structural, readiness or provenance regression signals. Only an otherwise eligible pair may FAIL an authentic replayed non-regression breach.",
+    "The legacy scorer is executable diagnostic-only. Complete or incomplete legacy gains cannot produce PASS or a quality FAIL; until a grounding-sensitive positive-quality authority exists, eligible comparisons remain HOLD with QUALITY_AUTHORITY_UNAVAILABLE."
+  ]
+}

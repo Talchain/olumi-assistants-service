@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/cli.ts",
+    "governed:draft-graph:verify": "tsx src/governed-draft-graph-cli.ts",
+    "governed:draft-graph:baseline": "tsx src/governed-draft-graph-baseline-cli.ts",
+    "governed:draft-graph:rescore": "tsx src/governed-draft-graph-rescore-cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
