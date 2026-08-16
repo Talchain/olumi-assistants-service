@@ -52,7 +52,10 @@ import type { BoundaryError } from '@talchain/schemas/boundary';
 // The PUBLISHED selected-element ref, imported rather than restated: this
 // parser's job is to admit what the contract declares, and a hand-copy of the
 // ref shape here would be free to drift from it silently (trap 12).
-import { SelectedElementRefSchema } from '@talchain/schemas/boundary';
+import {
+  DraftGraphBlockSchema,
+  SelectedElementRefSchema,
+} from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
@@ -92,7 +95,10 @@ export const GraphStateIngressSchema = z
     nodes: z.array(NodeContentSchema),
     edges: z.array(EdgeContentSchema),
     options: z.array(z.unknown()).optional(),
-    goal_node_id: z.string().optional(),
+    // Reuse the shared 0.43 receipt field verbatim: legacy omission remains
+    // admissible, while a canonical persisted graph can round-trip explicit
+    // no-goal state as null. Empty string is never a goal identity.
+    goal_node_id: DraftGraphBlockSchema.shape.goal_node_id,
     goal_constraints: z.array(z.unknown()).optional(),
   })
   .passthrough();

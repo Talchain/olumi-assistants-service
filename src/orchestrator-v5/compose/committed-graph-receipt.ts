@@ -103,18 +103,10 @@ export function buildCanonicalCommittedGraphReceipt(
     throw new CommittedGraphReceiptError('goal_identity_invalid');
   }
 
-  // GraphStateIngressSchema predates explicit-null goal absence. For its
-  // structural pass only, null is represented as the legacy omission it is
-  // semantically equivalent to. The canonical receipt below restores an OWN
-  // `goal_node_id: null`; no persisted value is rewritten or guessed.
-  const ingressCandidate =
-    rawGoalNodeId === null
-      ? (() => {
-          const { goal_node_id: _explicitAbsence, ...withoutNullGoal } = persistedGraph;
-          return withoutNullGoal;
-        })()
-      : persistedGraph;
-  const ingress = GraphStateIngressSchema.safeParse(ingressCandidate);
+  // The live ingress shares the 0.43 nullable, non-empty identity field, so
+  // canonical explicit absence is validated directly. No compatibility
+  // rewrite may make the object parsed here differ from the persisted bytes.
+  const ingress = GraphStateIngressSchema.safeParse(persistedGraph);
   if (!ingress.success) {
     throw new CommittedGraphReceiptError('ingress_invalid');
   }

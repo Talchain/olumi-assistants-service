@@ -58,6 +58,39 @@ describe('parseRequestExtensions', () => {
     }
   });
 
+  it('accepts canonical explicit no-goal state and preserves the own null identity', () => {
+    const result = parseRequestExtensions({
+      graph_state: {
+        nodes: [{ id: 'factor_1', kind: 'factor', label: 'Factor' }],
+        edges: [],
+        options: [],
+        goal_node_id: null,
+        goal_constraints: [],
+      },
+    }, REQUEST_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(Object.hasOwn(result.value.graphState!, 'goal_node_id')).toBe(true);
+      expect(result.value.graphState?.goal_node_id).toBeNull();
+    }
+  });
+
+  it('rejects an empty canonical goal identity instead of treating it as absence', () => {
+    const result = parseRequestExtensions({
+      graph_state: {
+        nodes: [{ id: 'goal_1', kind: 'goal', label: 'Goal' }],
+        edges: [],
+        goal_node_id: '',
+      },
+    }, REQUEST_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error.details as { field?: string }).field).toBe('graph_state');
+    }
+  });
+
   it('rejects graph with a node missing id (structural failure)', () => {
     const body = {
       graph_state: {

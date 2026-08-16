@@ -112,6 +112,10 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import {
+  buildCanonicalCommittedGraphReceipt,
+  CommittedGraphReceiptError,
+} from "../orchestrator-v5/compose/committed-graph-receipt.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -306,6 +310,38 @@ export default async function route(app: FastifyInstance) {
         );
       }
 
+      // Complete the pure payload gate before ownership or state reads. The
+      // persistence projection authors legacy-optional carrier absence, then
+      // the singular receipt validator proves the exact object intended for
+      // append is a strict canonical carrier with a coherent goal identity.
+      // This is validation only: graph registration emits no draft receipt.
+      let graphForStore: GraphStateIngress;
+      try {
+        graphForStore = projectGraphForPersistence(parsed.data, {
+          scenarioId,
+          turnClass: "direct_answer",
+          source: "graph_registration",
+        });
+        buildCanonicalCommittedGraphReceipt(graphForStore);
+      } catch (err) {
+        if (err instanceof CommittedGraphReceiptError) {
+          return invalid(
+            "GRAPH_CANONICAL_INVALID",
+            "This model has an inconsistent canonical graph identity.",
+          );
+        }
+        log.error(
+          {
+            event: "v5.scenario_graph_register.projection_failed",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "Graph registration — canonical projection failed",
+        );
+        return unavailable();
+      }
+
       // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
       let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
       try {
@@ -368,17 +404,7 @@ export default async function route(app: FastifyInstance) {
         expectedGraphAnalysisHash = undefined;
       }
 
-      // ── 5. Project, then hash, then write — in that order ────────────────
-      // `projectGraphForPersistence` is the single definition of "the form in
-      // which a graph is persisted". Hashing before it would advertise an
-      // identity for bytes we do not store, which is the exact ordering defect
-      // `commit.ts` was restructured to close.
-      const graphForStore = projectGraphForPersistence(parsed.data, {
-        scenarioId,
-        turnClass: "direct_answer",
-        source: "graph_registration",
-      });
-
+      // ── 5. Write the already-projected, strictly validated bytes ─────────
       const turnId = registrationTurnId();
       try {
         const appended = await store.append({

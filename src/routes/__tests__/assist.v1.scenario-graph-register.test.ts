@@ -72,7 +72,13 @@ import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 
 
 type WireNode = { id: string; kind?: unknown; type?: unknown; label?: string };
-type WireGraph = { nodes: WireNode[]; edges: Array<Record<string, unknown>> };
+type WireGraph = {
+  nodes: WireNode[];
+  edges: Array<Record<string, unknown>>;
+  options?: unknown[];
+  goal_node_id?: string | null;
+  goal_constraints?: unknown[];
+};
 
 // Read the fixture via fs rather than a `with { type: 'json' }` import
 // attribute: the full tsconfig (module=Node16, the typecheck-drift ratchet's
@@ -446,6 +452,79 @@ describe("register — payload refusals, all before any database work", () => {
     expect(res.statusCode).toBe(422);
     expect(res.json().details.code).toBe("GRAPH_CONTRACT_INVALID");
     expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    [
+      "empty goal identity",
+      { ...IMPORTED, goal_node_id: "" },
+      "GRAPH_CONTRACT_INVALID",
+    ],
+    [
+      "goal identity naming a non-goal node",
+      { ...IMPORTED, goal_node_id: "fac_alpha" },
+      "GRAPH_CANONICAL_INVALID",
+    ],
+    [
+      "explicit no-goal identity alongside a goal node",
+      { ...IMPORTED, goal_node_id: null },
+      "GRAPH_CANONICAL_INVALID",
+    ],
+    [
+      "non-null goal identity when the graph has no goal node",
+      {
+        ...IMPORTED,
+        nodes: IMPORTED.nodes.map((node) =>
+          node.id === "goal_turnout" ? { ...node, kind: "factor" } : node,
+        ),
+        goal_node_id: "goal_turnout",
+      },
+      "GRAPH_CANONICAL_INVALID",
+    ],
+  ])("refuses %s before append", async (_label, graph, code) => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe(code);
+    expect(res.json().registered).not.toBe(true);
+    expect(append).not.toHaveBeenCalled();
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(loadGraph).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("accepts a strict canonical graph with one matching goal identity", async () => {
+    const graph: WireGraph = {
+      ...IMPORTED,
+      options: [],
+      goal_node_id: "goal_turnout",
+      goal_constraints: [],
+    };
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().registered).toBe(true);
+    expect(writtenGraph().goal_node_id).toBe("goal_turnout");
+    await app.close();
+  });
+
+  it("accepts a strict canonical graph whose explicit null identity matches no goal node", async () => {
+    const graph: WireGraph = {
+      nodes: [{ id: "fac_only", kind: "factor", label: "Only factor" }],
+      edges: [],
+      options: [],
+      goal_node_id: null,
+      goal_constraints: [],
+    };
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().registered).toBe(true);
+    expect(writtenGraph().goal_node_id).toBeNull();
     await app.close();
   });
 

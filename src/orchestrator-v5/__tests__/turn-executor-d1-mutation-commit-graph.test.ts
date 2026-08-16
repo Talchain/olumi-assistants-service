@@ -68,15 +68,22 @@ let priorTurns: unknown[] = [];
 let priorFacts: unknown[] = [];
 const loadGraphCalls: unknown[] = [];
 let loadGraphError: Error | null = null;
+let acceptGraphWrites = true;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: AppendWrite) => {
       appendCalls.push(write);
-      if (write.graph !== undefined && write.graph !== null) {
+      const isGraphWrite = write.graph !== undefined && write.graph !== null;
+      if (isGraphWrite && acceptGraphWrites) {
         currentPersistedGraph = write.graph;
       }
-      return { id: 'mock-row-id' };
+      return {
+        id: 'mock-row-id',
+        ...(isGraphWrite && acceptGraphWrites
+          ? { graph_write_disposition: 'accepted_insert' as const }
+          : {}),
+      };
     },
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
@@ -220,6 +227,7 @@ beforeEach(() => {
   appendCalls.length = 0;
   loadGraphCalls.length = 0;
   loadGraphError = null;
+  acceptGraphWrites = true;
   currentPersistedGraph = null;
   priorTurns = [];
   priorFacts = [];
@@ -238,10 +246,13 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
     installPriorRunAnalysisFact(RICH_HASH);
     currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
 
-    await runSetFactorValueTurn(
+    const result = await runSetFactorValueTurn(
       'req-d1shape-j5c',
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11',
     );
+
+    expect(result.telemetry.commit_performed).toBe(true);
+    expect(result.response.blocks.some((block) => block.type === 'error')).toBe(false);
 
     const mutationWrite = appendCalls.at(-1)!;
     expect(mutationWrite.handler_id).toBe('set_factor_value');
@@ -271,6 +282,18 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
     const committedHash = computeAnalysisAffectingGraphHash(committed as never);
     expect(committedHash).not.toBe(RICH_HASH);
     expect(currentPersistedGraph).toBe(committed);
+    expect(result.response.graph_hash).toBe(committedHash);
+    const receipt = result.response.draft_graph as Record<string, unknown> | undefined;
+    expect(receipt).toBeDefined();
+    for (const key of [
+      'nodes',
+      'edges',
+      'options',
+      'goal_node_id',
+      'goal_constraints',
+    ] as const) {
+      expect(receipt?.[key], key).toStrictEqual(committed[key]);
+    }
 
     await runTurnExecutor(
       payload('what changed?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12'),
@@ -298,6 +321,24 @@ describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => 
     expect(freshness!.data.freshness).toBe('stale');
     expect(freshness!.data.reason).toBe('graph_hash_diverged');
     expect(freshness!.data.current_graph_hash).toBe(committedHash);
+  });
+
+  it('ack failure mutant: an attempted graph write without accepted_insert exposes no success or receipt', async () => {
+    currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
+    const pristine = JSON.stringify(currentPersistedGraph);
+    acceptGraphWrites = false;
+
+    const result = await runSetFactorValueTurn(
+      'req-d1shape-ack-missing',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa17',
+    );
+
+    expect(appendCalls.some((write) => write.graph != null)).toBe(true);
+    expect(JSON.stringify(currentPersistedGraph)).toBe(pristine);
+    expect(result.telemetry.commit_performed).toBe(false);
+    expect(result.response.draft_graph).toBeUndefined();
+    const errorBlock = result.response.blocks.find((block) => block.type === 'error');
+    expect(errorBlock).toMatchObject({ type: 'error', error_code: 'INTERNAL_ERROR' });
   });
 
   it('Gate 1 identifier proof: the strict persisted read is keyed by the SCENARIO id — the same value the commit targets — not the turn or request id', async () => {

@@ -1164,7 +1164,7 @@ export interface GraphWithOptions {
   readonly nodes: ReadonlyArray<{ readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly [k: string]: unknown }>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly [k: string]: unknown }>;
   readonly options?: readonly unknown[];
-  readonly goal_node_id?: string;
+  readonly goal_node_id?: string | null;
   readonly goal_constraints?: readonly unknown[];
 }
 
