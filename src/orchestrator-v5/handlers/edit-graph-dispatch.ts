@@ -43,6 +43,8 @@ import {
 // intercept uses, so the recovery copy and the intercept copy cannot drift.
 import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outcome.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
+import { carriesConfigureOptionValuePayload } from '../routing/configure-option-intent.js';
+import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
@@ -3446,12 +3448,34 @@ export async function dispatchEditGraph(
     // WHOLESALE: a success sentence followed by a correction is still a success
     // sentence, and the capture that motivated this row put its false claim in
     // the FIRST sentence, where it is what the user reads and acts on.
+    // ⭐ THE ADMISSION IS DERIVED HERE, NOT ASSUMED IN THE COPY (review C1).
+    // The terminating reply may only say "the analysis will run" if the run
+    // actually would — so the caller, which HOLDS the graph, answers that
+    // question with the same predicate `build-turn-context.ts` admits on. The
+    // composer's input cannot express the condition, which is precisely why the
+    // first version of that sentence was unconditional and therefore false
+    // whenever a structural blocker co-existed. Assessed against the graph the
+    // user now has: the applied one if the edit landed, else the pre-edit one —
+    // the same authority `evaluateConfigureOptionOutcome` compares.
+    const admissionNow = resolveRunAdmission(editResult.appliedGraph ?? parsedGraph);
     response = {
       ...response,
       assistant_text: composeConfigureOptionClarifyResponse({
         optionLabel: configureOutcome.optionLabel,
         factorLabels: configureOutcome.factorLabels,
         stage: payload.stage,
+        // ⭐ TERMINATION (L-25 / NEW-1, 2026-08-16). Without this the composer
+        // re-emits the SAME demand the user just answered: witnessed verbatim
+        // on deployed CEE `bacf35d` — the product asked for a literal template,
+        // the user typed it back exactly, and got the identical sentence again.
+        // `carriesConfigureOptionValuePayload` is the SAME predicate the pre-edit
+        // intercept uses to decline this turn (`configure-option-clarify.ts:217`,
+        // reason `value_payload_present`) — but it is a DIGIT-ANCHORED ROUTING
+        // regex, so it cannot certify whose value it saw. The composer's copy is
+        // written to be true regardless; see its `valueAlreadySupplied` doc.
+        valueAlreadySupplied: carriesConfigureOptionValuePayload(payload.message),
+        analysisWillProceed: admissionNow.willProceed,
+        blockedNextStep: admissionNow.willProceed ? null : admissionNow.strict.nextStep,
       }).assistant_text,
     };
   }

@@ -64,6 +64,8 @@ import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { composeConfigureOptionClarifyResponse } from '../../compose/configure-option-clarify-response.js';
+import { carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 // ── the captured graph ──────────────────────────────────────────────
@@ -258,11 +260,91 @@ const STUB_REQUEST = {} as FastifyRequest;
  * composer, never transcribed. A copy edit moves the expectation with it
  * instead of leaving a stale literal that passes by testing nothing.
  */
+/**
+ * ⚠ RE-POINTED 2026-08-16 (L-25): `valueAlreadySupplied` is now DERIVED from the
+ * fixture message by the SAME predicate production uses, not assumed false.
+ *
+ * `T12C` carries "…to 0.7", i.e. the user HAS supplied a value. The composer
+ * used to answer that by re-emitting its demand verbatim, and this expectation
+ * pinned exactly that — witnessed live on deployed CEE `bacf35d`: the product
+ * demanded a template, the user typed it back, and got the identical sentence
+ * again. The loop did not terminate.
+ *
+ * Deriving the flag here (rather than hardcoding `true`) keeps the test honest
+ * if the fixture message ever changes shape: the expectation follows the
+ * message, exactly as the dispatch does. The precondition — that this fixture
+ * really does carry a value — is asserted by name below, so this cannot become
+ * a tautology that quietly stops discriminating.
+ */
+/**
+ * ⚠ ALSO DERIVES THE ADMISSION (review C1, 2026-08-16). The dispatch now
+ * resolves `resolveRunAdmission` on the graph it holds and threads the verdict
+ * in, so the reply says "the analysis will run…" only when it actually would.
+ * This capture graph does NOT admit, so the honest-alternative branch is the
+ * correct output — derived here for the same reason `valueAlreadySupplied` is,
+ * and guarded against tautology by the preconditions asserted below.
+ */
+const CAPTURE_ADMISSION = resolveRunAdmission(captureGraph());
+
 const EXPECTED_RECOVERY_TEXT = composeConfigureOptionClarifyResponse({
   optionLabel: 'Cloud-Native CRM',
   factorLabels: ['Platform Licence Cost', 'Feature Richness', 'Adoption Complexity'],
   stage: 'analyse',
+  valueAlreadySupplied: carriesConfigureOptionValuePayload(T12C),
+  analysisWillProceed: CAPTURE_ADMISSION.willProceed,
+  blockedNextStep: CAPTURE_ADMISSION.willProceed ? null : CAPTURE_ADMISSION.strict.nextStep,
 }).assistant_text;
+
+describe('L-25 — the repair loop terminates', () => {
+  it('the fixture message genuinely carries a value (precondition for every recovery assertion)', () => {
+    expect(carriesConfigureOptionValuePayload(T12C)).toBe(true);
+  });
+
+  it('C1 — this capture graph genuinely does NOT admit, so the blocked branch is the right one', () => {
+    // PRECONDITION PINNED BY NAME. Without this the derived expectation above
+    // would agree with the code by construction: if the graph ever started
+    // admitting, both sides would flip together and the promise assertion below
+    // would silently stop testing anything.
+    expect(CAPTURE_ADMISSION.willProceed).toBe(false);
+    expect(CAPTURE_ADMISSION.strict.nextStep).toBeTruthy();
+  });
+
+  it('C1 — the reply states the honest alternative and makes NO promise about analysis', () => {
+    expect(EXPECTED_RECOVERY_TEXT).toContain('The analysis cannot run on this model yet.');
+    expect(EXPECTED_RECOVERY_TEXT).not.toMatch(/analysis will run/i);
+  });
+
+  it('C1 — DISCRIMINATING TWIN: an admitting model gets the promise instead', () => {
+    const promised = composeConfigureOptionClarifyResponse({
+      optionLabel: 'Cloud-Native CRM',
+      factorLabels: ['Platform Licence Cost'],
+      stage: 'analyse',
+      valueAlreadySupplied: true,
+      analysisWillProceed: true,
+    }).assistant_text;
+    expect(promised).toMatch(/analysis will run/i);
+    expect(promised).not.toContain('The analysis cannot run on this model yet.');
+  });
+
+  it('the recovery copy does NOT re-demand the format the user just used', () => {
+    expect(EXPECTED_RECOVERY_TEXT).not.toContain("option's effect on");
+    expect(EXPECTED_RECOVERY_TEXT).not.toContain('Tell me what it changes');
+    // It still names the option — terminating must not mean going vague.
+    expect(EXPECTED_RECOVERY_TEXT).toContain('Cloud-Native CRM');
+  });
+
+  it('DISCRIMINATING TWIN — a message with no value still gets the demand', () => {
+    const noValue = 'Configure the Cloud-Native CRM option.';
+    expect(carriesConfigureOptionValuePayload(noValue)).toBe(false);
+    const demand = composeConfigureOptionClarifyResponse({
+      optionLabel: 'Cloud-Native CRM',
+      factorLabels: ['Platform Licence Cost'],
+      stage: 'analyse',
+      valueAlreadySupplied: carriesConfigureOptionValuePayload(noValue),
+    }).assistant_text;
+    expect(demand).toContain("option's effect on");
+  });
+});
 
 // Same mode premise as the H5 sibling: 'off' is the mode in which the seam
 // under test is reached byte-identically. Stated, not inherited.
@@ -301,7 +383,9 @@ describe('ROADMAP 2.427 — branch (b): the wrong-entity write H5 cannot see', (
     // sentence that writes them.
     expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT);
     expect(out.response.assistant_text).toContain('Cloud-Native CRM');
-    expect(out.response.assistant_text).toContain("option's effect on");
+    // L-25: this message CARRIES a value, so the reply must not re-demand the
+    // format the user just used. It names the option and a route out instead.
+    expect(out.response.assistant_text).not.toContain("option's effect on");
   });
 
   it('emits the unhonoured-outcome meter with applied_something=true', async () => {

@@ -102,7 +102,16 @@ describe('EP2 §11 — V5 graph→PLoT no-bypass', () => {
     const servingSeam = seam.slice(seamStart, seamEnd);
     const floorIdx = servingSeam.indexOf('floorGraphSigmaForCompute(persistedGraph)');
     const computeParseIdx = servingSeam.indexOf('GraphV3.safeParse(sigmaFloor.graph)');
-    const guardIdx = servingSeam.indexOf('assessAnalysisReadiness(sigmaFloor.graph)');
+    // ⚠ RE-POINTED 2026-08-16 (row 2.1235), NOT relaxed. The admission call is
+    // now `resolveRunAdmission`, the TWO-TERM gate — it still DELEGATES to
+    // `assessAnalysisReadiness` for the strict verdict (asserted above), and
+    // additionally consults the exclusion projection the `/graph-readiness`
+    // panel publishes, so the offer and the admission cannot disagree. The
+    // one-term predicate this line used to name is what let the panel offer a
+    // Run the server refused. The ordering ratchet this guard owns is
+    // unchanged: the admission must still inspect the carrier-preserving
+    // FLOORED graph, before the canonical projection is parsed.
+    const guardIdx = servingSeam.indexOf('resolveRunAdmission(sigmaFloor.graph)');
     const canonicalParseIdx = servingSeam.indexOf('GraphV3.safeParse(graphForSnapshot)');
     expect(floorIdx).toBeGreaterThan(0);
     expect(computeParseIdx).toBeGreaterThan(floorIdx);

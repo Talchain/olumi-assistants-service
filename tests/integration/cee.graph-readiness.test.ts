@@ -563,6 +563,19 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
         { id: "e4", from: "opt_b", to: "fac_price" },
         { id: "e5", from: "decision", to: "opt_c" },
         { id: "e6", from: "opt_c", to: "fac_price" },
+        // ⚠ ADDED 2026-08-16 (row 2.1235). WITHOUT THIS EDGE THE GOAL IS
+        // UNREACHABLE and this fixture is a structurally broken model: derived
+        // at the deployed route, it returns ORPHAN_NODE + 5 × NO_PATH_TO_GOAL
+        // alongside the one MISSING_OPTION_VALUE.
+        //
+        // The scaffold-plan parity assertion below is the claim *"the panel
+        // advertises what the run will do"*. On the edgeless graph the run
+        // refuses on those six structural blockers, so the old
+        // `will_scaffold_options: true` asserted a parity that never existed —
+        // the test was pinning the very readiness↔run drift it is named for.
+        // With the goal reachable the claim is true and the assertions stand
+        // unchanged.
+        { id: "e7", from: "fac_price", to: "goal" },
       ],
     };
   }

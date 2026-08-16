@@ -125,11 +125,20 @@ export function buildConfigureOptionAdvisedFormat(
 }
 
 /**
- * The advised format with placeholders, for embedding in prompt copy. Derived
- * from the builder above so a prompt and a live suggestion can never diverge.
+ * The advised format for embedding in prompt copy. Derived from the builder
+ * above so a prompt and a live suggestion can never diverge.
+ *
+ * ⚠ THE VALUE SLOT CARRIES A CONCRETE NUMBER, NOT `'<0-1>'` (NEW-5, 2026-08-16).
+ * `<option>` and `<factor>` are placeholders the MODEL substitutes before the
+ * sentence is ever shown — the value slot was not: the prompt told the model to
+ * advise "exactly this phrasing", so `<0-1>` was reproduced verbatim into user
+ * copy and a strategic user was asked to expand a template by hand. A real
+ * number is what the model should be advising, and the routing witness accepts
+ * a decimal exactly as it accepted the placeholder (it requires only a digit
+ * after `to`). The 0-1 scale is stated in the prompt block that embeds this.
  */
 export const CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE = buildConfigureOptionAdvisedFormat(
   '<option>',
   '<factor>',
-  '<0-1>',
+  '0.6',
 );

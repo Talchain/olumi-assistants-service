@@ -104,7 +104,12 @@ because you need the user to supply an option's effect value, you
 MUST advise exactly this phrasing, with the real names substituted
 and nothing else offered:
   "${CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE}"
-Only that shape returns the user's reply to this lane. Do NOT
+Only that shape returns the user's reply to this lane. The number
+in it is an EXAMPLE OF THE FORMAT, not a recommendation: present it
+as the shape to copy and say the user picks their own number. Never
+state or imply that this value is the right one for their option --
+you have no basis for that, and asserting one would be inventing
+their judgement for them. Do NOT
 suggest a bare "Set <factor> to <value>": that names a factor, not
 an option, and it routes to the factor-value path, which cannot
 write an option's effect. Do NOT offer a currency amount as the

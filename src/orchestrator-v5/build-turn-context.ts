@@ -42,6 +42,8 @@ import {
 import {
   assessAnalysisReadiness,
   canonicaliseForAnalysis,
+  resolveRunAdmission,
+  admittedVerdict,
   AnalysisNotReadyError,
   type ReadinessResult,
 } from './tools/handlers/analysis-ready-core.js';
@@ -2272,10 +2274,22 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // reject a value the UI legitimately persists. This pre-parse decides only
   // schema/numeric integrity; structural + semantic Run admission remains
   // exclusively owned by `assessAnalysisReadiness`.
-  const verdict = assessAnalysisReadiness(sigmaFloor.graph);
-  if (verdict.status === 'unrecoverable') {
-    throw new AnalysisNotReadyError(verdict);
+  //
+  // ⭐ TWO-TERM ADMISSION (row 2.1235 / NEW-1 / L-63, 2026-08-16). This used to
+  // be `assessAnalysisReadiness(...).status === 'unrecoverable'` — a ONE-term
+  // gate that threw BEFORE `run-analysis.ts` §2.55 could exclude a single
+  // unconfigured option. The `/graph-readiness` panel meanwhile advertised
+  // `scaffold_plan.will_scaffold_options`, a projection of that very exclusion,
+  // and the deployed UI ORs the two — so the panel offered a Run this line
+  // refused. Measured at deployed CEE `2988eac`: a 2-of-4-configured graph
+  // returns `can_run_analysis:false` WITH `will_scaffold_options:true`, which is
+  // the state a FRESH DRAFT lands in. `resolveRunAdmission` reads the same
+  // projection the panel publishes, so offer and admission are now one answer.
+  const admission = resolveRunAdmission(sigmaFloor.graph);
+  if (!admission.willProceed) {
+    throw new AnalysisNotReadyError(admission.strict);
   }
+  const verdict = admittedVerdict(admission);
   const graphForSnapshot: unknown = verdict.canonicalGraph ?? sigmaFloor.graph;
   const parsedGraph = GraphV3.safeParse(graphForSnapshot);
   if (!parsedGraph.success) {
