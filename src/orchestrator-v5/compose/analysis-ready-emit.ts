@@ -104,18 +104,47 @@ export const ANALYSE_STAGE_INDICATOR = 'analyse' as const;
  * true regardless — so route-v2's authoritative top-level `graph_hash` stamp
  * is unaffected.
  *
- * `stale` and an already-`unknown` verdict pass through untouched: both are
- * honest, both are permitted, and `stale` is the signal the rerun affordance
- * is gated on.
+ * `stale` and an already-`unknown` verdict pass through with their VERDICT
+ * untouched: both are honest, both are permitted, and `stale` is the signal
+ * the rerun affordance is gated on.
+ *
+ * ⭐ ANALYSIS-STATE AUTHORITY, STEP 3 — WHAT THIS FUNCTION ALSO DOES NOW, AND
+ * WHAT IT DELIBERATELY DOES NOT.
+ *
+ * It stamps `refusal_declared: true` on EVERY return path, including the
+ * pass-through above. That flag is the ONLY signal downstream that this turn
+ * declined to analyse, and it feeds `analysis_state.run_state.kind: 'refused'`
+ * — the state that finally makes the refusal sayable as one fact instead of
+ * three that contradict each other. It must be stamped on the pass-through
+ * too: an already-stale derivation loses no verdict here, so its `reason`
+ * never becomes the refusal reason, and a consumer inferring the refusal from
+ * `reason` would report `complete_stale` and go on vouching for a result this
+ * turn refused to stand behind.
+ *
+ * `refusal_declared` CANNOT REACH THE WIRE. `attachComputedAt` (below) and
+ * `emitFreshnessTelemetry` both read NAMED members of the derivation; neither
+ * spreads it. Verified at both readers, and the additive-wire test asserts the
+ * finalised body's top-level key set changes by exactly one key.
+ *
+ * ⚠ AND WHAT DID NOT HAPPEN HERE, stated because the migration plan calls for
+ * it and a silent omission would read as an oversight. The plan RETIRES this
+ * clamp at step 3, on the grounds that `run_state: 'refused'` supersedes it.
+ * IT IS NOT RETIRED, and retiring it here would have been a regression: the
+ * clamp is the only thing that stops a refusal turn shipping
+ * `analysis_ready.freshness: 'fresh'`, and no consumer reads `analysis_state`
+ * yet. Deleting it now re-opens the two measured harms above for every
+ * deployed UI, in exchange for a field nothing reads. It retires at step 6,
+ * when the UI consumes the state — measured, not assumed: see the PR body.
  */
 export function clampRefusalFreshness(
   derivation: FreshnessDerivation,
 ): FreshnessDerivation {
   if (derivation.freshness === 'stale' || derivation.freshness === 'unknown') {
-    return derivation;
+    return { ...derivation, refusal_declared: true };
   }
   return {
     ...derivation,
+    refusal_declared: true,
     freshness: 'unknown',
     // `none` already carries the specific, true reason (there is no
     // successful run_analysis fact) — keep it rather than replacing a precise

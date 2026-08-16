@@ -80,6 +80,16 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
     const top = unwrapToObject(OlumiResponseSchema)
     expect(Object.keys(top.shape).sort()).toEqual([
       'analysis_ready',
+      // 0.46.0-new: ONE composed analysis-state verdict per turn — the seven-branch
+      // `run_state` (including the new `refused`), readiness, leader_claim,
+      // robustness, five usability booleans and the producer's own
+      // `contradictions` self-report. Unlike most entries in this list, CEE
+      // EMITS this one in the same change that declares it: the V5 finaliser
+      // composes it from values the turn has already computed
+      // (`compose/analysis-state-v1.ts`). Optional, so its declaration is
+      // additive to the wire surface, and a cross-tree capture taken on the PR
+      // base proves the rest of the body is unchanged.
+      'analysis_state',
       'assistant_text',
       'blocks',
       // 0.19.0-new: producer decision classification (wave-2 ask 5,
@@ -99,6 +109,12 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       // field is optional, so its declaration is additive to the wire surface.
       'graph_hash',
       'insights',
+      // 0.45.0-new: aggregate-only, response-only model-building notice carrier
+      // (`total_count` + per-kind `groups` + required `details_redacted: true`).
+      // DECLARED here by the 0.44.0 → 0.46.0 re-vendor, which crosses the
+      // never-vendored 0.45.0 line; CEE does NOT emit it and does not read it —
+      // this entry is consumer-parity only.
+      'model_building_notices',
       // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
       // wire sidecar). Approved surface change — 0.15.0 contract wave.
       'reasoning',
@@ -124,6 +140,11 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
     expect(optionality('decision_classification')).toBe(true)
     expect(optionality('framing_quality')).toBe(true)
     expect(optionality('graph_hash')).toBe(true)
+    // Both 0.45.0/0.46.0 arrivals are OPTIONAL — the property that makes them
+    // additive rather than a breaking surface change. Asserted, not assumed:
+    // a future release making either required would land here as a RED.
+    expect(optionality('analysis_state')).toBe(true)
+    expect(optionality('model_building_notices')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })

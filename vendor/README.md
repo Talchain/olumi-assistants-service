@@ -7,7 +7,101 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.44.0.tgz`
+### `talchain-schemas-0.46.0.tgz`
+
+> **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE, AND VERIFIED AGAINST THE
+> PUBLISHED BYTES BY CONTENT DIFF.**
+>
+> Packed from a fresh blobless clone of `olumi-schemas` with `HEAD` asserted
+> equal to `git rev-list -n1 v0.46.0` =
+> **`637ae4f8e3e33136c728a3aa3d1363e6019bf40b`** *before any read* — fetching a
+> ref is not checking it out — and `package.json.version == 0.46.0` asserted,
+> then `npm ci && npm run build && npm pack`
+> (node 20.19.5 / npm 10.8.2, the toolchain every entry above records).
+>
+> sha256 `99ce0c620b9788785276705c0e476009f0058288dff4962ac53790432279e8d9`
+> — 443,422 bytes. A second independent `npm pack` produced **byte-identical**
+> output.
+>
+> **✔ PUBLISHED-CONTENT IDENTITY, PROVEN BY CONTENT AND NOT BY A COMPRESSED
+> HASH.** npm REPACKS on publish, so the registry and source-packed *envelopes*
+> differ by construction and comparing their sha256 would be a check that can
+> only ever fail. The registry artifact was downloaded from GitHub Packages
+> (`dist.tarball` for 0.46.0, sha1 `9dea6332…`, integrity
+> `sha512-OZg64Tp+S+6np…atjL2NSWoh2Vw==` — both matching the publish run's own
+> `npm notice` lines), both tarballs were unpacked, and **`diff -r` over all
+> 226 files reported ZERO content differences**. The comparator carries a
+> positive control: injecting eight bytes into one file of the registry copy
+> made it fail, so the clean result is not a comparator that cannot see.
+>
+> **✔ THE PUBLISH ITSELF IS WITNESSED, NOT ASSUMED.** Merging PR #45 to
+> `olumi-schemas` `main` IS the release switch. Run `31956789130` on
+> `637ae4f8` completed with every step `success`, including
+> `Publish to GitHub Packages` (`skipped` is what a no-op version check
+> produces, and it did not skip) and the log line
+> `npm notice Publishing to https://npm.pkg.github.com …`. Tag `v0.46.0`
+> resolves to the same sha, and the registry packument reports
+> `dist-tags.latest = 0.46.0`. ⚠ NOTE FOR THE NEXT LANE: `Trigger propagation`
+> **succeeded** on this run. `olumi-schemas/CLAUDE.md` records it as a
+> never-once-successful standing red; that sentence is now stale at this tip.
+> Nothing propagated into CEE (no propagation PR exists on this repo), but do
+> not inherit either the old claim or this one — read the run.
+
+**What CEE adopts here: one additive-optional wire field, and CEE is its
+PRODUCER.** Unlike a reader-only bump, this one ships the emitter in the same
+change.
+
+`0.46.0` adds `AnalysisStateV1Schema` (`src/boundary/analysis-state.ts`) and an
+optional top-level `OlumiResponse.analysis_state`: ONE composed verdict per
+turn for "what is the state of the analysis, and what may a surface claim about
+it" — a seven-branch `run_state` discriminated union (including the new
+`refused`), `readiness`, `leader_claim`, `robustness`, five usability booleans
+and a producer self-report of `contradictions`. The paired CEE change composes
+it at the single V5 finaliser seam from values the turn has already computed.
+
+> **⚠ THIS IS A TWO-LINE JUMP: 0.44.0 → 0.46.0, SO IT ALSO ADOPTS 0.45.0.**
+> `@talchain/schemas` is 0.x, where **MINOR is the breaking axis**, so this
+> crosses two compatibility lines. CEE never vendored 0.45.0, which adds the
+> optional top-level `OlumiResponse.model_building_notices` and its
+> `ModelBuildingNoticeKind` / `ModelBuildingNotices` reader types. That is
+> additive-optional and CEE adopts it as **types only** — this PR emits no
+> notice carrier and reads none. Neither 0.45.0 nor 0.46.0 makes any existing
+> field required or narrows any vocabulary; `response_version` stays `2`.
+
+> **⚠ READER-FIRST ORDER, AND WHY IT IS SATISFIED HERE.** `OlumiResponseSchema`
+> is strict, so a service pinned below 0.46.0 that received `analysis_state`
+> would refuse the whole payload — not drop the field. CEE is the only producer
+> and it validates egress against the SAME 0.46.0 vendored here, so producer and
+> validator move as one commit. **The UI is NOT a reader yet (pinned 0.43.0 at
+> the time of writing) and does not need to be**: it ignores unknown top-level
+> keys on ingest. The UI pin bump is its own PR and is the prerequisite for the
+> UI CONSUMING the field (migration step 5), not for CEE emitting it.
+
+> **✔ AND IT CLOSES 0.44.0's OPEN ITEM IN PASSING, MEASURED HERE RATHER THAN
+> EDITED INTO THAT ENTRY.** The 0.44.0 block below still carries its
+> pre-merge caveat — that the bytes were packed from an unmerged branch head and
+> that "these are the published bytes" was asserted, not proven. **It is proven
+> now.** 0.44.0's registry artifact (sha1
+> `f47469ea5e7da2b0f28472788308f653e758c71d`) was downloaded and unpacked
+> alongside the tarball this repo carried at `bacf35d5`, whose sha256 is
+> `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72` —
+> identical to the value recorded in that block — and `diff -r` over every path
+> reported **zero content differences**. The estate rule "no two repos may hold
+> DIFFERENT bytes under one version string" held for 0.44.0.
+>
+> ⚠ THE 0.44.0 BLOCK IS DELIBERATELY LEFT UNEDITED. Open PR **#987** rewrites
+> that exact paragraph. Recording the settlement here instead of there keeps
+> these two PRs free of a textual conflict, and keeps both statements: #987's
+> account of the tagged-tree identity, and this measurement of the published
+> bytes. Whichever merges second should fold them together rather than take one
+> side wholesale.
+
+**Rollback path:** revert this whole PR and run `pnpm install`. Git restores the
+exact 0.44.0 tarball, checksum, pin and lockfile, and the wire returns to the
+shape it had before — no consumer reads `analysis_state`, so nothing downstream
+regresses. Reverting never unpublishes 0.46.0.
+
+### `talchain-schemas-0.44.0.tgz` (historical — no longer vendored as of 0.46.0)
 
 > **⚠⚠ PACKED FROM AN UNMERGED BRANCH — READ THIS BEFORE MERGING THIS PR.**
 > Every other entry in this file records a tarball packed from a **merged,

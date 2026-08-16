@@ -580,7 +580,24 @@ describe('EXT-2 / 2.1085 (root 2.1041) — the mixed-scale analyse arm emits a t
       'BBBB',
     );
     expect(staleIn.freshness).toBe('stale');
-    expect(clampRefusalFreshness(staleIn)).toEqual(staleIn);
+    // ⚠ THIS ASSERTION WAS `toEqual(staleIn)` AND IS DELIBERATELY NARROWED, NOT
+    // WEAKENED — the original is quoted rather than deleted (CLAUDE.md trap 14).
+    // What it was guarding is that the clamp does not TOUCH THE VERDICT on a
+    // pass-through, and that property is asserted below, field by field,
+    // including the two hashes the clamp drops on its other branch.
+    //
+    // What changed: the analysis-state authority (schemas 0.46.0) needs to know
+    // that THIS TURN REFUSED, and the pass-through branch is exactly the case a
+    // reason-string sniffer cannot see — a stale derivation keeps its own
+    // reason, so nothing else on the object says "refused". `clampRefusalFreshness`
+    // therefore stamps `refusal_declared: true` on BOTH branches. It is
+    // wire-invisible: `attachComputedAt` and `emitFreshnessTelemetry` both read
+    // NAMED members, and `analysis-state-emit.test.ts` asserts the finalised
+    // body never contains the string.
+    const stalePassThrough = clampRefusalFreshness(staleIn);
+    const { refusal_declared: refusalMarker, ...verdictOnly } = stalePassThrough;
+    expect(verdictOnly).toEqual(staleIn);
+    expect(refusalMarker).toBe(true);
   });
 
   /**

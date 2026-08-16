@@ -88,7 +88,12 @@ import {
   synthesiseFreshnessOnlyAnalysisReady,
   type AnalysisReadyPayload,
 } from './compose/analysis-ready-emit.js';
+import {
+  composeAnalysisStateV1,
+  readRawRobustnessFromResponseBody,
+} from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
+import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -173,6 +178,31 @@ export interface FinaliserContext {
    * `optional` in the schema for forward-compat.
    */
   readonly freshness?: import('./context/freshness.js').FreshnessDerivation;
+  /**
+   * ANALYSIS-STATE AUTHORITY, STEP 3 — the turn's canonical analysis verdict,
+   * threaded by a dispatch path that computed the FULL verdict (turn-executor,
+   * with degraded detection). When absent, the finaliser composes the same
+   * partial verdict from `freshness` + `analysisReady` via
+   * `canonicalStateFromFreshness` — the SAME call the route already makes for
+   * `_context_summary`, so the two surfaces cannot describe one turn
+   * differently.
+   *
+   * This is the promotion the migration calls for: the canonical verdict stops
+   * being a flag-gated diagnostic and becomes the producer of record for the
+   * `analysis_state` wire field. The `_context_summary` path is unchanged and
+   * still reads `ctx.canonicalState` under its own flag.
+   */
+  readonly canonicalState?: import('./context/canonical-analysis-state.js').CanonicalAnalysisState;
+  /**
+   * CEE's constraint entitlement for this turn — the CEE half of the
+   * `leader_claim` conjunction. Already REQUIRED on every V5 exit's
+   * `sendFinalised200` context and read there via the fail-closed canonical
+   * reader, so the finaliser reads it rather than re-deriving it (trap 12).
+   * Optional here only so the non-route callers of this function (tests, the
+   * wire-capture script) need not supply it; absence is read as NOT entitled,
+   * which is the fail-closed direction.
+   */
+  readonly mayNameLeadingOption?: boolean;
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -256,8 +286,51 @@ export function finaliseV5Response(
     ctx.freshness?.current_graph_hash != null
       ? { ...stamped, graph_hash: ctx.freshness.current_graph_hash }
       : stamped;
-  FINALISED_RESPONSES.add(withGraphHash);
-  return withGraphHash as FinalisedV5Response;
+  // ANALYSIS-STATE AUTHORITY, STEP 3 — ONE composed verdict per turn, beside
+  // `analysis_ready`. ADDITIVE BY CONSTRUCTION: it adds exactly one top-level
+  // key and rewrites none, so a consumer that ignores it sees byte-identical
+  // behaviour (asserted against a capture taken on the PR base, not against a
+  // fixture this lane wrote). Composed from values this turn already computed
+  // — no engine call, no model call, no store read.
+  const withAnalysisState = attachAnalysisState(withGraphHash, ctx);
+  FINALISED_RESPONSES.add(withAnalysisState);
+  return withAnalysisState as FinalisedV5Response;
+}
+
+/**
+ * Compose and stamp `analysis_state`, or return the body untouched when there
+ * is no verdict to supply.
+ *
+ * Absence is a first-class state in the contract — "no verdict was supplied" —
+ * and it is what a dispatch path with no analysis context must emit. Stamping
+ * a fabricated default (an invented readiness status over an invented run
+ * state) would make every no-analysis turn indistinguishable from a turn whose
+ * producer genuinely assessed one.
+ */
+function attachAnalysisState(
+  response: OlumiResponse,
+  ctx: FinaliserContext,
+): OlumiResponse {
+  const canonical =
+    ctx.canonicalState ??
+    (ctx.freshness !== undefined
+      ? canonicalStateFromFreshness(
+          ctx.freshness,
+          ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+        )
+      : null);
+  const analysisState = composeAnalysisStateV1({
+    canonical,
+    freshness: ctx.freshness,
+    readiness: ctx.analysisReady,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Read from the body as it will ship, not from the fact: when the
+    // withheld-claim projection has redacted `near_tie`, the separation half
+    // is genuinely unknown to the consumer and `leader_claim` must say so.
+    rawRobustness: readRawRobustnessFromResponseBody(response),
+  });
+  if (analysisState === undefined) return response;
+  return { ...response, analysis_state: analysisState };
 }
 
 function sanitiseEnrichmentBlocks(

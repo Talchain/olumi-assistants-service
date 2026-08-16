@@ -60,7 +60,24 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     //     it in the file.
     // So the strict member, the root superRefine, and the intent/direction
     // vocabularies this suite exercises are unchanged across both releases.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.44.0');
+    //
+    // 0.44.0 → 0.46.0 (the AnalysisStateV1 train, which also carries the
+    // never-vendored 0.45.0 `model_building_notices`). RE-DERIVED THE SAME
+    // WAY rather than inherited: both tarballs were unpacked and every `dist`
+    // file mentioning `edge_strength_edit` was compared. The FILE SET is
+    // identical (five files, same paths) and:
+    //   dist/boundary/turn-payload.d.ts   BYTE-IDENTICAL
+    //   dist/boundary/turn-payload.js     BYTE-IDENTICAL
+    //   dist/boundary/enums.d.ts          BYTE-IDENTICAL
+    //   dist/boundary/enums.js            BYTE-IDENTICAL
+    //   dist/fixtures/index.js            differs, but every
+    //     `edge_strength_edit` line is TEXTUALLY IDENTICAL — the delta is the
+    //     twelve AnalysisStateV1 fixtures registered elsewhere in the file.
+    // The comparator carries a positive control: `package.json` DOES differ
+    // between the two tarballs (the version string), so `cmp` is demonstrably
+    // able to see a difference and the four identical verdicts are not a
+    // comparator that cannot fail.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.46.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

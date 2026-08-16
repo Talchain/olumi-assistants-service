@@ -138,6 +138,28 @@ export interface FreshnessDerivation {
   /** ISO timestamp from the selected fact's `computed_at`. Null when
    *  no fact was selected, or selected fact predates 0.10.0. */
   readonly computed_at: string | null;
+  /**
+   * THIS TURN DECLINED TO ANALYSE. Set only by `clampRefusalFreshness`, at the
+   * two dispatch sites that refuse an analyse handler, and read only by the
+   * `analysis_state` composer to emit `run_state.kind: 'refused'`.
+   *
+   * INTERNAL, AND STRUCTURALLY SO: every consumer of this interface reads
+   * NAMED members — `attachComputedAt` stamps four of them onto the wire and
+   * `emitFreshnessTelemetry` reads six — so this field cannot reach the wire
+   * or a telemetry event by being added here. Verified at both readers.
+   *
+   * WHY A FLAG RATHER THAN THE REASON STRING. `clampRefusalFreshness`
+   * EARLY-RETURNS a derivation that is already `stale` or `unknown`, so on that
+   * path `reason` is NOT `analysis_refused_currency_unverified` and a
+   * reason-sniffing consumer cannot tell a refusal from an ordinary stale
+   * result. The flag is set on BOTH branches, which is the whole reason it
+   * exists; the early-return case carries its own test.
+   *
+   * Absent (never `false`) on every non-refusal derivation: this is a positive
+   * marker, and there is no state in which "the turn did not refuse" needs to
+   * be asserted rather than simply not claimed.
+   */
+  readonly refusal_declared?: true;
 }
 
 /**
