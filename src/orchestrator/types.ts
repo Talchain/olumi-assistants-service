@@ -610,6 +610,38 @@ export interface GraphPatchBlockData {
      * change.
      */
     blocked_reason?: string;
+    /** Exhaustive structural + semantic issues from the canonical readiness authority. */
+    readiness_issues?: Array<{
+      issue_id: string;
+      code: string;
+      category: string;
+      message: string;
+      repairability: 'safe_canonicalisation' | 'human_input_required';
+      option_id?: string;
+      option_label?: string;
+      factor_id?: string;
+      factor_label?: string;
+    }>;
+    /** Complete multi-blocker review plan; ordinary one-blocker edits do not emit it. */
+    repair_proposal?: {
+      proposal_version: 'readiness_repair_v1';
+      complete: true;
+      issue_ids: string[];
+      changes: Array<{
+        change_id: string;
+        kind: 'canonicalise_option_interventions';
+        option_id: string;
+        option_label: string;
+        description: string;
+      }>;
+      unresolved_inputs: Array<{
+        issue_id: string;
+        kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'value_scale' | 'constraint_review';
+        prompt: string;
+        option_id?: string;
+        factor_id?: string;
+      }>;
+    };
     blockers?: unknown[];
     model_adjustments?: unknown[];
     goal_threshold?: number;

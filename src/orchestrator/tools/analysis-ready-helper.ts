@@ -16,12 +16,102 @@ import {
   labelMatchesBaseline,
 } from "../../cee/transforms/analysis-ready.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
+import {
+  validateGraphStructure,
+  VIOLATION_MESSAGES,
+  type StructuralViolationCode,
+} from "../graph-structure-validator.js";
+import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
+import { stableStringify } from "../context/stable-stringify.js";
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
+export type CanonicalReadinessIssueCategory =
+  | 'graph_structure'
+  | 'option_values'
+  | 'option_mapping'
+  | 'numeric_integrity'
+  | 'internal';
+
+export type CanonicalReadinessIssueCode =
+  | StructuralViolationCode
+  | 'NO_GRAPH'
+  | 'SCHEMA_INVALID'
+  | 'OPTION_INTERVENTION_UNRESOLVABLE'
+  | 'NO_CAP_UNRECOVERABLE'
+  | 'UNIT_MISMATCH'
+  | 'OPTION_NEEDS_MAPPING'
+  | 'OPTION_NEEDS_ENCODING'
+  | 'MISSING_OPTION_VALUE'
+  | 'AMBIGUOUS_OPTION_VALUE'
+  | 'MISSING_OPTION_CONNECTION'
+  | 'CONSTRAINT_REVIEW_REQUIRED'
+  | 'UNREACHABLE_CONTROLLABLE_FACTOR'
+  | 'INTERNAL_ERROR';
+
+export interface CanonicalReadinessIssue {
+  readonly issue_id: string;
+  readonly code: CanonicalReadinessIssueCode;
+  readonly category: CanonicalReadinessIssueCategory;
+  readonly message: string;
+  readonly repairability: 'safe_canonicalisation' | 'human_input_required';
+  readonly option_id?: string;
+  readonly option_label?: string;
+  readonly factor_id?: string;
+  readonly factor_label?: string;
+}
+
+export interface CanonicalReadinessRepairChange {
+  readonly change_id: string;
+  readonly kind: 'canonicalise_option_interventions';
+  readonly option_id: string;
+  readonly option_label: string;
+  readonly description: string;
+}
+
+export interface CanonicalReadinessRequiredInput {
+  readonly issue_id: string;
+  readonly kind: 'model_structure' | 'option_mapping' | 'option_effect_value' | 'value_scale' | 'constraint_review';
+  readonly prompt: string;
+  readonly option_id?: string;
+  readonly factor_id?: string;
+}
+
+/**
+ * One complete, reviewable plan for a genuinely multi-blocker state. Complete
+ * means every known issue is represented either by a value-preserving change
+ * or by an explicit human input. It never means that Olumi invented the
+ * missing judgement, relationship, scale, or scalar.
+ */
+export interface CanonicalReadinessRepairProposal {
+  readonly proposal_version: 'readiness_repair_v1';
+  readonly complete: true;
+  readonly issue_ids: string[];
+  readonly changes: CanonicalReadinessRepairChange[];
+  readonly unresolved_inputs: CanonicalReadinessRequiredInput[];
+}
+
+export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']> & {
+  /** Exhaustive structural + semantic issues from the canonical assessment. */
+  readonly readiness_issues?: CanonicalReadinessIssue[];
+  /** Present only for two-or-more blocking issues. */
+  readonly repair_proposal?: CanonicalReadinessRepairProposal;
+};
+
+export interface CanonicalReadinessAssessment {
+  readonly analysisReady: AnalysisReadyPayload | undefined;
+  readonly issues: readonly CanonicalReadinessIssue[];
+  readonly blockingIssues: readonly CanonicalReadinessIssue[];
+  readonly repairProposal: CanonicalReadinessRepairProposal | null;
+  /** Strict value-preserving canonical graph admitted to Run, else null. */
+  readonly canonicalGraph: unknown | null;
+  /** Candidate containing every currently safe carrier canonicalisation. */
+  readonly proposedGraph: unknown | null;
+  readonly repairedForAnalysis: boolean;
+  readonly safeToAnalyse: boolean;
+}
 
 // ============================================================================
 // Intervention Extraction
@@ -348,6 +438,177 @@ function projectCanonicalPayloadToWire(
   };
 }
 
+function sameJson(left: unknown, right: unknown): boolean {
+  try {
+    return stableStringify(left) === stableStringify(right);
+  } catch {
+    return left === right;
+  }
+}
+
+function optionRecordById(graph: unknown, id: string): Dict | null {
+  if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return null;
+  const found = graph.nodes.find(
+    (node) => isPlainObject(node) && node.kind === 'option' && node.id === id,
+  );
+  return isPlainObject(found) ? found : null;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** Refines the encoder's defer without second-guessing its defer decision. */
+function classifyUnresolvedOption(
+  graph: unknown,
+  optionId: string,
+): 'NO_CAP_UNRECOVERABLE' | 'UNIT_MISMATCH' | 'OPTION_INTERVENTION_UNRESOLVABLE' {
+  try {
+    if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) {
+      return 'OPTION_INTERVENTION_UNRESOLVABLE';
+    }
+    const option = graph.nodes.find(
+      (node) => isPlainObject(node) && node.kind === 'option' && node.id === optionId,
+    );
+    if (!isPlainObject(option)) return 'OPTION_INTERVENTION_UNRESOLVABLE';
+    const factorById = new Map<string, Dict>();
+    for (const node of graph.nodes) {
+      if (isPlainObject(node) && node.kind === 'factor' && typeof node.id === 'string') {
+        factorById.set(node.id, node);
+      }
+    }
+    const bundle = isPlainObject(option.data) && isPlainObject(option.data.interventions)
+      ? option.data.interventions
+      : isPlainObject(option.interventions)
+        ? option.interventions
+        : {};
+    for (const [factorId, raw] of Object.entries(bundle)) {
+      if (!isPlainObject(raw) || finiteNumber(raw.value) !== undefined) continue;
+      if (finiteNumber(raw.raw_value) === undefined) continue;
+      const factor = factorById.get(factorId);
+      if (!factor) continue;
+      const observed = isPlainObject(factor.observed_state) ? factor.observed_state : undefined;
+      const sourceUnit = readNonEmptyString(raw.unit);
+      const factorUnit = readNonEmptyString(observed?.unit);
+      if (sourceUnit && factorUnit && sourceUnit.toLowerCase() !== factorUnit.toLowerCase()) {
+        return 'UNIT_MISMATCH';
+      }
+      if (finiteNumber(raw.cap) === undefined && finiteNumber(observed?.cap) === undefined) {
+        return 'NO_CAP_UNRECOVERABLE';
+      }
+    }
+    return 'OPTION_INTERVENTION_UNRESOLVABLE';
+  } catch {
+    return 'OPTION_INTERVENTION_UNRESOLVABLE';
+  }
+}
+
+function structuralIssue(
+  code: StructuralViolationCode,
+  ordinal: number,
+): CanonicalReadinessIssue {
+  return {
+    issue_id: `structural_${ordinal + 1}`,
+    code,
+    category: 'graph_structure',
+    message: VIOLATION_MESSAGES[code],
+    repairability: 'human_input_required',
+  };
+}
+
+function blockerIssue(
+  blocker: unknown,
+  ordinal: number,
+  status: string,
+): CanonicalReadinessIssue | null {
+  if (!isPlainObject(blocker)) return null;
+  const blockerType = readNonEmptyString(blocker.blocker_type);
+  const optionId = readNonEmptyString(blocker.option_id) ?? undefined;
+  const optionLabel = readNonEmptyString(blocker.option_label) ?? undefined;
+  const factorId = readNonEmptyString(blocker.factor_id) ?? undefined;
+  const factorLabel = readNonEmptyString(blocker.factor_label) ?? undefined;
+  const suffix = optionLabel && factorLabel
+    ? ` for "${optionLabel}" on "${factorLabel}"`
+    : optionLabel
+      ? ` for "${optionLabel}"`
+      : factorLabel
+        ? ` for "${factorLabel}"`
+        : '';
+  const common = {
+    issue_id: `semantic_${ordinal + 1}`,
+    repairability: 'human_input_required' as const,
+    ...(optionId ? { option_id: optionId } : {}),
+    ...(optionLabel ? { option_label: optionLabel } : {}),
+    ...(factorId ? { factor_id: factorId } : {}),
+    ...(factorLabel ? { factor_label: factorLabel } : {}),
+  };
+  if (status === 'needs_user_mapping' && !optionId && factorId) {
+    return {
+      ...common,
+      code: 'UNREACHABLE_CONTROLLABLE_FACTOR',
+      category: 'option_mapping',
+      message: `Choose which option changes${suffix} and by how much.`,
+    };
+  }
+  switch (blockerType) {
+    case 'missing_value':
+      return {
+        ...common,
+        code: 'MISSING_OPTION_VALUE',
+        category: 'option_values',
+        message: `Choose the missing effect value${suffix}.`,
+      };
+    case 'ambiguous_value':
+      return {
+        ...common,
+        code: 'AMBIGUOUS_OPTION_VALUE',
+        category: 'option_values',
+        message: `Confirm the effect value${suffix}.`,
+      };
+    case 'missing_connection':
+      return {
+        ...common,
+        code: 'MISSING_OPTION_CONNECTION',
+        category: 'option_mapping',
+        message: `Choose the missing connection${suffix}.`,
+      };
+    case 'constraint_dropped':
+      return {
+        ...common,
+        code: 'CONSTRAINT_REVIEW_REQUIRED',
+        category: 'option_values',
+        message: `Review the unresolved constraint${suffix}.`,
+      };
+    default:
+      return null;
+  }
+}
+
+function requiredInputForIssue(
+  issue: CanonicalReadinessIssue,
+): CanonicalReadinessRequiredInput | null {
+  if (issue.repairability !== 'human_input_required') return null;
+  const kind: CanonicalReadinessRequiredInput['kind'] =
+    issue.category === 'graph_structure'
+      ? 'model_structure'
+      : issue.code === 'CONSTRAINT_REVIEW_REQUIRED'
+        ? 'constraint_review'
+        : issue.category === 'option_mapping'
+          ? 'option_mapping'
+          : issue.category === 'numeric_integrity'
+            || issue.code === 'NO_CAP_UNRECOVERABLE'
+            || issue.code === 'UNIT_MISMATCH'
+            ? 'value_scale'
+            : 'option_effect_value';
+  return {
+    issue_id: issue.issue_id,
+    kind,
+    prompt: issue.message,
+    ...(issue.option_id ? { option_id: issue.option_id } : {}),
+    ...(issue.factor_id ? { factor_id: issue.factor_id } : {}),
+  };
+}
+
 /**
  * Build the canonical whole-graph readiness payload from request, mutated, or
  * persisted graph bytes.
@@ -358,7 +619,7 @@ function projectCanonicalPayloadToWire(
  * graph-only status algorithm. Canonical top-level `options[]` wins when it is
  * present; option nodes are a conservative persistence/legacy fallback.
  */
-export function buildCanonicalAnalysisReadyFromGraph(
+function projectSemanticAnalysisReadyFromGraph(
   graph: unknown,
 ): AnalysisReadyPayload | undefined {
   const parsed = GraphV3.safeParse(graph);
@@ -448,6 +709,245 @@ export function buildCanonicalAnalysisReadyFromGraph(
 
   const canonical = buildAnalysisReadyPayload(options, goalNodeId, parsed.data);
   return projectCanonicalPayloadToWire(canonical);
+}
+
+function appendSemanticIssues(
+  payload: AnalysisReadyPayload | undefined,
+  out: CanonicalReadinessIssue[],
+): void {
+  if (!payload || payload.status === 'ready') return;
+  // A strict encoder issue already explains why that option is non-ready.
+  // Counting the producer's derived option status again would turn one real
+  // blocker into an artificial multi-blocker proposal. Seed the coverage from
+  // issues already found, then add only genuinely distinct semantic issues.
+  const coveredOptionIds = new Set(
+    out
+      .map((issue) => issue.option_id)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  for (const [index, blocker] of (payload.blockers ?? []).entries()) {
+    const issue = blockerIssue(blocker, out.length + index, payload.status);
+    if (!issue) continue;
+    if (issue.option_id && coveredOptionIds.has(issue.option_id)) continue;
+    if (issue.option_id) coveredOptionIds.add(issue.option_id);
+    out.push(issue);
+  }
+  for (const option of payload.options) {
+    if (option.status === 'ready' || coveredOptionIds.has(option.option_id)) continue;
+    const mapping = option.status === 'needs_user_mapping';
+    out.push({
+      issue_id: `semantic_${out.length + 1}`,
+      code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',
+      category: mapping ? 'option_mapping' : 'option_values',
+      message: mapping
+        ? `Choose which factor "${option.label}" changes and by how much.`
+        : `Choose how "${option.label}" should be represented on the effect scale.`,
+      repairability: 'human_input_required',
+      option_id: option.option_id,
+      option_label: option.label,
+    });
+  }
+}
+
+/**
+ * The sole whole-model readiness assessment. It exhaustively records every
+ * structural and semantic issue, while separately identifying the carrier
+ * normalisations that are safe because they preserve user-supplied values.
+ * Both the wire projection and Run admission are adapters over this record.
+ */
+export function assessCanonicalAnalysisReadiness(
+  graph: unknown,
+): CanonicalReadinessAssessment {
+  try {
+    if (graph === null || graph === undefined) {
+      const issue: CanonicalReadinessIssue = {
+        issue_id: 'graph_1',
+        code: 'NO_GRAPH',
+        category: 'graph_structure',
+        message: 'Draft or save a model first, then run analysis.',
+        repairability: 'human_input_required',
+      };
+      return {
+        analysisReady: undefined,
+        issues: [issue],
+        blockingIssues: [issue],
+        repairProposal: null,
+        canonicalGraph: null,
+        proposedGraph: null,
+        repairedForAnalysis: false,
+        safeToAnalyse: false,
+      };
+    }
+
+    // Strict encoding is the Run candidate: any unresolvable option keeps it
+    // out. The empty touched set is the proposal candidate: it canonicalises
+    // every safely expressible carrier while deliberately leaving unresolved
+    // options alone, so one bad option cannot hide safe work on another.
+    const strictEncoding = encodeOptionInterventionsForEdit(graph);
+    const proposalEncoding = encodeOptionInterventionsForEdit(graph, new Set<string>());
+    const proposalGraph = proposalEncoding.graph;
+    const parsed = GraphV3.safeParse(proposalGraph);
+    if (!parsed.success) {
+      const issue: CanonicalReadinessIssue = {
+        issue_id: 'graph_1',
+        code: 'SCHEMA_INVALID',
+        category: 'graph_structure',
+        message: 'This graph cannot be analysed because its structure is invalid.',
+        repairability: 'human_input_required',
+      };
+      return {
+        analysisReady: undefined,
+        issues: [issue],
+        blockingIssues: [issue],
+        repairProposal: null,
+        canonicalGraph: null,
+        proposedGraph: null,
+        repairedForAnalysis: false,
+        safeToAnalyse: false,
+      };
+    }
+
+    const labels = new Map(
+      parsed.data.nodes.map((node) => [node.id, node.label] as const),
+    );
+    const changes: CanonicalReadinessRepairChange[] = [];
+    const carrierIssues: CanonicalReadinessIssue[] = [];
+    for (const node of parsed.data.nodes) {
+      if (node.kind !== 'option') continue;
+      const before = optionRecordById(graph, node.id);
+      const after = optionRecordById(proposalGraph, node.id);
+      if (!before || !after || sameJson(before, after)) continue;
+      const issueId = `carrier_${carrierIssues.length + 1}`;
+      carrierIssues.push({
+        issue_id: issueId,
+        code: 'OPTION_NEEDS_ENCODING',
+        category: 'option_values',
+        message: `Store the existing effect values for "${node.label}" in the canonical format.`,
+        repairability: 'safe_canonicalisation',
+        option_id: node.id,
+        option_label: node.label,
+      });
+      changes.push({
+        change_id: `canonicalise_${changes.length + 1}`,
+        kind: 'canonicalise_option_interventions',
+        option_id: node.id,
+        option_label: node.label,
+        description: `Canonicalise the existing effect values for "${node.label}" without changing them.`,
+      });
+    }
+
+    const blockingIssues: CanonicalReadinessIssue[] = [];
+    for (const optionId of strictEncoding.unresolvedOptionIds) {
+      const label = labels.get(optionId);
+      const code = classifyUnresolvedOption(graph, optionId);
+      const message = code === 'NO_CAP_UNRECOVERABLE'
+        ? label
+          ? `Review the effect values for "${label}"; a real bound is required before its raw value can be normalised.`
+          : 'Review the option effect values; a real bound is required before the raw value can be normalised.'
+        : code === 'UNIT_MISMATCH'
+          ? label
+            ? `Review the effect values for "${label}"; the supplied unit does not match the factor.`
+            : 'Review the option effect values; the supplied unit does not match the factor.'
+          : label
+            ? `Review the effect values for "${label}"; at least one value cannot be safely interpreted yet.`
+            : 'Review the option effect values; at least one value cannot be safely interpreted yet.';
+      blockingIssues.push({
+        issue_id: `numeric_${blockingIssues.length + 1}`,
+        code,
+        category: code === 'OPTION_INTERVENTION_UNRESOLVABLE'
+          ? 'numeric_integrity'
+          : 'option_values',
+        message,
+        repairability: 'human_input_required',
+        option_id: optionId,
+        ...(label ? { option_label: label } : {}),
+      });
+    }
+    const structural = validateGraphStructure(parsed.data);
+    structural.violations.forEach((violation, index) => {
+      blockingIssues.push(structuralIssue(violation.code, index));
+    });
+
+    const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
+    appendSemanticIssues(semantic, blockingIssues);
+
+    const allIssues = [...carrierIssues, ...blockingIssues];
+    const proposal: CanonicalReadinessRepairProposal | null =
+      blockingIssues.length >= 2
+        ? {
+            proposal_version: 'readiness_repair_v1',
+            complete: true,
+            issue_ids: allIssues.map((issue) => issue.issue_id),
+            changes,
+            unresolved_inputs: blockingIssues
+              .map(requiredInputForIssue)
+              .filter((input): input is CanonicalReadinessRequiredInput => input !== null),
+          }
+        : null;
+
+    const hardBlocked = blockingIssues.some(
+      (issue) => issue.category === 'graph_structure'
+        || issue.category === 'numeric_integrity'
+        || issue.category === 'internal',
+    );
+    const analysisReady = semantic
+      ? {
+          ...semantic,
+          ...(hardBlocked
+            ? { status: 'blocked', blocked_reason: blockingIssues[0]?.code ?? 'INTERNAL_ERROR' }
+            : {}),
+          ...(allIssues.length > 0 ? { readiness_issues: allIssues } : {}),
+          ...(proposal ? { repair_proposal: proposal } : {}),
+        }
+      : {
+          status: 'blocked',
+          goal_node_id: '',
+          options: [],
+          blocked_reason: blockingIssues[0]?.code ?? 'INTERNAL_ERROR',
+          readiness_issues: allIssues,
+          ...(proposal ? { repair_proposal: proposal } : {}),
+        };
+    const safeToAnalyse = blockingIssues.length === 0 && analysisReady?.status === 'ready';
+    const strictCanonicalGraph = strictEncoding.unresolvedOptionIds.length === 0
+      ? strictEncoding.graph
+      : null;
+    return {
+      analysisReady,
+      issues: allIssues,
+      blockingIssues,
+      repairProposal: proposal,
+      canonicalGraph: safeToAnalyse ? strictCanonicalGraph : null,
+      proposedGraph: changes.length > 0 ? proposalGraph : null,
+      repairedForAnalysis:
+        safeToAnalyse && strictCanonicalGraph !== null && !sameJson(graph, strictCanonicalGraph),
+      safeToAnalyse,
+    };
+  } catch {
+    const issue: CanonicalReadinessIssue = {
+      issue_id: 'internal_1',
+      code: 'INTERNAL_ERROR',
+      category: 'internal',
+      message: 'This graph could not be checked safely. Review it before analysis.',
+      repairability: 'human_input_required',
+    };
+    return {
+      analysisReady: undefined,
+      issues: [issue],
+      blockingIssues: [issue],
+      repairProposal: null,
+      canonicalGraph: null,
+      proposedGraph: null,
+      repairedForAnalysis: false,
+      safeToAnalyse: false,
+    };
+  }
+}
+
+/** Thin wire adapter over the canonical assessment. */
+export function buildCanonicalAnalysisReadyFromGraph(
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
+  return assessCanonicalAnalysisReadiness(graph).analysisReady;
 }
 
 // ============================================================================

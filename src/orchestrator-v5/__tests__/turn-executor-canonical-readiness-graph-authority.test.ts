@@ -91,11 +91,14 @@ function intervention(value: number) {
 const REQUEST_2OPT: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
+    { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
     { id: 'opt_a', kind: 'option', label: 'A' },
     { id: 'opt_b', kind: 'option', label: 'B' },
     { id: 'f1', kind: 'factor', label: 'Execution quality', category: 'controllable' },
   ],
   edges: [
+    { from: 'dec_1', to: 'opt_a', ...INTERVENTION_EDGE },
+    { from: 'dec_1', to: 'opt_b', ...INTERVENTION_EDGE },
     { from: 'opt_a', to: 'f1', ...INTERVENTION_EDGE },
     { from: 'opt_b', to: 'f1', ...INTERVENTION_EDGE },
     { from: 'f1', to: 'goal_1', ...INTERVENTION_EDGE },

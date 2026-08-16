@@ -87,11 +87,18 @@ const PROPOSAL_RUN_ANALYSIS = {
 const READY_GRAPH: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
+    { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
     { id: 'fac_licence', kind: 'factor', label: 'Annual CRM Licence Cost' },
     { id: 'opt_a', kind: 'option', label: 'A', interventions: { fac_licence: 0.7 } },
     { id: 'opt_b', kind: 'option', label: 'B', interventions: { fac_licence: 0.3 } },
   ],
-  edges: [],
+  edges: [
+    { from: 'dec_1', to: 'opt_a', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'dec_1', to: 'opt_b', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_a', to: 'fac_licence', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'opt_b', to: 'fac_licence', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    { from: 'fac_licence', to: 'goal_1', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
   options: [
     { id: 'opt_a', status: 'ready', interventions: { fac_licence: { value: 0.7 } } },
     { id: 'opt_b', status: 'ready', interventions: { fac_licence: { value: 0.3 } } },

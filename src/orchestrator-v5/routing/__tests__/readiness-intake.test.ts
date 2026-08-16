@@ -49,11 +49,18 @@ function readyGraph() {
   return {
     nodes: [
       goalNode({ goal_threshold: 0.8 }),
+      { id: 'dec_1', kind: 'decision', label: 'Choose an option' },
       optionNode('opt_1', 'Option A', READY_INTERVENTIONS),
       optionNode('opt_2', 'Option B', READY_INTERVENTIONS),
       { id: 'f1', kind: 'factor', label: 'Market response', category: 'controllable' },
     ],
-    edges: [edge('opt_1', 'f1'), edge('opt_2', 'f1'), edge('f1', 'goal_1')],
+    edges: [
+      edge('dec_1', 'opt_1'),
+      edge('dec_1', 'opt_2'),
+      edge('opt_1', 'f1'),
+      edge('opt_2', 'f1'),
+      edge('f1', 'goal_1'),
+    ],
   };
 }
 

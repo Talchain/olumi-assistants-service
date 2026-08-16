@@ -98,6 +98,7 @@ describe('canonical persisted-graph readiness projection', () => {
       goal_node_id: 'goal_growth',
       nodes: [
         { id: 'goal_growth', kind: 'goal', label: 'Sustainable growth' },
+        { id: 'dec_route', kind: 'decision', label: 'Choose a route' },
         {
           id: 'opt_fast',
           kind: 'option',
@@ -115,6 +116,8 @@ describe('canonical persisted-graph readiness projection', () => {
         { id: 'fac_top_only', kind: 'factor', label: 'Top-only reach', category: 'controllable' },
       ],
       edges: [
+        edge('dec_route', 'opt_fast'),
+        edge('dec_route', 'opt_careful'),
         edge('opt_fast', 'fac_primary'),
         edge('opt_fast', 'fac_slash'),
         edge('opt_fast', 'fac_top_only'),
@@ -237,7 +240,8 @@ describe('canonical persisted-graph readiness projection', () => {
     const guard = assessAnalysisReadiness(graph);
     expect(guard.status).toBe('unrecoverable');
     expect(guard.safeToAnalyse).toBe(false);
-    expect(guard.reasonCodes).toContain('OPTIONS_NOT_CONFIGURED');
-    expect(guard.nextStep).toContain('which option changes which factor');
+    expect(guard.reasonCodes).toContain('UNREACHABLE_CONTROLLABLE_FACTOR');
+    expect(guard.nextStep).toContain('Delivery capacity');
+    expect(guard.nextStep).toContain('by how much');
   });
 });

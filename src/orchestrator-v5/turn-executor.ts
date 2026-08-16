@@ -88,6 +88,7 @@ import {
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
 import {
+  assessCanonicalAnalysisReadiness,
   buildCanonicalAnalysisReadyFromGraph,
   buildAnalysisRefusalReadiness,
 } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -225,6 +226,13 @@ import {
   readGmHeldResume,
   type GmHeldResumeRead,
 } from './handlers/gm-held-execute.js';
+import {
+  buildReadinessRepairOffer,
+  executeReadinessRepair,
+  readReadinessRepairResume,
+  type ReadinessRepairResumeRead,
+} from './handlers/readiness-repair-proposal.js';
+import { composeReadinessIntakeResponse } from './routing/readiness-intake.js';
 import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
@@ -2927,6 +2935,268 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       };
+      /**
+       * Regenerate a readiness plan against the current persisted graph. This
+       * is the stale/reject/invalid outcome: a conversation turn may persist a
+       * fresh review pending, but there is deliberately no graph write.
+       */
+      const regenerateReadinessRepair = async (
+        priorPending: PendingAction,
+        baseGraph: unknown,
+        pathTag: string,
+      ): Promise<TurnExecutorRunResult> => {
+        const current = composeReadinessIntakeResponse(baseGraph, context.stage);
+        let recoveryResponse = current.response;
+        let replacementPending: PendingAction | null = null;
+        if (current.assessment) {
+          try {
+            const currentHash = computeAnalysisAffectingGraphHash(
+              baseGraph as GraphStateIngress | null | undefined,
+            );
+            if (currentHash === null) throw new Error('readiness graph hash unavailable');
+            const offer = buildReadinessRepairOffer({
+              assessment: current.assessment,
+              currentGraphHash: currentHash,
+              scenarioId: context.session_id,
+            });
+            if (offer) {
+              replacementPending = offer.pending;
+              recoveryResponse = {
+                ...recoveryResponse,
+                assistant_text:
+                  `The earlier repair plan is no longer valid, so I regenerated it against the model as it stands now. ` +
+                  recoveryResponse.assistant_text,
+                suggested_actions: [
+                  ...recoveryResponse.suggested_actions,
+                  {
+                    id: offer.chip.id,
+                    label: offer.chip.label,
+                    message: offer.chip.message,
+                    ...(offer.chip.detail ? { detail: offer.chip.detail } : {}),
+                  },
+                ],
+              };
+            } else {
+              recoveryResponse = {
+                ...recoveryResponse,
+                assistant_text:
+                  `The earlier repair plan is no longer valid. I checked the current model again. ` +
+                  recoveryResponse.assistant_text,
+              };
+            }
+          } catch {
+            // The deterministic composer still carries the current issues;
+            // omitting a dead apply control is the fail-closed posture.
+          }
+        }
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitTurn(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: replacementPending ? [replacementPending] : [],
+            consumedPendingRefs: [priorPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+          analysisReadyForTurn = current.assessment?.analysisReady;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: pathTag,
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure while regenerating readiness repair',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
+
+      /** Confirm one complete readiness plan and commit one reassessed graph. */
+      const commitReadinessRepairResume = async (
+        repairPending: PendingAction,
+        read: ReadinessRepairResumeRead,
+      ): Promise<TurnExecutorRunResult> => {
+        const baseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        if (read.kind !== 'ok') {
+          return regenerateReadinessRepair(
+            repairPending,
+            baseGraph,
+            'readiness_repair_invalid_payload',
+          );
+        }
+        let baseHash: string | null = null;
+        try {
+          baseHash = computeAnalysisAffectingGraphHash(
+            baseGraph as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          baseHash = null;
+        }
+        if (
+          baseHash === null
+          || !repairPending.preconditions.graph_hash
+          || repairPending.preconditions.graph_hash !== baseHash
+        ) {
+          return regenerateReadinessRepair(
+            repairPending,
+            baseGraph,
+            'readiness_repair_stale',
+          );
+        }
+        const outcome = executeReadinessRepair({
+          proposal: read.proposal,
+          currentGraph: baseGraph,
+          hasExistingAnalysis:
+            freshness?.freshness === 'fresh' || freshness?.freshness === 'stale',
+        });
+        if (outcome.status !== 'executed') {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: repairPending.id,
+              reason: outcome.reason,
+            },
+            'Readiness repair confirmation declined; regenerating with zero graph writes',
+          );
+          return regenerateReadinessRepair(
+            repairPending,
+            baseGraph,
+            `readiness_repair_${outcome.reason}`,
+          );
+        }
+
+        const appliedCount = read.proposal.changes.length;
+        const remaining = outcome.assessmentAfter.blockingIssues.length;
+        const appliedResponse = composeAnswer({
+          answerKind: 'functional',
+          assistant_text:
+            `Confirmed. I applied ${appliedCount} value-preserving model ${appliedCount === 1 ? 'fix' : 'fixes'} together. ` +
+            (remaining > 0
+              ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement; I did not invent any missing values or relationships.`
+              : 'The model now passes the readiness check.'),
+          stage: context.stage,
+          suggested_actions: [],
+        });
+        sonnetTextForLog = appliedResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'execute';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        const previousEffectiveGraph = effectiveTurnGraph;
+        const previousMutationObservation = handlerEmittedMutatedGraph;
+        effectiveTurnGraph = outcome.appliedGraph;
+        handlerEmittedMutatedGraph = true;
+        try {
+          const committed = await commitTurn(appliedResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [outcome.fact],
+            graph: outcome.mutatedGraph,
+            consumedPendingRefs: [repairPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          const readback = assessCanonicalAnalysisReadiness(committed.persistedGraph);
+          analysisReadyForTurn = readback.analysisReady;
+          const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
+          response = {
+            ...committed.response,
+            draft_graph: buildAppliedGraphWireField(
+              readbackParsed.success ? readbackParsed.data : outcome.appliedGraph,
+            ),
+          };
+          let postApplyHash: string | null = null;
+          try {
+            postApplyHash = computeAnalysisAffectingGraphHash(
+              committed.persistedGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            postApplyHash = null;
+          }
+          freshness = deriveAnalysisFreshness(
+            context.prior_facts,
+            postApplyHash,
+            config.cee.optionIdentityFreshnessGuard
+              ? extractGraphOptionIds(committed.persistedGraph)
+              : undefined,
+          );
+          try {
+            emit(TelemetryEvents.PendingActionConsumed, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: repairPending.id,
+              kind: repairPending.action.kind,
+              chip_id: repairPending.chip_id,
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+            });
+          } catch (telemetryError) {
+            // The graph and turn are already atomically durable. A best-effort
+            // observability failure must not invert that success on the wire.
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: context.session_id,
+                err: serialiseError(telemetryError),
+              },
+              'Readiness repair committed; pending-consumed telemetry failed',
+            );
+          }
+        } catch (error) {
+          effectiveTurnGraph = previousEffectiveGraph;
+          handlerEmittedMutatedGraph = previousMutationObservation;
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'readiness_repair_apply',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on readiness repair apply',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
       // Lane 34 — GM held-execute resume (propose → hold → confirm →
       // apply). Reached ONLY from the pending_action branch below when the
       // matched pending is a GM held one AND CEE_GRAPH_MANAGEMENT_MODE is
@@ -3481,6 +3751,10 @@ export async function runTurnExecutor(
         // proceed to handler dispatch — both can short-circuit into a
         // direct-answer recovery without an LLM round-trip.
         if (pending.action.kind === 'apply_proposed_change') {
+          const readinessRepairRead = readReadinessRepairResume(pending);
+          if (readinessRepairRead.kind !== 'not_readiness_repair') {
+            return commitReadinessRepairResume(pending, readinessRepairRead);
+          }
           // Lane 34 — GM held-execute wiring. A GM held pending
           // (inline_patch.handler_id = 'graph_management_held_v1') is
           // recognised BEFORE the generic synthesis. Live mode executes
@@ -3897,6 +4171,10 @@ export async function runTurnExecutor(
             // the generic synthesis would resolve it 'invalid' and decline
             // a change the user explicitly picked.
             const ordinalGmRead = readGmHeldResume(ordinal.pending);
+            const ordinalReadinessRepair = readReadinessRepairResume(ordinal.pending);
+            if (ordinalReadinessRepair.kind !== 'not_readiness_repair') {
+              return commitReadinessRepairResume(ordinal.pending, ordinalReadinessRepair);
+            }
             if (
               ordinalGmRead.kind !== 'not_gm_held' &&
               config.features.graphManagementMode === 'live'
@@ -4266,6 +4544,10 @@ export async function runTurnExecutor(
             // synthesis would resolve the GM handler id 'invalid' and
             // decline a change the user explicitly picked.
             const labelGmRead = readGmHeldResume(labelPick.pending);
+            const labelReadinessRepair = readReadinessRepairResume(labelPick.pending);
+            if (labelReadinessRepair.kind !== 'not_readiness_repair') {
+              return commitReadinessRepairResume(labelPick.pending, labelReadinessRepair);
+            }
             if (
               labelGmRead.kind !== 'not_gm_held' &&
               config.features.graphManagementMode === 'live'

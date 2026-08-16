@@ -94,6 +94,30 @@ function asDescription(nextStep: string): string {
 export function summariseReadiness(
   analysisReady: AnalysisReadyPayload,
 ): ReadinessSummary {
+  // A multi-blocker assessment is already exhaustive and user-safe. Preserve
+  // every item instead of collapsing back to the historical first-blocker
+  // projection. The established targeted projection remains byte-for-byte for
+  // zero/one issue, so ordinary edits are unaffected.
+  const canonicalIssues = Array.isArray(analysisReady.readiness_issues)
+    ? analysisReady.readiness_issues.filter(
+        (issue) => issue && typeof issue.message === 'string' && issue.message.trim().length > 0,
+      )
+    : [];
+  if (analysisReady.repair_proposal && canonicalIssues.length >= 2) {
+    const openItems: ReadinessOpenItem[] = canonicalIssues
+      .filter((issue) => issue.repairability === 'human_input_required')
+      .map((issue) => ({
+      kind:
+        issue.category === 'option_mapping'
+          ? 'option_needs_mapping'
+          : issue.category === 'option_values' || issue.category === 'numeric_integrity'
+            ? 'option_needs_encoding'
+            : 'model_needs_review',
+      description: asDescription(issue.message),
+      ...(issue.option_label ? { option_label: issue.option_label } : {}),
+      }));
+    return { open_items: openItems, prose: composeReadinessProse(openItems) };
+  }
   const recovery = projectReadinessRecovery(analysisReady);
   if (recovery.kind === 'run') return { open_items: [], prose: '' };
   const openItems: ReadinessOpenItem[] = [{
