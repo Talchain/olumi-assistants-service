@@ -377,7 +377,7 @@ describe("governed draft_graph V5 pack", () => {
     );
   });
 
-  it("rejects mean gain when canonical readiness or provenance regresses", async () => {
+  it("fails an eligible exact pair when canonical readiness or provenance regresses", async () => {
     const manifest = withCandidatePrompt(await readGovernedManifest());
     const identity = buildGovernedRunIdentity(manifest);
     const baseline = await makeScoredRun("baseline", identity, manifest, () =>
@@ -388,7 +388,7 @@ describe("governed draft_graph V5 pack", () => {
       candidateIdentity,
       manifest,
       (index) => index === 0
-        ? makeDiagnosticGraph({ removeGoal: true, omitFactorProvenance: true })
+        ? makeDiagnosticGraph({ clearOptionInterventions: true, omitFactorProvenance: true })
         : makeDiagnosticGraph({ numericDiversity: true }),
     );
 
@@ -400,6 +400,62 @@ describe("governed draft_graph V5 pack", () => {
         expect.stringContaining("READINESS_REGRESSION"),
         expect.stringContaining("PROVENANCE_REGRESSION"),
         expect.stringContaining("QUALITY_AUTHORITY_UNAVAILABLE"),
+      ]),
+    );
+  });
+
+  it("holds a model-mismatched pair even when replay finds an authentic failure", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
+    const identity = buildGovernedRunIdentity(manifest);
+    const baseline = await makeScoredRun("baseline", identity, manifest, () =>
+      makeDiagnosticGraph());
+    const mismatchedIdentity: GovernedRunIdentity = {
+      ...makeCandidateIdentity(identity),
+      model_id: "different-model",
+    };
+    const failed = await makeScoredRun(
+      "candidate",
+      mismatchedIdentity,
+      manifest,
+      (index) => index === 0 ? undefined : makeDiagnosticGraph(),
+      { failedFirstCase: true },
+    );
+
+    const result = await compareGovernedRuns(baseline, failed, manifest);
+
+    expect(result.verdict).toBe("HOLD");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("MODEL_CONFIG_MISMATCH"),
+        expect.stringContaining("STRUCTURAL_REGRESSION"),
+      ]),
+    );
+  });
+
+  it("holds unsurfaced disclosure evidence even when replay finds a structural regression", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
+    const identity = buildGovernedRunIdentity(manifest);
+    const baseline = await makeScoredRun("baseline", identity, manifest, () =>
+      makeDiagnosticGraph());
+    const failed = await makeScoredRun(
+      "candidate",
+      makeCandidateIdentity(identity),
+      manifest,
+      (index) => index === 0 ? undefined : makeDiagnosticGraph(),
+      {
+        failedFirstCase: true,
+        recordDisclosures: [{ reason: "withheld" }],
+        servedDisclosureCount: 0,
+      },
+    );
+
+    const result = await compareGovernedRuns(baseline, failed, manifest);
+
+    expect(result.verdict).toBe("HOLD");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("DISCLOSURE_EVIDENCE_HOLD"),
+        expect.stringContaining("STRUCTURAL_REGRESSION"),
       ]),
     );
   });
@@ -567,7 +623,7 @@ function withCandidatePrompt(
 interface DiagnosticGraphOptions {
   readonly numericDiversity?: boolean;
   readonly genericFactorLabel?: boolean;
-  readonly removeGoal?: boolean;
+  readonly clearOptionInterventions?: boolean;
   readonly omitFactorProvenance?: boolean;
 }
 
@@ -591,14 +647,14 @@ function makeDiagnosticGraph(options: DiagnosticGraphOptions = {}): unknown {
       id: "option_a",
       kind: "option",
       label: "Act now",
-      data: { interventions: { lever: 0.8 } },
+      data: { interventions: options.clearOptionInterventions ? {} : { lever: 0.8 } },
       provenance: stated,
     },
     {
       id: "option_b",
       kind: "option",
       label: "Keep the status quo",
-      data: { interventions: { lever: 0.5 } },
+      data: { interventions: options.clearOptionInterventions ? {} : { lever: 0.5 } },
       provenance: stated,
     },
     {
@@ -657,8 +713,8 @@ function makeDiagnosticGraph(options: DiagnosticGraphOptions = {}): unknown {
 
   return {
     version: "1",
-    nodes: options.removeGoal ? nodes.filter((node) => node.id !== "goal") : nodes,
-    edges: options.removeGoal ? edges.filter((item) => item.to !== "goal") : edges,
+    nodes,
+    edges,
     goal_constraints: [],
   };
 }

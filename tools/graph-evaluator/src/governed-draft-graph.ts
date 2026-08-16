@@ -1377,8 +1377,21 @@ export async function compareGovernedRuns(
     item.startsWith("READINESS_REGRESSION") ||
     item.startsWith("PROVENANCE_REGRESSION"),
   );
+  const hasEligibilityHold = reasons.some((item) =>
+    item.startsWith("PAIR_INCOMPLETE") ||
+    item.startsWith("MODEL_CONFIG_MISMATCH") ||
+    item.startsWith("CANDIDATE_IDENTITY_INVALID") ||
+    item.startsWith("DISCLOSURE_EVIDENCE_HOLD") ||
+    item.startsWith("SCORE_EVIDENCE_MISMATCH") ||
+    item.startsWith("QUALITY_EVIDENCE_INCOMPLETE"),
+  );
   return {
-    verdict: hasHardRegression ? "FAIL" : "HOLD",
+    // Eligibility is evaluated before non-regression. A malformed,
+    // configuration-mismatched, disclosure-incomplete or otherwise incomplete
+    // pair has no authority to establish a regression, so HOLD dominates even
+    // when replayed diagnostics also contain a regression signal. Only an exact,
+    // disclosure-complete pair can receive an authentic non-regression FAIL.
+    verdict: hasEligibilityHold ? "HOLD" : hasHardRegression ? "FAIL" : "HOLD",
     reasons,
     mean_legacy_delta: meanDelta,
     wins,

@@ -57,6 +57,7 @@
     "An incomplete or configuration-mismatched pair is HOLD, never PASS or FAIL.",
     "Missing, non-integer, non-finite, negative, or over-generated served-disclosure counts fail closed; any unsurfaced disclosure keeps comparison on HOLD.",
     "Stored scores and summaries are untrusted: verifier and comparator must recompute them from exact captures and briefs and reject any mismatch.",
+    "Identity, configuration, exact-coverage, stored-evidence and disclosure eligibility failures are HOLD and dominate simultaneous structural, readiness or provenance regression signals. Only an otherwise eligible pair may FAIL an authentic replayed non-regression breach.",
     "The legacy scorer is executable diagnostic-only. Complete or incomplete legacy gains cannot produce PASS or a quality FAIL; until a grounding-sensitive positive-quality authority exists, eligible comparisons remain HOLD with QUALITY_AUTHORITY_UNAVAILABLE."
   ]
 }

@@ -232,7 +232,7 @@
     "legacy_disposition_path": "legacy-disposition.json",
     "legacy_disposition_sha256": "ce1ea6ef1e16366ca22b41686ba862323a64690661530ff74f87ac6c222d091c",
     "failure_taxonomy_path": "failure-taxonomy.json",
-    "failure_taxonomy_sha256": "a48c6f3a7b28c222e5ee4f2fa12e2f5023f3f981894308ab737e989c1f60f8c2",
+    "failure_taxonomy_sha256": "39ea741f89c8fc5f019888b3a953efdc76aae53ad017db396ac06887c0637e57",
     "deployed_evidence_path": "deployed-evidence.json",
     "deployed_evidence_sha256": "a23706029f5e21ecbb83eba445ecbe1dbf107f9f960f733b6517397de3b722e5"
   }
