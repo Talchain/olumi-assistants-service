@@ -68,6 +68,33 @@ const OFFER = buildReadinessRepairOffer({
   currentGraphHash: HASH,
   scenarioId: SCENARIO_ID,
 })!;
+const PROPOSAL = ASSESSMENT.repairProposal;
+if (PROPOSAL === null) throw new Error('readiness fixture must have a repair proposal');
+
+const UNKNOWN_KEY_MUTANTS = [
+  {
+    location: 'root',
+    proposal: { ...PROPOSAL, unexpected_root: true },
+  },
+  {
+    location: 'change',
+    proposal: {
+      ...PROPOSAL,
+      changes: PROPOSAL.changes.map((change, index) => index === 0
+        ? { ...change, unexpected_nested: true }
+        : change),
+    },
+  },
+  {
+    location: 'unresolved input',
+    proposal: {
+      ...PROPOSAL,
+      unresolved_inputs: PROPOSAL.unresolved_inputs.map((input, index) => index === 0
+        ? { ...input, unexpected_input: true }
+        : input),
+    },
+  },
+];
 
 let pendingActionsForRead: readonly PendingAction[] = [OFFER.pending];
 const appendCalls: Array<Record<string, unknown>> = [];
@@ -194,4 +221,31 @@ describe('readiness multi-repair through TurnExecutor', () => {
     expect(appendCalls[0]!.graph).toBeUndefined();
     expect((appendCalls[0]!.pending_actions as PendingAction[])).toHaveLength(1);
   });
+
+  it.each(UNKNOWN_KEY_MUTANTS)(
+    'a proposal with an unknown $location key is rejected before execution with zero graph writes',
+    async ({ proposal }) => {
+      const action = OFFER.pending.action;
+      if (action.kind !== 'apply_proposed_change') throw new Error('fixture');
+      pendingActionsForRead = [{
+        ...OFFER.pending,
+        action: {
+          ...action,
+          inline_patch: {
+            ...action.inline_patch,
+            proposal,
+          },
+        },
+      }];
+
+      const result = await runTurnExecutor(payload(), `req-readiness-unknown-${randomUUID()}`, {
+        routingAdapter: throwingRoutingAdapter(),
+      });
+
+      expect(appendCalls).toHaveLength(1);
+      expect(appendCalls[0]!.graph).toBeUndefined();
+      expect((appendCalls[0]!.pending_actions as PendingAction[])).toHaveLength(1);
+      expect(result.response.assistant_text).toContain('regenerated');
+    },
+  );
 });

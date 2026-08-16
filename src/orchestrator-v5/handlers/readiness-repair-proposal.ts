@@ -112,14 +112,47 @@ const READINESS_REQUIRED_INPUT_KINDS: ReadonlySet<ReadinessRequiredInputKind> = 
   'value_scale',
   'constraint_review',
 ]);
+const READINESS_REPAIR_PROPOSAL_KEYS: ReadonlySet<string> = new Set([
+  'proposal_version',
+  'complete',
+  'issue_ids',
+  'changes',
+  'unresolved_inputs',
+]);
+const READINESS_REPAIR_CHANGE_KEYS: ReadonlySet<string> = new Set([
+  'change_id',
+  'kind',
+  'option_id',
+  'option_label',
+  'description',
+]);
+const READINESS_REQUIRED_INPUT_KEYS: ReadonlySet<string> = new Set([
+  'issue_id',
+  'kind',
+  'prompt',
+  'option_id',
+  'factor_id',
+]);
 
 function isReadinessRequiredInputKind(value: unknown): value is ReadinessRequiredInputKind {
   return typeof value === 'string'
     && READINESS_REQUIRED_INPUT_KINDS.has(value as ReadinessRequiredInputKind);
 }
 
+/**
+ * Pending actions cross a JSON/JSONB boundary, whose property surface is own,
+ * enumerable string keys. Symbols, non-enumerable properties, and inherited
+ * properties cannot survive that boundary and are therefore outside this
+ * parser's contract. Reject every unknown JSON key before reconstruction so
+ * normalisation cannot weaken the later exact proposal-equality check.
+ */
+function hasOnlyJsonOwnKeys(value: Dict, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
 function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null {
   if (!isRecord(value)) return null;
+  if (!hasOnlyJsonOwnKeys(value, READINESS_REPAIR_PROPOSAL_KEYS)) return null;
   if (value.proposal_version !== 'readiness_repair_v1' || value.complete !== true) return null;
   if (!Array.isArray(value.issue_ids) || value.issue_ids.length < 2 || !value.issue_ids.every(nonEmpty)) {
     return null;
@@ -129,6 +162,7 @@ function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null 
   for (const change of value.changes) {
     if (
       !isRecord(change)
+      || !hasOnlyJsonOwnKeys(change, READINESS_REPAIR_CHANGE_KEYS)
       || change.kind !== 'canonicalise_option_interventions'
       || !nonEmpty(change.change_id)
       || !nonEmpty(change.option_id)
@@ -146,7 +180,12 @@ function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null 
   if (!Array.isArray(value.unresolved_inputs)) return null;
   const unresolvedInputs: CanonicalReadinessRepairProposal['unresolved_inputs'] = [];
   for (const unresolved of value.unresolved_inputs) {
-    if (!isRecord(unresolved) || !nonEmpty(unresolved.issue_id) || !nonEmpty(unresolved.prompt)) {
+    if (
+      !isRecord(unresolved)
+      || !hasOnlyJsonOwnKeys(unresolved, READINESS_REQUIRED_INPUT_KEYS)
+      || !nonEmpty(unresolved.issue_id)
+      || !nonEmpty(unresolved.prompt)
+    ) {
       return null;
     }
     if (!isReadinessRequiredInputKind(unresolved.kind)) return null;
