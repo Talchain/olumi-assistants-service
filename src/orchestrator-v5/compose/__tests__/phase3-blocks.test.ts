@@ -30,6 +30,7 @@ import {
   buildGraphNodeLookup,
   buildReviewCardBlocks,
   buildStaleRerunCoachingBlock,
+  selectEvidencePriorityGuidance,
   type BlockBuildCtx,
 } from '../phase3-blocks.js';
 import {
@@ -138,6 +139,15 @@ const EDGE_DELIVERY_GOAL = {
 };
 
 const STANDARD_GRAPH_NODES = [FACTOR_DELIVERY, FACTOR_COST, EDGE_DELIVERY_GOAL];
+const NO_LEVERS: ReadonlySet<string> = new Set();
+
+function strictFactorGuidance(
+  fact: RunAnalysisHandlerFact,
+  lookup = buildGraphNodeLookup(fact),
+  levers: ReadonlySet<string> = NO_LEVERS,
+) {
+  return selectEvidencePriorityGuidance(fact, lookup, levers);
+}
 
 // ============================================================================
 // buildGraphNodeLookup
@@ -450,8 +460,7 @@ describe('buildReviewCardBlocks — robustness card_kind', () => {
 
 describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
   it('emits one card for the exact producer-ranked resolved EVPPI factor', () => {
-    const blocks = buildReviewCardBlocks(
-      makeFact({
+    const fact = makeFact({
         decisionReview: {
           evidence_enhancements: {
             fac_delivery_risk: {
@@ -473,9 +482,18 @@ describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
           { factor_id: 'fac_cost_overrun', evppi: 0.4, status: 'resolved' },
           { factor_id: 'fac_delivery_risk', evppi: 0.2, status: 'resolved' },
         ],
-      }),
-      buildGraphNodeLookup(makeFact({ graphNodes: STANDARD_GRAPH_NODES })),
+        factorSensitivity: [
+          { factor_id: 'fac_cost_overrun', factor_label: 'Cost overrun risk' },
+          { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+        ],
+      });
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
     const e = blocks.find((b) => b.card_kind === 'evidence_priority');
     expect(e).toBeDefined();
@@ -504,9 +522,20 @@ describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
         { factor_id: 'fac_cost_overrun', evppi: 0.4, status: 'resolved' },
         { factor_id: 'fac_delivery_risk', evppi: 0.2, status: 'resolved' },
       ],
+      factorSensitivity: [
+        { factor_id: 'fac_cost_overrun', factor_label: 'Cost overrun risk' },
+        { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+      ],
     });
 
-    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
     const priority = blocks.find((block) => block.card_kind === 'evidence_priority');
     expect(priority?.target_refs[0]?.id).toBe('fac_cost_overrun');
     expect(priority?.body).toContain(
@@ -521,9 +550,19 @@ describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
       factorEvppi: [
         { factor_id: 'fac_delivery_risk', evppi: 0, status: 'resolved' },
       ],
+      factorSensitivity: [
+        { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+      ],
     });
 
-    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
     const priority = blocks.find((block) => block.card_kind === 'evidence_priority');
     expect(priority?.title).toBe('Evidence to strengthen first: Delivery risk');
     expect(priority?.body).toContain('gather relevant data or expert judgement');
@@ -551,7 +590,14 @@ describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
       ],
     });
 
-    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
     expect(blocks.find((block) => block.card_kind === 'evidence_priority')).toBeUndefined();
   });
 
@@ -576,13 +622,19 @@ describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
       ],
     });
 
-    const blocks = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX);
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
     expect(blocks.find((block) => block.card_kind === 'evidence_priority')).toBeUndefined();
   });
 
   it('drops the evidence_priority card when the factor_id is not in the graph lookup (Codex correction #8)', () => {
-    const blocks = buildReviewCardBlocks(
-      makeFact({
+    const fact = makeFact({
         decisionReview: {
           evidence_enhancements: {
             fac_unknown: {
@@ -597,11 +649,114 @@ describe('buildReviewCardBlocks — evidence_priority card_kind', () => {
         factorEvppi: [
           { factor_id: 'fac_unknown', evppi: 0.4, status: 'resolved' },
         ],
-      }),
-      buildGraphNodeLookup(makeFact({ graphNodes: STANDARD_GRAPH_NODES })),
+      });
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
     expect(blocks.find((b) => b.card_kind === 'evidence_priority')).toBeUndefined();
+  });
+
+  it.each([
+    { name: 'missing', rows: [] },
+    {
+      name: 'duplicate',
+      rows: [
+        { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+        { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+      ],
+    },
+    {
+      name: 'unreadable',
+      rows: [{ factor_id: 'fac_delivery_risk', factor_label: 'fac_delivery_risk' }],
+    },
+  ])('suppresses priority guidance when the same-run label is $name', ({ rows }) => {
+    const fact = makeFact({
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorEvppi: [
+        { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
+      ],
+      factorSensitivity: rows,
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
+
+    expect(blocks.find((block) => block.card_kind === 'evidence_priority')).toBeUndefined();
+  });
+
+  it('uses the exact same-run factor label instead of a divergent graph label', () => {
+    const fact = makeFact({
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorEvppi: [
+        { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
+      ],
+      factorSensitivity: [
+        {
+          factor_id: 'fac_delivery_risk',
+          factor_label: 'Supplier execution uncertainty',
+        },
+      ],
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
+    const priority = blocks.find((block) => block.card_kind === 'evidence_priority');
+
+    expect(priority?.title).toBe(
+      'Evidence to strengthen first: Supplier execution uncertainty',
+    );
+    expect(priority?.body).toContain('Supplier execution uncertainty');
+    expect(priority?.target_refs[0]?.label).toBe('Supplier execution uncertainty');
+    expect(`${priority?.title} ${priority?.body}`).not.toContain('Delivery risk');
+  });
+
+  it('drops an unsafe review action and uses the deterministic same-factor fallback', () => {
+    const fact = makeFact({
+      decisionReview: {
+        evidence_enhancements: {
+          fac_delivery_risk: {
+            specific_action: 'Inspect fac_private_signal before proceeding.',
+          },
+        },
+      },
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorEvppi: [
+        { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
+      ],
+      factorSensitivity: [
+        { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+      ],
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    const blocks = buildReviewCardBlocks(
+      fact,
+      lookup,
+      CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
+    );
+    const priority = blocks.find((block) => block.card_kind === 'evidence_priority');
+
+    expect(priority?.body).toContain(
+      'Review the evidence behind the current estimate or range for Delivery risk',
+    );
+    expect(priority?.body).not.toContain('fac_private_signal');
+    expect(priority?.source_handler).toBe('run_analysis');
   });
 });
 
@@ -734,8 +889,16 @@ describe('buildEvidenceBlocks', () => {
       },
       graphNodes: STANDARD_GRAPH_NODES,
       factorSensitivity: [
-        { factor_id: 'fac_delivery_risk', confidence: 0.2 }, // low
-        { factor_id: 'fac_cost_overrun', confidence: 0.6 }, // medium
+        {
+          factor_id: 'fac_delivery_risk',
+          factor_label: 'Delivery risk',
+          confidence: 0.2,
+        }, // low
+        {
+          factor_id: 'fac_cost_overrun',
+          factor_label: 'Cost overrun risk',
+          confidence: 0.6,
+        }, // medium
       ],
       factorEvppi: [
         { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
@@ -746,11 +909,14 @@ describe('buildEvidenceBlocks', () => {
 
   it('puts the exact producer-ranked EVPPI factor first', () => {
     const fact = evidenceFact();
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
     expect(blocks).toHaveLength(2);
     expect(blocks[0].factor_ref.id).toBe('fac_delivery_risk');
@@ -766,11 +932,14 @@ describe('buildEvidenceBlocks', () => {
       { factor_id: 'fac_cost_overrun', evppi: 0.01, status: 'resolved' },
       { factor_id: 'fac_delivery_risk', evppi: 0.9, status: 'resolved' },
     ];
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
 
     expect(blocks.map((block) => block.factor_ref.id)).toEqual([
@@ -786,11 +955,14 @@ describe('buildEvidenceBlocks', () => {
     enrichment.factor_evppi = [
       { factor_id: 'fac_delivery_risk', evppi: 0, status: 'below_resolution' },
     ];
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
 
     expect(blocks[0].factor_ref.id).toBe('fac_delivery_risk');
@@ -809,11 +981,14 @@ describe('buildEvidenceBlocks', () => {
       { code: 'FACTOR_EVPPI_PARTIAL', field: 'factor_evppi' },
     ];
 
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
 
     // Without a complete producer ranking, the LLM object's original order is
@@ -839,11 +1014,14 @@ describe('buildEvidenceBlocks', () => {
 
   it('escalates low confidence only for the exact producer-ranked EVPPI factor', () => {
     const fact = evidenceFact();
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
     expect(blocks[0].severity).toBe('critical'); // low + exact EVPPI priority
     expect(blocks[1].severity).toBe('info'); // medium
@@ -1977,8 +2155,16 @@ describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces',
       },
       graphNodes: STANDARD_GRAPH_NODES,
       factorSensitivity: [
-        { factor_id: 'fac_delivery_risk', confidence: 0.2 },
-        { factor_id: 'fac_cost_overrun', confidence: 0.6 },
+        {
+          factor_id: 'fac_delivery_risk',
+          factor_label: 'Delivery risk',
+          confidence: 0.2,
+        },
+        {
+          factor_id: 'fac_cost_overrun',
+          factor_label: 'Cost overrun risk',
+          confidence: 0.6,
+        },
       ],
       factorEvppi: [
         { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
@@ -1991,12 +2177,14 @@ describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces',
     const fact = evidenceFactWithLever();
     // fac_delivery_risk is a lever (an option intervenes on it).
     const levers = new Set(['fac_delivery_risk']);
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
       levers,
+      strictFactorGuidance(fact, lookup, levers),
     );
     expect(blocks.map((b) => b.factor_ref.id)).toEqual(['fac_cost_overrun']);
     // channel preserved: the surviving non-lever block re-ranks to priority 1.
@@ -2005,11 +2193,14 @@ describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces',
 
   it('buildEvidenceBlocks without a lever set is unchanged (both named)', () => {
     const fact = evidenceFactWithLever();
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildEvidenceBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       buildFactorConfidenceLookup(fact),
       CTX,
+      NO_LEVERS,
+      strictFactorGuidance(fact, lookup),
     );
     expect(blocks.map((b) => b.factor_ref.id)).toEqual([
       'fac_delivery_risk',
@@ -2020,11 +2211,13 @@ describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces',
   it('evidence_priority card refuses a producer priority that contradicts the lever authority', () => {
     const fact = evidenceFactWithLever();
     const levers = new Set(['fac_delivery_risk']);
+    const lookup = buildGraphNodeLookup(fact);
     const blocks = buildReviewCardBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       CTX,
       levers,
+      strictFactorGuidance(fact, lookup, levers),
     );
     const ep = blocks.find((b) => b.card_kind === 'evidence_priority');
     expect(ep).toBeUndefined();
@@ -2045,16 +2238,25 @@ describe('D-U F2 lever-identity filter on evidence "investigate this" surfaces',
         },
       },
       graphNodes: STANDARD_GRAPH_NODES,
-      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+      factorSensitivity: [
+        {
+          factor_id: 'fac_delivery_risk',
+          factor_label: 'Delivery risk',
+          confidence: 0.2,
+        },
+      ],
       factorEvppi: [
         { factor_id: 'fac_delivery_risk', evppi: 0.4, status: 'resolved' },
       ],
     });
+    const lookup = buildGraphNodeLookup(fact);
+    const levers = new Set(['fac_delivery_risk']);
     const blocks = buildReviewCardBlocks(
       fact,
-      buildGraphNodeLookup(fact),
+      lookup,
       CTX,
-      new Set(['fac_delivery_risk']),
+      levers,
+      strictFactorGuidance(fact, lookup, levers),
     );
     expect(blocks.find((b) => b.card_kind === 'evidence_priority')).toBeUndefined();
   });

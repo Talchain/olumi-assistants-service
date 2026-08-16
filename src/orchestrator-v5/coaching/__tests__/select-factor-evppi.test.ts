@@ -170,6 +170,29 @@ describe('selectFactorEvppiPriority', () => {
     ).toStrictEqual({ outcome: 'not_selected', reason: 'duplicate_before_priority' });
   });
 
+  it.each([
+    ['malformed', { factor_id: 'fac_bad', status: 'resolved' }],
+    ['negative', row('fac_negative', -0.01, 'resolved')],
+    ['non-finite', row('fac_infinite', Number.POSITIVE_INFINITY, 'resolved')],
+  ])('refuses a %s trailing row after an otherwise valid priority', (_name, trailing) => {
+    expect(
+      selectFactorEvppiPriority({
+        factor_evppi: [row('fac_priority', 0.5, 'resolved'), trailing],
+      }),
+    ).toStrictEqual({ outcome: 'not_selected', reason: 'unreadable_before_priority' });
+  });
+
+  it('refuses a trailing duplicate after an otherwise valid priority', () => {
+    expect(
+      selectFactorEvppiPriority({
+        factor_evppi: [
+          row('fac_priority', 0.5, 'resolved'),
+          row('fac_priority', 0.4, 'below_resolution'),
+        ],
+      }),
+    ).toStrictEqual({ outcome: 'not_selected', reason: 'duplicate_before_priority' });
+  });
+
   it('does not promote row two when the producer priority is not eligible', () => {
     expect(
       selectFactorEvppiPriority(

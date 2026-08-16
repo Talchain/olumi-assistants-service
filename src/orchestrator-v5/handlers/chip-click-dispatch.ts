@@ -692,16 +692,16 @@ export async function dispatchChipClickRunAnalysis(
   //
   // Pre-load the scenario snapshot ONCE here. The handler invocation uses
   // a one-shot scenarioReader that returns this exact cached snapshot, and
-  // post-handler readiness derivation reads `snapshot.graph` from the same
-  // reference. This guarantees the canonical readiness adapter operates on
-  // the exact GraphV3T the handler operated on — eliminating any
-  // TOCTOU window where a concurrent edit-graph dispatch from another
-  // session could change the persisted record between two separate reads.
+  // readiness derivation reads the same raw snapshot carrier before any
+  // science-bearing surface is composed. This guarantees the canonical
+  // readiness adapter operates on the exact graph the handler operates on,
+  // eliminating any TOCTOU window where a concurrent edit-graph dispatch
+  // from another session could change the persisted record between reads.
   //
   // Test path: if `handlerRegistry` is injected, the test owns the
   // scenarioReader contract. We skip the production pre-load AND the
-  // post-handler readiness derivation in that case (tests assert
-  // analysis_ready surfacing via their own injection seam).
+  // readiness derivation in that case; readiness is therefore honestly
+  // unknown and every science-positive consumer fails closed.
   let cachedSnapshot: RunAnalysisScenarioSnapshot | null = null;
   let snapshotLoadError: unknown = null;
   if (!handlerRegistry) {
@@ -749,6 +749,13 @@ export async function dispatchChipClickRunAnalysis(
   // Null on the test path or when snapshot load failed — sanitiser then
   // falls back to prefix-aware generic wording.
   const snapshotGraph: GraphV3T | null = (cachedSnapshot?.graph as GraphV3T | undefined) ?? null;
+  // Science-positive permission must come from the exact current canonical
+  // snapshot, not from the successful handler result. Derive it once from the
+  // same one-shot carrier the handler will consume, then reuse that verdict
+  // for chips, Phase 3 composition, and the wire response.
+  const analysisReady = cachedSnapshot
+    ? deriveAnalysisReadyFromSnapshot(cachedSnapshot, requestId, payload.scenario_id)
+    : undefined;
 
   // Reuse the memoised default PLoT client so per-call registry
   // construction does not also construct a fresh PLoTClientImpl (which
@@ -1014,9 +1021,9 @@ export async function dispatchChipClickRunAnalysis(
     //     branch emits (executable explain_results + what_would_flip).
     //   - `priorFacts` — threaded so any future cross-turn rules in the
     //     chip generator stay consistent with the routed path.
-    //   - `analysisReady` — omitted; the post-run_analysis branch does
-    //     not consult readiness. The `analysisReady` derived after
-    //     commit below remains the authoritative wire-emit source.
+    //   - `analysisReady` — the exact current canonical snapshot verdict.
+    //     Ordinary post-analysis chips do not require it, while the
+    //     factor-EVPPI priority chip requires exact `status === 'ready'`.
     //   - `validationRegistry` — required for executable-chip
     //     registry-presence validation (existing chip-generator contract).
     const chipClickSuggestedActions = generateChips({
@@ -1024,6 +1031,7 @@ export async function dispatchChipClickRunAnalysis(
       handlerFacts: enrichedFacts,
       priorFacts: context.prior_facts,
       analysis: null,
+      analysisReady,
       validationRegistry: HANDLER_VALIDATION_REGISTRY,
       // D-ask-1 (2.11 P0-1): scaffolded-placeholder disclosure channel —
       // same threading as the routed path, so a chip-click run that only
@@ -1079,6 +1087,7 @@ export async function dispatchChipClickRunAnalysis(
       // registry test path fall back to the turn context's persisted graph.
       persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
       persistedGraphHash: composedRunFactGraphHash,
+      analysisReadyStatus: analysisReady?.status,
       // ROADMAP 2.211 — the PRIOR fact array (this turn's `enrichedFacts`
       // EXCLUDED), for the no-immediate-repeat lens tie-break. This path is the
       // one the live walk exercised (the "Run analysis" chip) and it passes no
@@ -1219,16 +1228,6 @@ export async function dispatchChipClickRunAnalysis(
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,
       });
-      // V5 finaliser contract: derive readiness from the SAME GraphV3T
-      // reference the run_analysis handler operated on (the cached
-      // snapshot). Single-source-of-truth — no second read, no TOCTOU
-      // window. When the test path injects a custom registry,
-      // cachedSnapshot is null by design (tests own the readiness
-      // emission via their own seam) and we skip the derivation.
-      const analysisReady = cachedSnapshot
-        ? deriveAnalysisReadyFromSnapshot(cachedSnapshot, requestId, payload.scenario_id)
-        : undefined;
-
       // V5 state-trust: derive freshness POST-dispatch using the just-
       // produced run_analysis fact + prior chain, against the snapshot
       // graph. The chip-click rerun path is the user's escape hatch from

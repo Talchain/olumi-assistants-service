@@ -580,7 +580,7 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     }
   });
 
-  it('evidence_gap composer surfaces gaps from readiness AND fragile edges', () => {
+  it('known non-ready evidence_gap composer returns only canonical readiness recovery', () => {
     const out = tryPostAnalysisAdviceGate({
       message: "What's missing?",
       analysis: FIXTURE_ANALYSIS,
@@ -589,9 +589,11 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toMatch(/biggest open gap/i);
-      // Either the fragile edge or a readiness gap appears
-      expect(out.assistant_text.length).toBeGreaterThan(40);
+      expect(out.copy_source).toBe('readiness');
+      expect(out.assistant_text).toContain('configure "Hire two senior engineers locally"');
+      expect(out.assistant_text).not.toContain('Delivery risk');
+      expect(out.assistant_text).not.toContain('Successful launch');
+      expect(out.assistant_text).not.toMatch(/biggest open gap/i);
     }
   });
 
@@ -1606,7 +1608,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
     });
@@ -1624,7 +1626,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
       factorEvppiGuidance: {
@@ -1647,11 +1649,86 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     }
   });
 
+  it.each([
+    ['needs_user_mapping', READY_PAYLOAD_OPEN],
+    [
+      'needs_encoding',
+      {
+        ...READY_PAYLOAD_OPEN,
+        status: 'needs_encoding',
+        options: READY_PAYLOAD_OPEN.options.map((option) => ({
+          ...option,
+          status: 'needs_encoding' as const,
+        })),
+      } as AnalysisReadyPayload,
+    ],
+    [
+      'needs_user_input',
+      { status: 'needs_user_input', goal_node_id: 'goal_1', options: [] } as AnalysisReadyPayload,
+    ],
+    [
+      'blocked',
+      {
+        status: 'blocked',
+        goal_node_id: '',
+        options: [],
+        blockers: [{ blocker_type: 'missing_value' }],
+      } as AnalysisReadyPayload,
+    ],
+    [
+      'blocked with sparse optional detail carrier',
+      { status: 'blocked' } as AnalysisReadyPayload,
+    ],
+  ])('known non-ready %s returns readiness-only copy despite selected EVPPI guidance', (_status, readiness) => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: readiness,
+      freshness: 'fresh',
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_cost_overrun_risk',
+        factorLabel: 'Cost overrun risk',
+        specificAction: 'Talk to the finance team about historical overruns.',
+      },
+    });
+
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.copy_source).toBe('readiness');
+      expect(out.suggested_actions).toEqual([]);
+      expect(out.assistant_text).not.toContain('Cost overrun risk');
+      expect(out.assistant_text).not.toContain('Talk to the finance team');
+      expect(out.assistant_text).not.toContain('The first evidence priority');
+    }
+  });
+
+  it('unknown readiness cannot be rescued by otherwise-valid EVPPI guidance', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?',
+      analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
+      freshness: 'fresh',
+      factorEvppiGuidance: {
+        outcome: 'selected',
+        factorId: 'fac_delivery_risk',
+        factorLabel: 'Delivery reliability',
+        specificAction: null,
+      },
+    });
+
+    expect(out).toStrictEqual({
+      matched: false,
+      reason: 'data_unavailable_for_class',
+      advice_class: 'evidence_gap',
+      missing_inputs: ['analysis_ready_or_top_drivers'],
+    });
+  });
+
   it('live priority refusal never falls back to LLM enhancement or assumption order', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
       factorEvppiGuidance: { outcome: 'not_selected', reason: 'producer_partial' },
@@ -1669,7 +1746,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       // decisionReview deliberately omitted
     });
@@ -1688,7 +1765,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       factorEvppiGuidance: {
         outcome: 'selected',
@@ -1712,6 +1789,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: { ...FIXTURE_ANALYSIS, top_drivers: [], fragile_edges: [] },
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       factorEvppiGuidance: {
         outcome: 'selected',
@@ -1731,7 +1809,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: {
         produced_at: '2026-05-21T10:00:00.000Z',
@@ -1755,7 +1833,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: {
         produced_at: '2026-05-21T10:00:00.000Z',
@@ -1779,7 +1857,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
       factorEvppiGuidance: {
@@ -1814,7 +1892,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
       factorEvppiGuidance: {
@@ -1872,7 +1950,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
         ...FIXTURE_ANALYSIS,
         fragile_edges: [{ from_label: '   ', to_label: 'Successful launch' }],
       },
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
@@ -1919,7 +1997,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
         top_drivers: [{ factor_label: '   ', sensitivity_value: 0.45 }],
         fragile_edges: [],
       },
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
     });
     expect(out.matched).toBe(true);
@@ -1948,7 +2026,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     const out = tryPostAnalysisAdviceGate({
       message: CHIP_MESSAGE,
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: SAMPLE_DECISION_REVIEW,
       factorEvppiGuidance: {
@@ -2822,7 +2900,7 @@ describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD_OPEN,
+      analysisReady: READY_PAYLOAD_READY,
       freshness: 'fresh',
       decisionReview: {
         produced_at: '2026-05-21T10:00:00.000Z',

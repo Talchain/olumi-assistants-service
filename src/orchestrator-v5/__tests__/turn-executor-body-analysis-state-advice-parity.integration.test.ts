@@ -39,6 +39,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { pickLatestFactorEvppiPriorityGuidance } from '../coaching/select-factor-evppi.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -88,6 +89,7 @@ const PRIOR_RA_ROW_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 const READY_GRAPH = {
   nodes: [
+    { id: 'dec_q3', kind: 'decision', label: 'Choose the Q3 resourcing route' },
     { id: 'goal_q3', kind: 'goal', label: 'Q3 Roadmap' },
     { id: 'fac_local_hire', kind: 'factor', label: 'Local Senior Hire Programme' },
     {
@@ -105,6 +107,20 @@ const READY_GRAPH = {
     },
   ],
   edges: [
+    {
+      from: 'dec_q3',
+      to: 'opt_hire_local',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_q3',
+      to: 'opt_status_quo',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
     {
       from: 'opt_hire_local',
       to: 'fac_local_hire',
@@ -381,6 +397,14 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
         key_assumptions: ['An unranked assumption must not be promoted.'],
       },
     })];
+    expect(
+      pickLatestFactorEvppiPriorityGuidance(mockState.priorFacts as never),
+    ).toStrictEqual({
+      outcome: 'selected',
+      factorId: 'fac_b',
+      factorLabel: 'Delivery uncertainty',
+      specificAction: 'Collect matched cohort evidence for factor B.',
+    });
     const adapter = throwingRoutingAdapter();
     const result = await runTurnExecutor(
       mkPayload('What should we validate?'),
@@ -394,6 +418,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
 
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
     expect(result.telemetry.llm_calls_used).toBe(0);
+    expect(result.analysisReady?.status).toBe('ready');
     expect(result.response.assistant_text).toContain(
       'The first evidence priority from this analysis is Delivery uncertainty:',
     );

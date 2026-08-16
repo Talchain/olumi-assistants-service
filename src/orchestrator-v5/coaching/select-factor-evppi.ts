@@ -208,7 +208,9 @@ function isUsableRow(row: FactorEvppiPriorityRow | null): row is FactorEvppiPrio
   return (
     row !== null &&
     row.factor_id.length > 0 &&
+    typeof row.evppi === 'number' &&
     Number.isFinite(row.evppi) &&
+    row.evppi >= 0 &&
     (row.status === 'resolved' || row.status === 'below_resolution')
   );
 }
@@ -261,14 +263,21 @@ export function selectFactorEvppiPriority(
     return { outcome: 'not_selected', reason: 'absent' };
   }
 
+  // Validate the WHOLE producer carrier before selecting anything. Returning as
+  // soon as row one is resolved would let a malformed or duplicate trailing row
+  // hide behind an otherwise-usable priority. That is not a complete ranking:
+  // PLoT's production schema arm is sampled and the shared row schema cannot
+  // express cross-row uniqueness, so this consumer remains the final claim cage.
   const seenFactorIds = new Set<string>();
-
+  const parsedRows: FactorEvppiPriorityRow[] = [];
   for (const raw of rows) {
     const parsed = FactorEvppiPriorityRowSchema.safeParse(raw);
     const row = parsed.success ? parsed.data : null;
 
-    // A row that cannot be read before a priority is found may itself have
-    // held that priority. Skipping it would silently promote a lower row.
+    // Keep the historical refusal code for telemetry compatibility. It now
+    // means an unreadable row anywhere in the ranking, not only before the
+    // first resolved row. Negative EVPPI is unreadable too: the producer clamps
+    // the Strong-Oakley estimate to Howard's non-negative bound before sorting.
     if (!isUsableRow(row)) {
       return { outcome: 'not_selected', reason: 'unreadable_before_priority' };
     }
@@ -277,7 +286,12 @@ export function selectFactorEvppiPriority(
       return { outcome: 'not_selected', reason: 'duplicate_before_priority' };
     }
     seenFactorIds.add(row.factor_id);
+    parsedRows.push(row);
+  }
 
+  // The carrier is now proven readable and unique. Preserve producer order
+  // exactly; magnitude is still never compared, returned, logged, or rendered.
+  for (const row of parsedRows) {
     if (row.status === 'below_resolution') continue;
 
     if (

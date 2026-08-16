@@ -234,8 +234,16 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
   };
 
   const STANDARD_FACTOR_SENSITIVITY = [
-    { factor_id: 'fac_delivery_risk', confidence: 0.2 }, // low
-    { factor_id: 'fac_cost_overrun', confidence: 0.6 }, // medium
+    {
+      factor_id: 'fac_delivery_risk',
+      factor_label: 'Delivery risk',
+      confidence: 0.2,
+    }, // low
+    {
+      factor_id: 'fac_cost_overrun',
+      factor_label: 'Cost overrun',
+      confidence: 0.6,
+    }, // medium
   ];
 
   const RICH_DECISION_REVIEW = {
@@ -415,6 +423,7 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     const env = composeToolCallResponse({
       ...baseInput,
       handlerFacts: [phase3Fact({ withEvppiPriority: true })],
+      analysisReadyStatus: 'ready',
     });
     const parsed = OlumiResponseSchema.parse(env);
     const reviewCards = parsed.blocks.filter((b) => b.type === 'review_card');
@@ -477,10 +486,16 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
   it('keeps the evidence_priority review card as a fallback when the richer evidence block cannot be built', () => {
     const fact = phase3Fact({ withEvppiPriority: true });
     const enrichment = fact.result.enrichment as Record<string, unknown>;
-    enrichment.factor_sensitivity = [];
+    enrichment.factor_sensitivity = [
+      { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+    ];
 
     const parsed = OlumiResponseSchema.parse(
-      composeToolCallResponse({ ...baseInput, handlerFacts: [fact] }),
+      composeToolCallResponse({
+        ...baseInput,
+        handlerFacts: [fact],
+        analysisReadyStatus: 'ready',
+      }),
     );
     expect(parsed.blocks.filter((b) => b.type === 'evidence')).toHaveLength(0);
     expect(
@@ -500,12 +515,18 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
   it('uses one deterministic factor card instead of the generic lens when Decision Review has no action', () => {
     const fact = phase3Fact({ withEvppiPriority: true });
     const enrichment = fact.result.enrichment as Record<string, unknown>;
-    enrichment.factor_sensitivity = [];
+    enrichment.factor_sensitivity = [
+      { factor_id: 'fac_delivery_risk', factor_label: 'Delivery risk' },
+    ];
     const decisionReview = enrichment.decision_review as Record<string, unknown>;
     decisionReview.evidence_enhancements = {};
 
     const parsed = OlumiResponseSchema.parse(
-      composeToolCallResponse({ ...baseInput, handlerFacts: [fact] }),
+      composeToolCallResponse({
+        ...baseInput,
+        handlerFacts: [fact],
+        analysisReadyStatus: 'ready',
+      }),
     );
     expect(
       parsed.blocks.some(
@@ -521,6 +542,46 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     expect(priorityCards[0]?.body).toContain('gather relevant data or expert judgement');
     expect(parsed.blocks.some((b) => b.type === 'evidence')).toBe(false);
   });
+
+  it.each([
+    { name: 'unknown', status: undefined },
+    { name: 'known non-ready', status: 'needs_user_input' as const },
+  ])(
+    '$name readiness suppresses factor-EVPPI priority while preserving ordinary Phase 3 content',
+    ({ status }) => {
+      const fact = phase3Fact({ withEvppiPriority: true });
+      const enrichment = fact.result.enrichment as Record<string, unknown>;
+      enrichment.factor_evppi = [
+        { factor_id: 'fac_cost_overrun', evppi: 0.4, status: 'resolved' },
+        { factor_id: 'fac_delivery_risk', evppi: 0.2, status: 'resolved' },
+      ];
+
+      const parsed = OlumiResponseSchema.parse(
+        composeToolCallResponse({
+          ...baseInput,
+          handlerFacts: [fact],
+          ...(status === undefined ? {} : { analysisReadyStatus: status }),
+        }),
+      );
+      const evidence = parsed.blocks.filter((block) => block.type === 'evidence');
+
+      expect(evidence.map((block) => block.type === 'evidence' && block.factor_ref.id)).toEqual([
+        'fac_delivery_risk',
+        'fac_cost_overrun',
+      ]);
+      expect(
+        parsed.blocks.some(
+          (block) =>
+            block.type === 'review_card' && block.card_kind === 'evidence_priority',
+        ),
+      ).toBe(false);
+      expect(
+        parsed.blocks.some(
+          (block) => block.type === 'review_card' && block.card_kind === 'narrative',
+        ),
+      ).toBe(true);
+    },
+  );
 
   it('skips Phase 3 emission when graph_hash_at_run is absent (Codex correction #4 fresh-only)', () => {
     const factWithoutHash: HandlerFact = {

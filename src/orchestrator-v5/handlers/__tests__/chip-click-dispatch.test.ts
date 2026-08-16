@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const {
   loadScenarioSnapshotForRunAnalysisMock,
@@ -104,6 +105,71 @@ import {
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+// Exact current canonical authority for the post-analysis science-chip tests.
+// A successful handler fact is not positive permission by itself: the snapshot
+// must also pass the whole-model readiness contract (decision → options →
+// factor → goal, with both option interventions configured).
+const READY_SNAPSHOT_GRAPH = {
+  nodes: [
+    { id: 'dec_x', kind: 'decision' as const, label: 'Choose an option' },
+    { id: 'goal_x', kind: 'goal' as const, label: 'Outcome', goal_threshold: 0.8 },
+    { id: 'fac_delivery', kind: 'factor' as const, label: 'Delivery reliability' },
+    {
+      id: 'opt_a',
+      kind: 'option' as const,
+      label: 'Option A',
+      interventions: { fac_delivery: 1 },
+    },
+    {
+      id: 'opt_b',
+      kind: 'option' as const,
+      label: 'Option B',
+      interventions: { fac_delivery: 0 },
+    },
+  ],
+  edges: [
+    {
+      from: 'dec_x',
+      to: 'opt_a',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_x',
+      to: 'opt_b',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'opt_a',
+      to: 'fac_delivery',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'opt_b',
+      to: 'fac_delivery',
+      strength: { mean: 0.01, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'fac_delivery',
+      to: 'goal_x',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+  ],
+  goal_node_id: 'goal_x',
+};
+const READY_SNAPSHOT_GRAPH_HASH = computeAnalysisAffectingGraphHash(
+  READY_SNAPSHOT_GRAPH as never,
+)!;
 
 function payloadFor(actionType: 'run_analysis' | 'explain_results' | 'what_would_flip') {
   return makeMessagePayload({
@@ -357,6 +423,8 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
         leading_option_id: 'opt_a',
         win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
         summary: 'Done.',
+        graph_hash_at_run: READY_SNAPSHOT_GRAPH_HASH,
+        computed_at: '2026-08-16T05:00:00.000Z',
         enrichment,
       },
     };
@@ -378,17 +446,10 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     vi.clearAllMocks();
     buildTurnContextMock.mockResolvedValue(DEFAULT_TURN_CONTEXT);
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue({
-      graph: {
-        nodes: [
-          { id: 'goal_x', kind: 'goal', label: 'Outcome', goal_threshold: 0.8 },
-          { id: 'opt_a', kind: 'option', label: 'Option A', interventions: {} },
-          { id: 'opt_b', kind: 'option', label: 'Option B', interventions: {} },
-        ],
-        edges: [],
-      },
+      graph: READY_SNAPSHOT_GRAPH,
       options: [],
       goal_node_id: 'goal_x',
-      rawPersistedGraph: null,
+      rawPersistedGraph: READY_SNAPSHOT_GRAPH,
     });
     runAnalysisHandlerMock.mockResolvedValue({
       assistant_text: 'Ran analysis.',
@@ -426,6 +487,8 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
       throw new Error(`expected ok, got ${out.outcome}`);
     }
 
+    expect(out.analysisReady?.status).toBe('ready');
+    expect(out.freshness?.freshness).toBe('fresh');
     const chips = out.response.suggested_actions ?? [];
     expect(chips).toHaveLength(2);
     expect(chips[0]!.id).toBe('chip_action_explain_results');
@@ -480,6 +543,8 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
       throw new Error(`expected ok, got ${out.outcome}`);
     }
 
+    expect(out.analysisReady?.status).toBe('ready');
+    expect(out.freshness?.freshness).toBe('fresh');
     const chips = out.response.suggested_actions ?? [];
     expect(chips).toHaveLength(3);
     expect(chips.map((c) => c.id)).toEqual([
@@ -587,6 +652,54 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     const chips = out.response.suggested_actions ?? [];
     expect(chips).toHaveLength(3);
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
+  });
+
+  it('fails the science chip closed when current canonical readiness is unknown, while preserving ordinary post-analysis chips', async () => {
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValueOnce({
+      graph: READY_SNAPSHOT_GRAPH,
+      options: [],
+      goal_node_id: 'goal_x',
+      rawPersistedGraph: null,
+    });
+    enrichRunAnalysisMock.mockImplementation(
+      async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) =>
+        handlerFacts.map((f) => {
+          if (f.fact_type !== 'run_analysis') return f;
+          return {
+            ...f,
+            result: {
+              ...f.result,
+              enrichment: {
+                factor_evppi: [
+                  { factor_id: 'fac_delivery', evppi: 0.1, status: 'resolved' },
+                ],
+                factor_sensitivity: [
+                  { factor_id: 'fac_delivery', factor_label: 'Delivery reliability' },
+                ],
+                decision_review: {
+                  evidence_enhancements: {
+                    fac_delivery: { specific_action: 'This must not reopen science.' },
+                  },
+                },
+              },
+            },
+          } as HandlerFact;
+        }),
+    );
+
+    const out = await dispatchDeterministicChipClick('run_analysis', {
+      payload: payloadFor('run_analysis'),
+      requestId: 'req-chip-parity-readiness-unknown',
+    });
+    if (out.outcome !== 'ok') {
+      throw new Error(`expected ok, got ${out.outcome}`);
+    }
+
+    expect(out.analysisReady).toBeUndefined();
+    expect((out.response.suggested_actions ?? []).map((chip) => chip.id)).toEqual([
+      'chip_action_explain_results',
+      'chip_action_what_would_flip',
+    ]);
   });
 
   it('MAX_CHIPS=3 cap respected — never more than 3 suggested_actions on the chip-click run_analysis path', async () => {

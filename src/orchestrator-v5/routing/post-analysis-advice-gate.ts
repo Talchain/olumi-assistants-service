@@ -252,9 +252,10 @@ export interface AdviceGateInput {
   readonly message: string;
   readonly analysis: AdviceGateAnalysis | null | undefined;
   /**
-   * Analysis-ready payload (`computeStructuralReadiness` output) for
-   * the current graph. Required by `readiness` and `evidence_gap`
-   * classes. Other classes ignore it; absent / null is safe.
+   * Exact canonical analysis-ready payload for the current graph. Required by
+   * `readiness` and `evidence_gap` classes. Factor-EVPPI priority is permitted
+   * only by exact `status === 'ready'`; a known non-ready state owns the whole
+   * evidence-gap answer, while absent/null suppresses only that science branch.
    */
   readonly analysisReady?: AnalysisReadyPayload | null | undefined;
   /**
@@ -282,7 +283,9 @@ export interface AdviceGateInput {
    * Number-free exact-factor guidance from the same successful run. Its safe
    * label comes from PLoT factor_sensitivity, so real EVPPI remains actionable
    * when configuration-gated Decision Review is absent; a same-factor action is
-   * optional enrichment. Missing/undefined is fail-closed.
+   * optional enrichment. This object cannot authorise itself: exact current
+   * canonical readiness and the gate's existing fresh verdict are independent
+   * positive permissions. Missing/undefined is fail-closed.
    */
   readonly factorEvppiGuidance?: FactorEvppiPriorityGuidanceDecision | null | undefined;
   /**
@@ -1223,9 +1226,21 @@ function evaluateAvailability(
   // key retained) — this is a strictly defensive tightening on what
   // counts as "top driver available".
   if (cls === 'evidence_gap') {
-    const haveReadiness = hasSufficientReadinessData(analysisReady);
+    // A canonical non-ready status is itself sufficient authority for the
+    // readiness-only recovery branch. Do not require a complete optional
+    // detail carrier before honouring that blocker: the shared readiness
+    // projection has a deterministic generic recovery for sparse payloads.
+    const haveReadiness =
+      (analysisReady?.status !== undefined && analysisReady.status !== 'ready')
+      || hasSufficientReadinessData(analysisReady);
     const haveDrivers = hasRenderableTopDriver(analysis);
-    const haveEvppiGuidance = factorEvppiGuidance?.outcome === 'selected';
+    // Factor-EVPPI is science PRIORITY advice, so freshness alone is not enough:
+    // the exact current canonical graph must also be analysis-ready. Unknown or
+    // non-ready state cannot be rescued by an otherwise-valid prior guidance
+    // object. Ordinary projection/readiness fallbacks remain available.
+    const haveEvppiGuidance =
+      analysisReady?.status === 'ready'
+      && factorEvppiGuidance?.outcome === 'selected';
     if (!haveReadiness && !haveDrivers && !haveEvppiGuidance) {
       missing.push('analysis_ready_or_top_drivers');
     }
@@ -1569,8 +1584,13 @@ function describeCopySource(
   if (cls === 'readiness') {
     copy_source = 'readiness';
   } else if (cls === 'evidence_gap') {
-    if (
-      composeFactorEvppiValidationGuidance(input.factorEvppiGuidance) != null
+    if (input.analysisReady?.status !== undefined && input.analysisReady.status !== 'ready') {
+      // A known canonical blocker outranks every analysis-derived evidence
+      // priority. The composer takes the same readiness-only branch below.
+      copy_source = 'readiness';
+    } else if (
+      input.analysisReady?.status === 'ready'
+      && composeFactorEvppiValidationGuidance(input.factorEvppiGuidance) != null
     ) {
       copy_source = 'factor_evppi';
       fields.push('factor_evppi');
@@ -2056,11 +2076,25 @@ function composeEvidenceGap(
   analysisReady: AnalysisReadyPayload | undefined,
   factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null | undefined,
 ): string {
+  // Canonical readiness is the positive permission for science priority. When
+  // the current graph is known non-ready, return ONLY its canonical recovery —
+  // do not mix an old analysis priority, fragile-edge narrative, or top-driver
+  // advice into the blocker response. Unknown readiness merely suppresses the
+  // EVPPI branch and leaves the existing non-science projection fallback intact.
+  if (
+    analysisReady?.status !== undefined
+    && analysisReady.status !== 'ready'
+  ) {
+    return composeReadiness(analysisReady);
+  }
+
   // V5 science-to-reasoning: factor_evppi order/status selects the exact
   // factor. A same-factor Decision Review action may enrich the result, but a
   // deterministic label-grounded action keeps this producer→reasoning chain
   // live when that enrichment is disabled, absent, or soft-failed.
-  const fromEvppi = composeFactorEvppiValidationGuidance(factorEvppiGuidance);
+  const fromEvppi = analysisReady?.status === 'ready'
+    ? composeFactorEvppiValidationGuidance(factorEvppiGuidance)
+    : null;
   if (fromEvppi != null) return fromEvppi;
 
   const gaps: string[] = [];

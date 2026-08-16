@@ -39,9 +39,11 @@
  * **No new LLM call.** Most blocks source existing
  * `enrichment.decision_review` fields. The evidence-priority ReviewCard is the
  * deliberate deterministic exception: its rank comes from producer-resolved
- * `factor_evppi`, its label comes from the canonical graph lookup, and its
- * number-free action needs no Decision Review. Per-factor confidence for a
- * richer EvidenceBlock derives from the PLoT-provided
+ * `factor_evppi`, its display label comes from the exact matching
+ * `factor_sensitivity` row in that same analysis, and its number-free action
+ * needs no Decision Review. The canonical graph lookup still validates current
+ * factor identity; it cannot replace the same-run label. Per-factor confidence
+ * for a richer EvidenceBlock derives from the PLoT-provided
  * `enrichment.factor_sensitivity[].confidence`, NOT from decision_review
  * (which has no confidence field) — v11 does not expose calibrated
  * per-factor confidence inside decision_review. Documented at the
@@ -167,7 +169,10 @@ import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 import { selectGroundedCounterCase } from '../coaching/grounded-counter-case.js';
 // Lane C — the grounded sensitivity body (names the subject factor).
 import { selectGroundedSensitivityBody } from '../coaching/grounded-sensitivity-body.js';
-import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
+import {
+  selectFactorEvppiPriorityGuidance,
+  type FactorEvppiPriorityGuidanceDecision,
+} from '../coaching/select-factor-evppi.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
@@ -847,24 +852,25 @@ function readAttestedFlipWinners(fact: RunAnalysisHandlerFact): ReadonlyMap<stri
  * Build all Phase 3 ReviewCardBlocks from a fresh analysis. Most cards enrich
  * the turn from `decision_review`; the factor-EVPPI evidence-priority card is
  * deterministic and remains reachable when that configuration-gated
- * enrichment is absent. Each emitted block is `BlockSchema`-validated;
- * failures DROP it.
+ * enrichment is absent. Its strict, readiness-gated guidance decision is
+ * supplied by the shared Phase 3 funnel; the default `null` fails that science
+ * surface closed for direct callers. Each emitted block is
+ * `BlockSchema`-validated; failures DROP it.
  */
 export function buildReviewCardBlocks(
   fact: RunAnalysisHandlerFact,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
   interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null = null,
 ): readonly ReviewCardBlock[] {
   const dr = readDecisionReview(fact);
   const blocks: ReviewCardBlock[] = [];
   if (dr === null) {
     const evidencePriority = buildEvidencePriorityCard(
-      fact,
-      null,
+      factorEvppiGuidance,
       lookup,
       ctx,
-      interventionControlledFactorIds,
     );
     return evidencePriority === null ? [] : [evidencePriority];
   }
@@ -915,11 +921,9 @@ export function buildReviewCardBlocks(
   // matching usable enhancement exists; the rest ride as unranked
   // EvidenceBlocks (not ReviewCards). One review card per fact.
   const evidencePriority = buildEvidencePriorityCard(
-    fact,
-    dr,
+    factorEvppiGuidance,
     lookup,
     ctx,
-    interventionControlledFactorIds,
   );
   if (evidencePriority !== null) blocks.push(evidencePriority);
 
@@ -1161,6 +1165,8 @@ export function buildCoachingBlocks(
  * presentation order; it is not treated as a scientific ranking. When EVPPI
  * has no honest selection, every enhancement remains an unranked suggestion
  * and no block earns the top-priority severity escalation.
+ * `factorEvppiGuidance` is the shared strict, readiness-gated decision; its
+ * default `null` preserves ordinary evidence while withholding science rank.
  *
  * factor_ref + target_refs primary entry resolved via lookup; on miss
  * the block is DROPPED rather than emitting `id`-as-label (per §0.1).
@@ -1174,17 +1180,17 @@ export function buildEvidenceBlocks(
   confidenceLookup: ReadonlyMap<string, 'high' | 'medium' | 'low'>,
   ctx: BlockBuildCtx,
   interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
+  factorEvppiGuidance: FactorEvppiPriorityGuidanceDecision | null = null,
 ): readonly EvidenceBlock[] {
   const dr = readDecisionReview(fact);
   if (dr === null) return [];
   const enhancements = readRecord(dr.evidence_enhancements);
   if (enhancements === null) return [];
 
-  const selectedPriorityId = selectEvidencePriorityFactorId(
-    fact,
-    lookup,
-    interventionControlledFactorIds,
-  );
+  const selectedGuidance = factorEvppiGuidance?.outcome === 'selected'
+    ? factorEvppiGuidance
+    : null;
+  const selectedPriorityId = selectedGuidance?.factorId ?? null;
 
   const orderedEntries = Object.entries(enhancements);
   if (selectedPriorityId !== null) {
@@ -1215,9 +1221,11 @@ export function buildEvidenceBlocks(
       continue;
     }
 
-    const specificAction = typeof entry.specific_action === 'string'
-      ? entry.specific_action.trim()
-      : '';
+    const specificAction = factorId === selectedPriorityId
+      ? (selectedGuidance?.specificAction ?? '')
+      : typeof entry.specific_action === 'string'
+        ? entry.specific_action.trim()
+        : '';
     if (specificAction.length === 0) {
       // Codex correction #2: drop the block rather than emit awkward
       // filler when the actionable verb is missing.
@@ -1265,12 +1273,25 @@ export function buildEvidenceBlocks(
       severity = factorId === selectedPriorityId ? 'critical' : 'warning';
     }
 
+    // The selected factor's display label is the exact same-run
+    // factor_sensitivity label already safety-checked by the strict guidance
+    // selector. The graph lookup remains structural identity authority, but it
+    // cannot silently replace that analysis-run label with a renamed/current
+    // label. Non-priority evidence keeps its historical graph label.
+    const factorLabel = factorId === selectedPriorityId
+      ? selectedGuidance!.factorLabel
+      : factorRef.label;
+    const factorTargetRef = {
+      id: factorRef.id,
+      label: factorLabel,
+      kind: 'factor' as const,
+    };
     const candidate = {
       ...commonMetadata('evidence', factorId, ctx),
       type: 'evidence' as const,
-      factor_label: factorRef.label,
-      factor_ref: { id: factorRef.id, label: factorRef.label, kind: 'factor' as const },
-      target_refs: [{ id: factorRef.id, label: factorRef.label, kind: 'factor' as const }],
+      factor_label: factorLabel,
+      factor_ref: factorTargetRef,
+      target_refs: [factorTargetRef],
       current_confidence: currentConfidence,
       evidence_gap: truncate(rationale, BODY_MAX),
       suggested_technique: suggestedTechnique,
@@ -3029,18 +3050,12 @@ function buildRobustnessCard(
 }
 
 function buildEvidencePriorityCard(
-  fact: RunAnalysisHandlerFact,
-  dr: Record<string, unknown> | null,
+  guidance: FactorEvppiPriorityGuidanceDecision | null,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
-  interventionControlledFactorIds: ReadonlySet<string> = EMPTY_FACTOR_ID_SET,
 ): ReviewCardBlock | null {
-  const factorId = selectEvidencePriorityFactorId(
-    fact,
-    lookup,
-    interventionControlledFactorIds,
-  );
-  if (factorId === null) return null;
+  if (guidance?.outcome !== 'selected') return null;
+  const factorId = guidance.factorId;
   const ref = lookup.get(factorId);
   if (ref === undefined || ref.kind !== 'factor') return null;
 
@@ -3048,14 +3063,15 @@ function buildEvidencePriorityCard(
   // justifies the rank and is never required. The deterministic fallback is
   // deliberately number-free and asks the human to strengthen evidence rather
   // than fabricating a replacement value.
-  const enhancements = readRecord(dr?.evidence_enhancements);
-  const entry = readRecord(enhancements?.[factorId]);
-  const specificAction = typeof entry?.specific_action === 'string'
-    ? entry.specific_action.trim()
-    : '';
+  const specificAction = guidance.specificAction ?? '';
   const body = specificAction.length > 0
     ? specificAction
-    : `Review the evidence behind the current estimate or range for ${ref.label}, then gather relevant data or expert judgement to narrow that uncertainty.`;
+    : `Review the evidence behind the current estimate or range for ${guidance.factorLabel}, then gather relevant data or expert judgement to narrow that uncertainty.`;
+  const targetRef = {
+    id: ref.id,
+    label: guidance.factorLabel,
+    kind: 'factor' as const,
+  };
 
   const candidate = {
     ...commonMetadata(
@@ -3066,10 +3082,10 @@ function buildEvidencePriorityCard(
     ),
     type: 'review_card' as const,
     card_kind: 'evidence_priority' as const,
-    title: truncate(`Evidence to strengthen first: ${ref.label}`, TITLE_MAX),
+    title: truncate(`Evidence to strengthen first: ${guidance.factorLabel}`, TITLE_MAX),
     body: truncate(body, BODY_MAX),
     ...reviewCardSignals('evidence_priority', 'info'),
-    target_refs: [ref],
+    target_refs: [targetRef],
     priority_rank: 60,
     action_intent: 'gather_evidence' as ActionIntentLiteral,
     action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
@@ -3092,11 +3108,11 @@ function buildEvidencePriorityCard(
  * the join here prevents the evidence list and its companion card from
  * answering the same run differently.
  */
-function selectEvidencePriorityFactorId(
+export function selectEvidencePriorityGuidance(
   fact: RunAnalysisHandlerFact,
   lookup: GraphNodeLookup,
   interventionControlledFactorIds: ReadonlySet<string>,
-): string | null {
+): FactorEvppiPriorityGuidanceDecision {
   const eligibleFactorIds = new Set<string>();
   for (const [factorId, ref] of lookup) {
     if (ref.kind === 'factor' && !isLeverFactor(factorId, interventionControlledFactorIds)) {
@@ -3104,10 +3120,9 @@ function selectEvidencePriorityFactorId(
     }
   }
 
-  const priority = selectFactorEvppiPriority(fact.result.enrichment, {
+  return selectFactorEvppiPriorityGuidance(fact.result.enrichment, {
     eligibleFactorIds,
   });
-  return priority.outcome === 'selected' ? priority.factorId : null;
 }
 
 function buildAssumptionCards(

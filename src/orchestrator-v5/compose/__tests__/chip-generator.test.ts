@@ -18,6 +18,7 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 import { generateChips } from '../chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import type { ContextPackAnalysis } from '../../context/context-pack-assembler.js';
+import { buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
 import { setTestSink } from '../../../utils/telemetry.js';
 
 const REGISTRY = HANDLER_VALIDATION_REGISTRY;
@@ -1007,6 +1008,12 @@ describe('generateChips — V5 state-trust stale-rerun rule', () => {
 // gate's evidence_gap class for a deterministic, grounded answer.
 // =========================================================================
 describe('generateChips — V5 coaching post-run_analysis validation chip', () => {
+  const READY_FOR_FACTOR_GUIDANCE = {
+    status: 'ready',
+    options: [],
+    goal_node_id: 'g',
+  } as never;
+
   function runAnalysisFactWithDecisionReview(
     evidenceEnhancements: Record<string, unknown>,
     keyAssumptions: readonly unknown[] = [],
@@ -1057,6 +1064,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(3);
@@ -1070,6 +1078,50 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
     );
   });
 
+  it.each([
+    'needs_user_mapping',
+    'needs_encoding',
+    'needs_user_input',
+    'blocked',
+  ] as const)(
+    'known non-ready %s returns only the canonical readiness recovery',
+    (status) => {
+      const analysisReady = {
+        status,
+        options: [],
+        goal_node_id: 'g',
+      } as never;
+      const chips = generateChips({
+        stage: 'analyse',
+        handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+        analysis: analysisAt('stable'),
+        analysisReady,
+        validationRegistry: REGISTRY,
+      });
+
+      expect(chips).toEqual([buildReadinessRecoveryChip(analysisReady)]);
+      expect(chips).toHaveLength(1);
+      expect(chips[0]).not.toHaveProperty('action_type');
+      expect(chips.some((chip) => chip.id === 'chip_prompt_validate_decision')).toBe(false);
+      expect(chips.some((chip) => chip.id === 'chip_action_explain_results')).toBe(false);
+      expect(chips.some((chip) => chip.id === 'chip_action_what_would_flip')).toBe(false);
+    },
+  );
+
+  it('unknown readiness preserves ordinary post-run chips but fails factor science closed', () => {
+    const chips = generateChips({
+      stage: 'analyse',
+      handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
+      analysis: analysisAt('stable'),
+      validationRegistry: REGISTRY,
+    });
+
+    expect(chips.map((chip) => chip.id)).toEqual([
+      'chip_action_explain_results',
+      'chip_action_what_would_flip',
+    ]);
+  });
+
   it('uses producer priority rather than decision-review object order to qualify the chip', () => {
     const chips = generateChips({
       stage: 'analyse',
@@ -1079,6 +1131,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
         [{ factor_id: 'fac_cost', evppi: 0.01, status: 'resolved' }],
       )],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
@@ -1096,6 +1149,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [fact],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
@@ -1113,6 +1167,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [fact],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
@@ -1130,6 +1185,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [fact],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(false);
@@ -1147,6 +1203,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
         [{ factor_id: 'fac_selected', evppi: 0.2, status: 'resolved' }],
       )],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips.some((c) => c.id === 'chip_prompt_validate_decision')).toBe(true);
@@ -1157,6 +1214,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     const validationChip = chips.find((c) => c.id === 'chip_prompt_validate_decision');
@@ -1169,6 +1227,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     const validationChip = chips.find((c) => c.id === 'chip_prompt_validate_decision');
@@ -1181,6 +1240,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFact()],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(2);
@@ -1192,6 +1252,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview({})],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(2);
@@ -1209,6 +1270,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
         }),
       ],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(3);
@@ -1227,6 +1289,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       handlerFacts: [runAnalysisFact()], // no enrichment on current turn
       priorFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)], // older usable
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(2);
@@ -1252,6 +1315,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
         } as HandlerFact,
       ],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips).toHaveLength(2);
@@ -1263,6 +1327,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     const ids = chips.map((c) => c.id);
@@ -1274,6 +1339,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     expect(chips.length).toBeLessThanOrEqual(3);
@@ -1284,6 +1350,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     for (const chip of chips) {
@@ -1296,6 +1363,7 @@ describe('generateChips — V5 coaching post-run_analysis validation chip', () =
       stage: 'analyse',
       handlerFacts: [runAnalysisFactWithDecisionReview(USABLE_ENHANCEMENTS)],
       analysis: analysisAt('stable'),
+      analysisReady: READY_FOR_FACTOR_GUIDANCE,
       validationRegistry: REGISTRY,
     });
     const forbidden = [

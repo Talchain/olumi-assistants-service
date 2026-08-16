@@ -9950,6 +9950,7 @@ export async function runTurnExecutor(
         coaching: coachingText,
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
+        analysisReadyStatus: analysisReadyForTurn?.status,
         suggested_actions: executeChips,
         // R4 lookup fix — persisted-snapshot fallback for graph-node
         // ID→{label,kind} resolution. The PLoT envelope on the fact has no

@@ -172,7 +172,13 @@ function productionShapedFact(overrides: FactOverrides = {}): RunAnalysisHandler
       constraint_verdict_state: 'evaluated_feasible',
     },
     option_comparison_status: 'computed',
-    factor_sensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.8 }],
+    factor_sensitivity: [
+      {
+        factor_id: 'fac_delivery_risk',
+        factor_label: 'Delivery risk',
+        confidence: 0.8,
+      },
+    ],
     ...(overrides.withEvppiPriority === true
       ? {
           factor_evppi: [
@@ -478,6 +484,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
       answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact({ withEvppiPriority: true })],
+      analysisReadyStatus: 'ready',
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
@@ -498,6 +505,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
         withEvppiPriority: true,
         withDecisionReview: false,
       })],
+      analysisReadyStatus: 'ready',
       persistedGraph: PERSISTED_GRAPH,
       persistedGraphHash: GRAPH_HASH,
     });
@@ -511,6 +519,46 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
     );
     expect(byType(env.blocks, 'evidence')).toHaveLength(0);
   });
+
+  it.each([
+    { name: 'ready', status: 'ready' as const, expected: 1 },
+    { name: 'unknown', status: undefined, expected: 0 },
+    {
+      name: 'known non-ready',
+      status: 'needs_user_mapping' as const,
+      expected: 0,
+    },
+  ])(
+    'prior-fact fresh lifecycle emits factor priority only when current readiness is $name',
+    ({ status, expected }) => {
+      const priorFact = productionShapedFact({
+        withEvppiPriority: true,
+        withDecisionReview: false,
+      });
+      const env = composeToolCallResponse({
+        answerKind: 'functional',
+        ...BASE_INPUT,
+        handlerFacts: [],
+        persistedGraph: PERSISTED_GRAPH,
+        ...(status === undefined ? {} : { analysisReadyStatus: status }),
+        lifecycle: {
+          priorFacts: [priorFact as unknown as HandlerFact],
+          freshness: {
+            freshness: 'fresh',
+            selected_fact_index: 0,
+            graph_hash_at_run: GRAPH_HASH,
+            current_graph_hash: GRAPH_HASH,
+            reason: 'graph_hash_match',
+            computed_at: '2026-07-10T09:00:00.000Z',
+          },
+          requestId: `req-prior-factor-${status ?? 'unknown'}`,
+          scenarioId: 'scen-lookup-fallback',
+        },
+      });
+
+      expect(reviewCardsOfKind(env.blocks, 'evidence_priority')).toHaveLength(expected);
+    },
+  );
 
   it('prior-fact FRESH lifecycle rebuild also resolves target_refs from the fallback', () => {
     const env = composeToolCallResponse({

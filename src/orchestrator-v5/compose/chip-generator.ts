@@ -496,6 +496,28 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     ? canonicalState.freshness
     : input.turnOutcome?.analysis_freshness;
 
+  // Canonical readiness is positive permission for every science-bearing
+  // chip surface. A typed non-ready state takes precedence over analysis
+  // follow-ups (including a just-produced run_analysis fact): the only honest
+  // next action is the canonical recovery for the current model. Unknown
+  // readiness deliberately falls through so ordinary, non-science follow-ups
+  // remain available; the factor-EVPPI chip itself is gated below.
+  const readyStatus = input.analysisReady?.status;
+  if (readyStatus !== undefined && readyStatus !== 'ready') {
+    const hasAnyRunAnalysisFact = canonicalState
+      ? canonicalState.selected_fact_index !== null
+      : (input.handlerFacts ?? []).some(isSuccessfulRunAnalysisFact) ||
+        (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
+    const recovery = buildReadinessRecoveryChip(input.analysisReady);
+    emit(TelemetryEvents.V5ChipsFloorApplied, {
+      reason: `readiness_${readyStatus}`,
+      stage: input.stage,
+      analysis_ready_status: readyStatus,
+      has_run_analysis_fact: hasAnyRunAnalysisFact,
+    });
+    return recovery ? [recovery] : [];
+  }
+
   // Rule: after run_analysis succeeds, prompt for the follow-ups that don't
   // require a new handler. Both executable chips emit `action_type` so the
   // chip-click path resolves deterministically via `dispatchDeterministicChipClick`
@@ -561,7 +583,10 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
         action_type: 'what_would_flip',
       },
     );
-    if (currentTurnCarriesUsableValidationGuidance(input.handlerFacts)) {
+    if (
+      readyStatus === 'ready' &&
+      currentTurnCarriesUsableValidationGuidance(input.handlerFacts)
+    ) {
       chips.push({
         id: 'chip_prompt_validate_decision',
         label: 'What should we validate?',
