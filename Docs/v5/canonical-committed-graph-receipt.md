@@ -2,19 +2,34 @@
 
 Status: **review-ready local freeze; not pushed, merged, deployed or enabled**.
 The CEE branch is based exactly on serving staging
-`b9389df8796f7e7ddb385e17cac5154b64fd6c58` (tree
-`abcf27c05576864b92fd3297e646d4ba67e075fe`), which contains the independently
-accepted Readiness #983 authority and science-to-reasoning #984. The prior
-reviewed receipt component remains immutable at
-`5597d855ccd23dd52ced7e4aeaf017182bada869` (tree
-`5e5b3f6ee3fec5c0926a18f201dd007a0d470aab`). The pre-repair rollback pin is
-`acaf2d4952c1e58017a0d3ff003371b012a6ac17`; the original foundation remains
-preserved at `62899d5cbbd4dab629cba0ae9cd0170c0d44ff0e`.
+`6cb2e27d95dcb3e6ca5bfc4f634b5178a76ccdc7` (tree
+`94160fb51ae79933e60dd0dd745b664ce7597610`), which contains the independently
+accepted Readiness #983 authority, science-to-reasoning #984, #985's schemas
+0.44 `conditional_winners` transport/withheld-claim projection and #988's
+fail-closed malformed-array correction, plus #986's governed `draft_graph`
+evaluator artefacts. The accepted pre-evaluator receipt head remains immutable
+at `5358cafa96962a5e2f7a5719b35dad6c6408e2f9` (tree
+`0ff24da0913b620855b4216fbb434958941403aa`), based on the prior serving tip
+`9d06f373d3f47ec38e9c3f00bf6a087c32c6cb9f`. The earlier exact
+pre-coexistence receipt freeze remains immutable at
+`afa9fe94ad0f3e0a93e703169c1808a841bc6b54` (tree
+`96f3c55a253d7657b2e130f7e316ba6cb22cf776`); its parent fixed-point freeze is
+`4ea35e2720f1756c6f39c0b59efa4e0ebf29d97e`.
 
-The controlled rebase from the prior #983 serving base onto the exact current
-staging tip completed without a conflict. Range-diff showed only the expected
-context movement at the #984 chip-click/turn-executor seam; both the factor
-EVPPI reasoning behavior and the exact-persisted receipt guards are retained.
+The six-commit receipt train (four code patches, this handoff patch and one
+test-only ratchet repair) was replayed exactly once from the prior exact serving
+base `9d06f373d3f47ec38e9c3f00bf6a087c32c6cb9f` onto the exact serving tip
+above. #986 changes only `tools/graph-evaluator/**`; no receipt commit touches
+that subtree, so its reviewed serving tree is inherited byte-identically. #988
+changes exactly
+`src/orchestrator-v5/compose/withheld-claim-projection.ts` and
+`tests/contract/cee-to-ui.contract.test.ts`; no receipt commit touches either
+path, so the predicted and observed conflict sets were both empty. Their
+serving blobs (`178a98e2…` and `712537a6…`) are inherited exactly. Schemas 0.44
+remains the sole vendored authority and the orphan 0.43 tarball was not
+resurrected. Range-diff keeps the four receipt code patches and test-only repair
+unchanged; this handoff patch changes only exact-base, evaluator/#988
+coexistence and verification facts.
 
 ## Boundary and completion state
 
@@ -51,7 +66,8 @@ or internally contradictory goal authority.
 
 ## Shared contract authority
 
-CEE is pinned locally to the live schemas 0.43.0 contract built from:
+CEE is pinned locally to the live schemas 0.44.0 artifact, which carries the
+0.43 canonical-receipt contract byte-identically. Exact authorities are:
 
 - schemas base/tag v0.42.0:
   `bbfb7eb1e3f450598ff061a8651ce8c7e053468d`
@@ -61,10 +77,21 @@ CEE is pinned locally to the live schemas 0.43.0 contract built from:
   `3c3dc78cb08eb63135da7c2a90a9d4609ce28267`
 - corrected schemas tree:
   `fc96888fc41cf537ed83f041bab159447e23bc2d`
-- vendored sha256:
-  `9865bfc0891cfed383ae7a0741b324087ba33db03479f97295174f031dc8ea5e`
+- schemas 0.44 packed head:
+  `bf53ad8fdea3b3c74e94ee7b2b436ba2ecab0b0b`
+- guarded main/tag `v0.44.0`:
+  `cec5d4432e5a07c8fdf0226d79da60eaf0b045c5`
+- shared packed/tagged tree:
+  `7b493e24b21b4b177d3917890e890dda592cc9b4`
+- schemas 0.44 vendored sha256:
+  `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72`
 
-Schemas 0.43 provides two deliberately different reader/producer shapes:
+The 0.44 `blocks.js`, `blocks.d.ts`, `graph-hash-contract.js` and
+`graph-hash-contract.d.ts` files are byte-identical to 0.43. Their respective
+sha256 values are `4c4e77cc…`, `e233b104…`, `1ac2060d…` and `e831f909…` in
+both artifacts. The existing receipt symbols and semantics therefore survive
+the re-vendor without a mirror or compatibility shim. Schemas 0.43 introduced
+two deliberately different reader/producer shapes, now consumed through 0.44:
 
 - additive legacy `DraftGraphBlockSchema`, for compatibility;
 - strict `CanonicalCommittedGraphReceiptSchema` and producer block, including
@@ -171,10 +198,10 @@ committed graph authority.
 Required completion sequence:
 
 1. **Complete:** schemas 0.43 is reviewed, guarded-merged, tagged and published;
-   CEE and UI hold the same source-pack artifact bytes.
+   CEE now consumes its byte-identical receipt symbols through schemas 0.44.
 2. **Complete:** #983 is independently accepted, integrated and serving; this
    component is rebased on its exact staging SHA and converged on its builder.
-3. Deploy and prove the UI's fail-closed 0.43 canonical-receipt consumer from
+3. Deploy and prove the UI's fail-closed 0.43-or-newer canonical-receipt consumer from
    serving origin `7ad0cefcd8c386491680e9656b8720ce36df6b4e` or newer. Producer-first
    emission remains forbidden.
 4. Apply `20260816120000_v5_graph_append_ack.sql` DB-first, refresh the schema
@@ -188,12 +215,18 @@ Required completion sequence:
    the v5 function/trigger may be revoked and dropped; retain `accepted_graph`
    unless a separately approved data-loss cleanup is intended.
 
+The current code rollback anchor is serving staging `6cb2e27d…`: revert only
+the receipt train and retain #986's governed evaluator, #988's two-file
+fail-closed correction and schemas 0.44. The immutable pre-#988 receipt head
+`1a214847…` is comparison evidence, not a serving rollback target, because
+checking it out would remove both serving coexistence components.
+
 ## Architecture disposition
 
 | Item | Disposition | Reason |
 |---|---|---|
 | `buildCanonicalCommittedGraphReceipt` | **KEEP** | Sole exact post-commit receipt validator/transporter. |
-| schemas 0.43 producer receipt + nested vocabulary | **KEEP** | Shared wire contract and one field vocabulary; no duplicate digest. |
+| schemas 0.44 carrying the 0.43 producer receipt + nested vocabulary | **KEEP** | Shared wire contract and one field vocabulary; no duplicate digest or downgraded vendor. |
 | `projectGraphForPersistence` carrier authoring | **KEEP** | Makes append bytes canonical before the irreversible commit. |
 | `buildAppliedGraphWireField` / `applied-graph-emit.ts` | **REMOVE** | Lossy nodes/edges-only projection from the wrong authority. |
 | manual initial-draft receipt composer | **REPLACE** | Now routed through the singular post-commit helper. |
@@ -252,16 +285,57 @@ after canonicalisation.
 
 ### Frozen verification evidence
 
-- current-base draft fixed-point/route/source-guard set: 5/5 files, 104/104
+- final current-tip replay: six commits rebased exactly once from serving
+  `9d06f373…` onto serving `6cb2e27d…`, with zero conflicts and zero receipt /
+  `tools/graph-evaluator` path overlap; the evaluator subtree and both #988
+  blobs are byte-identical from base to head;
+- current-tip receipt/#988 coexistence matrix: 27/27 files, 447/447 tests;
+- evaluator coexistence: governed evaluator suite 17/17 tests and pack verifier
+  `VERIFIED`, with the pinned candidate remaining `HOLD_WITH_EVIDENCE`;
+- final-base receipt/#988 focused coexistence matrix: 23/23 files, 332/332
+  tests, including the complete withheld `conditional_winners` projection and
+  CEE-to-UI contract set;
+- six-diagnostic repair matrix: 3/3 files, 18/18 tests; the final canonical
+  carrier typing adjustment retained its 6/6 behavior tests;
+- full test-inclusive TypeScript drift ratchet: green at the frozen baseline,
+  103 files / 291 errors (baseline file unchanged); production source
+  typecheck: green;
+- schemas-resolution gate: green, resolving `@talchain/schemas@0.44.0` from the
+  sole 0.44 vendored tarball; exact tarball sha256 remains
+  `2177849b178aaf5a4fbdf273377582ac03dfb18d891cf3d8443c62c81315ea72`;
+- the three test-only child files lint with 0 errors and 0 warnings;
+- current-tip changed-code lint: 0 errors (one ignored-script warning only);
+  `git diff --check` is clean;
+- the evaluator package's standalone legacy-wide typecheck is not a candidate
+  gate and still reports four inherited errors in
+  `src/e2e-pipeline-test.ts` and `src/validate-graph-tester.ts`. Both files,
+  the evaluator tsconfig and package lock are byte-identical at `9d06f373…`,
+  serving `6cb2e27d…` and this receipt head; no governed-evaluator file adds an
+  error. The required CEE source typecheck and exact full drift ratchet above
+  are green;
+- #987's pre-#988 exact-head required, full, integration, live-LLM, schema,
+  CodeQL, Snyk and dependency-review gates were green. Its only candidate
+  failure was the six test-only ratchet diagnostics repaired above; its package
+  audit failure was inherited and reproduced byte-identically by #988;
+- #988's exact-head required, full, integration, ratchet, schema, CodeQL, Snyk
+  and dependency-review gates were green before it became serving staging
+  `9d06f373…`;
+- no full repository suite was rerun locally. The final-base work is bounded to
+  the focused coexistence matrix, full drift ratchet, production typecheck,
+  changed lint and diff/range checks.
+
+Pre-#985 fixed-point evidence retained as historical regression proof:
+
+- draft fixed-point/route/source-guard set: 5/5 files, 104/104
   tests;
-- current-base #984 science coexistence set: 8/8 files, 577/577 tests;
-- current-base receipt/readiness/append-ack coexistence set: 21/21 files,
+- #984 science coexistence set: 8/8 files, 577/577 tests;
+- receipt/readiness/append-ack coexistence set: 21/21 files,
   333/333 tests;
-- current-base full TypeScript typecheck: green, resolving
+- full TypeScript typecheck: green, resolving
   `@talchain/schemas@0.43.0`;
-- current changed-code lint: 0 errors and 0 warnings;
-- current full lint: 0 errors and two pre-existing unused-disable warnings;
-- current `git diff --check`: clean;
+- changed-code lint: 0 errors and 0 warnings;
+- full lint: 0 errors and two pre-existing unused-disable warnings;
+- `git diff --check`: clean;
 - one serialized local `test:required` run completed without restart: 1,717
   files passed, 12 failed and 19 skipped; 30,101 tests passed, 17 failed, 223
   skipped and 12 remained todo (646.78s). The bounded residual comprised two

@@ -9,16 +9,15 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ### `talchain-schemas-0.44.0.tgz`
 
-> **⚠⚠ PACKED FROM AN UNMERGED BRANCH — READ THIS BEFORE MERGING THIS PR.**
-> Every other entry in this file records a tarball packed from a **merged,
-> tagged release**. This one cannot, and saying otherwise would be the false
-> label this repo's doctrine exists to prevent.
->
-> `@talchain/schemas` **publishes on merge to `main`** — that is its release
-> switch — and the schemas half of this train (olumi-schemas **#43**) is
-> deliberately still OPEN so both halves can be reviewed as one change. The
-> bytes here were therefore packed from that PR's branch head,
-> **`bf53ad8fdea3b3c74e94ee7b2b436ba2ecab0b0b`**, with
+> **⚠ SOURCE-PACKED BEFORE MERGE; TAGGED-TREE IDENTITY IS NOW PROVEN, WHILE A
+> FRESH-TAG REPACK REMAINS OPEN.** The bytes here were originally packed from
+> olumi-schemas #43's pre-merge branch head
+> **`bf53ad8fdea3b3c74e94ee7b2b436ba2ecab0b0b`**. The published tag
+> `v0.44.0` now resolves to guarded main
+> **`cec5d4432e5a07c8fdf0226d79da60eaf0b045c5`**; both commits have the exact
+> tree **`7b493e24b21b4b177d3917890e890dda592cc9b4`**. The source used for the pack
+> is therefore the tagged source byte-for-byte, but the originally required
+> fresh-clone repack from the tag has not been rerun. The original pack used
 > `package.json.version == 0.44.0` asserted before packing, via
 > `npm ci && npm run build && npm pack` (node 20.19.5 / npm 10.8.2 — the same
 > toolchain the 0.40.0 entry records).
@@ -27,24 +26,22 @@ identically from a normal clone, a CI checkout, and any worktree.
 > — 419,086 bytes. A second independent `npm pack` produced **byte-identical**
 > output.
 >
-> **REQUIRED BEFORE THIS PR MERGES — do not skip, and do not treat a green CI
-> as covering it.** CI validates that these bytes match the adjacent `.sha256`;
-> it cannot know whether they match what was PUBLISHED, because nothing was
-> published when they were made.
+> **REQUIRED BEFORE THIS ARTIFACT IS CALLED TAG-REPACKED — do not skip, and do
+> not treat a green CI as covering it.** CI validates that these bytes match the
+> adjacent `.sha256`; it does not perform a fresh pack from the tag.
 >
-> 1. Merge olumi-schemas #43 ⇒ 0.44.0 publishes and is tagged.
-> 2. Re-pack from a fresh blobless clone with `HEAD` asserted equal to
+> 1. Re-pack from a fresh blobless clone with `HEAD` asserted equal to
 >    `git rev-list -n1 v0.44.0` *before any read* — fetching a ref is not
 >    checking it out.
-> 3. Assert the sha256 is **identical** to the one above. If it differs, the
+> 2. Assert the sha256 is **identical** to the one above. If it differs, the
 >    published bytes are not these bytes: replace the tarball and the `.sha256`
 >    in this PR rather than reasoning about why the difference is harmless.
-> 4. Then replace this whole block with the normal
+> 3. Then replace this whole block with the normal
 >    "SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE" wording.
 >
 > The estate rule this protects is "no two repos may hold DIFFERENT bytes under
-> one version string". Until step 3 is done, that rule is *asserted here and not
-> yet proven*.
+> one version string". Tagged-source identity is proven by the shared tree;
+> registry/package-envelope identity remains open until the repack above.
 
 **What CEE adopts here: one transport key, its claim-safety ruling, and a
 two-release version jump.**
@@ -66,10 +63,13 @@ the leading-option claim, and the factor-level science is kept.
 > producer forms, and `CANONICAL_GRAPH_HASH_PROJECTION_VERSION` +
 > `CANONICAL_GRAPH_HASH_NESTED_PROJECTION`. It adds names and relaxes two
 > previously-absent optional keys; it makes nothing required and narrows no
-> vocabulary. CEE adopts it as a **reader only** here — this PR enables no
-> canonical receipt emission and adds no digest implementation. 0.43.0's own
-> rollout note calls for exactly this order: publish, re-vendor CEE and the UI,
-> and only then enable emission.
+> vocabulary. At serving base `e7d2a0b9`, #985 adopted it as a **reader only**.
+> The separately stacked canonical-receipt component now uses those same
+> 0.43-compatible producer symbols from this 0.44 artifact; it does not
+> re-vendor 0.43 or change the digest authority, and remains undeployed behind
+> the UI-consumer and DB-first rollout barriers. 0.43.0's own rollout note calls
+> for exactly this order: publish, re-vendor CEE and the UI, and only then
+> enable emission.
 
 **Rollback path:** revert this whole PR and run `pnpm install`. Git restores the
 exact 0.42.0 tarball, checksum, pin and lockfile. Reverting is independent: no
