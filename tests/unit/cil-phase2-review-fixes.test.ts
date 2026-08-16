@@ -457,16 +457,36 @@ describe("Task 3B: _retry_suggestion removed (CIL Phase 1)", () => {
 // Task 3A: needs_user_input in graph readiness
 // ============================================================================
 
-describe("Task 3A: needs_user_input in graph readiness", () => {
-  it("readiness route surfaces payload-level blockers", async () => {
+describe("Task 3A: blockers in graph readiness", () => {
+  /**
+   * ⚠ THIS ASSERTION IS NOW THE INVERSE OF WHAT IT WAS, DELIBERATELY.
+   *
+   * It used to require the route to read `analysisReady.status ===
+   * "needs_user_input"` and `analysisReady.blockers` — i.e. to surface blockers
+   * the CLIENT sent. That is exactly the dependence the readiness unification
+   * removed: `analysis_ready` is the UI's own CACHE, and letting it decide the
+   * verdict meant a fresh session and a warmed session got opposite answers for
+   * the same graph.
+   *
+   * Blockers are still surfaced — better, with per-option and per-factor
+   * identity — but they are DERIVED from the graph by the canonical assessor
+   * rather than echoed back from the request.
+   */
+  it("derives blockers from the canonical assessor, not from the request payload", async () => {
     const fs = await import("fs");
     const source = fs.readFileSync(
       "src/routes/assist.v1.graph-readiness.ts",
       "utf-8"
     );
-    // Verify that needs_user_input is handled
-    expect(source).toContain('analysisReady.status === "needs_user_input"');
-    expect(source).toContain("analysisReady.blockers");
+
+    // The route no longer reads the client's cached blockers at all.
+    expect(source).not.toContain('analysisReady.status === "needs_user_input"');
+    expect(source).not.toContain("analysisReady.blockers");
+
+    // It reads the one admission authority, and serialises its per-option
+    // blockers onto the response.
+    expect(source).toContain("assessRouteAdmission");
+    expect(source).toContain("readiness_issues");
   });
 });
 

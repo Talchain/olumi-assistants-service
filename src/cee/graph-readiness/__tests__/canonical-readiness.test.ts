@@ -220,32 +220,36 @@ describe("assessRouteAdmission — one assessor, answering from the model", () =
 });
 
 // ============================================================================
-// THE CUTOVER PRECONDITION — an executable statement of a MEASURED FACT.
+// THE CUTOVER PIN, INVERTED.
 //
-// Derived at DecisionGuideAI@9a8b84c6, `readinessStore.ts:279-308`: the UI's
-// node projection emits `{id, type, kind, label}` (+ `data.value` when numeric,
-// + `observed_state` for factors) and NEVER forwards `interventions` on option
-// nodes. So the graph on the wire cannot express a configured option, and a
-// model the user has fully configured is indistinguishable from an empty one.
+// This block previously asserted that a canvas-configured model read as
+// UNCONFIGURED on the deployed wire — the measured data gap that blocked
+// re-pointing `/assist/v1/graph-readiness` at this assessor. That gap is
+// closed: DecisionGuideAI #734 makes `buildReadinessPayload` forward
+// `interventions` on option nodes.
 //
-// This is why `/assist/v1/graph-readiness` has NOT been repointed at this
-// assessor in this PR: doing so would answer `can_run_analysis: false` for
-// every deployed request.
-//
-// When the UI starts forwarding option interventions, this spec REDs — which
-// is the signal that the cutover is safe. Do not "fix" it by relaxing it.
+// So the fixture below is the NEW projection, and the assertion is the
+// opposite one: the deployed payload must now ADMIT a configured model. The
+// negative arm is retained directly beneath it, because "admits everything" is
+// exactly as broken as "admits nothing" and one assertion alone cannot tell
+// them apart.
 // ============================================================================
-describe("cutover precondition — the deployed UI payload cannot express a configured option", () => {
-  /** Exactly the UI's node projection. */
-  const uiNode = (id: string, kind: string, label: string) => ({ id, type: kind, kind, label });
+describe("cutover pin — the deployed UI payload CAN express a configured option", () => {
+  /** The UI's node projection, post-#734: option nodes carry `interventions`. */
+  const uiNode = (
+    id: string,
+    kind: string,
+    label: string,
+    extra: Record<string, unknown> = {},
+  ) => ({ id, type: kind, kind, label, ...extra });
 
-  const deployedUiPayloadGraph = {
+  const deployedUiGraph = (configured: boolean) => ({
     nodes: [
       uiNode("goal", "goal", "Increase revenue"),
       uiNode("decision", "decision", "Pricing"),
-      { ...uiNode("fac_price", "factor", "Price"), observed_state: { value: 0.5 } },
-      uiNode("opt_a", "option", "Premium"),
-      uiNode("opt_c", "option", "Value"),
+      uiNode("fac_price", "factor", "Price", { observed_state: { value: 0.5 } }),
+      uiNode("opt_a", "option", "Premium", configured ? { interventions: { fac_price: 0.9 } } : {}),
+      uiNode("opt_c", "option", "Value", configured ? { interventions: { fac_price: 0.4 } } : {}),
     ],
     edges: [
       uiEdge("e1", "decision", "opt_a"),
@@ -254,30 +258,22 @@ describe("cutover precondition — the deployed UI payload cannot express a conf
       uiEdge("e6", "opt_c", "fac_price"),
       uiEdge("e7", "fac_price", "goal"),
     ],
-  };
-
-  it("BLOCKER: a canvas-configured model still reads as unconfigured on the deployed wire", () => {
-    const verdict = assessRouteAdmission(deployedUiPayloadGraph);
-
-    expect(verdict.can_run_analysis).toBe(false);
-    // EVERY option is blocked — not one, all of them. That is the signature of
-    // a data-availability gap, not of a genuinely incomplete model.
-    expect(verdict.readiness_issues.some((i) => i.option_id === "opt_a")).toBe(true);
-    expect(verdict.readiness_issues.some((i) => i.option_id === "opt_c")).toBe(true);
   });
 
-  it("CONTRAST CONTROL: the identical model admits once the graph carries interventions", () => {
-    const withInterventions = {
-      ...deployedUiPayloadGraph,
-      nodes: deployedUiPayloadGraph.nodes.map((n: any) =>
-        n.kind === "option"
-          ? { ...n, interventions: { fac_price: n.id === "opt_a" ? 0.9 : 0.4 } }
-          : n,
-      ),
-    };
+  it("ADMITS a configured model sent in the deployed UI's own payload shape", () => {
+    const verdict = assessRouteAdmission(deployedUiGraph(true));
 
-    // The ONLY difference from the test above is the interventions. This is
-    // what isolates the cause to the UI's node projection and nothing else.
-    expect(assessRouteAdmission(withInterventions).can_run_analysis).toBe(true);
+    expect(verdict.can_run_analysis).toBe(true);
+    expect(verdict.readiness_issues).toEqual([]);
+    expect(verdict.options_ready).toBe(2);
+  });
+
+  it("still REFUSES the same payload shape when the options are genuinely unconfigured", () => {
+    const verdict = assessRouteAdmission(deployedUiGraph(false));
+
+    expect(verdict.can_run_analysis).toBe(false);
+    // Named by identity, so the affordance can act on it.
+    expect(verdict.readiness_issues.some((i) => i.option_id === "opt_a")).toBe(true);
+    expect(verdict.readiness_issues.some((i) => i.option_id === "opt_c")).toBe(true);
   });
 });

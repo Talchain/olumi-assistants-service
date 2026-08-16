@@ -130,7 +130,6 @@ export function assessGraphReadiness(
     confidence_level: confidenceLevel,
     confidence_explanation: confidenceExplanation,
     quality_factors: qualityFactors,
-    can_run_analysis: true,
     evidence_quality: evidenceQuality,
     key_assumptions: keyAssumptions,
     domain_completeness: domainCompleteness,
@@ -174,8 +173,6 @@ function createBlockedAssessment(
     confidence_level: "low",
     confidence_explanation: `Cannot assess readiness: ${blockerReason}`,
     quality_factors: [],
-    can_run_analysis: false,
-    blocker_reason: blockerReason,
   };
 }
 

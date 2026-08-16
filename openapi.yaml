@@ -4109,6 +4109,54 @@ components:
               minimum: 0
               description: How many options would be scaffolded (present when will_scaffold_options is true).
               example: 1
+        readiness_issues:
+          type: array
+          description: >-
+            Per-option, per-factor blockers from the canonical admission
+            assessor — the sole authority on whether analysis may run. Additive.
+            This is what makes can_run_analysis=false actionable: the route
+            previously offered only a count ("1 option(s) blocked"), which names
+            no option and no field and so cannot drive the UI's
+            draft-missing-values affordance.
+          items:
+            type: object
+            required:
+              - code
+              - category
+              - message
+              - repairability
+            properties:
+              code:
+                type: string
+                description: Canonical issue code, e.g. MISSING_OPTION_VALUE.
+                example: MISSING_OPTION_VALUE
+              category:
+                type: string
+                description: Issue family, e.g. option_values, graph_structure, numeric_integrity.
+                example: option_values
+              message:
+                type: string
+                description: Human-readable, user-facing description of what to do.
+                example: Choose how "Unconfigured" should be represented on the effect scale.
+              repairability:
+                type: string
+                enum: [safe_canonicalisation, human_input_required]
+                description: Whether Olumi can resolve this without inventing user judgement.
+                example: human_input_required
+              option_id:
+                type: string
+                description: The option this blocker is about, when option-scoped.
+                example: opt_b
+              option_label:
+                type: string
+                example: Unconfigured
+              factor_id:
+                type: string
+                description: The factor whose value is missing or unusable, when factor-scoped.
+                example: fac_price
+              factor_label:
+                type: string
+                example: Price
         evidence_quality:
           type: object
           description: Distribution of evidence quality across edges
