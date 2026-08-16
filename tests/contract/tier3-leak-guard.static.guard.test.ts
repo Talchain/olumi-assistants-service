@@ -91,6 +91,12 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // only), so no caller can surface it; the lens copy is number-free by design
   // (2.692 §4: magnitudes banned; `BODY_BY_RATIONALE.CONTESTED_UNADJUDICATED`).
   ['compose/lens-selector.ts', 'structured'],
+  // Science reachability (factor-EVPPI) — this selector reads only the exact
+  // `inference_warnings[].code` discriminator needed to refuse a partial or
+  // transport-mismatched ranking. It fails closed on an unreadable carrier;
+  // no warning content, warning prose, or numeric magnitude is returned,
+  // logged, or made available to a user-facing composer.
+  ['coaching/select-factor-evppi.ts', 'structured'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
   // Root-level seams (non-recursive root scan):
   ['compose.ts', 'transport'],

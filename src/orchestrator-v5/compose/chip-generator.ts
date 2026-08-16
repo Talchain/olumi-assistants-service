@@ -508,7 +508,17 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
       ? canonicalState.selected_fact_index !== null
       : (input.handlerFacts ?? []).some(isSuccessfulRunAnalysisFact) ||
         (input.priorFacts ?? []).some(isSuccessfulRunAnalysisFact);
-    const recovery = buildReadinessRecoveryChip(input.analysisReady);
+    // A successful current run can compare the configured subset while
+    // explicitly excluding an option that still needs values. That exact
+    // option is a more specific recovery than the readiness payload's generic
+    // model-level prompt. It remains the ONLY chip: known non-ready state must
+    // never fall through to explain, flip, validation, or factor-EVPPI science.
+    const recovery =
+      handlerJustRan === 'run_analysis' &&
+      input.excludedOptions !== undefined &&
+      input.excludedOptions.length > 0
+        ? buildScaffoldConfigureChip(input.excludedOptions)
+        : buildReadinessRecoveryChip(input.analysisReady);
     emit(TelemetryEvents.V5ChipsFloorApplied, {
       reason: `readiness_${readyStatus}`,
       stage: input.stage,
