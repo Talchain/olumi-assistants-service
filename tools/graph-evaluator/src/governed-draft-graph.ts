@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { score, DRAFT_RUBRIC_VERSION } from "./scorer.js";
@@ -25,8 +25,8 @@ interface HashPinnedPath {
 
 export interface GovernedDraftManifest {
   readonly schema_version: "olumi.draft_graph.governed_eval.v1";
-  readonly status: string;
-  readonly candidate_status: string;
+  readonly status: "BASELINE_FROZEN";
+  readonly candidate_status: "HOLD_WITH_EVIDENCE";
   readonly serving: {
     readonly git_sha: string;
     readonly git_tree: string;
@@ -51,6 +51,8 @@ export interface GovernedDraftManifest {
     readonly logical_primary_calls: 14;
     readonly manual_retries: 0;
     readonly candidate_calls: 0;
+    readonly equivalence_scope: "first_primary_prompt_composition_and_model_under_pinned_direct_adapter_configuration";
+    readonly equivalence_excludes: "whole_route_and_request_bytes";
   };
   readonly model: {
     readonly provider: string;
@@ -141,7 +143,9 @@ export interface PackProblem {
     | "MODEL_ROUTE_DRIFT"
     | "LEGACY_UNDISPOSITIONED"
     | "DEPLOYED_EVIDENCE_DRIFT"
-    | "GOVERNANCE_ARTIFACT_DRIFT";
+    | "GOVERNANCE_ARTIFACT_DRIFT"
+    | "GOVERNANCE_STATUS_INVALID"
+    | "CANDIDATE_IDENTITY_INVALID";
   readonly detail: string;
 }
 
@@ -184,7 +188,7 @@ export interface GovernedCaseCapture {
   readonly graph?: unknown;
   readonly record_disclosures?: readonly unknown[];
   /** Count after the live AnthropicAdapter field projection. */
-  readonly serving_record_disclosures_count?: number;
+  readonly serving_record_disclosures_count: number;
   readonly latency_ms?: number;
   readonly provider_latency_ms?: number;
   readonly input_tokens?: number;
@@ -253,6 +257,71 @@ function sha256(value: string | Buffer): string {
 
 async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
+}
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+
+interface GovernedBaselineArtifactEnvelope {
+  readonly schema_version?: unknown;
+  readonly baseline_status?: unknown;
+  readonly candidate_status?: unknown;
+  readonly run?: unknown;
+}
+
+function isGovernedRun(value: unknown): value is GovernedRun {
+  if (!value || typeof value !== "object") return false;
+  const run = value as Partial<GovernedRun>;
+  return run.schema_version === "olumi.draft_graph.governed_run.v1" &&
+    (run.arm === "baseline" || run.arm === "candidate") &&
+    Boolean(run.identity && typeof run.identity === "object") &&
+    Array.isArray(run.cases) &&
+    Array.isArray(run.scores);
+}
+
+function exactStrings(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index]);
+}
+
+function hasExactRunCoverage(
+  run: GovernedRun,
+  expectedIds: readonly string[],
+): boolean {
+  return run.schema_version === "olumi.draft_graph.governed_run.v1" &&
+    exactStrings(run.identity.corpus_ids, expectedIds) &&
+    exactStrings(run.cases.map((item) => item.brief_id), expectedIds) &&
+    exactStrings(run.scores.map((item) => item.brief_id), expectedIds);
+}
+
+function captureDisclosureEvidence(captures: readonly GovernedCaseCapture[]): {
+  readonly invalid_count: number;
+  readonly unsurfaced_count: number;
+} {
+  let invalid = 0;
+  let unsurfaced = 0;
+  for (const capture of captures) {
+    const generated = Array.isArray(capture.record_disclosures)
+      ? capture.record_disclosures.length
+      : 0;
+    const served = (capture as { serving_record_disclosures_count?: unknown })
+      .serving_record_disclosures_count;
+    if (
+      typeof served !== "number" ||
+      !Number.isFinite(served) ||
+      !Number.isInteger(served) ||
+      served < 0 ||
+      served > generated
+    ) {
+      invalid += 1;
+      unsurfaced += generated;
+      continue;
+    }
+    unsurfaced += generated - served;
+  }
+  return { invalid_count: invalid, unsurfaced_count: unsurfaced };
 }
 
 function problem(
@@ -351,6 +420,86 @@ export async function verifyGovernedPack(
   const manifest = await readGovernedManifest(packRoot);
   const problems: PackProblem[] = [];
   const layerContentHashes: Record<string, string> = {};
+
+  const runtimeManifest = manifest as unknown as {
+    status?: unknown;
+    candidate_status?: unknown;
+    baseline?: {
+      status?: unknown;
+      logical_primary_calls?: unknown;
+      manual_retries?: unknown;
+      candidate_calls?: unknown;
+      equivalence_scope?: unknown;
+      equivalence_excludes?: unknown;
+    };
+  };
+  if (
+    runtimeManifest.status !== "BASELINE_FROZEN" ||
+    runtimeManifest.candidate_status !== "HOLD_WITH_EVIDENCE" ||
+    runtimeManifest.baseline?.status !== "complete" ||
+    runtimeManifest.baseline.logical_primary_calls !== 14 ||
+    runtimeManifest.baseline.manual_retries !== 0 ||
+    runtimeManifest.baseline.candidate_calls !== 0 ||
+    runtimeManifest.baseline.equivalence_scope !==
+      "first_primary_prompt_composition_and_model_under_pinned_direct_adapter_configuration" ||
+    runtimeManifest.baseline.equivalence_excludes !== "whole_route_and_request_bytes"
+  ) {
+    problem(
+      problems,
+      "GOVERNANCE_STATUS_INVALID",
+      "the frozen baseline must remain BASELINE_FROZEN + HOLD_WITH_EVIDENCE with 14 baseline calls, no retries, and zero candidate calls",
+    );
+  }
+
+  const candidatePath = manifest.governance.candidate_path;
+  const candidateHash = manifest.governance.candidate_sha256;
+  const candidateAbsent = candidatePath === null && candidateHash === null;
+  const candidatePairPresent = typeof candidatePath === "string" &&
+    candidatePath.length > 0 &&
+    typeof candidateHash === "string" &&
+    SHA256_PATTERN.test(candidateHash);
+  if (!candidateAbsent && !candidatePairPresent) {
+    problem(
+      problems,
+      "CANDIDATE_IDENTITY_INVALID",
+      "candidate_path and candidate_sha256 must either both be null or form one complete hash-pinned pair",
+    );
+  } else if (candidatePairPresent) {
+    const candidateAbsolutePath = resolve(packRoot, candidatePath);
+    const candidateRelativePath = relative(packRoot, candidateAbsolutePath);
+    if (
+      candidateRelativePath.length === 0 ||
+      isAbsolute(candidateRelativePath) ||
+      candidateRelativePath === ".." ||
+      candidateRelativePath.startsWith(`..${sep}`)
+    ) {
+      problem(
+        problems,
+        "CANDIDATE_IDENTITY_INVALID",
+        "candidate prompt path must resolve to a file within the governed pack",
+      );
+    } else {
+      try {
+        const actualCandidateHash = sha256(await readFile(candidateAbsolutePath));
+        if (
+          actualCandidateHash !== candidateHash ||
+          actualCandidateHash === manifest.prompt.sha256
+        ) {
+          problem(
+            problems,
+            "CANDIDATE_IDENTITY_INVALID",
+            "candidate prompt must match its pinned hash and be byte-distinct from the baseline prompt",
+          );
+        }
+      } catch (error) {
+        problem(
+          problems,
+          "CANDIDATE_IDENTITY_INVALID",
+          `candidate prompt could not be read: ${String(error)}`,
+        );
+      }
+    }
+  }
 
   const mergeBase = gitValue(["merge-base", manifest.serving.git_sha, "HEAD"]);
   if (mergeBase !== manifest.serving.git_sha) {
@@ -554,6 +703,49 @@ export async function verifyGovernedPack(
     }
   }
 
+  try {
+    const artifact = await readJson<GovernedBaselineArtifactEnvelope>(
+      join(packRoot, manifest.baseline.result_path),
+    );
+    const baselineRun = artifact.run;
+    const expectedIdentity = buildGovernedRunIdentity(manifest);
+    const expectedIds = manifest.corpus.order.map((item) => item.id);
+    if (
+      artifact.schema_version !== "olumi.draft_graph.governed_baseline_artifact.v1" ||
+      artifact.baseline_status !== "COMPLETE" ||
+      artifact.candidate_status !== "HOLD_WITH_EVIDENCE"
+    ) {
+      problem(
+        problems,
+        "GOVERNANCE_STATUS_INVALID",
+        "the frozen baseline artifact must remain COMPLETE + HOLD_WITH_EVIDENCE",
+      );
+    }
+    if (
+      !isGovernedRun(baselineRun) ||
+      baselineRun.arm !== "baseline" ||
+      JSON.stringify(baselineRun.identity) !== JSON.stringify(expectedIdentity) ||
+      !hasExactRunCoverage(baselineRun, expectedIds) ||
+      baselineRun.cases.some((capture) =>
+        capture.model_id !== baselineRun.identity.model_id ||
+        capture.prompt_sha256 !== baselineRun.identity.prompt_sha256
+      ) ||
+      captureDisclosureEvidence(baselineRun.cases).invalid_count > 0
+    ) {
+      problem(
+        problems,
+        "GOVERNANCE_ARTIFACT_DRIFT",
+        "baseline result does not contain the exact complete hash-pinned 14-case baseline run",
+      );
+    }
+  } catch (error) {
+    problem(
+      problems,
+      "GOVERNANCE_ARTIFACT_DRIFT",
+      `baseline result could not be validated: ${String(error)}`,
+    );
+  }
+
   return {
     ok: problems.length === 0,
     manifest,
@@ -674,7 +866,7 @@ function toLegacyGraph(graph: unknown): ParsedGraph | undefined {
 function assessProvenance(
   graph: unknown,
   disclosures: readonly unknown[] | undefined,
-  servingDisclosuresCount: number | undefined,
+  servingDisclosuresCount: number,
 ): ProvenanceAssessment {
   const record = graph && typeof graph === "object" ? graph as Record<string, unknown> : {};
   const elements = [
@@ -700,7 +892,6 @@ function assessProvenance(
     else missing += 1;
   }
   const disclosureCount = disclosures?.length ?? 0;
-  const servingDisclosureCount = servingDisclosuresCount ?? disclosureCount;
   return {
     element_count: elements.length,
     missing_count: missing,
@@ -709,8 +900,8 @@ function assessProvenance(
     structural_count: structural,
     unbased_inference_count: unbased,
     disclosure_count: disclosureCount,
-    serving_disclosure_count: servingDisclosureCount,
-    unsurfaced_disclosure_count: Math.max(0, disclosureCount - servingDisclosureCount),
+    serving_disclosure_count: servingDisclosuresCount,
+    unsurfaced_disclosure_count: disclosureCount - servingDisclosuresCount,
   };
 }
 
@@ -783,10 +974,22 @@ export async function scoreGovernedCase(
       };
   const legacy = score(response, brief);
   const productionStructuralValid = capture.status === "success" && legacyGraph !== undefined;
+  const generatedDisclosureCount = Array.isArray(capture.record_disclosures)
+    ? capture.record_disclosures.length
+    : 0;
+  const rawServingDisclosureCount = (
+    capture as { serving_record_disclosures_count?: unknown }
+  ).serving_record_disclosures_count;
+  const servingDisclosureCountValid =
+    typeof rawServingDisclosureCount === "number" &&
+    Number.isFinite(rawServingDisclosureCount) &&
+    Number.isInteger(rawServingDisclosureCount) &&
+    rawServingDisclosureCount >= 0 &&
+    rawServingDisclosureCount <= generatedDisclosureCount;
   const provenance = assessProvenance(
     capture.graph,
     capture.record_disclosures,
-    capture.serving_record_disclosures_count,
+    servingDisclosureCountValid ? rawServingDisclosureCount : 0,
   );
   let canonicalReady = false;
   let canonicalStatus: string | null = null;
@@ -818,6 +1021,9 @@ export async function scoreGovernedCase(
   if (!canonicalReady) failures.push("CANONICAL_READINESS_BLOCKED");
   if (blockingCodes.includes("INTERNAL_ERROR")) failures.push("CANONICAL_READINESS_INTERNAL");
   if (provenance.missing_count > 0) failures.push("PROVENANCE_MISSING");
+  if (!servingDisclosureCountValid) {
+    failures.push("SERVING_DISCLOSURE_COUNT_INVALID");
+  }
   if (provenance.unsurfaced_disclosure_count > 0) {
     failures.push("RECORD_DISCLOSURE_UNSURFACED");
   }
@@ -845,6 +1051,19 @@ export async function scoreGovernedRun(
   manifest: GovernedDraftManifest,
 ): Promise<GovernedRun> {
   const briefs = await loadGovernedBriefs(manifest);
+  const expectedIds = manifest.corpus.order.map((item) => item.id);
+  if (
+    !exactStrings(identity.corpus_ids, expectedIds) ||
+    !exactStrings(captures.map((capture) => capture.brief_id), expectedIds)
+  ) {
+    throw new Error("governed run must contain the exact 14 case IDs in manifest order");
+  }
+  if (captures.some((capture) =>
+    capture.model_id !== identity.model_id ||
+    capture.prompt_sha256 !== identity.prompt_sha256
+  )) {
+    throw new Error("governed run case identity does not match its hash-pinned run identity");
+  }
   const byBrief = new Map(captures.map((capture) => [capture.brief_id, capture] as const));
   const orderedCaptures = identity.corpus_ids.map((id) => {
     const capture = byBrief.get(id);
@@ -942,20 +1161,74 @@ export function compareGovernedRuns(
   manifest: GovernedDraftManifest,
 ): GovernedComparison {
   const reasons: string[] = [];
+  const expectedIds = manifest.corpus.order.map((item) => item.id);
+  const manifestHasCanonical14 = manifest.corpus.cardinality === 14 &&
+    expectedIds.length === 14;
+  const baselineCoverageExact = manifestHasCanonical14 &&
+    hasExactRunCoverage(baseline, expectedIds);
+  const candidateCoverageExact = manifestHasCanonical14 &&
+    hasExactRunCoverage(candidate, expectedIds);
   if (baseline.arm !== "baseline" || candidate.arm !== "candidate") {
     reasons.push("PAIR_INCOMPLETE: arm labels are not baseline/candidate");
+  }
+  if (!baselineCoverageExact || !candidateCoverageExact) {
+    reasons.push(
+      "PAIR_INCOMPLETE: both arms must contain the exact 14 case IDs in manifest order across identity, captures, and scores",
+    );
+  }
+  if (
+    JSON.stringify(baseline.identity) !==
+      JSON.stringify(buildGovernedRunIdentity(manifest)) ||
+    baseline.cases.some((capture) =>
+      capture.model_id !== baseline.identity.model_id ||
+      capture.prompt_sha256 !== baseline.identity.prompt_sha256
+    )
+  ) {
+    reasons.push("MODEL_CONFIG_MISMATCH: baseline identity differs from the manifest");
   }
   if (comparisonIdentity(baseline.identity) !== comparisonIdentity(candidate.identity)) {
     reasons.push("MODEL_CONFIG_MISMATCH: non-prompt run identity differs");
   }
+  const governedCandidatePath = manifest.governance.candidate_path;
+  const governedCandidateHash = manifest.governance.candidate_sha256;
   if (
-    baseline.scores.length !== manifest.corpus.cardinality ||
-    candidate.scores.length !== manifest.corpus.cardinality
+    typeof governedCandidatePath !== "string" ||
+    governedCandidatePath.length === 0 ||
+    typeof governedCandidateHash !== "string" ||
+    !SHA256_PATTERN.test(governedCandidateHash) ||
+    !SHA256_PATTERN.test(candidate.identity.prompt_sha256) ||
+    candidate.identity.prompt_sha256 !== governedCandidateHash ||
+    candidate.identity.prompt_sha256 === baseline.identity.prompt_sha256 ||
+    candidate.identity.prompt_version !== "candidate" ||
+    candidate.identity.prompt_id.length === 0 ||
+    candidate.cases.some((capture) =>
+      capture.model_id !== candidate.identity.model_id ||
+      capture.prompt_sha256 !== candidate.identity.prompt_sha256
+    )
   ) {
-    reasons.push("PAIR_INCOMPLETE: both arms must contain exactly 14 scored cases");
+    reasons.push(
+      "CANDIDATE_IDENTITY_INVALID: candidate prompt identity must match the manifest's complete distinct path/hash pin, use candidate version, and match every case capture",
+    );
   }
   const baselineSummary = summariseGovernedScores(baseline.scores);
   const candidateSummary = summariseGovernedScores(candidate.scores);
+  const baselineDisclosures = captureDisclosureEvidence(baseline.cases);
+  const candidateDisclosures = captureDisclosureEvidence(candidate.cases);
+  if (baselineDisclosures.invalid_count > 0 || candidateDisclosures.invalid_count > 0) {
+    reasons.push(
+      `DISCLOSURE_EVIDENCE_HOLD: invalid served-disclosure counts baseline=${baselineDisclosures.invalid_count}, candidate=${candidateDisclosures.invalid_count}`,
+    );
+  }
+  if (
+    baselineDisclosures.unsurfaced_count > 0 ||
+    candidateDisclosures.unsurfaced_count > 0 ||
+    baselineSummary.unsurfaced_record_disclosure_count > 0 ||
+    candidateSummary.unsurfaced_record_disclosure_count > 0
+  ) {
+    reasons.push(
+      `DISCLOSURE_EVIDENCE_HOLD: unsurfaced disclosures baseline=${Math.max(baselineDisclosures.unsurfaced_count, baselineSummary.unsurfaced_record_disclosure_count)}, candidate=${Math.max(candidateDisclosures.unsurfaced_count, candidateSummary.unsurfaced_record_disclosure_count)}`,
+    );
+  }
   const hardPairs: Array<[keyof typeof baselineSummary, string, "at_least" | "at_most"]> = [
     ["adapter_success_count", "records adapter success", "at_least"],
     ["structured_outputs_count", "structured outputs attestation", "at_least"],
@@ -964,7 +1237,6 @@ export function compareGovernedRuns(
     ["canonical_blocking_issue_count", "canonical blocking issues", "at_most"],
     ["missing_provenance_count", "missing provenance", "at_most"],
     ["unbased_inference_count", "unbased inference", "at_most"],
-    ["unsurfaced_record_disclosure_count", "unsurfaced record disclosures", "at_most"],
   ];
   for (const [key, label, direction] of hardPairs) {
     const before = baselineSummary[key];
@@ -972,8 +1244,7 @@ export function compareGovernedRuns(
     if (typeof before !== "number" || typeof after !== "number") continue;
     if (direction === "at_least" ? after < before : after > before) {
       const family = label.includes("provenance") ||
-        label.includes("inference") ||
-        label.includes("disclosure")
+        label.includes("inference")
         ? "PROVENANCE_REGRESSION"
         : label.includes("readiness") || label.includes("blocking")
           ? "READINESS_REGRESSION"
@@ -996,7 +1267,16 @@ export function compareGovernedRuns(
   const losses = deltas.filter((value) => value < 0).length;
   const worst = deltas.length > 0 ? Math.min(...deltas) : null;
   const gate = manifest.rubric.meaningful_gain;
-  if (
+  const qualityEvidenceComplete = baselineCoverageExact &&
+    candidateCoverageExact &&
+    baselineSummary.legacy_scored_count === manifest.corpus.cardinality &&
+    candidateSummary.legacy_scored_count === manifest.corpus.cardinality &&
+    deltas.length === manifest.corpus.cardinality;
+  if (!qualityEvidenceComplete) {
+    reasons.push(
+      `QUALITY_EVIDENCE_INCOMPLETE: legacy coverage baseline=${baselineSummary.legacy_scored_count}/${manifest.corpus.cardinality}, candidate=${candidateSummary.legacy_scored_count}/${manifest.corpus.cardinality}, paired=${deltas.length}/${manifest.corpus.cardinality}`,
+    );
+  } else if (
     meanDelta === null ||
     meanDelta < gate.minimum_mean_legacy_delta ||
     wins < gate.minimum_case_wins ||
@@ -1010,7 +1290,11 @@ export function compareGovernedRuns(
   }
 
   const isHold = reasons.some((item) =>
-    item.startsWith("PAIR_INCOMPLETE") || item.startsWith("MODEL_CONFIG_MISMATCH"),
+    item.startsWith("PAIR_INCOMPLETE") ||
+    item.startsWith("MODEL_CONFIG_MISMATCH") ||
+    item.startsWith("CANDIDATE_IDENTITY_INVALID") ||
+    item.startsWith("DISCLOSURE_EVIDENCE_HOLD") ||
+    item.startsWith("QUALITY_EVIDENCE_INCOMPLETE"),
   );
   return {
     verdict: reasons.length === 0 ? "PASS" : isHold ? "HOLD" : "FAIL",

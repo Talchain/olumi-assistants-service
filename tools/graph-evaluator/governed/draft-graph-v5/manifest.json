@@ -33,7 +33,9 @@
     "result_sha256": "dab1fe78c09a33a500a00ff64c8ddb09f1dfa824b726547d9b5cf15206908938",
     "logical_primary_calls": 14,
     "manual_retries": 0,
-    "candidate_calls": 0
+    "candidate_calls": 0,
+    "equivalence_scope": "first_primary_prompt_composition_and_model_under_pinned_direct_adapter_configuration",
+    "equivalence_excludes": "whole_route_and_request_bytes"
   },
   "model": {
     "provider": "anthropic",
@@ -235,7 +237,7 @@
     "legacy_disposition_path": "legacy-disposition.json",
     "legacy_disposition_sha256": "ce1ea6ef1e16366ca22b41686ba862323a64690661530ff74f87ac6c222d091c",
     "failure_taxonomy_path": "failure-taxonomy.json",
-    "failure_taxonomy_sha256": "bf3df2996320ce73d3fb389ffb241c70851af5b403c14e330d5cb2560d7b1e73",
+    "failure_taxonomy_sha256": "09fb7403b08f027ea2881fc8a8e921c2dbd3809b89aba2d622837e0a5d616241",
     "deployed_evidence_path": "deployed-evidence.json",
     "deployed_evidence_sha256": "a23706029f5e21ecbb83eba445ecbe1dbf107f9f960f733b6517397de3b722e5"
   }

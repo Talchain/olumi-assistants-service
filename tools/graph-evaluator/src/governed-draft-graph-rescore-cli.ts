@@ -93,6 +93,11 @@ async function main(): Promise<void> {
   const latencies = run.cases
     .map((capture) => capture.latency_ms)
     .filter((value): value is number => typeof value === "number");
+  const servingEquivalence = Object.fromEntries(
+    Object.entries(existing.serving_equivalence).filter(
+      ([key]) => key !== "request_bytes_and_model",
+    ),
+  );
   const updated = {
     ...existing,
     rescored_at: new Date().toISOString(),
@@ -116,6 +121,12 @@ async function main(): Promise<void> {
       latency_p50_ms: percentile(latencies, 0.5),
       latency_p95_ms: percentile(latencies, 0.95),
       latency_max_ms: latencies.length > 0 ? Math.max(...latencies) : null,
+    },
+    serving_equivalence: {
+      ...servingEquivalence,
+      first_primary_prompt_composition_and_model:
+        "exact_under_pinned_direct_adapter_configuration",
+      scope_limit: "not_whole_route_or_request_bytes",
     },
     quality_interpretation: [
       `${summary.adapter_success_count}/14 exact-identity calls passed the production records adapter and ${summary.structured_outputs_count}/14 attested structured outputs.`,

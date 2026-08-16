@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  GOVERNED_PACK_ROOT,
   compareGovernedRuns,
   buildGovernedRunIdentity,
   loadGovernedBriefs,
@@ -8,11 +14,14 @@ import {
   scoreGovernedCase,
   verifyGovernedPack,
   type GovernedCaseScore,
+  type GovernedCaseCapture,
   type GovernedDraftManifest,
   type GovernedRun,
   type GovernedRunIdentity,
 } from "../src/governed-draft-graph.js";
 import type { ScoreResult } from "../src/types.js";
+
+const CANDIDATE_PROMPT_SHA256 = "a".repeat(64);
 
 describe("governed draft_graph V5 pack", () => {
   it("pins the exact serving prompt composition and canonical 14 in order", async () => {
@@ -28,6 +37,16 @@ describe("governed draft_graph V5 pack", () => {
     expect(result.brief_ids).toHaveLength(14);
     expect(result.brief_ids[0]).toBe("01-simple-binary");
     expect(result.brief_ids[13]).toBe("14-qualitative-strategy");
+    expect(result.manifest.status).toBe("BASELINE_FROZEN");
+    expect(result.manifest.candidate_status).toBe("HOLD_WITH_EVIDENCE");
+    expect(result.manifest.governance.candidate_path).toBeNull();
+    expect(result.manifest.governance.candidate_sha256).toBeNull();
+    expect(result.manifest.baseline.equivalence_scope).toBe(
+      "first_primary_prompt_composition_and_model_under_pinned_direct_adapter_configuration",
+    );
+    expect(result.manifest.baseline.equivalence_excludes).toBe(
+      "whole_route_and_request_bytes",
+    );
     expect(result.layer_content_hashes).toEqual({
       draft_records_instruction:
         "37f271b2377bc1f8a84c8b822af1a626aea22832ca767cfa8f897076f8c69af8",
@@ -117,6 +136,7 @@ describe("governed draft_graph V5 pack", () => {
         structured_outputs_used: true,
         graph,
         record_disclosures: [],
+        serving_record_disclosures_count: 0,
       },
       brief!,
     );
@@ -192,13 +212,83 @@ describe("governed draft_graph V5 pack", () => {
     expect(result.legacy_structural_valid).toBe(false);
     expect(result.failures).not.toContain("STRUCTURAL_INVALID");
     expect(result.failures).toContain("RECORD_DISCLOSURE_UNSURFACED");
+    expect(result.failures).not.toContain("SERVING_DISCLOSURE_COUNT_INVALID");
   });
 
-  it("accepts a meaningful matched gain only when hard gates do not regress", async () => {
+  it("fails closed when the served disclosure count is absent or invalid", async () => {
     const manifest = await readGovernedManifest();
+    const [brief] = await loadGovernedBriefs(manifest);
+    const base = {
+      brief_id: brief!.id,
+      status: "success" as const,
+      model_id: manifest.model.model_id,
+      prompt_sha256: manifest.prompt.sha256,
+      structured_outputs_used: true,
+      graph: { version: "1", nodes: [], edges: [] },
+      record_disclosures: [{ reason: "withheld" }],
+    };
+    const invalidValues = [undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, 0.5, 2];
+
+    for (const invalidValue of invalidValues) {
+      const capture = {
+        ...base,
+        serving_record_disclosures_count: invalidValue,
+      } as unknown as GovernedCaseCapture;
+      const result = await scoreGovernedCase(capture, brief!);
+
+      expect(result.failures).toContain("SERVING_DISCLOSURE_COUNT_INVALID");
+      expect(result.provenance.serving_disclosure_count).toBe(0);
+      expect(result.provenance.unsurfaced_disclosure_count).toBe(1);
+    }
+
+    const surfaced = await scoreGovernedCase(
+      { ...base, serving_record_disclosures_count: 1 },
+      brief!,
+    );
+    expect(surfaced.failures).not.toContain("SERVING_DISCLOSURE_COUNT_INVALID");
+    expect(surfaced.provenance.serving_disclosure_count).toBe(1);
+    expect(surfaced.provenance.unsurfaced_disclosure_count).toBe(0);
+  });
+
+  it("rejects a forged PASS even when the rewritten baseline artifact is re-hashed", async () => {
+    const verification = await verifyPackMutant(async (packRoot) => {
+      const manifestPath = join(packRoot, "manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        candidate_status: string;
+        baseline: { result_path: string; result_sha256: string };
+        governance: { candidate_path: string | null; candidate_sha256: string | null };
+      };
+      const artifactPath = join(packRoot, manifest.baseline.result_path);
+      const artifact = JSON.parse(await readFile(artifactPath, "utf8")) as {
+        candidate_status: string;
+        readonly [key: string]: unknown;
+      };
+      artifact.candidate_status = "PASS";
+      const artifactBytes = `${JSON.stringify(artifact, null, 2)}\n`;
+      await writeFile(artifactPath, artifactBytes, "utf8");
+      manifest.candidate_status = "PASS";
+      manifest.governance.candidate_path = "candidate-without-a-hash.txt";
+      manifest.governance.candidate_sha256 = null;
+      manifest.baseline.result_sha256 = createHash("sha256")
+        .update(artifactBytes)
+        .digest("hex");
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    });
+
+    expect(verification.ok).toBe(false);
+    expect(verification.problems.map((item) => item.code)).toContain(
+      "GOVERNANCE_STATUS_INVALID",
+    );
+    expect(verification.problems.map((item) => item.code)).toContain(
+      "CANDIDATE_IDENTITY_INVALID",
+    );
+  }, 40_000);
+
+  it("accepts a meaningful matched gain only when hard gates do not regress", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
     const identity = buildGovernedRunIdentity(manifest);
     const baseline = makeRun("baseline", identity, manifest, 0.60);
-    const candidate = makeRun("candidate", { ...identity, prompt_sha256: "candidate" }, manifest, 0.64);
+    const candidate = makeRun("candidate", makeCandidateIdentity(identity), manifest, 0.64);
 
     const result = compareGovernedRuns(baseline, candidate, manifest);
 
@@ -208,10 +298,10 @@ describe("governed draft_graph V5 pack", () => {
   });
 
   it("rejects mean gain when canonical readiness or provenance regresses", async () => {
-    const manifest = await readGovernedManifest();
+    const manifest = withCandidatePrompt(await readGovernedManifest());
     const identity = buildGovernedRunIdentity(manifest);
     const baseline = makeRun("baseline", identity, manifest, 0.60);
-    const candidate = makeRun("candidate", { ...identity, prompt_sha256: "candidate" }, manifest, 0.66);
+    const candidate = makeRun("candidate", makeCandidateIdentity(identity), manifest, 0.66);
     const first = candidate.scores[0]!;
     const damaged: GovernedRun = {
       ...candidate,
@@ -236,6 +326,106 @@ describe("governed draft_graph V5 pack", () => {
       ]),
     );
   });
+
+  it("holds an otherwise promotable candidate when any disclosure remains unsurfaced", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
+    const identity = buildGovernedRunIdentity(manifest);
+    const baseline = makeRun("baseline", identity, manifest, 0.60);
+    const candidate = makeRun("candidate", makeCandidateIdentity(identity), manifest, 0.64);
+    const hidden: GovernedRun = {
+      ...candidate,
+      cases: candidate.cases.map((capture) => ({
+        ...capture,
+        record_disclosures: [{ reason: "withheld" }],
+        serving_record_disclosures_count: 0,
+      })),
+      scores: candidate.scores.map((score) => ({
+        ...score,
+        provenance: {
+          ...score.provenance,
+          disclosure_count: 1,
+          serving_disclosure_count: 0,
+          unsurfaced_disclosure_count: 1,
+        },
+      })),
+    };
+
+    const result = compareGovernedRuns(baseline, hidden, manifest);
+
+    expect(result.verdict).toBe("HOLD");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("DISCLOSURE_EVIDENCE_HOLD")]),
+    );
+  });
+
+  it("holds a candidate that reuses the baseline prompt identity", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
+    const identity = buildGovernedRunIdentity(manifest);
+    const baseline = makeRun("baseline", identity, manifest, 0.60);
+    const candidate = makeRun("candidate", identity, manifest, 0.64);
+
+    const result = compareGovernedRuns(baseline, candidate, manifest);
+
+    expect(result.verdict).toBe("HOLD");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("CANDIDATE_IDENTITY_INVALID")]),
+    );
+  });
+
+  it("holds incomplete legacy quality evidence instead of calling it a quality failure", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
+    const identity = buildGovernedRunIdentity(manifest);
+    const baseline = makeRun("baseline", identity, manifest, 0.60);
+    const candidate = makeRun("candidate", makeCandidateIdentity(identity), manifest, 0.64);
+    const incomplete: GovernedRun = {
+      ...candidate,
+      scores: candidate.scores.map((score, index) => index === 0
+        ? { ...score, legacy: { ...score.legacy, overall_score: null } }
+        : score),
+    };
+
+    const result = compareGovernedRuns(baseline, incomplete, manifest);
+
+    expect(result.verdict).toBe("HOLD");
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("QUALITY_EVIDENCE_INCOMPLETE")]),
+    );
+    expect(result.reasons.some((reason) =>
+      reason.startsWith("QUALITY_GAIN_BELOW_THRESHOLD")
+    )).toBe(false);
+  });
+
+  it("holds incomplete, reordered, or ID-drifted 14-case pairs", async () => {
+    const manifest = withCandidatePrompt(await readGovernedManifest());
+    const identity = buildGovernedRunIdentity(manifest);
+    const baseline = makeRun("baseline", identity, manifest, 0.60);
+    const candidate = makeRun("candidate", makeCandidateIdentity(identity), manifest, 0.64);
+    const swappedCases = [...candidate.cases];
+    const swappedScores = [...candidate.scores];
+    [swappedCases[0], swappedCases[1]] = [swappedCases[1]!, swappedCases[0]!];
+    [swappedScores[0], swappedScores[1]] = [swappedScores[1]!, swappedScores[0]!];
+    const mutants: GovernedRun[] = [
+      { ...candidate, cases: candidate.cases.slice(0, -1), scores: candidate.scores.slice(0, -1) },
+      { ...candidate, cases: swappedCases, scores: swappedScores },
+      {
+        ...candidate,
+        cases: candidate.cases.map((capture, index) => index === 0
+          ? { ...capture, brief_id: "01-drifted" }
+          : capture),
+        scores: candidate.scores.map((score, index) => index === 0
+          ? { ...score, brief_id: "01-drifted" }
+          : score),
+      },
+    ];
+
+    for (const mutant of mutants) {
+      const result = compareGovernedRuns(baseline, mutant, manifest);
+      expect(result.verdict).toBe("HOLD");
+      expect(result.reasons).toEqual(
+        expect.arrayContaining([expect.stringContaining("PAIR_INCOMPLETE")]),
+      );
+    }
+  });
 });
 
 function legacyScore(value: number): ScoreResult {
@@ -253,6 +443,27 @@ function legacyScore(value: number): ScoreResult {
     overall_score: value,
     node_count: 8,
     edge_count: 10,
+  };
+}
+
+function makeCandidateIdentity(identity: GovernedRunIdentity): GovernedRunIdentity {
+  return {
+    ...identity,
+    prompt_version: "candidate",
+    prompt_sha256: CANDIDATE_PROMPT_SHA256,
+  };
+}
+
+function withCandidatePrompt(
+  manifest: GovernedDraftManifest,
+): GovernedDraftManifest {
+  return {
+    ...manifest,
+    governance: {
+      ...manifest.governance,
+      candidate_path: "candidate/prompt.txt",
+      candidate_sha256: CANDIDATE_PROMPT_SHA256,
+    },
   };
 }
 
@@ -300,7 +511,22 @@ function makeRun(
       model_id: manifest.model.model_id,
       prompt_sha256: identity.prompt_sha256,
       structured_outputs_used: true,
+      serving_record_disclosures_count: 0,
     })),
     scores: ids.map((id) => makeScore(id, value)),
   };
+}
+
+async function verifyPackMutant(
+  mutate: (packRoot: string) => Promise<void>,
+): Promise<Awaited<ReturnType<typeof verifyGovernedPack>>> {
+  const temporaryParent = await mkdtemp(join(tmpdir(), "governed-draft-graph-mutant-"));
+  const packRoot = join(temporaryParent, "pack");
+  try {
+    await cp(GOVERNED_PACK_ROOT, packRoot, { recursive: true });
+    await mutate(packRoot);
+    return await verifyGovernedPack(packRoot);
+  } finally {
+    await rm(temporaryParent, { recursive: true, force: true });
+  }
 }

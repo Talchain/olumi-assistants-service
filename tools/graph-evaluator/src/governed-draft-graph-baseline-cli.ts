@@ -259,6 +259,7 @@ async function main(): Promise<void> {
         brief_id: brief.id,
         model_id: manifest.model.model_id,
         prompt_sha256: manifest.prompt.sha256,
+        serving_record_disclosures_count: 0,
         structured_outputs_used: result.meta?.structured_outputs_used,
         prompt_version: result.meta?.prompt_version,
         prompt_store_version: result.meta?.prompt_store_version,
@@ -312,6 +313,7 @@ async function main(): Promise<void> {
         error_class: errorClass(error),
         model_id: manifest.model.model_id,
         prompt_sha256: manifest.prompt.sha256,
+        serving_record_disclosures_count: 0,
         latency_ms: Date.now() - startedAt,
       });
     }
@@ -367,7 +369,9 @@ async function main(): Promise<void> {
       authorised_external_spend_cap_usd: manifest.invocation.external_spend_cap_usd,
     },
     serving_equivalence: {
-      request_bytes_and_model: "exact",
+      first_primary_prompt_composition_and_model:
+        "exact_under_pinned_direct_adapter_configuration",
+      scope_limit: "not_whole_route_or_request_bytes",
       prompt_source: "pinned_pms_snapshot",
       route_dynamic_suffixes: "currency_derived_per_brief; other optional suffixes explicitly absent",
       output_wrapper: "audited_separately",

@@ -8,6 +8,8 @@ Status: **BASELINE FROZEN — CANDIDATE HOLD WITH EVIDENCE.** No candidate promp
 
 The single authorised pass used `claude-sonnet-4-6`, exactly 14 logical primary calls, no manual retries, and at most one adapter-owned additive completion per case. All 14 calls returned through the production records adapter with structured outputs attested, but only 1 of 14 projected graphs passed canonical analysis readiness. The readiness authority reported 91 blocking findings: 46 missing option values, 26 orphan nodes, and smaller sets of unreachable controllable factors, graph-cap breaches, missing goals, unmapped options, missing option-to-factor edges, and one missing path to the goal.
 
+Equivalence is deliberately narrow: the pass attests the first-primary prompt composition and model under the pinned direct-adapter configuration. It does not claim byte equivalence for the whole HTTP route or request. The frozen result's older `request_bytes_and_model` label is governed by this narrower scope; its captured cases and reported measurements remain byte-for-byte unchanged.
+
 Provenance classes were present on every node and edge, but 136 AI-inferred elements were unbased. The projector emitted 156 refusal disclosures; the live `AnthropicAdapter` wrapper drops that sidecar, so none survives to the serving route. This is reported as `RECORD_DISCLOSURE_UNSURFACED`, not hidden or scored as a prompt success.
 
 The retired raw-graph rubric could score only 5 of 14 records-contract graphs. Its topology validator rejected legitimate/current shapes such as factor-to-goal links, so its 0.6423 mean over the five scorable cases is informational only and cannot authorize promotion. Production adapter success, canonical readiness, provenance and disclosure survival are the governing axes.
@@ -28,7 +30,7 @@ The frozen result, including safe graph captures, per-case scores, exact identit
 1. Run `npm run governed:draft-graph:verify`. Any prompt, code-layer, corpus, model, evidence, disposition, or result hash drift is a hard stop.
 2. Use `npm run governed:draft-graph:rescore` only to re-run deterministic local scoring over the frozen captures. It makes no provider call; a controlled manifest hash update is required afterward.
 3. Do not re-run the live baseline, manually retry a case, or add a candidate arm without a new bounded authorization and a newly frozen result identity.
-4. A future candidate must use the same 14 briefs, model, production adapter, records grammar, completion policy, composition and rubric. It must deliver a meaningful matched gain with no adapter, structure, readiness, provenance, or disclosure regression.
+4. A future candidate must have a distinct path and SHA-256 pin, then use the same 14 briefs in exact order, model, production adapter, records grammar, completion policy, composition and rubric. It must deliver a meaningful matched gain with no adapter, structure, readiness, provenance, or disclosure regression; incomplete legacy coverage or any unsurfaced disclosure remains HOLD.
 
 ## Legacy disposition
 

@@ -9,7 +9,9 @@
       "MODEL_ROUTE_DRIFT",
       "LEGACY_UNDISPOSITIONED",
       "DEPLOYED_EVIDENCE_DRIFT",
-      "PROMPT_IDENTITY_MISMATCH"
+      "PROMPT_IDENTITY_MISMATCH",
+      "GOVERNANCE_STATUS_INVALID",
+      "CANDIDATE_IDENTITY_INVALID"
     ],
     "provider": [
       "AUTH_FAILED",
@@ -25,7 +27,8 @@
       "RECORD_PROJECTION_FAILED",
       "COMPLETION_FAILED_DEGRADED",
       "COMPLETION_REGRESSED",
-      "RECORD_DISCLOSURE_UNSURFACED"
+      "RECORD_DISCLOSURE_UNSURFACED",
+      "SERVING_DISCLOSURE_COUNT_INVALID"
     ],
     "graph_contract": [
       "GRAPH_SCHEMA_INVALID",
@@ -37,6 +40,8 @@
     "comparison": [
       "PAIR_INCOMPLETE",
       "MODEL_CONFIG_MISMATCH",
+      "DISCLOSURE_EVIDENCE_HOLD",
+      "QUALITY_EVIDENCE_INCOMPLETE",
       "QUALITY_GAIN_BELOW_THRESHOLD",
       "STRUCTURAL_REGRESSION",
       "READINESS_REGRESSION",
@@ -48,6 +53,8 @@
     "A completion failure is fail-soft only when pass-one projection survives; otherwise classify the records contract failure.",
     "A candidate cannot pass on mean quality while any structural, readiness or provenance non-regression gate fails.",
     "An unbased AI inference is a governed comparison metric, not an automatic case failure; a candidate may not increase its matched total.",
-    "An incomplete or configuration-mismatched pair is HOLD, never PASS or FAIL."
+    "An incomplete or configuration-mismatched pair is HOLD, never PASS or FAIL.",
+    "Missing, non-integer, non-finite, negative, or over-generated served-disclosure counts fail closed; any unsurfaced disclosure keeps comparison on HOLD.",
+    "Incomplete 14-case legacy quality evidence is HOLD and is never converted into a quality FAIL."
   ]
 }
