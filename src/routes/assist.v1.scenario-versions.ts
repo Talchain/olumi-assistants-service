@@ -16,10 +16,22 @@
  *
  * ── THE FAMILY RULES, INHERITED VERBATIM (scenario-graph read/register) ─────
  * · POST always; identity travels in the BODY (`parseRequestExtensions`), never
- *   a URL. · Order: identity → UUID → EXISTENCE → ownership → the operation —
- *   existence BEFORE ownership because `authorizeScenarioOwnership` UPSERTS and
- *   none of these routes may create the row it addresses (the read route's pin;
- *   restore is a write to the GRAPH but must still never mint a scenario).
+ *   a URL. · Order: identity → UUID → EXISTENCE → ownership → route-local BODY
+ *   → the operation — existence BEFORE ownership because
+ *   `authorizeScenarioOwnership` UPSERTS and none of these routes may create the
+ *   row it addresses (the read route's pin; restore is a write to the GRAPH but
+ *   must still never mint a scenario).
+ * · ⚠ THE BODY PARSE IS LAST, NOT FIRST (corrected 2026-08-17). These three
+ *   routes originally validated their route-local body BEFORE `preflight`,
+ *   which inverts the family principle the shared pre-flight states in its own
+ *   header and enforces for every turn: *authentication precedes body
+ *   validation, so an unauthenticated caller learns nothing about payload
+ *   validity* (route-v2-preflight.ts step 0; the register route observes it
+ *   too — identity at :226, payload at :236). It is deliberately moved BELOW
+ *   the whole pre-flight rather than just below step 0: a route-local 422 is
+ *   decided purely on the caller's OWN bytes, so it carries no server state and
+ *   costs nothing to defer, and deferring it keeps every pre-operation refusal
+ *   these routes can emit on one side of the identity gate.
  * · ONE indistinguishable 404 for every scenario-shaped refusal. VERSION-shaped
  *   refusals name their cause: the caller already holds authorised access to
  *   the scenario, so "version not found" leaks nothing about anyone else.
@@ -61,9 +73,31 @@
  * turn (the graph-registration precedent; `store_draft_graph` is banned here
  * because it does not move `graph_identity_hash` with the graph and would
  * poison every later CAS compare). If the append fails AFTER the RPC, the
- * response says so honestly (`RESTORE_INCOMPLETE`, `version_recorded: true`)
- * — and a retried restore CONVERGES: the RPC dedupes (the head already carries
- * the target's envelope) and the append re-runs.
+ * response says so honestly (`RESTORE_INCOMPLETE`, `version_recorded: true`).
+ *
+ * ⚠ WHAT A RETRY ACTUALLY DOES — CORRECTED 2026-08-17. This header claimed "a
+ * retried restore CONVERGES: the RPC dedupes (the head already carries the
+ * target's envelope) and the append re-runs". Measured by the #1001 review and
+ * re-derived here at the RPC bytes (migration 20260705120000), BOTH halves are
+ * false on the RESTORE_INCOMPLETE path — and the thing that falsifies them is
+ * the snapshot guard one step above:
+ *   · NO DEDUPE IS REACHABLE. `restore_model_version`'s dedupe compares the
+ *     HEAD against the TARGET. The failed attempt left the head carrying the
+ *     target's envelope but the working graph UNMOVED (the append is what
+ *     failed), so the retry's step 7 snapshots that unchanged current graph and
+ *     the head becomes the CURRENT hash again — the head-vs-target compare can
+ *     no longer match. The snapshot guard defeats the dedupe by construction.
+ *   · A RETRY WITH THE SAME `expected_graph_identity_hash` NEVER REACHES THE
+ *     RPC. `create_model_version`'s CAS compares that hash against the head the
+ *     first attempt already moved ⇒ MV409 ⇒ this route answers 409
+ *     `VERSION_STALE`. Its copy ("Refresh to see the latest, then try again")
+ *     is the honest next step; replaying the same bytes is not.
+ *   · A REFRESHED RETRY (or one carrying no expected hash — no CAS to fail)
+ *     DOES complete, and costs TWO new version rows per attempt: a
+ *     `pre_restore` snapshot plus a `restore` row, because neither RPC can
+ *     dedupe. NO DATA IS LOST — `model_versions` rows are immutable and each
+ *     attempt's own pre-restore snapshot still holds the state it replaced.
+ * So convergence is real, but it is 409-then-refresh, not a silent dedupe.
  *
  * Restore accepts NO client graph either: the bytes appended are the STORED
  * version's, re-validated against the ingress contract and re-projected
@@ -343,19 +377,19 @@ export default async function route(app: FastifyInstance) {
     { config: { rateLimit: { max: LIST_RATE_LIMIT_MAX, timeWindow: "1 minute" } } },
     async (req, reply) => {
       const requestId = getRequestId(req);
-      const body = (req.body ?? {}) as Record<string, unknown>;
 
-      // Payload validation BEFORE any database work (register-route rule):
-      // the caller supplied these bytes, so a bad limit costs no round trip.
+      const ctx = await preflight(req, reply);
+      if (ctx === null) return;
+
+      // Route-local body AFTER the pre-flight — authentication precedes body
+      // validation (see THE BODY PARSE IS LAST in the header).
+      const body = (req.body ?? {}) as Record<string, unknown>;
       const parsedBody = ListBodySchema.safeParse({
         ...(body.limit !== undefined ? { limit: body.limit } : {}),
       });
       if (!parsedBody.success) {
         return invalid(reply, requestId, "LIMIT_INVALID", "`limit` must be a positive integer (max 200).");
       }
-
-      const ctx = await preflight(req, reply);
-      if (ctx === null) return;
 
       const service = getModelManagementService();
       let listed: Awaited<ReturnType<typeof service.listVersions>>;
@@ -424,8 +458,13 @@ export default async function route(app: FastifyInstance) {
     { config: { rateLimit: { max: WRITE_RATE_LIMIT_MAX, timeWindow: "1 minute" } } },
     async (req, reply) => {
       const requestId = getRequestId(req);
-      const body = (req.body ?? {}) as Record<string, unknown>;
 
+      const ctx = await preflight(req, reply);
+      if (ctx === null) return;
+
+      // Route-local body AFTER the pre-flight — authentication precedes body
+      // validation (see THE BODY PARSE IS LAST in the header).
+      const body = (req.body ?? {}) as Record<string, unknown>;
       const parsedBody = SaveBodySchema.safeParse({
         ...(body.label !== undefined ? { label: body.label } : {}),
         ...(body.expected_graph_identity_hash !== undefined
@@ -440,9 +479,6 @@ export default async function route(app: FastifyInstance) {
           "`label` must be a 1–200 character string; `expected_graph_identity_hash` must be a 64-hex sha256.",
         );
       }
-
-      const ctx = await preflight(req, reply);
-      if (ctx === null) return;
 
       // The graph being versioned is the SERVER's — never the client's. A
       // `graph` field in the body is deliberately never read (see header).
@@ -526,8 +562,13 @@ export default async function route(app: FastifyInstance) {
     async (req, reply) => {
       const requestId = getRequestId(req);
       const startedAt = Date.now();
-      const body = (req.body ?? {}) as Record<string, unknown>;
 
+      const ctx = await preflight(req, reply);
+      if (ctx === null) return;
+
+      // Route-local body AFTER the pre-flight — authentication precedes body
+      // validation (see THE BODY PARSE IS LAST in the header).
+      const body = (req.body ?? {}) as Record<string, unknown>;
       const parsedBody = RestoreBodySchema.safeParse({
         version_id: body.version_id,
         ...(body.label !== undefined ? { label: body.label } : {}),
@@ -543,9 +584,6 @@ export default async function route(app: FastifyInstance) {
           "`version_id` must be a UUID; `label` 1–200 chars; `expected_graph_identity_hash` a 64-hex sha256.",
         );
       }
-
-      const ctx = await preflight(req, reply);
-      if (ctx === null) return;
 
       const service = getModelManagementService();
 
@@ -745,7 +783,7 @@ export default async function route(app: FastifyInstance) {
               scenario_id: ctx.scenarioId,
               err: err instanceof Error ? err.message : String(err),
             },
-            "Scenario versions — restore recorded but the working graph write failed; retry converges",
+            "Scenario versions — restore recorded but the working graph write failed; a retry must REFRESH first (the snapshot guard defeats the RPC dedupe — see the header)",
           );
           return reply
             .code(503)
