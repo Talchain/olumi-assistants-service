@@ -28,6 +28,9 @@ import {
   assertHealthyJourney,
   assertPromptProvenance,
   extractDiagnostics,
+  carriedDraftGraph,
+  readyOptionCount,
+  READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
@@ -315,8 +318,13 @@ describe("staging journey smoke — the model must arrive, on whichever turn dra
     expect(src).toContain("assertHealthyJourney(t1.body, t2.body)");
     // …and the superseded turn-2-only call must not come back.
     expect(src).not.toContain("assertHealthyDraft(t2.body)");
-    // Provenance is asserted across both turns' diagnostics, not turn 2's.
-    expect(src).toContain("assertPromptProvenance([d1, d2])");
+    // Provenance is asserted across every turn's diagnostics AND its body —
+    // the body is what carries graph DELIVERY, the predicate the check now
+    // keys on. Passing diagnostics alone would silently drop back to
+    // exit_path-only, which is the defect 2.1300 F2 removed.
+    expect(src).toContain("assertPromptProvenance(turnDiagnostics, turnBodies)");
+    expect(src).toContain("const turnBodies = turns.map((t) => t.body)");
+    expect(src).not.toContain("assertPromptProvenance([d1, d2])");
   });
 
   it("a draft_graph exit on EITHER turn must carry prompt_identity", () => {
@@ -479,5 +487,272 @@ describe("no NEW workflow may gate itself on an unset repo variable", () => {
       stale,
       `stale VAR_GATE_OPT_OUTS entries (workflow fixed or deleted — remove the exemption): ${stale.join(", ")}`,
     ).toEqual([]);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * THE ALARM MUST NOT BE ABLE TO TURN ITSELF OFF (ROADMAP 2.1300, round 2).
+ *
+ * An independent review MEASURED four ways the guarantees above disable
+ * themselves rather than firing. Each case below reproduces one of them, and
+ * each was RED before the corresponding fix. They are grouped by the harm,
+ * and every case carries its OPPOSITE-DIRECTION TWIN (trap 22b): a silent
+ * no-op and a false alarm are two different harms and cannot share a
+ * parameter, so both directions are pinned.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/** Turn 1's four real option objects, stripped to a given `option_id` shape. */
+function turn1WithOptionIds(idFor: (i: number) => unknown) {
+  const b = structuredClone(LIVE_DRAFTFIRST_TURN1);
+  b.analysis_ready.options = b.analysis_ready.options.map((o: any, i: number) => {
+    const next = { ...o };
+    const id = idFor(i);
+    if (id === undefined) delete next.option_id;
+    else next.option_id = id;
+    return next;
+  });
+  return b;
+}
+
+/** A follow-up naming four ids that share nothing with the drafted model. */
+const FOUR_FOREIGN_IDS = {
+  ...LIVE_DRAFTFIRST_TURN2,
+  analysis_ready: {
+    ...LIVE_DRAFTFIRST_TURN2.analysis_ready,
+    options: [0, 1, 2, 3].map((i) => ({ option_id: `foreign_option_${i}` })),
+  },
+};
+
+describe("2.1300 F1 — an unbindable continuity check must FAIL, never silently pass", () => {
+  // The contract admits every one of these: OptionForAnalysis.id is
+  // `z.string()` with no `.min(1)` (src/schemas/analysis-ready.ts:85), the emit
+  // is `option_id: opt.id` (analysis-ready-helper.ts:1123), and the wire
+  // envelope validates analysis_ready as `z.unknown().optional()`
+  // (src/orchestrator/validation/response-envelope-schema.ts:135) —
+  // so NOTHING enforces a usable option_id on egress.
+  const idShapes: Array<[string, (i: number) => unknown]> = [
+    ["empty string", () => ""],
+    ["null", () => null],
+    ["absent", () => undefined],
+  ];
+
+  for (const [name, idFor] of idShapes) {
+    it(`FAILS when drafted option_ids are unusable (${name}) and the follow-up names four different ids`, () => {
+      const drafting = turn1WithOptionIds(idFor);
+      // The precondition of the harm: the drafting turn still has four option
+      // OBJECTS, so `assertHealthyDraft`'s count check is fully satisfied —
+      // which is exactly why this was invisible. Pinned in-test (trap 13b) so
+      // this case cannot decay into asserting something else.
+      expect(readyOptionCount(drafting)).toBe(4);
+      expect(assertHealthyDraft(drafting, "turn 1")).toEqual([]);
+
+      const failures = assertHealthyJourney(drafting, FOUR_FOREIGN_IDS);
+      expect(failures.length).toBeGreaterThan(0);
+      expect(failures.join(" ")).toContain("carry no usable option_id");
+      expect(failures.join(" ")).toContain("turn 1:");
+    });
+  }
+
+  it("TWIN: option objects genuinely absent are reported by USABILITY, not as an unbindable check", () => {
+    // Opposite direction. Zero option OBJECTS is already the count failure's
+    // job; emitting the unbindable-check message there too would be a second
+    // predicate for one concept — the defect this whole round is about.
+    const noOptions = structuredClone(LIVE_DRAFTFIRST_TURN1);
+    noOptions.analysis_ready.options = [];
+    expect(readyOptionCount(noOptions)).toBe(0);
+    const failures = assertHealthyJourney(noOptions, LIVE_DRAFTFIRST_TURN2);
+    expect(failures.join(" ")).toContain(`analysis_ready.options=0, expected >= ${MIN_OPTIONS}`);
+    expect(failures.join(" ")).not.toContain("carry no usable option_id");
+  });
+
+  it("FAILS when the follow-up names a DIFFERENT graph_hash — the strongest continuity signal", () => {
+    // Both committed fixtures carry an IDENTICAL graph_hash and the suite
+    // already asserts that equality as "the premise of the continuity
+    // assertion" — while the gate never read it. A divergent hash is the
+    // product describing a model it did not build, by the model's own identity.
+    const forked = { ...LIVE_DRAFTFIRST_TURN2, graph_hash: "0000feed0000feed0000feed0000feed" };
+    const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, forked);
+    expect(failures.join(" ")).toContain("graph_hash");
+    expect(failures.join(" ")).toContain(LIVE_DRAFTFIRST_TURN1.graph_hash);
+  });
+
+  it("TWIN: a follow-up carrying NO graph_hash is not a divergence", () => {
+    // Absence is not disagreement. The legacy clarify-then-draft fixture
+    // carries no graph_hash at all, and firing on absence would red a
+    // healthy journey — the false-alarm shape this PR exists to remove.
+    const noHash = { ...LIVE_DRAFTFIRST_TURN2 };
+    delete (noHash as any).graph_hash;
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, noHash)).toEqual([]);
+  });
+});
+
+describe("2.1300 F2 — one concept, ONE predicate: a delivered graph needs provenance", () => {
+  /** A turn that DELIVERS a graph under a non-drafting exit_path. */
+  const deliveredUnderEditExit = {
+    assistant_text: "Applied your edit.",
+    draft_graph: structuredClone(LIVE_DRAFTFIRST_TURN1.draft_graph),
+    analysis_ready: structuredClone(LIVE_DRAFTFIRST_TURN1.analysis_ready),
+    _diagnostic_trace: { exit_path: "edit_graph", prompt_identity: [] },
+  };
+
+  it("the refuting fixture fact: turn_executor DOES carry prompt_identity", () => {
+    // The comment justifying the exit_path-only scope claimed prompt_identity
+    // is EXPECTED to be [] on the minimal-trace exits including turn_executor.
+    // This PR's own turn-2 fixture is `turn_executor` with a prompt_identity of
+    // 1 — so keying provenance on graph DELIVERY costs no false alarm here.
+    expect(LIVE_DRAFTFIRST_TURN2._diagnostic_trace.exit_path).toBe("turn_executor");
+    expect(extractDiagnostics(LIVE_DRAFTFIRST_TURN2).prompt_identity_count).toBe(1);
+  });
+
+  it("FAILS a graph delivered under exit_path=edit_graph with an empty prompt_identity", () => {
+    // `draft_graph` is genuinely emitted under other exits: applied-graph-emit's
+    // `n()` is called from four turn-executor sites, edit-graph-dispatch and
+    // system-events/dispatch. Keying provenance on exit_path alone means the
+    // guarantee silently lapses the next time the drafting event is relabelled
+    // — which is precisely the change #1002 made.
+    expect(carriedDraftGraph(deliveredUnderEditExit)).toBe(true);
+    const d = extractDiagnostics(deliveredUnderEditExit);
+    const failures = assertPromptProvenance([d], [deliveredUnderEditExit]);
+    expect(failures.join(" ")).toContain("prompt_identity was empty");
+    expect(failures.join(" ")).toContain("turn 1:");
+  });
+
+  it("TWIN: a turn that delivers NO graph on a non-draft exit stays legitimate", () => {
+    // Opposite direction: the minimal-trace exits really do omit prompt_identity
+    // and must not red. Same predicate, other side.
+    const clarify = { assistant_text: "Which site?", _diagnostic_trace: { exit_path: "clarify_v2", prompt_identity: [] } };
+    expect(carriedDraftGraph(clarify)).toBe(false);
+    expect(assertPromptProvenance([extractDiagnostics(clarify)], [clarify])).toEqual([]);
+  });
+});
+
+describe("2.1300 F3 — an absent analysis_ready is only a LOSS where readiness is produced", () => {
+  it("does NOT assert a loss when the follow-up is a deterministic non-readiness exit", () => {
+    // MEASURED false red: a follow-up with NO analysis_ready block produced
+    // "the model did not survive the turn". `clarify_v2` and
+    // `frame_no_brief_guard` call sendFinalised200 with NO analysisReady
+    // (route-v2.ts:3848 / :5366 / :5400) and the finaliser omits the block
+    // unless a payload is supplied (response-finaliser.ts:261-269). Asserting
+    // a loss there is false, and a false alarm is how this estate loses real ones.
+    for (const exit of ["clarify_v2", "frame_no_brief_guard", "process_meta_intake"]) {
+      const followUp = { assistant_text: "Before I go on…", _diagnostic_trace: { exit_path: exit } };
+      expect(READINESS_PRODUCING_EXIT_PATHS.has(exit)).toBe(false);
+      expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, followUp), `exit_path=${exit}`).toEqual([]);
+    }
+  });
+
+  it("TWIN: the freshness-only synthesis shape MUST still fail — options:[] on a readiness exit", () => {
+    // Opposite direction, and the case that must not be traded away: the
+    // finaliser synthesises `{status:'blocked', goal_node_id:'', options:[],
+    // bias_findings:[]}` for genuinely unparseable graphs
+    // (compose/analysis-ready-emit.ts:59-61). That IS a loss and must stay red.
+    const freshnessOnly = {
+      assistant_text: "Here's what I can tell you.",
+      analysis_ready: { status: "blocked", goal_node_id: "", options: [], bias_findings: [] },
+      _diagnostic_trace: { exit_path: "turn_executor" },
+    };
+    expect(READINESS_PRODUCING_EXIT_PATHS.has("turn_executor")).toBe(true);
+    const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, freshnessOnly);
+    expect(failures.join(" ")).toContain("did not survive the turn");
+    // The message must NAME the exit_path, or the on-call engineer cannot tell
+    // a real loss from a mis-classified exit without opening the payload.
+    expect(failures.join(" ")).toContain("turn_executor");
+  });
+
+  it("an ABSENT exit_path is reported as unclassifiable, not silently passed", () => {
+    // The gate cannot tell a loss from a legitimate omission without the exit
+    // path. Silently passing is the same silent-disable this round is fixing;
+    // asserting a loss would be a fabrication. Say what is actually true.
+    const noExit = { assistant_text: "…", analysis_ready: { options: [] } };
+    const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, noExit);
+    expect(failures.join(" ")).toContain("exit_path");
+    expect(failures.join(" ")).not.toContain("did not survive the turn");
+  });
+
+  it("DERIVED, NOT MIRRORED: the readiness-producing set matches route-v2's call sites", () => {
+    // trap 12: a hand-listed set of exit paths WILL drift from the producer.
+    // Derive it from the sendFinalised200 call sites — the sole sanctioned
+    // 200-OK send site — and fail loud when the two disagree.
+    const routeSrc = readFileSync(resolve(REPO_ROOT, "src/orchestrator/route-v2.ts"), "utf8");
+    const lines = routeSrc.split("\n");
+    const found = new Set<string>();
+    const supplying = new Set<string>();
+    let sites = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (!/sendFinalised200\s*\(/.test(lines[i])) continue;
+      if (/function sendFinalised200/.test(lines[i])) continue;
+      let depth = 0;
+      let started = false;
+      const buf: string[] = [];
+      for (let j = i; j < Math.min(i + 120, lines.length); j++) {
+        buf.push(lines[j]);
+        for (const ch of lines[j]) {
+          if (ch === "(") {
+            depth++;
+            started = true;
+          } else if (ch === ")") depth--;
+        }
+        if (started && depth <= 0) break;
+      }
+      const text = buf.join("\n");
+      const m = text.match(/sendFinalised200\s*\(\s*[^,]+,\s*[^,]+,\s*'([a-z_0-9]+)'\s*,/);
+      if (!m) continue;
+      sites++;
+      found.add(m[1]);
+      if (/(^|[^.\w])analysisReady\s*:/.test(text)) supplying.add(m[1]);
+    }
+    // POSITIVE CONTROL: an empty or single-bucket parse must not pass vacuously,
+    // and identical answers for every site would be evidence about the parser
+    // rather than about the route (trap 20).
+    expect(sites, "the sendFinalised200 parse found no call sites — the probe is blind").toBeGreaterThan(14);
+    expect(found.size, "the parse returned too few distinct exit paths to be discriminating").toBeGreaterThan(9);
+    expect([...supplying].sort()).toEqual([...READINESS_PRODUCING_EXIT_PATHS].sort());
+  });
+});
+
+describe("2.1300 F4 — the invariant is the model the user LEAVES HOLDING", () => {
+  it("FAILS a later-turn re-draft that collapses to an empty graph", () => {
+    // MEASURED: turn 1 healthy, turn 2 re-drafts an EMPTY graph → PASS. The
+    // usability check bound to the FIRST drafting turn, so a re-draft collapse
+    // was invisible — and a redraft on a later turn is a real product path
+    // (exit_path=explicit_generate_graph_present commits a draft_graph redraft).
+    const collapsedRedraft = {
+      assistant_text: "I've redrafted the model.",
+      draft_graph: { nodes: [], edges: [] },
+      analysis_ready: structuredClone(LIVE_DRAFTFIRST_TURN1.analysis_ready),
+      graph_hash: LIVE_DRAFTFIRST_TURN1.graph_hash,
+      _diagnostic_trace: { exit_path: "draft_graph", prompt_identity: [{ task_id: "t", version: "v", hash: "h" }] },
+    };
+    const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, collapsedRedraft);
+    expect(failures.join(" ")).toContain(`expected >= ${MIN_NODES}`);
+    // …named on TURN 2, where the collapse happened.
+    expect(failures.join(" ")).toContain("turn 2: draft_graph.nodes=0");
+  });
+
+  it("PASSES a provisional first draft followed by a full one — the user does leave holding a model", () => {
+    // MEASURED false red ×4: a 2-node provisional draft on turn 1 followed by a
+    // full healthy draft on turn 2 failed, though the user leaves holding a
+    // usable model. Same false-alarm shape as the P0 this PR removes, narrower.
+    const provisional = {
+      assistant_text: "Here's a first sketch — I'll fill it in.",
+      draft_graph: { nodes: [{ id: "g", kind: "goal" }, { id: "o1", kind: "option" }], edges: [] },
+      analysis_ready: { options: [] },
+      _diagnostic_trace: { exit_path: "draft_graph", prompt_identity: [{ task_id: "t", version: "v", hash: "h" }] },
+    };
+    expect(assertHealthyJourney(provisional, LIVE_DRAFTFIRST_TURN1)).toEqual([]);
+  });
+
+  it("TWIN: a trivial draft that is the LAST word still fails, on its own label", () => {
+    // Opposite direction — the 2.1252 shape must stay red. This is the case the
+    // "last drafting turn" reading must not weaken.
+    const trivialTurn1 = {
+      assistant_text: "I've built a first decision model from your brief.",
+      draft_graph: { nodes: [{ id: "n1", kind: "goal" }], edges: [] },
+      analysis_ready: { options: [] },
+      _diagnostic_trace: { exit_path: "draft_graph" },
+    };
+    const failures = assertHealthyJourney(trivialTurn1, LIVE_DRAFTFIRST_TURN2);
+    expect(failures.join(" ")).toContain("turn 1:");
+    expect(failures.join(" ")).toContain(`expected >= ${MIN_NODES}`);
   });
 });

@@ -20,6 +20,27 @@ export declare const MIN_NODES: number;
 /** Minimum comparable options for a decision to be analysable. */
 export declare const MIN_OPTIONS: number;
 
+/**
+ * Exit paths whose `sendFinalised200` call site supplies an `analysisReady`
+ * payload — the only paths on which an empty/absent `analysis_ready` is a LOSS.
+ * Derived from `src/orchestrator/route-v2.ts`; the spec re-derives it and fails
+ * loud on drift.
+ */
+export declare const READINESS_PRODUCING_EXIT_PATHS: ReadonlySet<string>;
+
+/**
+ * THE ONE PREDICATE for "this turn handed the user a model". Shared by the
+ * journey's delivery/usability leg and the provenance check, so the two cannot
+ * disagree about which turn drafted.
+ */
+export declare function carriedDraftGraph(body: unknown): boolean;
+
+/**
+ * How many option OBJECTS a response carries, identifiable or not. The single
+ * counter behind both the minimum-count check and the continuity precondition.
+ */
+export declare function readyOptionCount(body: unknown): number;
+
 /** @returns failure messages; an empty array means healthy. */
 export declare function assertHealthyFrame(body: unknown): string[];
 
@@ -44,9 +65,14 @@ export declare function extractDiagnostics(body: unknown): {
 };
 
 /**
- * A `draft_graph` exit on ANY turn must carry a non-empty prompt_identity.
+ * A turn that PRODUCED a graph — delivered one on the wire, or declared the
+ * `draft_graph` exit — must carry a non-empty prompt_identity, on any turn and
+ * any exit path.
+ * @param bodies the same turns' response bodies, index-aligned with
+ *   `diagnostics`. Omit only when no bodies exist (no turns were driven).
  * @returns failure messages; an empty array means healthy.
  */
 export declare function assertPromptProvenance(
   diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count"> | null>,
+  bodies?: readonly unknown[],
 ): string[];
