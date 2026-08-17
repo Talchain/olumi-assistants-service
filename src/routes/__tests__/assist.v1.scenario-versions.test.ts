@@ -41,13 +41,34 @@
  *     refusal (guest MV001, missing version MV404, stale-head MV409) happens
  *     BEFORE the working graph is touched. If the append then fails, the
  *     response says so (`version_recorded: true` in details) rather than
- *     claiming success or pretending nothing happened — and a retried restore
- *     converges (the RPC dedupes, the append re-runs).
+ *     claiming success or pretending nothing happened. ⚠ This header used to
+ *     add "and a retried restore converges (the RPC dedupes, the append
+ *     re-runs)" — CORRECTED 2026-08-17: the pre-restore snapshot moves the head
+ *     back to the current graph's hash on the retry, so the RPC's head-vs-target
+ *     dedupe cannot fire; a same-hash retry 409s and a refreshed one completes
+ *     at +2 version rows. The route header carries the derivation.
+ *
+ *     THE APPEND SEAM FAILS IN TWO DISTINGUISHABLE WAYS, and the two tests that
+ *     pin them are a DISCRIMINATING PAIR at one seam: a `GraphStaleWriteError`
+ *     (the working graph moved under the write) is a RECOVERABLE 409
+ *     `VERSION_STALE`; any other throw is a 503 `RESTORE_INCOMPLETE`. Both carry
+ *     `version_recorded: true`. The 409 limb was UNCOVERED until this pack —
+ *     deleting the whole `instanceof GraphStaleWriteError` branch left the
+ *     27-test suite fully green (measured), i.e. the route could have silently
+ *     downgraded a recoverable conflict to an outage with nothing going red.
  *
  *  6. THE APPEND IS THE SANCTIONED ATOMIC WRITER. `store.append` with a
  *     `direct_answer` / null-handler turn (the graph-registration precedent) —
  *     never `store_draft_graph`, which does not move the identity hash with
  *     the graph and would poison every later CAS compare.
+ *
+ *  7. AUTHENTICATION PRECEDES BODY VALIDATION. All three routes run the shared
+ *     pre-flight BEFORE parsing their route-local body, so an unauthenticated
+ *     caller with an invalid body sees 401, never 422 — the principle
+ *     route-v2-preflight.ts states in its own header and the register route
+ *     observes. Pinned with its PRECONDITION CONTROL: the same bytes must
+ *     produce 422 for an authenticated caller, or the 401 proves nothing about
+ *     ordering (a body that is not actually invalid would pass the test too).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -84,6 +105,23 @@ vi.mock("../../utils/telemetry.js", () => ({
   emit: vi.fn(),
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
+
+// ── Identity resolution — the seam the ORDERING pin (7) drives ──────────────
+// Spread the REAL module (trap 12: a hand-listed stub silently drops every
+// export added since) and control only `resolveUserIdentity`. Everything below
+// it stays real: `resolveVerifiedIdentityOrRefuse` and the sign-in envelope are
+// the production ones, so the 401 this suite asserts is the route's own bytes.
+// Default `{ mode: "off" }` is exactly what `requireUserJwt: false` produces,
+// so every other test in this file is unaffected.
+// `vi.hoisted` is load-bearing: this factory DEREFERENCES the spy when it runs
+// (unlike the lazy `getSessionStore: () => store` idiom below), and `vi.mock` is
+// hoisted above plain `const` declarations — a bare `const` here fails the whole
+// file at collect with "Cannot access before initialization" (zero tests).
+const { resolveUserIdentity } = vi.hoisted(() => ({ resolveUserIdentity: vi.fn() }));
+vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../orchestrator/user-identity.js")>();
+  return { ...actual, resolveUserIdentity };
+});
 
 // ── The store double (session store) ────────────────────────────────────────
 const scenarioExists = vi.fn();
@@ -125,6 +163,10 @@ vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal
   };
 });
 
+// The REAL error class the route discriminates on (`session/store.js` is NOT
+// mocked — only `session/index.js` is), so `instanceof` binds to the same
+// constructor the route imports. A locally-declared look-alike would not.
+import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
 import scenarioVersionsRoute from "../assist.v1.scenario-versions.js";
 
 /** A stored version graph — distinct labels so identity-bound assertions can
@@ -188,6 +230,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default posture: scenario exists, OWNED by OWNER, holds CURRENT_GRAPH,
   // and has two versions with A as head/current.
+  resolveUserIdentity.mockResolvedValue({ mode: "off" });
   scenarioExists.mockResolvedValue(true);
   ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
   getScenarioOwner.mockResolvedValue(OWNER);
@@ -588,6 +631,38 @@ describe("POST /versions/restore — the guarded restore", () => {
     const body = res.json();
     expect(body.details.code).toBe("RESTORE_INCOMPLETE");
     expect(body.details.version_recorded).toBe(true);
+    // Half of the DISCRIMINATING PAIR: a NON-CAS throw is the 503 limb. Its
+    // twin below sends a GraphStaleWriteError through the same seam and must
+    // get 409 — one test alone cannot show the route discriminates.
+    await app.close();
+  });
+
+  it("PIN 5 — an append CAS conflict AFTER the RPC answers 409 VERSION_STALE, version_recorded", async () => {
+    // The working graph moved between the restore RPC and the append. Nothing
+    // was overwritten and the version row IS recorded, so this is RECOVERABLE
+    // (refresh and retry), not the outage the 503 limb reports.
+    appendSpy.mockRejectedValue(
+      new GraphStaleWriteError("graph_identity CAS rejected the restore append", {
+        conflict_category: "analysis_affecting_conflict",
+      }),
+    );
+    const app = await buildApp();
+    const res = await post(app, "/versions/restore", {
+      user_id: OWNER,
+      version_id: VERSION_A,
+      expected_graph_identity_hash: HASH_B,
+    });
+
+    expect(res.statusCode).toBe(409);
+    const body = res.json();
+    expect(body.details.code).toBe("VERSION_STALE");
+    expect(body.details.version_recorded).toBe(true);
+    // PRECONDITION, PINNED IN-TEST: the conflict really is the one AFTER the
+    // RPC. Both earlier stages ran to completion, so a 409 produced by an
+    // earlier CAS limb (snapshot MV409, RPC MV409) cannot masquerade as this.
+    expect(saveVersion).toHaveBeenCalledTimes(1);
+    expect(restoreVersion).toHaveBeenCalledTimes(1);
+    expect(appendSpy).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
@@ -659,4 +734,50 @@ describe("POST /versions/restore — the guarded restore", () => {
     expect(appendSpy).not.toHaveBeenCalled();
     await app.close();
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIN 7 — ORDERING: authentication precedes body validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("ordering — an unauthenticated caller learns nothing about payload validity", () => {
+  /** One invalid body per route, each already proven to 422 elsewhere in this
+   *  suite (list `limit`, save `label`, restore `version_id`). */
+  const INVALID_BODY_PER_ROUTE: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ["/versions", { limit: -2 }],
+    ["/versions/save", { label: 42 }],
+    ["/versions/restore", { version_id: "not-a-uuid" }],
+  ];
+
+  it.each(INVALID_BODY_PER_ROUTE)(
+    "%s — an UNAUTHENTICATED caller with an invalid body gets 401, never 422",
+    async (path, body) => {
+      resolveUserIdentity.mockResolvedValue({ mode: "refused", reason: "invalid_token" });
+      const app = await buildApp();
+      const res = await post(app, path, body);
+
+      expect(res.statusCode).toBe(401);
+      // The refusal is about the CALLER'S TOKEN and nothing else: no scenario
+      // read happened, so it carries no existence/ownership information either.
+      expect(scenarioExists).not.toHaveBeenCalled();
+      expect(ensureScenarioExists).not.toHaveBeenCalled();
+      expect(listVersions).not.toHaveBeenCalled();
+      expect(saveVersion).not.toHaveBeenCalled();
+      expect(getVersion).not.toHaveBeenCalled();
+      await app.close();
+    },
+  );
+
+  it.each(INVALID_BODY_PER_ROUTE)(
+    "%s — PRECONDITION CONTROL: those same bytes ARE invalid, and an AUTHENTICATED caller sees the 422",
+    async (path, body) => {
+      // Without this control the 401 above is vacuous — a body that is not
+      // actually invalid would satisfy it while proving nothing about order.
+      const app = await buildApp();
+      const res = await post(app, path, { ...body, user_id: OWNER });
+
+      expect(res.statusCode).toBe(422);
+      await app.close();
+    },
+  );
 });
