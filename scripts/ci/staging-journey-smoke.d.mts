@@ -23,8 +23,18 @@ export declare const MIN_OPTIONS: number;
 /** @returns failure messages; an empty array means healthy. */
 export declare function assertHealthyFrame(body: unknown): string[];
 
-/** @returns failure messages; an empty array means healthy. */
-export declare function assertHealthyDraft(body: unknown): string[];
+/**
+ * @param label names the turn in every message (drafting moved to turn 1 in #1002).
+ * @returns failure messages; an empty array means healthy.
+ */
+export declare function assertHealthyDraft(body: unknown, label?: string): string[];
+
+/**
+ * The journey invariant: the user leaves holding a usable model, on whichever
+ * turn drafts, and later turns still name that model's option_ids.
+ * @returns failure messages; an empty array means healthy.
+ */
+export declare function assertHealthyJourney(frameBody: unknown, followUpBody: unknown): string[];
 
 export declare function extractDiagnostics(body: unknown): {
   build_sha: string | null;
@@ -32,3 +42,11 @@ export declare function extractDiagnostics(body: unknown): {
   prompt_identity_count: number;
   prompt_identity: string[];
 };
+
+/**
+ * A `draft_graph` exit on ANY turn must carry a non-empty prompt_identity.
+ * @returns failure messages; an empty array means healthy.
+ */
+export declare function assertPromptProvenance(
+  diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count"> | null>,
+): string[];

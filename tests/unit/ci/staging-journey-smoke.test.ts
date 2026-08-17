@@ -25,6 +25,8 @@ import { parse } from "yaml";
 import {
   assertHealthyFrame,
   assertHealthyDraft,
+  assertHealthyJourney,
+  assertPromptProvenance,
   extractDiagnostics,
   MIN_NODES,
   MIN_OPTIONS,
@@ -154,6 +156,178 @@ describe("staging journey smoke — assertions discriminate", () => {
     // builder deliberately does not fabricate one. It is only treated as a
     // defect on a SUCCESSFUL draft_graph exit (enforced in the CLI reporter).
     expect(d.prompt_identity_count).toBe(0);
+  });
+});
+
+/**
+ * The journey-level invariant (ROADMAP 2.1268).
+ *
+ * WHY THIS BLOCK EXISTS
+ * ---------------------
+ * The gate used to assert the model's arrival on TURN 2 by turn INDEX. #1002
+ * ("draft-first") moved drafting to TURN 1 — deliberately, to Paul's ratified
+ * target — and the gate reddened on a HEALTHY product with
+ * `no draft_graph on the response — the user got no model back`, while the user
+ * was in fact handed a 14-node model on turn 1.
+ *
+ * The deeper defect is the one these tests pin: with the only graph assertion
+ * living on turn 2, the gate could no longer TELL APART
+ *   (a) healthy — the model arrived a turn earlier, and
+ *   (b) broken — no model arrived at all,
+ * because both produce the same message. An alarm that reports the same thing
+ * for a working product and an outage is not an alarm.
+ *
+ * The fixtures are REAL wire captures from a FRESH staging session
+ * (scenario d1cd7a3e, deployed build 2ceb65f, 2026-08-17T15:32Z — 29 minutes
+ * after the Render build-flap self-corrected, and both turns stamp
+ * `build_sha=2ceb65f`, so they are single-build evidence). Turn 1 carries
+ * 14 nodes / 4 option nodes; turn 2 routes to `turn_executor`, carries NO
+ * `draft_graph`, and reports the SAME four `option_id`s. `graph_hash` is
+ * identical on both turns (`f986ac90…`), which is what makes the continuity
+ * assertion below a fact about one model rather than about two counts.
+ */
+const LIVE_DRAFTFIRST_TURN1 = readJson(
+  resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-draftfirst-turn1-2ceb65f.json"),
+);
+const LIVE_DRAFTFIRST_TURN2 = readJson(
+  resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-draftfirst-turn2-2ceb65f.json"),
+);
+
+describe("staging journey smoke — the model must arrive, on whichever turn drafts", () => {
+  it("the draft-first fixtures really are the shape this defect is about", () => {
+    // If these ever stop being the draft-first shape, every test below is
+    // asserting against something else and must fail loudly here first.
+    expect(LIVE_DRAFTFIRST_TURN1._diagnostic_trace.exit_path).toBe("draft_graph");
+    expect(LIVE_DRAFTFIRST_TURN1.draft_graph.nodes.length).toBeGreaterThanOrEqual(MIN_NODES);
+    expect(LIVE_DRAFTFIRST_TURN2._diagnostic_trace.exit_path).toBe("turn_executor");
+    expect(LIVE_DRAFTFIRST_TURN2.draft_graph).toBeUndefined();
+    // Same model on both turns — the premise of the continuity assertion.
+    expect(LIVE_DRAFTFIRST_TURN2.graph_hash).toBe(LIVE_DRAFTFIRST_TURN1.graph_hash);
+  });
+
+  it("DEFECT PIN: the turn-2-only assertion reds this healthy journey", () => {
+    // This is the exact CI message from run 32039145332. It is correct about
+    // turn 2 and wrong about the user, which is why the journey function exists.
+    expect(assertHealthyDraft(LIVE_DRAFTFIRST_TURN2).join(" ")).toContain(
+      "no draft_graph on the response",
+    );
+  });
+
+  it("PASSES the real draft-first journey — model on turn 1, follow-up carries none", () => {
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, LIVE_DRAFTFIRST_TURN2)).toEqual([]);
+  });
+
+  it("PASSES the legacy clarify-then-draft journey — model on turn 2", () => {
+    // The pre-#1002 shape must keep passing: the gate asserts model DELIVERY,
+    // not a turn index, so it is indifferent to which turn drafts.
+    const clarifyTurn1 = { assistant_text: "Before I draft…", _diagnostic_trace: { exit_path: "clarify_v2" } };
+    expect(assertHealthyJourney(clarifyTurn1, HEALTHY_DRAFT)).toEqual([]);
+  });
+
+  it("FAILS when NEITHER turn carries a model — the outage this alarm exists for", () => {
+    const clarifyTurn1 = { assistant_text: "Before I draft…", _diagnostic_trace: { exit_path: "clarify_v2" } };
+    const noModelTurn2 = {
+      assistant_text: "Let me know more.",
+      analysis_ready: { options: [] },
+      _diagnostic_trace: { exit_path: "turn_executor" },
+    };
+    const failures = assertHealthyJourney(clarifyTurn1, noModelTurn2);
+    expect(failures.join(" ")).toContain("neither turn carried a draft_graph");
+    expect(failures.join(" ")).toContain("clarify_v2");
+    expect(failures.join(" ")).toContain("turn_executor");
+  });
+
+  it("FAILS a trivial draft-first graph — the 2.1252 shape, now on the turn the old gate never checked", () => {
+    // #1002 moved drafting to turn 1, where the only graph assertion did not
+    // reach. An empty/trivial model on turn 1 must red, and the message must
+    // name TURN 1 — an on-call engineer told "turn 2" would read the wrong log.
+    const trivialTurn1 = {
+      assistant_text: "I've built a first decision model from your brief.",
+      draft_graph: { nodes: [{ id: "n1", kind: "goal" }], edges: [] },
+      analysis_ready: { options: [] },
+      _diagnostic_trace: { exit_path: "draft_graph" },
+    };
+    const failures = assertHealthyJourney(trivialTurn1, LIVE_DRAFTFIRST_TURN2);
+    expect(failures.join(" ")).toContain(`expected >= ${MIN_NODES}`);
+    expect(failures.join(" ")).toContain("turn 1:");
+    expect(failures.join(" ")).not.toContain("turn 2: draft_graph.nodes");
+  });
+
+  it("FAILS when the follow-up loses the drafted option identities", () => {
+    const lost = {
+      ...LIVE_DRAFTFIRST_TURN2,
+      analysis_ready: { ...LIVE_DRAFTFIRST_TURN2.analysis_ready, options: [] },
+    };
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, lost).join(" ")).toContain(
+      "did not survive the turn",
+    );
+  });
+
+  it("IDENTITY, NOT COUNT: same number of DIFFERENT option_ids still FAILS", () => {
+    // The discriminating case. Any count-based check (`options.length >= 2`,
+    // or `=== 4`) passes this body: it has exactly as many options as the real
+    // one. Only binding to the drafted option_ids can see that the product is
+    // now talking about a different set of options than the model it built.
+    const drafted = LIVE_DRAFTFIRST_TURN1.analysis_ready.options.map((o: any) => o.option_id);
+    expect(drafted.length).toBe(4);
+    const swapped = {
+      ...LIVE_DRAFTFIRST_TURN2,
+      analysis_ready: {
+        ...LIVE_DRAFTFIRST_TURN2.analysis_ready,
+        options: drafted.map((id: string, i: number) => ({ option_id: `other_${i}_${id.slice(0, 2)}` })),
+      },
+    };
+    expect(swapped.analysis_ready.options.length).toBe(
+      LIVE_DRAFTFIRST_TURN2.analysis_ready.options.length,
+    );
+    const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, swapped);
+    expect(failures.join(" ")).toContain("no longer identifies the model");
+    // The message must name the ids that went missing, or the on-call engineer
+    // has to go and diff two payloads by hand.
+    expect(failures.join(" ")).toContain(drafted[0]);
+  });
+
+  it("TOLERATES a follow-up that ADDS an option — a gain is not a loss", () => {
+    // Deliberate asymmetry, stated: losing a drafted option means the model the
+    // product describes is not the model it built (the harm). Gaining one does
+    // not make anything the user was told less true, so it must not red — a
+    // gate that fires on a state no less true than the one it replaced is a
+    // false alarm, and false alarms are how this estate loses real ones.
+    const added = {
+      ...LIVE_DRAFTFIRST_TURN2,
+      analysis_ready: {
+        ...LIVE_DRAFTFIRST_TURN2.analysis_ready,
+        options: [...LIVE_DRAFTFIRST_TURN2.analysis_ready.options, { option_id: "newly_added_opt" }],
+      },
+    };
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, added)).toEqual([]);
+  });
+
+  it("CALL-SITE PIN: the CLI asserts the JOURNEY, never turn 2 alone", () => {
+    // The pure functions above are fully covered, but the CLI that wires them is
+    // by design un-unit-testable (there is deliberately no fixture mode — it
+    // always drives real HTTP). Without this pin the whole fix could be reverted
+    // at the call site with every test above still green: the functions would be
+    // correct and nothing would call them. Honest about what it is — a bounded,
+    // fail-loud source pin, the same technique this file already uses on the
+    // workflow YAML.
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("assertHealthyJourney(t1.body, t2.body)");
+    // …and the superseded turn-2-only call must not come back.
+    expect(src).not.toContain("assertHealthyDraft(t2.body)");
+    // Provenance is asserted across both turns' diagnostics, not turn 2's.
+    expect(src).toContain("assertPromptProvenance([d1, d2])");
+  });
+
+  it("a draft_graph exit on EITHER turn must carry prompt_identity", () => {
+    // The reporter's provenance check was keyed on turn 2's exit_path, so
+    // #1002 silently moved the drafting turn out from under it: we lost the
+    // ability to prove WHICH prompt produced the graph the user was shown.
+    const d1 = extractDiagnostics({ _diagnostic_trace: { exit_path: "draft_graph", prompt_identity: [] } });
+    const d2 = extractDiagnostics({ _diagnostic_trace: { exit_path: "turn_executor", prompt_identity: [] } });
+    expect(assertPromptProvenance([d1, d2]).join(" ")).toContain("prompt_identity was empty");
+    // …and it must NOT fire on a non-drafting exit, where [] is legitimate.
+    expect(assertPromptProvenance([d2, d2])).toEqual([]);
   });
 });
 

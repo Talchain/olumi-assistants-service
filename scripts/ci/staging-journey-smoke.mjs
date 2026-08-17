@@ -75,19 +75,25 @@ export function assertHealthyFrame(body) {
 }
 
 /**
- * Assert turn 2 (draft) returned a USABLE graph, not merely a 200.
+ * Assert the turn that DRAFTED returned a USABLE graph, not merely a 200.
+ *
+ * `label` names the turn in every message. It is a parameter, not the hardcoded
+ * "turn 2" it used to be, because #1002 (draft-first) moved drafting to turn 1:
+ * an alarm that says "turn 2" about a turn-1 failure sends the on-call engineer
+ * to the wrong log line.
+ *
  * @returns {string[]} failure messages; empty means healthy.
  */
-export function assertHealthyDraft(body) {
+export function assertHealthyDraft(body, label = "turn 2") {
   const f = [];
-  if (!body || typeof body !== "object") return ["turn 2: response body was not a JSON object"];
+  if (!body || typeof body !== "object") return [`${label}: response body was not a JSON object`];
 
   const exit = body?._diagnostic_trace?.exit_path;
   if (exit === "draft_graph_error") {
     // Surface the real reason — this is the message an on-call engineer reads first.
     const d = body.details ?? {};
     f.push(
-      `turn 2: exit_path=draft_graph_error` +
+      `${label}: exit_path=draft_graph_error` +
         (d.violation_code ? ` violation_code=${d.violation_code}` : "") +
         (d.reason ? ` reason=${d.reason}` : ""),
     );
@@ -95,13 +101,13 @@ export function assertHealthyDraft(body) {
 
   const g = body.draft_graph;
   if (!g || typeof g !== "object") {
-    f.push("turn 2: no draft_graph on the response — the user got no model back");
+    f.push(`${label}: no draft_graph on the response — the user got no model back`);
     return f;
   }
 
   const nodes = Array.isArray(g.nodes) ? g.nodes : [];
   if (nodes.length < MIN_NODES) {
-    f.push(`turn 2: draft_graph.nodes=${nodes.length}, expected >= ${MIN_NODES} (graph too trivial to be usable)`);
+    f.push(`${label}: draft_graph.nodes=${nodes.length}, expected >= ${MIN_NODES} (graph too trivial to be usable)`);
   }
 
   // Options live in two places; require BOTH to be coherent. The graph needs
@@ -110,23 +116,151 @@ export function assertHealthyDraft(body) {
   const optionNodes = nodes.filter((n) => n && n.kind === OPTION_KIND);
   if (optionNodes.length < MIN_OPTIONS) {
     f.push(
-      `turn 2: option nodes=${optionNodes.length}, expected >= ${MIN_OPTIONS} ` +
+      `${label}: option nodes=${optionNodes.length}, expected >= ${MIN_OPTIONS} ` +
         `(nothing to compare — a decision needs alternatives)`,
     );
   }
 
   const readyOptions = Array.isArray(body?.analysis_ready?.options) ? body.analysis_ready.options : [];
   if (readyOptions.length < MIN_OPTIONS) {
-    f.push(`turn 2: analysis_ready.options=${readyOptions.length}, expected >= ${MIN_OPTIONS}`);
+    f.push(`${label}: analysis_ready.options=${readyOptions.length}, expected >= ${MIN_OPTIONS}`);
   }
 
   // OPTIONS_IDENTICAL was the live defect: distinct ids, but nothing to tell
   // the options apart. Assert the ids are actually distinct.
   const ids = readyOptions.map((o) => o?.option_id).filter(Boolean);
   if (ids.length > 0 && new Set(ids).size !== ids.length) {
-    f.push(`turn 2: analysis_ready.options contained duplicate option_id values: ${ids.join(",")}`);
+    f.push(`${label}: analysis_ready.options contained duplicate option_id values: ${ids.join(",")}`);
   }
 
+  return f;
+}
+
+/** The `option_id`s a response says the model is comparing. */
+function readyOptionIds(body) {
+  const opts = Array.isArray(body?.analysis_ready?.options) ? body.analysis_ready.options : [];
+  return opts.map((o) => o?.option_id).filter((id) => typeof id === "string" && id.length > 0);
+}
+
+/**
+ * THE JOURNEY INVARIANT (ROADMAP 2.1268).
+ *
+ * WHAT THIS ASSERTS, AND WHY IT IS NOT "assert turn 2"
+ * ---------------------------------------------------
+ * The product's promise is not "turn 2 returns a graph" — it is that a user who
+ * brings a decision LEAVES HOLDING A USABLE MODEL, and that the model the
+ * product then talks about is the model it actually built. Which turn drafts is
+ * a product decision that has now changed twice: pre-#1002 turn 1 asked a
+ * clarifying question and turn 2 drafted; post-#1002 turn 1 drafts immediately
+ * and clarification rides alongside. Binding the alarm to a turn INDEX made a
+ * deliberate, ratified product improvement read as an outage — and, far worse,
+ * left the gate unable to tell that case apart from a real outage, because both
+ * emit `no draft_graph on the response`.
+ *
+ * So the assertion is stated over the JOURNEY:
+ *
+ *   1. DELIVERY — at least one turn carried a `draft_graph`. If none did, the
+ *      user got no model and that is the outage this alarm was built for. The
+ *      message names both exit_paths, because "which path served this" is the
+ *      first thing an on-call engineer needs and the old message omitted it.
+ *
+ *   2. USABILITY — the drafting turn's graph clears MIN_NODES / MIN_OPTIONS and
+ *      has distinct option ids, via `assertHealthyDraft` under that turn's own
+ *      label. This is the assertion that #1002 moved out from under: the only
+ *      graph check lived on turn 2, so a trivial or empty turn-1 draft (the
+ *      ROADMAP 2.1252 shape) had NO gate above it here.
+ *
+ *   3. CONTINUITY, BOUND BY IDENTITY — every turn after the drafting turn must
+ *      still name the same `option_id`s. This is deliberately an identity check
+ *      and not a count: `analysis_ready.options.length >= 2` is satisfied by ANY
+ *      two-item list, so a count cannot see the product describing a different
+ *      set of options than the one it built. That divergence is the P5
+ *      fabrication class — a claim about the user's model not grounded in the
+ *      model — and the old gate was blind to it entirely.
+ *
+ * ASYMMETRY, STATED DELIBERATELY (trap 22b): LOSS of a drafted option_id fails;
+ * ADDITION does not. Losing one means the product is talking about a model it
+ * did not build. Gaining one makes nothing the user was told less true, so
+ * failing on it would be a false alarm — and false alarms are precisely how this
+ * estate has lost real ones. One harm, one direction, one parameter.
+ *
+ * @param {unknown} frameBody   turn 1 body
+ * @param {unknown} followUpBody turn 2 body
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertHealthyJourney(frameBody, followUpBody) {
+  const f = [];
+  const turns = [
+    { label: "turn 1", body: frameBody },
+    { label: "turn 2", body: followUpBody },
+  ];
+
+  const draftIdx = turns.findIndex((t) => t.body?.draft_graph && typeof t.body.draft_graph === "object");
+
+  // 1. DELIVERY.
+  if (draftIdx === -1) {
+    f.push(
+      "journey: neither turn carried a draft_graph — the user got no model back " +
+        `(exit_paths: ${turns
+          .map((t) => `${t.label}=${t.body?._diagnostic_trace?.exit_path ?? "?"}`)
+          .join(", ")})`,
+    );
+    return f;
+  }
+
+  // 2. USABILITY, on the turn that actually drafted.
+  const drafting = turns[draftIdx];
+  f.push(...assertHealthyDraft(drafting.body, drafting.label));
+
+  // 3. CONTINUITY, by identity.
+  const draftedIds = readyOptionIds(drafting.body);
+  for (const later of turns.slice(draftIdx + 1)) {
+    const laterIds = readyOptionIds(later.body);
+    if (draftedIds.length === 0) continue; // nothing to lose; (2) already judged it
+    if (laterIds.length === 0) {
+      f.push(
+        `${later.label}: analysis_ready.options was empty after the model was drafted on ` +
+          `${drafting.label} — the model did not survive the turn`,
+      );
+      continue;
+    }
+    const missing = draftedIds.filter((id) => !laterIds.includes(id));
+    if (missing.length > 0) {
+      f.push(
+        `${later.label}: analysis_ready.options no longer identifies the model drafted on ` +
+          `${drafting.label} — missing option_id(s): ${missing.join(",")}. The product is ` +
+          `describing a different set of options than the one it built.`,
+      );
+    }
+  }
+
+  return f;
+}
+
+/**
+ * A successful draft must prove WHICH prompt produced it.
+ *
+ * This was previously inline in `report()` and keyed on TURN 2's exit_path, so
+ * #1002 silently moved the drafting turn out from under it and the provenance
+ * guarantee stopped applying to any turn. It is now stated over every turn's
+ * diagnostics: a `draft_graph` exit anywhere requires a non-empty
+ * `prompt_identity`. An empty identity on a NON-drafting exit stays legitimate —
+ * the trace builder deliberately does not fabricate one there.
+ *
+ * @param {Array<{exit_path: string|null, prompt_identity_count: number}|null>} diagnostics
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertPromptProvenance(diagnostics) {
+  const f = [];
+  diagnostics.forEach((d, i) => {
+    if (!d) return;
+    if (d.exit_path === "draft_graph" && d.prompt_identity_count === 0) {
+      f.push(
+        `turn ${i + 1}: exit_path=draft_graph but prompt_identity was empty — the served prompt ` +
+          "version/hash did not reach the trace, so we cannot prove WHICH prompt produced this graph.",
+      );
+    }
+  });
   return f;
 }
 
@@ -154,6 +288,28 @@ function uuid() {
 
 function log(msg) {
   process.stdout.write(`${msg}\n`);
+}
+
+/**
+ * Describe the model on a turn, UNAMBIGUOUSLY.
+ *
+ * The old line printed `nodes=${body?.draft_graph?.nodes?.length ?? 0}` beside
+ * `options=${body?.analysis_ready?.options.length}`. Those read two DIFFERENT
+ * top-level blocks with different lifecycles, and the `?? 0` collapsed "there is
+ * no draft_graph block on this turn" into the same "0" as "the graph is empty".
+ * On the 17 Aug failure that printed `nodes=0 options=4`, which reads as an
+ * incoherent payload — four options with no nodes — and cost real diagnosis time
+ * chasing a graph corruption that never existed. An alarm must never make its
+ * own observation ambiguous.
+ */
+function graphLine(body) {
+  const g = body?.draft_graph;
+  const opts = Array.isArray(body?.analysis_ready?.options) ? body.analysis_ready.options.length : "absent";
+  const graph =
+    g && typeof g === "object"
+      ? `draft_graph=present nodes=${Array.isArray(g.nodes) ? g.nodes.length : "?"}`
+      : "draft_graph=absent(no-block)";
+  return `${graph} analysis_ready.options=${opts}`;
 }
 
 async function postTurn(base, key, payload, timeoutMs) {
@@ -275,7 +431,10 @@ async function main() {
     turnTimeout,
   );
   const d1 = extractDiagnostics(t1.body);
-  log(`  HTTP ${t1.status} in ${(t1.ms / 1000).toFixed(1)}s | exit_path=${d1.exit_path} | build_sha=${d1.build_sha}`);
+  log(
+    `  HTTP ${t1.status} in ${(t1.ms / 1000).toFixed(1)}s | exit_path=${d1.exit_path} | ` +
+      `build_sha=${d1.build_sha} | ${graphLine(t1.body)}`,
+  );
   if (t1.status !== 200) failures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
   failures.push(...assertHealthyFrame(t1.body));
 
@@ -295,14 +454,18 @@ async function main() {
     turnTimeout,
   );
   const d2 = extractDiagnostics(t2.body);
-  const nodeCount = t2.body?.draft_graph?.nodes?.length ?? 0;
-  const optCount = (t2.body?.analysis_ready?.options ?? []).length;
+  // build_sha is stamped PER TURN, not once per run. Render made a rolled-back
+  // parent build live mid-window on 17 Aug 2026 (two merges 14s apart, the
+  // parent's deploy finishing last), so "the run confirmed the build at the
+  // start" is not evidence about which build answered a given turn.
   log(
     `  HTTP ${t2.status} in ${(t2.ms / 1000).toFixed(1)}s | exit_path=${d2.exit_path} | ` +
-      `nodes=${nodeCount} options=${optCount}`,
+      `build_sha=${d2.build_sha} | ${graphLine(t2.body)}`,
   );
   if (t2.status !== 200) failures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
-  failures.push(...assertHealthyDraft(t2.body));
+
+  // Assert over the JOURNEY, not over turn 2. See assertHealthyJourney.
+  failures.push(...assertHealthyJourney(t1.body, t2.body));
 
   report(failures, d1, d2);
 }
@@ -320,13 +483,9 @@ function report(failures, d1, d2) {
   // prompt_identity is EXPECTED to be [] on the minimal-trace exits (clarify_v2,
   // turn_executor, chip_click) — no prompt hash is captured there, and the trace
   // builder deliberately does not fabricate one. It is only a defect on a
-  // SUCCESSFUL draft_graph exit, which is why this is asserted narrowly.
-  if (d2 && d2.exit_path === "draft_graph" && d2.prompt_identity_count === 0) {
-    failures.push(
-      "turn 2: exit_path=draft_graph but prompt_identity was empty — the served prompt " +
-        "version/hash did not reach the trace, so we cannot prove WHICH prompt produced this graph.",
-    );
-  }
+  // SUCCESSFUL draft_graph exit — on WHICHEVER turn that is. Keyed on turn 2
+  // alone, this check went dark the moment #1002 moved drafting to turn 1.
+  failures.push(...assertPromptProvenance([d1, d2]));
 
   log(`\n## Result`);
   if (failures.length === 0) {
