@@ -193,18 +193,18 @@ const DESIGNATION_MAX = 90;
 const DESIGNATION_MIN = 3;
 
 /**
- * The entry's own option vocabulary. An entry qualifies ONLY when the record
- * designates it one of these — this is the entity-class gate the Step-0 census
- * forced (see header). Deliberately NARROW: "route", "path" and "choice" were
- * measured to admit factors ("Tax treatment of each route").
- */
-const OPTION_DESIGNATOR = /\b(?:option|options|alternative|alternatives)\b/i;
-
-/**
  * ⭐ CONJUNCT 2 of the B1 fix. The class word must CLOSE the designation, modulo
  * the same closed boilerplate tail `DESIGNATION_TAIL` strips. A class word
  * buried mid-sentence means the entry is prose ABOUT options, not the name of
  * one — which is what the field actually holds (see the header's P7 note).
+ *
+ * The vocabulary is deliberately NARROW: "route", "path" and "choice" were
+ * measured to admit factors ("Tax treatment of each route").
+ *
+ * ⚠ A bare `OPTION_DESIGNATOR` (the class word ANYWHERE in the head) used to sit
+ * beside this one and was left behind by the B1 fix — DEAD CODE that a mutant
+ * silently mutated to no effect, which is how it was found. There is one
+ * authority for this vocabulary and it is this regex.
  */
 const OPTION_DESIGNATOR_CLOSES_HEAD = new RegExp(
   [

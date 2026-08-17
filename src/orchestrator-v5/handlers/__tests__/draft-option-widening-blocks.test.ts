@@ -11,8 +11,15 @@
  * writes — which is NOT what the brief assumed. Each fixture names the scenario
  * id it came from.
  *
+ * ⚠ TWO EXCEPTIONS, both labelled at their site rather than left to be assumed:
+ *   - `'Nothing else in the brief suggests a further option'` is CONSTRUCTED. A
+ *     search of all 4,922 entries found ZERO instances of its shape, and it is
+ *     the only input that discriminates conjunct 1. Kept, and marked.
+ *   - the `con-current`/`opt_phased_rollout` R3 inputs are CONSTRUCTED probes of
+ *     the id-shape boundary, not observed captures.
+ *
  * The option LABELS are likewise the real labels persisted on those same rows.
- * The BRIEF strings are the one specification-only element: the census pulled
+ * The BRIEF strings are the other specification-only element: the census pulled
  * graphs, not briefs, so the briefs here are constructed to drive
  * `deriveIntakeOptionReconciliation` into a NAMED state, and every test that
  * depends on that state PINS IT IN-TEST before asserting anything else
@@ -538,6 +545,26 @@ describe('buildDraftOptionWideningBlocks — ⭐⭐ B1: reason prose is never na
     'Cost differences between the options — not quantified anywhere in the brief',
     'The relative risk of each option — brief gives no basis to differentiate',
     'Whether either option can be reversed later — not addressed in the brief',
+    /**
+     * ⭐ CONJUNCT 1's OWN discriminating input, and the ONLY guard that stops it.
+     * No separator, the class word DOES close the head, and the residue is short
+     * and ends on a content word — so conjuncts 2 and 3 both pass it and only
+     * "a separator must have been found" refuses it. Without conjunct 1 the card
+     * says: I set aside an option … "Nothing else in the brief suggests a further".
+     * ⚠ SPECIFICATION-ONLY: a search of all 4,922 census entries found ZERO
+     * instances of this shape, so it is constructed, and it is labelled as
+     * constructed. It is kept because a conjunct whose necessity rests on the
+     * absence of a shape from one corpus is a conjunct nobody can safely delete.
+     */
+    'Nothing else in the brief suggests a further option',
+    /**
+     * ⭐ CONJUNCT 3b's (the word bound) discriminating input — a REAL capture.
+     * Separator present, class word closes the head, residue ends on a content
+     * word; only the 8-word bound refuses it. Without it the card says:
+     * I set aside an option … "Phased rollout modelled as coaching item rather
+     * than separate".
+     */
+    'Phased rollout modelled as coaching item rather than separate option — no distinct intervention profile that differs from the named vendors',
   ];
 
   for (const entry of REASON_PROSE_THAT_MENTIONS_OPTIONS) {
@@ -588,20 +615,45 @@ describe('buildDraftOptionWideningBlocks — MR-5: the fail-closed branch of the
 });
 
 describe('buildDraftOptionWideningBlocks — R3: an id-shaped designation never reaches the caption', () => {
-  it('uses the generic caption when the designation carries an id-shaped token', () => {
-    // The egress scrub runs BEFORE validation and its label substitution can
-    // LENGTHEN a string, so an id-shaped token could push a caption that
-    // validated here past 40 chars AFTER the scrub — and the egress parse is
-    // WHOLE-RESPONSE, so that costs the entire draft turn, not just the card.
+  /**
+   * ⚠ THE FIRST VERSION OF THIS BLOCK WAS VACUOUS AND A MUTANT CAUGHT IT.
+   * It looped `for (const block of blocks)` with no length assertion, so when
+   * `blocks` was empty the body never ran and the test passed by testing
+   * nothing — a test that cannot fail, which is the exact class this estate
+   * hunts. Dropping the guard under test left it GREEN. Both tests below now
+   * assert their block count FIRST.
+   *
+   * Deriving why it was empty produced the honest picture:
+   *   - `opt_phased_rollout` is slug-shaped, so `gateCoachingCardBody` refuses
+   *     the whole body and NO card is emitted at all;
+   *   - `con-current` is NOT slug-shaped (a 3-char first segment reads as an
+   *     English compound), so the body gate passes it and the caption guard is
+   *     what acts.
+   * So the reachable case for this guard is the second one, and that is what is
+   * pinned. The risk it addresses is real: the egress scrub runs BEFORE
+   * validation and can LENGTHEN a caption, and the egress parse is
+   * WHOLE-RESPONSE — so an over-long caption costs the ENTIRE draft turn.
+   */
+  it('an id-bearing designation the BODY gate refuses emits no card at all', () => {
     const blocks = build({
       wideningLog: {
         elements_considered_but_excluded: ['opt_phased_rollout option — not referenced in the brief'],
       },
     });
-    for (const block of blocks) {
-      expect(block.action_label).toBe('Add this option');
-      expect(CoachingBlockSchema.safeParse(block).success).toBe(true);
-    }
+    expect(blocks).toHaveLength(0);
+  });
+
+  it('uses the generic caption for an id-shaped designation the body gate ADMITS', () => {
+    const blocks = build({
+      wideningLog: {
+        elements_considered_but_excluded: ['con-current rollout option — not referenced in the brief'],
+      },
+    });
+    expect(blocks).toHaveLength(1); // non-vacuous: assert presence BEFORE the shape
+    expect(blocks[0]!.action_label).toBe('Add this option');
+    // The card stays specific where it matters.
+    expect(blocks[0]!.action_prompt).toContain('con-current rollout');
+    expect(CoachingBlockSchema.safeParse(blocks[0]).success).toBe(true);
   });
 
   it('CONTRAST: a plain-prose designation keeps its named caption', () => {
