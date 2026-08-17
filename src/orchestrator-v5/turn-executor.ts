@@ -451,7 +451,10 @@ import {
 } from './routing/mutation-language.js';
 // ⭐⭐ ROADMAP 2.1265 (D2) — no reply may assert the model already holds a value
 // its own MISSING_OPTION_VALUE blocker says is missing.
-import { classifyMissingValueClaim } from './compose/missing-value-claim-guard.js';
+import {
+  classifyModelContentsClaim,
+  readAuthoritativeModelState,
+} from './compose/missing-value-claim-guard.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -11855,11 +11858,20 @@ export async function runTurnExecutor(
     if (!response) return;
     const assistantText = response.assistant_text;
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
-    const decision = classifyMissingValueClaim({
-      assistantText,
-      readiness: analysisReadyForTurn ?? null,
+    // ⭐ THE STRUCTURAL GATE (2.1265, Paul's ruling / P5). The permission
+    // decision is unreachable without the authoritative read, and the read is
+    // taken HERE from the same parse `analysisReadyForTurn` was built from
+    // (`:2108-2109`), so the blocker that mandates a refusal and the state that
+    // could ground the claim describe ONE state — no second read, no second
+    // derivation (trap 12). A null read means there is no authoritative state to
+    // ground anything against, and there is deliberately no way to synthesise
+    // one: the guard stands down rather than swap a claim it cannot check.
+    const read = readAuthoritativeModelState({
       persistedGraph: effectiveTurnGraph,
+      readiness: analysisReadyForTurn ?? null,
     });
+    if (read === null) return;
+    const decision = classifyModelContentsClaim({ assistantText, read });
     if (decision.verdict !== 'swap') return;
     log.warn(
       {
@@ -11875,8 +11887,12 @@ export async function runTurnExecutor(
         factor_label: decision.pairs[0]?.factorLabel ?? null,
         asserted_values: decision.assertedValues,
         blocker_pair_count: decision.pairs.length,
+        // `blocker_says_missing` is the CONTRADICTION case — the payload's own
+        // blocker says the value is absent. Distinguished in telemetry because
+        // it is a different severity from a merely ungrounded claim.
+        refusal_reason: decision.reason,
       },
-      'V5 TurnExecutor — reply asserted the model already holds a value its own MISSING_OPTION_VALUE blocker says is missing and the persisted graph does not carry; replaced with the honest ask',
+      'V5 TurnExecutor — reply asserted the model already holds a value the authoritative persisted read does not ground; replaced with the honest refusal (reason blocker_says_missing = the payload contradicted its own blocker)',
     );
     response = {
       ...response,

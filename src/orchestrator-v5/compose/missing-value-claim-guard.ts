@@ -75,7 +75,21 @@
 
 import { CONFIGURE_OPTION_EXAMPLE_VALUE } from './configure-option-clarify-response.js';
 import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text.js';
-import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
+import {
+  extractAssertedNumbers,
+  groundModelValueClaim,
+  type AuthoritativeModelRead,
+  type ClaimRefusalReason,
+  type MissingValuePair,
+} from './model-contents-claim.js';
+
+export type { MissingValuePair } from './model-contents-claim.js';
+export {
+  extractAssertedNumbers,
+  readAuthoritativeModelState,
+  projectMissingValuePairs,
+  collectModelValueNumbers,
+} from './model-contents-claim.js';
 
 /**
  * The closed holding-verb set. A member, together with `already` and a number,
@@ -149,7 +163,7 @@ export const VALUE_ABSENT_MARKERS: readonly string[] = [
  * today's behaviour. A gap recorded in the suite is honest; a gap invisible to
  * it is how four rounds happen.
  */
-export const MISSING_VALUE_CLAIM_KNOWN_DROPPED: readonly string[] = [
+export const MODEL_CONTENTS_CLAIM_KNOWN_DROPPED: readonly string[] = [
   // The claim carries NO number — it asserts the factor is represented, which
   // is true; only a value assertion is a value fabrication.
   'Your model already reflects subcontractor cost, so no change is needed there.',
@@ -164,23 +178,17 @@ export const MISSING_VALUE_CLAIM_KNOWN_DROPPED: readonly string[] = [
 
 export type MissingValueClaimStandDownReason =
   | 'no_text'
-  | 'no_readiness'
-  | 'no_missing_value_blocker'
-  | 'no_graph'
   | 'no_already_holds_claim'
-  | 'value_present_in_graph';
-
-/** A live missing-effect-value blocker, projected to the two labels we name. */
-export interface MissingValuePair {
-  readonly optionLabel: string;
-  readonly factorLabel: string;
-}
+  /** Every asserted value IS held by the authoritative read — the claim is TRUE. */
+  | 'claim_is_grounded';
 
 export type MissingValueClaimDecision =
   | { readonly verdict: 'stand_down'; readonly reason: MissingValueClaimStandDownReason }
   | {
       readonly verdict: 'swap';
-      /** The live pairs, in payload order. `[0]` supplies the worked example. */
+      /** Why the claim was refused — the seam's own verdict, not re-derived. */
+      readonly reason: ClaimRefusalReason;
+      /** The blocked slots, in payload order. `[0]` supplies the worked example. */
       readonly pairs: readonly MissingValuePair[];
       /** The asserted numbers the graph does not hold, as written. */
       readonly assertedValues: readonly string[];
@@ -252,162 +260,6 @@ function containsWord(paddedHaystack: string, word: string): boolean {
 }
 
 /**
- * The two discriminators a missing-effect-value blocker is spelled with, and
- * they are NOT interchangeable spellings of one field.
- *
- * ⚠⚠ THIS COST A NEAR-MISS, CAUGHT BY MEASUREMENT AND RECORDED RATHER THAN
- * QUIETLY FIXED (CLAUDE.md trap 14). The guard was written against the WIRE
- * projection — `analysis_state.readiness.blockers[].code ===
- * "MISSING_OPTION_VALUE"`, which is what the witness captures carry, so the unit
- * spec was fully green. The payload the executor actually holds
- * (`buildCanonicalAnalysisReadyFromGraph`, the value threaded as
- * `analysisReadyForTurn`) spells the same fact `blocker_type ===
- * "missing_value"` and carries NO `code` field at all. Reading only `code` meant
- * ZERO pairs in production and a guard that could never fire — green tests, dead
- * guard, the estate's dominant defect shape (trap 3b at payload grain).
- *
- * Both are accepted, and the spec asserts BOTH shapes over the SAME witnessed
- * graph so neither reading can rot alone.
- */
-const MISSING_VALUE_DISCRIMINATORS: readonly (readonly [string, string])[] = [
-  // Canonical, in-process — what the turn-executor and the edit dispatcher hold.
-  ['blocker_type', 'missing_value'],
-  // Wire projection — what `analysis_state.readiness.blockers` carries.
-  ['code', 'MISSING_OPTION_VALUE'],
-];
-
-/**
- * Project the LIVE missing-effect-value pairs off the readiness payload.
- *
- * DERIVED, NOT MIRRORED (trap 12): the pairs come off the SAME blockers that
- * compose the blocker copy the user is reading, so this guard cannot disagree
- * with the product about what is missing. Duck-typed deliberately — it must read
- * both the canonical payload and the wire projection, so an unrecognised shape
- * yields NO pairs and the guard stands down.
- */
-export function projectMissingValuePairs(readiness: unknown): MissingValuePair[] {
-  if (readiness === null || typeof readiness !== 'object') return [];
-  const blockers = (readiness as { blockers?: unknown }).blockers;
-  if (!Array.isArray(blockers)) return [];
-  const pairs: MissingValuePair[] = [];
-  for (const raw of blockers) {
-    if (raw === null || typeof raw !== 'object') continue;
-    const b = raw as Record<string, unknown>;
-    const isMissingValue = MISSING_VALUE_DISCRIMINATORS.some(
-      ([field, value]) => b[field] === value,
-    );
-    if (!isMissingValue) continue;
-    const optionLabel = b.option_label;
-    const factorLabel = b.factor_label;
-    if (typeof optionLabel !== 'string' || optionLabel.trim().length === 0) continue;
-    if (typeof factorLabel !== 'string' || factorLabel.trim().length < 3) continue;
-    pairs.push({ optionLabel: optionLabel.trim(), factorLabel: factorLabel.trim() });
-  }
-  return pairs;
-}
-
-/** A number as written in the claim, plus every value it could denote. */
-interface AssertedNumber {
-  readonly asWritten: string;
-  /** `12%` ⇒ {12, 0.12}; `0.12` ⇒ {0.12, 12}. Share/percent are the same claim. */
-  readonly candidates: readonly number[];
-}
-
-const NUMBER_TOKEN = /(\d[\d,]*(?:\.\d+)?)\s*(%)?/g;
-
-/** Extract every number in a sentence with its percent/share equivalents. */
-export function extractAssertedNumbers(sentence: string): AssertedNumber[] {
-  const out: AssertedNumber[] = [];
-  for (const m of sentence.matchAll(NUMBER_TOKEN)) {
-    const raw = m[1]!;
-    const value = Number(raw.replace(/,/g, ''));
-    if (!Number.isFinite(value)) continue;
-    const candidates = new Set<number>([value]);
-    if (m[2] === '%') candidates.add(value / 100);
-    // A bare share reads as its percent twin and vice versa: the claim
-    // "already at 0.12" and "already at 12%" are the same assertion about the
-    // same slot, so a graph holding EITHER stands the guard down.
-    if (value > 0 && value < 1) candidates.add(value * 100);
-    else if (value >= 1 && value <= 100) candidates.add(value / 100);
-    out.push({ asWritten: m[0].trim(), candidates: [...candidates] });
-  }
-  return out;
-}
-
-/**
- * Sweep the values the persisted MODEL holds in the slots a "your model already
- * reflects X" claim can be about: every option's effect values (interventions)
- * and every node's own observed value, in numeric and display-string form.
- *
- * ⚠⚠ A WHOLE-OBJECT NUMERIC SWEEP WAS TRIED FIRST AND MEASURED WRONG — recorded
- * rather than quietly replaced (CLAUDE.md trap 14). Run over the witnessed draft
- * graph (`captures/j4-t1-event-final.json`) it reports the asserted `0.12` as
- * PRESENT, from two sources that have nothing to do with any value the user
- * could mean: digit runs inside hex node ids (`21ea9b80` → `21`, `80`) and
- * twelve edges carrying `strength.std = 0.11999999999999998`, which matches 0.12
- * inside any sane tolerance. The guard would have stood down on the exact
- * fabrication it exists to catch, silently, and its "no numeric match" reading
- * would have looked like a clean absence result (trap 13e: a sweep that cannot
- * distinguish coincidence from evidence is reporting on itself).
- *
- * So the scope is the CLAIM'S DOMAIN, not the object graph. Intervention values
- * are read through `mergeInterventionSources` — the SAME reader that composes
- * the readiness payload whose blocker triggered this guard, so the two can never
- * disagree about what the model holds (trap 12: derived, never mirrored).
- */
-export function collectModelValueNumbers(graph: unknown): Set<number> {
-  const found = new Set<number>();
-  if (graph === null || typeof graph !== 'object') return found;
-  const nodes = (graph as { nodes?: unknown }).nodes;
-  if (!Array.isArray(nodes)) return found;
-
-  const addNumber = (value: unknown): void => {
-    if (typeof value === 'number' && Number.isFinite(value)) found.add(value);
-  };
-  const addFromDisplayString = (value: unknown): void => {
-    if (typeof value !== 'string') return;
-    for (const m of value.matchAll(NUMBER_TOKEN)) {
-      const parsed = Number(m[1]!.replace(/,/g, ''));
-      if (!Number.isFinite(parsed)) continue;
-      found.add(parsed);
-      if (m[2] === '%') found.add(parsed / 100);
-    }
-  };
-  const addObservedState = (holder: unknown): void => {
-    if (holder === null || typeof holder !== 'object') return;
-    const observed = (holder as Record<string, unknown>).observed_state;
-    if (observed !== null && typeof observed === 'object') {
-      addNumber((observed as Record<string, unknown>).value);
-      addFromDisplayString((observed as Record<string, unknown>).display_value);
-    }
-    addFromDisplayString((holder as Record<string, unknown>).display_value);
-  };
-
-  for (const node of nodes) {
-    if (node === null || typeof node !== 'object') continue;
-    const record = node as Record<string, unknown>;
-    // The node's OWN value — the "baseline" a factor carries.
-    addObservedState(record);
-    addObservedState(record.data);
-    // Every effect value this node carries, through the readiness reader.
-    const interventions = mergeInterventionSources(record);
-    if (interventions !== undefined) {
-      for (const value of Object.values(interventions)) addNumber(value);
-    }
-  }
-  return found;
-}
-
-/** Floating-point-safe membership (0.12 must match a stored 0.12). */
-function graphHolds(numbers: ReadonlySet<number>, candidate: number): boolean {
-  for (const held of numbers) {
-    if (held === candidate) return true;
-    if (Math.abs(held - candidate) <= 1e-9 * Math.max(1, Math.abs(candidate))) return true;
-  }
-  return false;
-}
-
-/**
  * The honest replacement, composed from BLOCKER FACTS ONLY.
  *
  * ⚠ It does NOT echo the asserted number. The blocker says the effect value is
@@ -418,9 +270,16 @@ function graphHolds(numbers: ReadonlySet<number>, candidate: number): boolean {
  * (`buildConfigureOptionAdvisedFormat` = probe P1), so the sentence this reply
  * suggests returns to the lane that suggested it.
  */
-export function composeMissingValueClaimCorrection(
+export function composeModelContentsRefusal(
   pairs: readonly MissingValuePair[],
+  reason: ClaimRefusalReason,
 ): string {
+  // No blocked slot ⇒ the claim is merely UNGROUNDED, not contradicted. Say the
+  // narrower true thing: the model does not carry it. Naming a pair here would
+  // be an invention (P5's own rule applied to the correction copy).
+  if (pairs.length === 0 || reason === 'not_in_persisted_state') {
+    return 'I cannot say your model already carries that figure — I checked the saved model and it is not there. Tell me the value you want and I will set it.';
+  }
   const primary = pairs[0]!;
   const example = buildConfigureOptionAdvisedFormat(
     primary.optionLabel,
@@ -430,7 +289,7 @@ export function composeMissingValueClaimCorrection(
   const head =
     pairs.length === 1
       ? `Your model does not carry that figure — "${primary.optionLabel}" still has no effect value on ${primary.factorLabel}, which is exactly what this turn is asking you for.`
-      : `Your model does not carry that figure anywhere yet, and ${pairs.length} effect values are still unset — so I cannot tell you it is already reflected.`;
+      : `Your model does not carry that figure anywhere yet, and ${pairs.length} effect values are still unset — so I cannot tell you it is reflected there.`;
   return [
     head,
     `Tell me what it changes, like this: ${example}`,
@@ -444,53 +303,53 @@ export function composeMissingValueClaimCorrection(
  *
  * Pure: no I/O, no LLM, no telemetry. The caller owns emission and the swap.
  */
-export function classifyMissingValueClaim(params: {
+export function classifyModelContentsClaim(params: {
   readonly assistantText: string;
-  readonly readiness: unknown;
-  readonly persistedGraph: unknown;
+  /**
+   * ⭐ THE STRUCTURAL GATE. Branded, and obtainable ONLY from
+   * `readAuthoritativeModelState`, so this function cannot be asked for a
+   * permission decision by a caller holding nothing but a sentence. Passing a
+   * bare graph or readiness object is a COMPILE error, not a runtime check —
+   * that is the difference between this and the advisory version it replaces.
+   */
+  readonly read: AuthoritativeModelRead;
 }): MissingValueClaimDecision {
-  const { assistantText, readiness, persistedGraph } = params;
+  const { assistantText, read } = params;
   if (typeof assistantText !== 'string' || assistantText.trim().length === 0) {
     return { verdict: 'stand_down', reason: 'no_text' };
   }
-  if (readiness === null || readiness === undefined) {
-    return { verdict: 'stand_down', reason: 'no_readiness' };
-  }
-  const pairs = projectMissingValuePairs(readiness);
-  if (pairs.length === 0) {
-    return { verdict: 'stand_down', reason: 'no_missing_value_blocker' };
-  }
-  // No graph ⇒ the "did it read this from the model" question is unanswerable,
-  // and a guard that cannot answer it must not swap. Fail-open here is the only
-  // honest direction: swapping on an unread graph would replace true claims.
-  if (persistedGraph === null || persistedGraph === undefined) {
-    return { verdict: 'stand_down', reason: 'no_graph' };
-  }
 
-  const graphNumbers = collectModelValueNumbers(persistedGraph);
-  let sawClaim = false;
+  let sawGroundedClaim = false;
   for (const sentence of splitSentencesPreservingDecimals(assistantText)) {
     const padded = wordsOnly(sentence);
+    // ── The RECOGNISER: is this sentence a claim about model CONTENTS? Its
+    // honest gaps are pinned in MODEL_CONTENTS_CLAIM_KNOWN_DROPPED. Every gap is
+    // a MISSED claim; widening it can never create a permission.
     if (!containsWord(padded, 'already')) continue;
     if (!ALREADY_HOLDS_VERBS.some((verb) => containsWord(padded, verb))) continue;
+    // Opposite-direction escape: a sentence that also says the value is absent
+    // is making the TRUE claim (trap 22b — every case gets its twin).
     if (VALUE_ABSENT_MARKERS.some((marker) => padded.includes(wordsOnly(marker)))) continue;
     const asserted = extractAssertedNumbers(sentence);
     if (asserted.length === 0) continue;
-    sawClaim = true;
-    const anyHeld = asserted.some((n) =>
-      n.candidates.some((candidate) => graphHolds(graphNumbers, candidate)),
-    );
-    if (anyHeld) continue;
+
+    // ── The PERMISSION, delegated to the seam. Default-deny; no override.
+    const verdict = groundModelValueClaim({ read, assertedValues: asserted });
+    if (verdict.grounded) {
+      sawGroundedClaim = true;
+      continue;
+    }
     return {
       verdict: 'swap',
-      pairs,
+      reason: verdict.reason,
+      pairs: read.blockedSlots,
       assertedValues: asserted.map((n) => n.asWritten),
       sentence,
-      text: composeMissingValueClaimCorrection(pairs),
+      text: composeModelContentsRefusal(read.blockedSlots, verdict.reason),
     };
   }
   return {
     verdict: 'stand_down',
-    reason: sawClaim ? 'value_present_in_graph' : 'no_already_holds_claim',
+    reason: sawGroundedClaim ? 'claim_is_grounded' : 'no_already_holds_claim',
   };
 }

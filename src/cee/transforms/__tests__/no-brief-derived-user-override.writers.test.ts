@@ -43,6 +43,19 @@ const USER_OVERRIDE_LITERAL = "user_override";
  * 2.714 revert.
  */
 const REVIEWED: Readonly<Record<string, string>> = {
+  // ── ROADMAP 2.1266 — READERS, NOT WRITERS. Both files below appear here
+  // ── because they READ `user_override` state to REFUSE a write, which is the
+  // ── exact inverse of the 2.714 defect. Answering this guard's only question
+  // ── ("by what path does the value reach the stamp?"): neither file stamps
+  // ── anything. Wire-witnessed on deployed `8be62df`
+  // ── (olumi-docs/witness-acceptance-2026-08-17/, J4 t5): the edit lane wrote
+  // ── factor `49a2b80b` 0.5 `cee_inference` -> 0.12 `user_override` from a
+  // ── message asking for an OPTION's effect value, and the reply said nothing
+  // ── had changed. These two withhold that write.
+  "orchestrator-v5/routing/option-intervention-write-guard.ts":
+    "reader only — the literal appears in the witness citation in its header; it stamps nothing and exists to WITHHOLD a wrong-entity write",
+  "orchestrator-v5/handlers/edit-graph-dispatch.ts":
+    "reader only — the withhold branch's comment cites the witnessed `user_override` stamp it prevents; the dispatcher's own writes are the pre-existing canonicalise-value-ops path",
   // Declares USER_EDIT_SOURCE and stamps it onto `update_node` ops that carry
   // an `observed_state.value` — i.e. a value the user wrote through a
   // structured patch operation they consented to. The stamp is TRUE here.

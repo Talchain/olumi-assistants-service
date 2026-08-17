@@ -392,6 +392,22 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // ROADMAP 2.1265 — INCIDENTAL, and for the SAME reason as the two entries
+    // below it: the only magnitude words in the model-contents claim guard sit
+    // in prose explaining why its sentence splitter must NOT break on a decimal
+    // point (`£1.5 million` truncated to `1` is the 2.714 / trap-22 shape, and
+    // that guard would then be correct and pointed at the wrong bytes). The
+    // file holds NO magnitude alphabet: it parses bare numeric tokens with
+    // percent/share equivalence only, and never maps a magnitude WORD to a
+    // multiplier — so there is nothing here that could drift from `AMT`.
+    'orchestrator-v5/compose/model-contents-claim.ts':
+      'incidental — comment only; no magnitude word is mapped to a multiplier (numeric tokens + percent/share only)',
+    // Same file pair, same reason: the recogniser half carries the `£1.5 million`
+    // example in the doc on `splitSentencesPreservingDecimals`, which exists
+    // precisely BECAUSE a `[.!?]` splitter truncates it to `1`. No alphabet here
+    // either — the module holds no magnitude word → multiplier mapping.
+    'orchestrator-v5/compose/missing-value-claim-guard.ts':
+      'incidental — comment only; the £1.5 million example documents why the sentence splitter must not break on a decimal',
     // ROADMAP 2.1051 — INCIDENTAL. The direction gate holds no magnitude list
     // of its own: it IMPORTS `AMT` and `parseValue` from the extractor
     // precisely so it cannot drift from them. Its only magnitude words sit in
