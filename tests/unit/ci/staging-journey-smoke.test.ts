@@ -160,7 +160,7 @@ describe("staging journey smoke — assertions discriminate", () => {
 });
 
 /**
- * The journey-level invariant (ROADMAP 2.1268).
+ * The journey-level invariant (ROADMAP 2.1300).
  *
  * WHY THIS BLOCK EXISTS
  * ---------------------

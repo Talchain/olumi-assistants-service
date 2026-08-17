@@ -143,7 +143,7 @@ function readyOptionIds(body) {
 }
 
 /**
- * THE JOURNEY INVARIANT (ROADMAP 2.1268).
+ * THE JOURNEY INVARIANT (ROADMAP 2.1300).
  *
  * WHAT THIS ASSERTS, AND WHY IT IS NOT "assert turn 2"
  * ---------------------------------------------------
