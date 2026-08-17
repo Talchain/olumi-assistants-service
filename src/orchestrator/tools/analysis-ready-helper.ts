@@ -23,6 +23,11 @@ import {
 } from "../graph-structure-validator.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
+// ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
+// `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
+// discriminator is `origin` and not `provenance.source` (measured: the V3
+// transform coerces `"synthetic"` to `"cee_hypothesis"`).
+import { isRepairAuthoredOrigin } from "../../graph/repair-authored-edge.js";
 
 // ============================================================================
 // Types
@@ -712,9 +717,21 @@ function projectSemanticAnalysisReadyFromGraph(
       .map((node) => readNonEmptyString(node.id))
       .filter((id): id is string => id !== null),
   );
+  // ⛔ REPAIR-AUTHORED EDGES ARE EXCLUDED — ROADMAP 2.1266, the SAME authority
+  // the draft-path builder uses (`transforms/analysis-ready.ts`). This set is
+  // `projectOptionForCanonicalBuilder`'s `connectedFactorIds`, and its only
+  // reader is the status fallback at :374 — where a non-empty set means
+  // `needs_encoding` ("Choose how \"X\" should be represented on the effect
+  // scale") rather than `needs_user_mapping` ("Choose which factor \"X\" changes
+  // and by how much"). Counting the repair's own wiring here therefore did not
+  // merely add asks, it swapped the QUESTION for one the user cannot answer:
+  // there is no representation to choose for a lever nobody stated. Both paths
+  // resolve to one predicate on purpose — two readiness surfaces deciding
+  // independently which edges the repair invented is trap 21's shape.
   const optionConnectedFactorIds = new Map<string, Set<string>>();
   for (const edge of parsed.data.edges) {
     if (!optionNodeIds.has(edge.from) || !factorIds.has(edge.to)) continue;
+    if (isRepairAuthoredOrigin(edge)) continue;
     const connected = optionConnectedFactorIds.get(edge.from) ?? new Set<string>();
     connected.add(edge.to);
     optionConnectedFactorIds.set(edge.from, connected);
