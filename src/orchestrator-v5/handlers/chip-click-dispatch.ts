@@ -123,11 +123,60 @@ import type { ComposeContext } from '../compose/types.js';
  * handler DOES need ingress-state passthrough, add the fields then,
  * not now.
  */
+
+/**
+ * R2 (2026-08-16) — the chip id carried by the SERVER-SYNTHESISED payload the
+ * post-draft auto-run dispatches with (auto-run-after-draft.ts). Exported so
+ * the synthesiser and any log reader share one identity; never emitted as a
+ * suggested_action.
+ */
+export const AUTO_RUN_POST_DRAFT_CHIP_ID = 'auto_run_post_draft';
+
+/**
+ * R2 — the CEE-authored key stamped into the run_analysis fact's open
+ * `enrichment` record when the run was auto-initiated after a fresh draft.
+ * Same carrier pattern as the decision_review enricher (a freshly-cloned
+ * record, PLoT keys preserved). NO schema change: `enrichment` is
+ * `z.record(z.unknown())` at every published contract version, so the stamp
+ * validates at the UI's deployed 0.43.0 pin and at 0.46.0 alike. It is NOT on
+ * the wire transport keep-list (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` — which
+ * must stay element-for-element equal to the schemas package's
+ * CEE_UI_ENRICHMENT_KEEP_LIST), so today's UI sees an ordinary completed
+ * analysis: the graceful-degradation posture R2 requires. Surfacing it to the
+ * browser is a schemas-train keep-list change, deliberately not made here.
+ */
+export const RUN_PROVENANCE_ENRICHMENT_KEY = 'run_provenance';
+
+/**
+ * R2 — the user-visible provisional label. Opens the auto-run turn's
+ * assistant answer (stored copy and would-be wire copy alike), so a resumed
+ * conversation never presents the auto-run as something the user asked for.
+ * Deterministic template text: no graph labels, no counts, no leader claim.
+ */
+export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
+  'I ran a provisional first analysis automatically after drafting this model.';
+
+/**
+ * R2 — marks a dispatch as the post-draft auto-run rather than a user's chip
+ * click. Three behavioural consequences, each pinned in
+ * chip-click-dispatch-auto-run.test.ts, and NOTHING else changes:
+ *   1. the commit carries NO `userMessage` (the user typed nothing; NULL
+ *      user_message is the established system-event turn shape);
+ *   2. the run_analysis fact is stamped with `enrichment.run_provenance`;
+ *   3. the assistant answer opens with AUTO_RUN_PROVISIONAL_DISCLOSURE.
+ */
+export interface ChipClickAutoRunTrigger {
+  /** The fresh-draft turn this run was initiated for (provenance only). */
+  readonly draftTurnId: string;
+}
+
 export interface DispatchChipClickRunAnalysisParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   /** Injectable registry for tests. Production uses the default singleton. */
   readonly handlerRegistry?: HandlerRegistry;
+  /** R2 — present ONLY on the server-initiated post-draft auto-run. */
+  readonly autoRun?: ChipClickAutoRunTrigger;
 }
 
 /**
@@ -693,6 +742,35 @@ export async function dispatchDeterministicChipClick(
   );
 }
 
+/**
+ * R2 — stamp auto-run provenance onto the run_analysis fact. Clone-and-spread
+ * per the decision_review enricher's rule: PLoT-originated enrichment keys are
+ * preserved verbatim; only the CEE-authored provenance key is added. Facts of
+ * any other type pass through untouched by reference.
+ */
+function stampAutoRunProvenance(
+  facts: readonly HandlerFact[],
+  draftTurnId: string,
+): readonly HandlerFact[] {
+  return facts.map((fact) => {
+    if (fact.fact_type !== 'run_analysis') return fact;
+    return {
+      ...fact,
+      result: {
+        ...fact.result,
+        enrichment: {
+          ...(fact.result.enrichment ?? {}),
+          [RUN_PROVENANCE_ENRICHMENT_KEY]: {
+            initiated_by: 'auto_post_draft',
+            provisional: true,
+            draft_turn_id: draftTurnId,
+          },
+        },
+      },
+    };
+  });
+}
+
 export async function dispatchChipClickRunAnalysis(
   params: DispatchChipClickRunAnalysisParams,
 ): Promise<DispatchChipClickRunAnalysisResult> {
@@ -1024,6 +1102,15 @@ export async function dispatchChipClickRunAnalysis(
     });
     enrichedFacts = coachingApplication.handlerFacts;
 
+    // R2 — provisional provenance stamp, BEFORE the compose/commit seams so
+    // the persisted fact, the composed block source and the freshness read
+    // all see one fact object. The wire block's transport keep-list strips
+    // the key (see RUN_PROVENANCE_ENRICHMENT_KEY), so today's UI renders an
+    // ordinary completed analysis — the required graceful degradation.
+    if (params.autoRun !== undefined) {
+      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun.draftTurnId);
+    }
+
     // V5 coaching parity — emit the same post-analysis suggested_actions
     // the Sonnet-routed run_analysis path emits. Reuses the existing
     // `generateChips` rule so chip-click and routed turns produce
@@ -1120,6 +1207,21 @@ export async function dispatchChipClickRunAnalysis(
       // — no extra DB read.
       priorTurnFactsForLensHistory: context.prior_facts,
     });
+
+    // R2 — the user-visible provisional label, PREPENDED before the egress
+    // guards below so the forbidden-phrase and defaulted-value seams qualify
+    // the text that actually ships/persists. Deterministic template copy;
+    // placed ahead of the receipt so a resumed conversation reads the honest
+    // framing first.
+    if (params.autoRun !== undefined) {
+      const receipt = response.assistant_text ?? '';
+      response = {
+        ...response,
+        assistant_text: receipt.length > 0
+          ? `${AUTO_RUN_PROVISIONAL_DISCLOSURE} ${receipt}`
+          : AUTO_RUN_PROVISIONAL_DISCLOSURE,
+      };
+    }
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
     // Runs as the LAST step before the chip-click response is
@@ -1247,7 +1349,13 @@ export async function dispatchChipClickRunAnalysis(
         coaching_state: context.coaching_state,
         // V5 Conversation Context Reliability: persist the user's turn text;
         // the assistant answer auto-derives from `response.assistant_text`.
-        userMessage: payload.message,
+        // R2 — on the auto-run trigger the user typed NOTHING, so nothing may
+        // be stored as their words: omit the key entirely (capConversationText
+        // maps the absence to a NULL user_message — the established
+        // system-event turn shape). The synthesised payload.message exists
+        // only to satisfy the boundary contract and must never enter the
+        // conversation record as user speech.
+        ...(params.autoRun === undefined ? { userMessage: payload.message } : {}),
         // Same GraphV3T the egress sanitiser uses for this turn — resolves
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,

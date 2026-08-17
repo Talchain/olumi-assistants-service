@@ -125,6 +125,9 @@ import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+// R2 — post-draft auto-run scheduler (fires AFTER the draft response is
+// handed to the transport; see the draft_graph branch below).
+import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';
 // ROADMAP 2.735 — did THIS turn hand the client a graph to render? The one
 // fact that separates a lost model from a draft that never existed.
 import { graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
@@ -3934,7 +3937,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
                 assistant_text: `${dg.response.assistant_text.trimEnd()}\n\n${clarifyV2DeferredDisclosure}`,
               }
             : dg.response;
-        return sendFinalised200(reply, requestId, 'draft_graph', draftResponse, {
+        const sentDraft = await sendFinalised200(reply, requestId, 'draft_graph', draftResponse, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
           // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
@@ -3952,6 +3955,42 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           turnId: ingress.turn_id,
         userMessage: ingress.message,
         });
+        // R2 (2026-08-16, Paul's ruling) — auto-run a PROVISIONAL analysis
+        // AFTER the draft response has been handed to the transport
+        // (`sendFinalised200` awaited above), NEVER on the draft's critical
+        // path: #995's delivery latency is untouchable. `scheduleAutoRun
+        // AfterFreshDraft` returns synchronously and runs the admission-gated
+        // dispatch on a later tick under the commit-seam hooks' non-blocking
+        // contract; the try/catch is belt-and-braces so a scheduling fault can
+        // never surface on a turn that already succeeded. Fresh drafts only:
+        // this is the single call site, edit/chip/reload paths never reach it,
+        // and `dg.graph != null` excludes the graphless-draft commit (which
+        // has nothing to analyse; loose null-check by house idiom — it also
+        // keeps test doubles that omit the field from scheduling).
+        if (dg.graph != null) {
+          try {
+            scheduleAutoRunAfterFreshDraft({
+              scenarioId: ingress.scenario_id,
+              draftTurnId: ingress.turn_id,
+              draftGraph: dg.graph,
+              draftGraphHash: dg.freshness?.current_graph_hash ?? null,
+              requestId,
+            });
+          } catch (scheduleErr) {
+            log.error(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  scheduleErr instanceof Error
+                    ? { name: scheduleErr.name, message: scheduleErr.message }
+                    : { message: String(scheduleErr) },
+              },
+              'V5 draft_graph — auto-run scheduling threw; delivered draft unaffected',
+            );
+          }
+        }
+        return sentDraft;
       } catch (err) {
         // The unified pipeline threw — surface a typed BoundaryError. The
         // dispatcher already logged the details; re-log here with the
