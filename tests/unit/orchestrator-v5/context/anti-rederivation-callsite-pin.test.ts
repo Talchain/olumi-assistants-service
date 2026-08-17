@@ -148,7 +148,27 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // the wire must not carry a post-edit hash for a graph that never
     // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
     // frame-consumer audit, do not add more.
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
+    // 2026-08-17 ROADMAP 2.1266 (D1b) option-intervention write withhold: +1 —
+    // the THIRD branch in this file with the identical shape and the identical
+    // reason. A message naming an option and asking for its effect value applied
+    // a FACTOR-BASELINE update instead (wire-witnessed on deployed `8be62df`,
+    // `olumi-docs/witness-acceptance-2026-08-17/` J4 t5: factor `49a2b80b` 0.5 →
+    // 0.12 persisted and guest-readable, option `21ea9b80` still
+    // `interventions: {}`), so the write is withheld — and a withheld write must
+    // not leave the wire carrying a hash for a graph that never persists (the
+    // F6 coherence rule the GM-blocked, swap-withheld and part-accounting
+    // branches above each obey).
+    //
+    // ⚠ THE PIN IS RIGHT THAT THIS IS DEBT, AND THE HONEST NOTE IS THAT THREE
+    // BRANCHES NOW DUPLICATE ONE DERIVATION. The correct fix is a single shared
+    // "the graph did not change this turn" re-derivation these branches call,
+    // which would take this count DOWN rather than up. That refactor spans three
+    // existing branches with two different hash sources (`gmCurrentHash` vs a
+    // recomputed `gmFrameBase` hash) and is NOT this urgent trust-fix lane's
+    // scope (estate scope-expansion rule: stop at the boundary, name the
+    // smallest enabling change, re-brief). Recorded here so the next lane in
+    // this file inherits the intent, not just the number.
+    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 7,
     // 2026-08-15 Train C: +2 (import + one call) — edge_strength_edit commits
     // mid-turn, then derives wire freshness against the authoritative analysis
     // hash returned by that atomic commit. The pre-write context frame cannot
