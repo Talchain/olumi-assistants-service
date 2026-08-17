@@ -757,11 +757,16 @@ const REPAIR_VALUE_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
       'margin, win-rate, ordering or comparative claim is available to interpolate. Zero LLM ' +
       'calls — the composer replaces a routing-LLM round-trip that was re-serving a verbatim ' +
       'refusal (wire-witnessed, req b90d62e0). ' +
-      'The chip channel DOES carry labels out of this file (unlike the configure-clarify ' +
-      'sibling): each chip message is `buildRepairBindingInstruction`, the probe-P1 advised ' +
-      'format over the same blocked-pair labels and the same user value — the identical ' +
-      'selection criterion, so no chip can name an option by rank either. The route threads ' +
-      '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
+      '⭐ THE CHIP CHANNEL IS GONE (2.1267, P8 — 17 Aug 2026). This entry previously read "the ' +
+      'chip channel DOES carry labels out of this file … each chip message is ' +
+      '`buildRepairBindingInstruction`, the probe-P1 advised format"; the chips were suppressed ' +
+      'after one was wire-witnessed TERMINATING IN REFUSAL on deployed 8be62df (J4 t4: routed ' +
+      'correctly, wrote nothing, replied "open … on the canvas"). Routability had been proven; ' +
+      'landing was assumed. `suggested_actions` is now always `[]`, so this file emits labels ' +
+      'through the assistant_text site ONLY — the advised sentence is handed over as TEXT to ' +
+      'type, over the same blocked-pair selection, so it still cannot name an option by rank. ' +
+      'The route threads `mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not ' +
+      'a literal.',
   },
 };
 

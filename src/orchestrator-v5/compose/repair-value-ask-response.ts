@@ -8,7 +8,36 @@
  * pick — never guess, and never re-serve the refusal that trapped the
  * wire-witnessed user (req b90d62e0).
  *
- * WHY THESE CHIPS ARE LEGITIMATE where the L16 composer's were not
+ * ⭐⭐⭐ P8 SUPPRESSION (17 Aug 2026, Paul's ruling — STANDING-BRIEF-PREAMBLE P8:
+ * *never ask what you cannot accept; an affordance that terminates in refusal is
+ * the same defect as a fabrication wearing different clothes*).
+ *
+ * THE CHIPS ARE GONE. They were wire-witnessed TERMINATING IN REFUSAL on deployed
+ * `8be62df` (`olumi-docs/witness-acceptance-2026-08-17/`, J4 t4): clicking
+ * `chip_prompt_repair_value_bind_1` — a message this file authored — produced NO
+ * edit fact, left the blocker count at 10→10, left `graph_hash` unchanged, and
+ * replied *"To set it directly, open … on the canvas"*. The product offered a
+ * one-click action and answered it with a canvas redirect: the Research-CTA shape
+ * in miniature.
+ *
+ * ⚠ AND THE REASONING BELOW WAS CORRECT ABOUT THE WRONG QUESTION, which is why it
+ * is kept rather than deleted. It establishes that a chip here would not FABRICATE
+ * a value (the number is the user's own) — and that is true. What it never
+ * established is that clicking the chip WRITES anything. The chip's replay routes
+ * into the edit lane, whose write is an LLM proposal: on `c5e2430` that proposal
+ * landed the intervention, on `8be62df` it landed a factor baseline or nothing at
+ * all. **Routability was proven; landing was assumed.** A deterministic
+ * option-intervention write would make the chip honest, and it is explicitly not
+ * wired (`edit-graph.ts:1264-1277`, "a separate brief") — so until it exists, the
+ * product must not offer the click.
+ *
+ * WHAT REPLACES IT, and why the user is strictly better off: the prose already
+ * enumerates EVERY blocked pair, and the reply now hands over the exact sentence
+ * to type — `buildRepairBindingInstruction`, the same probe-P1 advised format the
+ * chips carried, as TEXT rather than as a one-click promise. Nothing the user
+ * could learn from the chip is withheld; only the false affordance is.
+ *
+ * WHY THESE CHIPS WERE ARGUED LEGITIMATE where the L16 composer's were not
  * (`configure-option-clarify-response.ts` deliberately ships none): there the
  * missing ingredient was the VALUE, and a chip would have chosen the user's
  * number for them. Here the value is the USER'S OWN, captured by a
@@ -32,19 +61,6 @@ import {
   buildRepairBindingInstruction,
   type MissingEffectPair,
 } from '../routing/repair-value-binding.js';
-
-/**
- * At most this many pair chips. Mirrors the L16 composer's judgement that
- * beyond three the copy stops reading as a next step; the prose invites a
- * typed reply for anything not offered.
- */
-export const MAX_REPAIR_PAIR_CHIPS = 3;
-
-/** Truncate a label for chip copy; the full labels appear in the prose. */
-function chipLabel(pair: MissingEffectPair, cap = 56): string {
-  const label = pair.factorLabel.trim();
-  return label.length <= cap ? label : `${label.slice(0, cap - 1)}…`;
-}
 
 function describePair(pair: MissingEffectPair): string {
   return `"${pair.factorLabel}" for "${pair.optionLabel}"`;
@@ -70,21 +86,21 @@ export interface ComposeRepairValueAskInput {
 export function composeRepairValueAskResponse(
   input: ComposeRepairValueAskInput,
 ): OlumiResponse {
-  const offered = input.pairs.slice(0, MAX_REPAIR_PAIR_CHIPS);
   const assistant_text =
     `You gave ${input.valueText}, and more than one effect value is still ` +
     `missing, so I want to be sure where to apply it before I change the ` +
     `model. Still unset: ${joinDescriptions(input.pairs.map(describePair))}. ` +
-    `Pick one below, or name the option and factor in your reply.`;
+    `Name the option and factor in your reply, like this: ` +
+    `${buildRepairBindingInstruction(input.pairs[0]!, input.valueText)}`;
 
   return composeDirectAnswerResponse({
     answerKind: 'functional',
     assistant_text,
     stage: input.stage,
-    suggested_actions: offered.map((pair, index) => ({
-      id: `chip_prompt_repair_value_bind_${index + 1}`,
-      label: `Apply ${input.valueText} to ${chipLabel(pair)}`,
-      message: buildRepairBindingInstruction(pair, input.valueText),
-    })),
+    // ⭐ P8: DELIBERATELY NONE. See the header. A chip must carry a complete
+    // message AND a write that lands; this leg has the first and not the second,
+    // and an affordance that terminates in refusal is the harm, not the remedy.
+    // The exemplar above is the identical sentence, handed over as text to type.
+    suggested_actions: [],
   });
 }

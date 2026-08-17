@@ -1,17 +1,25 @@
 /**
- * ⭐ ROADMAP 2.1261 — the ASK composer.
+ * ⭐ ROADMAP 2.1261 — the ASK composer, ⭐⭐ AS SUPPRESSED BY P8 (2.1267).
  *
- * The load-bearing property is CHIP ROUTABILITY, asserted by DERIVATION
- * (trap 12): each emitted chip message is run through the ROUTER'S OWN
- * predicates — `detectConfigureOptionIntent` must claim it (effect_vocab) and
- * none of route-v2's shared negative gates may fire — so the offered remedy
- * provably returns to the lane that writes option interventions. A mirrored
- * assertion ("message contains the word option") could drift; the predicates
- * cannot.
+ * ⚠ THE ORIGINAL HEADER NAMED THE WRONG LOAD-BEARING PROPERTY, and that is the
+ * lesson, so it is quoted rather than deleted: *"The load-bearing property is
+ * CHIP ROUTABILITY, asserted by DERIVATION (trap 12) … so the offered remedy
+ * provably returns to the lane that writes option interventions."*
+ *
+ * Routability was proven and was never the question. **Landing was assumed.** On
+ * deployed `8be62df` (witness-acceptance-2026-08-17, J4 t4) clicking
+ * `chip_prompt_repair_value_bind_1` routed correctly into the edit lane and then
+ * produced NO edit fact, blockers 10→10, `graph_hash` unchanged, and *"open … on
+ * the canvas"* — an affordance terminating in refusal (P8; Research-CTA shape).
+ *
+ * So the chips are suppressed and the derived-routability check is RE-POINTED at
+ * the sentence the reply now hands the user to TYPE. The check is still the
+ * valuable one — a phrasing the product suggests must return to the lane that
+ * suggested it — it simply no longer certifies a click the product cannot honour.
  */
 import { describe, expect, it } from 'vitest';
 
-import { composeRepairValueAskResponse, MAX_REPAIR_PAIR_CHIPS } from '../repair-value-ask-response.js';
+import { composeRepairValueAskResponse } from '../repair-value-ask-response.js';
 import type { MissingEffectPair } from '../../routing/repair-value-binding.js';
 import { detectConfigureOptionIntent, carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
 import { isAnalyticalQuestion } from '../../routing/analytical-question-guard.js';
@@ -48,34 +56,29 @@ describe('composeRepairValueAskResponse', () => {
     expect(response.assistant_text).toMatch(/name the option and factor/i);
   });
 
-  it('offers one chip per pair, each carrying the user value verbatim', () => {
-    const response = compose();
-    expect(response.suggested_actions).toHaveLength(2);
-    for (const chip of response.suggested_actions) {
-      expect(chip.message).toContain('0.12');
-      expect(chip.label).toContain('0.12');
-    }
-    expect(response.suggested_actions[0]!.message).toContain(PAIR_SUB.factorLabel);
-    expect(response.suggested_actions[1]!.message).toContain(PAIR_PASS.factorLabel);
+  it('⭐⭐ P8: offers NO chip — an affordance that cannot land must not be offered', () => {
+    // RED at 936f4b49: this emitted 2 chips, one of which was wire-witnessed
+    // no-opping with a canvas redirect (J4 t4). The value in the reply is still
+    // the user's own and every pair is still named; only the false click is gone.
+    expect(compose().suggested_actions).toEqual([]);
   });
 
-  it('⭐ every chip message ROUTES, by the router’s own predicates', () => {
-    for (const chip of compose().suggested_actions) {
-      // The configure-option detector claims it (the "option" word anchors,
-      // "set … effect … to <digit>" satisfies effect_vocab / value payload).
-      const detection = detectConfigureOptionIntent(chip.message, []);
-      expect(detection.matched, chip.message).toBe(true);
-      // It carries a writable value payload, so the bare-configure intercept
-      // (`shouldInterceptBeforeEditLane`) declines and the edit LLM gets it.
-      expect(carriesConfigureOptionValuePayload(chip.message), chip.message).toBe(true);
-      // None of route-v2's shared negative gates fires.
-      expect(EDIT_GRAPH_NEGATIVE_REGEX.test(chip.message), chip.message).toBe(false);
-      expect(isAnalyticalQuestion(chip.message), chip.message).toBe(false);
-      expect(isStateQueryQuestionShape(chip.message), chip.message).toBe(false);
+  it('offers no chip AT ANY pair count — this is a doctrine, not a cap', () => {
+    // The predecessor test asserted a CAP (3 chips), i.e. it would have passed
+    // while still offering a click that cannot land. Bind by the invariant.
+    for (const n of [1, 2, 3, 4, 10]) {
+      const pairs = Array.from({ length: n }, (_, i) => ({
+        ...PAIR_SUB,
+        optionId: `opt_${i}`,
+        optionLabel: `option ${i}`,
+        factorId: `fac_${i}`,
+        factorLabel: `Factor ${i}`,
+      }));
+      expect(compose(pairs).suggested_actions, `pair count ${n}`).toEqual([]);
     }
   });
 
-  it('caps chips at MAX_REPAIR_PAIR_CHIPS while the prose still names every pair', () => {
+  it('the prose still names EVERY pair — nothing the chips carried is withheld', () => {
     const pairs = [
       PAIR_SUB,
       PAIR_PASS,
@@ -83,8 +86,23 @@ describe('composeRepairValueAskResponse', () => {
       { ...PAIR_SUB, optionId: 'opt_d', optionLabel: 'option d', factorId: 'fac_d', factorLabel: 'Factor d' },
     ];
     const response = compose(pairs);
-    expect(response.suggested_actions).toHaveLength(MAX_REPAIR_PAIR_CHIPS);
     expect(response.assistant_text).toContain('Factor d');
+    expect(response.assistant_text).toContain('Factor c');
+  });
+
+  it('⭐ the TYPED exemplar still ROUTES, by the router’s own predicates (the check, re-pointed)', () => {
+    // The derivation that mattered survives the suppression: a phrasing the
+    // product suggests must return to the lane that suggested it. It is now
+    // asserted on the sentence handed over as TEXT, not on a click.
+    const text = compose().assistant_text;
+    const exemplar = text.slice(text.indexOf('like this: ') + 'like this: '.length);
+    expect(exemplar.length).toBeGreaterThan(20);
+    expect(exemplar).toContain('0.12');
+    expect(detectConfigureOptionIntent(exemplar, []).matched, exemplar).toBe(true);
+    expect(carriesConfigureOptionValuePayload(exemplar), exemplar).toBe(true);
+    expect(EDIT_GRAPH_NEGATIVE_REGEX.test(exemplar), exemplar).toBe(false);
+    expect(isAnalyticalQuestion(exemplar), exemplar).toBe(false);
+    expect(isStateQueryQuestionShape(exemplar), exemplar).toBe(false);
   });
 
   it('survives the egress forbidden-phrase guard (derived, not mirrored)', () => {
