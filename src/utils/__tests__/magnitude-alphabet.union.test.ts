@@ -392,6 +392,20 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // Quantities lane (2026-08-18), goal-label conservation rule — NOT a fifth
+    // magnitude list, and the distinction is the reason this entry is safe.
+    // `compound-goal-label.ts` spells magnitude words (`million`, `billion`,
+    // `trillion`, `thousand`, `k`, `m`, `bn`) inside ONE regex whose entire job
+    // is DETECTION: does this label contain a quantity token, yes or no. It
+    // assigns no numeric value to any of them, performs no multiplication, and
+    // never parses a magnitude into a number — so there is nothing here that
+    // CAN drift from the canonical magnitude→value map, which is what this
+    // guard exists to prevent. Its tokens are compared only against other
+    // tokens from the same pass, canonicalised as strings.
+    // ⚠ If this file ever maps a magnitude word to a NUMBER, that makes it a
+    // genuine sibling lookup and it must move to SIBLING_VALUE_LOOKUPS.
+    'cee/structure/compound-goal-label.ts':
+      'detection vocabulary only — spells magnitude words but assigns no numeric value and parses no magnitudes',
     // ROADMAP 2.1051 — INCIDENTAL. The direction gate holds no magnitude list
     // of its own: it IMPORTS `AMT` and `parseValue` from the extractor
     // precisely so it cannot drift from them. Its only magnitude words sit in

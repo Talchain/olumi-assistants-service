@@ -319,9 +319,20 @@ describe("enforceSingleGoal", () => {
     const nodes = result!.graph.nodes as any[];
     const goalNodes = nodes.filter((n) => n.kind === "goal");
     expect(goalNodes).toHaveLength(1);
-    expect(goalNodes[0].label).toContain("Compound Goal");
-    expect(goalNodes[0].label).toContain("Increase Revenue");
-    expect(goalNodes[0].label).toContain("Reduce Churn");
+    // ⭐ UPDATED (quantities lane, 2026-08-18) — the founder's node-label ruling.
+    // This previously asserted `toContain("Compound Goal")` plus BOTH original
+    // labels inside the display label, i.e. it pinned the defect: a repair
+    // announcing itself to the user, with every objective string-joined behind
+    // it. The label is now a concise faithful objective and the exact user
+    // language is preserved as PROVENANCE instead.
+    expect(goalNodes[0].label).not.toContain("Compound Goal");
+    expect(goalNodes[0].label).not.toContain(" + ");
+    expect(goalNodes[0].label).toBe("Increase Revenue");
+    // Nothing is lost: the merged-away objective stays recoverable. Asserted
+    // explicitly so this test still fails if the label shortens by DISCARDING
+    // rather than by relocating.
+    expect(goalNodes[0].merged_from).toEqual(["Increase Revenue", "Reduce Churn"]);
+    expect(goalNodes[0].merged_goals.map((g: any) => g.label)).toEqual(["Reduce Churn"]);
   });
 
   it("redirects edges from removed goals to primary goal", () => {
@@ -508,7 +519,10 @@ describe("validateAndFixGraph", () => {
     // Verify single goal
     const goalNodes = (result.graph!.nodes as any[]).filter((n) => n.kind === "goal");
     expect(goalNodes).toHaveLength(1);
-    expect(goalNodes[0].label).toContain("Compound Goal");
+    // ⭐ UPDATED (quantities lane, 2026-08-18) — see the note in the
+    // `enforceSingleGoal` block above. The merge still happens; the label no
+    // longer announces it.
+    expect(goalNodes[0].label).not.toContain("Compound Goal");
 
     // Verify decision→option beliefs are preserved (not normalised)
     const decisionEdges = (result.graph!.edges as any[]).filter(

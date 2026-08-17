@@ -99,21 +99,50 @@ export function readStampedFactorValueTier(node: unknown): FactorValueTier | und
 /**
  * Is this factor's numeric value something the system invented?
  *
- * ⚠ FAIL-CLOSED, AND THE POLARITY IS THE WHOLE POINT. This answers *"may we
- * treat this number as information?"*, so the safe answer under ambiguity is
- * "no". It is therefore derived from {@link classifyFactorValueTier} — which
- * still applies the `0.5` heuristic as a compatibility floor for facts
- * persisted before the stamp existed — and NOT from the stamp alone. A value
- * we cannot vouch for is treated exactly like one we know we invented.
+ * ⚠⚠ POSITIVE EVIDENCE ONLY — AND THE FIRST VERSION OF THIS FUNCTION GOT THE
+ * POLARITY WRONG, WHICH IS WORTH RECORDING BECAUSE THE MISTAKE WAS PLAUSIBLE.
  *
- * The consequence that matters: a caller asking this before narrowing a
- * distribution will decline to narrow on an ambiguous baseline as well as on a
- * known-fabricated one. That is the founder's ruling ("without a defensible
- * value … NOT given invented quantitative values") rather than a weaker
- * "without a *provably* fabricated value".
+ * It was written fail-closed, as `classifyFactorValueTier(node) ===
+ * "fallback_default"`, reasoning that a value we cannot vouch for should be
+ * treated exactly like one we know we invented. That reads as the cautious
+ * choice. It is not: `classifyFactorValueTier`'s `fallback_default` rung is
+ * "everything else", so a factor carrying a perfectly real `{ value: 0.6 }`
+ * with NO `extractionType` landed there too — and the caller then refused to
+ * narrow a genuine number, replacing real information with an assertion of
+ * ignorance we did not have. Five existing tests caught it
+ * (`tests/unit/cee.unified-pipeline.deterministic-sweep.test.ts`, values 0.04,
+ * 0.6 and a high ratio), and they were right.
+ *
+ * ⭐ THE SHARED CONTRACT SETTLES IT, and against the first version. From
+ * `@talchain/schemas` `ObservedStateSchema.source`, quoted in
+ * `graph-readiness/obligation-provenance.ts`:
+ *
+ *   > Absence means the producer stamped no provenance — a consumer MUST NOT
+ *   > read absence as any particular class; classify unknown/absent as neutral,
+ *   > never guess.
+ *
+ * So absence is NEUTRAL, not fabricated. Suppressing on absence is the
+ * too-wide-predicate defect (CLAUDE.md trap 22b): a false positive that DROPS
+ * information and a false positive that INVENTS a constraint are different
+ * harms and cannot share one predicate. The quality bar says the same thing for
+ * this exact surface — MARK, never SUPPRESS.
+ *
+ * Two grounds, both positive, nothing inferred from absence:
+ *   1. THE STAMP. A defaulting site said so. Authoritative.
+ *   2. THE LEGACY SIGNATURE, for facts persisted before the stamp existed:
+ *      the value IS the declared default AND no brief-backed label claims it.
+ *      This is the `0.5` heuristic, kept deliberately NARROW — it fires only on
+ *      the one magnitude the defaulting sites actually write, never on an
+ *      arbitrary unlabelled number.
  */
 export function factorValueIsFabricated(node: unknown): boolean {
-  return classifyFactorValueTier(node) === "fallback_default";
+  if (readStampedFactorValueTier(node) === "fallback_default") return true;
+
+  const { extractionType, value } = readFactorValueView(node);
+  if (extractionType !== undefined && BRIEF_BACKED_EXTRACTION_TYPES.has(extractionType)) {
+    return false;
+  }
+  return value === INFERRED_DEFAULT_VALUE;
 }
 
 /**

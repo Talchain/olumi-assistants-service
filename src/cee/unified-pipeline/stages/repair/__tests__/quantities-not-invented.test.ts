@@ -51,6 +51,10 @@ import {
   FACTOR_VALUE_TIER_FIELD,
   classifyFactorValueTier,
 } from "../../../../provenance/factor-value-provenance.js";
+import {
+  classifyValueSource,
+  obligationFor,
+} from "../../../../graph-readiness/obligation-provenance.js";
 import type { GraphT } from "../../../../../schemas/graph.js";
 
 /**
@@ -246,6 +250,94 @@ describe("C — end to end: an unvalued factor never acquires uniform(0.25, 0.75
       distribution: "uniform",
       range_min: 0.0,
       range_max: 1.0,
+    });
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// D — THE GAP IS AN ELICITATION ASK, NEVER A BLOCKING ERROR
+//
+// ⚠ TWO QUESTIONS, NAMED APART ON PURPOSE (CLAUDE.md trap 21 — two authorities
+// under similar names is how one PR closes a harm and its neighbour reopens it):
+//
+//   `value_tier`          — "is this NUMBER information?"   (this lane)
+//   `StructureProvenance` — "WHO supplied this structure?"  (#1014's authority)
+//
+// They are not the same axis and neither is derived from the other. This block
+// asserts they AGREE on the fabricated case, so no surface can read one as the
+// other, and it pins the founder's "never a blocking error" clause for exactly
+// the class of factor the laundering fix now produces.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("D — an unquantified factor is OFFERED, never DEMANDED", () => {
+  it("classifies a system-defaulted value as an OFFER, so the gap cannot block", () => {
+    const graph = unreachableFactorGraph({
+      value: 0.5,
+      extractionType: "inferred",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+    const node = factorNode(graph);
+
+    // This lane's axis says the number is not information …
+    expect(classifyFactorValueTier(node)).toBe("fallback_default");
+    // … and #1014's authority says the gap may only be OFFERED.
+    expect(obligationFor(classifyValueSource(node.data.extractionType))).toBe("offered");
+  });
+
+  it("TWIN — a genuinely user-stated value still DEMANDS, so the offer path is not vacuous", () => {
+    const graph = unreachableFactorGraph({ value: 0.5, extractionType: "explicit" });
+    const node = factorNode(graph);
+
+    expect(classifyFactorValueTier(node)).toBe("explicit");
+    expect(obligationFor(classifyValueSource(node.data.extractionType))).toBe("required");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// E — THE PREDICATE'S BREADTH, pinned in BOTH directions
+//
+// The first version of `factorValueIsFabricated` was fail-closed and therefore
+// TOO WIDE: it treated any value whose provenance was merely UNSTAMPED as an
+// invention, and refused to narrow a real `{ value: 0.6 }`. The shared contract
+// forbids exactly that read — "a consumer MUST NOT read absence as any
+// particular class" — so absence is neutral, not fabricated. These cases pin the
+// corrected breadth so it cannot silently widen again (trap 22b: a gap and a lie
+// are different harms and cannot share one window).
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("E — an unlabelled but real value is NOT treated as an invention", () => {
+  it.each([0.04, 0.6, 0.9])(
+    "narrows an unstamped, unlabelled value of %s instead of asserting ignorance",
+    (value) => {
+      const graph = unreachableFactorGraph({ value });
+
+      handleUnreachableFactors(graph, "causal");
+
+      expect(factorNode(graph).prior).toEqual({
+        distribution: "uniform",
+        ...declaredNarrowedPrior(value),
+      });
+      // The ignorance range must NOT have been substituted for real information.
+      expect(factorNode(graph).prior).not.toEqual({
+        distribution: "uniform",
+        range_min: 0,
+        range_max: 1,
+      });
+    },
+  );
+
+  it("TWIN — the legacy unstamped 0.5 signature IS still caught", () => {
+    // Facts persisted before the stamp existed have no other signal, and 0.5 is
+    // the one magnitude the defaulting sites actually write. Narrow by design:
+    // it fires on that value only, never on an arbitrary unlabelled number.
+    const graph = unreachableFactorGraph({ value: 0.5 });
+
+    handleUnreachableFactors(graph, "causal");
+
+    expect(factorNode(graph).prior).toEqual({
+      distribution: "uniform",
+      range_min: 0,
+      range_max: 1,
     });
   });
 });
