@@ -110,7 +110,7 @@ const INTERROGATIVE_OPENER_CAPTURE = new RegExp(
  */
 export const AMBIGUOUS_MODAL_DECISION_VERBS: readonly string[] = ["should", "shall"];
 
-const UNAMBIGUOUS_DECISION_VERB_REGEX = (() => {
+const UNAMBIGUOUS_DECISION_VERB_ALTERNATION = (() => {
   const verbs = DECISION_VERB_ALTERNATION_SOURCE.split("|");
   const openers = INTERROGATIVE_OPENER_ALTERNATION_SOURCE.split("|");
   for (const modal of AMBIGUOUS_MODAL_DECISION_VERBS) {
@@ -122,8 +122,74 @@ const UNAMBIGUOUS_DECISION_VERB_REGEX = (() => {
       );
     }
   }
-  const remaining = verbs.filter((v) => !AMBIGUOUS_MODAL_DECISION_VERBS.includes(v));
-  return new RegExp(`\\b(?:${remaining.join("|")})\\b`, "i");
+  return verbs.filter((v) => !AMBIGUOUS_MODAL_DECISION_VERBS.includes(v)).join("|");
+})();
+
+const UNAMBIGUOUS_DECISION_VERB_REGEX = new RegExp(
+  `\\b(?:${UNAMBIGUOUS_DECISION_VERB_ALTERNATION})\\b`,
+  "i",
+);
+
+/**
+ * SUBJECT-POSITIONAL RULE (PR #1002 fix round, 2026-08-17) — a decision verb
+ * whose SUBJECT is the assistant is not decision-BEARING.
+ *
+ * The execution-proven blocker: "How do you decide which factors matter in
+ * the analysis?" and "How does Olumi decide which options to include?" carry
+ * `decide`, so the unambiguous-verb escape below rescued them from deflection
+ * — and under draft-first intake the cost of that pre-existing
+ * misclassification rose from a recoverable question list to a fabricated
+ * model + auto-run with the human checkpoint removed.
+ *
+ * Same positional philosophy as AMBIGUOUS_MODAL_DECISION_VERBS above: the
+ * WORD is not the signal, its GRAMMATICAL SLOT is. `decide` with subject "we"
+ * frames the user's decision; `decide` with subject "you"/"Olumi" asks about
+ * the PRODUCT's behaviour. The construction matched here is
+ * `aux + you|olumi + [one optional intervening word] + unambiguous-verb`,
+ * derived from the same single-source alternations as everything else in
+ * this file. The optional single word is forced by a measured case — the
+ * product's own bias-library copy "Would you STILL choose to invest…?" — and
+ * is deliberately capped at ONE: each widening of this predicate needs its
+ * own opposite-direction twins (traps 22b/22f), and the corpus in
+ * `__tests__/question-to-assistant.test.ts` A7 carries the current set
+ * (including "Do you think we should buy the warehouse?", which must STILL
+ * draft — "think" is not a decision verb, and `we` owns `buy`).
+ *
+ * KNOWN RESIDUAL, recorded rather than hidden: two or more intervening words
+ * ("Would you ever really choose…?") are not matched and such a message will
+ * draft — the precision-bias direction (META-DECISION-DIAGNOSIS-2026-07-20)
+ * prefers a wrong draft over a stranded genuine brief, and the bounded slot
+ * keeps the predicate reviewable.
+ *
+ * `g` flag: consumed ONLY via `String.replace` (which always scans from the
+ * start), never `.test()` — a global regex's `lastIndex` makes `.test()`
+ * stateful across calls.
+ */
+const ASSISTANT_SUBJECT_AUXILIARY_ALTERNATION_SOURCE = "do|does|did|would|will|can|could";
+const ASSISTANT_SUBJECT_ALTERNATION_SOURCE = "you|olumi";
+const ASSISTANT_SUBJECT_DECISION_VERB_REGEX = (() => {
+  const openers = INTERROGATIVE_OPENER_ALTERNATION_SOURCE.split("|");
+  for (const aux of ASSISTANT_SUBJECT_AUXILIARY_ALTERNATION_SOURCE.split("|")) {
+    if (!openers.includes(aux)) {
+      throw new Error(
+        `ASSISTANT_SUBJECT auxiliary '${aux}' must be a member of the interrogative-opener ` +
+          `alternation — the rule only ever runs inside interrogative-shaped messages.`,
+      );
+    }
+  }
+  return new RegExp(
+    `\\b(?:${ASSISTANT_SUBJECT_AUXILIARY_ALTERNATION_SOURCE})\\s+` +
+      `(?:${ASSISTANT_SUBJECT_ALTERNATION_SOURCE})\\s+` +
+      `(?:[a-z]['’a-z]*\\s+)?` +
+      `(?:${UNAMBIGUOUS_DECISION_VERB_ALTERNATION})\\b` +
+      // Catenative chain: the matched verb's own infinitive complements
+      // ("choose TO INVEST in this option") belong to the same
+      // assistant-subject construction — consume them so a chained verb
+      // cannot re-trigger the escape. Extends only an ALREADY-matched
+      // construction; it can never create a match a twin lacks.
+      `(?:\\s+to\\s+(?:${UNAMBIGUOUS_DECISION_VERB_ALTERNATION})\\b)*`,
+    "gi",
+  );
 })();
 
 /**
@@ -147,7 +213,12 @@ export function isQuestionToAssistant(message: string): boolean {
   if (!INTERROGATIVE_QUESTION_PATTERN.test(trimmed)) return false;
   const opener = INTERROGATIVE_OPENER_CAPTURE.exec(trimmed)?.[1];
   if (opener !== undefined && DRAFT_GRAPH_DECISION_VERB_REGEX.test(opener)) return false;
-  return !UNAMBIGUOUS_DECISION_VERB_REGEX.test(trimmed);
+  // Subject-positional rule (PR #1002 fix round): neutralise decision verbs
+  // whose subject is the assistant BEFORE the escape below — "How do you
+  // decide…?" stays a question; "Do you think we should buy…?" keeps `buy`
+  // (subject "we") and drafts. See ASSISTANT_SUBJECT_DECISION_VERB_REGEX.
+  const neutralised = trimmed.replace(ASSISTANT_SUBJECT_DECISION_VERB_REGEX, " ");
+  return !UNAMBIGUOUS_DECISION_VERB_REGEX.test(neutralised);
 }
 
 /**

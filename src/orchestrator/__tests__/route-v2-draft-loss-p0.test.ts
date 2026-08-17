@@ -238,29 +238,28 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
   });
 
-  it('CONTROL (discriminating): a genuine BRIEF on a FRESH scenario still engages clarify', async () => {
+  it('CONTROL (discriminating): a genuine BRIEF on a FRESH scenario still engages clarify — draft-first, with the working brief threaded', async () => {
     hasPriorTurnsForRead = false;
     hasOtherAdmittedLiveTurnForRead = false;
 
-    // Track-1 intake fix (2026-08-13): the previous control brief ("…expand
-    // into Germany or double down on the UK next year") drifted to a
-    // SINGLE-GAP brief (goal-only missing — "double" satisfies quantities,
-    // "next year" timeframe), which now correctly drafts first with a
-    // deferred ask instead of blocking. The control's job is unchanged —
-    // prove the fresh-scenario refusal above discriminates on QUESTION
-    // SHAPE, not on scenario state — so it uses a ≥2-missing brief that
-    // still takes the blocking ask.
+    // Draft-first intake (2026-08-17): the blocking ask is gone, so
+    // "engages clarify" now surfaces as the DRAFT dispatch running with the
+    // clarify working brief threaded as briefOverride (a ≥2-missing brief
+    // defers its questions alongside the draft). The control's job is
+    // unchanged — prove the fresh-scenario refusal above discriminates on
+    // QUESTION SHAPE, not on scenario state: the mid-draft question was NOT
+    // drafted, this genuine brief IS.
+    const CONTROL_BRIEF =
+      'We are weighing whether to expand into Germany or focus on the UK instead.';
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: messagePayload(
-        'We are weighing whether to expand into Germany or focus on the UK instead.',
-      ),
+      payload: messagePayload(CONTROL_BRIEF),
     });
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
-    expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(CONTROL_BRIEF);
   });
 
   // ═══ Invariant 6 — the two draft-500 exits leave a trace ════════════════

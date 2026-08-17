@@ -3792,16 +3792,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // never silently dropped.
       !isProcessMetaIntake(ingress.message);
     const isDraftGraphShape = extensions.graphState == null && draftShapedTurn;
-    // ── Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
-    // CEE_CLARIFY_V2_ENABLED (default off; flag-off skips the import
-    // entirely, same containment as V6 dual-draft). Two deterministic
-    // claims, zero LLM calls: (1) draft preflight — a thin brief gets up to
-    // 3 tap-able clarifying questions instead of the draft; (2) resume — a
-    // live clarify_v2_round pending claims the user's answer and either
-    // asks a follow-up or proceeds to the ordinary draft dispatch below
-    // with the answer-augmented briefOverride. Fail-open: any internal
-    // failure returns null and this turn routes exactly as with the flag
-    // off. See handlers/clarify-v2-dispatch.ts.
+    // ── Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement). Two
+    // deterministic claims, zero LLM calls: (1) draft preflight —
+    // DRAFT-FIRST INTAKE (2026-08-17, Paul's ratified target): a
+    // draft-shaped brief ALWAYS drafts; missing-dimension questions ride
+    // the draft response as a non-blocking deferred ask (the disclosure
+    // append below), never instead of the draft; (2) resume — a live
+    // clarify_v2_round pending (legacy rounds only — round 1 no longer
+    // arms new ones) claims the user's answer and either asks a follow-up
+    // or proceeds to the ordinary draft dispatch below with the
+    // answer-augmented briefOverride. Fail-open: any internal failure
+    // returns null and this turn routes exactly as if clarify v2 were
+    // absent. See handlers/clarify-v2-dispatch.ts.
     let clarifyV2DraftBrief: string | null = null;
     // TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b): the single-gap
     // draft-first disclosure — composed by the clarify dispatch, appended to

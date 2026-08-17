@@ -219,40 +219,41 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
 
   // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_CLARIFY_V2_ENABLED is deleted — clarify
   // v2 runs unconditionally, so the former FLAG-OFF byte-identity pin is gone.
-  // ── FLAG ON: draft preflight ─────────────────────────────────────────────
-  it('FLAG ON: a thin brief gets tap-able clarifying questions instead of a draft (zero LLM calls)', async () => {
+  // ── DRAFT-FIRST INTAKE (2026-08-17, Paul's ratified target) ──────────────
+  it('DRAFT-FIRST: a thin brief DRAFTS immediately — its questions ride alongside, never instead (zero LLM calls, nothing committed here)', async () => {
+    dispatchDraftGraphMock.mockResolvedValue({
+      ...makeDraftMockResult(),
+      graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Grow revenue' }], edges: [] },
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: messagePayload(THIN_BRIEF),
     });
     expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    // The draft ran — clarification never gates seeing the model.
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
     expect(chatWithToolsMock).not.toHaveBeenCalled();
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(THIN_BRIEF);
+    // The questions ride the SAME turn's narrative, assistant-authored.
     const body = JSON.parse(res.body);
-    // Questions + candidates + the default-forward escape chip.
+    expect(body.assistant_text).toContain('Drafted the model.');
+    expect(body.assistant_text).toContain("I've assumed");
     expect(body.assistant_text).toContain('?');
-    expect(body.assistant_text).toContain('go ahead');
-    const chipIds = (body.suggested_actions as Array<{ id: string }>).map((a) => a.id);
-    expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
-    expect(chipIds.length).toBeGreaterThanOrEqual(3);
-    // The clarify turn COMMITS (turn_class clarify, round-state pending)
-    // so the next turn can resume. Review fix A9 (1.152): the ask commit
-    // seeds NO brief_text — the column is write-once at the RPC, so an
-    // ask-time seed would freeze the PRE-ANSWER brief forever; the FINAL
-    // brief seeds at the flow's terminal points (draft dispatch / decline).
-    expect(appendMock).toHaveBeenCalledTimes(1);
-    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
-    expect(committed.turn_class).toBe('clarify');
-    expect(committed.llm_calls_used).toBe(0);
-    expect(committed.briefText).toBeUndefined();
-    const pendings = committed.pending_actions as PendingAction[];
-    expect(pendings).toHaveLength(1);
-    expect(pendings[0]!.action.kind).toBe('clarify_v2_round');
+    // Non-blocking by construction: NO clarify turn committed, NO
+    // clarify_v2_round pending persisted, no clarify chips on the draft.
+    expect(appendMock).not.toHaveBeenCalled();
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });
 
   // ── Review fix A5 (17 Jul) — behavioural pin (deferred from #497) ───────
-  it('A5: an EMPTY canvas ({nodes:[],edges:[]}) does NOT defeat clarify v2 — questions still engage', async () => {
+  it('A5: an EMPTY canvas ({nodes:[],edges:[]}) does NOT defeat clarify v2 — the deferred questions still engage on the draft', async () => {
+    dispatchDraftGraphMock.mockResolvedValue({
+      ...makeDraftMockResult(),
+      graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Grow revenue' }], edges: [] },
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -262,12 +263,15 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     });
     expect(res.statusCode).toBe(200);
     // Before A5 the gate was `graphState == null`, so the empty canvas the
-    // capability was built for silently disabled it (straight to draft).
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    // capability was built for silently disabled it (a bare draft with no
+    // working-brief override and no deferred ask). The engagement now
+    // surfaces as the briefOverride + the disclosure riding the draft.
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(THIN_BRIEF);
     const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain("I've assumed");
     expect(body.assistant_text).toContain('?');
-    const chipIds = (body.suggested_actions as Array<{ id: string }>).map((a) => a.id);
-    expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });
 
   it('A5 control: a POPULATED canvas keeps clarify v2 out (gate is population, not nullness)', async () => {
@@ -369,18 +373,29 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(body.assistant_text).not.toContain(PROVENANCE_MARKER);
   });
 
-  it('DRAFT-FIRST off-by-one control: a TWO-gap brief still gets the blocking ask, never a draft', async () => {
+  it('DRAFT-FIRST widened (2026-08-17): a TWO-gap brief ALSO drafts, with both questions riding alongside — the blocking ask is gone', async () => {
+    dispatchDraftGraphMock.mockResolvedValue({
+      ...makeDraftMockResult(),
+      graph: { nodes: [{ id: 'goal_1', kind: 'goal', label: 'Grow revenue' }], edges: [] },
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: messagePayload(TWO_GAP_BRIEF),
     });
     expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(TWO_GAP_BRIEF);
+    expect(appendMock).not.toHaveBeenCalled();
     const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('?');
+    expect(body.assistant_text).toContain('Drafted the model.');
+    expect(body.assistant_text).toContain(PROVENANCE_MARKER);
+    // S1 is goal+quantities at the live rubric: both questions ride.
+    expect(body.assistant_text).toContain('What outcome would make this decision a success?');
+    expect(body.assistant_text).toContain('scale');
     const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
-    expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });
 
   it('FLAG ON: explicit-generate RESPECTS the generate instruction and DRAFTS — even on a thin brief (clarifying over Generate is a dead-end class)', async () => {
@@ -436,10 +451,12 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 
-  // ── PR #490 review P1 — over-length round-1 brief must round-trip ───────
-  it('ROUND-TRIP: a >5000-char round-1 brief persists a pending its own READER accepts; the answer turn resumes and drafts', async () => {
+  // ── PR #490 review P1, re-homed under draft-first (2026-08-17) ──────────
+  it('OVER-LENGTH: a >5000-char brief drafts immediately with the working brief capped at the draft pipeline max', async () => {
     // Thin decision question + long pasted background (the live probe that
-    // proved the dead end was 6,341 chars).
+    // proved the dead end was 6,341 chars). Draft-first: the cap now
+    // protects the briefOverride handed to the draft dispatch (the pipeline
+    // Zod max), not a round-1 pending — round 1 persists nothing.
     const longBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`.trim();
     expect(longBrief.length).toBeGreaterThan(5000);
     const res = await app.inject({
@@ -448,22 +465,29 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
       payload: messagePayload(longBrief),
     });
     expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
-    const pendingRow = (committed.pending_actions as PendingAction[]).find(
-      (p) => p.action.kind === 'clarify_v2_round',
-    );
-    expect(pendingRow).toBeDefined();
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride).length).toBeLessThanOrEqual(5000);
+    expect(String(args.briefOverride).startsWith(THIN_BRIEF)).toBe(true);
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
+  // ── NEGATIVE PIN (draft-first intake): a clarify answer arriving on the
+  //    NEXT turn still resumes correctly — LEGACY rounds (persisted by a
+  //    pre-draft-first deploy, or by resume follow-ups) are honoured within
+  //    their TTL, and the store's own reader accepts their shape.
+  it('LEGACY ROUND-TRIP: a live capped round resumes on the answer turn and drafts with the augmented brief', async () => {
+    const cappedBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`
+      .trim()
+      .slice(0, 5000);
+    const legacyRow = livePending(cappedBrief, ['goal', 'options', 'timeframe'], 1);
     // The REAL read-side gate: the store only returns rows parsePendingAction
     // accepts (supabase-store drops the rest as PendingActionsReadDegraded).
-    // Before the round-1 cap this returned null and the round was dead.
-    const parsed = parsePendingAction(pendingRow);
+    const parsed = parsePendingAction(legacyRow);
     expect(parsed).not.toBeNull();
-
-    // Answer turn: feed the parse-accepted row back, exactly as the store would.
     pendingActionsForRead = [parsed!];
     hasPriorTurnsForRead = true;
-    appendMock.mockClear();
     const answer =
       'The goal is to increase revenue; the alternative is doing nothing; the stakes are around £200,000; it plays out within this year.';
     const res2 = await app.inject({
@@ -481,18 +505,12 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 
-  it('ROUND-TRIP: the escape chip stays ALIVE after a >5000-char round-1 brief (go-ahead proceeds to draft)', async () => {
-    const longBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`.trim();
-    await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: messagePayload(longBrief),
-    });
-    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
+  it('LEGACY ROUND-TRIP: the escape chip stays ALIVE on a live capped round (go-ahead proceeds to draft)', async () => {
+    const cappedBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`
+      .trim()
+      .slice(0, 5000);
     const parsed = parsePendingAction(
-      (committed.pending_actions as PendingAction[]).find(
-        (p) => p.action.kind === 'clarify_v2_round',
-      ),
+      livePending(cappedBrief, ['goal', 'options', 'timeframe'], 1),
     );
     expect(parsed).not.toBeNull();
     pendingActionsForRead = [parsed!];

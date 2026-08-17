@@ -1,34 +1,40 @@
 /**
- * Clarify v2 — DRAFT-FIRST with a disclosed assumption when exactly ONE
- * completeness dimension is missing (Track 1 intake fix, 2026-08-13).
+ * Clarify v2 — DRAFT-FIRST intake: a draft-shaped brief ALWAYS drafts, with
+ * its missing-dimension questions deferred alongside the draft response.
  *
- * Derivation: olumi-docs/PHASE0-EVIDENCE-2026-07-28/draft-reliability-
- * 2026-08-12/INTAKE-FUNNEL.md §5(b). The trigger is a COUNT over the
- * existing detectors (`assessBriefCompleteness(...).missing.length === 1`),
- * deliberately NOT a new natural-language predicate. Briefs missing ≥2
- * dimensions keep the blocking ask unchanged — the thin-brief asks are the
- * rubric doing its job.
+ * HISTORY, because the table below has moved twice and each move was the
+ * point:
+ *   - 2026-08-13 (Track 1, INTAKE-FUNNEL §5b): EXACTLY ONE missing
+ *     dimension drafted first; ≥2 kept the blocking ask.
+ *   - #928 review: two predicted flips (S4, M5) rode FAIL-UNSAFE timeframe
+ *     arms; those detector arms were ablated. Round 4 removed every claim
+ *     about the user's brief from the disclosure copy.
+ *   - 2026-08-17 (Paul's ratified target — draft-first intake): the
+ *     blocking round-1 ask is DELETED. A substantive brief produces the
+ *     provisional model immediately; clarification rides alongside,
+ *     non-blocking, and must never gate seeing the model. The wire witness
+ *     (olumi-docs/witness-998-2026-08-16/, session A1) showed a fully
+ *     substantive brief answered with questions instead of a model — and
+ *     #928 R4 had already voided the cost model that licensed the blocking
+ *     ask ("a false MISSING costs one question with a one-tap escape").
  *
- * Honesty invariants pinned here (INTAKE-FUNNEL §5b i):
- *   - the deferred ask's disclosure names the assumption as the
- *     ASSISTANT's, never as user-stated;
- *   - the disclosure binds to the MISSING dimension by identity (a
- *     quantities gap must carry the quantities question, not goal's);
+ * The trigger remains a COUNT over the existing detectors and the route's
+ * own draft-shape heuristic — deliberately NOT a new natural-language
+ * predicate (traps 22/22b/22f).
+ *
+ * Honesty invariants pinned here (INTAKE-FUNNEL §5b i + #928 R4):
+ *   - the deferred ask's disclosure names the assumptions as the
+ *     ASSISTANT's, never as user-stated, and claims NOTHING about the
+ *     user's brief (both branches: genuine miss and over-detection);
+ *   - the disclosure binds to the MISSING dimensions by identity;
  *   - explicit-generate still proceeds with NO deferred ask (the user
  *     pressed Generate; unchanged behaviour).
  *
  * The 15-brief table is driven by REAL WIRE CAPTURES (tests/fixtures/
- * clarify-v2-wire-briefs-2026-08-12.json — append-only, sha-verified against
- * the deployed-staging baseline runs). The expected column is this change's
- * whole point: 5 of the 13 re-asked briefs draft first-turn.
- *
- * ⚠ THE TABLE MOVED AT REVIEW, AND THE MOVE IS THE POINT (#928, REVIEW-928.md
- * §1). It predicted 7 flips while two of them (S4, M5) rode timeframe arms
- * that an independent corpus measured as FAIL-UNSAFE; those arms were ablated,
- * so S4 and M5 correctly return to the blocking ask. Five flips still clears
- * the ≥5 acceptance target — the capability was never what the defect
- * threatened. **This table is a routing OUTCOME metric (trap 23): it counts
- * briefs that draft, not arms that fire.**
+ * clarify-v2-wire-briefs-2026-08-12.json — append-only, never edited).
+ * Expected missing-dimension sets are the LIVE RUBRIC's own verdicts,
+ * derived at fa8bacc5 (the rubric is untouched by draft-first intake):
+ * this table pins the ROUTING OUTCOME (trap 23) — every brief drafts.
  */
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -90,84 +96,95 @@ const wireBrief = (id: string): string => {
 const PROVENANCE_MARKER = "I've assumed";
 
 // ── The 15-brief outcome table (the acceptance table, pinned) ──────────────
-// 'complete'    → proceed silently, reason 'complete', NO deferred question.
-// 'draft_first' → proceed, reason 'single_gap_draft_first', deferred question
-//                 for exactly the named dimension.
-// 'ask'         → blocking clarify questions (unchanged behaviour).
+// 'complete'    → proceed silently, reason 'complete', NO deferred questions.
+// 'draft_first' → proceed with the named dimensions' questions deferred:
+//                 reason 'single_gap_draft_first' for one dimension,
+//                 'multi_gap_draft_first' for two or more. EVERY gapped
+//                 brief drafts — no row may be a blocking ask.
 const EXPECTED_FIRST_TURN: ReadonlyArray<
-  readonly [string, 'complete' | 'ask'] | readonly [string, 'draft_first', ClarifyDimension]
+  readonly [string, 'complete'] | readonly [string, 'draft_first', readonly ClarifyDimension[]]
 > = [
-  ['S1', 'ask'],
-  ['S2', 'ask'],
-  ['S3', 'ask'],
-  ['S4', 'ask'], // timeframe arm ABLATED at review (#928) — goal+timeframe missing
-  ['S5', 'draft_first', 'goal'],
+  ['S1', 'draft_first', ['goal', 'quantities']],
+  ['S2', 'draft_first', ['goal', 'timeframe']],
+  ['S3', 'draft_first', ['goal', 'quantities']],
+  ['S4', 'draft_first', ['goal', 'timeframe']],
+  ['S5', 'draft_first', ['goal']],
   ['M1', 'complete'],
-  ['M2', 'ask'],
-  ['M3', 'draft_first', 'goal'], // prize arm DROPPED at review — drafts first-turn WITH a disclosure
-  ['M4', 'ask'], // from-X-to-Y arm DROPPED at round 4 — goal+options+timeframe missing; asks either way
-  ['M5', 'ask'], // timeframe arm ABLATED at review (#928) — goal+timeframe missing
-  ['L1', 'draft_first', 'goal'],
-  ['L2', 'draft_first', 'goal'],
-  ['L3', 'draft_first', 'goal'],
-  ['L4', 'ask'],
+  ['M2', 'draft_first', ['goal', 'timeframe']],
+  ['M3', 'draft_first', ['goal']],
+  ['M4', 'draft_first', ['goal', 'options', 'timeframe']],
+  ['M5', 'draft_first', ['goal', 'timeframe']],
+  ['L1', 'draft_first', ['goal']],
+  ['L2', 'draft_first', ['goal']],
+  ['L3', 'draft_first', ['goal']],
+  ['L4', 'draft_first', ['goal', 'timeframe']],
   ['L5', 'complete'],
 ];
 
-describe('the 15-brief first-turn table (real wire captures)', () => {
+describe('the 15-brief first-turn table (real wire captures) — every brief drafts', () => {
   it.each(EXPECTED_FIRST_TURN.map((row) => [row[0], row] as const))(
     '%s',
     (_id, row) => {
-      const [id, expected, dimension] = row;
+      const [id, expected, dimensions] = row;
       const decision = decideClarifyV2Round1(wireBrief(id));
-      if (expected === 'ask') {
-        expect(decision.kind, id).toBe('ask');
-        return;
-      }
       expect(decision.kind, id).toBe('proceed');
-      if (decision.kind !== 'proceed') return;
       if (expected === 'complete') {
         expect(decision.reason, id).toBe('complete');
-        expect(decision.deferredQuestion, `${id}: a complete brief must carry NO deferred ask`).toBeUndefined();
-      } else {
-        expect(decision.reason, id).toBe('single_gap_draft_first');
-        expect(decision.deferredQuestion?.dimension, id).toBe(dimension);
+        expect(
+          decision.deferredQuestions,
+          `${id}: a complete brief must carry NO deferred ask`,
+        ).toBeUndefined();
+        return;
       }
+      expect(decision.reason, id).toBe(
+        dimensions!.length === 1 ? 'single_gap_draft_first' : 'multi_gap_draft_first',
+      );
+      expect(
+        decision.deferredQuestions?.map((q) => q.dimension),
+        id,
+      ).toEqual(dimensions);
     },
   );
 
-  it('acceptance count: at least 5 previously re-asked briefs now draft first-turn', () => {
-    const flips = EXPECTED_FIRST_TURN.filter(
-      (r) => r[0] !== 'M1' && r[0] !== 'L5' && (r[1] === 'draft_first' || r[1] === 'complete'),
-    );
-    // EXACT, not a floor-only assertion: a floor alone would stay green if a
-    // future widening silently flipped more briefs than were measured, which
-    // is the direction that carries invented-value risk. Growth must be a
-    // deliberate, re-measured change to this list (S5, M3, L1, L2, L3).
-    expect(flips.map((r) => r[0])).toEqual(['S5', 'M3', 'L1', 'L2', 'L3']);
-    expect(flips.length).toBeGreaterThanOrEqual(5);
+  it('acceptance: EVERY previously re-asked brief now drafts first-turn — no blocking ask remains in the table', () => {
+    // EXACT, not a floor: the whole table drafts. A future change that
+    // reintroduces a blocking first-turn ask must edit this list
+    // deliberately, and the per-row pins above go RED with it.
+    const nonComplete = EXPECTED_FIRST_TURN.filter((r) => r[1] !== 'complete');
+    expect(nonComplete.map((r) => r[0])).toEqual([
+      'S1', 'S2', 'S3', 'S4', 'S5', 'M2', 'M3', 'M4', 'M5', 'L1', 'L2', 'L3', 'L4',
+    ]);
+    for (const [id] of nonComplete) {
+      const decision = decideClarifyV2Round1(wireBrief(id));
+      expect(decision.kind, `${id} must draft, never block`).toBe('proceed');
+      expect(decision.deferredQuestions?.length ?? 0, id).toBeGreaterThanOrEqual(1);
+    }
   });
 });
 
-// ── Count-predicate pins (the off-by-one mutant target) ───────────────────
-describe('the trigger is EXACTLY-ONE missing — never two', () => {
-  // Real capture, two missing (goal + quantities): MUST still block.
-  it('two missing dimensions keep the blocking ask (S1)', () => {
+// ── Gap-count semantics (the off-by-one mutant target, inverted) ───────────
+describe('EVERY gap count drafts first — the questions defer, capped at the round budget', () => {
+  it('two missing dimensions draft with BOTH questions deferred (S1)', () => {
     const decision = decideClarifyV2Round1(wireBrief('S1'));
-    expect(decision.kind).toBe('ask');
+    expect(decision.kind).toBe('proceed');
+    expect(decision.reason).toBe('multi_gap_draft_first');
+    expect(decision.deferredQuestions).toHaveLength(2);
   });
 
-  it('two missing dimensions keep the blocking ask (L4)', () => {
+  it('two missing dimensions draft with BOTH questions deferred (L4)', () => {
     const decision = decideClarifyV2Round1(wireBrief('L4'));
-    expect(decision.kind).toBe('ask');
+    expect(decision.reason).toBe('multi_gap_draft_first');
+    expect(decision.deferredQuestions).toHaveLength(2);
   });
 
-  it('three missing dimensions keep the blocking ask (synthetic control)', () => {
+  it('three missing dimensions draft with THREE questions deferred (synthetic control)', () => {
     // Options present via "or"; goal, timeframe, quantities all absent.
     const decision = decideClarifyV2Round1(
       'Should we rebuild the billing platform ourselves or buy a vendor product instead of waiting?',
     );
-    expect(decision.kind).toBe('ask');
+    expect(decision.kind).toBe('proceed');
+    expect(decision.reason).toBe('multi_gap_draft_first');
+    expect(decision.deferredQuestions).toHaveLength(3);
   });
 
   it('a single missing dimension proceeds with the deferred question for THAT dimension (quantities)', () => {
@@ -178,23 +195,20 @@ describe('the trigger is EXACTLY-ONE missing — never two', () => {
       'Should we hire a contractor or a permanent engineer this quarter? The goal is to reduce delivery risk.',
     );
     expect(decision.kind).toBe('proceed');
-    if (decision.kind !== 'proceed') return;
     expect(decision.reason).toBe('single_gap_draft_first');
-    expect(decision.deferredQuestion?.dimension).toBe('quantities');
+    expect(decision.deferredQuestions?.map((q) => q.dimension)).toEqual(['quantities']);
   });
 
-  it('explicit-generate proceeds with NO deferred question, even on a single-gap brief', () => {
+  it('explicit-generate proceeds with NO deferred questions, even on a gapped brief', () => {
     const decision = decideClarifyV2Round1(wireBrief('S5'), true);
     expect(decision.kind).toBe('proceed');
-    if (decision.kind !== 'proceed') return;
     expect(decision.reason).toBe('explicit_generate');
-    expect(decision.deferredQuestion).toBeUndefined();
+    expect(decision.deferredQuestions).toBeUndefined();
   });
 
   it('the working brief is preserved (trimmed) as the draft brief', () => {
     const decision = decideClarifyV2Round1(`  ${wireBrief('S5')}  `);
     expect(decision.kind).toBe('proceed');
-    if (decision.kind !== 'proceed') return;
     expect(decision.brief).toBe(wireBrief('S5'));
   });
 });
@@ -208,14 +222,10 @@ describe('composeDraftFirstDisclosure — assistant provenance, dimension identi
   };
 
   it.each(['goal', 'options', 'timeframe', 'quantities'] as const)(
-    '%s: names the assumption as the assistant’s, never the user’s',
+    '%s (single): names the assumption as the assistant’s, never the user’s',
     (dimension) => {
-      const text = composeDraftFirstDisclosure(questionFor(dimension));
+      const text = composeDraftFirstDisclosure([questionFor(dimension)]);
       expect(text).toContain(PROVENANCE_MARKER);
-      // ⚠ `/my assumption/` was asserted here until #928 round 4. It is now
-      // covered by PROVENANCE_MARKER above; the copy states the assumption as
-      // an ACTION THE PRODUCT TOOK ("I've assumed…") rather than as a noun
-      // phrase sitting next to a claim about the user's brief.
       expect(text).toMatch(/\bassumed\b/i);
       // The user must never be quoted as the source of the assumed value.
       expect(text).not.toMatch(/\byou (?:said|stated|told me that|asked for)\b/i);
@@ -223,9 +233,9 @@ describe('composeDraftFirstDisclosure — assistant provenance, dimension identi
   );
 
   it.each(['goal', 'options', 'timeframe', 'quantities'] as const)(
-    '%s: carries its OWN dimension’s question text (identity binding)',
+    '%s (single): carries its OWN dimension’s question text (identity binding)',
     (dimension) => {
-      const text = composeDraftFirstDisclosure(questionFor(dimension));
+      const text = composeDraftFirstDisclosure([questionFor(dimension)]);
       expect(text).toContain(questionFor(dimension).text);
       for (const other of ['goal', 'options', 'timeframe', 'quantities'] as const) {
         if (other === dimension) continue;
@@ -236,9 +246,44 @@ describe('composeDraftFirstDisclosure — assistant provenance, dimension identi
     },
   );
 
-  it('offers the canvas as the way to change the assumption (a live surface, not a promise of new machinery)', () => {
-    const text = composeDraftFirstDisclosure(questionFor('goal'));
-    expect(text).toMatch(/canvas/i);
+  it('multi-gap: carries EVERY deferred question’s text and only those (identity binding)', () => {
+    const included = ['goal', 'timeframe'] as const;
+    const text = composeDraftFirstDisclosure(included.map(questionFor));
+    for (const dim of included) {
+      expect(text).toContain(questionFor(dim).text);
+    }
+    for (const other of ['options', 'quantities'] as const) {
+      expect(text, `must not carry ${other}'s question`).not.toContain(
+        questionFor(other).text,
+      );
+    }
+    // Numbered lines, not a wall of text (the 2026-08-16 P1 lesson).
+    expect(text).toContain('1. ');
+    expect(text).toContain('2. ');
+    expect(text).toContain('\n');
+  });
+
+  it('multi-gap: keeps the assistant-authored provenance', () => {
+    const text = composeDraftFirstDisclosure(
+      (['goal', 'options', 'quantities'] as const).map(questionFor),
+    );
+    expect(text).toContain(PROVENANCE_MARKER);
+    expect(text).not.toMatch(/\byou (?:said|stated|told me that|asked for)\b/i);
+  });
+
+  it('offers the canvas as the way to change the assumption(s) — single and multi', () => {
+    expect(composeDraftFirstDisclosure([questionFor('goal')])).toMatch(/canvas/i);
+    expect(
+      composeDraftFirstDisclosure((['goal', 'timeframe'] as const).map(questionFor)),
+    ).toMatch(/canvas/i);
+  });
+
+  it('the single-question copy is byte-stable across the widening (the 2026-08-13 shape survives)', () => {
+    const q = questionFor('goal');
+    expect(composeDraftFirstDisclosure([q])).toBe(
+      `One thing to check: I've assumed the goal in this draft, and I haven't confirmed it with you. ` +
+        `${q.text} You can answer here, or change it directly on the canvas.`,
+    );
   });
 });
 
@@ -254,19 +299,15 @@ describe('composeDraftFirstDisclosure — assistant provenance, dimension identi
  * user's own words. Draft-first is what made it serious: it removed both the
  * clarifying question and the one-tap escape that used to make a false
  * MISSING cost one question, so the error now costs a confident falsehood
- * about the user with no way to answer back.
+ * about the user with no way to answer back. Draft-first INTAKE (2026-08-17)
+ * widens draft-first to every gap count, so this rule now covers the
+ * multi-gap disclosure too — pinned below in BOTH branches.
  *
  * THE EXIT IS NOT A BETTER DETECTOR. Four rounds of widening this predicate
  * each fixed one direction and opened the other (trap 22f). Round 4 instead
  * makes the predicate's accuracy STOP BEING A TRUTH-BEARING PROPERTY: the
  * disclosure claims only what the product itself did, so over-detection
  * degrades from a TRUTH defect to a QUALITY-OF-ASSUMPTION defect.
- *
- * THE PROOF OBLIGATION IS BOTH BRANCHES — the dimension genuinely missing,
- * AND the detector over-detecting on a brief that plainly states it. The
- * over-detection input is the reviewer's OWN measured `KNOWN_OVER_DETECTION`
- * string, not one invented here: a self-authored input encodes the author's
- * model of the detector rather than the detector (trap 16).
  */
 describe('B3 — the disclosure is true in BOTH branches (it claims nothing about the brief)', () => {
   /**
@@ -306,15 +347,33 @@ describe('B3 — the disclosure is true in BOTH branches (it claims nothing abou
   });
 
   it.each(['goal', 'options', 'timeframe', 'quantities'] as const)(
-    '%s: the emitted disclosure asserts nothing about what the user said',
+    '%s: the emitted single-question disclosure asserts nothing about what the user said',
     (dimension) => {
-      const text = composeDraftFirstDisclosure(questionFor(dimension));
+      const text = composeDraftFirstDisclosure([questionFor(dimension)]);
       expect(
         claimsAboutTheBrief(text),
         `${dimension} disclosure tells the user what they said: ${text}`,
       ).toEqual([]);
     },
   );
+
+  it('the multi-question disclosure asserts nothing about what the user said (every pair and the full set)', () => {
+    const dims = ['goal', 'options', 'timeframe', 'quantities'] as const;
+    for (let i = 0; i < dims.length; i += 1) {
+      for (let j = i + 1; j < dims.length; j += 1) {
+        const text = composeDraftFirstDisclosure([
+          questionFor(dims[i]!),
+          questionFor(dims[j]!),
+        ]);
+        expect(
+          claimsAboutTheBrief(text),
+          `[${dims[i]},${dims[j]}] disclosure tells the user what they said: ${text}`,
+        ).toEqual([]);
+      }
+    }
+    const full = composeDraftFirstDisclosure(dims.slice(0, 3).map(questionFor));
+    expect(claimsAboutTheBrief(full)).toEqual([]);
+  });
 
   /**
    * The two branches, both routed through the REAL decision function so the
@@ -328,8 +387,8 @@ describe('B3 — the disclosure is true in BOTH branches (it claims nothing abou
     if (decision.reason !== 'single_gap_draft_first') {
       throw new Error(`expected single_gap_draft_first, got ${decision.reason}`);
     }
-    if (decision.deferredQuestion === undefined) throw new Error('no deferred question');
-    return composeDraftFirstDisclosure(decision.deferredQuestion);
+    if (decision.deferredQuestions === undefined) throw new Error('no deferred questions');
+    return composeDraftFirstDisclosure(decision.deferredQuestions);
   };
 
   /**
@@ -347,28 +406,20 @@ describe('B3 — the disclosure is true in BOTH branches (it claims nothing abou
 
   it('the over-detection branch is REAL at this tip — BOTH halves (the pin is not vacuous)', () => {
     // ⭐⭐ THIS PIN HAD ONLY ONE HALF UNTIL #928 ROUND 4, AND A REVIEWER PROVED
-    // IT BY EXECUTION. It asserted only that the rubric SCORES GOAL MISSING.
-    // That is half of "over-detection"; the other half is that the brief
-    // ACTUALLY STATES THE GOAL. Measured: a `ROT-B` mutant deleting the goal
-    // sentence — turning branch B into a genuine MISS, i.e. a duplicate of
-    // branch A — left the suite 109/109 GREEN. The discriminating fixture was
-    // unpinned in exactly the direction that silently destroys the property
-    // (trap 13b: a guard whose discrimination depends on a fixture nothing
-    // pins is real only on the day it was written).
+    // IT BY EXECUTION (trap 13b: a guard whose discrimination depends on a
+    // fixture nothing pins is real only on the day it was written).
     //
     // HALF ONE — the brief provably contains a sentence the reviewer's corpus
-    // records as STATING a goal. This is the assertion whose absence let the
-    // branch decay; it REDs the moment the fixture stops being an
-    // over-detection input.
+    // records as STATING a goal. It REDs the moment the fixture stops being
+    // an over-detection input.
     expect(OVER_DETECTED_BRIEF).toContain(MEASURED_OVER_DETECTION_GOAL_SENTENCE);
     // HALF TWO — and the rubric nevertheless scores goal MISSING. Together
     // these two are what "the detector over-detected" MEANS; either alone is
     // satisfiable by a brief that is not an over-detection at all.
     const decision = decideClarifyV2Round1(OVER_DETECTED_BRIEF);
     expect(decision.kind).toBe('proceed');
-    if (decision.kind !== 'proceed') return;
     expect(decision.reason).toBe('single_gap_draft_first');
-    expect(decision.deferredQuestion?.dimension).toBe('goal');
+    expect(decision.deferredQuestions?.map((q) => q.dimension)).toEqual(['goal']);
   });
 
   it('BOTH BRANCHES emit the SAME sentence, and it claims nothing about the brief', () => {
@@ -389,7 +440,7 @@ describe('B3 — the disclosure is true in BOTH branches (it claims nothing abou
 });
 
 // ── Dispatch level: the outcome is a DRAFT instruction, not a commit ──────
-describe('tryClarifyV2Turn — single-gap round 1 returns a draft outcome with the deferred ask', () => {
+describe('tryClarifyV2Turn — round 1 returns a draft outcome with the deferred ask, at EVERY gap count', () => {
   beforeEach(async () => {
     await resetClarifyV2Harness();
   });
@@ -406,23 +457,32 @@ describe('tryClarifyV2Turn — single-gap round 1 returns a draft outcome with t
     expect(outcome?.kind).toBe('draft');
     if (outcome?.kind !== 'draft') return;
     expect(outcome.briefOverride).toBe(wireBrief('S5'));
-    expect(outcome.deferredAsk?.dimension).toBe('goal');
+    expect(outcome.deferredAsk?.dimensions).toEqual(['goal']);
     expect(outcome.deferredAsk?.disclosure).toContain(PROVENANCE_MARKER);
     // Non-blocking by construction: no clarify turn is committed and no
     // clarify_v2_round pending is persisted — there is nothing to resume.
     expect(appends).toHaveLength(0);
-    // Telemetry: the proceed event fires with the new reason.
+    // Telemetry: the proceed event fires with the single-gap reason.
     const proceeded = events.filter((e) => e.name === TelemetryEvents.V5ClarifyV2Proceeded);
     expect(proceeded).toHaveLength(1);
     expect(proceeded[0]?.data.reason).toBe('single_gap_draft_first');
+    expect(proceeded[0]?.data.deferred_dimensions).toEqual(['goal']);
   });
 
-  it('two-missing brief still gets the blocking ask (dispatch-level off-by-one control)', async () => {
-    const { outcome, appends } = await runClarifyV2Turn({
+  it('two-gap brief → {kind:"draft"} with BOTH dimensions deferred; NOTHING committed (the old blocking ask is gone)', async () => {
+    const { outcome, appends, events } = await runClarifyV2Turn({
       message: wireBrief('S1'),
     });
-    expect(outcome?.kind).toBe('respond');
-    expect(appends).toHaveLength(1);
+    expect(outcome?.kind).toBe('draft');
+    if (outcome?.kind !== 'draft') return;
+    expect(outcome.briefOverride).toBe(wireBrief('S1'));
+    expect(outcome.deferredAsk?.dimensions).toEqual(['goal', 'quantities']);
+    expect(outcome.deferredAsk?.disclosure).toContain(PROVENANCE_MARKER);
+    expect(appends).toHaveLength(0);
+    const proceeded = events.filter((e) => e.name === TelemetryEvents.V5ClarifyV2Proceeded);
+    expect(proceeded).toHaveLength(1);
+    expect(proceeded[0]?.data.reason).toBe('multi_gap_draft_first');
+    expect(proceeded[0]?.data.deferred_dimensions).toEqual(['goal', 'quantities']);
   });
 
   it('complete brief still proceeds silently — null outcome, no deferred ask anywhere', async () => {
@@ -433,11 +493,23 @@ describe('tryClarifyV2Turn — single-gap round 1 returns a draft outcome with t
     expect(appends).toHaveLength(0);
   });
 
-  it('explicit-generate on a single-gap brief keeps the pristine path (null → route drafts)', async () => {
+  it('explicit-generate on a gapped brief keeps the pristine path (null → route drafts)', async () => {
     const { outcome } = await runClarifyV2Turn({
       message: wireBrief('S5'),
       explicitGenerateBrief: wireBrief('S5'),
     });
     expect(outcome).toBeNull();
+  });
+
+  it('NEGATIVE PIN: a non-draft-shaped message is never claimed and never drafted — the route’s own heuristic bounds the draft attempt', async () => {
+    const { outcome, appends } = await runClarifyV2Turn({
+      message: 'help',
+      draftShaped: false,
+    });
+    // Null = not engaged: no draft instruction is fabricated for a message
+    // the pipeline itself judged un-draftable; the route's conversational
+    // reply stands (that IS the honest case).
+    expect(outcome).toBeNull();
+    expect(appends).toHaveLength(0);
   });
 });

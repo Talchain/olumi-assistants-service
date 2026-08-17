@@ -170,6 +170,77 @@ describe("INV-Q — an interrogative with no decision verb is not a decision bri
     });
   });
 
+  /**
+   * A7 — SUBJECT-POSITIONAL RULE (PR #1002 fix round, 2026-08-17). The
+   * reviewer's execution-proven blocker: questions TO the product carrying an
+   * unambiguous decision verb — "How do you decide which factors matter in
+   * the analysis?" — were rescued from deflection by the verb escape, and
+   * under draft-first intake the cost of that pre-existing misclassification
+   * rose from a recoverable question list to a fabricated model + auto-run.
+   *
+   * The rule: an interrogative-opened, `?`-terminated message whose decision
+   * verb's SUBJECT is the assistant (`aux + you|olumi [+ one optional word]
+   * + verb`) stays a question. Same positional philosophy as the
+   * ambiguous-modal rule above.
+   *
+   * CORPUS PROVENANCE (traps 22b/22c — outside the author's head, each
+   * direction with opposite-direction twins):
+   *   - Q2/Q3: the reviewer's execution corpus (rev1002 corpus-head.json).
+   *   - "Would you still choose to invest…": the product's OWN bias-library
+   *     copy (src/cee/bias/library.ts) — a user retyping it addresses the
+   *     assistant; it is also the measured case that forces the ONE optional
+   *     intervening word ("still") in the rule.
+   *   - The remaining deflect cases walk the rule's own auxiliary × subject
+   *     alphabet (could/olumi, will/you, did/you) — parameter-space coverage,
+   *     not invented semantics.
+   *   - Twins: the reviewer's two pre-validated must-still-draft cases, the
+   *     `whether` strand documented at assist.ts (A5 above), and near-miss
+   *     shapes where the assistant is MENTIONED but the verb's subject is
+   *     the user ("do you agree WE should acquire…", "…in your view?").
+   */
+  describe("A7 — a decision verb whose subject is the assistant is not decision-bearing", () => {
+    const MUST_DEFLECT: readonly string[] = [
+      // Reviewer's blocker cases (execution-proven drafting at 7d27adef).
+      "How do you decide which factors matter in the analysis?",
+      "How does Olumi decide which options to include?",
+      // Product-authored (bias library) — forces the optional-adverb slot.
+      "Would you still choose to invest in this option?",
+      // Auxiliary × subject alphabet walks.
+      "Could Olumi choose the best option for us automatically?",
+      "Will you launch the analysis for me once the model is ready?",
+      "Did you decide the baseline values yourself when drafting?",
+    ];
+
+    const MUST_STILL_DRAFT: readonly string[] = [
+      // Reviewer's pre-validated opposite-direction twins.
+      "Do you think we should buy the warehouse?",
+      "Which vendor should we choose, Acme at £40k or Bolt?",
+      // Assistant mentioned, but the decision verb's subject is the user.
+      "Do you agree we should acquire the smaller competitor this year?",
+      "Would it be better to sell the unit or restructure it, in your view?",
+      // The documented `whether` strand (assist.ts) — aux+you+non-verb.
+      "Can you help me work out whether to migrate the CRM or stay?",
+    ];
+
+    it.each(MUST_DEFLECT)("deflects (stays a question to the assistant): %s", (message) => {
+      expect(isQuestionToAssistant(message)).toBe(true);
+      expect(capturesAsBrief(message)).toBe(false);
+    });
+
+    it("positive control — every deflect case would OTHERWISE capture (length, shape, verb escape)", () => {
+      for (const m of MUST_DEFLECT) {
+        expect(m.length).toBeGreaterThanOrEqual(30);
+        expect(INTERROGATIVE_QUESTION_PATTERN.test(m)).toBe(true);
+        expect(DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(m)).toBe(true);
+      }
+    });
+
+    it.each(MUST_STILL_DRAFT)("still drafts (the verb's subject is not the assistant): %s", (message) => {
+      expect(isQuestionToAssistant(message)).toBe(false);
+      expect(capturesAsBrief(message)).toBe(true);
+    });
+  });
+
   describe("A6 — shape terms the predicate must NOT swallow", () => {
     it("a non-interrogative message is untouched", () => {
       expect(isQuestionToAssistant("We are deciding whether to expand into Germany.")).toBe(false);
