@@ -238,6 +238,44 @@ describe('POST /orchestrate/v2/turn — scale redeclaration (ROADMAP 2.159)', ()
       ],
       insights: [],
       stage_indicator: 'analyse',
+      // ⭐ ADDED BY ROADMAP 2.1264, AND THIS TEST IS WHY IT IS SAFE. `analysis_state`
+      // is now stamped on EVERY turn exit, including the graph-less refusal
+      // families, so that absence of the key on the wire means only "this CEE
+      // build predates the field" and never "this turn supplied no verdict" —
+      // the ambiguity that kept the UI on legacy per-turn-type feature
+      // detection. This whole-body `toEqual` was the ONE assertion in 30,896
+      // that caught the addition, which is exactly what a cross-repo shape pin
+      // is for; it stays a `toEqual` (never relaxed to `toMatchObject`) so the
+      // next addition is caught the same way.
+      //
+      // EVERY MEMBER BELOW IS A DELIBERATE NON-CLAIM, and the UI half should
+      // read it that way:
+      //   * `unknown_degraded` / `no_graph_this_turn` — this exit threaded no
+      //     graph and no freshness derivation, so the producer CANNOT DETERMINE
+      //     the run state. It is deliberately NOT `never_run`: that state means
+      //     "no analysis has ever been run for this model" and licenses the
+      //     pre-analysis affordance, which this exit has no fact read to
+      //     support and which would hide a real prior result.
+      //   * `readiness.status: 'unknown'` — no readiness was assessed here.
+      //   * `leader_claim.permitted: false` with `constraint_verdict_withheld` —
+      //     the CEE half of the conjunction withheld; `separation` is ABSENT
+      //     because none was computed, which is not "the options do not
+      //     separate".
+      //   * all five usability booleans false, `contradictions: []` — there is
+      //     no result on this turn to use, and the producer found no
+      //     disagreement while composing.
+      analysis_state: {
+        run_state: { kind: 'unknown_degraded', cause: 'no_graph_this_turn' },
+        readiness: { status: 'unknown', blockers: [] },
+        leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' },
+        robustness: {},
+        usable_for_prose: false,
+        usable_for_chips: false,
+        usable_for_followup: false,
+        requires_rerun: false,
+        blocked_unusable: false,
+        contradictions: [],
+      },
     });
   });
 

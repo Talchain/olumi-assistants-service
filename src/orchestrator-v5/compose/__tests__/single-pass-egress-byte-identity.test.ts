@@ -9,8 +9,10 @@
  * `sanitiseOlumiResponseForEgress` — which `sendFinalised200` re-enters 2–8×
  * per response — and into ONE call on the final `wireBody` immediately before
  * `reply.send`. E1 is byte-neutral BY CONSTRUCTION and not merely by test: the
- * guard is observe-only (`enforce: false`), it returns its input unchanged, and
- * the call site discards the return value. There is no code path by which it
+ * guard rail has no enforcing mode (its `enforce` option was deleted in ROADMAP
+ * 2.1264 — it gated no byte and only mislabelled telemetry), it returns its
+ * input unchanged, and the call site discards the return value. The DISCARD is
+ * the load-bearing half and is what this file now asserts. There is no code path by which it
  * can alter a wire byte, so the honest proof for E1 is STRUCTURAL (below) plus
  * the route-level "exactly one alarm" pin in
  * `claim-safety-hoist-and-input-gate-route-level.test.ts`.
@@ -205,10 +207,36 @@ describe('E1: the Layer-3 scan happens ONCE, on the bytes that ship', () => {
   it('the guard is armed at the send point in sendFinalised200', () => {
     expect(ROUTE_V2).toContain('guardLeadingOptionClaimsAtEgress(wireBody, {');
     expect(ROUTE_V2).toContain('mayNameLeadingOption: ctx.mayNameLeadingOption,');
-    // Observe-only. If this ever flips to `enforce: true` at THIS site it stops
-    // being byte-neutral, and the byte-identity argument above dies with it.
-    const call = ROUTE_V2.slice(ROUTE_V2.indexOf('guardLeadingOptionClaimsAtEgress(wireBody, {'));
-    expect(call.slice(0, 260)).toContain('enforce: false');
+  });
+
+  it('the guard call DISCARDS its return value — the byte-neutrality claim itself', () => {
+    // ⚠ THIS ASSERTION REPLACES A WEAKER ONE, and the swap is the point
+    // (ROADMAP 2.1264). It used to read:
+    //
+    //     const call = ROUTE_V2.slice(ROUTE_V2.indexOf('guardLeading…'));
+    //     expect(call.slice(0, 260)).toContain('enforce: false');
+    //
+    // …on the reasoning that "if this ever flips to `enforce: true` at THIS
+    // site it stops being byte-neutral". THAT REASONING WAS FALSE. `enforce`
+    // gated no byte in the guard — it reached only a log field and a telemetry
+    // tag — so the flip it was watching for could never have broken byte
+    // neutrality, and the option has now been deleted. What actually makes this
+    // call byte-neutral is that its RESULT IS THROWN AWAY: the statement is a
+    // bare expression, not an assignment to `wireBody`. So that is what is
+    // asserted, and it holds no matter what options the guard grows.
+    expect(ROUTE_V2).not.toContain('wireBody = guardLeadingOptionClaimsAtEgress');
+    expect(ROUTE_V2).not.toContain('return guardLeadingOptionClaimsAtEgress');
+    // …and the statement genuinely is the bare call, terminated as one.
+    const at = ROUTE_V2.indexOf('guardLeadingOptionClaimsAtEgress(wireBody, {');
+    const lineStart = ROUTE_V2.lastIndexOf('\n', at) + 1;
+    expect(ROUTE_V2.slice(lineStart, at).trim()).toBe('');
+  });
+
+  it('POSITIVE CONTROL: the discard check can FAIL', () => {
+    // Rule 2 — a `not.toContain` pair proves nothing unless the strings it
+    // hunts would be seen. Plant the capturing shape the assertions forbid.
+    const planted = `${ROUTE_V2}\n  wireBody = guardLeadingOptionClaimsAtEgress(wireBody, {});`;
+    expect(planted).toContain('wireBody = guardLeadingOptionClaimsAtEgress');
   });
 
   it('the scan is the LAST thing before the send, and after the last wireBody write', () => {
@@ -244,7 +272,7 @@ describe('E1: the Layer-3 scan happens ONCE, on the bytes that ship', () => {
   it('POSITIVE CONTROL: the chokepoint-absence check can FAIL', () => {
     // Rule 2 — prove the `not.toContain` discriminates by planting the exact
     // pre-fix call back into the source it reads.
-    const planted = `${OUTPUT_SAFETY}\n  guardLeadingOptionClaimsAtEgress(sanitised, { enforce: false });`;
+    const planted = `${OUTPUT_SAFETY}\n  guardLeadingOptionClaimsAtEgress(sanitised, {});`;
     expect(planted).toContain('guardLeadingOptionClaimsAtEgress(sanitised');
   });
 

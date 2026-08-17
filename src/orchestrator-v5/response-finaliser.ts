@@ -90,6 +90,7 @@ import {
 } from './compose/analysis-ready-emit.js';
 import {
   composeAnalysisStateV1,
+  NO_ANALYSIS_CONTEXT_DERIVATION,
   readRawRobustnessFromResponseBody,
 } from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
@@ -298,14 +299,30 @@ export function finaliseV5Response(
 }
 
 /**
- * Compose and stamp `analysis_state`, or return the body untouched when there
- * is no verdict to supply.
+ * Compose and stamp `analysis_state` — on EVERY exit, ROADMAP 2.1264.
  *
- * Absence is a first-class state in the contract — "no verdict was supplied" —
- * and it is what a dispatch path with no analysis context must emit. Stamping
- * a fabricated default (an invented readiness status over an invented run
- * state) would make every no-analysis turn indistinguishable from a turn whose
- * producer genuinely assessed one.
+ * ⚠ THIS FUNCTION USED TO RETURN THE BODY UNTOUCHED when the turn carried no
+ * analysis context, and the reasoning is kept rather than deleted (trap 14)
+ * because half of it still holds. It read: *absence is a first-class state in
+ * the contract — "no verdict was supplied" — and stamping a fabricated default
+ * would make every no-analysis turn indistinguishable from a turn whose
+ * producer genuinely assessed one.*
+ *
+ * The half that still holds: A FABRICATED DEFAULT IS STILL FORBIDDEN. What
+ * changed is that omission was ALSO carrying a second meaning. With the key
+ * present on some exits and absent on others, absence on the wire meant BOTH
+ * "this CEE build predates the field" AND "this turn supplied no verdict", and
+ * no consumer can separate those — which is precisely what kept the UI on
+ * legacy per-turn-type feature detection instead of reading one contract. CEE
+ * now always supplies a verdict, so absence means exactly one thing.
+ *
+ * The emission on a no-context exit is NOT a default: it is the verdict
+ * `canonicalStateFromFreshness` computes from the derivation that is TRUE of
+ * such an exit (see `NO_ANALYSIS_CONTEXT_DERIVATION` for why each member is
+ * true, and why the state is `unknown_degraded` / `no_graph_this_turn` rather
+ * than the `never_run` the brief asked for). Every predicate, contradiction and
+ * readiness value still comes from the one shared implementation — there is no
+ * second literal here to drift.
  */
 function attachAnalysisState(
   response: OlumiResponse,
@@ -313,12 +330,19 @@ function attachAnalysisState(
 ): OlumiResponse {
   const canonical =
     ctx.canonicalState ??
-    (ctx.freshness !== undefined
-      ? canonicalStateFromFreshness(
-          ctx.freshness,
-          ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
-        )
-      : null);
+    canonicalStateFromFreshness(
+      // The no-context derivation is passed POSITIONALLY and never assigned to
+      // `ctx.freshness` — see its docstring: its reason is a
+      // FRESHNESS_ONLY_SYNTHESIS_REASONS member, so binding it to the context
+      // would also synthesise a `blocked` analysis_ready block.
+      ctx.freshness ?? NO_ANALYSIS_CONTEXT_DERIVATION,
+      // Threaded UNCONDITIONALLY, which it was not before. Three graph-less
+      // exits (`readiness_intake` and two `edit_graph` declines) supply a
+      // readiness payload with no freshness derivation; under the old
+      // `ctx.freshness !== undefined` guard their readiness verdict and their
+      // blockers were dropped on the floor.
+      ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
+    );
   const analysisState = composeAnalysisStateV1({
     canonical,
     freshness: ctx.freshness,

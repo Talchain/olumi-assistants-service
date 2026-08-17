@@ -1589,10 +1589,18 @@ async function sendFinalised200(
   // between here and `reply.send`, so this satisfies that rule strictly better
   // than the old position did.
   //
-  // OBSERVE-ONLY (`enforce: false`): it reports and returns the response
-  // unchanged, and the return value is discarded. It cannot alter a single wire
-  // byte — which is why this move is byte-neutral by construction, not merely
-  // by test.
+  // OBSERVE-ONLY, AND NOW STRUCTURALLY SO (ROADMAP 2.1264): it reports and
+  // returns the response unchanged, and the return value is discarded. It
+  // cannot alter a single wire byte — which is why this move is byte-neutral by
+  // construction, not merely by test.
+  //
+  // ⚠ THIS CALL USED TO PASS `enforce: false`, AND THAT OPTION IS GONE. It
+  // gated nothing in the guard — only the `enforced` log field and the `dropped`
+  // telemetry tag — so "flipping it to enforcing" would have changed no wire
+  // byte and made the dashboard claim drops that never happened. Enforcement
+  // is the call immediately ABOVE this one
+  // (`enforceLeadingOptionClaimsAtWire`), which is unconditional, per-field and
+  // per-sentence. See the guard module's docstring.
   //
   // `ctx.mayNameLeadingOption` is the SAME value that was previously handed to
   // every sanitiser call on this path (it is passed to each of them from this
@@ -1630,7 +1638,6 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
-    enforce: false,
   });
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);

@@ -23,9 +23,14 @@
  *      against Hold at 28%."
  *
  * The Layer-3 alarm (`leading-option-egress-guard.ts`) saw it and logged it and
- * changed nothing, because `enforce: false` is the only mode wired. The estate's
+ * changed nothing, because that rail has no enforcing mode at all. The estate's
  * own test asserted exactly that — status 200, one alarm, `hit_count > 0`, and
  * NO assertion on the body. The harm was pinned, not fixed.
+ *
+ * ⚠ THIS SENTENCE USED TO READ "because `enforce: false` is the only mode
+ * wired", which invited a reader to look for the flip. There was no flip to
+ * find: that option gated no byte, and it was deleted in ROADMAP 2.1264. THIS
+ * MODULE is the enforcement, and it is unconditional.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHAT THIS MODULE DOES, AND — MORE IMPORTANTLY — WHAT IT REFUSES TO DO.

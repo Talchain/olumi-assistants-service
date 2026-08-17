@@ -33,6 +33,7 @@ import { OlumiResponseSchema, AnalysisStateV1Schema } from '@talchain/schemas/bo
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 import { finaliseV5Response } from '../response-finaliser.js';
+import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
 import {
   clampRefusalFreshness,
   type AnalysisReadyPayload,
@@ -736,11 +737,204 @@ describe('additive on the wire', () => {
     expect(JSON.stringify(body)).not.toContain('refusal_declared');
   });
 
-  it('omits analysis_state entirely when the producer has no verdict to supply', () => {
-    // Absence is a first-class state in the contract — "no verdict was
-    // supplied" — and it is what a dispatch path with no analysis context
-    // must emit rather than a fabricated default.
-    const body = finalise(baseResponse({ withAnalysisBlock: false }), {});
-    expect('analysis_state' in body).toBe(false);
+  it('adds exactly ONE top-level key on a NO-ANALYSIS-CONTEXT exit too', () => {
+    // The step-4 emission must be additive on the clarify-family exits by the
+    // same standard as the analysis-carrying ones: one new key, nothing
+    // rewritten. Compared against the SAME body finalised with no context at
+    // all rather than against a fixture this lane wrote.
+    const input = baseResponse({ withAnalysisBlock: false });
+    const body = finalise(input, { mayNameLeadingOption: false });
+    const inputKeys = Object.keys(input as unknown as Record<string, unknown>);
+    expect(Object.keys(body).sort()).toEqual([...inputKeys, 'analysis_state'].sort());
+  });
+});
+
+// ─── ROADMAP 2.1264 — the key is present on EVERY turn exit ───────────────
+//
+// ⚠ THIS DESCRIBE REPLACES A TEST THAT PINNED THE OPPOSITE, and the swap is
+// the point of the step, so it is recorded rather than silently dropped
+// (CLAUDE.md trap #14). The removed test read:
+//
+//     it('omits analysis_state entirely when the producer has no verdict to
+//        supply', () => { … expect('analysis_state' in body).toBe(false); });
+//
+// Its rationale — absence is a contract-licensed state meaning "no verdict was
+// supplied" — is still TRUE OF THE CONTRACT. What changed is CEE's posture
+// inside it: while CEE emitted the key on some exits and omitted it on others,
+// absence on the wire meant BOTH "this build predates the field" AND "this turn
+// supplied no verdict", and a consumer cannot tell those apart. That ambiguity
+// is what forced the UI back onto legacy per-turn-type feature detection.
+// CEE now always supplies a verdict, so absence means exactly one thing: a
+// build that predates the field.
+//
+// ⚠ AND THE STATE IT EMITS IS *NOT* `never_run`, WHICH THE STEP-4 BRIEF ASKED
+// FOR. Derived at the vendored 0.46.0 bytes, `never_run` is declared as *"No
+// analysis has ever been run for this model"*, and its consumer licence is to
+// *"render the pre-analysis affordance"*. A clarify-family exit threads no
+// graph, no freshness derivation and no fact read, so it CANNOT know that —
+// and on a scenario that does hold a completed analysis, a `never_run` stamp
+// would send the UI to the pre-analysis affordance over a real result. That is
+// the contradiction class this whole contract exists to close, manufactured by
+// its own fix. `unknown_degraded` + `no_graph_this_turn` is the branch whose
+// declared meaning ("the producer CANNOT DETERMINE the run state this turn";
+// "no graph was in scope, so there was nothing to classify") is true BY
+// CONSTRUCTION of such an exit, so that is what ships.
+
+describe('analysis_state on an exit with NO analysis context (ROADMAP 2.1264)', () => {
+  it('EMITS the key — a consumer never has to feature-detect per turn type', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect('analysis_state' in body).toBe(true);
+  });
+
+  it('run_state is unknown_degraded/no_graph_this_turn — the branch that is TRUE here', () => {
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    expect(runState.kind).toBe('unknown_degraded');
+    expect(runState.cause).toBe('no_graph_this_turn');
+  });
+
+  it('is NEVER never_run — the producer cannot know no analysis has EVER run', () => {
+    // The discriminating half of the pair. An implementation that reached for
+    // the brief's `never_run` passes the previous test's "key is present"
+    // sibling and REDs here.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    expect(runState.kind).not.toBe('never_run');
+  });
+
+  it('THE PAIR — never_run IS emitted when a fact read actually found none', () => {
+    // Without this, the assertion above could be satisfied by an
+    // implementation that never emits `never_run` at all, which would lose a
+    // state the contract needs. `noRunDerivation()` is a fact read that
+    // returned nothing; THAT licenses the positive claim.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        analysisReady: readyPayload(),
+        freshness: noRunDerivation(),
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('never_run');
+  });
+
+  it('claims NO usability and reports no contradictions', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    expect(state.usable_for_prose).toBe(false);
+    expect(state.usable_for_chips).toBe(false);
+    expect(state.usable_for_followup).toBe(false);
+    // `requires_rerun` false: there is no result here whose recomputation
+    // would move the user forward, and the flag LICENSES a rerun affordance.
+    expect(state.requires_rerun).toBe(false);
+    // `blocked_unusable` false: nothing established that the MODEL is
+    // unanalysable. Suppressing every result-derived surface on a
+    // clarification turn would be a verdict this exit did not reach.
+    expect(state.blocked_unusable).toBe(false);
+    expect(state.contradictions).toEqual([]);
+  });
+
+  it('readiness says UNSUPPLIED, not blocked — the exit assessed nothing', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    const readiness = state.readiness as Record<string, unknown>;
+    expect(readiness.status).toBe('unknown');
+    expect(readiness.blockers).toEqual([]);
+  });
+
+  it('THE PAIR — a graph-less exit that DID supply readiness keeps the payload verdict', () => {
+    // `readiness_intake` and two `edit_graph` exits thread `analysisReady`
+    // with NO freshness (derived from route-v2.ts's 21 `sendFinalised200` call
+    // sites). Their readiness verdict must survive: an implementation that
+    // hardcoded the no-context state would flatten a real `blocked` model into
+    // "unknown" and lose the blockers the UI's repair affordance consumes.
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        analysisReady: blockedPayload(),
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect((state.readiness as Record<string, unknown>).status).toBe('blocked');
+    expect((state.run_state as Record<string, unknown>).kind).toBe('blocked');
+    const blockers = (state.readiness as Record<string, unknown>).blockers as Array<
+      Record<string, unknown>
+    >;
+    expect(blockers.map((b) => b.factor_id).sort()).toEqual(
+      ['fac_headcount', 'fac_role_type'].sort(),
+    );
+  });
+
+  it('leader_claim is composed by the SAME conjunction — withheld, with the CEE reason', () => {
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: false }),
+    );
+    const claim = state.leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('constraint_verdict_withheld');
+    // ABSENCE IS DISTINCT: no separation statement was computed on this turn,
+    // which is not the same as "the options do not separate".
+    expect('separation' in claim).toBe(false);
+  });
+
+  it('THE OTHER HALF — entitled but no separation reads separation_unavailable', () => {
+    // Proves the reason is derived from WHICH half failed rather than being a
+    // constant on the no-context path. Both halves of the conjunction are
+    // therefore live here, not only on analysis-carrying turns.
+    const claim = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), { mayNameLeadingOption: true }),
+    ).leader_claim as Record<string, unknown>;
+    expect(claim.permitted).toBe(false);
+    expect(claim.withheld_reason).toBe('separation_unavailable');
+  });
+
+  it('does NOT synthesise an analysis_ready block — the two stamps stay independent', () => {
+    // ⚠ THE COUPLING THIS PINS IS REAL AND SHARP. The no-context derivation
+    // carries `reason: 'current_graph_hash_unavailable'`, which is a member of
+    // `FRESHNESS_ONLY_SYNTHESIS_REASONS`. Had it been threaded onto
+    // `ctx.freshness` instead of held locally, the finaliser would ALSO have
+    // synthesised a freshness-only `analysis_ready` whose status is `blocked`
+    // — a second new top-level key AND a fabricated blocked claim on every
+    // clarification turn.
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect('analysis_ready' in body).toBe(false);
+  });
+
+  it('POSITIVE CONTROL — the synthesis path this turn avoids really does fire', () => {
+    // Without this, the assertion above could pass because the synthesis is
+    // broken rather than because it was correctly not reached (trap #13).
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      freshness: unknownDerivation('current_graph_hash_unavailable'),
+      mayNameLeadingOption: false,
+    });
+    expect('analysis_ready' in body).toBe(true);
+  });
+
+  it('the no-context state parses against AnalysisStateV1Schema', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect(() => AnalysisStateV1Schema.parse(stateOf(body))).not.toThrow();
+  });
+
+  it('the no-context response parses against the strict OlumiResponseSchema', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      mayNameLeadingOption: false,
+    });
+    expect(() => OlumiResponseSchema.parse(body)).not.toThrow();
+  });
+
+  it('the composer still returns undefined for a caller with NO canonical verdict', () => {
+    // The contract-licensed absence remains reachable at the COMPOSER, which
+    // other producers may use; what changed is that the finaliser always
+    // supplies a verdict. Kept under test so the branch is not untested dead
+    // code.
+    expect(composeAnalysisStateV1({ canonical: null, rawRobustness: null })).toBeUndefined();
   });
 });
