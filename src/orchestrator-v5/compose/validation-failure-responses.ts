@@ -34,6 +34,26 @@ import {
 import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-phrasing.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
+import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+
+/**
+ * ⭐ ROADMAP 2.1261 — did the user's own message state (a token of the same
+ * family as) this unit? DERIVED from the value-unit vocabulary the misroute
+ * containment already maintains (`value-unit-resolution.ts`), never a second
+ * list: "12%" and "12 percent" both evidence a `%` proposal, because both
+ * tokens resolve to the `percent` family. A unit outside that vocabulary
+ * falls back to literal containment. An unreadable unit (absent/empty) is
+ * treated as EVIDENCED — this helper only ever LICENSES the honest replacement
+ * copy, so its unknowns must keep the historical bytes (fail-open).
+ */
+function messageEvidencesUnit(message: string, unit: string | undefined): boolean {
+  if (unit === undefined || unit.trim().length === 0) return true;
+  const family = unitFamilyOf(unit);
+  const lowered = message.toLowerCase();
+  if (family === null) return lowered.includes(unit.trim().toLowerCase());
+  const tokens = lowered.match(/[%£$€]|[a-z][a-z'-]*/g) ?? [];
+  return tokens.some((token) => unitFamilyOf(token) === family);
+}
 
 const ENTITY_SIBLING_CAP = 4;
 const AMBIGUOUS_CANDIDATE_CAP = 5;
@@ -347,7 +367,7 @@ function composePreconditionUnmet(error: ValidationError): BranchResult {
   };
 }
 
-function composeParameterInvalid(error: ValidationError): BranchResult {
+function composeParameterInvalid(error: ValidationError, ctx: ComposeContext): BranchResult {
   const details = error.details ?? {};
   // `parameter` is a free-string field from the proposal; sanitise before
   // interpolating. constraint/actual are already sanitised.
@@ -555,6 +575,45 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
     };
   }
 
+  // ⭐ ROADMAP 2.1261 — HONEST COPY for a unit the USER NEVER STATED.
+  //
+  // `unit_redeclares_scale`'s specific_issue interpolates the PROPOSAL's unit
+  // ("…applying a value in % would change what it measures"). On the chat
+  // path that unit comes from the routing model, which re-reads conversation
+  // history — wire-witnessed (req b90d62e0, deployed c5e2430): the unit-free
+  // "Set it to 0.12." was re-proposed with the PRIOR turn's `%`, and the copy
+  // attributed that % to the user. Copy may only describe what the input
+  // actually contained, so when the caller supplied the raw message AND no
+  // token of the unit's family appears in it, say what is true of the MODEL
+  // and what is needed — without attributing a unit to the user.
+  //
+  // Fail-open by construction: no `userMessage` (system-event paths, legacy
+  // callers) or a message that DOES evidence the unit keeps the historical
+  // bytes below — including the pinned system-event wire contract.
+  if (
+    rejectionReason === 'unit_redeclares_scale' &&
+    typeof ctx.userMessage === 'string' &&
+    !messageEvidencesUnit(ctx.userMessage, readString(details.unit))
+  ) {
+    return {
+      body: {
+        assistant_text:
+          `This factor is recorded without a unit, so I need the value as a ` +
+          `plain number. I haven't changed anything. Tell me the plain number ` +
+          `you want and I'll apply it.`,
+        suggested_actions: [
+          {
+            id: chipId('prompt', 'param-retry'),
+            label: 'Try a different value',
+            message: `Use a different value for ${parameter}.`,
+          },
+        ],
+      },
+      template_id: 'parameter_invalid_unit_unstated',
+      chip_type: 'text_prompt',
+    };
+  }
+
   // General fallback (item A1): when there is no constraint description but
   // the validator supplied a user-readable issue, render the issue rather
   // than the meaningless "'value' needs to be a valid value.".
@@ -743,7 +802,7 @@ export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchCo
   ENTITY_NOT_FOUND: composeEntityNotFound,
   ENTITY_RESOLUTION_SUSPICIOUS: (e) => composeEntityResolutionSuspicious(e),
   PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),
-  PARAMETER_INVALID: (e) => composeParameterInvalid(e),
+  PARAMETER_INVALID: (e, ctx) => composeParameterInvalid(e, ctx),
   OPTION_INTERVENTION_MISROUTE: (e) => composeOptionInterventionMisroute(e),
   VALUE_UNIT_UNRESOLVED: (e) => composeValueUnitUnresolved(e),
 };

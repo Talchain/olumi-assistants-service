@@ -1159,6 +1159,22 @@ export interface DispatchEditGraphParams {
    * become the live path without a RED.
    */
   readonly requestStartMs?: number;
+  /**
+   * ⭐ ROADMAP 2.1261 — repair-leg bare-value binding. When set, THIS string
+   * (the advised-format instruction binding the user's bare value to the sole
+   * missing option×factor pair — probe P1 verbatim, with the user's value) is
+   * what the edit LLM is asked to perform, INSTEAD of `payload.message`.
+   *
+   * ⚠ SCOPE, deliberately narrow: it substitutes ONLY the instruction handed
+   * to `handleEditGraph`. `payload.message` remains the record everywhere else
+   * — the commit's `userMessage`, part-accounting decomposition, the GM
+   * protection-scope extraction, telemetry — so the persisted conversation
+   * carries the user's own bytes, never a synthesised sentence (trap 14b:
+   * rewriting the record falsifies evidence). The route sets it only after the
+   * whole-message claim anchor matched and the persisted graph derived exactly
+   * one missing pair; no other caller may pass it.
+   */
+  readonly editInstructionOverride?: string;
 }
 
 export interface DispatchEditGraphResult {
@@ -2232,7 +2248,10 @@ export async function dispatchEditGraph(
       } else {
         editResult = await handleEditGraph(
           context,
-          payload.message,
+          // ⭐ ROADMAP 2.1261 — the bind instruction substitutes ONLY here (the
+          // edit LLM's task); `payload.message` stays the record everywhere
+          // else in this dispatcher. See `editInstructionOverride`'s jsdoc.
+          params.editInstructionOverride ?? payload.message,
           adapter,
           requestId,
           payload.turn_id,
