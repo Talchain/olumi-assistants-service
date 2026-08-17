@@ -87,6 +87,7 @@ import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
+import { buildDraftOpportunityCostBlocks } from './draft-opportunity-cost-block.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -412,7 +413,49 @@ export function draftResultToOlumiResponse(
   // knowledge already exists on `coachingWideningLogObject` (the same field
   // buildPostDraftNarrative reads) — this is plumbing, not new generation, and
   // it never invents an option.
+  // Opportunity-cost visibility (draft-opportunity-cost-block): emit AT MOST ONE
+  // `exercise_kind:'opportunity_cost'` card making explicit what committing to
+  // one option costs in forgone alternatives, drawn from the persisted graph's
+  // own option nodes. Same gates, same egress, same persisted-path-only rule as
+  // the two projectors above. Statement-only by design — see that module's P8
+  // note.
   const blocksCreatedAt = new Date().toISOString();
+  // The SAME brief the drafter drafted from, so every anti-collision reconciler
+  // and the drafter can never disagree about what the brief is. NOT
+  // `payload.message` — on the clarify-v2 intake path that is the user's
+  // one-line answer (the 2.972 defect, see above).
+  const blocksBriefText = typeof effectiveBrief === 'string' ? effectiveBrief : null;
+  /**
+   * ⚠⚠ TRAP-21 PRECEDENCE, AND WHY IT LIVES HERE RATHER THAN INSIDE EITHER
+   * BUILDER. The widening card and the opportunity-cost exercise answer
+   * DIFFERENT questions about the same object:
+   *
+   *   widening          "your option set is too NARROW — here is one you set
+   *                     aside, worth a second look."        (fires at 1-3 options)
+   *   opportunity cost  "committing to one of these forgoes the others."
+   *                                                        (fires at >= 3 options)
+   *
+   * `OPTION_WIDENING_FLOOR` is 4 and DSK-TR-004's floor is 3, so they OVERLAP at
+   * exactly three options — and DSK-P-004's own step 2 ("alternatives that
+   * aren't currently in the model?") IS the widening card's job, so on that turn
+   * they would also overlap in CONTENT. Two option-set lectures on one draft
+   * turn is noise, and the widening card's is the more actionable of the two
+   * when the set is that narrow. So the widening card WINS, and this is a
+   * SUPPRESSION rather than a threshold inversion: DSK-TR-004's stated `>= 3`
+   * is left exactly as the bundle states it, and the exercise simply yields when
+   * its sibling has already spoken. Stated at the call site, where both
+   * builders are visible, instead of hidden inside one as a claim about the
+   * other that nothing would reveal.
+   */
+  const wideningBlocks = graphPersisted
+    ? buildDraftOptionWideningBlocks({
+        analysisReady: result.analysisReady ?? null,
+        wideningLog: result.coachingWideningLogObject ?? null,
+        graph: result.graphOutput,
+        briefText: blocksBriefText,
+        createdAt: blocksCreatedAt,
+      })
+    : [];
   const blocks: OlumiResponse['blocks'] = graphPersisted
     ? [
         ...buildDraftBiasSignalBlocks({
@@ -421,17 +464,15 @@ export function draftResultToOlumiResponse(
           graph: result.graphOutput,
           createdAt: blocksCreatedAt,
         }),
-        ...buildDraftOptionWideningBlocks({
-          analysisReady: result.analysisReady ?? null,
-          wideningLog: result.coachingWideningLogObject ?? null,
-          graph: result.graphOutput,
-          // The SAME brief the drafter drafted from, so the anti-collision
-          // reconciler and the drafter can never disagree about what the brief
-          // is. NOT `payload.message` — on the clarify-v2 intake path that is
-          // the user's one-line answer (the 2.972 defect, see above).
-          briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
-          createdAt: blocksCreatedAt,
-        }),
+        ...wideningBlocks,
+        ...(wideningBlocks.length === 0
+          ? buildDraftOpportunityCostBlocks({
+              analysisReady: result.analysisReady ?? null,
+              graph: result.graphOutput,
+              briefText: blocksBriefText,
+              createdAt: blocksCreatedAt,
+            })
+          : []),
       ]
     : [];
 
