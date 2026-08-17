@@ -82,6 +82,28 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // module exists to close.
   "collab/apply-verification.ts":
     "comment only — the module header naming the user_override untruth it closes; the module performs no write",
+  // ── INV-P6, the obligation authority. Reviewed 17 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // A READER, NOT A WRITER — and the distinction is the whole justification. The
+  // literal appears exactly once, as a KEY in a `Record<KnownObservedStateSource
+  // Literal, StructureProvenance>` that classifies a stamp SOMEONE ELSE already
+  // wrote. The module has no write path of any kind: it takes a graph, reads
+  // producer-written stamps, and returns a classification. It cannot cause
+  // `user_override` to appear on any value.
+  //
+  // The truth condition is satisfied in the only direction that applies to a
+  // reader: the module treats `user_override` as evidence the value is the
+  // user's, which is exactly what the writers above establish when they stamp it.
+  // If any of them ever stamped it untruthfully, this module would inherit that
+  // untruth — which is an argument for keeping THEIR entries honest, not for
+  // giving this one a write path it does not have.
+  //
+  // ⚠ And the direction of harm here is the safe one. A wrong classification can
+  // only ever WITHDRAW an obligation the product would otherwise have demanded;
+  // it cannot invent a claim about the user, and it cannot put a number on screen.
+  "cee/graph-readiness/obligation-provenance.ts":
+    "reader only — classifies the stamp as user_stated for the INV-P6 obligation rule; the literal is a lookup key, the module has no write path",
 };
 
 /**

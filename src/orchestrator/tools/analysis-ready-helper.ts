@@ -28,6 +28,15 @@ import { stableStringify } from "../context/stable-stringify.js";
 // discriminator is `origin` and not `provenance.source` (measured: the V3
 // transform coerces `"synthetic"` to `"cee_hypothesis"`).
 import { isRepairAuthoredOrigin } from "../../graph/repair-authored-edge.js";
+// ⭐ INV-P6 — the SOLE derivation of "may this gap be demanded of the user?".
+// Type-only for the vocabulary, value import for the classifier; the classifier
+// module imports `CanonicalReadinessIssue` back as a TYPE, so there is no runtime
+// cycle (`import type` is erased).
+import {
+  classifyIssueObligation,
+  type ObligationClass,
+  type StructureProvenance,
+} from "../../cee/graph-readiness/obligation-provenance.js";
 
 // ============================================================================
 // Types
@@ -66,6 +75,36 @@ export interface CanonicalReadinessIssue {
   readonly option_label?: string;
   readonly factor_id?: string;
   readonly factor_label?: string;
+  /**
+   * Who authored the structure this issue is raised over
+   * (`graph-readiness/obligation-provenance.ts` is the sole derivation).
+   *
+   * Additive and always populated by `assessCanonicalAnalysisReadiness`. Rides
+   * `readiness_issues[]`, `analysisReady.readiness_issues[]` and the route body,
+   * so every surface can tell the product's own contributions from the user's
+   * without deriving a second opinion.
+   */
+  readonly provenance?: StructureProvenance;
+  /**
+   * Whether this gap may be put to the user as a DEMAND (`required`) or only as
+   * an OFFER (`offered`) — INV-P6.
+   *
+   * ⚠ THE FIELD IS THE POINT. Before it, every blocker was rendered as a demand
+   * because nothing distinguished them, so the product asked the user to supply
+   * effect values for links, options and factors it had invented itself. A
+   * surface that cannot see this field cannot avoid that.
+   */
+  readonly obligation?: ObligationClass;
+  /**
+   * True when the run will proceed by EXCLUDING or HOLDING the option this issue
+   * names — i.e. the exclusion answers it, not the user.
+   *
+   * Stamped by `resolveRunAdmission`, not by the assessor: only the admission
+   * knows the exclusion plan. An offer that is made while this is true must say
+   * so out loud ("Run analysis — I'll leave out Option B"), which is the whole
+   * reason it is carried per-blocker rather than as one response-level boolean.
+   */
+  readonly waived_by_exclusion?: boolean;
 }
 
 export interface CanonicalReadinessRepairChange {
@@ -82,6 +121,24 @@ export interface CanonicalReadinessRequiredInput {
   readonly prompt: string;
   readonly option_id?: string;
   readonly factor_id?: string;
+  /**
+   * `required` = this may be put to the user as a question. `offered` = the gap is
+   * over structure OLUMI authored, so the product may offer to work it through but
+   * may never demand it (INV-P6).
+   *
+   * ⚠ THE ARRAY IS STILL COMPLETE — this is a MARK, not a filter. The name
+   * `unresolved_inputs` predates the distinction; an `offered` entry is an
+   * unresolved input Olumi owes itself, not one the user owes Olumi.
+   *
+   * ⭐ THE CONSUMER CHANGE THIS ENABLES, AND IT IS NOT IN THIS MODULE: the surface
+   * that COMPOSES the question must ask only for `required` entries. Until it
+   * reads this field, the marking is carried and unread — deliberately, because
+   * this module is the authority on whose gap it is and not on what is said to the
+   * user, and because a second lane owns the repair-ask composition seam.
+   */
+  readonly obligation?: ObligationClass;
+  /** Who authored the structure this input is over. */
+  readonly provenance?: StructureProvenance;
 }
 
 /**
@@ -654,6 +711,28 @@ export function blockerIssue(
   }
 }
 
+/**
+ * Stamp `provenance` + `obligation` onto every issue in an array, in place.
+ *
+ * ⚠ IN PLACE, ON PURPOSE. These arrays are already referenced by
+ * `blockingIssues`, `allIssues` and (through `allIssues`) by
+ * `analysisReady.readiness_issues[]`. Returning a new array would leave three
+ * readers holding unstamped copies — the objects are shared, so a partial stamp
+ * is worse than none: a surface reading `obligation === undefined` would treat an
+ * `offered` gap as a demand and the defect would look fixed in the tests that
+ * happen to read the stamped array.
+ */
+function stampObligationsInPlace(issues: CanonicalReadinessIssue[], graph: unknown): void {
+  for (let i = 0; i < issues.length; i += 1) {
+    const decision = classifyIssueObligation(issues[i], graph);
+    issues[i] = {
+      ...issues[i],
+      provenance: decision.provenance,
+      obligation: decision.obligation,
+    };
+  }
+}
+
 function requiredInputForIssue(
   issue: CanonicalReadinessIssue,
 ): CanonicalReadinessRequiredInput | null {
@@ -676,6 +755,9 @@ function requiredInputForIssue(
     prompt: issue.message,
     ...(issue.option_id ? { option_id: issue.option_id } : {}),
     ...(issue.factor_id ? { factor_id: issue.factor_id } : {}),
+    // Carried from the issue, never re-derived: one authority, one answer.
+    ...(issue.obligation ? { obligation: issue.obligation } : {}),
+    ...(issue.provenance ? { provenance: issue.provenance } : {}),
   };
 }
 
@@ -980,6 +1062,18 @@ export function assessCanonicalAnalysisReadiness(
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
     appendSemanticIssues(semantic, blockingIssues);
 
+    // ⭐ INV-P6 — stamp provenance + obligation on EVERY issue, at the one point
+    // where the complete issue set exists.
+    //
+    // In place, and against the CALLER'S graph rather than `proposalGraph`: the
+    // canonicalisation may promote a carrier, but provenance is a fact about what
+    // the user gave us, so it is read from the model as it arrived. Stamping here
+    // rather than at each mint site is deliberate — four separate mints feed these
+    // arrays (carrier, numeric, structural, semantic), and a per-mint stamp is
+    // exactly the hand-maintained mirror that goes stale when a fifth is added.
+    stampObligationsInPlace(carrierIssues, graph);
+    stampObligationsInPlace(blockingIssues, graph);
+
     const allIssues = [...carrierIssues, ...blockingIssues];
     const proposal: CanonicalReadinessRepairProposal | null =
       blockingIssues.length >= 2
@@ -988,6 +1082,23 @@ export function assessCanonicalAnalysisReadiness(
             complete: true,
             issue_ids: allIssues.map((issue) => issue.issue_id),
             changes,
+            // ⭐ EVERY input is still listed, and each one now says WHETHER IT MAY
+            // BE DEMANDED.
+            //
+            // ⚠ MY FIRST VERSION FILTERED `offered` INPUTS OUT HERE, AND TWO
+            // EXISTING TESTS WERE RIGHT TO GO RED. `unresolved_inputs.length ===
+            // blockingIssues.length` is the machine-checkable form of this
+            // proposal's `complete: true` claim, and dropping entries while keeping
+            // that flag would have replaced a truthful invariant with a weaker one
+            // — a more "complete-looking" payload that is less true than the thing
+            // it replaced.
+            //
+            // Marking, not filtering, is also the right SEAM: this module is the
+            // authority on WHOSE gap it is; the surface that composes the question
+            // decides what to put to the user. Filtering here would have made this
+            // module hold an opinion about presentation, and would have silently
+            // removed the offered gap from a payload whose whole purpose is to be a
+            // complete record.
             unresolved_inputs: blockingIssues
               .map(requiredInputForIssue)
               .filter((input): input is CanonicalReadinessRequiredInput => input !== null),

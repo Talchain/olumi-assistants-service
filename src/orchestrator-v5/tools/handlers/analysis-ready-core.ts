@@ -352,6 +352,23 @@ const WAIVABLE_BY_EXCLUSION: ReadonlySet<string> = new Set<string>([
   'OPTION_NEEDS_MAPPING',
 ]);
 
+/**
+ * Mark one blocker as answered by the exclusion rather than by the user.
+ *
+ * ⚠ Scoped to the blockers the exclusion GENUINELY answers, not to every blocker
+ * on an admitted graph. A structural blocker on a graph admitted by exclusion is
+ * still the user's to fix, and stamping it waived would make the offer copy lie
+ * about which options are being dropped.
+ */
+function stampWaiver(
+  issue: CanonicalReadinessIssue,
+  touchedOptionIds: ReadonlySet<string>,
+): CanonicalReadinessIssue {
+  return isWaivableByExclusion(issue, touchedOptionIds)
+    ? { ...issue, waived_by_exclusion: true }
+    : issue;
+}
+
 /** A blocker the exclusion can answer: nothing-is-set, and on a touched option. */
 function isWaivableByExclusion(
   issue: CanonicalReadinessIssue,
@@ -464,7 +481,7 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     if (!plan.will_scaffold_options) {
       return { strict, assessment, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
     }
-    const touched = new Set(plan.scaffolded_option_ids);
+    const touched = new Set<string>(plan.scaffolded_option_ids);
     const blockers = assessment.blockingIssues;
     // EVERY blocker must be answered by the exclusion. One that is not means the
     // run would fail after admission — the drift in the other direction, which
@@ -475,9 +492,26 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     if (blockers.length === 0 || !blockers.every((i) => isWaivableByExclusion(i, touched))) {
       return { strict, assessment, plan, willProceed: false, waivedOptionIds: [], canonicalGraph };
     }
+    // ⭐ MOVE 1 — THE UNIT OF THE FIX IS THE BLOCKER, NOT A NEW BOOLEAN.
+    //
+    // The run is about to proceed by excluding or holding the options these
+    // blockers name. Stamp that ON EACH BLOCKER so the offer can say it out loud
+    // ("Run analysis — I'll leave out Option B and Option C") instead of a panel
+    // rendering an unqualified refusal beside an enabled Run button. That
+    // simultaneous offer-and-refuse is the founder-witnessed screenshot, and no
+    // response-level boolean can express it: in that state the offer is TRUE and
+    // the blockers are TRUE, and the harm is that neither is qualified.
+    //
+    // Stamped here rather than in the assessor because only the ADMISSION knows
+    // the exclusion plan — the assessor is deliberately ignorant of it.
+    const waivedAssessment: typeof assessment = {
+      ...assessment,
+      issues: assessment.issues.map((issue) => stampWaiver(issue, touched)),
+      blockingIssues: blockers.map((issue) => stampWaiver(issue, touched)),
+    };
     return {
       strict,
-      assessment,
+      assessment: waivedAssessment,
       plan,
       willProceed: true,
       waivedOptionIds: [...touched],

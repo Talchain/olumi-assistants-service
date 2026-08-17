@@ -71,6 +71,7 @@
 
 import type { CanonicalReadinessIssue } from "../../orchestrator/tools/analysis-ready-helper.js";
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+import type { ObligationClass, StructureProvenance } from "./obligation-provenance.js";
 
 /** Default parametric uncertainty. Must be > 0 to satisfy `EdgeStrengthV3`. */
 const SYNTHETIC_STRENGTH_STD = 0.1;
@@ -144,6 +145,20 @@ export interface RouteReadinessBlocker {
   readonly option_label?: string;
   readonly factor_id?: string;
   readonly factor_label?: string;
+  /** Who authored the structure this blocker is over. See `obligation-provenance.ts`. */
+  readonly provenance?: StructureProvenance;
+  /**
+   * `required` = the user must answer. `offered` = the SYSTEM authored this
+   * structure, so it may be shown and offered for confirmation but never demanded
+   * (INV-P6).
+   *
+   * ⚠ A PANEL THAT IGNORES THIS FIELD REPRODUCES THE DEFECT. Rendering every
+   * entry of `readiness_issues[]` as a demand is what asked the user to supply
+   * effect values for links the product invented.
+   */
+  readonly obligation?: ObligationClass;
+  /** True when the run will proceed by excluding/holding the option this names. */
+  readonly waived_by_exclusion?: boolean;
 }
 
 export interface RouteReadinessCritique {
@@ -171,11 +186,41 @@ export interface RouteReadinessCritique {
 export interface RouteScaffoldPlan {
   readonly will_scaffold_options: boolean;
   readonly option_count?: number;
+  /**
+   * The option ids the run will leave out, BY NAME, so the offer can disclose
+   * them inline rather than the panel enabling a Run whose consequence is
+   * invisible until after it happens.
+   */
+  readonly excluded_option_ids?: readonly string[];
 }
+
+/**
+ * THE admission answer, three-valued.
+ *
+ * ⚠ `unknown` IS NOT DECORATION AND `may_run === true` IS THE WRONG GATE.
+ * `canRunAnalysis.ts:246-253` records as an explicit decision (I-2, ROADMAP
+ * 2.332) that a MISSING verdict means UNKNOWN and must NOT object: the gate stays
+ * OPEN and the outage is disclosed, because failing closed would brick the Run
+ * button for a healthy user whose only problem is that a side-car service is
+ * down — the shut dead end POC-DONE PC1 forbids. A consumer writing
+ * `gate = may_run === true` re-introduces exactly that.
+ *
+ * The honest consumer shape is `gate = may_run !== false`.
+ */
+export type MayRun = true | false | 'unknown';
 
 /** The route's admission verdict — derived wholly from the canonical assessment. */
 export interface RouteAdmissionVerdict {
   readonly can_run_analysis: boolean;
+  /**
+   * THE single field a gate should read. `can_run_analysis` answers the STRICTER
+   * question "is this model ready as it stands?", which is why the deployed UI has
+   * to OR it with `scaffold_plan.will_scaffold_options` to avoid blocking a graph
+   * the run would happily analyse. `may_run` is that composition, computed once,
+   * server-side, from the run path's own predicate — so the panel no longer has to
+   * reconstruct the admission rule and cannot get it wrong.
+   */
+  readonly may_run: MayRun;
   readonly blocker_reason?: string;
   readonly readiness_issues: RouteReadinessBlocker[];
   readonly issues: string[];
@@ -196,6 +241,11 @@ function toBlocker(issue: CanonicalReadinessIssue): RouteReadinessBlocker {
     ...(issue.option_label ? { option_label: issue.option_label } : {}),
     ...(issue.factor_id ? { factor_id: issue.factor_id } : {}),
     ...(issue.factor_label ? { factor_label: issue.factor_label } : {}),
+    // Carried, never re-derived. The route holds no second opinion about who
+    // authored a piece of the model or about whether it may be demanded.
+    ...(issue.provenance ? { provenance: issue.provenance } : {}),
+    ...(issue.obligation ? { obligation: issue.obligation } : {}),
+    ...(issue.waived_by_exclusion ? { waived_by_exclusion: true } : {}),
   };
 }
 
@@ -290,7 +340,6 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
     | undefined;
 
   const options = payload?.options ?? [];
-  const optionsTotal = options.length;
   const optionsReady = options.filter((option) => option.status === "ready").length;
 
   const goalNodeId = payload?.goal_node_id ?? "";
@@ -298,7 +347,30 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
   const goalNodeValid =
     goalNodeId.length > 0 && nodes.some((node) => asRecord(node)?.id === goalNodeId);
 
+  // ⭐ D4 — `0 of 0 options` ON A MODEL CARRYING FOUR OPTIONS.
+  //
+  // The semantic projection collapses to an EMPTY blocked payload when the graph
+  // has no goal, so `payload.options` is `[]` and the route reported
+  // `options_total: 0` for a graph the user can plainly see four options in. The
+  // denominator is a fact about the MODEL, not about whether the model is
+  // analysable, so it falls back to the option NODES.
+  //
+  // ⚠ It is a FLOOR, not a replacement: `Math.max` keeps the canonical count when
+  // the projection succeeded (top-level canonical `options[]` may legitimately
+  // carry entries with no matching node, and taking the node count there would
+  // shrink a correct denominator). The numerator is untouched — an option with no
+  // status is not ready, and inflating `options_ready` would be the inverse
+  // defect.
+  const optionNodeCount = nodes.filter((node) => asRecord(node)?.kind === "option").length;
+  const optionsTotal = Math.max(options.length, optionNodeCount);
+
   const readinessIssues = assessment.blockingIssues.map(toBlocker);
+  // The offer is honest only if the headline speaks for something the user can
+  // actually act on. A blocker the exclusion answers, or one over structure the
+  // system authored, must not become the sentence that says "you cannot run this".
+  const headlineBlocker = readinessIssues.find(
+    (issue) => issue.obligation !== "offered" && issue.waived_by_exclusion !== true,
+  );
 
   // Scaffold projection — now the RUN PATH'S OWN ADMISSION OBJECT, not a
   // parallel computation of it.
@@ -319,9 +391,35 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
 
   return {
     can_run_analysis: assessment.safeToAnalyse,
+    // ONE answer, from the run path's own predicate. Never `'unknown'` here: this
+    // function HAS an assessment in hand, and `resolveRunAdmission` is total, so a
+    // verdict always exists. `'unknown'` is reserved for the transport case — a
+    // caller that could not reach this route at all — and is declared on
+    // {@link MayRun} so a consumer's gate is written for it from the start rather
+    // than retrofitted the first time the service is down.
+    may_run: admission.willProceed,
     ...(assessment.safeToAnalyse
       ? {}
-      : { blocker_reason: readinessIssues[0]?.message ?? "This model is not ready to analyse." }),
+      : {
+          // ⭐ THE HEADLINE MAY NEVER QUOTE A DEMAND THE USER DOES NOT OWE.
+          //
+          // It used to be `readiness_issues[0].message` unconditionally, so when
+          // every blocker was over structure Olumi had authored, the panel's
+          // headline was one of Olumi's own asks presented as the user's obstacle —
+          // and, under the deployed `can_run_analysis || will_scaffold_options`
+          // gate, presented UNDER AN ENABLED RUN BUTTON. That is the
+          // offer-and-refuse screenshot in one field.
+          //
+          // Three cases, and the third is the one that was missing: refuse
+          // honestly WITHOUT demanding. A refusal is still correct when the run
+          // genuinely will not proceed; what it must not do is hand the user a
+          // task list of the product's own inventions.
+          blocker_reason:
+            headlineBlocker?.message ??
+            (admission.willProceed
+              ? "This model can be analysed now. Some values are Olumi's suggestions — review them whenever you like."
+              : "This model can't be analysed yet. The values involved are Olumi's own suggestions, not yours — ask Olumi to work them through, or set them yourself."),
+        }),
     readiness_issues: readinessIssues,
     issues: readinessIssues.map((issue) => issue.message),
     options_ready: optionsReady,
@@ -337,7 +435,15 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
       // panel may only offer when both hold.
       will_scaffold_options: admission.plan.will_scaffold_options && admission.willProceed,
       ...(admission.plan.will_scaffold_options && admission.willProceed
-        ? { option_count: admission.plan.option_count }
+        ? {
+            option_count: admission.plan.option_count,
+            // Named, so the offer can disclose its own consequence. An offer whose
+            // effect is invisible until after the click is the same defect as a
+            // refusal with no reason.
+            ...(admission.waivedOptionIds.length > 0
+              ? { excluded_option_ids: [...admission.waivedOptionIds] }
+              : {}),
+          }
         : {}),
     },
   };

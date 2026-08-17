@@ -280,10 +280,18 @@ describe('multi-blocker repair proposal', () => {
     const proposal = assessCanonicalAnalysisReadiness(graph).repairProposal!;
     const reordered = {
       unresolved_inputs: proposal.unresolved_inputs.map((input) => ({
+        // ⚠ THIS LITERAL IS A HAND-MAINTAINED MIRROR OF THE INPUT SHAPE, and it
+        // went stale the moment `obligation`/`provenance` were added: the parser
+        // reconstructed fields this reordering dropped, so exact proposal equality
+        // failed and a healthy resume read `invalid`. The test's intent is
+        // "reordering must not break equality" — every field therefore has to be
+        // carried, in a deliberately different order.
+        ...(input.provenance ? { provenance: input.provenance } : {}),
         prompt: input.prompt,
         kind: input.kind,
         issue_id: input.issue_id,
         ...(input.factor_id ? { factor_id: input.factor_id } : {}),
+        ...(input.obligation ? { obligation: input.obligation } : {}),
         ...(input.option_id ? { option_id: input.option_id } : {}),
       })),
       changes: proposal.changes.map((change) => ({
