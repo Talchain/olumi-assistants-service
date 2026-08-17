@@ -176,7 +176,7 @@ echo
 # job, and it is evidence the guard has teeth rather than being decoration.
 # Reformulated to be type-IDENTICAL and false only at RUNTIME.
 run_mutant "A1 collapse-never-fires" "$PROJ" \
-  "collapses byte-identical stated goals" \
+  "single, connected node" \
   's/kind === "goal" && usedIds\.has\(statedBaseId\)/kind === "goal" \&\& usedIds.has(statedBaseId + "-never-matches")/'
 
 run_mutant "A2 collapse-ignores-the-quote" "$PROJ" \

@@ -257,7 +257,7 @@ describe("one objective stated twice is one goal node", () => {
     };
   }
 
-  it("collapses byte-identical stated goals to a single, connected node", () => {
+  it("collapses stated goals with the same canonical quote into a single, connected node", () => {
     const { graph } = projectRecordsToGraph(recordsWithTheGoalStatedTwice(), BRIEF);
     const goals = graph.nodes.filter((n) => n.kind === "goal");
 
