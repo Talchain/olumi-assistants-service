@@ -2,6 +2,7 @@ import type { components } from "../../generated/openapi.d.ts";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { matchesStatusQuoLabel } from "./status-quo-patterns.js";
+import { buildCompoundGoalLabel } from "./compound-goal-label.js";
 import { createValidationIssue } from "../validation/classifier.js";
 
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
@@ -317,16 +318,43 @@ export function enforceSingleGoal(
   const labels = goalNodes
     .map((g) => (g as any)?.label)
     .filter((l) => typeof l === "string" && l.length > 0);
-  const compoundLabel = labels.length > 1
-    ? `Compound Goal: ${labels.join(" + ")}`
-    : labels[0] || "Compound Goal";
+  // ⭐ THE LABEL IS NO LONGER A STRING JOIN BEHIND A REPAIR-ANNOUNCING PREFIX.
+  // `Compound Goal: A + B` told the user about an internal merge and read as
+  // machine output. `buildCompoundGoalLabel` picks a concise faithful label from
+  // the user's OWN objectives, keeps every verbatim original as provenance, and
+  // declines to shorten where that would drop a figure (the conservation rule).
+  // It does NOT paraphrase — authored restatement needs the served prompt, which
+  // is not in this repo — and it does not change WHICH goals merge.
+  const composed = buildCompoundGoalLabel(labels);
+
+  // Everything the merged-away goals carried, preserved rather than filtered
+  // away with them. The quality bar's HARD rule is that no repair may discard a
+  // `goal_threshold` quad; before this, the `.filter` below dropped the whole
+  // node and the quad went with it.
+  const mergedGoalRecords = nodes
+    .filter((node) => otherGoalIds.has((node as any)?.id))
+    .map((node) => {
+      const n = node as any;
+      return {
+        id: n.id,
+        label: n.label,
+        ...(n.goal_threshold !== undefined && { goal_threshold: n.goal_threshold }),
+        ...(n.goal_constraints !== undefined && { goal_constraints: n.goal_constraints }),
+        ...(n.provenance !== undefined && { provenance: n.provenance }),
+      };
+    });
 
   // Create updated nodes array
   const updatedNodes = nodes.map((node) => {
     if ((node as any)?.id === primaryId) {
       return {
         ...(node as any),
-        label: compoundLabel,
+        label: composed.label,
+        ...(composed.merged_from !== undefined && { merged_from: composed.merged_from }),
+        ...(composed.label_extended_for_conservation === true && {
+          label_extended_for_conservation: true,
+        }),
+        ...(mergedGoalRecords.length > 0 && { merged_goals: mergedGoalRecords }),
       };
     }
     return node;
