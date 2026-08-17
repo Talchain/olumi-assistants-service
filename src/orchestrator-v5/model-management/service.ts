@@ -230,6 +230,23 @@ export class ModelManagementService {
   }
 
   /**
+   * The current-version POINTER, id only — the light read the list surface
+   * needs to mark "current" without shipping the head's full graph (which
+   * `getCurrentVersion` does, by design, for consumers that want the record).
+   * `ok` with `null` = no versions yet.
+   */
+  async getCurrentVersionPointer(
+    scenarioId: string,
+  ): Promise<ModelManagementResult<string | null>> {
+    if (!this.isEnabled()) return { status: 'disabled' };
+    try {
+      return { status: 'ok', value: await this.store.getCurrentVersionId(scenarioId) };
+    } catch (err) {
+      return mapThrownError(err);
+    }
+  }
+
+  /**
    * Compare two persisted versions (direction: `from` → `to`), CEE-side:
    * identity-hash short-circuit, else analysis-affecting equivalence + a
    * compact structural diff summary (compare.ts).

@@ -28,6 +28,7 @@ import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-
 import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
 import ceeScenarioGraphRouteV1 from "./routes/assist.v1.scenario-graph.js";
 import ceeScenarioGraphRegisterRouteV1 from "./routes/assist.v1.scenario-graph-register.js";
+import ceeScenarioVersionsRouteV1 from "./routes/assist.v1.scenario-versions.js";
 import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
 import collabRoundsRouteV1 from "./routes/collab.v1.rounds.js";
 import collabPacketRouteV1 from "./routes/collab.v1.packet.js";
@@ -1162,6 +1163,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeGraphReadinessRouteV1(app);
   await ceeScenarioGraphRouteV1(app);
   await ceeScenarioGraphRegisterRouteV1(app);
+  // Model Management v1 wiring slice — versions list/save/restore. Registered
+  // UNCONDITIONALLY (no dark launches); the service itself still honours
+  // CEE_MODEL_VERSIONS_ENABLED, whose default is now ON (config/index.ts).
+  await ceeScenarioVersionsRouteV1(app);
   await ceeElicitBeliefRouteV1(app);
   // COLLAB U-S0 (ROADMAP 2.686/2.909/2.910) — blind elicitation rounds.
   // Registered UNCONDITIONALLY (no dark launches, no new env gate).

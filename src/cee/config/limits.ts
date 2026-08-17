@@ -80,7 +80,21 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   // tier. Its bucket is keyed on the CLIENT, not the key id; see the route.
   CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM: "read",
 
+  // Scenario-addressed VERSIONS list (Model Management wiring slice): two
+  // indexed Supabase reads (summaries + head pointer), no LLM, no writes —
+  // the same cost shape as the scenario-graph read, so the same tier. Its
+  // bucket is keyed on the CLIENT, not the key id; see the route.
+  CEE_SCENARIO_VERSIONS_RATE_LIMIT_RPM: "read",
+
   // --- coach: the whole-graph WRITE seam ---
+  // Scenario-addressed VERSION WRITES (save + restore, Model Management
+  // wiring slice): restore replaces `scenarios.graph` through the same atomic
+  // append the registration route uses, so it takes the registration route's
+  // posture — deliberately NOT `read`, because `read` fails OPEN on limiter
+  // error and a whole-graph replacement must not be waved through when the
+  // limiter is blind. `coach` fails CLOSED. Bucket keyed on the CLIENT.
+  CEE_SCENARIO_VERSIONS_WRITE_RATE_LIMIT_RPM: "coach",
+
   // Scenario-addressed graph REGISTRATION (ROADMAP 2.467): one ownership
   // pre-flight, one base read, one atomic RPC that replaces `scenarios.graph`.
   // No LLM — but deliberately NOT the `read` tier, because `read` fails OPEN on
