@@ -74,6 +74,7 @@ import {
   projectRecordsToGraph,
   isSalvageableRecordSet,
   enumerateCompletionAsk,
+  modelAnswerableAskItems,
   countBlockingAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
@@ -2006,12 +2007,23 @@ export async function draftGraphWithAnthropic(
     let activeRecords = seam.records;
     let activeProjection = seam.projection;
     const completionAsk = enumerateCompletionAsk(seam.records, seam.projection);
+    // ⭐ THE GATE COUNTS ANSWERABLE ITEMS, NOT ALL ITEMS. `no_goal` is raised and
+    // recorded but has no legal response in the completion grammar (see
+    // `isModelAnswerableAskItem`), so a draft whose only complaint is that it has
+    // no goal must buy NO provider call — a turn spent on an unanswerable
+    // instruction returns nothing and can only be refused.
+    //
+    // BOTH counts are reported: `ask_items` stays the full tally so a goal-less
+    // draft never reads as unblocked, and `model_answerable_ask_items` explains
+    // why a turn was or was not attempted. One number could not say both.
+    const answerableAskItems = modelAnswerableAskItems(completionAsk);
     const completionMeta: Record<string, unknown> = {
       attempted: false,
       ask_items: completionAsk.items.length,
+      model_answerable_ask_items: answerableAskItems.length,
       base_claim_index: completionAsk.baseClaimIndex,
     };
-    if (completionAsk.items.length > 0) {
+    if (answerableAskItems.length > 0) {
       completionMeta.attempted = true;
       const completionStartedAt = Date.now();
       const ac = new AbortController();
