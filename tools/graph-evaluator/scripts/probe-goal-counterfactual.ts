@@ -156,7 +156,18 @@ async function main(): Promise<void> {
         { brief },
       );
       const r = p.assess(canonical);
-      return { ready: r.safeToAnalyse, n: r.blockingIssues.length };
+      // ⭐ CODES, not just a count. A count cannot say WHICH blocker a change
+      // revealed or introduced, and both questions matter here: brief 05's
+      // post-injection findings are CONNECTIVITY, brief 10's are OPTION-VALUE, and
+      // a bare "1 → 4" reads as one phenomenon when it is two. It also exposes
+      // class changes that a net count MASKS — brief 08 loses two mapping codes
+      // and gains `NO_PATH_TO_GOAL` across the sweep while its total merely falls.
+      const codes: Record<string, number> = {};
+      for (const i of r.blockingIssues) {
+        const k = String(i.code ?? "UNKNOWN");
+        codes[k] = (codes[k] ?? 0) + 1;
+      }
+      return { ready: r.safeToAnalyse, n: r.blockingIssues.length, codes };
     };
 
     const base = score(await sweptOnce());
@@ -183,16 +194,28 @@ async function main(): Promise<void> {
       `${JSON.stringify(arms, null, 2)}\n\n`,
   );
   process.stdout.write(
-    `${"brief".padEnd(28)} ${"post".padEnd(6)} ${"+merge".padEnd(8)} ${"+goal".padEnd(8)} ${"+both"}\n`,
+    `${"brief".padEnd(28)} ${"post".padEnd(6)} ${"+merge".padEnd(8)} ${"+goal".padEnd(8)} ${"+both".padEnd(8)} codes after goal injection\n`,
   );
+  const f = (x: unknown) => {
+    const v = x as { ready: boolean; n: number };
+    return `${v.ready ? "RDY" : "—"}/${v.n}`;
+  };
   for (const r of perBrief) {
-    const f = (x: unknown) => {
-      const v = x as { ready: boolean; n: number };
-      return `${v.ready ? "RDY" : "—"}/${v.n}`;
-    };
+    const inj = r.plus_goal_injection as { codes: Record<string, number> };
+    const codes = Object.entries(inj.codes)
+      .map(([k, v]) => (v > 1 ? `${k}x${v}` : k))
+      .join(", ");
     process.stdout.write(
-      `${String(r.brief_id).padEnd(28)} ${f(r.post_sweep).padEnd(6)} ${f(r.plus_goal_merge).padEnd(8)} ${f(r.plus_goal_injection).padEnd(8)} ${f(r.plus_both)}\n`,
+      `${String(r.brief_id).padEnd(28)} ${f(r.post_sweep).padEnd(6)} ${f(r.plus_goal_merge).padEnd(8)} ${f(r.plus_goal_injection).padEnd(8)} ${f(r.plus_both).padEnd(8)} ${codes}\n`,
     );
+  }
+  process.stdout.write(`\nCLASS CHANGE ACROSS THE SWEEP (post-sweep codes, for masking attribution)\n`);
+  for (const r of perBrief) {
+    const base = r.post_sweep as { codes: Record<string, number> };
+    const codes = Object.entries(base.codes)
+      .map(([k, v]) => (v > 1 ? `${k}x${v}` : k))
+      .join(", ");
+    process.stdout.write(`${String(r.brief_id).padEnd(28)} ${codes}\n`);
   }
 }
 

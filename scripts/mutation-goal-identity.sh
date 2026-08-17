@@ -10,6 +10,17 @@
 #
 # Run:  bash scripts/mutation-goal-identity.sh
 #
+# ⏱ EXPECT ~10-15 MINUTES. Guard 2 runs a full `tsc -p tsconfig.build.json` per
+# mutant (12 of them), which is the dominant cost and is deliberate: typechecking
+# only the mutated FILE would miss the cross-file errors that are exactly how a
+# mutation stops being a legal program. Slow evidence beats fast theatre. Run it in
+# the foreground and let it finish — 0% CPU is not a hang (trap 6).
+#
+# ⚠ Do NOT clear a runaway from this script with `pkill -f tsc` or `pkill -f vitest`:
+# several lanes run concurrently in this estate and a pattern kill takes out their
+# runs too, which they cannot distinguish from their own failure (trap 9e). Kill by
+# the PID you own.
+#
 # ── THE TWO GUARDS THAT MAKE A SURVIVOR MEAN SOMETHING ─────────────────────────
 # An "equivalent mutant" and a mutant that never ran are indistinguishable from
 # the exit code alone (trap 22d — a FALSE SURVIVOR). This harness closes BOTH
@@ -69,6 +80,26 @@ after="$(shasum -a 256 "$REPO/$PROJ" | cut -d' ' -f1)"
 echo "  ISOLATED: source hash unchanged after writing into the worktree"
 git -C "$WT" checkout "$SHA" -- "$PROJ"; git -C "$WT" reset -q
 ln -s "$REPO/node_modules" "$WT/node_modules" 2>/dev/null
+
+# ⚠ THE WORKTREE IS NOT A BUILD ENVIRONMENT UNTIL THE GENERATED TYPES EXIST.
+# `src/generated/openapi.d.ts` is produced by `pretypecheck`, is gitignored, and is
+# therefore ABSENT from a fresh worktree — so a naive typecheck guard fails on
+# every mutant for a reason that has nothing to do with the mutation. Caught by the
+# guard's own baseline control below, which is the point of having one: a wrong
+# baseline in the instrument that verifies your instrument is the worst place for
+# one (trap 12e).
+echo "=== generating the openapi types the typecheck guard depends on ==="
+(cd "$WT" && npx openapi-typescript openapi.yaml -o src/generated/openapi.d.ts >/dev/null 2>&1) \
+  || { echo "  openapi:generate failed in the worktree — ABORT"; exit 1; }
+
+echo "=== BASELINE CONTROL: the PRISTINE worktree must typecheck clean ==="
+if ! (cd "$WT" && npx tsc -p tsconfig.build.json --noEmit >/tmp/mut-base.$$ 2>&1); then
+  echo "  !! pristine worktree does not typecheck — the typecheck guard would fail every"
+  echo "     mutant for an environmental reason and report 12 HARNESS ERRORs. ABORT."
+  tail -5 /tmp/mut-base.$$ | sed 's/^/     /'; rm -f /tmp/mut-base.$$; exit 1
+fi
+rm -f /tmp/mut-base.$$
+echo "  pristine typechecks clean — a later typecheck failure is attributable to the mutation"
 
 restore() {
   git -C "$WT" checkout "$SHA" -- "$PROJ" "$COMP"
@@ -136,9 +167,17 @@ echo "$ctl" | grep -qE "Tests +${EXPECTED_TESTS} passed \(${EXPECTED_TESTS}\)" \
 echo
 
 # ── Fix A: duplicate stated-goal collapse ────────────────────────────────────
+# ⚠ A1 AND A5 ARE DELIBERATELY FORMULATED WITHOUT `&& false`, and the reason is a
+# POSITIVE CONTROL FOR GUARD 2 rather than a style note. Both were first written
+# that way; TypeScript then treats the block as unreachable and STOPS NARROWING
+# inside it, so `survivor !== undefined && ... survivor.goal_threshold_unit` no
+# longer compiled and BOTH mutants were rejected by the typecheck guard with
+# `TS18048: 'survivor' is possibly 'undefined'`. That is the guard doing exactly its
+# job, and it is evidence the guard has teeth rather than being decoration.
+# Reformulated to be type-IDENTICAL and false only at RUNTIME.
 run_mutant "A1 collapse-never-fires" "$PROJ" \
   "collapses byte-identical stated goals" \
-  's/kind === "goal" && usedIds\.has\(statedBaseId\)/kind === "goal" \&\& false/'
+  's/kind === "goal" && usedIds\.has\(statedBaseId\)/kind === "goal" \&\& usedIds.has(statedBaseId + "-never-matches")/'
 
 run_mutant "A2 collapse-ignores-the-quote" "$PROJ" \
   "keeps TWO goal nodes when the user stated two DIFFERENT objectives" \
@@ -152,9 +191,9 @@ run_mutant "A4 collapse-drops-the-stated-TARGET" "$PROJ" \
   "carries the target onto the survivor" \
   's/        if \(survivorTarget === undefined && duplicateStatesATarget\) \{\n          applyStatedGoalTarget\(survivor, item\.value as number, item\.unit\);\n        \}//'
 
-run_mutant "A5 collapse-overwrites-an-existing-target" "$PROJ" \
+run_mutant "A5 disagreement-check-disabled" "$PROJ" \
   "refuses to collapse when the two copies state DIFFERENT targets" \
-  's/      const disagrees =\n        survivor !== undefined/      const disagrees =\n        false \&\& survivor !== undefined/'
+  's/        && \(survivorTarget !== item\.value/        \&\& (survivorTarget === item.value/'
 
 # ── Fix B: the no_goal ask, raised but not put to the model ──────────────────
 run_mutant "B1 ask-never-fires" "$COMP" \
@@ -177,9 +216,17 @@ run_mutant "B5 unanswerable-item-IS-put-to-the-model" "$COMP" \
   "omits it from the prompt the model is shown" \
   's/  const problems = modelAnswerableAskItems\(ask\)/  const problems = ask.items/'
 
-run_mutant "B6 answerable-items-are-ALSO-withheld" "$COMP" \
+# ⚠ B6's FIRST FORMULATION WAS AN EQUIVALENT MUTANT, AND THAT IS DEMONSTRATED
+# RATHER THAN ASSERTED (trap 13c — a survivor is a claim either way). It replaced the
+# derived `return` at the END of `isModelAnswerableAskItem` with `return false`; but
+# that line is reached ONLY for kinds in `ASK_KINDS_NEEDING_A_STATED_ITEM`, i.e.
+# `no_goal`, which already evaluated to false. Every other kind returns `true` at the
+# guard clause above it, so the mutation changed nothing observable and SURVIVED for a
+# legitimate reason. The property it was meant to test — that BLANKING the list REDs,
+# so the B5 pair discriminates in BOTH directions — needs the filter itself mutated.
+run_mutant "B6 ALL-items-withheld-from-the-prompt" "$COMP" \
   "omits it from the prompt the model is shown" \
-  's/  return properties !== undefined\n    && Object\.prototype\.hasOwnProperty\.call\(properties, "stated_items"\);/  return false;/'
+  's/  return ask\.items\.filter\(isModelAnswerableAskItem\);/  return [];/'
 
 run_mutant "B7 answerability-hardcoded-instead-of-derived" "$COMP" \
   "classifies \`no_goal\` as not model-answerable" \
