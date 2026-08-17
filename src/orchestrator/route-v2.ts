@@ -131,6 +131,10 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
 import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';
+// ROADMAP 2.1271 — the SAME two-term admission predicate the auto-run scheduler
+// gates on. Imported (never re-implemented) so the `running` claim on the draft
+// wire and the decision to run cannot come from two different rules.
+import { resolveRunAdmission } from '../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 // ROADMAP 2.735 — did THIS turn hand the client a graph to render? The one
 // fact that separates a lost model from a draft that never existed.
 import { graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
@@ -906,6 +910,17 @@ async function sendFinalised200(
      * `_diagnostic_trace.claim_safety`, never `response`.
      */
     readonly withheldExplanationReason?: WithheldExplanationReason;
+    /**
+     * ROADMAP 2.1271 — THIS turn started a provisional analysis and it is in
+     * flight. Threaded by exactly ONE exit (draft_graph) and consumed only by
+     * `composeAnalysisStateV1`'s `running` arm. Absent everywhere else, which is
+     * the honest state: no other exit starts a run it can vouch for.
+     *
+     * Passed through to the finaliser as part of `ctx`; see
+     * `orchestrator-v5/response-finaliser.ts::FinaliserContext.autoRunInFlight`
+     * for why it deliberately does NOT join the freshness precedence chain.
+     */
+    readonly autoRunInFlight?: { readonly startedAt: string };
   },
 ): Promise<import('fastify').FastifyReply<{ Reply: V5RouteReply }>> {
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
@@ -4041,9 +4056,59 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
                 assistant_text: `${dg.response.assistant_text.trimEnd()}\n\n${clarifyV2DeferredDisclosure}`,
               }
             : dg.response;
+        // R2 / ROADMAP 2.1271 — THE IN-FLIGHT SIGNAL, resolved from the SAME
+        // predicate that gates the scheduler below.
+        //
+        // ⚠ WHY THIS SITS ON THE CRITICAL PATH WHEN THE DISPATCH DELIBERATELY
+        // DOES NOT (the comment below says #995's delivery latency is
+        // untouchable, and it still is). Two different things are being placed:
+        //
+        //   · the DISPATCH is a CEE → PLoT → ISL → enrichment → commit chain on
+        //     the order of ~20 s. It stays behind `setImmediate`, unchanged.
+        //   · `resolveRunAdmission` is a PURE, TOTAL, in-memory readiness
+        //     assessment over a graph already in memory — no I/O, no model, no
+        //     store read. MEASURED at this tip (400 samples/arm, throwaway
+        //     probe): p50 1.05 ms / p95 2.04 ms on a draft-typical graph
+        //     (11 nodes, 29 edges); p50 8.28 ms / p95 20.8 ms on a deliberately
+        //     oversized 36-node / 314-edge graph no draft produces. Against a
+        //     draft COMPLETE measured in tens of seconds that is ~0.002 %.
+        //
+        // It CANNOT be deferred: the verdict must exist before the response is
+        // finalised, because it is the response that carries the claim. And it
+        // cannot be cheaply avoided — see the honesty argument below.
+        //
+        // H1 (honesty) — ONE DECISION, TWO READ POINTS, AND NO SECOND
+        // PREDICATE. The scheduler re-resolves `resolveRunAdmission` on the
+        // SAME `dg.graph` object. That is not the two-derivations defect
+        // (trap 12): the function is declared pure and total
+        // (`analysis-ready-core.ts:365-367`) and its input here is
+        // referentially identical, so the two calls cannot disagree. Threading
+        // the resolved object into the scheduler was considered and REJECTED:
+        // `auto-run-after-draft.ts:136-139` states the gate is "deliberately
+        // NOT injectable: the gate the mutant obligation binds to is the real
+        // predicate", and an injectable admission would let a caller authorise
+        // a run the real predicate refuses. Purity buys the agreement without
+        // buying that hole.
+        //
+        // The DIRECTION of any residual error is the safe one: this claim is
+        // made only where the run will proceed, so the reachable mistake is a
+        // run that proceeds without having been announced (today's behaviour,
+        // harmless), never an announcement with no run.
+        //
+        // Deliberately NOT gating the schedule call on `willProceed`: the
+        // scheduler's own `skipped/not_admissible` telemetry is the operator's
+        // only record of an inadmissible draft, and short-circuiting here would
+        // silently delete it.
+        const autoRunAdmission =
+          dg.graph != null ? resolveRunAdmission(dg.graph) : null;
+        const autoRunInFlight =
+          autoRunAdmission?.willProceed === true
+            ? { startedAt: new Date().toISOString() }
+            : undefined;
         const sentDraft = await sendFinalised200(reply, requestId, 'draft_graph', draftResponse, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
+          ...(autoRunInFlight !== undefined ? { autoRunInFlight } : {}),
           // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
           // the permission belongs to the fact this response DISPLAYS, not to
           // whether this turn ran an analysis. See turn-claim-safety.ts.
