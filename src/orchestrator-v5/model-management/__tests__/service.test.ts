@@ -416,3 +416,49 @@ describe('getCurrentVersion — resolve the head pointer to a record', () => {
     }
   });
 });
+
+describe('getCurrentVersionPointer — the id-only head read (versions wiring slice)', () => {
+  it('returns the pointer id without loading the record', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockResolvedValue(TARGET_ID),
+    });
+    const service = makeService(store);
+    expect(await service.getCurrentVersionPointer(SCENARIO)).toEqual({
+      status: 'ok',
+      value: TARGET_ID,
+    });
+    expect(store.getCurrentVersionId).toHaveBeenCalledWith(SCENARIO);
+    // The whole point of the pointer read: no record (and no graph) is loaded.
+    expect(store.getVersion).not.toHaveBeenCalled();
+  });
+
+  it('none: null pointer ⇒ ok with null (empty state)', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockResolvedValue(null),
+    });
+    const service = makeService(store);
+    expect(await service.getCurrentVersionPointer(SCENARIO)).toEqual({
+      status: 'ok',
+      value: null,
+    });
+  });
+
+  it('flag off ⇒ disabled, pointer never read', async () => {
+    const store = makeStore({ getCurrentVersionId: vi.fn() });
+    const service = new ModelManagementService({ store, isEnabled: () => false });
+    expect(await service.getCurrentVersionPointer(SCENARIO)).toEqual({ status: 'disabled' });
+    expect(store.getCurrentVersionId).not.toHaveBeenCalled();
+  });
+
+  it('store failure ⇒ fail-closed store_error, never a throw', async () => {
+    const store = makeStore({
+      getCurrentVersionId: vi.fn().mockRejectedValue(new Error('pooler down')),
+    });
+    const service = makeService(store);
+    const result = await service.getCurrentVersionPointer(SCENARIO);
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.error.code).toBe('store_error');
+    }
+  });
+});

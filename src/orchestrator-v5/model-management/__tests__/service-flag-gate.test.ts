@@ -1,10 +1,13 @@
 /**
- * Model Management v1 — flag gate (CEE_MODEL_VERSIONS_ENABLED, default OFF).
+ * Model Management v1 — flag gate (CEE_MODEL_VERSIONS_ENABLED, default ON
+ * since the versions wiring slice, 2026-08-17 — the no-dark-launch rule).
  *
  * Every service entry point must fail-closed no-op to `{ status:
  * 'disabled' }` when the flag is off: no store call, no hashing, no event
- * emission. Also pins that the DEFAULT config value is OFF (a service
- * built with no isEnabled override, against pristine config, is disabled).
+ * emission. Also pins that the DEFAULT config value is now ON (a service
+ * built with no isEnabled override, against pristine config, is enabled),
+ * and that an explicit CEE_MODEL_VERSIONS_ENABLED=false still disables —
+ * the flag remains the deploy-free rollback lever.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
@@ -80,30 +83,33 @@ describe('ModelManagementService — default flag wiring', () => {
   const cee = () => config.cee as unknown as { modelVersionsEnabled: boolean };
 
   afterEach(() => {
-    cee().modelVersionsEnabled = false;
+    // Restore the schema default (ON since the wiring slice) for later suites.
+    cee().modelVersionsEnabled = true;
   });
 
-  it('config default is OFF (CEE_MODEL_VERSIONS_ENABLED unset ⇒ disabled)', async () => {
-    // Pristine config in the test env carries the schema default: false.
-    expect(config.cee.modelVersionsEnabled).toBe(false);
+  it('config default is ON (CEE_MODEL_VERSIONS_ENABLED unset ⇒ enabled) — the no-dark-launch flip', async () => {
+    // Pristine config in the test env carries the schema default: true.
+    expect(config.cee.modelVersionsEnabled).toBe(true);
 
     const store = explodingStore();
+    (store.listVersions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const service = new ModelManagementService({ store }); // no isEnabled override
-    expect(await service.listVersions(SCENARIO)).toEqual({ status: 'disabled' });
-    expect(store.listVersions).not.toHaveBeenCalled();
+    expect(await service.listVersions(SCENARIO)).toEqual({ status: 'ok', value: [] });
+    expect(store.listVersions).toHaveBeenCalledWith(SCENARIO);
   });
 
-  it('flag flip is honoured at CALL time (no boot-time capture)', async () => {
+  it('flag flip is honoured at CALL time in BOTH directions (no boot-time capture; explicit false still disables)', async () => {
     const store = explodingStore();
     (store.listVersions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const service = new ModelManagementService({ store });
 
+    expect(await service.listVersions(SCENARIO)).toEqual({ status: 'ok', value: [] });
+
+    // The rollback lever: an explicit false disables without a deploy.
+    cee().modelVersionsEnabled = false;
     expect(await service.listVersions(SCENARIO)).toEqual({ status: 'disabled' });
 
     cee().modelVersionsEnabled = true;
     expect(await service.listVersions(SCENARIO)).toEqual({ status: 'ok', value: [] });
-
-    cee().modelVersionsEnabled = false;
-    expect(await service.listVersions(SCENARIO)).toEqual({ status: 'disabled' });
   });
 });

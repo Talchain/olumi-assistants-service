@@ -1329,16 +1329,21 @@ const ConfigSchema = z.object({
     // model-management/index.ts header + commit.ts's
     // `recordModelVersionForCommit`). Routes/turn-executor/restore-compare
     // surfaces remain unwired; isolation-guards.test.ts enforces the exact
-    // call-site set. Env-enforced: locked false in prod; staging requires an
-    // explicit opt-in (audit-logged). STALE-COMMENT FIX (CEE hygiene batch
+    // call-site set. STALE-COMMENT FIX (CEE hygiene batch
     // FIX 2, 2026-07-08): this previously said the backing migration
     // (20260705120000_v5_model_versions.sql) "is AUTHORED-NOT-EXECUTED" —
     // it has since been EXECUTED on staging under Paul-gated approval
     // (2026-07-08, build e122f16 — see
-    // acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md). This flag's
-    // own default stays `false` regardless (its Env-enforced posture above
-    // is independent of migration execution status).
-    modelVersionsEnabled: createEnvEnforcedBoolean(false, "CEE_MODEL_VERSIONS_ENABLED"),
+    // acceptance-evidence/gm-mm/03-mm-owned-scenario-proof.md).
+    // ⚠ DEFAULT FLIPPED TO ON (versions wiring slice, 2026-08-17, the
+    // no-dark-launch rule — the same ruling that deleted
+    // CEE_DECISION_RECORD_CAPTURE and CEE_ROLLING_SUMMARY): the wiring slice
+    // ships list/save/restore routes and the commit-seam auto-version hook
+    // live. Production remains FORCED FALSE by createEnvEnforcedBoolean's
+    // production lockdown; an explicit CEE_MODEL_VERSIONS_ENABLED=false in
+    // the environment still disables it (rollback without a deploy), and the
+    // routes answer an honest VERSIONS_DISABLED 503 in that posture.
+    modelVersionsEnabled: createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED"),
   }),
 
   // ISL (Inference Service Layer) Configuration

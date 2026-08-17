@@ -284,12 +284,19 @@ describe('hook model-versions-substrate (ISSUE-9025, owner: Model Management)', 
     expect(tsHits, 'model_versions service module disappeared — ISSUE-9025 regressed').not.toEqual([]);
   });
 
-  it('ENFORCING: Model Management stays dark by default (env-enforced flag, prod-locked)', () => {
+  // CONVERTED (versions wiring slice, 2026-08-17): the DARK-BY-DEFAULT half of
+  // this invariant is deliberately retired — the wiring slice ships the
+  // list/save/restore routes and flips the default ON (the no-dark-launch
+  // rule). What must SURVIVE the wiring is the env-enforcement itself: the
+  // flag stays a createEnvEnforcedBoolean (prod remains FORCED FALSE by its
+  // production lockdown, and an explicit env false is still the deploy-free
+  // rollback lever), and the module's own guard suites keep existing.
+  it('ENFORCING: Model Management stays env-enforced (prod-locked; explicit false still disables)', () => {
     // Raw source (not stripComments — see the A3 hook note above).
     const configSrc = readFileSync(join(REPO_ROOT, 'src/config/index.ts'), 'utf-8');
     expect(
-      /createEnvEnforcedBoolean\(\s*false\s*,\s*"CEE_MODEL_VERSIONS_ENABLED"\s*\)/.test(configSrc),
-      'CEE_MODEL_VERSIONS_ENABLED must remain env-enforced default-false (dark invariant)',
+      /createEnvEnforcedBoolean\(\s*(true|false)\s*,\s*"CEE_MODEL_VERSIONS_ENABLED"\s*\)/.test(configSrc),
+      'CEE_MODEL_VERSIONS_ENABLED must remain env-enforced (prod-locked) — never an unconditional constant',
     ).toBe(true);
     // The module's own gates must keep existing: flag-off no-op behaviour and
     // the migration's security-load-bearing lines are pinned by these suites.

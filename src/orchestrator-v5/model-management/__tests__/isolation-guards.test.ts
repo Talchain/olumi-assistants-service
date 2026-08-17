@@ -201,8 +201,19 @@ describe('model-management isolation guards — OUTBOUND (module imports only sa
 // ⚠ It inherits the flag: `saveVersion` returns `disabled` when
 // CEE_MODEL_VERSIONS_ENABLED is off, and the collab store REFUSES the round
 // rather than pinning nothing (an unpinned round is 2.910's exact failure).
+// VERSIONS WIRING SLICE (2026-08-17): the THIRD sanctioned call site, added
+// deliberately in its own reviewed slice exactly as the note above requires.
+// `src/routes/assist.v1.scenario-versions.ts` is the route surface the module's
+// own headers anticipated ("the wiring slice will parse ingress / validate
+// egress with them" — contracts.ts): list/save/restore reach the service
+// through `getModelManagementService()`, identity stays computed inside the
+// service, and the strict contracts validate the wire in both directions.
 const SANCTIONED_INBOUND_CALL_SITES = new Set(
-  ['../commit.ts', '../../collab/store.ts'].map((s) => resolve(moduleDir, s)),
+  [
+    '../commit.ts',
+    '../../collab/store.ts',
+    '../../routes/assist.v1.scenario-versions.ts',
+  ].map((s) => resolve(moduleDir, s)),
 );
 
 describe('model-management isolation guards — INBOUND (only the sanctioned commit-seam call site)', () => {
