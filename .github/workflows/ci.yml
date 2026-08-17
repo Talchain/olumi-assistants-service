@@ -397,13 +397,99 @@ jobs:
   # Job C: Spec v04 compliance (already exists as separate workflow, keeping here for visibility)
   # See .github/workflows/spec-v04-audit.yml
 
-  # Job D: Live LLM tests (optional, requires secrets)
-  # Note: GitHub Actions cannot check secret existence in job-level 'if' conditions.
-  # This job will run but skip the test step if the secret is not set.
+  # ── Job D0: DOES THE LIVE-LLM KEY EXIST? ────────────────────────────────────
+  #
+  # This job exists so that `live-tests` below can report **skipped** rather than
+  # **success** when it cannot run. A job-level `if:` may not read the `secrets`
+  # context, but it MAY read `needs.<job>.outputs`, and a STEP may read secrets.
+  # So the question is answered here and consumed there.
+  #
+  # ⭐⭐ WHY THIS EXISTS, AND THE DIAGNOSIS THAT WAS WRONG (17 Aug 2026).
+  #
+  # `Live LLM Integration Tests` has been reporting SUCCESS having executed ZERO
+  # tests. That was first rowed as ROADMAP 1.175 on 19 Jul 2026 and never closed.
+  # Runtime proof at staging tip 2ceb65f9 (run 32039145335 / job 95417290300):
+  # job conclusion `success`, step `Run live LLM tests` **skipped**, step
+  # `Skip live tests (no API key)` **success**.
+  #
+  # A review of PR #1005 attributed this to a scope rule — that a step's own
+  # `env:` is not visible to that step's own `if:`, making the guard ALWAYS false
+  # regardless of the secret. **That is FALSE, and it was settled by execution,
+  # not by reading docs** (probe workflow on branch `probe/ci-guard-scope-2026-08-17`,
+  # run 32044391662):
+  #   · A step's own `env:` with a literal value IS in scope for its own `if:`
+  #     (probe A: the guarded step RAN).
+  #   · The byte-for-byte shipped shape, pointed at a secret that DOES exist
+  #     (`ASSIST_API_KEY`), takes the LIVE branch (probe F: F1 ran, F2 skipped).
+  #     So the guard discriminates correctly and always did.
+  #   · Hoisting the `env:` to job level changes NOTHING (probe E: still the skip
+  #     branch) — it is a behavioural no-op.
+  #
+  # The real cause: **`ANTHROPIC_API_KEY` is not a secret on this repository.**
+  # Derived from `GET /actions/secrets` — the complete set is `ASSIST_API_KEY`,
+  # `STAGING_ADMIN_API_KEY`, `STAGING_ASSIST_API_KEY`; `Talchain` is a USER
+  # account (so there are no organisation secrets) and `environments` is empty.
+  # `${{ secrets.ANTHROPIC_API_KEY }}` therefore resolves to the empty string and
+  # the guard honestly takes the skip branch.
+  #
+  # So the guard was never broken. **The DESIGN was: it treated "cannot run" as
+  # "pass".** That is the defect, and it is worse than a broken condition, because
+  # the green was then quoted as evidence in at least a dozen merge and review
+  # records ("all 20 checks green, incl. Live LLM Integration Tests").
+  #
+  # THE FIX IS THE CONCLUSION, NOT THE CONDITION. A skipped job cannot be
+  # mistaken for a passing test run by any check tally, by branch protection, or
+  # by a human reading a PR page. Proven by execution (probe H, run 32044510940):
+  # with the key absent the gated job reports `skipped` as BOTH its job
+  # conclusion and its check-run conclusion, while the probe job reports success.
+  #
+  # This repository already holds the correct doctrine for the other half —
+  # `staging-journey-smoke.yml` says of its own secret: *"If it is missing the
+  # script exits 2 and the run goes RED — a missing secret must never read as a
+  # pass."* A deliberate `skipped` is that principle applied where a hard red
+  # would be a standing red nobody can clear without a credential (trap 7).
+  #
+  # ⚠ Provisioning `ANTHROPIC_API_KEY` is an OWNER action. Until it exists this
+  # check will read `skipped`, which is the honest answer. It must never go back
+  # to reading `success`.
+  live-tests-key:
+    name: Live LLM key availability
+    runs-on: ubuntu-latest
+    steps:
+      - id: probe
+        name: Publish whether the live-LLM key is configured
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+            echo "ANTHROPIC_API_KEY is configured — the live LLM suite will run." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Live LLM suite did NOT execute::ANTHROPIC_API_KEY is not configured on this repository, so \`Live LLM Integration Tests\` reports SKIPPED. Nothing in tests/integration/adversarial.test.ts or tests/validation/golden-briefs-runner.test.ts was executed. Do not cite this check as coverage."
+            {
+              echo "### ⚠ Live LLM suite did NOT execute"
+              echo ""
+              echo "\`ANTHROPIC_API_KEY\` is not configured on this repository, so"
+              echo "\`Live LLM Integration Tests\` reports **skipped**, not success."
+              echo ""
+              echo "Not executed by any CI job:"
+              echo "- \`tests/integration/adversarial.test.ts\` (also excluded from both vitest configs)"
+              echo "- \`tests/validation/golden-briefs-runner.test.ts\` (collected but \`describe.skipIf\`-ed without \`LIVE_LLM=1\`)"
+              echo ""
+              echo "**Do not cite this check as evidence of coverage.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+    outputs:
+      has_key: ${{ steps.probe.outputs.has_key }}
+
+  # Job D: Live LLM tests. Runs only when the key exists; otherwise this job
+  # reports SKIPPED (see the D0 block above for why that is the whole point).
   live-tests:
     name: Live LLM Integration Tests
     runs-on: ubuntu-latest
-    needs: unit-tests  # Run after unit tests pass
+    needs: [unit-tests, live-tests-key]
+    if: ${{ needs.live-tests-key.outputs.has_key == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -418,14 +504,13 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      # No `if:` here, and no complementary "skipped, but passing" step. The job
+      # only reaches this point when the key exists, so this command must run —
+      # and if it fails, this job must go RED. A step-level guard here would
+      # re-open the exact defect this change closes: a way for the job to
+      # conclude `success` without executing the suite.
       - name: Run live LLM tests
-        if: ${{ env.ANTHROPIC_API_KEY != '' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LIVE_LLM: '1'
         run: pnpm test:live
-      - name: Skip live tests (no API key)
-        if: ${{ env.ANTHROPIC_API_KEY == '' }}
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: echo "⏭️ Skipping live LLM tests - ANTHROPIC_API_KEY not configured"
