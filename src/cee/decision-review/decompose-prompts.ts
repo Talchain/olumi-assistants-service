@@ -272,9 +272,10 @@ ${SHARED_VOICE_AND_GROUNDING}
   ],
   "framing_check": {
      // OPTIONAL — include ONLY if the options do not address the stated goal, or the goal is framed as an action rather than an outcome. Omit the key entirely otherwise.
-     "addresses_goal": true,
-     "concern": "string, optional",
-     "suggested_reframe": "string, optional"
+     // POLARITY: because the key exists ONLY when there IS a framing concern, "addresses_goal" is ALWAYS false when you emit this object. Never emit "addresses_goal": true — if the options do address the stated goal, omit the whole key.
+     "addresses_goal": false,
+     "concern": "string — REQUIRED whenever you emit this key: name which framing problem you found, in one sentence. Say plainly whether the OPTIONS do not address the stated goal, or the GOAL is stated as an action rather than an outcome — a reader must be able to tell which without guessing.",
+     "suggested_reframe": "string, optional — if the goal is stated as an action, restate it as the outcome the team actually wants"
   }
 }
 </OUTPUT_CONTRACT>
