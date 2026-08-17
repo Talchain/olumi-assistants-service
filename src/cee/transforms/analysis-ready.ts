@@ -33,6 +33,11 @@ import {
 import { readIsBaseline } from "../baseline-identity.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/shared/encoded-intervention-admissibility.js";
+// ⭐ ROADMAP 2.1266 — ONE authority on repair-authored option→factor edges,
+// shared with the V5 Run-admission projection in `analysis-ready-helper.ts`.
+// Two readiness paths deciding independently which edges the repair invented is
+// the two-authorities shape this estate keeps paying for (trap 21).
+import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
 
 // ============================================================================
 // Types
@@ -584,10 +589,45 @@ export function buildAnalysisReadyPayload(
     }
   }
 
-  // Build option→factor adjacency from V3 graph edges
+  // Build option→factor adjacency from V3 graph edges.
+  //
+  // ⛔ REPAIR-AUTHORED EDGES ARE EXCLUDED — ROADMAP 2.1266. THE PRODUCT MUST NOT
+  // BILL THE USER FOR ITS OWN INVENTIONS.
+  //
+  // `fixStatusQuoConnectivity` wires each DISCONNECTED option to the UNION of
+  // every factor the CONNECTED options target, so the graph acquires a path to
+  // goal and the draft is not lost at the 422 fail-closed gate
+  // (`repair/graph-enforcement.ts:665`, reached because `NO_PATH_TO_GOAL` is
+  // `severity: "error"` — `validators/graph-validator.ts:626`). Those edges carry
+  // no intervention value, and this loop used to mint one `MISSING_OPTION_VALUE`
+  // blocker for each of them: measured 14 asks on a brief-04-shaped graph
+  // (2 disconnected options × 7 union targets), asked in the user's own name
+  // ("What should option \"C\" set it to?") with nothing saying the product had
+  // drawn the link itself.
+  //
+  // ⚠ WHAT SUPPRESSING THEM DOES **NOT** DO — checked, because the dangerous
+  // outcome would be flipping the model to `ready` with a numerically inert
+  // option, i.e. the exact harm the NO-SILENT-INVENTION block below removed. It
+  // cannot: an option whose `interventions` are empty sets `hasIncompleteOptions`
+  // (:803-805), so `payloadStatus` falls to `needs_user_mapping` (:923) and
+  // `user_questions` carries the ONE true question — which factor does this
+  // option change, and by how much — instead of seven false ones. Fewer asks AND
+  // a non-ready model; nothing is analysed on invented magnitudes.
+  //
+  // The wiring itself stays disclosed: `STATUS_QUO_WIRED` rides
+  // `trace.pipeline.repair_summary.deterministic_repairs[]`
+  // (`stages/package.ts:751-752`), which the UI renders — see the adjudication in
+  // `stages/boundary.ts:31-40` for why it cannot become a `model_adjustments` row
+  // without a new `@talchain/schemas` contract member.
+  //
+  // `optionEdgeTargets` (:854) is DELIBERATELY left reading every edge: it
+  // answers a different question ("is this factor connected to any option at
+  // all?") and the repair's targets always carry a real edge from a connected
+  // option by construction, since the union is taken FROM those options.
   const optionFactorAdj = new Map<string, string[]>();
   for (const edge of graph.edges) {
     if (nodeKindLookup.get(edge.from) === "option" && nodeKindLookup.get(edge.to) === "factor") {
+      if (isRepairAuthoredOptionFactorEdge(edge, nodeKindLookup)) continue;
       const list = optionFactorAdj.get(edge.from) ?? [];
       list.push(edge.to);
       optionFactorAdj.set(edge.from, list);
