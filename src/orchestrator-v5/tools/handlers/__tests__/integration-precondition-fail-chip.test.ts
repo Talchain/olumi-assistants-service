@@ -27,6 +27,7 @@ import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registr
 import { EMPTY_DECISION_CONTEXT } from '@talchain/schemas/orchestrator';
 import { EMPTY_COACHING_STATE } from '../../../coaching/coaching-state.js';
 import { EMPTY_COACHING_LIFECYCLE } from '../../../coaching/coaching-lifecycle.js';
+import { deriveAnalysisFreshness } from '../../../context/freshness.js';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const REQUEST_ID = 'req-precondition-fail-chip';
@@ -50,6 +51,11 @@ function buildEnrichedTurnContext(message: string): EnrichedTurnContext {
     prior_turns: [],
     prior_facts: [],
     prior_facts_with_turn: [],
+    // ROADMAP 2.1264 — the context's persisted-graph freshness derivation.
+    // DERIVED from this fixture's own inputs (no prior facts, no persisted
+    // graph) by the same function `buildTurnContext` uses, rather than a
+    // hand-written object that would silently stop matching the real shape.
+    persisted_analysis_freshness: deriveAnalysisFreshness([], null),
     scenarioBriefText: null,
     persistedGraph: null,
     decision_context: EMPTY_DECISION_CONTEXT,

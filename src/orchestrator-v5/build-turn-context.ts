@@ -59,6 +59,7 @@ import {
 } from './coaching/coaching-lifecycle.js';
 import { deriveAuthoritativeStage } from './context/derive-stage.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
+import type { FreshnessDerivation } from './context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
@@ -176,6 +177,36 @@ export interface EnrichedTurnContext extends TurnContext {
    * second vocabulary for the same idea.
    */
   readonly prior_facts_read_ok?: boolean;
+  /**
+   * THE PERSISTED-GRAPH ANALYSIS-FRESHNESS DERIVATION FOR THIS TURN — one
+   * derivation, now with two consumers.
+   *
+   * ⚠ THIS IS NOT A NEW DERIVATION, AND THAT IS THE ENTIRE POINT (trap 12).
+   * `buildTurnContext` has always computed it — it feeds `deriveCoachingState`
+   * — from `prior_facts`, the SAME `persistedGraphHash` the routing path uses,
+   * the SAME option-identity guard input and the SAME `priorFactsReadOk`
+   * degraded-read flag. It was computed and then dropped on the floor. Exposing
+   * the object rather than recomputing it elsewhere is what keeps the wire
+   * verdict and the coaching state unable to disagree about one turn.
+   *
+   * ADDED FOR (ROADMAP 2.1264, PR #1004 review): the graph-less exits —
+   * clarify_v2, readiness_intake, the explicit-generate and frame guards, the
+   * edit_graph declines — carry no per-turn freshness of their own, so the
+   * `analysis_state` stamped at those exits had nothing to classify and said
+   * `unknown_degraded`. On a POST-ANALYSIS clarification turn that is a
+   * self-inflicted degradation: CEE already knows the analysis is current,
+   * because THIS read established it. `turn-claim-safety.ts` carries this value
+   * to the exit so the wire tells the truth instead.
+   *
+   * ⚠ IT DESCRIBES THE PERSISTED GRAPH, NOT A MUTATED ONE. A dispatch that
+   * changed the graph this turn must use its OWN derivation; the finaliser
+   * consumes this one only where the exit declares no graph in scope. See the
+   * `exitFreshness` gate in `response-finaliser.ts`.
+   *
+   * ⚠ NOT emitted as freshness telemetry — turn-executor still owns that event,
+   * so there is still exactly one emitter.
+   */
+  readonly persisted_analysis_freshness: FreshnessDerivation;
   /**
    * Same facts as `prior_facts` but each entry pairs the fact with
    * its parent turn's row id and creation timestamp via the FK
@@ -914,6 +945,10 @@ export async function buildTurnContext(
     newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
     prior_facts: priorFacts,
     prior_facts_read_ok: priorFactsReadOk,
+    // ONE derivation, two consumers — `deriveCoachingState` above and the
+    // graph-less exits' `analysis_state` via `turn-claim-safety.ts`. Exposed
+    // rather than recomputed downstream; see the member's docstring.
+    persisted_analysis_freshness: coachingFreshness,
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,

@@ -38,10 +38,23 @@
  * report drops that never happened. The theatre was not the observing; it was
  * the switch.
  *
- * ENFORCEMENT IS ALREADY WIRED, unconditionally, ONE RAIL OVER:
+ * ENFORCEMENT IS ALREADY WIRED, ONE RAIL OVER:
  * `compose/leading-option-wire-enforcement.ts` (`enforceLeadingOptionClaimsAtWire`,
  * ROADMAP 2.149), per FIELD and per SENTENCE, called from `sendFinalised200`
- * immediately upstream of this scan. The two rails are deliberately separate —
+ * immediately upstream of this scan.
+ *
+ * ⚠ AND ITS SCOPE, STATED RATHER THAN ROUNDED UP — this paragraph first said
+ * "unconditionally", which is the guarantee-theatre shape it was written to
+ * complain about. Derived at that module's bytes: it is CALLED on every exit,
+ * and it ENFORCES over `WIRE_ENFORCED_PROSE_FIELDS` — `assistant_text` and
+ * `framing_question` only — and only when the exit carries a NON-NULL graph,
+ * because the option roster comes from the graph and a null graph stands the
+ * gate down (reported as `mode: 'roster_unavailable'`, not silently). Block
+ * prose, enrichment blobs and structured key designations are producer-owned
+ * (`compose/withheld-claim-projection.ts`). Which is precisely why this alarm
+ * still matters: a hit here names a surface the wire gate does not cover.
+ *
+ * The two rails are deliberately separate —
  * see the closing block of `guardLeadingOptionClaimsAtEgress`: if the meter also
  * removed what it found it would report its own success and the producer defect
  * would go dark. So this module keeps measuring THE RESIDUE THAT STILL SHIPS,
@@ -544,9 +557,11 @@ export interface LeadingOptionEgressGuardOpts {
    * mislabel the telemetry — see the module docstring. If you are reaching for
    * it to make a withheld leader claim stop shipping, the rail you want is
    * `enforceLeadingOptionClaimsAtWire` in
-   * `compose/leading-option-wire-enforcement.ts`, which already runs on every
-   * exit. Do NOT re-add a switch here: this reader is intentionally wider than
-   * any enforcer may safely be.
+   * `compose/leading-option-wire-enforcement.ts` — CALLED on every exit, and
+   * ENFORCING over `assistant_text` and `framing_question` when the exit carries
+   * a non-null graph (see the module docstring for the scope in full; it is not
+   * "everything"). Do NOT re-add a switch here: this reader is intentionally
+   * wider than any enforcer may safely be.
    */
 }
 

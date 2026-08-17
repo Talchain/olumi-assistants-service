@@ -1442,17 +1442,29 @@ async function sendFinalised200(
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety — ENFORCEMENT AT THE WIRE. (ROADMAP 2.149.)
   //
-  // THE POPULATION. Eighteen of this file's nineteen `sendFinalised200` call
-  // sites return BEFORE `runTurnExecutor` (`:4427`), so eighteen never pass
+  // THE POPULATION. This file has TWENTY-ONE `sendFinalised200` call sites.
+  //
+  // ⚠ THE COUNT HERE READ "nineteen" UNTIL 2026-08-17, and it was correct when
+  // written — it drifted as dispatch families were added, which is what a number
+  // typed into a comment does. It is now DERIVED by a balanced-paren enumeration
+  // in `__tests__/route-egress-analysis-state-freshness.drift.test.ts` (and the
+  // claim-safety marking guard beside it), so the population fails loud instead
+  // of quietly aging. Do not re-type a number here; read the guard.
+  //
+  // ALL BUT THE EXECUTE EXIT return BEFORE `runTurnExecutor`, so they never pass
   // through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is
   // a function NESTED inside `runTurnExecutor`, closed over run-local state, and
-  // therefore not callable from here even deliberately. Three of the eighteen
-  // can carry model-authored text (`chip_click` ok, `draft_graph`, and the MAIN
-  // edit exit), and the main edit exit is where the 28 Jul live confirmation
-  // caught a withheld leader claim shipping at HTTP 200.
+  // therefore not callable from here even deliberately. ⚠ THE EXACT SPLIT WAS
+  // NOT RE-DERIVED by the 2.1264 lane: it is a CONTROL-FLOW property and the
+  // lane only measured the call-site count, so "eighteen of nineteen" has been
+  // replaced with the qualitative statement rather than with a number nobody
+  // measured. The conclusion is untouched either way. Some of those exits carry
+  // model-authored text (`chip_click` ok, `draft_graph`, and the MAIN edit
+  // exit), and the main edit exit is where the 28 Jul live confirmation caught a
+  // withheld leader claim shipping at HTTP 200.
   //
-  // WHY HERE AND NOT PER-EXIT. Eighteen per-exit edits is eighteen places for
-  // the nineteenth exit to be forgotten — the hand-maintained mirror
+  // WHY HERE AND NOT PER-EXIT. A per-exit edit is one place per exit for the
+  // next exit to be forgotten — the hand-maintained mirror
   // (CLAUDE.md trap #12). This is the file's SOLE `reply.code(200).send`, it is
   // type-branded and grep-gated, and every exit already threads a REAL verdict
   // (#737 / ROADMAP 1.233 — no literal survives, pinned by

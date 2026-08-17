@@ -133,10 +133,18 @@ export const SEPARATION_NEAR_TIE = 'near_tie';
  * hand-built minimal object here would be the hand-maintained mirror (trap 12)
  * sitting directly beside the code it mirrors.
  *
- * WHY EACH MEMBER IS TRUE, not merely convenient — the clarify-family exits
- * (`clarify_v2`, `readiness_intake`, `explicit_generate_*`, `process_meta_intake`,
- * `frame_no_brief_guard`, the graph-less `edit_graph` declines) pass
- * `graph: null` and thread no freshness derivation:
+ * ⚠ WHEN IT IS REACHED — NARROWED BY THE PR #1004 REVIEW, AND THE OLD TEXT WAS
+ * OVER-BROAD (trap 14). It used to say this derivation covers "the clarify-family
+ * exits", full stop. It does not, and must not: those exits now carry the
+ * persisted-graph derivation their own claim-safety read produced
+ * (`TurnExitStamp.exitFreshness`), because on a POST-ANALYSIS clarification turn
+ * this state would DEGRADE a verdict CEE already knew was current — the
+ * self-inflicted degradation the review blocked. This derivation is the LAST
+ * resort: no canonical state, no per-turn derivation, and no exit derivation
+ * either, i.e. genuinely nothing was looked at (today: the `system_event` family,
+ * which passes a `null` payload to the resolver, and non-route callers).
+ *
+ * WHY EACH MEMBER IS TRUE of that residual case, not merely convenient:
  *   - `freshness: 'unknown'`      the turn classified nothing;
  *   - `reason: 'current_graph_hash_unavailable'` no graph was in scope, so the
  *                                current graph hash genuinely could not be
@@ -160,6 +168,11 @@ export const SEPARATION_NEAR_TIE = 'near_tie';
  * manufactured by its own fix. `never_run` stays reserved for the case a fact
  * read actually returned nothing (`freshness: 'none'`), which is the only place
  * the positive claim is earned.
+ *
+ * ⭐ AND THAT PLACE NOW EXISTS ON THESE EXITS. With `exitFreshness` threaded, a
+ * graph-less exit on a never-analysed scenario DOES have a real fact read behind
+ * it and DOES emit `never_run` — the brief's requested state, arrived at by
+ * earning the claim rather than by asserting it.
  *
  * ⚠ HOLD IT LOCALLY — NEVER ASSIGN IT TO `ctx.freshness`.
  * `current_graph_hash_unavailable` is a member of

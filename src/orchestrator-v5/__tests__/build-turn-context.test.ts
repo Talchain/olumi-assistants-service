@@ -83,6 +83,11 @@ describe('buildTurnContext', () => {
       coaching_state: _cs,
       prior_coaching_state: _pcs,
       coaching_lifecycle: _cl,
+      // ROADMAP 2.1264 — an ENRICHED member (the context's persisted-graph
+      // freshness derivation), stripped here like every other one so what
+      // remains is a base TurnContext the strict schema accepts. Its presence in
+      // this list is the assertion that it did NOT leak into the base contract.
+      persisted_analysis_freshness: _paf,
       ...base
     } = ctx;
     const parsed = TurnContextSchema.parse(base);

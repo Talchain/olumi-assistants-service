@@ -190,6 +190,10 @@ function finalise(
   ctx: {
     analysisReady?: AnalysisReadyPayload;
     freshness?: FreshnessDerivation;
+    /** The derivation `claimSafety.forExit()` carries to a graph-less exit. */
+    exitFreshness?: FreshnessDerivation;
+    /** Declared by every route exit; `null` means no graph was in scope. */
+    graph?: unknown;
     mayNameLeadingOption?: boolean;
   },
 ): Record<string, unknown> {
@@ -936,5 +940,186 @@ describe('analysis_state on an exit with NO analysis context (ROADMAP 2.1264)', 
     // supplies a verdict. Kept under test so the branch is not untested dead
     // code.
     expect(composeAnalysisStateV1({ canonical: null, rawRobustness: null })).toBeUndefined();
+  });
+});
+
+// ─── THE REVIEW BLOCKER — a graph-less exit must not DEGRADE a known-good
+//     analysis state (review of PR #1004) ───────────────────────────────────
+//
+// ⚠⚠ WHAT THE FIRST CUT OF THIS PR GOT WRONG, recorded because it is the whole
+// reason this describe exists. Emitting `unknown_degraded` on EVERY graph-less
+// exit was honest about what the FINALISER could see and WRONG about what CEE
+// KNOWS. On a post-analysis clarification turn the UI previously fell back to
+// its retained-fresh legacy verdict and displayed "Analysis complete"; a
+// complete, strict-valid `unknown_degraded` object outranks that fallback and
+// flips the display to "Results may be outdated" + a "Rerun analysis" CTA,
+// ungated. And the contract MANDATES that harm — `unknown_degraded` instructs a
+// consumer to degrade visibly and never fall back to its last-known state. So
+// the emission would have bought "absence is unambiguous" at the price of
+// re-opening the harm class ROADMAP 2.1085 closed (documented at
+// `route-v2.ts:2611`, measured on staging 13 Aug).
+//
+// THE FIX IS NOT TO STOP EMITTING — it is to emit the TRUTH, which CEE already
+// holds. `claimSafety.forExit()` runs `buildTurnContext` on exactly these exits
+// (lazy, memoised, one read per turn) and that context already computes a
+// freshness derivation from the persisted graph. It is now carried to the exit
+// as `exitFreshness` and consumed by the finaliser, so a post-analysis clarify
+// turn emits `complete_current` / `complete_stale` — truthful, non-degrading,
+// and absence still means only "this build predates the field".
+//
+// ⚠ WHY A DISTINCT CTX MEMBER AND NOT `freshness`: the four graph-bearing exits
+// spread `claimSafety.forExit()` and ALSO set `freshness`, and the KEY ORDER
+// DIFFERS BETWEEN THEM — `system_event:2532` and `chip_click:2611` set freshness
+// BEFORE the spread, `draft_graph:3955` and `edit_graph:5082` after. A
+// `freshness` member on the stamp would therefore have silently overridden the
+// real per-turn derivation on two of the four. Precedence lives in the
+// finaliser, explicitly, where key order cannot decide it.
+
+/**
+ * Run-state kinds that INSTRUCT A CONSUMER TO DEGRADE what it is showing.
+ *
+ * Cited, not invented: the vendored 0.46.0 contract says `unknown_degraded`
+ * means "The producer CANNOT DETERMINE the run state this turn … A consumer
+ * must degrade visibly — say the state is unknown — and must never fall back to
+ * a default kind, to its own last-known state, or to a client-side derivation."
+ * At the UI that maps to `results_stale` / "Results may be outdated" / a "Rerun
+ * analysis" CTA (measured by the PR review by executing the UI's own pure
+ * `deriveAnalysisDisplayState` against the values emitted here).
+ *
+ * A turn that KNOWS the analysis is current must never emit a member of this
+ * set. That is the property, stated once, so every assertion below binds to it
+ * by name rather than to a hand-copied kind string.
+ */
+const DEGRADING_RUN_STATE_KINDS: readonly string[] = ['unknown_degraded'];
+
+describe('a graph-less exit consumes the fact read that already happened (exitFreshness)', () => {
+  it('a POST-ANALYSIS clarify turn emits complete_current — not a degraded verdict', () => {
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        // The shape `claimSafety.forExit()` now supplies: the derivation the
+        // turn context already computed from the persisted graph.
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('complete_current');
+    expect(runState.computed_at).toBe('2026-08-16T12:00:00.000Z');
+  });
+
+  it('THE HARM, ASSERTED AS THE PROPERTY — it emits no DEGRADING kind', () => {
+    // Bound to the named property rather than to `!== 'unknown_degraded'`, so a
+    // future degrading kind added to the contract is covered by extending one
+    // list rather than by remembering to add an assertion.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(DEGRADING_RUN_STATE_KINDS).not.toContain(runState.kind);
+  });
+
+  it('and it is USABLE — the predicates do not blank out a good analysis', () => {
+    // The display consequence in the other direction: a `complete_current`
+    // run_state whose usability predicates all read false would suppress every
+    // result-derived surface anyway, which is the same harm by another route.
+    const state = stateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(state.usable_for_prose).toBe(true);
+    expect(state.usable_for_chips).toBe(true);
+    expect(state.usable_for_followup).toBe(true);
+    expect(state.requires_rerun).toBe(false);
+    expect(state.blocked_unusable).toBe(false);
+  });
+
+  it('a STALE post-analysis clarify turn says stale, with the actionable cause', () => {
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: staleDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('complete_stale');
+    expect(runState.cause).toBe('graph_changed');
+  });
+
+  it('never_run BECOMES TRUTHFUL here — a real fact read that found nothing', () => {
+    // ⭐ THE BRIEF'S REQUESTED STATE, NOW EARNED. `never_run` was refused on the
+    // first cut because nothing had looked; with the fact read threaded, a
+    // graph-less exit on a never-analysed scenario can make the positive claim.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: noRunDerivation(),
+        graph: null,
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect(runState.kind).toBe('never_run');
+  });
+
+  it('a FAILED context read says store_unreadable — not "no graph this turn"', () => {
+    // The honest cause for "we tried to look and could not", distinct from
+    // "there was nothing to look at". Different sentences, different remedies.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: unknownDerivation('derivation_failed'),
+        graph: null,
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect(runState.kind).toBe('unknown_degraded');
+    expect(runState.cause).toBe('store_unreadable');
+  });
+
+  it('PRECEDENCE — the exit\'s OWN per-turn derivation outranks the persisted one', () => {
+    // The two are given DELIBERATELY DIFFERENT verdicts, so this cannot pass by
+    // both paths agreeing. `freshness` is the mutating turn's own derivation and
+    // must win; `exitFreshness` describes the persisted graph.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        freshness: staleDerivation(),
+        exitFreshness: freshDerivation(),
+        graph: null,
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).toBe('complete_stale');
+  });
+
+  it('THE MUTATING-TURN GATE — a graph-BEARING exit never consumes exitFreshness', () => {
+    // ⚠ THIS IS THE SAFETY HALF, and it is why the consumption is gated on
+    // `graph == null`. `exitFreshness` is derived from the PERSISTED graph. On an
+    // exit that mutated the graph this turn, the persisted derivation can read
+    // `fresh` while the post-edit graph has diverged — a FALSE currency claim,
+    // which is worse than the degraded verdict this whole review is about.
+    // Those exits thread their own `freshness`; if one ever fails to, it must
+    // fall back rather than borrow a derivation about a different graph.
+    const runState = runStateOf(
+      finalise(baseResponse({ withAnalysisBlock: false }), {
+        exitFreshness: freshDerivation(),
+        graph: { nodes: [], edges: [] },
+        mayNameLeadingOption: true,
+      }),
+    );
+    expect(runState.kind).not.toBe('complete_current');
+    expect(runState.kind).toBe('unknown_degraded');
+  });
+
+  it('the post-analysis clarify state parses against AnalysisStateV1Schema', () => {
+    const body = finalise(baseResponse({ withAnalysisBlock: false }), {
+      exitFreshness: freshDerivation(),
+      graph: null,
+      mayNameLeadingOption: true,
+    });
+    expect(() => AnalysisStateV1Schema.parse(stateOf(body))).not.toThrow();
+    expect(() => OlumiResponseSchema.parse(body)).not.toThrow();
   });
 });
