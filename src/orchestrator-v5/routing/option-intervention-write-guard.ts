@@ -99,7 +99,16 @@ export type OptionInterventionWriteVerdict =
 function projectInterventionValues(graph: GraphV3T): Map<string, number> {
   const out = new Map<string, number>();
   for (const node of graph.nodes) {
-    const merged = mergeInterventionSources(node as unknown as Record<string, unknown>);
+    // ⚠ SINGLE CAST, matching `configure-option-outcome.ts`'s call site verbatim
+    // — deliberately NOT `as unknown as`. That double-cast is one of the three
+    // high-risk boundary patterns the forbidden-boundary ratchet FREEZES, and the
+    // sibling module says so in a comment for exactly this reason. Caught by the
+    // gate, not by inspection: the required check runs
+    // `scripts/check-forbidden-boundary-patterns.sh`, which I had not run
+    // locally, and it failed in 1m48s having executed no tests (trap 22e — the
+    // named gate is not the required check's shape). The reader this feeds is
+    // duck-typed precisely so callers need not force it.
+    const merged = mergeInterventionSources(node as Record<string, unknown>);
     if (merged === undefined) continue;
     for (const [factorId, value] of Object.entries(merged)) {
       out.set(`${node.id}::${factorId}`, value);
