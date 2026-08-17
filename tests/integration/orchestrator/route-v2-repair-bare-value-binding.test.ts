@@ -332,6 +332,85 @@ describe('POST /orchestrate/v2/turn — 2.1261 repair-leg bare-value binding', (
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
   });
 
+  it('⭐ B1 twin: a canvas SELECTION withdraws the claim — the deictic referent is never stolen', async () => {
+    // Review #1000 B1 (execution-proven): "this one" with a selection has an
+    // ESTABLISHED meaning — the SELECTED node (DEICTIC_REFERENCE_PATTERN,
+    // Path B, deterministic-value-update.ts). The pre-route runs BEFORE the
+    // executor sees `selected_elements`, so without the gate it would bind
+    // the NON-selected sole-missing-pair factor: a silent wrong-factor
+    // mutation. With the gate the claim is withdrawn wholesale and the turn
+    // proceeds on the pre-existing route (on this frame-stage, no-brief
+    // payload that is the frame guard; on executor-reaching payloads it is
+    // the deictic path — whose selected-referent meaning is pinned at unit
+    // level below, mirroring the reviewer's base control).
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        ...payload('Set this one to 0.4.'),
+        selected_elements: { node_ids: ['fac_price_up'] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // The claim is withdrawn wholesale: no binding decision, no edit-lane
+    // dispatch, no bind instruction anywhere near this turn.
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).not.toContain('Subcontractor cost as share of affected revenue');
+    expect(body.assistant_text).not.toMatch(/more than one effect value/i);
+  });
+
+  it('⭐ B1 unit control: the deictic module resolves "this one" + selection to the SELECTED factor', async () => {
+    // The reviewer's base control, carried into the merged suite: this is the
+    // established meaning the selection gate exists to protect. If this ever
+    // stops holding, the gate's justification changes — RED here forces that
+    // conversation rather than letting the two modules drift apart silently.
+    const { tryDeicticValueUpdate } = await import(
+      '../../../src/orchestrator-v5/routing/deterministic-value-update.js'
+    );
+    const nodes = [
+      { id: 'fac_price_up', kind: 'factor', label: 'Customer price increase applied' },
+      { id: 'fac_sub_cost', kind: 'factor', label: 'Subcontractor cost as share of affected revenue' },
+    ];
+    const lookup = {
+      getNode: (id: string) => nodes.find((n) => n.id === id) ?? null,
+      getEntity: (id: string) => nodes.find((n) => n.id === id) ?? null,
+      listEntitiesByKind: (kind: string) =>
+        kind === 'node' || kind === 'factor' ? nodes : [],
+    } as never;
+    const result = tryDeicticValueUpdate(
+      'Set this one to 0.4.',
+      [{ value: 0.4, unit: null, raw_text: '0.4', operator: 'set', direction: 'set' }] as never,
+      lookup,
+      ['fac_price_up'],
+      (id: string) => nodes.find((n) => n.id === id)?.label ?? null,
+      false,
+    );
+    expect(result.matched).toBe(true);
+    if (result.matched && result.dispatch === 'set_factor_value') {
+      expect(result.candidate.id).toBe('fac_price_up');
+    } else {
+      throw new Error(`unexpected deictic dispatch: ${JSON.stringify(result)}`);
+    }
+  });
+
+  it('B1 twin (broad): ANY selection withdraws the claim, even on the witnessed bare message', async () => {
+    loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        ...payload(TRAPPED_MESSAGE),
+        selected_elements: { node_ids: ['fac_price_up'] },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(repairEvents()).toHaveLength(0);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
   it('a pendings read failure withdraws the claim rather than failing the turn', async () => {
     loadGraphMock.mockResolvedValue(buildGraph(['opt_pass']));
     readPendingsMock.mockRejectedValue(new Error('store down'));

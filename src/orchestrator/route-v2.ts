@@ -4695,17 +4695,37 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     //
     // FAIL-CLOSED GATES, in order: the whole-message claim anchor (a named
     // target, a unit, a trailing clause or a question never matches); the
-    // shared negative gates via `bypassEditHandling`; a live
-    // `set_factor_value` pending (an open value-clarification makes the
-    // referent ambiguous — decline rather than steal the resumer's turn); a
-    // pendings/graph read failure; a persisted graph that fails the SAME
-    // ingress parse the edit dispatch below would apply.
+    // shared negative gates via `bypassEditHandling`; a CANVAS SELECTION on
+    // the ingress (review #1000 B1 — see below); a live `set_factor_value`
+    // pending (an open value-clarification makes the referent ambiguous —
+    // decline rather than steal the resumer's turn); a pendings/graph read
+    // failure; a persisted graph that fails the SAME ingress parse the edit
+    // dispatch below would apply.
+    //
+    // ⭐ THE SELECTION GATE (review #1000 B1, execution-proven both ways):
+    // "this one" / "that one" already HAVE a deterministic meaning when a
+    // canvas selection exists — `DEICTIC_REFERENCE_PATTERN` (Path B,
+    // deterministic-value-update.ts) resolves them to the SELECTED node in
+    // the turn-executor. This pre-route runs BEFORE the executor sees
+    // `selected_elements`, so without this gate a selection-carrying
+    // "Set this one to 0.4." would bind the NON-selected sole-missing-pair
+    // factor — a silent wrong-factor mutation, the exact harm the deictic
+    // module's header names. ANY non-empty selection therefore withdraws the
+    // claim wholesale (not just for the deictic referents): a user pointing
+    // at the canvas has named their referent, and the established
+    // selection-aware paths own the turn. The witnessed trapped request
+    // (a2-turn3-request.json) carries NO selected_elements key, so the
+    // witnessed journey is untouched.
     // ────────────────────────────────────────────────────────────────────
+    const repairSelectionPresent =
+      (extensions.selectedElements?.node_ids.length ?? 0) > 0 ||
+      (extensions.selectedElements?.edge_ids.length ?? 0) > 0;
     let repairValueBinding: (RepairValueBindingResolution & { kind: 'bind' }) | null = null;
     if (
       !bypassEditHandling &&
       !configureOptionIntent &&
       !structuralRestructureIntent &&
+      !repairSelectionPresent &&
       matchBareRepairValue(ingress.message) !== null
     ) {
       let repairClaimBlocked = false;
