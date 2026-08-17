@@ -237,4 +237,25 @@ describe('buildTurnContext — a degraded prior_turns read may not claim never_r
     const runState = runStateAtGraphlessExit(ctx.persisted_analysis_freshness);
     expect(runState.kind).toBe('complete_current');
   });
+
+  it('ARM 4 (twin): NO session store at all is genuine emptiness, not a failed read', async () => {
+    // The third empty, and the one `fetchPriorTurns` answers for separately.
+    // Added because a mutant flipping the `!store` early return to
+    // `readOk: false` SURVIVED the first battery — and a survivor is a claim
+    // either way, so it was adjudicated rather than assumed (trap 13c): the
+    // no-store path is reachable with no injected store and observably reports
+    // `true` / `'none'`, so the mutant was NOT equivalent, merely unpinned.
+    //
+    // The distinction it protects: "there is no store to read" is a fact about
+    // this deployment, not an unreadable store. Reporting it as
+    // `store_unreadable` would make every store-less turn claim an
+    // infrastructure failure, and it deliberately mirrors what `fetchPriorFacts`
+    // reports for its own `!store` early return — one answer for one idea.
+    const ctx = await buildTurnContext(BASE, 'req-no-store', {});
+
+    expect(ctx.prior_turns).toEqual([]);
+    expect(ctx.prior_facts).toEqual([]);
+    expect(ctx.prior_facts_read_ok).toBe(true);
+    expect(ctx.persisted_analysis_freshness.reason).not.toBe('derivation_failed');
+  });
 });
