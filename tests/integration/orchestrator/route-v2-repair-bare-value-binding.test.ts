@@ -244,11 +244,20 @@ describe('POST /orchestrate/v2/turn — 2.1261 repair-leg bare-value binding', (
     expect(body.assistant_text).toContain('Subcontractor cost as share of affected revenue');
     expect(body.assistant_text).toContain('Customer price increase applied');
 
-    // One executable chip per pair, each carrying the user's value.
-    expect(body.suggested_actions).toHaveLength(2);
-    expect(body.suggested_actions[0].message).toBe(EXPECTED_INSTRUCTION);
-    expect(body.suggested_actions[1].message).toContain('Customer price increase applied');
-    expect(body.suggested_actions[1].message).toContain('0.12');
+    // ⭐⭐ P8 (2.1267, 17 Aug 2026): NO CHIP. This asserted "one executable chip per
+    // pair" — and "executable" was the assumption that failed. The chip routed
+    // correctly into the edit lane and then wrote NOTHING: wire-witnessed on
+    // deployed 8be62df (witness-acceptance-2026-08-17, J4 t4 — no edit fact,
+    // blockers 10 -> 10, graph_hash unchanged, reply "open ... on the canvas").
+    // #1000 proved ROUTABILITY; landing was assumed. Per P8 (never ask what you
+    // cannot accept) the affordance is withdrawn until a deterministic
+    // option-intervention write exists (edit-graph.ts:1264-1277 — not wired).
+    //
+    // Nothing the chip carried is withheld: the prose above still names BOTH pairs
+    // and the user's value, and the reply hands over the same probe-P1 sentence as
+    // TEXT to type — asserted here so the remedy is still present and routable.
+    expect(body.suggested_actions).toHaveLength(0);
+    expect(body.assistant_text).toContain(EXPECTED_INSTRUCTION);
 
     // Deterministic: no routing LLM call, no edit dispatch.
     expect(chatWithToolsMock).not.toHaveBeenCalled();
