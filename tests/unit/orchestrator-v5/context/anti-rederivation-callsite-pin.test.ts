@@ -155,7 +155,17 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // represent those post-write bytes. Prior facts are observational only:
     // a degraded read yields unknown and never authorises or blocks the write.
     // Deliberate new post-commit seam; migrate with the frame-consumer audit.
-    'src/orchestrator-v5/system-events/dispatch.ts': 2,
+    // 2026-08-17 P0 L-22 (structural_delete writer): +1 (one call; the import
+    // was already counted above) — `dispatchStructuralDelete` commits mid-turn
+    // and then derives wire freshness against the authoritative analysis hash
+    // that atomic commit returned, for EXACTLY the Train C reason directly
+    // above: a structural removal always moves the analysis-affecting
+    // projection, so the pre-write context frame cannot represent the
+    // post-write bytes, and any prior analysis is out of date by construction.
+    // Prior facts stay observational — a degraded read yields `unknown` and
+    // never authorises or blocks the write. Same post-commit seam, third
+    // instance; migrate with the frame-consumer audit, do not add more.
+    'src/orchestrator-v5/system-events/dispatch.ts': 3,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`

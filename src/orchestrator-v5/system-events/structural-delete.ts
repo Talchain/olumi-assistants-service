@@ -61,6 +61,7 @@ import type { OlumiResponse, SystemEventTurnPayload } from '@talchain/schemas/bo
 import { EditGraphHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { log } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
@@ -436,17 +437,34 @@ export function applyStructuralDelete(
   // a one-option deletion left `options` = [o-launch, o-wait] while `nodes` held
   // only o-wait.
   //
-  // `ingressBase` is a fallback used ONLY when `persistedBase` is structurally
-  // unusable — unreachable here, because a malformed persisted graph has already
-  // thrown `InvalidPersistedDeleteGraphError` above. It is fed the same trusted
-  // server read rather than anything client-supplied, so the trusted-base rule
-  // holds on both arguments.
+  // `ingressBase` is a fallback the helper reads ONLY when `persistedBase` is
+  // structurally unusable — unreachable here, because a malformed persisted graph
+  // has already thrown `InvalidPersistedDeleteGraphError` above. It is fed the
+  // SAME trusted server read, PARSED into the type rather than cast into it, so
+  // the trusted-base rule holds on both arguments and no `as unknown as` double
+  // cast is introduced (the forbidden-boundary containment ratchet reds on one,
+  // and it is right to: a cast here would assert a shape nobody checked).
+  const ingressParse = GraphStateIngressSchema.safeParse(persistedGraph);
+  if (!ingressParse.success) {
+    log.error(
+      {
+        event: 'v5.system_event.structural_delete.ingress_projection_failed',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        first_issue_path: ingressParse.error.issues[0]?.path.join('.') ?? '',
+      },
+      'structural_delete — trusted base could not be projected for the persist merge; refusing the write',
+    );
+    return refuse(
+      payload,
+      'ingress_projection_failed',
+      `I couldn't save that deletion safely, so I haven't removed anything.`,
+    );
+  }
   const merged = mergeAppliedGraphForPersistence({
     appliedGraph: candidate,
     persistedBase: persistedGraph,
-    ingressBase: baseGraph as unknown as Parameters<
-      typeof mergeAppliedGraphForPersistence
-    >[0]['ingressBase'],
+    ingressBase: ingressParse.data,
     requestId,
     scenarioId: payload.scenario_id,
   });
