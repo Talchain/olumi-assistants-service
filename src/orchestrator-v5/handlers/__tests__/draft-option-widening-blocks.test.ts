@@ -33,6 +33,7 @@ import {
   OPTION_WIDENING_TITLE,
 } from '../draft-option-widening-blocks.js';
 import { deriveIntakeOptionReconciliation } from '../../../orchestrator/context/intake-option-reconciliation.js';
+import { resolveDskClaimProvenance } from '../../compose/dsk-claim-record.js';
 import type { GraphV3T } from '../../../orchestrator/types.js';
 
 const CREATED_AT = '2026-08-17T12:00:00.000Z';
@@ -159,7 +160,22 @@ describe('buildDraftOptionWideningBlocks — 2. provenance is DSK-B-007 and carr
     expect(provenance).not.toHaveProperty('protocol_id');
   });
 
-  it('⭐ the contract CANNOT catch a fabricated protocol_id, so the emitter’s restraint is the only guard', () => {
+  it('⭐⭐ resolves the triple from the HASH-VERIFIED bundle, never hand-typed', () => {
+    // B2. An earlier revision hand-typed {claim_id, claim_title,
+    // evidence_strength} and defended it as "the emitter's restraint is the only
+    // guard". That was false in both halves: `resolveDskClaimProvenance` already
+    // fails closed on unknown/deprecated/non-claim ids, so restraint was never
+    // the only guard — and hand-typing BYPASSED the real one, making the title a
+    // mirror of the science it names and meaning a future `deprecated: true`
+    // would be honoured by every other coaching card and ignored by this one.
+    const resolved = resolveDskClaimProvenance('DSK-B-007');
+    expect(resolved).not.toBeNull();
+    // Bind to the resolver's output by identity — if the bundle changes the
+    // title or the strength, this card changes with it, by construction.
+    expect(build()[0]!.dsk_claim_provenance).toEqual(resolved);
+  });
+
+  it('⭐ the contract CANNOT catch a fabricated protocol_id, so the bundle must be the source', () => {
     // Derived at the schema bytes: `protocol_id` is
     // `z.string().regex(/^DSK-P-\d{3}$/).optional()`. So a WELL-FORMED id that
     // names no protocol object in the v1 bundle validates happily — the
@@ -247,9 +263,25 @@ describe('buildDraftOptionWideningBlocks — 4. the option-count floor', () => {
     expect(build({ graph: crmGraph(['Replacing the CRM', 'Keeping it']) })).toHaveLength(1);
   });
 
-  it('stays silent at the floor (3 options)', () => {
+  it('POSITIVE CONTROL: at 3 options it also fires (the floor-4 ruling)', () => {
+    // ⭐ Paul's call, and the reason is DSK-B-007's own contraindication rather
+    // than the rate: "do not flag when the decision genuinely has only two
+    // viable options after thorough analysis". Option-node counts are never 1,
+    // so a floor of 3 aimed the card EXCLUSIVELY at 2-option drafts — the one
+    // population its own science is most cautious about. Floor 4 reaches
+    // 3-option drafts too, where Nutt's finding is live.
     const graph = crmGraph(['Replacing the CRM', 'Keeping it', 'Renegotiating the licence']);
-    expect(OPTION_WIDENING_FLOOR).toBe(3);
+    expect(build({ graph })).toHaveLength(1);
+  });
+
+  it('stays silent at the floor (4 options)', () => {
+    const graph = crmGraph([
+      'Replacing the CRM',
+      'Keeping it',
+      'Renegotiating the licence',
+      'Building in-house',
+    ]);
+    expect(OPTION_WIDENING_FLOOR).toBe(4);
     expect(build({ graph })).toEqual([]);
   });
 
@@ -478,6 +510,102 @@ describe('buildDraftOptionWideningBlocks — 8. visibility', () => {
       },
     })[0]!;
     expect(a.block_id).not.toBe(b.block_id);
+  });
+});
+
+/**
+ * ⭐⭐ B1 — THE FABRICATION SUITE. The field holds REASON PROSE BY DESIGN
+ * (`coaching-pass.ts:108` "brief reasons"; the legacy normaliser's "canonical
+ * 'reason descriptions' surface"). Every entry below is reason prose that an
+ * earlier revision of this module accepted as a set-aside OPTION, because it
+ * took `parts[0]` without requiring that a separator was found — so `head`
+ * became the whole sentence and passed for containing "option" and no veto word.
+ *
+ * 10 of 13 such inputs produced a card asserting the drafter set aside an option
+ * that is not an option, WITH A 48-TEST SUITE GREEN THROUGHOUT. That is why
+ * these are pinned by class and not as a one-off regression.
+ */
+describe('buildDraftOptionWideningBlocks — ⭐⭐ B1: reason prose is never named as an option', () => {
+  const REASON_PROSE_THAT_MENTIONS_OPTIONS: readonly string[] = [
+    // No separator anywhere: the whole sentence became a "designation".
+    'Supplier concentration, which could bite either option, is absent from the brief',
+    'A pricing change was considered but it overlaps substantially with the paid tier option',
+    'Timing was considered but the brief frames it as a constraint on existing options rather than an option',
+    'Nothing else in the brief suggests a further option worth modelling',
+    'We kept the option set as stated because the brief is explicit about scope',
+    // Separator present, but the class word does not CLOSE the head — the head
+    // is prose ABOUT options, not the name of one.
+    'Cost differences between the options — not quantified anywhere in the brief',
+    'The relative risk of each option — brief gives no basis to differentiate',
+    'Whether either option can be reversed later — not addressed in the brief',
+  ];
+
+  for (const entry of REASON_PROSE_THAT_MENTIONS_OPTIONS) {
+    it(`is SILENT on reason prose: "${entry.slice(0, 58)}…"`, () => {
+      expect(
+        build({ wideningLog: { elements_considered_but_excluded: [entry] } }),
+      ).toEqual([]);
+    });
+  }
+
+  it('CONTRAST CONTROLS: the genuine designations in the same run still fire', () => {
+    // Trap 13 / 22b: an all-silent predicate is not a fix, it is a broken
+    // instrument. These must still emit, or the conjuncts went too wide.
+    for (const entry of [REAL_CRM_EXCLUSION, REAL_QUOTED_EXCLUSION, REAL_HYBRID_STAFFING_EXCLUSION]) {
+      expect(
+        build({ wideningLog: { elements_considered_but_excluded: [entry] } }),
+        `contrast control must fire: ${entry}`,
+      ).toHaveLength(1);
+    }
+  });
+
+  it('never ships a truncated fragment as if it were quoted words', () => {
+    // The tail strip used to remove a trailing " options" that was grammatically
+    // the HEAD NOUN, yielding "Cost differences between" while the copy claimed
+    // to quote the record. Conjunct 3 pins the residue.
+    for (const entry of REASON_PROSE_THAT_MENTIONS_OPTIONS) {
+      for (const block of build({ wideningLog: { elements_considered_but_excluded: [entry] } })) {
+        expect(block.body).not.toMatch(/"[^"]*\b(?:between|of|the|and|or|either|which|that)"/i);
+      }
+    }
+  });
+});
+
+describe('buildDraftOptionWideningBlocks — MR-5: the fail-closed branch of the duplicate check', () => {
+  it('is SILENT when the designation reduces to no identifying tokens', () => {
+    // Demonstrated NON-equivalent by the reviewer: inverting the
+    // `tokens.length === 0 → true` fail-closed branch makes this real-shaped
+    // entry emit a card naming the bare word "Alternative" — a card that names
+    // NOTHING. Pristine is correctly silent; this pins that it stays so.
+    expect(
+      build({
+        wideningLog: {
+          elements_considered_but_excluded: ['Alternative — not mentioned in the brief'],
+        },
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe('buildDraftOptionWideningBlocks — R3: an id-shaped designation never reaches the caption', () => {
+  it('uses the generic caption when the designation carries an id-shaped token', () => {
+    // The egress scrub runs BEFORE validation and its label substitution can
+    // LENGTHEN a string, so an id-shaped token could push a caption that
+    // validated here past 40 chars AFTER the scrub — and the egress parse is
+    // WHOLE-RESPONSE, so that costs the entire draft turn, not just the card.
+    const blocks = build({
+      wideningLog: {
+        elements_considered_but_excluded: ['opt_phased_rollout option — not referenced in the brief'],
+      },
+    });
+    for (const block of blocks) {
+      expect(block.action_label).toBe('Add this option');
+      expect(CoachingBlockSchema.safeParse(block).success).toBe(true);
+    }
+  });
+
+  it('CONTRAST: a plain-prose designation keeps its named caption', () => {
+    expect(build()[0]!.action_label).toBe('Add "Phased rollout"');
   });
 });
 

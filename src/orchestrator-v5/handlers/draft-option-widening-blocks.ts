@@ -23,39 +23,55 @@
  * guard, and `guidanceSignalsForCoachingKind('widening')` already resolves to
  * `could_fix`. The producer has simply never emitted one. This is the producer.
  *
- * ── ⭐ THE STEP-0 MEASUREMENT THAT SHAPED THIS MODULE, AND CORRECTED ITS BRIEF ─
- * Censused 2026-08-17 over the COMPLETE staging `scenarios` table — 2,977 rows,
- * 2026-04-18 → 2026-08-17, contrast controls fired (`graph.nodes` present on
- * 2,435; `graph.coaching.summary` non-empty on 2,166):
+ * ── ⭐⭐ WHAT THE FIELD IS FOR — READ THIS BEFORE CHANGING ANY GATE BELOW ────
+ * **`elements_considered_but_excluded` HOLDS REASON PROSE BY DESIGN, NOT ENTITY
+ * NAMES.** Derived from the two places that WRITE it, which is the only way to
+ * learn a field's meaning:
+ *   - the instruction that generates it — `cee/unified-pipeline/stages/
+ *     coaching-pass.ts:108` tells the drafting model the field holds
+ *     **"brief reasons (may be empty)"**;
+ *   - the legacy normaliser — `adapters/llm/normalise-legacy-coaching.ts`
+ *     collects each legacy entry's `reason` string into this same field, its
+ *     header naming it **"the canonical 'reason descriptions' surface"**.
  *
- *   - `elements_considered_but_excluded` is POPULATED on 2,165 of the 2,200
- *     graphs carrying a `widening_log` (98.4%), 1,059 of them in August 2026,
- *     the newest hours before this module was written. The record is live.
- *   - ⚠ BUT ITS ENTRIES ARE DOMINATED BY **FACTORS**, NOT OPTIONS. Of 4,922
- *     entries, only 763 (15.5%) mention an option/alternative at all, and most
- *     of those mention it only in the REASON half ("...unlikely to change
- *     option ranking"). The typical entry is a factor the drafter declined to
- *     invent: "Competitor presence in Leeds — relevant but no basis in the
- *     brief to add it".
+ * ⚠ THIS MODULE'S FIRST REVISION GOT THAT WRONG, AND THE WAY IT GOT IT WRONG IS
+ * NOW STANDING DOCTRINE (`STANDING-BRIEF-PREAMBLE.md` P7). It audited 4,922
+ * census entries, observed that the field SOMETIMES names options, and built an
+ * entity-class gate on that distribution. Selecting a predicate from the same
+ * corpus you intend to gate is circular: the corpus shows what the field
+ * *happens to contain*, never what it is *for*. The gate then admitted whole
+ * sentences, and the product told users it had "set aside" options that were not
+ * options — **10 of 13 adversarial inputs, with a 48-test suite green
+ * throughout**, e.g. `I set aside an option when I built this model: "Cost
+ * differences between".` A census tells you the distribution; only the producer
+ * tells you the meaning, and where they disagree the PRODUCER WINS.
  *
- * THE CONSEQUENCE FOR THIS MODULE, and it is the whole design: the brief's
- * gate 3 was "≥1 entry surviving the copy gate". Implemented literally, this
- * card would title itself "Options you set aside" and then name a FACTOR — a
- * fabricated claim about what the product did, of exactly the class the
- * estate's provenance rule forbids. So eligibility is an ENTITY-CLASS gate:
- * an entry qualifies only when the record ITSELF designates it an option or an
- * alternative (see `extractSetAsideOptions`). Measured acceptance after that
- * gate: 526 of 4,922 entries (10.7%), and a hand audit of 30 accepted entries
- * found 30/30 genuinely naming a set-aside option.
+ * So the extraction below is not "find the option-ish entries". It is: **accept
+ * only an entry whose own grammar DESIGNATES a named option** — a quoted name
+ * followed by its class word, or a designation that CLOSES on its class word
+ * before a real separator, whose residue reads as a name. Everything else is
+ * reason prose and is dropped. The three conjuncts on shape B are each there
+ * because its absence produced a fabricated claim; see them inline.
  *
- * ── FIRING RATE, MEASURED, SO NOBODY IS SURPRISED BY THE RARITY ────────────
- * Combined with the option-count floor, on the same census:
- *   - floor 3 (shipped): 13 of 2,165 exclusion-bearing drafts (0.6%)
- *   - floor 4:          167 of 2,165 (7.7%)
- *   - floor 5:          601 of 2,165 (27.8%)
- * Option-node counts observed are 0, 2, 3, 4, 5, 6 — never 1 — so at floor 3
- * the card fires only on a 2-option draft. The floor is an exported constant
- * and reversible; the number is Paul's to move.
+ * ── FIRING RATE (RE-DERIVED UNDER THE FIXED PREDICATE) ─────────────────────
+ * ⚠ The figures this header first carried (0.6% at floor 3, 7.7% at floor 4)
+ * were measured under the FABRICATING predicate and were therefore UPPER
+ * BOUNDS, not rates — P7's corollary. Re-derived on the same 2,977-row census
+ * after the B1 fix, over 2,165 exclusion-bearing drafts:
+ *
+ *   floor 3:  12 drafts   0.6%
+ *   floor 4:  84 drafts   3.9%   <-- SHIPPED   (was reported as 7.7%: ~2x too high)
+ *   floor 5: 372 drafts  17.2%
+ *
+ * Entry-level acceptance also fell, 526 → 491 of 4,922 (10.7% → 10.0%).
+ *
+ * ⭐ WHY FLOOR 4 AND NOT 3, and it is not the rate. DSK-B-007's own
+ * contraindication says do not flag "when the decision genuinely has only two
+ * viable options after thorough analysis". Option-node counts observed are
+ * 0, 2, 3, 4, 5, 6 — NEVER 1 — so a floor of 3 aimed the card EXCLUSIVELY at
+ * 2-option drafts: precisely the population its own science is most cautious
+ * about. At floor 4 the firing set is {2 options: 12, 3 options: 72}, so 86% of
+ * cards land on 3-option drafts where Nutt's finding is live.
  *
  * ── WHAT THIS MODULE WILL NOT DO ───────────────────────────────────────────
  * It never GENERATES an option. DSK-B-007's own boundary conditions forbid it
@@ -65,10 +81,10 @@
  *
  * It also does not parse the record into a name and a reason with a general
  * natural-language rule. CLAUDE.md trap 22f is explicit that a punctuation
- * predicate over free text oscillates; the two shapes handled here are the two
- * shapes the census actually contains (a quoted name, or a designation before
- * the first separator), and an entry matching neither is DROPPED rather than
- * guessed at.
+ * predicate over free text oscillates. The two shapes accepted here are the two
+ * in which the record's own grammar DESIGNATES a name; an entry matching neither
+ * is DROPPED rather than guessed at. Because the field is reason prose by
+ * design, dropping is the common case and that is correct.
  *
  * ── FAIL-CLOSED GATES (all of them, in order) ──────────────────────────────
  *   1. `analysisReady.status !== 'ready'`  → [] (the sibling's own first gate:
@@ -95,6 +111,7 @@ import {
 } from '../../orchestrator/context/intake-option-reconciliation.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { deterministicBlockId } from '../compose/block-id.js';
+import { resolveDskClaimProvenance } from '../compose/dsk-claim-record.js';
 import { gateCoachingCardBody } from '../coaching/copy-quality-gate.js';
 import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
 
@@ -104,7 +121,7 @@ import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
  * generation") and DSK-TR-004's kin threshold (`option_count >= 3`). Reversible
  * constant; measured firing rates for 3/4/5 are in this file's header.
  */
-export const OPTION_WIDENING_FLOOR = 3;
+export const OPTION_WIDENING_FLOOR = 4;
 
 /**
  * ⭐ PAUL FORK 2 (brief §9.2) — the copy. The three JOBS are doctrine
@@ -132,15 +149,32 @@ export const OPTION_WIDENING_FLOOR = 3;
  */
 export const OPTION_WIDENING_TITLE = 'Options you set aside';
 
-/** The DSK claim this card cites. Its citations are already attached at `data/dsk/v1.json`. */
-export const OPTION_WIDENING_DSK_CLAIM: NonNullable<CoachingBlock['dsk_claim_provenance']> = {
-  claim_id: 'DSK-B-007',
-  claim_title: 'Narrow framing and insufficient option generation',
-  evidence_strength: 'medium',
-  // NO `protocol_id`. It is optional at the contract and NO generation
-  // protocol object exists in the v1 bundle, so inventing one would be a
-  // fabricated provenance id. The brief is explicit: do not invent one.
-};
+/**
+ * The DSK claim this card cites. Its citations (Nutt 2004; Tversky & Kahneman)
+ * are already attached at `data/dsk/v1.json`.
+ *
+ * ⭐⭐ THE ID IS ALL WE HARD-CODE, AND THAT IS THE POINT. The title, the
+ * evidence strength and any protocol id are RESOLVED from the hash-verified
+ * bundle by `resolveDskClaimProvenance` (`compose/dsk-claim-record.ts:135`),
+ * never written here.
+ *
+ * An earlier revision hand-typed the whole triple and defended it on the
+ * grounds that "no generation protocol exists, so the emitter's restraint is
+ * the only guard". **That was wrong on both halves.** The resolver already
+ * fails closed on unknown, deprecated and non-claim ids, and already attaches a
+ * protocol ONLY when one genuinely links — so restraint was never the only
+ * guard, and hand-typing actively BYPASSED the real one. `dsk-claim-record.ts`
+ * states the rule the hand-typed version broke:
+ *
+ *   "Every byte the user sees under the bundle's authority comes from
+ *    `data/dsk/v1.json`. A title written into this file could drift from the
+ *    science it names and nothing would notice."
+ *
+ * Concretely: a future `deprecated: true` on DSK-B-007 would be honoured by
+ * every other coaching card and IGNORED by this one. Resolved through the
+ * resolver, the badge is simply omitted when the bundle says it must be.
+ */
+export const OPTION_WIDENING_DSK_CLAIM_ID = 'DSK-B-007';
 
 /**
  * A PRE-FILTER, NOT THE AUTHORITY. `CoachingBlockSchema` is the authority and
@@ -165,6 +199,46 @@ const DESIGNATION_MIN = 3;
  * measured to admit factors ("Tax treatment of each route").
  */
 const OPTION_DESIGNATOR = /\b(?:option|options|alternative|alternatives)\b/i;
+
+/**
+ * ⭐ CONJUNCT 2 of the B1 fix. The class word must CLOSE the designation, modulo
+ * the same closed boilerplate tail `DESIGNATION_TAIL` strips. A class word
+ * buried mid-sentence means the entry is prose ABOUT options, not the name of
+ * one — which is what the field actually holds (see the header's P7 note).
+ */
+const OPTION_DESIGNATOR_CLOSES_HEAD = new RegExp(
+  [
+    '\\b(?:option|options|alternative|alternatives)',
+    '(?:\\s+(?:excluded|omitted|dropped|considered))?',
+    '(?:\\s+(?:routed|surfaced)\\s+(?:to|in)\\s+coaching)?',
+    '\\s*$',
+  ].join(''),
+  'i',
+);
+
+/**
+ * ⭐ CONJUNCT 3 of the B1 fix. Function words that cannot END a name. A residue
+ * closing on one of these is a severed clause, not a designation ("Cost
+ * differences between", "Tax treatment of").
+ *
+ * ⚠ THIS IS A HAND-WRITTEN CLOSED SET — trap 12's shape, and it is named as such
+ * rather than hidden. It is tolerable here ONLY because its failure direction is
+ * a GAP: a missing word costs a card, never a false claim. It is pinned by
+ * fixtures rather than trusted.
+ */
+const TRAILING_FUNCTION_WORDS: ReadonlySet<string> = new Set([
+  'between', 'of', 'the', 'a', 'an', 'and', 'or', 'nor', 'for', 'with', 'without',
+  'in', 'on', 'to', 'by', 'as', 'at', 'from', 'than', 'across', 'about', 'into',
+  'either', 'both', 'which', 'that', 'this', 'these', 'those', 'is', 'are', 'was',
+  'were', 'be', 'been', 'but', 'if', 'per', 'via', 'over', 'under', 'versus', 'vs',
+]);
+
+/**
+ * ⭐ CONJUNCT 3's length bound. The reconciler already uses `MAX_CANDIDATE_WORDS
+ * = 10` for exactly this purpose (an option name is short; a clause is not).
+ * Eight is tighter because a designation here also carries its class word.
+ */
+const DESIGNATION_MAX_WORDS = 8;
 
 /**
  * Explicit NON-option entity words. Their presence in the DESIGNATION half
@@ -334,13 +408,27 @@ export function extractSetAsideOptions(entries: unknown): SetAsideOption[] {
       const parts = entry.split(DESIGNATION_SEPARATOR);
       const head = (parts[0] ?? '').trim();
       if (
+        // ⭐ CONJUNCT 1 — A REAL SEPARATOR MUST HAVE BEEN FOUND.
+        // Without this, `split` returns the WHOLE SENTENCE as `parts[0]`, and a
+        // reason sentence that merely contains the word "option" and no veto
+        // word becomes a "designation". That is the B1 blocker: the card said
+        // `I set aside an option when I built this model: "Cost differences
+        // between"` and `Add "Supplier concentration, which could bite either
+        // option, is absent from the brief" as an option on the model.` ~17.4%
+        // of option-mentioning entries carry no separator at all.
+        parts.length > 1 &&
         head.length >= DESIGNATION_MIN &&
         head.length <= DESIGNATION_MAX &&
-        OPTION_DESIGNATOR.test(head) &&
+        // ⭐ CONJUNCT 2 — THE CLASS WORD MUST CLOSE THE HEAD (modulo the closed
+        // boilerplate tail). "Phased rollout as a third option" and
+        // "Colocation option excluded" designate; "Supplier concentration,
+        // which could bite either option, is absent…" does not. A class word
+        // buried mid-sentence is prose ABOUT options, not the name of one.
+        OPTION_DESIGNATOR_CLOSES_HEAD.test(head) &&
         !NON_OPTION_ENTITY.test(head)
       ) {
         designation = head;
-        reason = parts.length > 1 ? entry.slice(head.length).replace(DESIGNATION_SEPARATOR, '').trim() || null : null;
+        reason = entry.slice(head.length).replace(DESIGNATION_SEPARATOR, '').trim() || null;
       }
     }
 
@@ -351,6 +439,17 @@ export function extractSetAsideOptions(entries: unknown): SetAsideOption[] {
     const cleaned = designation.replace(DESIGNATION_TAIL, '').trim();
     if (cleaned.length < DESIGNATION_MIN || cleaned.length > DESIGNATION_MAX) continue;
     if (NON_OPTION_ENTITY.test(cleaned)) continue;
+
+    // ⭐ CONJUNCT 3 of the B1 fix — the RESIDUE must read as a name.
+    // `DESIGNATION_TAIL` strips a trailing class word that was sometimes the
+    // grammatical HEAD NOUN, which produced truncated fragments ("Cost
+    // differences between") while the copy claimed to quote the record's own
+    // words. A residue that ends on a function word is a severed clause, and a
+    // residue longer than a short phrase is prose.
+    const words = cleaned.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length === 0 || words.length > DESIGNATION_MAX_WORDS) continue;
+    const lastWord = words[words.length - 1]!.toLowerCase().replace(/[^a-z]/g, '');
+    if (TRAILING_FUNCTION_WORDS.has(lastWord)) continue;
 
     const key = cleaned.toLowerCase();
     if (seen.has(key)) continue;
@@ -449,12 +548,21 @@ function composeBody(chosen: SetAsideOption, optionCount: number): string | null
  * this module all carried short option names, so they never reached
  * `action_label`'s bound — which is 40 characters, and module-private in the
  * schemas package. Replaying the emitter over all 2,977 captured drafts
- * produced `Add "Franchise or partnership" to the model` at 43 characters: a
- * block the egress `safeParse` would have DROPPED WHOLE (`phase3-blocks.ts
- * :57-61` — never a partial), i.e. a card that silently never appears. A green
- * unit suite could not see it, because the class was absent from the corpus the
- * author wrote (trap 22). The lesson is not "add 40 to a constants block" — it
- * is that the numbers are not importable, so the SCHEMA has to be the guard.
+ * produced `Add "Franchise or partnership" to the model` at 43 characters. A
+ * green unit suite could not see it, because the class was absent from the
+ * corpus the author wrote (trap 22). The lesson is not "add 40 to a constants
+ * block" — the numbers are not importable, so the SCHEMA has to be the guard.
+ *
+ * ⚠⚠ AND THE STAKES ARE HIGHER THAN THIS COMMENT FIRST CLAIMED. It cited
+ * `phase3-blocks.ts:57-61` as a block-level drop ("never a partial"). **That is
+ * the run_analysis composer and the DRAFT PATH NEVER CALLS IT.** The real seam
+ * is `route-v2.ts:1056` sanitise → `:1063` `validateEgress`, which is a
+ * WHOLE-RESPONSE `OlumiResponseSchema.safeParse`; on failure
+ * `validators/b1.ts:124-136` returns `buildEgressFallback()`. So one invalid
+ * block does not cost a card — **it costs THE WHOLE DRAFT TURN**, replaced by
+ * "The server produced a response that failed validation." A user who would
+ * have got a model gets an error instead. This function is the last thing
+ * standing between a long option name and that outcome.
  */
 function firstValidBlock(candidates: readonly CoachingBlock[]): CoachingBlock | null {
   for (const candidate of candidates) {
@@ -535,6 +643,11 @@ export function buildDraftOptionWideningBlocks(
   // reruns of the same draft and distinct between different set-aside options.
   const signalId = `draft_option_widening:${chosen.designation.toLowerCase()}`;
 
+  // Resolved from the hash-verified bundle, never hand-typed — see the note on
+  // OPTION_WIDENING_DSK_CLAIM_ID. `null` (unknown / deprecated / not a claim)
+  // means the badge is omitted, not faked.
+  const dskProvenance = resolveDskClaimProvenance(OPTION_WIDENING_DSK_CLAIM_ID);
+
   /**
    * Chip captions in preference order. The named form is what we want; the
    * generic fallback exists so a LONG option name costs the caption's
@@ -542,7 +655,29 @@ export function buildDraftOptionWideningBlocks(
    * still name the option in full, so nothing about the card becomes vague, and
    * nothing about it becomes untrue.
    */
-  const labelCandidates = [`Add "${chosen.designation}"`, 'Add this option'];
+  //
+  // ⚠ R3 — AN ID-SHAPED TOKEN IN THE DESIGNATION MUST NOT REACH THE CAPTION.
+  // The egress scrub runs BEFORE validation, and its label substitution can
+  // LENGTHEN a string (an id is replaced by its human label). So a designation
+  // carrying an id-shaped token could push a caption that validated here past
+  // the 40-char bound AFTER the scrub — and because the egress parse is
+  // whole-response (see `firstValidBlock`), that costs THE ENTIRE TURN. This is
+  // the first draft-path block to carry `action_label` at all, so nothing
+  // upstream has ever had to think about it.
+  //
+  // The test is deliberately BROADER than the gate's own id shape: any `_` or
+  // `:`, or any of the gate's entity prefixes followed by a separator. Drift in
+  // this list can therefore only cost the caption's SPECIFICITY, never a turn
+  // and never a true statement — the same provable-containment argument as
+  // `matchesExistingOption`, and the reason a mirror is tolerable here.
+  const idShaped =
+    /[_:]/.test(chosen.designation) ||
+    /\b(?:fac|opt|goal|dec|out|risk|con|factor|option|decision|outcome|constraint)[-_:]/i.test(
+      chosen.designation,
+    );
+  const labelCandidates = idShaped
+    ? ['Add this option']
+    : [`Add "${chosen.designation}"`, 'Add this option'];
 
   const block = firstValidBlock(
     labelCandidates.map((action_label) => ({
@@ -583,7 +718,9 @@ export function buildDraftOptionWideningBlocks(
       // chip sends `action_prompt` as an ordinary free-text turn. This is NOT a
       // typed dispatch and no test in this lane asserts one.
       action_intent: 'add_option',
-      dsk_claim_provenance: OPTION_WIDENING_DSK_CLAIM,
+      // Resolved from the hash-verified bundle; OMITTED entirely when the
+      // bundle cannot vouch for the claim (unknown / deprecated / not a claim).
+      ...(dskProvenance !== null ? { dsk_claim_provenance: dskProvenance } : {}),
       // Producer-owned guidance signals: `widening` already resolves to
       // `could_fix` (compose/guidance-signals.ts). Derived, never hand-typed.
       ...guidanceSignalsForCoachingKind('widening'),
