@@ -64,6 +64,8 @@ const DRAFT_GRAPH = JSON.parse(
   ),
 ) as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
 
+const OPTION_ID = '21ea9b80';
+const FACTOR_ID = '49a2b80b';
 const OPTION_LABEL = 'subcontracting inner-city deliveries to a green courier';
 const FACTOR_LABEL = 'Subcontractor cost as share of affected-route revenue';
 
@@ -82,7 +84,8 @@ describe('preconditions — the witness bytes really carry the defect', () => {
   it('the SAME payload carries a live MISSING_OPTION_VALUE blocker (WIRE shape)', () => {
     const pairs = projectMissingValuePairs(WIRE.j4_t2_readiness);
     expect(pairs.length).toBeGreaterThan(0);
-    expect(pairs[0]).toEqual({ optionLabel: OPTION_LABEL, factorLabel: FACTOR_LABEL });
+    // By identity, not by position — #1008 reorders/shortens this list.
+    expect(pairs).toContainEqual({ optionLabel: OPTION_LABEL, factorLabel: FACTOR_LABEL });
   });
 
   it('⚠ NEAR-MISS (c): the CANONICAL in-process payload spells it DIFFERENTLY — both must be read', () => {
@@ -93,8 +96,21 @@ describe('preconditions — the witness bytes really carry the defect', () => {
     const canonical = buildCanonicalAnalysisReadyFromGraph(DRAFT_GRAPH) as unknown as {
       blockers?: Array<Record<string, unknown>>;
     };
-    expect(canonical.blockers?.[0]?.blocker_type).toBe('missing_value');
-    expect(canonical.blockers?.[0]?.code).toBeUndefined();
+    // ⚠⚠ BOUND BY IDENTITY, NEVER BY POSITION (trap 19) — a REAL fragility, not a
+    // stylistic one. This asserted `blockers?.[0]` until #1008 (2.1266,
+    // "system-inferred edges no longer manufacture mandatory user repair work")
+    // was measured to SHORTEN this array from 10 blockers to 1, so `[0]` is a
+    // different blocker before and after it. This guard's entire precondition is
+    // "a live missing-value blocker for THIS pair; absent ⇒ no opinion" — exactly
+    // what #1008 removes for synthetic edges — so index-binding made the
+    // precondition depend on an ordering #1008 changes. It survived only because
+    // the decisive pair is an `origin:"ai"` edge #1008 keeps: luck of ordering,
+    // not construction.
+    const blockers = canonical.blockers ?? [];
+    const mine = blockers.find((b) => b.option_id === OPTION_ID && b.factor_id === FACTOR_ID);
+    expect(mine, 'the witnessed blocked pair must be present BY IDENTITY').toBeDefined();
+    expect(mine?.blocker_type).toBe('missing_value');
+    expect(mine?.code).toBeUndefined();
     const pairs = projectMissingValuePairs(canonical);
     expect(pairs).toContainEqual({ optionLabel: OPTION_LABEL, factorLabel: FACTOR_LABEL });
   });

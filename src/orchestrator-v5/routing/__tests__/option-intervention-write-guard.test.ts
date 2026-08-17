@@ -82,6 +82,37 @@ function withRenamedFactor(label: string): GraphV3T {
 
 const BEFORE = DRAFT_GRAPH as unknown as GraphV3T;
 
+describe('the fixture\'s two near-duplicate options — distinguished EXPLICITLY, not positionally', () => {
+  // ⚠ REVIEWER FINDING (#1008's reviewer, 17 Aug): the witnessed draft carries two
+  // options whose labels differ only cosmetically and whose real distinction is
+  // PROVENANCE — `21ea9b80` "subcontracting inner-city deliveries to a green
+  // courier" (`from_brief`, i.e. the user's own words) and `862169d7` "Subcontract
+  // inner-city runs to green courier" (`ai_inferred`, the drafter's near-duplicate,
+  // recorded as N2 in the witness). Leaving that distinction implicit is the same
+  // positional fragility as binding a blocker by `[0]`: #1008 changes how
+  // system-inferred structure is treated, so which of the two carries a blocker can
+  // move. Asserted by IDENTITY here so the fixture's shape is load-bearing and
+  // visible rather than incidental.
+  it('the two options are distinct ids with distinct provenance', () => {
+    const byId = new Map(DRAFT_GRAPH.nodes.map((n) => [n.id as string, n]));
+    expect(byId.get(OPTION_ID)?.provenance).toBe('from_brief');
+    expect(byId.get(OTHER_OPTION_ID)?.provenance).toBe('ai_inferred');
+    expect(byId.get(OPTION_ID)?.label).not.toBe(byId.get(OTHER_OPTION_ID)?.label);
+  });
+
+  it('the witnessed message resolves to the FROM_BRIEF option, never its ai_inferred twin', () => {
+    const outcome = evaluateConfigureOptionOutcome({
+      message: WIRE.j4_t5_user_message,
+      before: BEFORE,
+      after: withFactorBaseline(0.12),
+    });
+    expect(outcome.status).toBe('not_honoured');
+    if (outcome.status !== 'not_honoured') return;
+    expect(outcome.optionId).toBe(OPTION_ID);
+    expect(outcome.optionId).not.toBe(OTHER_OPTION_ID);
+  });
+});
+
 describe('preconditions — the witnessed messages really reach this guard', () => {
   it('the explicit phrasing names the option, so the outcome guard binds by identity', () => {
     const outcome = evaluateConfigureOptionOutcome({
