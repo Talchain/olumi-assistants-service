@@ -11869,6 +11869,10 @@ export async function runTurnExecutor(
     const read = readAuthoritativeModelState({
       persistedGraph: effectiveTurnGraph,
       readiness: analysisReadyForTurn ?? null,
+      // A turn that WROTE the model has no settled authoritative read here — see
+      // the parameter's doc. Fail-open: the mutation's own receipt guards
+      // (structural-success, goal-target) own claims about what it just wrote.
+      turnWroteModel: handlerEmittedMutatedGraph,
     });
     if (read === null) return;
     const decision = classifyModelContentsClaim({ assistantText, read });

@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
 import {
+  MIXED_CLAIM_KNOWN_GAP,
   extractAssertedNumbers,
   groundModelValueClaim,
   readAuthoritativeModelState,
@@ -144,7 +145,27 @@ describe('RESTORE THE CLAIM — every shape must be refused as blocker_says_miss
     });
   }
 
-  it('MIXED CLAIM: one grounded value does NOT license an ungrounded one in the same sentence', () => {
+  it('MIXED CLAIM is a PINNED KNOWN GAP, not a silent one (trap 22f)', () => {
+    // ⚠ THIS ASSERTION WAS REVERSED UNDER MEASUREMENT, and the reversal is the
+    // finding. It first demanded refusal (closing a surviving `some` mutant). That
+    // required `every`, and `every` was then measured FALSELY REFUSING a true claim
+    // in CI (the goal-target positive control: a registered £250,000 target beside a
+    // 3% churn ceiling and an 80% margin floor held as CONSTRAINTS). Two rounds,
+    // opposite directions ⇒ stop guessing and pin the gap (trap 22f).
+    //
+    // So this now pins the GAP explicitly: the mixed claim is NOT refused. If a
+    // future change closes it, this REDs and the author must show it did not
+    // reintroduce the false-refusal. The real fix is per-value slot attribution.
+    const verdict = groundModelValueClaim({
+      read,
+      assertedValues: extractAssertedNumbers(MIXED_CLAIM_KNOWN_GAP),
+    });
+    expect(read.groundedValues.has(0.5), 'precondition: 0.5 IS grounded').toBe(true);
+    expect(read.groundedValues.has(0.12), 'precondition: 0.12 is NOT grounded').toBe(false);
+    expect(verdict).toEqual({ grounded: true });
+  });
+
+  it('the SINGLE-value fabrication — the witnessed shape — is still refused', () => {
     // ⚠ ADDED AFTER A SURVIVING MUTANT (recorded, not quietly patched — trap 14).
     // The `every`→`some` mutant on `groundModelValueClaim` SURVIVED the whole
     // first battery: every case in the corpus asserted exactly ONE number, so
@@ -153,18 +174,11 @@ describe('RESTORE THE CLAIM — every shape must be refused as blocker_says_miss
     // the harm it hides is the dangerous one: a reply that pairs a TRUE figure
     // with a fabricated one would ship the fabrication on the true one's licence.
     // 0.5 IS grounded (the witnessed factor default); 12% is not.
-    const mixed =
-      'Your model already uses 0.5 for that driver and already reflects 12% on the subcontracting route.';
-    expect(read.groundedValues.has(0.5)).toBe(true);
-    expect(read.groundedValues.has(0.12)).toBe(false);
-    const verdict = groundModelValueClaim({
-      read,
-      assertedValues: extractAssertedNumbers(mixed),
-    });
-    expect(verdict).toEqual({ grounded: false, reason: 'blocker_says_missing' });
-    // …and end to end through the recogniser.
-    const decision = classifyModelContentsClaim({ assistantText: mixed, read });
-    expect(decision.verdict).toBe('swap');
+    const single = 'Your model already reflects 12% on the subcontracting route.';
+    expect(
+      groundModelValueClaim({ read, assertedValues: extractAssertedNumbers(single) }),
+    ).toEqual({ grounded: false, reason: 'blocker_says_missing' });
+    expect(classifyModelContentsClaim({ assistantText: single, read }).verdict).toBe('swap');
   });
 
   it('the SEAM itself refuses, not just the recogniser — grounding is denied at source', () => {

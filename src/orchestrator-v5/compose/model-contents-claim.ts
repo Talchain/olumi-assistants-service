@@ -212,12 +212,38 @@ export function collectModelValueNumbers(graph: unknown): Set<number> {
     }
     addFromDisplayString((holder as Record<string, unknown>).display_value);
   };
+  // ⭐⭐ GOAL TARGETS ARE PART OF THE CLAIM'S DOMAIN — added after CI proved the
+  // omission caused a FALSE REFUSAL of a TRUE claim (trap 14, recorded not
+  // patched). The required check failed on
+  // `turn-executor-direct-answer-registration-claim.test.ts`'s own POSITIVE
+  // CONTROL — *"the SAME prose ships untouched when the persisted goal node DOES
+  // register the target"* — because "The model already has that target in place:
+  // growing MRR to £250,000…" is `already` + a holding verb + a number, and this
+  // sweep looked only at effect values and node observed values. The claim was
+  // TRUE and this guard refused it.
+  //
+  // ⚠ AND THE DEEPER POINT (trap 21): goal-target registration claims ALREADY have
+  // a dedicated authority — `compose/goal-target-receipt-guard.ts` (ROADMAP 1.19),
+  // which checks the canonical `goal_threshold_raw` contract. Two guards answering
+  // one question and disagreeing is the defect; this sweep reads the same
+  // registration so it can only ever AGREE with that authority, never contradict
+  // it. Over-refusal is a failure, not a safe default.
+  const addTargetCarriers = (holder: unknown): void => {
+    if (holder === null || typeof holder !== 'object') return;
+    for (const [key, value] of Object.entries(holder as Record<string, unknown>)) {
+      if (!/threshold|target/i.test(key)) continue;
+      addNumber(value);
+      addFromDisplayString(value);
+    }
+  };
 
   for (const node of nodes) {
     if (node === null || typeof node !== 'object') continue;
     const record = node as Record<string, unknown>;
     addObservedState(record);
     addObservedState(record.data);
+    addTargetCarriers(record);
+    addTargetCarriers(record.data);
     const interventions = mergeInterventionSources(record);
     if (interventions !== undefined) {
       for (const value of Object.values(interventions)) addNumber(value);
@@ -237,8 +263,24 @@ export function collectModelValueNumbers(graph: unknown): Set<number> {
 export function readAuthoritativeModelState(params: {
   readonly persistedGraph: unknown;
   readonly readiness: unknown;
+  /**
+   * ⭐⭐ DID THIS TURN WRITE THE MODEL? If so there is NO authoritative read to
+   * ground against yet, and this returns `null` so the guard stands down.
+   *
+   * Added after CI proved the omission caused a FALSE REFUSAL (trap 14): the
+   * required check failed on `baseline-elicitation-route-level.test.ts` —
+   * *"about 12%" against the live question mints the baseline on the named
+   * target* — where the reply *"Noted Churn rate is currently at 12%."* is TRUE
+   * because the turn had just written it, while the graph this guard holds is the
+   * PRE-dispatch parse. Refusing there is unsound, and it is P3 exactly: my
+   * emission must not be LESS TRUE than the behaviour it replaces. A mutating
+   * turn's claim is the mutation's own to justify — the structural-success and
+   * goal-target receipt guards own that question.
+   */
+  readonly turnWroteModel?: boolean;
 }): AuthoritativeModelRead | null {
   const { persistedGraph, readiness } = params;
+  if (params.turnWroteModel === true) return null;
   if (persistedGraph === null || persistedGraph === undefined) return null;
   return {
     [AUTHORITATIVE_READ]: true,
@@ -279,6 +321,17 @@ function readHolds(read: AuthoritativeModelRead, candidate: number): boolean {
   return false;
 }
 
+/**
+ * ⭐ Trap 22f's honest-gap protocol at the SEAM. A sentence pairing a grounded
+ * figure with a fabricated one is NOT refused, because refusing it would require
+ * `every`, which measurably refuses true claims (see the scope ruling in
+ * `groundModelValueClaim`). Recorded as data so the suite REDs if this changes in
+ * either direction, and reported up as the follow-up that needs per-value slot
+ * attribution.
+ */
+export const MIXED_CLAIM_KNOWN_GAP =
+  'Your model already uses 0.5 for that driver and already reflects 12% on the subcontracting route.';
+
 export type ClaimRefusalReason =
   /** The payload's own blocker says the value is missing. MANDATORY refusal. */
   | 'blocker_says_missing'
@@ -314,10 +367,35 @@ export function groundModelValueClaim(params: {
   if (assertedValues.length === 0) {
     return { grounded: false, reason: 'not_in_persisted_state' };
   }
-  const everyValueHeld = assertedValues.every((n) =>
+  // ⭐⭐⭐ SCOPE RULING (trap 22f — TWO ROUNDS IN OPPOSITE DIRECTIONS, SO STOP
+  // GUESSING). This predicate has now failed in both directions under measurement:
+  //
+  //   · `some` (any value held ⇒ grounded) let a FABRICATED figure ride on a TRUE
+  //     one — the mutant that survived the first battery.
+  //   · `every` (all values held ⇒ grounded) FALSELY REFUSED a true claim: CI
+  //     failed on `turn-executor-direct-answer-registration-claim`'s own positive
+  //     control, where *"The model already has that target in place: growing MRR to
+  //     £250,000 is set as the goal, alongside your churn ceiling (below 3%) and
+  //     gross margin floor (above 80%…)"* is TRUE — the £250,000 target IS
+  //     registered — but 3% and 80% are CONSTRAINTS, which this sweep does not
+  //     read, so one true sentence read as ungrounded.
+  //
+  // The estate's ruling for an oscillating predicate is not a third guess: it is to
+  // ship the SAFE direction with the gap pinned as data. Refusal therefore requires
+  // that the claim have NO grounding at all. Consequences, stated plainly:
+  //   · the witnessed fabrication still refuses (it asserts 12% alone, ungrounded);
+  //   · a true claim can no longer be refused because it mentions an incidental or
+  //     constraint-held figure — over-refusal of a true statement about the user's
+  //     own model is itself a P5 harm, and it was shipping;
+  //   · the MIXED case (a fabricated value beside a grounded one) is now a KNOWN,
+  //     PINNED GAP — see `MIXED_CLAIM_KNOWN_GAP` and its spec, which REDs if the gap
+  //     silently widens or closes. The real fix is per-value slot attribution (which
+  //     number is claimed about WHICH slot); that needs the producer-side derivation
+  //     this lane does not have and is reported up rather than guessed at here.
+  const anyValueHeld = assertedValues.some((n) =>
     n.candidates.some((candidate) => readHolds(read, candidate)),
   );
-  if (everyValueHeld) return { grounded: true };
+  if (anyValueHeld) return { grounded: true };
   // ⭐ MANDATORY REFUSAL, and it is deliberately the FIRST thing decided once
   // grounding fails: when the same payload says the value is missing, a claim
   // that the model already holds it is not merely unsupported, it is a
