@@ -35,6 +35,88 @@
 export type FactorValueTier = "explicit" | "inferred_with_evidence" | "fallback_default";
 
 /**
+ * ⭐ THE EXPLICIT STAMP (2026-08-18, the quantities lane) — why a magic number
+ * is not a discriminator.
+ *
+ * `classifyFactorValueTier` below detects a fabricated baseline by testing
+ * `value === 0.5`. That is a VALUE PREDICATE, and CLAUDE.md trap 19 is exactly
+ * this: a genuinely user-stated 0.5 satisfies it, and a fabricated default that
+ * a later stage nudges off 0.5 escapes it. The pipeline knows the answer at the
+ * moment it defaults — it simply threw the fact away and left a downstream
+ * reader to guess it back from the magnitude.
+ *
+ * So the defaulting sites now SAY SO. Three of them stamp this field:
+ *   `adapters/llm/normalisation.ts`            (Stage-1 controllable default)
+ *   `…/repair/deterministic-sweep.ts`          (controllable + observable nets)
+ *
+ * ⚠ NOT A NEW VOCABULARY. The value is a member of {@link FactorValueTier},
+ * which this module already owned and which the pipeline's own
+ * `factor_value_coverage` counter declared. Nothing new is named; a derivation
+ * that was being guessed is now recorded.
+ *
+ * ⚠ WHY THIS FIELD NAME. `ExtractionType` (`schemas/graph.ts:59`) has exactly
+ * four members — `explicit | inferred | range | observed` — and no "defaulted"
+ * class, so the honest fact cannot be expressed there without a contract
+ * change. It rides an additive field on `data` instead, which the graph
+ * schemas preserve via `.passthrough()`. The name deliberately contains no
+ * `"user"`, `"specified"` or `"manual"` substring: `mapToV3ProvenanceSource`
+ * (`transforms/schema-v3.ts:863-877`) coerces ANY stamp containing `"user"` to
+ * `user_specified`, which would convert an admission of ignorance into a claim
+ * that the user supplied the number.
+ */
+export const FACTOR_VALUE_TIER_FIELD = "value_tier";
+
+/**
+ * Record, at the moment of defaulting, that this value carries no information.
+ *
+ * Returns a new `data` bag — callers already build one by spread, and mutating
+ * a shared node bag in a repair pass is how two stages end up disagreeing.
+ */
+export function stampFallbackDefault(
+  data: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> {
+  return { ...(data ?? {}), [FACTOR_VALUE_TIER_FIELD]: "fallback_default" };
+}
+
+/**
+ * Read an explicit tier stamp, in the same precedence order as
+ * {@link readFactorValueView} — `observed_state`, then node level (where
+ * `unreachable-factors` promotes it when it strips `data`), then `data`.
+ */
+export function readStampedFactorValueTier(node: unknown): FactorValueTier | undefined {
+  const n = bag(node);
+  if (!n) return undefined;
+  const stamp = firstString(
+    bag(n.observed_state)?.[FACTOR_VALUE_TIER_FIELD],
+    n[FACTOR_VALUE_TIER_FIELD],
+    bag(n.data)?.[FACTOR_VALUE_TIER_FIELD],
+  );
+  return stamp === "explicit" || stamp === "inferred_with_evidence" || stamp === "fallback_default"
+    ? stamp
+    : undefined;
+}
+
+/**
+ * Is this factor's numeric value something the system invented?
+ *
+ * ⚠ FAIL-CLOSED, AND THE POLARITY IS THE WHOLE POINT. This answers *"may we
+ * treat this number as information?"*, so the safe answer under ambiguity is
+ * "no". It is therefore derived from {@link classifyFactorValueTier} — which
+ * still applies the `0.5` heuristic as a compatibility floor for facts
+ * persisted before the stamp existed — and NOT from the stamp alone. A value
+ * we cannot vouch for is treated exactly like one we know we invented.
+ *
+ * The consequence that matters: a caller asking this before narrowing a
+ * distribution will decline to narrow on an ambiguous baseline as well as on a
+ * known-fabricated one. That is the founder's ruling ("without a defensible
+ * value … NOT given invented quantitative values") rather than a weaker
+ * "without a *provably* fabricated value".
+ */
+export function factorValueIsFabricated(node: unknown): boolean {
+  return classifyFactorValueTier(node) === "fallback_default";
+}
+
+/**
  * The value that a `fallback_default` inference lands on. Declared by the
  * counter's own comment: "inferred with default 0.5".
  */
