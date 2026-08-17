@@ -148,7 +148,21 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // the wire must not carry a post-edit hash for a graph that never
     // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
     // frame-consumer audit, do not add more.
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
+    // 2026-08-17 ROADMAP 2.1266 wrong-entity write withhold: +1 — the
+    // option-intervention misroute branch re-derives freshness against
+    // `gmFrameBase` (the PRE-edit persisted base). Identical reason and
+    // identical shape to the swap-withheld and substitution-blocked branches
+    // above: the write is withheld, so NOTHING persists, and the wire must not
+    // carry `complete_stale`/`graph_changed` off a mutation the store never
+    // kept — which is precisely what the J4 t5 witness measured. Deliberate,
+    // reviewed; still ad-hoc debt.
+    // ⚠ HONEST NOTE, so the next lane inherits the intent and not the number:
+    // three branches in this file now run a BYTE-IDENTICAL re-derivation
+    // (swap-withheld, substitution-blocked, and this one). The right fix takes
+    // this count DOWN by extracting one local helper for all three — it was
+    // deliberately NOT done here because it would rewrite two branches this
+    // lane does not own (scope-expansion rule). Do that before adding a fourth.
+    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 7,
     // 2026-08-15 Train C: +2 (import + one call) — edge_strength_edit commits
     // mid-turn, then derives wire freshness against the authoritative analysis
     // hash returned by that atomic commit. The pre-write context frame cannot
