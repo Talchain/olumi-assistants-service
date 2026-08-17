@@ -319,6 +319,28 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
     expect(scheduleAutoRunMock).not.toHaveBeenCalled();
   });
 
+  it('NEGATIVE PIN (PR #1002 fix round): a question TO the product with a decision verb never drafts — no fabricated model, no auto-run', async () => {
+    // The reviewer's execution-proven blocker case (rev1002 corpus Q2): at
+    // 7d27adef this dispatched a draft with the question VERBATIM as the
+    // brief, plus auto-run — the misclassification predates this PR, but
+    // draft-first raised its cost from a recoverable question list to a
+    // fabricated model with the human checkpoint removed.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: turnPayload(
+        'How do you decide which factors matter in the analysis?',
+        '44444444-4444-4444-8444-444444444448',
+      ),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text ?? '').not.toContain("I've assumed");
+  });
+
   it("NEGATIVE PIN: a genuinely undraftable message ('help') never drafts — no draft dispatch, no fabricated graph, no auto-run", async () => {
     const res = await app.inject({
       method: 'POST',
