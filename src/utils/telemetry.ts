@@ -2002,6 +2002,10 @@ export const TelemetryEvents = {
   // ('named_in_message' | 'sole_unconfigured'), factor_count.
   V5ConfigureOptionClarifyIntercept: "v5.edit_graph.configure_option_clarify_intercept",
 
+  // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolved a claimed turn.
+  // Payload: request_id, scenario_id, outcome ('bind' | 'ask'), pair_count.
+  V5RepairValueBindingResolved: "v5.edit_graph.repair_value_binding_resolved",
+
   // ⭐⭐ ROADMAP 2.427 — the configure-option OUTCOME did not honour the turn's
   // INTENT: the message named an option, the edit lane ran, and the applied
   // graph carries NO interventions write for THAT option id. Emitted where the

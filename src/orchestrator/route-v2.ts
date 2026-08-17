@@ -225,6 +225,14 @@ import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.j
 // L16 / N16 — deterministic remedy for a bare configure-option turn.
 import { shouldInterceptBeforeEditLane } from '../orchestrator-v5/routing/configure-option-clarify.js';
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
+// ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
+import {
+  matchBareRepairValue,
+  resolveRepairValueBinding,
+  type RepairValueBindingResolution,
+} from '../orchestrator-v5/routing/repair-value-binding.js';
+import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
+import { buildCanonicalAnalysisReadyFromGraph } from './tools/analysis-ready-helper.js';
 import {
   isProcessMetaIntake,
   composeProcessMetaIntakeResponse,
@@ -4663,6 +4671,111 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
     }
 
+    // ────────────────────────────────────────────────────────────────────
+    // ⭐ ROADMAP 2.1261 — repair-leg BARE-VALUE BINDING pre-route.
+    //
+    // Wire-witnessed on deployed #998 (scenario a05fefcd…, req b90d62e0): a
+    // MISSING_OPTION_VALUE blocker asked the user to choose a value; the
+    // unit-free, fully compliant reply "Set it to 0.12." fell through every
+    // deterministic route (no label to anchor), reached the LLM router, was
+    // re-proposed with the PRIOR turn's % unit, and re-served the
+    // byte-identical unit refusal — a loop the user cannot exit without
+    // guessing the explicit phrasing. The binding is derivable server-side:
+    // the missing option×factor pairs are facts of the persisted graph, read
+    // off the SAME canonical readiness payload that composed the blocker.
+    //
+    //   - exactly ONE pair missing  → BIND: dispatch the edit lane (the one
+    //     chat path that writes option interventions) with the advised-format
+    //     instruction carrying the user's value verbatim; the user's own
+    //     message is what gets persisted as the turn record.
+    //   - two or more pairs missing → ASK: deterministic disambiguation
+    //     naming each pair, one chip per pair (trap 22f — the ambiguity is
+    //     the product; never guess).
+    //   - nothing missing / any doubt → DECLINE, byte-identical route.
+    //
+    // FAIL-CLOSED GATES, in order: the whole-message claim anchor (a named
+    // target, a unit, a trailing clause or a question never matches); the
+    // shared negative gates via `bypassEditHandling`; a live
+    // `set_factor_value` pending (an open value-clarification makes the
+    // referent ambiguous — decline rather than steal the resumer's turn); a
+    // pendings/graph read failure; a persisted graph that fails the SAME
+    // ingress parse the edit dispatch below would apply.
+    // ────────────────────────────────────────────────────────────────────
+    let repairValueBinding: (RepairValueBindingResolution & { kind: 'bind' }) | null = null;
+    if (
+      !bypassEditHandling &&
+      !configureOptionIntent &&
+      !structuralRestructureIntent &&
+      matchBareRepairValue(ingress.message) !== null
+    ) {
+      let repairClaimBlocked = false;
+      try {
+        const pendings = await loadMostRecentPendingActionsStrict(ingress.scenario_id, requestId);
+        const nowMs = Date.now();
+        repairClaimBlocked = pendings.some(
+          (pa) => pa.action.kind === 'set_factor_value' && !isPendingActionExpired(pa, nowMs),
+        );
+      } catch {
+        // A pendings read must never fail the turn; it only withdraws this
+        // claim (the turn proceeds exactly as before this pre-route existed).
+        repairClaimBlocked = true;
+      }
+      let persistedForRepair: unknown = null;
+      if (!repairClaimBlocked) {
+        try {
+          persistedForRepair = await loadPersistedGraphOnce();
+        } catch {
+          persistedForRepair = null;
+        }
+      }
+      if (
+        !repairClaimBlocked &&
+        persistedForRepair != null &&
+        // The bind path re-enters the edit dispatch below, whose reload runs
+        // this SAME parse on this SAME memoised graph — pre-checking it here
+        // means a claim can never convert today's fall-through into a typed
+        // recovery error.
+        GraphStateIngressSchema.safeParse(persistedForRepair).success
+      ) {
+        const repairReadiness = buildCanonicalAnalysisReadyFromGraph(persistedForRepair);
+        const resolution = resolveRepairValueBinding({
+          message: ingress.message,
+          readiness: repairReadiness,
+        });
+        if (resolution.matched) {
+          emit(TelemetryEvents.V5RepairValueBindingResolved, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            outcome: resolution.kind,
+            pair_count: resolution.kind === 'ask' ? resolution.pairs.length : 1,
+          });
+        }
+        if (resolution.matched && resolution.kind === 'ask') {
+          const response = composeRepairValueAskResponse({
+            pairs: resolution.pairs,
+            valueText: resolution.valueText,
+            stage: ingress.stage,
+          });
+          return sendFinalised200(reply, requestId, 'edit_graph', response, {
+            // Gate-reason integrity (same rule as the L16 intercept above):
+            // readiness is derived from the UNCHANGED persisted graph, so the
+            // disambiguation turn is not the turn the blocker disappears.
+            ...(repairReadiness !== undefined ? { analysisReady: repairReadiness } : {}),
+            graph: null,
+            ...(await claimSafety.forExit()),
+            answerKind: 'functional',
+            requestStartedAt: routeStartedAt,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+            userMessage: ingress.message,
+          });
+        }
+        if (resolution.matched && resolution.kind === 'bind') {
+          repairValueBinding = resolution;
+        }
+      }
+    }
+
     // Predicates, state-query suppression, and the proposal-confirmation
     // resolution were computed ABOVE (hoisted before the Stage-4A intercepts so
     // a confirmation / state-query cannot be claimed by tryVagueEditGuard et al.
@@ -4672,7 +4785,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // in its own right (see the detection block above) — same suppressors,
     // same proposal-confirm resolution, same dispatch.
     const editIntentDetected =
-      (editVerbCandidate || configureOptionIntent || structuralRestructureIntent) &&
+      // ⭐ ROADMAP 2.1261: a resolved bare-value BIND is an edit-lane intent in
+      // its own right — the claim anchor + the sole-missing-pair derivation
+      // above ARE its gates (bypassEditHandling was already required to claim).
+      (editVerbCandidate || configureOptionIntent || structuralRestructureIntent ||
+        repairValueBinding !== null) &&
       !proposalConfirmSuppressed &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness
@@ -4864,6 +4981,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           request: req,
           graphState: effectiveGraphState!,
           analysisState: extensions.analysisState ?? null,
+          // ⭐ ROADMAP 2.1261 — the BIND path's instruction. The edit LLM
+          // receives the advised-format sentence (probe P1 verbatim) carrying
+          // the user's value bound to the sole missing option×factor pair;
+          // `payload.message` stays the user's own bytes everywhere it is
+          // recorded (commit `userMessage`, wire echo, telemetry).
+          ...(repairValueBinding !== null
+            ? { editInstructionOverride: repairValueBinding.instruction }
+            : {}),
           // ROADMAP 2.684 — the turn's wall-clock baseline, threaded so the
           // structural-edit composer can derive what is LEFT of the turn rather
           // than a static ceiling. Same baseline `dispatchDraftGraph` already

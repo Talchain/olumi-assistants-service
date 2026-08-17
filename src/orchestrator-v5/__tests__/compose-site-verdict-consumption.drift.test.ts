@@ -155,6 +155,13 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../compose/configure-option-clarify-response.ts',
   ),
+  // ROADMAP 2.1261 — the repair-leg bare-value ASK composer. Caught by
+  // `derivedComposeFileDomain()` on the commit that created the file (the
+  // mechanism working), registered on the same commit.
+  'compose/repair-value-ask-response.ts': resolve(
+    HERE,
+    '../compose/repair-value-ask-response.ts',
+  ),
 };
 
 /**
@@ -726,6 +733,38 @@ const CONFIGURE_OPTION_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> =
   },
 };
 
+/**
+ * `src/orchestrator-v5/compose/repair-value-ask-response.ts` — brought into
+ * scope by ROADMAP 2.1261, on the commit that created the file. The derived
+ * domain test caught it on its first run, which is the mechanism working.
+ */
+const REPAIR_VALUE_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same ' +
+      'shape as EDIT_CLARIFY_SITES). The value is a deterministic template over exactly three ' +
+      'ingredient kinds: module string constants, the USER\'S OWN value text (captured verbatim ' +
+      'by the whole-message claim anchor in routing/repair-value-binding.ts — a full-anchored ' +
+      'regex admitting only an assignment verb, a closed referent set and a bare number, so the ' +
+      'echoed value provably came from the message), and graph labels for the missing ' +
+      'option×factor pairs. ' +
+      'IT CANNOT ASSERT A LEADER, and the derivation is about SELECTION: every pair named is ' +
+      'selected by `deriveMissingEffectPairs` on ONE criterion — a `missing_value` blocker with ' +
+      'full identity on the SAME canonical readiness payload that composes the blocker copy ' +
+      '(`buildCanonicalAnalysisReadyFromGraph`) — i.e. a pair is named because it is BLOCKED, ' +
+      'never because it ranks. No analysis result is read on this path at all; no probability, ' +
+      'margin, win-rate, ordering or comparative claim is available to interpolate. Zero LLM ' +
+      'calls — the composer replaces a routing-LLM round-trip that was re-serving a verbatim ' +
+      'refusal (wire-witnessed, req b90d62e0). ' +
+      'The chip channel DOES carry labels out of this file (unlike the configure-clarify ' +
+      'sibling): each chip message is `buildRepairBindingInstruction`, the probe-P1 advised ' +
+      'format over the same blocked-pair labels and the same user value — the identical ' +
+      'selection criterion, so no chip can name an option by rank either. The route threads ' +
+      '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -735,6 +774,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'system-events/factor-value-edit.ts': FACTOR_VALUE_EDIT_SITES,
   'system-events/edge-strength-edit.ts': EDGE_STRENGTH_EDIT_SITES,
   'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
+  'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -1166,11 +1206,19 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // found the omission rather than a human remembering it. Fourth instance
     // of the mechanism working; the note stays because the next author will
     // not remember either.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(43);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(39);
+    // ⚠ REPAIR-LEG BARE-VALUE ASK (ROADMAP 2.1261): 43 -> 44 sites,
+    // 39 -> 40 keys, one ADDED file (compose/repair-value-ask-response.ts),
+    // registered `structural` with its derivation (REPAIR_VALUE_ASK_SITES).
+    // Recorded the same way as every entry above, and for the same reason:
+    // this ledger failed `pnpm test:required` on the commit that created the
+    // site, and the guard found the omission rather than a human remembering
+    // it. Fifth instance of the mechanism working.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(44);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(40);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',
+      'compose/repair-value-ask-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
       'routing/post-analysis-label-intercept.ts',

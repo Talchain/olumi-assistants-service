@@ -30,6 +30,22 @@ export type ChipType = 'action' | 'text_prompt' | 'entity_suggestion';
 export interface ComposeContext {
   readonly graph?: GraphLookup;
   readonly handlerRegistry: HandlerValidationRegistry;
+  /**
+   * ⭐ ROADMAP 2.1261 — the RAW user message of the turn being composed for,
+   * when the caller has one (the turn-executor's recoverable-validator path
+   * threads it; system-event paths have no user prose and omit it).
+   *
+   * Purpose: honesty gating for refusal copy that would otherwise attribute a
+   * PROPOSAL property to the USER. Wire-witnessed (req b90d62e0): the routing
+   * model re-proposed a `%` unit from conversation history on the unit-free
+   * message "Set it to 0.12.", and the `unit_redeclares_scale` copy told the
+   * user they were "applying a value in %". Copy may only describe what the
+   * input actually contained — when this field is absent the composer keeps
+   * the historical copy unchanged (fail-open to today's bytes; the pinned
+   * system-event wire contract in route-v2-factor-value-edit-scale-
+   * redeclaration.test.ts carries its unit explicitly and is unaffected).
+   */
+  readonly userMessage?: string;
 }
 
 export interface FailureComposeResult {

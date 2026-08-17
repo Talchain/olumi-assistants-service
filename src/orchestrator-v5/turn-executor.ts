@@ -8427,6 +8427,11 @@ export async function runTurnExecutor(
         const composeCtx: ComposeContext = {
           graph: graphLookupForValidate,
           handlerRegistry: validationRegistry,
+          // ⭐ ROADMAP 2.1261 — the raw user message, so refusal copy can be
+          // honesty-gated against what the user actually typed (the routing
+          // model's proposal may carry a unit the message never stated — see
+          // `messageEvidencesUnit` in validation-failure-responses.ts).
+          userMessage: payload.message,
         };
 
         // V5 alpha hardening Phase 2.2: EVERY validator outcome is a

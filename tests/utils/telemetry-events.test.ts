@@ -653,6 +653,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
         V5ConfigureOptionClarifyIntercept:
           "v5.edit_graph.configure_option_clarify_intercept",
+        // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolved (bind/ask).
+        // Log-only (see debugOnlyEvents).
+        V5RepairValueBindingResolved:
+          "v5.edit_graph.repair_value_binding_resolved",
         V5ConfigureOptionOutcomeUnhonoured:
           "v5.edit_graph.configure_option_outcome_unhonoured",
         // Wave-1 Lane B (PR3, ROADMAP 3.16) — edit target not present in the
@@ -1489,6 +1493,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // L16 / N16 — the bare-configure deterministic remedy intercept.
         // Diagnostic-only, same posture as its configure-option sibling.
         TelemetryEvents.V5ConfigureOptionClarifyIntercept,
+        // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolution.
+        // Diagnostic-only, same posture as its configure-option siblings.
+        TelemetryEvents.V5RepairValueBindingResolved,
         // ⭐ ROADMAP 2.427 — the configure-option outcome did not honour the
         // turn's intent (no interventions write for the named option id).
         // Diagnostic-only, same posture as its false-success sibling
@@ -2330,6 +2337,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.context_integrity.routed",
         "cee.context_integrity.derived",
         "cee.context_integrity.unavailable",
+        // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolved (bind/ask).
+        // Deliberate frozen-registry addition per the registry discipline.
+        "v5.edit_graph.repair_value_binding_resolved",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
