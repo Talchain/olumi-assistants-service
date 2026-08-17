@@ -86,6 +86,7 @@ import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/p
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
+import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -403,13 +404,35 @@ export function draftResultToOlumiResponse(
   // Entity-id leaks in title/body are scrubbed downstream by the central
   // egress chokepoint (sanitiseOlumiResponseForEgress → sanitiseBlock
   // 'coaching'), exactly as for every other coaching block.
+  //
+  // Option-widening visibility (draft-option-widening-blocks): emit AT MOST ONE
+  // `coaching_kind:'widening'` card naming an option the drafter itself recorded
+  // that it SET ASIDE, when the option set it built is narrow. Same gates, same
+  // egress, same persisted-path-only rule as the bias projector above. The
+  // knowledge already exists on `coachingWideningLogObject` (the same field
+  // buildPostDraftNarrative reads) — this is plumbing, not new generation, and
+  // it never invents an option.
+  const blocksCreatedAt = new Date().toISOString();
   const blocks: OlumiResponse['blocks'] = graphPersisted
-    ? buildDraftBiasSignalBlocks({
-        analysisReady: result.analysisReady ?? null,
-        biasSignals: result.coachingBiasSignals,
-        graph: result.graphOutput,
-        createdAt: new Date().toISOString(),
-      })
+    ? [
+        ...buildDraftBiasSignalBlocks({
+          analysisReady: result.analysisReady ?? null,
+          biasSignals: result.coachingBiasSignals,
+          graph: result.graphOutput,
+          createdAt: blocksCreatedAt,
+        }),
+        ...buildDraftOptionWideningBlocks({
+          analysisReady: result.analysisReady ?? null,
+          wideningLog: result.coachingWideningLogObject ?? null,
+          graph: result.graphOutput,
+          // The SAME brief the drafter drafted from, so the anti-collision
+          // reconciler and the drafter can never disagree about what the brief
+          // is. NOT `payload.message` — on the clarify-v2 intake path that is
+          // the user's one-line answer (the 2.972 defect, see above).
+          briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
+          createdAt: blocksCreatedAt,
+        }),
+      ]
     : [];
 
   return {
