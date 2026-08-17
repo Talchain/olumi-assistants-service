@@ -164,16 +164,25 @@ export interface EnrichedTurnContext extends TurnContext {
   /**
    * CONTEXT/MEMORY V5 defect 4 — did the `prior_facts` read SUCCEED?
    *
-   * `prior_facts` above is `[]` in four situations: no session store, no prior
-   * turns, no eligible row ids, and a THROWN read. The first three are genuine
-   * emptiness; the fourth is ignorance. Without this flag they are
-   * indistinguishable, and `deriveAnalysisFreshness` reads all four as
-   * `'none' / no_successful_run_analysis_fact` — a positive claim that the
-   * scenario has never been analysed, which on a thrown read is simply not
-   * known and which clears state downstream.
+   * `prior_facts` above is `[]` in FIVE situations: no session store, no prior
+   * turns, no eligible row ids, a THROWN FACTS read, and a THROWN TURNS read.
+   * The first three are genuine emptiness; the last two are ignorance. Without
+   * this flag they are indistinguishable, and `deriveAnalysisFreshness` reads
+   * them all as `'none' / no_successful_run_analysis_fact` — a positive claim
+   * that the scenario has never been analysed, which on a failed read is simply
+   * not known and which clears state downstream.
    *
-   * `false` ONLY on a thrown read. Deliberately mirrors the existing
-   * `newest_analysis_fact_read_ok` pattern above rather than inventing a
+   * ⚠ THE FIFTH SITUATION WAS MISSING AND THAT WAS THE #1004 REVIEW BLOCKER.
+   * This docstring said "four", and the flag was sourced from `fetchPriorFacts`
+   * alone — which cannot see a turns read that already failed, because it
+   * short-circuits on `priorTurns.length === 0` and reports a truthful `true`
+   * about the read it did not need to perform. A thrown `readRecent` therefore
+   * arrived here as healthy emptiness and reached the wire as
+   * `run_state.kind = 'never_run'`. The value is now the CONJUNCTION of both
+   * reads; see where it is computed for why that belongs at the single producer.
+   *
+   * `false` ONLY on a thrown read (of either kind). Deliberately mirrors the
+   * existing `newest_analysis_fact_read_ok` pattern above rather than inventing a
    * second vocabulary for the same idea.
    */
   readonly prior_facts_read_ok?: boolean;
@@ -626,11 +635,12 @@ export async function buildTurnContext(
   // claim-safety permission must describe the SCENARIO, and `priorTurns` is a
   // 20-turn window. Concurrent ⇒ it costs the batch's max latency, not a
   // serial addition.
-  const [priorTurns, priorTurnsTotal, newestAnalysisFactRead] = await Promise.all([
+  const [priorTurnsRead, priorTurnsTotal, newestAnalysisFactRead] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
     fetchNewestAnalysisFact(payload.scenario_id, requestId, store),
   ]);
+  const priorTurns = priorTurnsRead.turns;
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
   // turn PROVABLY continues a prior conversation — the chip can only exist if a
   // prior assistant turn rendered it — so zero prior turns under this scenario_id
@@ -667,13 +677,33 @@ export async function buildTurnContext(
   const {
     facts: priorFacts,
     factsWithTurn: priorFactsWithTurn,
-    readOk: priorFactsReadOk,
+    readOk: factsReadOk,
   } = await fetchPriorFacts(
     priorTurns,
     requestId,
     payload.scenario_id,
     store,
   );
+  /**
+   * DID THE READ THAT PRODUCED `priorFacts` SUCCEED — ALL OF IT?
+   *
+   * ⚠ THE CONJUNCTION IS THE FIX (PR #1004 review blocker). `fetchPriorFacts`
+   * can only answer for the read IT performs; when the TURNS read has already
+   * failed it short-circuits on `priorTurns.length === 0` and honestly reports
+   * `true`, because from its own vantage point there were no turns to read facts
+   * for. Both reads are prerequisites for a fact ever being seen, so an empty
+   * `priorFacts` is trustworthy only if BOTH succeeded. Conjoining here — at the
+   * single place the flag is produced — is what makes every one of the ~20
+   * downstream consumers (`turn-executor.ts`'s nine sites, `route-v2.ts`, both
+   * dispatchers, `context-pack-assembler.ts`, `canonical-analysis-state.ts` and
+   * the freshness derivation below) honest at once, with no new field to thread
+   * and no second vocabulary to drift (trap 12).
+   *
+   * It can only ever make a claim MORE conservative, never less: the degraded
+   * arm in `deriveAnalysisFreshness` fires ONLY where no fact was selected, so a
+   * fact that WAS read stays authoritative and the hash comparison still decides.
+   */
+  const priorFactsReadOk = factsReadOk && priorTurnsRead.readOk;
   // V5 Phase 1 brief persistence: load the persisted brief_text alongside
   // the graph so callers can read both from canonical state. Failure to
   // read scenarios.* is non-fatal (graceful degradation); the field
@@ -1327,7 +1357,9 @@ export async function loadRecentConversationTurns(
   requestId: string,
 ): Promise<readonly SessionTurnWithContent[]> {
   const store = tryGetSessionStore(requestId, scenarioId);
-  return fetchPriorTurns(scenarioId, requestId, store);
+  // This helper's contract is the WINDOW only; the read status is deliberately
+  // dropped here rather than widened into a V4 path that has no consumer for it.
+  return (await fetchPriorTurns(scenarioId, requestId, store)).turns;
 }
 
 /**
@@ -1642,14 +1674,49 @@ function tryGetSessionStore(requestId: string, scenarioId: string): SessionStore
   }
 }
 
+/**
+ * The recent-turns window AND whether the read that produced it SUCCEEDED.
+ *
+ * ⚠ THE `readOk` HALF IS LOAD-BEARING, AND ITS ABSENCE WAS A DEFECT (PR #1004
+ * review). This function swallows a thrown `readRecent` and returns `[]` — which
+ * is correct as graceful degradation, and was silently catastrophic as an
+ * ANSWER, because the emptiness then travelled with no way to tell it from a
+ * scenario that genuinely has no turns. `fetchPriorFacts` short-circuits on
+ * `priorTurns.length === 0` and reports `readOk: true` (from its point of view
+ * there were simply no turns to read facts FOR), so `deriveAnalysisFreshness`
+ * took its `none` / `no_successful_run_analysis_fact` arm and the graph-less
+ * exits stamped `run_state.kind = 'never_run'` — the product telling a user
+ * "this scenario has never been analysed" on the strength of a read that
+ * failed. Measured on `e58a31c1`: a thrown `readRecent` produced
+ * `freshness: 'none'` with a NON-NULL `current_graph_hash`, i.e. "your graph
+ * read fine and you have never analysed it", about a conversation CEE could not
+ * load.
+ *
+ * `CONTEXT_READ_FAILED_DERIVATION` in `context/turn-claim-safety.ts` states the
+ * invariant this restores — *"It must never read `none`"* — but it guards the
+ * path where `buildTurnContext` THROWS. This failure is swallowed INSIDE
+ * `buildTurnContext`, so that guard never saw it: correct at its seam, defective
+ * one seam upstream.
+ *
+ * `readOk` is `false` ONLY on a thrown read. A missing store and a successful
+ * read of an empty conversation are both genuine emptiness and report `true`,
+ * exactly as `fetchPriorFacts` does for its own three genuine empties. No new
+ * vocabulary: this mirrors the established `newest_analysis_fact_read_ok` /
+ * `prior_facts_read_ok` pattern rather than inventing a third word for one idea.
+ */
+interface PriorTurnsRead {
+  readonly turns: readonly SessionTurnWithContent[];
+  readonly readOk: boolean;
+}
+
 async function fetchPriorTurns(
   scenarioId: string,
   requestId: string,
   store: SessionStore | undefined,
-): Promise<readonly SessionTurnWithContent[]> {
-  if (!store) return [];
+): Promise<PriorTurnsRead> {
+  if (!store) return { turns: [], readOk: true };
   try {
-    return await store.readRecent(scenarioId);
+    return { turns: await store.readRecent(scenarioId), readOk: true };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -1663,7 +1730,7 @@ async function fetchPriorTurns(
       error_code: errorCode ?? 'unknown',
       severity: 'warning',
     });
-    return [];
+    return { turns: [], readOk: false };
   }
 }
 

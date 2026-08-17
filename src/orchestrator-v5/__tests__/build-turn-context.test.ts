@@ -606,10 +606,37 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
   // The value of exposing it rather than recomputing downstream is ENTIRELY that
   // it is the same object the coaching state was built from: two derivations of
   // one turn's freshness is how two surfaces come to disagree, which is the
-  // defect the whole analysis-state contract exists to close. These two tests
-  // are what make that a property rather than a comment — a change that computes
-  // a fresh verdict here (a different hash, a different helper, a dropped
-  // degraded-read flag) turns them red.
+  // defect the whole analysis-state contract exists to close.
+  //
+  // ⚠ THIS COMMENT USED TO OVERCLAIM, AND THE OVERCLAIM WAS CAUGHT BY A MUTANT
+  // (#1004 review, M7b). It said "a change that computes a fresh verdict here (a
+  // different hash, a different helper, a dropped degraded-read flag) turns them
+  // red". The degraded-read half was FALSE: replacing the production call with a
+  // plain two-argument `deriveAnalysisFreshness(priorFacts, persistedGraphHash)`
+  // left all tests GREEN, because the first test's own EXPECTATION is that same
+  // two-argument call — so the mutant and the oracle agreed with each other. A
+  // comment asserting a proof that does not exist is worse than no comment: it
+  // tells the next reader not to look.
+  //
+  // WHAT THESE THREE TESTS ACTUALLY PIN, stated so it can be checked:
+  //   1. the HASH — it is the PERSISTED graph's, cross-checked against the
+  //      coaching state's own emitted `graph_hash` (test 1);
+  //   2. that DIVERGENCE is honoured, so the agreement in test 1 is not a
+  //      fixture on which every path returns `fresh` (test 2);
+  //   3. the DEGRADED-READ FLAG — test 3 drives a genuinely thrown facts read,
+  //      where the two-argument form yields `'none'` and the production
+  //      four-argument form yields `'unknown' / derivation_failed`. THIS is the
+  //      arm that makes the dropped-flag claim true; it did not exist before.
+  //
+  // WHAT THEY DO NOT PIN, so nobody infers it: the OPTION-IDENTITY argument
+  // (`extractGraphOptionIds`). Every fixture here reaches a hash-proven verdict,
+  // and the guard is deliberately NOT consulted on the hash-proven `fresh` path
+  // (see `deriveAnalysisFreshness`'s INVARIANT note — equal hashes already prove
+  // the option set is unchanged). So dropping that argument is byte-identical on
+  // these inputs and no assertion here can see it. Pinning it needs a
+  // hash-impossible `unknown` fixture with diverged analysed option ids; the
+  // guard's own behaviour is covered in `context/__tests__/freshness.test.ts`,
+  // but its THREADING out of `buildTurnContext` is currently unpinned.
 
   it('the EXPOSED derivation equals the single-source verdict for the same inputs', async () => {
     const parsed = GraphStateIngressSchema.safeParse(STAGE1_GRAPH);
@@ -655,6 +682,53 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
     // The coaching signal derived from the SAME object says the same thing.
     const stale = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
     expect(stale?.reason_code).toBe(ctx.persisted_analysis_freshness.reason);
+  });
+
+  it('THE DEGRADED-READ FLAG IS CARRIED — a dropped 4th argument turns this red (M7b)', async () => {
+    // The arm the block's comment claimed to have and did not. Mutant M7b
+    // replaced the production `persisted_analysis_freshness: coachingFreshness`
+    // with a fresh `deriveAnalysisFreshness(priorFacts, persistedGraphHash)` —
+    // dropping the degraded-read flag — and survived, because the two tests above
+    // both assert against that very two-argument call. On THIS fixture the two
+    // forms disagree, which is what gives the mutant somewhere to die:
+    //   two-arg  → 'none' / no_successful_run_analysis_fact  (the false claim)
+    //   four-arg → 'unknown' / derivation_failed             (the honest one)
+    const store = {
+      ...createNoopSessionStore({
+        loadGraphResult: STAGE1_GRAPH,
+        priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      }),
+      readFactsFor: async () => {
+        throw new SessionReadError('DB offline', { code: '57P03' });
+      },
+    };
+    const ctx = await buildTurnContext(BASE, 'req-paf-3', { sessionStore: store });
+
+    // Preconditions, pinned in-test so the assertions below cannot pass for the
+    // wrong reason (trap 13b): the read really did fail, and the facts really
+    // are empty, so this really is the ambiguous case the flag disambiguates.
+    expect(ctx.prior_facts_read_ok).toBe(false);
+    expect(ctx.prior_facts).toEqual([]);
+
+    // The exposed derivation carries the flag's consequence…
+    expect(ctx.persisted_analysis_freshness.freshness).toBe('unknown');
+    expect(ctx.persisted_analysis_freshness.reason).toBe('derivation_failed');
+    // …and explicitly NOT the two-argument answer. Stated as its own assertion
+    // because `'none'` is the specific falsehood at issue, and a future refactor
+    // could satisfy "is not fresh" while reintroducing it.
+    expect(ctx.persisted_analysis_freshness.freshness).not.toBe('none');
+
+    // Cross-checked against the OTHER consumer of the same object: the coaching
+    // state reads it as unavailable, not as "never analysed". Two surfaces, one
+    // derivation — which is the property this whole block exists to hold. The
+    // expected shape is derived from the PRODUCER, not from what the name
+    // suggests: `derivation_failed` maps to `analysis_stale` / `unavailable` /
+    // `staleness_indeterminate` (coaching-state.ts:453-457, because the closed
+    // `CoachingStateReasonCode` enum has no member of its own for it).
+    expect(ctx.coaching_state.signals.map((s) => s.kind)).not.toContain('analysis_missing');
+    const degraded = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
+    expect(degraded?.status).toBe('unavailable');
+    expect(degraded?.reason_code).toBe('staleness_indeterminate');
   });
 });
 
