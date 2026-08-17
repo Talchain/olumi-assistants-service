@@ -17,6 +17,10 @@ import {
   type CanonicalReadinessRepairProposal,
 } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
+  isObligationClass,
+  isStructureProvenance,
+} from '../../cee/graph-readiness/obligation-provenance.js';
+import {
   buildGenericEditGraphHandlerFact,
 } from './edit-graph-fact-builder.js';
 import type { PendingAction } from '../session/pending-action.js';
@@ -132,6 +136,14 @@ const READINESS_REQUIRED_INPUT_KEYS: ReadonlySet<string> = new Set([
   'prompt',
   'option_id',
   'factor_id',
+  // ⭐ INV-P6 — whose gap it is, and whether it may be demanded. Additive, and it
+  // MUST be listed here: this allowlist rejects unrecognised JSON keys by design
+  // (see `hasOnlyJsonOwnKeys`), so an additive field that skips it turns a healthy
+  // resume into `invalid` and the later exact proposal-equality check can never
+  // pass. The guard is one seam past where the field was added, which is exactly
+  // where this class of defect lives.
+  'obligation',
+  'provenance',
 ]);
 
 function isReadinessRequiredInputKind(value: unknown): value is ReadinessRequiredInputKind {
@@ -193,12 +205,22 @@ function parseProposal(value: unknown): CanonicalReadinessRepairProposal | null 
       (unresolved.option_id !== undefined && !nonEmpty(unresolved.option_id))
       || (unresolved.factor_id !== undefined && !nonEmpty(unresolved.factor_id))
     ) return null;
+    // Validated against the DERIVED vocabularies, so an unknown value is rejected
+    // rather than reconstructed — and a new member of either vocabulary breaks the
+    // build at its declaration rather than being silently refused here.
+    if (unresolved.obligation !== undefined && !isObligationClass(unresolved.obligation)) return null;
+    if (unresolved.provenance !== undefined && !isStructureProvenance(unresolved.provenance)) return null;
     unresolvedInputs.push({
       issue_id: unresolved.issue_id,
       kind: unresolved.kind,
       prompt: unresolved.prompt,
       ...(unresolved.option_id ? { option_id: unresolved.option_id } : {}),
       ...(unresolved.factor_id ? { factor_id: unresolved.factor_id } : {}),
+      // Reconstructed, not dropped: the later check is EXACT proposal equality
+      // against a freshly computed assessment, so a field silently lost here would
+      // fail that comparison rather than degrade quietly.
+      ...(unresolved.obligation !== undefined ? { obligation: unresolved.obligation } : {}),
+      ...(unresolved.provenance !== undefined ? { provenance: unresolved.provenance } : {}),
     });
   }
   return {

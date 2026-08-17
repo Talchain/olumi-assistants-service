@@ -240,7 +240,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     expect(["ready", "fair", "needs_work"]).toContain(body.readiness_level);
   });
 
-  it("emits total_factor_count, user_question_count, and deprecated factor_count in telemetry and response", async () => {
+  it("emits total_factor_count and user_question_count, and NO LONGER emits the deprecated factor_count alias", async () => {
     // Build a graph with exactly 4 factor nodes
     const graphWith4Factors = {
       version: "1",
@@ -282,13 +282,24 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     const eventData = completedCall![1] as any;
     expect(eventData.total_factor_count).toBe(4);
     expect(typeof eventData.user_question_count).toBe("number");
-    expect(typeof eventData.factor_count).toBe("number");
+    // ⭐ DELETED, AND PINNED AS DELETED. `factor_count` was self-declared
+    // DEPRECATED at the route in favour of `total_factor_count`, was absent from
+    // BOTH published contract surfaces (`openapi.yaml`, `src/schemas/ceeResponses.ts`
+    // — verified at this tip), and was an alias of `quality_factors.length` rather
+    // than a factor count at all. Asserting ABSENCE rather than deleting the
+    // assertion: a removed assertion is invisible, an absence assertion REDs if the
+    // alias returns.
+    expect(eventData.factor_count).toBeUndefined();
 
     // Response payload: verify all three factor count fields
     const body = res.json();
     expect(body.total_factor_count).toBe(4);
     expect(typeof body.user_question_count).toBe("number");
-    expect(typeof body.factor_count).toBe("number");
+    expect(body.factor_count).toBeUndefined();
+    // The single admission answer the panel should gate on, three-valued.
+    expect([true, false, "unknown"]).toContain(body.may_run);
+    // Which model was assessed — declared, never assumed.
+    expect(["persisted", "request_graph"]).toContain(body.assessed_from);
 
     emitSpy.mockRestore();
   });
@@ -512,10 +523,14 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
       expect(Array.isArray(body.quality_factors)).toBe(true);
       expect(Array.isArray(body.issues)).toBe(true);
       expect(Array.isArray(body.readiness_issues)).toBe(true);
-      expect(typeof body.ready).toBe("boolean");
+      // `ready` and `factor_count` are DELETED — undeclared duplicate aliases,
+      // in neither `openapi.yaml` nor `ceeResponses.ts`. `may_run` replaces
+      // `ready`, and carries the third value `ready` could not express.
+      expect(body.ready).toBeUndefined();
+      expect(body.factor_count).toBeUndefined();
+      expect([true, false, "unknown"]).toContain(body.may_run);
       expect(typeof body.total_factor_count).toBe("number");
       expect(typeof body.user_question_count).toBe("number");
-      expect(typeof body.factor_count).toBe("number");
       expect(body.trace).toBeDefined();
     }
   });

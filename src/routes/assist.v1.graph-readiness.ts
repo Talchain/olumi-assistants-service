@@ -13,10 +13,12 @@ import { Graph } from "../schemas/graph.js";
 import { AnalysisReadyPayload } from "../schemas/analysis-ready.js";
 import {
   assessRouteAdmission,
+  type MayRun,
   type RouteReadinessBlocker,
   type RouteReadinessCritique,
   type RouteScaffoldPlan,
 } from "../cee/graph-readiness/canonical-readiness.js";
+import { loadPersistedScenarioStateStrict } from "../orchestrator-v5/build-turn-context.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -48,8 +50,26 @@ interface CEEGraphReadinessResponseV1 {
 
   // ── Admission: "may analysis run?" (canonical assessor, sole authority) ──
   can_run_analysis: boolean;
+  /**
+   * THE field a Run gate should read — the run path's own predicate, computed
+   * once, server-side. See {@link MayRun}: three-valued, and the honest consumer
+   * shape is `may_run !== false`, never `may_run === true`.
+   */
+  may_run: MayRun;
   blocker_reason?: string;
-  ready: boolean;
+  /**
+   * WHICH MODEL WAS ASSESSED. `persisted` = the same read the run path performs;
+   * `request_graph` = the caller's own bytes.
+   *
+   * ⭐ DECLARED RATHER THAN ASSUMED. A readiness verdict over the request graph is
+   * a verdict about the CLIENT'S copy of the model, and the run assesses the
+   * PERSISTED one — so the two can legitimately differ and the difference used to
+   * be invisible. Stamping it means a divergence is a reportable fact instead of a
+   * mystery. (The route previously chose its whole ASSESSOR by request-body shape,
+   * which made the verdict a function of browser cache state; that is gone, and
+   * this stamp is what stops the weaker version of it returning unnoticed.)
+   */
+  assessed_from: "persisted" | "request_graph";
   options_ready: number;
   options_total: number;
   goal_node_valid: boolean;
@@ -74,8 +94,6 @@ interface CEEGraphReadinessResponseV1 {
     /** Human-readable summary */
     summary: string;
   };
-  // DEPRECATED: use total_factor_count and user_question_count. Remove after next release.
-  factor_count?: number;
   /** Count of nodes with kind === "factor" (all categories) */
   total_factor_count: number;
   /** Count of quality assessment dimensions (legacy quality_factors.length) */
@@ -87,6 +105,17 @@ interface CEEGraphReadinessResponseV1 {
 const GraphReadinessInput = z.object({
   graph: Graph,
   analysis_ready: AnalysisReadyPayload.optional(),
+  /**
+   * ⭐ MOVE 3 — assess the PERSISTED model when the caller can name it.
+   *
+   * ADDITIVE AND OPTIONAL BY NECESSITY, not by preference: guest and pre-save
+   * callers have no scenario, so requiring it would break them. When it IS
+   * supplied, readiness performs the IDENTICAL read the run path performs
+   * (`loadPersistedScenarioStateStrict`), which removes the last way for the panel
+   * and the run to assess different models. Either way the response STAMPS which
+   * source was used — see `assessed_from`.
+   */
+  scenario_id: z.string().min(1).optional(),
 });
 
 type GraphReadinessInputT = z.infer<typeof GraphReadinessInput>;
@@ -268,7 +297,34 @@ export default async function route(app: FastifyInstance) {
       // `can_run_analysis` or `blocker_reason` at all, so the hardcoded `true`
       // literal is not merely unread, it is unrepresentable.
       // ======================================================================
-      const admission = assessRouteAdmission(input.graph);
+      // ⭐ MOVE 3 — ONE ASSESSOR, OVER PERSISTED STATE WHERE THERE IS ANY.
+      //
+      // The strict read is used deliberately: it returns a null graph ONLY when
+      // the store is reachable and nothing is stored, and THROWS on a store/RPC
+      // failure. So a transient outage cannot be silently misread as "nothing
+      // persisted" and quietly downgrade us to the client's copy — the caller gets
+      // a retryable 500 instead, which is the truthful answer.
+      //
+      // ⚠ AND THE FALLBACK IS NOT A FAILURE PATH. `null` here is the genuine
+      // pre-save case (guest sessions, a draft not yet committed). Assessing the
+      // request graph is the RIGHT answer for those callers; it is only wrong when
+      // it happens SILENTLY, which is what `assessed_from` fixes.
+      let assessedGraph: unknown = input.graph;
+      let assessedFrom: CEEGraphReadinessResponseV1["assessed_from"] = "request_graph";
+      if (input.scenario_id) {
+        const persisted = await loadPersistedScenarioStateStrict(input.scenario_id);
+        if (persisted.graph !== null && persisted.graph !== undefined) {
+          assessedGraph = persisted.graph;
+          assessedFrom = "persisted";
+        }
+      }
+
+      const admission = assessRouteAdmission(assessedGraph);
+      // Coaching stays on the graph the caller sent. It answers "how good is the
+      // model you are looking at?", which is a question about the CANVAS — and it
+      // is not an admission answer, so it cannot reintroduce the divergence Move 3
+      // closes. Trap 21: name the question each authority answers before making
+      // them agree.
       const coaching = assessGraphReadiness(graph);
 
       const totalFactorCount = (graph.nodes ?? []).filter(
@@ -283,8 +339,9 @@ export default async function route(app: FastifyInstance) {
         quality_factors: coaching.quality_factors,
 
         can_run_analysis: admission.can_run_analysis,
+        may_run: admission.may_run satisfies MayRun,
         blocker_reason: admission.blocker_reason,
-        ready: admission.can_run_analysis,
+        assessed_from: assessedFrom,
         options_ready: admission.options_ready,
         options_total: admission.options_total,
         goal_node_valid: admission.goal_node_valid,
@@ -294,8 +351,6 @@ export default async function route(app: FastifyInstance) {
         readiness_issues: admission.readiness_issues,
 
         evidence_quality: coaching.evidence_quality,
-        // DEPRECATED: use total_factor_count and user_question_count.
-        factor_count: coaching.quality_factors.length,
         total_factor_count: totalFactorCount,
         user_question_count: coaching.quality_factors.length,
         trace,
@@ -309,8 +364,8 @@ export default async function route(app: FastifyInstance) {
         readiness_score: coaching.readiness_score,
         readiness_level: coaching.readiness_level,
         can_run_analysis: admission.can_run_analysis,
-        // DEPRECATED: use total_factor_count and user_question_count.
-        factor_count: coaching.quality_factors.length,
+        may_run: String(admission.may_run),
+        assessed_from: assessedFrom,
         total_factor_count: totalFactorCount,
         user_question_count: coaching.quality_factors.length,
         options_ready: admission.options_ready,
