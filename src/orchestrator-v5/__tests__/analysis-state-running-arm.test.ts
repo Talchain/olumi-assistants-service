@@ -331,4 +331,24 @@ describe('2.1271 — only the draft exit may claim a run it started', () => {
     const threadingSites = src.match(/\{\s*autoRunInFlight\s*\}/g) ?? [];
     expect(threadingSites).toHaveLength(1);
   });
+
+  it('the claim is GATED on the admission verdict, on the graph the draft persisted', async () => {
+    // ⚠ WHAT THIS IS AND IS NOT, stated so it is not mistaken for more.
+    // It is a STRUCTURAL guard over `route-v2.ts`, derived from the source. It
+    // proves the emission is written as conditional on `willProceed` and that
+    // the admission is resolved from `dg.graph` — the same object the scheduler
+    // receives. It does NOT execute the draft route, so it cannot prove the
+    // runtime wiring; that is what the deploy-verify witness is for. It exists
+    // because loosening this gate is the one edit that would turn an honest
+    // signal into a claim about a run that never starts, and nothing else in the
+    // suite would notice.
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(process.cwd(), 'src/orchestrator/route-v2.ts'), 'utf8');
+    expect(src).toContain('resolveRunAdmission(dg.graph)');
+    expect(src).toContain('autoRunAdmission?.willProceed === true');
+    // And the timestamp is a UTC ISO string taken at the decision, never a
+    // compose-time clock read inside the composer.
+    expect(src).toContain('{ startedAt: new Date().toISOString() }');
+  });
 });
