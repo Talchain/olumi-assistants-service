@@ -360,20 +360,19 @@ describe('2.171 — "start over" routes to the existing new-draft path', () => {
       startOverBrief: NEW_BRIEF,
     });
 
-  it('typed "start over" on the armed round: round 1 re-runs over the NEW brief (old frame discarded)', async () => {
+  it('typed "start over" on the armed round: round 1 re-runs over the NEW brief and DRAFTS it (old frame discarded; draft-first intake, 2026-08-17)', async () => {
     clarifyV2Harness.seededPendings = [armedRound()];
     const { outcome, appends } = await runClarifyV2Turn({ message: 'Start over' });
-    if (outcome === null || outcome.kind !== 'respond') {
-      throw new Error(`expected respond, got ${outcome?.kind}`);
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
     }
-    // Round-1 lead over the new topic — not a follow-up on the old frame.
-    expect(outcome.response.assistant_text).toContain('Before I draft the model');
-    const round = roundPendingOf(appends);
-    expect(round).toBeDefined();
-    const action = round!.action as { brief: string; round: number; start_over_brief?: string };
-    expect(action.brief).toBe(NEW_BRIEF);
-    expect(action.round).toBe(1);
-    expect(action.start_over_brief).toBeUndefined();
+    // The consented replacement drafts the NEW topic immediately — the
+    // streaming new-topic draft says the stop took better than any copy
+    // could — with the thin brief's questions deferred alongside.
+    expect(outcome.briefOverride).toBe(NEW_BRIEF);
+    expect(outcome.deferredAsk?.dimensions.length ?? 0).toBeGreaterThanOrEqual(1);
+    // No clarify round persists: the ask is non-blocking by construction.
+    expect(appends).toHaveLength(0);
   });
 
   it('the start-over CHIP message routes exactly like the typed phrase (constant inside the pattern — the A10 pin)', async () => {
@@ -385,11 +384,11 @@ describe('2.171 — "start over" routes to the existing new-draft path', () => {
     const { outcome, appends } = await runClarifyV2Turn({
       message: CLARIFY_V2_START_OVER_MESSAGE,
     });
-    if (outcome === null || outcome.kind !== 'respond') {
-      throw new Error(`expected respond, got ${outcome?.kind}`);
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
     }
-    const round = roundPendingOf(appends);
-    expect((round!.action as { brief: string }).brief).toBe(NEW_BRIEF);
+    expect(outcome.briefOverride).toBe(NEW_BRIEF);
+    expect(appends).toHaveLength(0);
   });
 
   it('UNARMED control: "start over" in an ordinary round stays an ordinary answer (no round-1 reset)', async () => {

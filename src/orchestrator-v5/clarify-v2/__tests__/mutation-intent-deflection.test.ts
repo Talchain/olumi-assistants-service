@@ -23,27 +23,34 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  decideClarifyV2Round1,
+  CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   decideClarifyV2Resume,
   incorporateAnswerIntoBrief,
   composeClarifyV2ReofferResponse,
   isGraphMutationCommand,
   type ClarifyV2RoundState,
 } from "../preflight.js";
+import { assessBriefCompleteness } from "../rubric.js";
+import { composeClarifyQuestions } from "../questions.js";
 import { isDraftShapedText } from "../../../schemas/assist.js";
 
 /**
- * FIXTURE HONESTY (§5.0): the round state is built by calling the PRODUCER,
- * never written as an object literal — the shape is the producer's contract.
+ * FIXTURE HONESTY (§5.0): the round state derives from the PRODUCER
+ * modules, never a hand-listed object. DRAFT-FIRST INTAKE (2026-08-17)
+ * retired round 1's ask arm, so a LIVE round is now a LEGACY row —
+ * persisted by a pre-draft-first deploy and still honoured by resume
+ * within its TTL. Its `asked` history derives from the live rubric +
+ * question composer, exactly what the retired ask arm recorded.
  */
 function liveRoundState(brief: string): ClarifyV2RoundState {
-  const round1 = decideClarifyV2Round1(brief);
-  if (round1.kind !== "ask") {
-    throw new Error(
-      `fixture precondition failed: round 1 did not ASK for this brief (kind=${round1.kind})`,
-    );
+  const questions = composeClarifyQuestions(
+    assessBriefCompleteness(brief).missing,
+    CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
+  );
+  if (questions.length === 0) {
+    throw new Error("fixture precondition failed: brief has no gaps to ask about");
   }
-  return round1.state;
+  return { brief, asked: questions.map((q) => q.dimension), round: 1 };
 }
 
 const THIN_BRIEF =

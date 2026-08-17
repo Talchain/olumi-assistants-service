@@ -8,11 +8,16 @@
  * LLM calls):
  *
  *  ROUND 1 (draft preflight) — the turn would dispatch `draft_graph`
- *  (brief-shape heuristic or explicit-generate). The rubric
- *  (`clarify-v2/rubric.ts`) assesses the effective brief; a thin brief
- *  gets up to 3 tap-able questions via the existing `clarify` turn class,
- *  a complete brief proceeds silently (return null → the route's draft
- *  dispatch runs untouched).
+ *  (brief-shape heuristic or explicit-generate). DRAFT-FIRST INTAKE
+ *  (2026-08-17, Paul's ratified target): round 1 NEVER blocks the draft.
+ *  The rubric (`clarify-v2/rubric.ts`) assesses the effective brief; a
+ *  complete brief proceeds silently (return null → the route's draft
+ *  dispatch runs untouched), and a brief with missing dimensions proceeds
+ *  to the draft WITH up to 3 composed questions riding alongside as a
+ *  non-blocking deferred ask (`{kind:'draft', deferredAsk}` — route-v2
+ *  appends the disclosure after a successful draft commit). Round 1
+ *  commits NO clarify turn and persists NO round: there is nothing to
+ *  resume, and answers route through the ordinary post-draft turn flow.
  *
  *  RESUME — a live `clarify_v2_round` pending action exists from a prior
  *  clarify turn and the user replied. Answers incorporate into the
@@ -96,17 +101,19 @@ export type ClarifyV2Outcome =
       readonly kind: 'draft';
       readonly briefOverride: string;
       /**
-       * TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b): present when
-       * round 1 found EXACTLY ONE missing dimension — the composed
-       * disclosure (assumption named as ASSISTANT-authored + the one
-       * deferred question) that route-v2 appends to the draft response's
-       * assistant_text after a successful draft commit. No pending is
-       * persisted for it: the clarify flow is strictly pre-draft, and the
-       * answer routes through the ordinary post-draft turn flow (typed
-       * answer or direct canvas edit).
+       * Present when round 1 (or a start-over re-run of it) found missing
+       * dimensions — the composed disclosure (assumptions named as
+       * ASSISTANT-authored + the deferred questions) that route-v2 appends
+       * to the draft response's assistant_text after a successful draft
+       * commit. Draft-first intake (2026-08-17) widened this from the
+       * single-gap case to EVERY gap count: the questions ride alongside
+       * the draft, never instead of it. No pending is persisted for it:
+       * the clarify flow is strictly pre-draft, and answers route through
+       * the ordinary post-draft turn flow (typed answer or direct canvas
+       * edit).
        */
       readonly deferredAsk?: {
-        readonly dimension: ClarifyDimension;
+        readonly dimensions: readonly ClarifyDimension[];
         readonly disclosure: string;
       };
     };
@@ -287,10 +294,12 @@ function emitDecisionTelemetry(
       scenario_id: payload.scenario_id,
       reason: decision.reason,
       resumed,
-      // TRACK-1 INTAKE FIX: additive — names the dimension riding as the
-      // non-blocking deferred ask on a draft-first proceed.
-      ...(decision.deferredQuestion !== undefined
-        ? { deferred_dimension: decision.deferredQuestion.dimension }
+      // Names the dimensions riding as the non-blocking deferred ask on a
+      // draft-first proceed (plural since 2026-08-17 — the multi-gap arm
+      // defers up to the round budget; the old `deferred_dimension`
+      // singular is retired with the single-question-only shape).
+      ...(decision.deferredQuestions !== undefined
+        ? { deferred_dimensions: decision.deferredQuestions.map((q) => q.dimension) }
         : {}),
     });
   } else {
@@ -402,15 +411,16 @@ export async function tryClarifyV2Turn(
         return {
           kind: 'draft',
           briefOverride: decision.brief,
-          // TRACK-1 INTAKE FIX: the "start over" arm re-runs round 1 over
-          // the new brief, so a single-gap restart carries the same
-          // deferred disclosure as a fresh single-gap round 1 would.
-          ...(decision.reason === 'single_gap_draft_first' &&
-          decision.deferredQuestion !== undefined
+          // The "start over" arm re-runs round 1 over the new brief, so a
+          // gapped restart carries the same deferred disclosure as a fresh
+          // gapped round 1 would (single- or multi-gap alike since
+          // draft-first intake, 2026-08-17).
+          ...(decision.deferredQuestions !== undefined &&
+          decision.deferredQuestions.length > 0
             ? {
                 deferredAsk: {
-                  dimension: decision.deferredQuestion.dimension,
-                  disclosure: composeDraftFirstDisclosure(decision.deferredQuestion),
+                  dimensions: decision.deferredQuestions.map((q) => q.dimension),
+                  disclosure: composeDraftFirstDisclosure(decision.deferredQuestions),
                 },
               }
             : {}),
@@ -515,49 +525,26 @@ export async function tryClarifyV2Turn(
     effectiveBrief,
     params.explicitGenerateBrief !== null,
   );
-  if (decision.kind === 'proceed') {
-    emitDecisionTelemetry(decision, payload, requestId, false);
-    // ── TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b) ────────────────
-    // EXACTLY ONE missing dimension: draft NOW and hand the route the
-    // composed disclosure to append after a successful draft commit. No
-    // clarify turn commits and no pending persists — the ask is
-    // non-blocking by construction. Unreachable on explicit-generate
-    // (reason 'explicit_generate' proceeds above the rubric).
-    if (
-      decision.reason === 'single_gap_draft_first' &&
-      decision.deferredQuestion !== undefined
-    ) {
-      return {
-        kind: 'draft',
-        briefOverride: decision.brief,
-        deferredAsk: {
-          dimension: decision.deferredQuestion.dimension,
-          disclosure: composeDraftFirstDisclosure(decision.deferredQuestion),
-        },
-      };
-    }
-    // Complete brief: proceed SILENTLY — return null so the route's draft
-    // dispatch runs bit-identically to the flag-off path.
-    return null;
-  }
-  const response = composeClarifyV2Response(decision.questions, decision.phase);
-  const finalResponse = await commitClarifyTurn(
-    response,
-    payload,
-    requestId,
-    startedAtMs,
-    {
-      // Review fix A9 (1.152): NO briefText here — see ClarifyCommitOptions.
-      pendingActions: [buildClarifyPending(decision.state, payload, startedAtMs)],
-      priorPendings: pendings,
-    },
-  );
-  // Round-1 commit failure → silent draft (unchanged). Review fix A8: the
-  // questions-emitted telemetry fires only AFTER a successful commit, so a
-  // failed commit no longer reports a clarify round that never persisted.
-  if (finalResponse === null) return null;
+  // ── DRAFT-FIRST INTAKE (2026-08-17, Paul's ratified target) ─────────────
+  // Round 1 ALWAYS proceeds (the type enforces it): a draft-shaped brief
+  // drafts, and any missing-dimension questions ride the draft response as
+  // a non-blocking deferred ask. No clarify turn commits and no pending
+  // persists on this path — the blocking round-1 ask (and its A7/A8 commit
+  // machinery) is deleted; the resume arms above keep it for LIVE legacy
+  // rounds only. Unreachable on explicit-generate (reason
+  // 'explicit_generate' proceeds above the rubric with no deferred set).
   emitDecisionTelemetry(decision, payload, requestId, false);
-  // Review fix A7: respond with the chokepoint's FINAL response (it may have
-  // appended F-HELD lapse notices) — wire and store must not diverge.
-  return { kind: 'respond', response: finalResponse };
+  if (decision.deferredQuestions !== undefined && decision.deferredQuestions.length > 0) {
+    return {
+      kind: 'draft',
+      briefOverride: decision.brief,
+      deferredAsk: {
+        dimensions: decision.deferredQuestions.map((q) => q.dimension),
+        disclosure: composeDraftFirstDisclosure(decision.deferredQuestions),
+      },
+    };
+  }
+  // Complete brief (or explicit-generate): proceed SILENTLY — return null so
+  // the route's draft dispatch runs bit-identically to the pristine path.
+  return null;
 }

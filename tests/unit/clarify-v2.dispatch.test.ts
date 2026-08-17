@@ -91,24 +91,19 @@ describe('clarify v2 dispatch — #497 mechanical-fix behavioural pins', () => {
   });
 
   // ── A7 — the commit chokepoint's FINAL response is what goes on the wire ─
-  it('A7 round 1: an F-HELD lapse notice appended AT COMMIT is present on the wire response', async () => {
-    // A confirmation-expecting hold with turn-TTL 1 lapses at THIS commit's
-    // carry-forward; the chokepoint appends the honest lapse notice to the
-    // response it persists. The wire must carry that FINAL response.
+  it('A7 round 1 (draft-first, 2026-08-17): NOTHING commits here — a live hold is left untouched for the DRAFT commit to carry', async () => {
+    // Round 1 no longer commits a clarify turn, so no carry-forward can run
+    // here at all: the hold's lifecycle (including any lapse notice) belongs
+    // to the draft dispatch's own commit, which threads priorPendingActions
+    // (the hold-wipe fix, task_2e1b8c87). The clarify seam must not touch it.
     clarifyV2Harness.seededPendings = [
       seedProposedConceptHold({ expires_at_turn_count: 1 }),
     ];
     const { outcome, appends } = await runClarifyV2Turn({ message: THIN_BRIEF });
-    expect(outcome).not.toBeNull();
-    if (outcome === null || outcome.kind !== 'respond') {
-      throw new Error(`expected respond, got ${outcome?.kind}`);
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
     }
-    expect(outcome.response.assistant_text).toContain(
-      "The held change 'Add churn risk' has lapsed",
-    );
-    // Store and wire agree: the persisted content carries the same notice.
-    expect(appends).toHaveLength(1);
-    expect(JSON.stringify(appends[0])).toContain('has lapsed');
+    expect(appends).toHaveLength(0);
   });
 
   it('A7 resume: the follow-up ask also carries a commit-time lapse notice on the wire', async () => {
@@ -127,11 +122,14 @@ describe('clarify v2 dispatch — #497 mechanical-fix behavioural pins', () => {
     );
   });
 
-  it('A7 survival control: a hold with turn-TTL headroom survives the clarify commit un-lapsed', async () => {
+  it('A7 survival control (RESUME): a hold with turn-TTL headroom survives the follow-up ask commit un-lapsed', async () => {
+    // The clarify commit is resume-only since draft-first intake; the
+    // survival property is pinned where the commit still runs.
     clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
       seedProposedConceptHold({ expires_at_turn_count: 3 }),
     ];
-    const { outcome, appends } = await runClarifyV2Turn({ message: THIN_BRIEF });
+    const { outcome, appends } = await runClarifyV2Turn({ message: PARTIAL_ANSWER });
     if (outcome === null || outcome.kind !== 'respond') {
       throw new Error(`expected respond, got ${outcome?.kind}`);
     }
@@ -142,17 +140,24 @@ describe('clarify v2 dispatch — #497 mechanical-fix behavioural pins', () => {
   });
 
   // ── A8 — questions-emitted telemetry fires only AFTER a successful commit ─
-  it('A8 positive control: a SUCCESSFUL round-1 ask commit emits questions_emitted (the sink can see it)', async () => {
-    const { outcome, events } = await runClarifyV2Turn({ message: THIN_BRIEF });
+  it('A8 positive control: a SUCCESSFUL resume follow-up ask commit emits questions_emitted (the sink can see it)', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
+    ];
+    const { outcome, events } = await runClarifyV2Turn({ message: PARTIAL_ANSWER });
     expect(outcome?.kind).toBe('respond');
     expect(eventNames(events)).toContain(QUESTIONS_EMITTED);
   });
 
-  it('A8 round 1: a FAILED commit emits NO questions_emitted (silent draft, honest telemetry)', async () => {
+  it('A8 round 1 (draft-first): a store commit fault CANNOT block the draft — nothing commits, no questions_emitted, the draft outcome stands', async () => {
     clarifyV2Harness.commitError = new Error('append failed');
-    const { outcome, events } = await runClarifyV2Turn({ message: THIN_BRIEF });
-    // Round-1 commit failure degrades to not-engaged (silent draft).
-    expect(outcome).toBeNull();
+    const { outcome, events, appends } = await runClarifyV2Turn({ message: THIN_BRIEF });
+    // Round 1 commits nothing, so a broken append is unobservable here —
+    // the draft-first outcome is immune by construction.
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
+    }
+    expect(appends).toHaveLength(0);
     expect(eventNames(events)).not.toContain(QUESTIONS_EMITTED);
   });
 
@@ -212,12 +217,19 @@ describe('clarify v2 dispatch — explicit generate respected at round 1 (first-
     expect(proceeded[0]!.data).toMatchObject({ reason: 'explicit_generate', resumed: false });
   });
 
-  it('control: the SAME thin brief WITHOUT an explicit-generate brief still asks (clarify not lobotomised)', async () => {
-    const { outcome, events } = await runClarifyV2Turn({
+  it('control: the SAME thin brief WITHOUT an explicit-generate brief still gets its questions — deferred alongside the draft (clarify not lobotomised, never blocking)', async () => {
+    const { outcome, events, appends } = await runClarifyV2Turn({
       message: 'Should we expand into the German market?',
     });
-    expect(outcome?.kind).toBe('respond');
-    expect(eventNames(events)).toContain(QUESTIONS_EMITTED);
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
+    }
+    expect(outcome.deferredAsk?.dimensions.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(appends).toHaveLength(0);
+    expect(eventNames(events)).not.toContain(QUESTIONS_EMITTED);
+    const proceeded = events.filter((e) => e.name === PROCEEDED);
+    expect(proceeded).toHaveLength(1);
+    expect(proceeded[0]!.data).toMatchObject({ reason: 'multi_gap_draft_first', resumed: false });
   });
 });
 
@@ -358,11 +370,14 @@ describe('clarify v2 dispatch — 1.152 design fixes (A1 / A4 / A9)', () => {
     expect(second.outcome.briefOverride).toBe(THIN_BRIEF);
   });
 
-  it('A9: ask-class commits (round 1 AND resume follow-up) seed NO brief_text — the write-once column stays free for the terminal brief', async () => {
-    // Round 1 ask.
+  it('A9: ask-class commits seed NO brief_text — the write-once column stays free for the terminal brief', async () => {
+    // Round 1 no longer commits at all (draft-first, 2026-08-17): the
+    // write-once column is untouched by construction on that path, and the
+    // draft dispatch seeds it from briefOverride. The remaining ask-class
+    // commit is the RESUME follow-up ask.
     const round1 = await runClarifyV2Turn({ message: THIN_BRIEF });
-    expect(round1.outcome?.kind).toBe('respond');
-    expect(round1.appends[0]!.briefText).toBeUndefined();
+    expect(round1.outcome?.kind).toBe('draft');
+    expect(round1.appends).toHaveLength(0);
 
     // Resume follow-up ask.
     await resetClarifyV2Harness();

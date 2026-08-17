@@ -23,17 +23,25 @@ import { describe, it, expect } from "vitest";
 
 import { sanitiseOlumiResponseForEgress } from "../../src/orchestrator-v5/compose/output-safety.js";
 import {
+  CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   composeClarifyV2Response,
-  decideClarifyV2Round1,
   CLARIFY_V2_PROCEED_CHIP_ID,
 } from "../../src/orchestrator-v5/clarify-v2/preflight.js";
+import { assessBriefCompleteness } from "../../src/orchestrator-v5/clarify-v2/rubric.js";
+import { composeClarifyQuestions } from "../../src/orchestrator-v5/clarify-v2/questions.js";
 
 const THIN_BRIEF = "Should we expand into the German market?";
 
+// The clarify ask response is RESUME-ONLY since draft-first intake
+// (2026-08-17): follow-up asks over LEGACY live rounds. The question set
+// derives from the live rubric + composer, as the resume arm does.
 function composeForThinBrief() {
-  const d = decideClarifyV2Round1(THIN_BRIEF);
-  if (d.kind !== "ask") throw new Error("fixture: thin brief must ask");
-  return composeClarifyV2Response(d.questions, d.phase);
+  const questions = composeClarifyQuestions(
+    assessBriefCompleteness(THIN_BRIEF).missing,
+    CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
+  );
+  if (questions.length === 0) throw new Error("fixture: thin brief must have gaps");
+  return composeClarifyV2Response(questions, "follow_up");
 }
 
 describe("clarify_v2 — #464 egress guard coverage (by construction)", () => {

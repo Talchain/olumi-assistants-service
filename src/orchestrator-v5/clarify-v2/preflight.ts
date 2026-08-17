@@ -424,9 +424,22 @@ export type ClarifyV2ProceedReason =
    * EXACTLY ONE missing dimension on an otherwise draftable brief —
    * proceed to the draft NOW and carry the one composed question as a
    * NON-BLOCKING post-draft coaching ask, with the assumption disclosed
-   * as assistant-authored. Round-1 only; resume proceeds never mint it.
+   * as assistant-authored. Round-1 only; resume proceeds never mint it
+   * (except the start-over arm, which re-runs round 1 by design).
    */
-  | 'single_gap_draft_first';
+  | 'single_gap_draft_first'
+  /**
+   * DRAFT-FIRST INTAKE (2026-08-17, Paul's ratified target): round 1 found
+   * TWO OR MORE missing dimensions on a draft-shaped brief — draft anyway,
+   * with up to CLARIFY_V2_MAX_QUESTIONS_PER_ROUND composed questions riding
+   * the draft response as a NON-BLOCKING deferred ask. Clarification must
+   * never gate seeing the model: the blocking round-1 ask this replaces
+   * answered a fully substantive brief with questions INSTEAD of a model
+   * (wire witness olumi-docs/witness-998-2026-08-16/, session A1). The
+   * trigger stays a COUNT over the existing detectors — no new
+   * natural-language predicate (traps 22/22b/22f).
+   */
+  | 'multi_gap_draft_first';
 
 /** Why a re-offer / decline fired (also the telemetry `cue` field). */
 export type ClarifyV2DeflectionCue =
@@ -449,15 +462,18 @@ export type ClarifyV2Decision =
       readonly brief: string;
       readonly reason: ClarifyV2ProceedReason;
       /**
-       * TRACK-1 INTAKE FIX: present EXACTLY when `reason` is
-       * `single_gap_draft_first` — the one composed question for the single
-       * missing dimension, deferred to ride the draft response as a
-       * non-blocking coaching ask (disclosure composed by
-       * `composeDraftFirstDisclosure`). Never persisted as a pending: after
-       * the draft a graph exists and the clarify flow is strictly pre-draft;
-       * the answer routes through the ordinary post-draft turn flow.
+       * Present EXACTLY when `reason` is `single_gap_draft_first` (one
+       * question) or `multi_gap_draft_first` (up to the round budget) — the
+       * composed questions for the missing dimensions, deferred to ride the
+       * draft response as a non-blocking coaching ask (disclosure composed
+       * by `composeDraftFirstDisclosure`). Never persisted as a pending:
+       * after the draft a graph exists and the clarify flow is strictly
+       * pre-draft; answers route through the ordinary post-draft turn flow
+       * (typed answer or direct canvas edit). ONE field for both reasons,
+       * deliberately — differently-named twins for the same concept are
+       * this estate's chronic defect.
        */
-      readonly deferredQuestion?: ClarifyQuestion;
+      readonly deferredQuestions?: readonly ClarifyQuestion[];
     }
   | {
       readonly kind: 'ask';
@@ -533,14 +549,15 @@ export function incorporateAnswerIntoBrief(brief: string, answer: string): strin
 }
 
 /**
- * Round 1 can only proceed or ask — decline / re-offer are resume-only
- * (they need a live round to release or re-present). The narrow type
- * keeps the dispatch's round-1 arm exhaustive without dead branches.
+ * Round 1 can only PROCEED — draft-first intake (2026-08-17) removed the
+ * round-1 blocking ask entirely: every draft-shaped brief drafts, with any
+ * missing-dimension questions deferred alongside the draft. Decline /
+ * re-offer / ask remain resume-only (they need a live round). The narrow
+ * type keeps the dispatch's round-1 arm exhaustive without dead branches,
+ * and makes a reintroduced round-1 ask a TYPE error, not a silent
+ * behaviour change.
  */
-export type ClarifyV2Round1Decision = Extract<
-  ClarifyV2Decision,
-  { kind: 'proceed' | 'ask' }
->;
+export type ClarifyV2Round1Decision = Extract<ClarifyV2Decision, { kind: 'proceed' }>;
 
 /**
  * Round 1: assess the brief at draft preflight.
@@ -584,40 +601,34 @@ export function decideClarifyV2Round1(
   if (assessment.complete) {
     return { kind: 'proceed', brief: workingBrief, reason: 'complete' };
   }
-  // ── TRACK-1 INTAKE FIX (2026-08-13, INTAKE-FUNNEL §5b) ──────────────────
-  // EXACTLY ONE missing dimension → draft FIRST and defer the question to a
-  // non-blocking post-draft coaching ask. The trigger is a COUNT over the
-  // existing detectors — deliberately not a new natural-language predicate
-  // (trap 22 does not attach to the routing change). Measured yield at the
-  // wire baseline: 7 of the 13 re-asked briefs (S4, S5, M3, M5, L1–L3)
-  // draft first-turn, and the defaults-walk evidence (BASELINE.md) says
-  // those drafts come out structurally usable. ≥2 missing keeps the
-  // blocking ask below unchanged — the thin-brief asks are the rubric
-  // doing its job (INTAKE-FUNNEL: S1–S4 asks are defensible coaching).
-  if (assessment.missing.length === 1) {
-    const [deferredQuestion] = composeClarifyQuestions(assessment.missing, 1);
-    if (deferredQuestion !== undefined) {
-      return {
-        kind: 'proceed',
-        brief: workingBrief,
-        reason: 'single_gap_draft_first',
-        deferredQuestion,
-      };
-    }
-  }
+  // ── DRAFT-FIRST INTAKE (2026-08-17, Paul's ratified target) ──────────────
+  // ANY number of missing dimensions → draft FIRST and defer the composed
+  // questions to a non-blocking ask riding the draft response. This extends
+  // the 2026-08-13 single-gap fix (INTAKE-FUNNEL §5b) to the multi-gap arm,
+  // deleting round 1's blocking ask: clarification must never gate seeing
+  // the model. The wire witness (olumi-docs/witness-998-2026-08-16/, A1)
+  // showed a fully substantive brief answered with questions INSTEAD of a
+  // model — the respond arm's cost model ("a false MISSING costs one
+  // question with a one-tap escape") had already been voided by #928 round
+  // 4, and the disclosure claims only what the PRODUCT did ("I've
+  // assumed…"), so over-detection stays a quality-of-assumption defect,
+  // never a truth defect. The trigger remains a COUNT over the existing
+  // detectors, and drafting is bounded by the route's own draft-shape
+  // heuristic (`params.draftShaped` gates round 1 in the dispatch) —
+  // deliberately no new natural-language predicate (traps 22/22b/22f).
   const questions = composeClarifyQuestions(
     assessment.missing,
     CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   );
   return {
-    kind: 'ask',
-    questions,
-    state: {
-      brief: workingBrief,
-      asked: questions.map((q) => q.dimension),
-      round: 1,
-    },
-    phase: 'initial',
+    kind: 'proceed',
+    brief: workingBrief,
+    reason:
+      assessment.missing.length === 1 ? 'single_gap_draft_first' : 'multi_gap_draft_first',
+    // Fail-open: composeClarifyQuestions over a non-empty missing list is
+    // never empty at this tip (templates exist for every dimension), but an
+    // empty result must degrade to a silent proceed, not an empty disclosure.
+    ...(questions.length > 0 ? { deferredQuestions: questions } : {}),
   };
 }
 
@@ -958,10 +969,56 @@ const DRAFT_FIRST_GAP_COPY: Readonly<Record<ClarifyDimension, string>> = {
     "I've assumed the figures in this draft, and I haven't confirmed them with you",
 };
 
-export function composeDraftFirstDisclosure(question: ClarifyQuestion): string {
+/**
+ * DRAFT-FIRST INTAKE (2026-08-17): the multi-gap disclosure names each
+ * assumed dimension with a short noun. Keyed on the same ClarifyDimension
+ * union as DRAFT_FIRST_GAP_COPY — both are TS-exhaustive Records, so adding
+ * a dimension without both entries is a compile error, not silent drift.
+ * Same governing rule as the singular copy (#928 round 4): these name what
+ * the PRODUCT assumed, never what the user said.
+ */
+const DRAFT_FIRST_GAP_NOUN: Readonly<Record<ClarifyDimension, string>> = {
+  goal: 'the goal',
+  options: 'the alternatives',
+  timeframe: 'the horizon',
+  quantities: 'the figures',
+};
+
+/** British-English list join: "a", "a and b", "a, b and c" (no Oxford comma). */
+function joinNouns(nouns: readonly string[]): string {
+  if (nouns.length <= 1) return nouns[0] ?? '';
+  return `${nouns.slice(0, -1).join(', ')} and ${nouns[nouns.length - 1]!}`;
+}
+
+export function composeDraftFirstDisclosure(
+  questions: readonly ClarifyQuestion[],
+): string {
+  const [first] = questions;
+  if (first === undefined) {
+    // Callers guard on a non-empty deferred set; degrade to silence rather
+    // than emit a disclosure about nothing.
+    return '';
+  }
+  if (questions.length === 1) {
+    // The single-gap copy, byte-identical to the 2026-08-13 shape (pinned by
+    // tests/unit/clarify-v2.draft-first.test.ts in both branches of #928 R4).
+    return (
+      `One thing to check: ${DRAFT_FIRST_GAP_COPY[first.dimension]}. ` +
+      `${first.text} You can answer here, or change it directly on the canvas.`
+    );
+  }
+  // Multi-gap: one honest lead naming every assumed dimension (product-
+  // authored provenance, no claim about the user's brief), then the
+  // questions on numbered lines — the wall-of-text lesson (2026-08-16 P1)
+  // says newlines, which survive the egress chokepoint untouched.
+  const lead =
+    questions.length === 2 ? 'A couple of things to check' : 'A few things to check';
+  const nouns = joinNouns(questions.map((q) => DRAFT_FIRST_GAP_NOUN[q.dimension]));
+  const numbered = questions.map((q, i) => `${i + 1}. ${q.text}`).join('\n');
   return (
-    `One thing to check: ${DRAFT_FIRST_GAP_COPY[question.dimension]}. ` +
-    `${question.text} You can answer here, or change it directly on the canvas.`
+    `${lead}: I've assumed ${nouns} in this draft, and I haven't confirmed them with you.\n` +
+    `${numbered}\n` +
+    'You can answer here, or change them directly on the canvas.'
   );
 }
 

@@ -2,12 +2,21 @@
  * Clarify v2 preflight decision core — round semantics, no-repeat, stop
  * rule, response composition (E0-B, ROADMAP 1.94 Option A replacement).
  *
+ * DRAFT-FIRST INTAKE (2026-08-17, Paul's ratified target): round 1 no
+ * longer ASKS — every draft-shaped brief proceeds to the draft, with its
+ * questions deferred alongside. The resume machinery (and the composer it
+ * uses) stays live for LEGACY rounds — rows persisted by pre-draft-first
+ * deploys, honoured within their TTL — so the resume/composition pins
+ * below derive their round state from the live rubric + question composer
+ * (exactly what the retired round-1 ask arm recorded), never hand-listed.
+ *
  * RED-first on base (module absent). The mutation checks for these pins
  * (run in a throwaway worktree):
  *   - forcing the rubric to always return complete turns the fires-at-all
- *     pins RED (the retired never-asks baseline);
+ *     pins RED (the retired never-fires baseline);
  *   - dropping `asked` from the resume filter turns the no-repeat pin RED;
- *   - removing the round budget turns the stop-rule pin RED.
+ *   - removing the round budget turns the stop-rule pin RED;
+ *   - restoring the round-1 blocking ask turns the draft-first pins RED.
  */
 import { describe, it, expect } from "vitest";
 
@@ -26,7 +35,10 @@ import {
   decideClarifyV2Resume,
   decideClarifyV2Round1,
   incorporateAnswerIntoBrief,
+  type ClarifyV2RoundState,
 } from "../../src/orchestrator-v5/clarify-v2/preflight.js";
+import { assessBriefCompleteness } from "../../src/orchestrator-v5/clarify-v2/rubric.js";
+import { composeClarifyQuestions } from "../../src/orchestrator-v5/clarify-v2/questions.js";
 import { parsePendingAction } from "../../src/orchestrator-v5/session/pending-action.js";
 import { DRAFT_GRAPH_MAX_BRIEF_LENGTH } from "../../src/schemas/assist.js";
 
@@ -34,18 +46,43 @@ const THIN_BRIEF = "Should we expand into the German market?";
 const COMPLETE_BRIEF =
   "Should we hire a senior tech lead or two junior developers to accelerate the platform rebuild this year?";
 
+/**
+ * The questions a round over `brief` asks/defers — composed over the REAL
+ * rubric's missing set, capped at the round budget. This is exactly the
+ * derivation the retired round-1 ask arm used, kept live here because the
+ * resume path still consumes it.
+ */
+const questionsFor = (brief: string) =>
+  composeClarifyQuestions(
+    assessBriefCompleteness(brief).missing,
+    CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
+  );
+
+/**
+ * A LEGACY live round state — as persisted by a pre-draft-first deploy
+ * (when round 1 still asked), and as the resume path's own follow-up asks
+ * still persist it. Derived from the live modules, never hand-listed.
+ */
+const legacyRoundState = (brief: string): ClarifyV2RoundState => {
+  const qs = questionsFor(brief);
+  if (qs.length === 0) throw new Error("fixture precondition: brief must have gaps");
+  return { brief, asked: qs.map((q) => q.dimension), round: 1 };
+};
+
 describe("clarify_v2 round 1 (draft preflight)", () => {
-  it("FIRES on a thin brief — asks up to the question budget (never-fires baseline is RED)", () => {
+  it("FIRES on a thin brief — proceeds to the DRAFT with up to the question budget deferred alongside (never-fires baseline is RED)", () => {
     const d = decideClarifyV2Round1(THIN_BRIEF);
-    expect(d.kind).toBe("ask");
-    if (d.kind !== "ask") return;
-    expect(d.questions.length).toBeGreaterThanOrEqual(1);
-    expect(d.questions.length).toBeLessThanOrEqual(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND);
-    expect(d.state.round).toBe(1);
-    expect(d.state.brief).toBe(THIN_BRIEF);
-    // asked-history records exactly the asked dimensions — the REAL
-    // history the retired plumbing never had (always-empty previous_answers).
-    expect(d.state.asked).toEqual(d.questions.map((q) => q.dimension));
+    expect(d.kind).toBe("proceed");
+    expect(d.reason).toBe("multi_gap_draft_first");
+    expect(d.brief).toBe(THIN_BRIEF);
+    const qs = d.deferredQuestions ?? [];
+    expect(qs.length).toBeGreaterThanOrEqual(1);
+    expect(qs.length).toBeLessThanOrEqual(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND);
+    // The deferred set records exactly the missing dimensions' questions —
+    // the same derivation the retired ask arm recorded as asked-history.
+    expect(qs.map((q) => q.dimension)).toEqual(
+      questionsFor(THIN_BRIEF).map((q) => q.dimension),
+    );
   });
 
   it("stays SILENT on a complete brief (no busywork)", () => {
@@ -53,35 +90,41 @@ describe("clarify_v2 round 1 (draft preflight)", () => {
     expect(d).toEqual({ kind: "proceed", brief: COMPLETE_BRIEF, reason: "complete" });
   });
 
-  it("more than 3 missing dimensions still asks at most the budget", () => {
+  it("more than 3 missing dimensions still defers at most the question budget", () => {
     const d = decideClarifyV2Round1(THIN_BRIEF);
-    if (d.kind !== "ask") throw new Error("expected ask");
-    expect(d.questions.length).toBe(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND);
+    expect(d.deferredQuestions?.length).toBe(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND);
   });
 
-  it("PRODUCER/READER: an over-length round-1 brief is capped at the WRITE so the pending's own reader accepts it (PR #490 review P1)", () => {
+  it("NEVER BLOCKS: no round-1 decision is an ask, for thin and complete briefs alike (draft-first intake, 2026-08-17)", () => {
+    for (const brief of [THIN_BRIEF, COMPLETE_BRIEF]) {
+      expect(decideClarifyV2Round1(brief).kind).toBe("proceed");
+    }
+  });
+
+  it("PRODUCER/READER: an over-length round-1 brief is capped at the WRITE so the draft pipeline and the legacy-round reader both accept it (PR #490 review P1)", () => {
     // A thin decision question + a long pasted background (the probe that
-    // proved the dead end live was 6,341 chars). Round 1 must persist a
-    // working brief the `clarify_v2_round` parser will accept back —
-    // otherwise the pending is dropped at the next turn's read, answers
-    // are silently ignored and the escape chip is dead.
+    // proved the dead end live was 6,341 chars). Draft-first: the capped
+    // working brief IS the briefOverride the draft dispatch receives, so it
+    // must respect the draft pipeline's Zod max — and the persisted-round
+    // reader must still accept a brief of this shape (legacy rounds and
+    // resume follow-ups persist through the same parser).
     const longBrief = `${THIN_BRIEF} ${"Background detail. ".repeat(320)}`.trim();
     expect(longBrief.length).toBeGreaterThan(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
     const d = decideClarifyV2Round1(longBrief);
-    expect(d.kind).toBe("ask");
-    if (d.kind !== "ask") return;
-    expect(d.state.brief.length).toBeLessThanOrEqual(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
-    expect(d.state.brief.startsWith(THIN_BRIEF)).toBe(true);
-    // The REAL reader accepts the persisted shape (round-trip, not a mirror).
+    expect(d.kind).toBe("proceed");
+    expect(d.brief.length).toBeLessThanOrEqual(DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+    expect(d.brief.startsWith(THIN_BRIEF)).toBe(true);
+    // The REAL reader accepts the capped shape (round-trip, not a mirror).
+    const legacy = legacyRoundState(d.brief);
     const parsed = parsePendingAction({
       id: "cv2_turn-1",
       scenario_id: "scenario-1",
       chip_id: CLARIFY_V2_PROCEED_CHIP_ID,
       action: {
         kind: "clarify_v2_round",
-        brief: d.state.brief,
-        asked_dimensions: d.state.asked,
-        round: d.state.round,
+        brief: legacy.brief,
+        asked_dimensions: legacy.asked,
+        round: legacy.round,
       },
       preconditions: {},
       expires_at_turn_count: 2,
@@ -89,22 +132,22 @@ describe("clarify_v2 round 1 (draft preflight)", () => {
       emitted_at_iso: new Date(Date.now()).toISOString(),
     });
     expect(parsed).not.toBeNull();
-    // And the round stays alive end-to-end: an answer incorporates, the
-    // escape chip proceeds.
+    // And a LEGACY round over the capped brief stays alive end-to-end: an
+    // answer incorporates, the escape chip proceeds.
     const answered = decideClarifyV2Resume({
-      state: d.state,
+      state: legacy,
       message: "The goal is to increase revenue.",
       messageIsDraftShaped: false,
       explicitGenerateBrief: null,
     });
     expect(answered.kind === "ask" || answered.kind === "proceed").toBe(true);
     const escaped = decideClarifyV2Resume({
-      state: d.state,
+      state: legacy,
       message: CLARIFY_V2_PROCEED_MESSAGE,
       messageIsDraftShaped: false,
       explicitGenerateBrief: null,
     });
-    expect(escaped).toEqual({ kind: "proceed", brief: d.state.brief, reason: "user_proceed" });
+    expect(escaped).toEqual({ kind: "proceed", brief: legacy.brief, reason: "user_proceed" });
   });
 });
 
@@ -133,19 +176,23 @@ describe("clarify_v2 round 1 — explicit generate is respected (first-message-d
     expect(d).toEqual({ kind: "proceed", brief: THIN_BRIEF, reason: "explicit_generate" });
   });
 
-  it("NOT lobotomised: the SAME thin brief with NO generate flag still asks (clarify still fires when the user did not press Generate)", () => {
+  it("NOT lobotomised: the SAME thin brief with NO generate flag still gets its questions — deferred alongside the draft, never blocking", () => {
     const d = decideClarifyV2Round1(THIN_BRIEF);
-    expect(d.kind).toBe("ask");
+    expect(d.kind).toBe("proceed");
+    expect(d.deferredQuestions?.length ?? 0).toBeGreaterThanOrEqual(1);
     // The default second argument is 'not a generate turn' — behaviour is
     // bit-identical to the single-arg call the rest of the suite uses.
-    expect(decideClarifyV2Round1(THIN_BRIEF, false).kind).toBe("ask");
+    expect(
+      decideClarifyV2Round1(THIN_BRIEF, false).deferredQuestions?.length ?? 0,
+    ).toBeGreaterThanOrEqual(1);
+    // Explicit generate still carries NO deferred questions (the dead-end
+    // rule is unchanged: the user pressed Generate, we draft silently).
+    expect(decideClarifyV2Round1(THIN_BRIEF, true).deferredQuestions).toBeUndefined();
   });
 });
 
-describe("clarify_v2 resume — answers incorporate via the normal turn flow", () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== "ask") throw new Error("fixture: round 1 must ask");
-  const state1 = round1.state;
+describe("clarify_v2 resume — answers incorporate via the normal turn flow (LEGACY live rounds)", () => {
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it("an answer that completes the brief proceeds to draft with the augmented brief", () => {
     // Answer all four dimensions in one typed message.
@@ -296,9 +343,11 @@ describe("clarify_v2 resume — answers incorporate via the normal turn flow", (
 });
 
 describe("clarify_v2 response composition (wire shape)", () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== "ask") throw new Error("fixture: round 1 must ask");
-  const response = composeClarifyV2Response(round1.questions, round1.phase);
+  // The composer remains LIVE on the resume path (follow-up asks over
+  // legacy rounds); drive it with the derived question set the retired
+  // round-1 ask arm produced for this brief.
+  const round1 = { questions: questionsFor(THIN_BRIEF) };
+  const response = composeClarifyV2Response(round1.questions, "initial");
 
   it("parses the strict OlumiResponseSchema (contract floor: 100%)", () => {
     const parsed = OlumiResponseSchema.safeParse(response);
@@ -376,9 +425,8 @@ describe('A10 — proceed pattern covers the canned proceed message', () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('1.152 A1 — decline releases the round honestly', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it.each(['not now', 'Hold off', "I don't want to answer these questions", 'stop', 'cancel', 'later', 'wait', 'No, not right now thanks'])(
     "decline cue '%s' → DECLINE (round released, brief kept), never a forced draft",
@@ -420,9 +468,8 @@ describe('1.152 A1 — decline releases the round honestly', () => {
 });
 
 describe('1.152 A1 — not-an-answer guard (question-shaped replies never fold in)', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it('a question back to the assistant → RE-OFFER (not folded into the brief)', () => {
     const d = decideClarifyV2Resume({
@@ -470,9 +517,8 @@ describe('1.152 A1 — not-an-answer guard (question-shaped replies never fold i
 });
 
 describe('1.152 A2 — wholesale replacement needs a genuinely standalone restatement', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it("the 33-char 'whether' fragment APPENDS (the review's canonical probe) — the working brief survives", () => {
     const fragment = 'It depends on whether Sam accepts.'; // 34 chars, 'whether' → route-draft-shaped
@@ -526,9 +572,8 @@ describe('1.152 A2 — wholesale replacement needs a genuinely standalone restat
 });
 
 describe('1.152 A3 — explicit-generate brief is incorporated, not discarded', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it('an assembled brief that is a SUBSET of the working brief adds nothing (no duplication)', () => {
     const d = decideClarifyV2Resume({
@@ -571,9 +616,8 @@ describe('1.152 A3 — explicit-generate brief is incorporated, not discarded', 
 });
 
 describe('1.152 A4 — bare single-word acks are calibrated, not auto-proceeds', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it.each(['ok', 'OK.', 'sure', 'fine'])(
     "bare ack '%s' while questions are pending → RE-OFFER of the default-forward choice",
@@ -621,9 +665,8 @@ describe('1.152 A4 — bare single-word acks are calibrated, not auto-proceeds',
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('1.152(i) P2 — widened decline cues (RED-first at #498 head)', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it.each([
     'no thanks',
@@ -654,9 +697,8 @@ describe('1.152(i) P2 — widened decline cues (RED-first at #498 head)', () => 
 });
 
 describe('1.152(i) — the 24-case answer battery (danger direction: every one MUST fold as an answer)', () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   // Each case carries a decline/hedge cue WORD or shape that the widened
   // patterns must NOT claim. Asserting the incorporated brief CONTAINS the
@@ -716,9 +758,8 @@ describe('1.152(i) — the 24-case answer battery (danger direction: every one M
 });
 
 describe("1.152(i) P3 — hedged proceed ('not sure — maybe just draft it?') is proceed-INTENT → one re-offer, then consent (pinned decision)", () => {
-  const round1 = decideClarifyV2Round1(THIN_BRIEF);
-  if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-  const state1 = round1.state;
+  // LEGACY live round (persisted pre-draft-first; resume still honours it).
+  const state1 = legacyRoundState(THIN_BRIEF);
 
   it.each(['not sure — maybe just draft it?', 'Maybe just draft it?', "I'm not sure, just go ahead"])(
     "hedged proceed '%s' → RE-OFFER with cue hedged_proceed (not decline, not fold)",
@@ -839,15 +880,17 @@ describe('clarify_v2 chip cap (D-K 0–3) — the escape hatch must never be the
    */
   const everyClarifyResponseShape = () => {
     const shapes: { name: string; response: ReturnType<typeof composeClarifyV2Response> }[] = [];
-    const round1 = decideClarifyV2Round1(THIN_BRIEF);
-    if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-    shapes.push({ name: 'round1(thin brief)', response: composeClarifyV2Response(round1.questions, round1.phase) });
+    // The composer is resume-only since draft-first intake (2026-08-17);
+    // the question set derives from the live rubric + composer as before.
+    const questions = questionsFor(THIN_BRIEF);
+    if (questions.length === 0) throw new Error('fixture: thin brief must have gaps');
+    shapes.push({ name: 'legacy round(thin brief)', response: composeClarifyV2Response(questions, 'initial') });
     // Derived worst case: the full per-round question budget.
-    for (let n = 1; n <= Math.min(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND, round1.questions.length); n += 1) {
+    for (let n = 1; n <= Math.min(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND, questions.length); n += 1) {
       for (const phase of ['initial', 'follow_up'] as const) {
         shapes.push({
           name: `${n} question(s), phase=${phase}`,
-          response: composeClarifyV2Response(round1.questions.slice(0, n), phase),
+          response: composeClarifyV2Response(questions.slice(0, n), phase),
         });
       }
     }
@@ -855,12 +898,11 @@ describe('clarify_v2 chip cap (D-K 0–3) — the escape hatch must never be the
   };
 
   it('POSITIVE CONTROL: the fixture round really does carry a multi-chip candidate set', () => {
-    const round1 = decideClarifyV2Round1(THIN_BRIEF);
-    if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
-    const totalCandidates = round1.questions.reduce((n, q) => n + q.candidates.length, 0);
+    const questions = questionsFor(THIN_BRIEF);
+    const totalCandidates = questions.reduce((n, q) => n + q.candidates.length, 0);
     // If this ever drops to 0 the cap assertions below would pass vacuously.
     expect(totalCandidates).toBeGreaterThan(0);
-    expect(round1.questions.length).toBeGreaterThan(0);
+    expect(questions.length).toBeGreaterThan(0);
   });
 
   it('emits AT MOST the ratified cap on every response shape (RED on base: 4+)', () => {
