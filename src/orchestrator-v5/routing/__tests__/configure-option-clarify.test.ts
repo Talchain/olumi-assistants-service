@@ -211,6 +211,9 @@ describe('composeConfigureOptionClarifyResponse — copy contract', () => {
     optionLabel: OPTION_LABEL,
     factorLabels: [FACTOR_LABEL],
     stage: 'analyse',
+    // The composer derives termination from the message now; this suite is about
+    // the FIRST-ASK copy, so the message must not read as an answer.
+    message: `Configure ${OPTION_LABEL}`,
   });
 
   it('names the option, the factor, and the phrasing that routes back to the writer', () => {
@@ -249,6 +252,7 @@ describe('composeConfigureOptionClarifyResponse — copy contract', () => {
       optionLabel: OPTION_LABEL,
       factorLabels: [FACTOR_LABEL, 'Churn Rate', 'Support Cost'],
       stage: 'analyse',
+      message: `Configure ${OPTION_LABEL}`,
     });
     expect(multi.assistant_text).toContain(`${FACTOR_LABEL}, Churn Rate and Support Cost`);
     expect(findForbiddenPhraseHit(multi.assistant_text)).toBeNull();

@@ -157,6 +157,9 @@ describe('configure-option copy ↔ detector contract', () => {
       optionLabel,
       factorLabels: [factorLabel, 'Feature Richness'],
       stage: 'analyse',
+      // The composer derives termination from the message; this suite is about
+      // the FIRST-ASK copy, so the message must not read as an answer.
+      message: `Configure ${optionLabel}`,
     }).assistant_text;
 
     // Derived from the builder AND from the shipped example value, never

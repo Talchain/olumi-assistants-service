@@ -398,6 +398,7 @@ import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
+import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';
 import {
   pickLatestFlipClaimPosture,
   pickLatestFlipSummary,
@@ -11917,6 +11918,83 @@ export async function runTurnExecutor(
   }
 
   /**
+   * ⭐⭐ ROADMAP 2.1265 — THE BLOCKER/CLAIM MUTUAL-EXCLUSION INVARIANT, at the
+   * chokepoint.
+   *
+   * A missing-value blocker and a claim that the value exists are mutually
+   * exclusive. Witnessed on deployed CEE `8be62df` (2026-08-17, journey J4 turn
+   * 2): "Your model already reflects subcontractor cost at 12% of affected-route
+   * revenue" shipped in the SAME payload as a live `missing_value` blocker for
+   * exactly that option × factor, over a persisted factor of 0.5 and no option
+   * intervention at all. A reply that contradicts its own payload is
+   * unconditionally wrong.
+   *
+   * WHY A FINALISER HOOK AND NOT A COMPOSER FIX. The fabrication came from the
+   * GENERIC routing/direct-answer composer (`prompt_id 120`, `turn_class
+   * direct_answer`, `handler_id null`) — a model that has never heard of this
+   * rule, on the path taken when no deterministic composer matched. A fix
+   * confined to composers closes the paths it can see and leaves the one it
+   * cannot; the same argument `enforceDefaultedValueDisclosureGuard` and
+   * `leading-option-egress-guard.ts` already make. The prompt's own
+   * `<STATE_GROUNDING>` section instructs the model to check structured context
+   * before claiming what exists — so this is not a missing instruction, it is an
+   * instruction a model can fail to follow, which is exactly what an egress
+   * invariant is for.
+   *
+   * ⚠ ORDER — LAST, and deliberately AFTER the defaulted-value disclosure. Every
+   * guard above performs a WHOLE-TEXT substitution; running last means this
+   * layer judges the text that actually ships rather than one a later guard
+   * discards. Its own replacement copy is checked by the recogniser itself in
+   * `blocked-slot-claim-guard.test.ts` (a replacement that were itself a caught
+   * claim is the defect reintroduced by the fix), so it does not need to sit
+   * upstream of the others to be swept.
+   *
+   * ⚠ P5 — THE AUTHORITATIVE READ IS NAMED, NOT INFERRED.
+   * `canonicalReadinessGraphForRun` is the graph `analysisReadyForTurn` was
+   * derived from. Passing any other graph would have the guard decide a
+   * contradiction against state the blockers were not computed over — and a
+   * reload taken one turn LATER was measured doing exactly that during
+   * development, calling the fabricated 12% grounded because a subsequent
+   * wrong-entity write had put it there (trap 16: a capture proves what it was
+   * pointed at).
+   */
+  function enforceBlockedSlotClaimGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+
+    const applied = applyBlockedSlotClaimGuard({
+      assistantText,
+      blockers: analysisReadyForTurn?.blockers,
+      persistedGraph: canonicalReadinessGraphForRun,
+    });
+    if (!applied.changed) return;
+
+    emit(TelemetryEvents.V5BlockedSlotClaimRefused, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      dispatch_path: dispatchPath,
+      option_id: applied.slot?.optionId ?? null,
+      factor_id: applied.slot?.factorId ?? null,
+      contradiction_count: applied.contradictions.length,
+      ungrounded_value_count: applied.ungroundedValues.length,
+    });
+
+    response = {
+      ...response,
+      assistant_text: applied.text,
+    };
+    // Same classification-carry as the sibling guards: this layer CORRECTS a
+    // claim inside an answer rather than replacing the answer, so a functional
+    // turn stays functional and a substantive one stays substantive.
+    if (functionalAnswerText === assistantText) {
+      functionalAnswerText = applied.text;
+    }
+  }
+
+  /**
    * ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD finaliser-level guard.
    *
    * ═══════════════════════════════════════════════════════════════════════════
@@ -12419,6 +12497,11 @@ export async function runTurnExecutor(
     // discards. See `enforceDefaultedValueDisclosureGuard` for the ordering
     // argument and for why it reads `context.prior_facts` directly.
     enforceDefaultedValueDisclosureGuard('turn_executor_finalise');
+    // ⭐⭐ 2.1265 — LAST. The mutual-exclusion invariant judges the text that
+    // actually ships, after every whole-text substitution above. See
+    // `enforceBlockedSlotClaimGuard` for the ordering argument and for why the
+    // authoritative read is `canonicalReadinessGraphForRun` and nothing else.
+    enforceBlockedSlotClaimGuard('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and

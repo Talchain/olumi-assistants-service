@@ -290,7 +290,14 @@ const EXPECTED_RECOVERY_TEXT = composeConfigureOptionClarifyResponse({
   optionLabel: 'Cloud-Native CRM',
   factorLabels: ['Platform Licence Cost', 'Feature Richness', 'Adoption Complexity'],
   stage: 'analyse',
-  valueAlreadySupplied: carriesConfigureOptionValuePayload(T12C),
+  // ⚠⚠ THIS WAS `valueAlreadySupplied: carriesConfigureOptionValuePayload(T12C)`
+  // AND THE RENAME TO `message` MADE IT A SILENT NO-OP. Test files are excluded
+  // from `tsconfig.build.json`, so an unknown excess property compiles and is
+  // simply IGNORED: this derived expectation quietly became the NON-terminating
+  // demand while the dispatch path under test produced the terminating copy.
+  // It failed loudly here only because the expectation is DERIVED — a
+  // hand-written literal would have gone on agreeing with nothing (ROADMAP 2.1267).
+  message: T12C,
   analysisWillProceed: CAPTURE_ADMISSION.willProceed,
   blockedNextStep: CAPTURE_ADMISSION.willProceed ? null : CAPTURE_ADMISSION.strict.nextStep,
 }).assistant_text;
@@ -319,7 +326,7 @@ describe('L-25 — the repair loop terminates', () => {
       optionLabel: 'Cloud-Native CRM',
       factorLabels: ['Platform Licence Cost'],
       stage: 'analyse',
-      valueAlreadySupplied: true,
+      message: T12C,
       analysisWillProceed: true,
     }).assistant_text;
     expect(promised).toMatch(/analysis will run/i);
@@ -340,7 +347,7 @@ describe('L-25 — the repair loop terminates', () => {
       optionLabel: 'Cloud-Native CRM',
       factorLabels: ['Platform Licence Cost'],
       stage: 'analyse',
-      valueAlreadySupplied: carriesConfigureOptionValuePayload(noValue),
+      message: noValue,
     }).assistant_text;
     expect(demand).toContain("option's effect on");
   });

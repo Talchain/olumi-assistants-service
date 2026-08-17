@@ -59,74 +59,45 @@ import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text.js';
 
 /**
- * The CLOSED referent set. A member is a phrase that can only point at "the
- * value under discussion" — never a contentful noun phrase that might name a
- * graph entity. Extending this set is a deliberate act with tests; anything
- * outside it falls through to today's routing (fail-closed: a false negative
- * costs nothing new, a false positive would write to the wrong place).
+ * The referent set and the whole-message value grammar MOVED to
+ * `routing/missing-value-answer.ts` (a MOVE, not a copy — CLAUDE.md trap 12).
  *
- * "them" / "both" are deliberately ABSENT: a plural referent with one value is
- * a compound intent this module must not flatten.
+ * ⭐ WHY THEY LEFT. Two modules need the same answer to "did the user answer the
+ * missing-value ask?": this one, to BIND the value to a slot, and
+ * `compose/configure-option-clarify-response.ts`, to refuse to repeat a demand
+ * the user has already answered. While the grammar lived here, the composer had
+ * no access to it and re-issued the identical demand — the witnessed NEW-1 loop.
+ * One owner is what makes that structurally impossible rather than fixed at the
+ * sites someone remembered.
+ *
+ * Re-exported so this module's existing consumers and specs are unaffected.
  */
-const BARE_REFERENTS: readonly string[] = [
-  'it',
-  'that',
-  'this',
-  'that one',
-  'this one',
-  'the value',
-  'its value',
-  'this value',
-  'that value',
-  'the effect',
-  'the effect value',
-  'the missing value',
-  'the missing effect value',
-];
+import { readMissingValueAnswer } from './missing-value-answer.js';
+
+export { BARE_REFERENTS } from './missing-value-answer.js';
 
 /**
- * The whole-message claim anchor. Groups:
- *   1 — the referent (optional; "set to 0.12" is also a bare instruction)
- *   2 — the value token: digits, optional thousands commas, optional decimal.
+ * ⭐ Trap 22f's honest-gap protocol — phrasings that carry the SAME user intent
+ * and are KNOWINGLY NOT CLAIMED, pinned as data so the suite REDs if the
+ * predicate silently widens to claim one, or narrows past a claimed form.
  *
- * The `^…$` anchoring is load-bearing: it is what makes a unit ("12%",
- * "3 months", "£5000"), a named target ("set the delivery share to 0.4"), a
- * trailing clause ("…for the subcontracting option"), a question lead, or a
- * compound sentence fail the claim WITHOUT this module maintaining vocabulary
- * lists for any of them. Only sentence-final `.`/`!` may follow the value.
+ * ⚠⚠ THIS SET SHRANK BY FOUR, AND THAT IS THE POINT OF PINNING IT.
+ *
+ * `Make it 0.12.` · `Use 0.12.` · `Set it to .12.` · `Yes, set it to 0.12.` were
+ * recorded here as knowingly-unclaimed. Measured at this tip, all four were
+ * refused by the binder AND by the configure composer's termination signal — so
+ * an ordinary human answer to the product's own ask got the identical demand
+ * back. They are now CLAIMED; each has a twin in the suite showing it bound to
+ * the right pair, and each verb shape is separately pinned.
+ *
+ * The set is now the single owner's, re-exported: a second list here would drift
+ * from the grammar that decides it (trap 12). See
+ * `MISSING_VALUE_ANSWER_KNOWN_DROPPED` for the four that remain refused and the
+ * stated reason for each — three are deliberate (hedge, word-number, named
+ * target) and one, the bare number, is a genuine capability gap whose enabling
+ * change is named there.
  */
-const BARE_VALUE_SET_PATTERN = new RegExp(
-  '^(?:please\\s+)?(?:set|change|update|adjust)\\s+' +
-    `(?:(${BARE_REFERENTS.join('|')})\\s+)?` +
-    'to\\s+(\\d[\\d,]*(?:\\.\\d+)?)\\s*[.!]*$',
-);
-
-/**
- * ⭐ Trap 22f's honest-gap protocol — phrasings that carry the SAME user
- * intent and are KNOWINGLY NOT CLAIMED, pinned as data so the suite REDs if
- * the predicate silently widens to claim one (set must shrink consciously)
- * or narrows past a claimed form. Each stays on today's route.
- */
-export const REPAIR_BARE_VALUE_KNOWN_DROPPED: readonly string[] = [
-  // No "to" spine — "make" was also removed from the effect-assign verbs
-  // after REVIEW-573 C-2 proved it claims conversational statements.
-  'Make it 0.12.',
-  // No assignment verb at all.
-  'Use 0.12.',
-  '0.12',
-  // Approximation token between "to" and the digit.
-  'Set it to about 0.12.',
-  // No digit (the #998 qualitative gap, same family as
-  // QUALITATIVE_VALUE_KNOWN_DROPPED in configure-option-clarify-response.ts).
-  'Set it to a third.',
-  // Leading decimal without an integer part.
-  'Set it to .12.',
-  // Affirmative prefix — confirmation-adjacent, left to the existing routes.
-  'Yes, set it to 0.12.',
-  // Trailing clause naming a target — the existing configure/effect routes
-  // own anything that names an option, and must keep owning it.
-  'Set it to 0.12 for the subcontracting option.',
-];
+export { MISSING_VALUE_ANSWER_KNOWN_DROPPED as REPAIR_BARE_VALUE_KNOWN_DROPPED } from './missing-value-answer.js';
 
 export interface BareRepairValueMatch {
   /** The user's value, verbatim as typed (commas preserved). */
@@ -141,12 +112,13 @@ export interface BareRepairValueMatch {
  * `detectConfigureOptionIntent` (lowercase, collapse whitespace, trim).
  */
 export function matchBareRepairValue(message: string): BareRepairValueMatch | null {
-  if (typeof message !== 'string') return null;
-  const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (normalised.length === 0) return null;
-  const m = BARE_VALUE_SET_PATTERN.exec(normalised);
-  if (m === null) return null;
-  return { valueText: m[2]!, referent: m[1] ?? null };
+  const answer = readMissingValueAnswer(message);
+  // QUALITATIVE ANSWERS ARE NOT BINDABLE AND MUST NOT REACH THIS FUNCTION'S
+  // CONSUMERS. This is the write path: "high" has no number, and choosing one
+  // for the user is the fabrication class the sibling claim guard exists to
+  // close. The clarify composer handles that reading instead.
+  if (answer === null || answer.kind !== 'numeric') return null;
+  return { valueText: answer.valueText, referent: answer.referent };
 }
 
 /** One option×factor pair the model is still waiting on. */
@@ -165,9 +137,41 @@ export interface MissingEffectPair {
  * a blocker this module cannot name is a blocker it must not bind to.
  * Deduplicated by (option_id, factor_id); order preserved (the first pair is
  * the one the readiness-recovery copy presents as "next").
+ *
+ * ⭐ THIS IS THE ESTATE'S ONE OWNER of "which option × factor pairs is the
+ * product currently saying it has no value for". `compose/blocked-slot-claim-guard.ts`
+ * imports it rather than re-deriving it, and that is load-bearing rather than
+ * tidy: the claim guard's whole invariant is that a blocker and a possession
+ * claim are mutually exclusive, and two readers of "which pairs are blocked"
+ * could disagree about exactly the pair under dispute (CLAUDE.md trap 12).
+ *
+ * ⚠⚠ THE DISCRIMINATOR HAS TWO SPELLINGS AND THIS FUNCTION USED TO SEE ONLY
+ * ONE. Measured on the J4 t2 wire capture (deployed CEE `8be62df`), a SINGLE
+ * payload carries the same ten blockers twice:
+ *
+ *   `analysis_ready.blockers[]`           → `blocker_type: "missing_value"`
+ *   `analysis_state.readiness.blockers[]` → `code: "MISSING_OPTION_VALUE"`,
+ *                                           and NO `blocker_type` field at all
+ *
+ * The canonical Zod type (`schemas/analysis-ready.ts:152`) declares
+ * `blocker_type` and has no `code`, so a reader written from the schema is
+ * green in unit and blind to half the payloads it will actually be handed.
+ * Both spellings are read; which one matched is deliberately not recorded,
+ * because a consumer that behaved differently per spelling would be a second
+ * concept (trap 21).
+ *
+ * ⚠ WIDENING DIRECTION, stated: this can only ADD pairs, never remove one. The
+ * reachable behavioural change is a payload that carried only the `code`
+ * spelling moving from `no_missing_effect_values` (no bind) to `bind`/`ask`,
+ * and a single-pair payload gaining a second pair moves `bind` → `ask` — which
+ * asks the user instead of choosing for them. Both directions are toward less
+ * guessing.
  */
+const MISSING_VALUE_BLOCKER_TYPE = 'missing_value';
+const MISSING_VALUE_BLOCKER_CODE = 'MISSING_OPTION_VALUE';
+
 export function deriveMissingEffectPairs(
-  readiness: AnalysisReadyPayload | null | undefined,
+  readiness: { readonly blockers?: unknown } | null | undefined,
 ): readonly MissingEffectPair[] {
   const blockers = readiness?.blockers;
   if (!Array.isArray(blockers)) return [];
@@ -176,7 +180,12 @@ export function deriveMissingEffectPairs(
   for (const raw of blockers as readonly unknown[]) {
     if (raw === null || typeof raw !== 'object') continue;
     const blocker = raw as Record<string, unknown>;
-    if (blocker.blocker_type !== 'missing_value') continue;
+    if (
+      blocker.blocker_type !== MISSING_VALUE_BLOCKER_TYPE
+      && blocker.code !== MISSING_VALUE_BLOCKER_CODE
+    ) {
+      continue;
+    }
     const optionId = nonEmpty(blocker.option_id);
     const optionLabel = nonEmpty(blocker.option_label);
     const factorId = nonEmpty(blocker.factor_id);

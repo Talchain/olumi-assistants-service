@@ -31,6 +31,10 @@
  * phrasings that cannot return to the lane that suggested them").
  */
 
+import {
+  messageAnswersMissingValueAsk,
+  readMissingValueAnswer,
+} from '../routing/missing-value-answer.js';
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 
 import { composeDirectAnswerResponse } from '../compose.js';
@@ -42,36 +46,31 @@ export interface ComposeConfigureOptionClarifyInput {
   readonly factorLabels: readonly string[];
   readonly stage: StageType;
   /**
-   * TRUE when the user's message looked like it already carried a value — i.e.
-   * they answered the demand this composer made last turn, and it still did not
-   * land.
+   * THE MESSAGE THIS REPLY IS ANSWERING. Required, and that is the whole fix.
    *
-   * ⭐ THIS FLAG EXISTS BECAUSE THE REPLY WITHOUT IT DOES NOT TERMINATE.
-   * Witnessed on deployed CEE `bacf35d` (2026-08-16, simulated-user run,
-   * 18:15:06Z → 18:15:42Z): the product demanded a literal template, the user
-   * typed it back VERBATIM, and `edit-graph-dispatch.ts` re-emitted **the
-   * identical demand, word for word**.
+   * ⭐⭐ IT REPLACED A `valueAlreadySupplied?: boolean` THE CALLER HAD TO
+   * REMEMBER TO PASS — AND ONE OF THE TWO CALLERS DID NOT.
+   * `route-v2.ts`'s pre-edit intercept passed only `optionLabel`, `factorLabels`
+   * and `stage`, so at that site the terminating branch was UNREACHABLE: no
+   * matter what the user said, they got the demand. An optional boolean that
+   * selects between "repeat yourself" and "terminate" is a hand-maintained
+   * mirror of the caller's diligence (CLAUDE.md trap 12), and it drifted exactly
+   * as that trap predicts.
    *
-   * ⚠⚠ WHAT IT IS NOT, AND THIS BOUNDS THE COPY BELOW. It is fed by
-   * `carriesConfigureOptionValuePayload`, a DIGIT-ANCHORED ROUTING regex. It
-   * answers *"does this message look like a value-set instruction?"* — NOT
-   * *"do I have the user's number for THIS option on THIS factor?"* Those are
-   * two different questions (trap 21), and measured, the gap is real in both
-   * directions:
+   * With the message required, the composer derives the condition itself from
+   * the estate's single owner (`routing/missing-value-answer.ts`), so THE SAME
+   * UNMODIFIED DEMAND CANNOT BE RE-ISSUED TO AN ANSWER AT ANY CALL SITE,
+   * present or future. There is no flag left to forget.
    *
-   *   - `"…to high"` / `"…to about a third"` → no digit → FALSE, so the demand
-   *     repeats. See {@link QUALITATIVE_VALUE_KNOWN_DROPPED} — an explicitly
-   *     pinned gap, not a silent one.
-   *   - `"Update the timeline to 3 months"`, aimed at a DIFFERENT target →
-   *     TRUE, on a message that never mentioned this option or factor.
-   *
-   * So the terminating copy MUST NOT CLAIM POSSESSION OF A NUMBER. It says what
-   * is true of the MODEL — this option has no effect values — which holds
-   * whatever the message contained. Asserting "I have your number" off a
-   * routing regex would be fabricating the user's input, the exact class this
-   * PR exists to close.
+   * ⚠ THE COPY STILL MUST NOT CLAIM POSSESSION OF A NUMBER. The predicate
+   * answers "does this message look like an answer to the ask?", NOT "do I have
+   * the user's number for THIS option on THIS factor?" — two different questions
+   * (trap 21), and nothing in CEE records which slot was asked about. So every
+   * sentence in the branches below is a claim about the MODEL (this option has
+   * no effect value), which holds whatever the message contained. Asserting "I
+   * have your number" off a text predicate would fabricate the user's input.
    */
-  readonly valueAlreadySupplied?: boolean;
+  readonly message: string;
   /**
    * Whether the run would ACTUALLY proceed on the model as it now stands —
    * `resolveRunAdmission(...).willProceed`, computed by the caller.
@@ -98,23 +97,30 @@ export interface ComposeConfigureOptionClarifyInput {
 }
 
 /**
- * The value phrasings this lane KNOWINGLY DOES NOT TERMINATE ON — pinned as an
- * explicit set rather than left silent (trap 22f's honest-gap protocol).
+ * The value phrasings this lane RECOGNISES BUT CANNOT BIND TO A NUMBER — pinned
+ * as an explicit set rather than left silent (trap 22f's honest-gap protocol).
  *
- * `carriesConfigureOptionValuePayload` requires a DIGIT. A qualitative answer
- * carries a real user intent and no digit, so the demand repeats. Four rounds
- * of punctuation/lookahead rules on a neighbouring natural-language predicate
- * proved that "one more regex" oscillates; the honest move is to record the gap
- * where the suite can see it, so it REDs if the set GROWS **or SHRINKS**.
+ * ⚠⚠ THIS SET'S MEANING CHANGED, and the change is recorded rather than the set
+ * quietly deleted (trap 14 — an honest label must not be overwritten). It used
+ * to mean *"phrasings the demand REPEATS on"*: `carriesConfigureOptionValuePayload`
+ * requires a digit, so a qualitative answer got the identical demand back. That
+ * was measured still live at this tip — the product advises "…to {value}", the
+ * user answers "…to high", and the product repeats itself.
  *
- * Closing it properly means parsing a value bound to THIS option×factor — a
- * real piece of work, rowed, not smuggled into a copy fix.
+ * It now means *"phrasings that TERMINATE the demand but cannot be written"*.
+ * Each member reaches the CHANGED ASK: the word is quoted back, the slot is
+ * named, and a number on the 0–1 scale is requested. Nothing is guessed.
+ *
+ * ⭐ WHY THE REMAINING GAP IS NOT CLOSED BY MAPPING WORDS TO NUMBERS. "high"
+ * would have to become a figure, and choosing it is inventing the user's value —
+ * the fabrication class the sibling claim guard exists to close (P5), bought to
+ * save one turn. The ambiguity is the product (trap 22f), not a lookup table.
  */
 export const QUALITATIVE_VALUE_KNOWN_DROPPED: readonly string[] = [
-  'Set the X option\'s effect on Y to high',
-  'Set the X option\'s effect on Y to about a third',
-  'Set the X option\'s effect on Y to roughly half',
-  'Set the X option\'s effect on Y to low',
+  "Set the X option's effect on Y to high",
+  "Set the X option's effect on Y to about a third",
+  "Set the X option's effect on Y to roughly half",
+  "Set the X option's effect on Y to low",
 ];
 
 /**
@@ -170,10 +176,10 @@ export function composeConfigureOptionClarifyResponse(
   // with no effect values no longer stops the analysis. It is left out of the
   // comparison and named, which the run already discloses.
   // THE TERMINATING BRANCH. Every sentence here is a claim about the MODEL, not
-  // about the message: the flag that selects this branch comes from a routing
-  // regex that cannot tell whose value it saw (see `valueAlreadySupplied`), so
-  // "I have your number" would be a fabrication. What IS true either way is
-  // that the option still has no effect values.
+  // about the message: the predicate that selects this branch is a TEXT
+  // predicate and cannot tell whose value it saw (see the `message` field's
+  // doc), so "I have your number" would be a fabrication. What IS true either
+  // way is that the option still has no effect values.
   const analysisSentence =
     input.analysisWillProceed === true
       // Only ever said when the caller has DERIVED that the run proceeds.
@@ -185,7 +191,32 @@ export function composeConfigureOptionClarifyResponse(
         // only honest option when the condition is unknown.
         : null;
 
-  const assistant_text = input.valueAlreadySupplied === true
+  // ⭐ THE TERMINATING DERIVATION, in ONE place. `answered` is deliberately
+  // WIDER than `bindable`: a hedged, targeted or qualitative answer cannot be
+  // written to a slot and is still unmistakably an answer, and repeating the
+  // demand at it is the witnessed defect. See `messageAnswersMissingValueAsk`.
+  const answer = readMissingValueAnswer(input.message);
+  const answered = messageAnswersMissingValueAsk(input.message);
+
+  // ⭐⭐ THE CHANGED ASK. The user answered the product's own template with a
+  // WORD where it wanted a number ("…to high", "…to about a third" — the
+  // QUALITATIVE_VALUE_KNOWN_DROPPED set, measured looping at this tip). The demand
+  // must not repeat, and the word must not be silently mapped to a number: that
+  // would invent the user's figure, the exact class the sibling claim guard
+  // exists to close (P5). So the ask CHANGES — their word is quoted back, the
+  // slot is named, and the scale is stated. Progress, or a different question;
+  // never the same one twice.
+  const qualitativeText = answer !== null && answer.kind === 'qualitative'
+    ? [
+        `I can't put "${answer.term}" on that link — the effect value has to be a number.`,
+        `Give me one for ${primaryFactor} on "${optionLabel}", from 0 (this option does nothing to it) to 1 (this option drives it fully).`,
+        ...(analysisSentence === null ? [] : [analysisSentence]),
+      ].join(' ')
+    : null;
+
+  const assistant_text = qualitativeText !== null
+    ? qualitativeText
+    : answered
     ? [
         `"${optionLabel}" still has no effect value on ${primaryFactor}, so that link is not carrying anything yet.`,
         ...(analysisSentence === null ? [] : [analysisSentence]),

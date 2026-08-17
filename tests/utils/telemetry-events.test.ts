@@ -538,6 +538,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // F6 — the defaulted-value egress invariant fired on an analysis-bearing
         // answer over a run the engine defaulted. Log-only (see debugOnlyEvents).
         V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
+        V5BlockedSlotClaimRefused: "v5.egress.blocked_slot_claim_refused",
         V5DeterministicValueUpdate: "v5.deterministic_value_update",
         V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
         V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
@@ -1523,6 +1524,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // finaliser-level egress guard whose hits are diagnostic and logged
         // locally, with no Datadog counter wired yet.
         TelemetryEvents.V5DefaultedValueEgressApplied,
+        // ROADMAP 2.1265 — the blocker/claim mutual-exclusion invariant, same
+        // posture as its two finaliser siblings above: a diagnostic hit logged
+        // locally, with no Datadog counter wired yet. ⚠ WORTH A DASHBOARD WHEN
+        // ONE IS WIRED: unlike a hygiene signal, ANY firing here is a real
+        // fabrication that reached egress, so the rate is the honest measure of
+        // how often the composer's context fails to carry the blocked slots.
+        TelemetryEvents.V5BlockedSlotClaimRefused,
         TelemetryEvents.V5FrameStageNoBriefGuard,
         // ROADMAP 2.63 C1 — explicit-generate wire flag. Diagnostic-only
         // (structured logs are the operational signal; no Datadog metric
@@ -2226,6 +2234,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.intercepted_chip_clarify",
         "v5.edit_graph.intercepted_vague_edit",
         "v5.egress.defaulted_value_applied",
+        "v5.egress.blocked_slot_claim_refused",
         "v5.egress.forbidden_phrase_detected",
         "v5.egress.leading_option_claim_withheld_violated",
         // The ENFORCING sibling of the line above: same subject, same

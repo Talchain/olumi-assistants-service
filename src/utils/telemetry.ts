@@ -2251,6 +2251,21 @@ export const TelemetryEvents = {
   // upstream), so a non-zero count there means a composer regressed.
   V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
 
+  // ⭐⭐ ROADMAP 2.1265 — the blocker/claim MUTUAL-EXCLUSION invariant fired: a
+  // reply asserted the model holds a value for an option × factor pair whose own
+  // live blocker says it is missing, and the contradicting sentence(s) were
+  // corrected at egress. Payload: { request_id, scenario_id, dispatch_path,
+  // option_id, factor_id, contradiction_count, ungrounded_value_count }.
+  //
+  // ⚠ ANY non-zero count is a REAL fabrication that reached egress, not a
+  // hygiene signal. The guard is inert without a live missing-value blocker AND
+  // a sentence naming that pair AND an unattributed number, so it cannot fire on
+  // ordinary prose — measured at 0 false positives over 688 live replies. A
+  // rising rate here means the upstream composer's context is not carrying the
+  // blocked slots, which is the root cause this layer backstops rather than
+  // fixes.
+  V5BlockedSlotClaimRefused: "v5.egress.blocked_slot_claim_refused",
+
   // V5 Phase 2 workstream E — PLoT response carries non-finite numeric
   // value (NaN / +Infinity / -Infinity) at ingress. Walker is structural
   // so any new PLoT field is covered automatically. Payload:

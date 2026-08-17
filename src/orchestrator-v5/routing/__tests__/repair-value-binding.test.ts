@@ -110,17 +110,42 @@ describe('matchBareRepairValue — the whole-message claim anchor', () => {
     },
   );
 
-  it('the KNOWN-DROPPED set is exactly the reviewed eight', () => {
+  it('the KNOWN-DROPPED set is exactly the reviewed FOUR — it shrank by four, consciously', () => {
+    // ⚠⚠ THIS SET WAS EIGHT AND IS NOW FOUR. The protocol above says the set must
+    // shrink CONSCIOUSLY and RED here otherwise; this is that conscious decision,
+    // recorded where the next reader will find it (ROADMAP 2.1267).
+    //
+    // CLAIMED, and each has a binding twin in
+    // `routing/__tests__/missing-value-answer.test.ts`:
+    //   'Make it 0.12.'          — a set verb with no "to" spine
+    //   'Use 0.12.'              — a set verb with no referent and no "to"
+    //   'Set it to .12.'         — a bare decimal; the same intent, one character short
+    //   'Yes, set it to 0.12.'   — an affirmative lead; a human agreeing before answering
+    // Measured at pristine: all four were refused by the binder AND by the
+    // configure composer's termination signal, so an ordinary answer to the
+    // product's own ask got the identical demand back.
+    //
+    // STILL DROPPED, with the reason stated at the owner
+    // (`MISSING_VALUE_ANSWER_KNOWN_DROPPED`): a hedge, a word number, a bare
+    // number with no antecedent, and a named target the edit lane owns.
     expect(REPAIR_BARE_VALUE_KNOWN_DROPPED).toEqual([
-      'Make it 0.12.',
-      'Use 0.12.',
-      '0.12',
       'Set it to about 0.12.',
       'Set it to a third.',
-      'Set it to .12.',
-      'Yes, set it to 0.12.',
+      '0.12',
       'Set it to 0.12 for the subcontracting option.',
     ]);
+  });
+
+  it('the four that LEFT the set are now genuinely claimed (the other direction)', () => {
+    // A shrinking set is only honest if the members left because they WORK.
+    for (const [message, value] of [
+      ['Make it 0.12.', '0.12'],
+      ['Use 0.12.', '0.12'],
+      ['Set it to .12.', '.12'],
+      ['Yes, set it to 0.12.', '0.12'],
+    ] as const) {
+      expect(matchBareRepairValue(message)?.valueText, message).toBe(value);
+    }
   });
 
   // The #998 lane's qualitative gap set (imported from the sibling module —
