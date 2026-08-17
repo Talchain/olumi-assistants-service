@@ -159,6 +159,9 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
+// ROADMAP 2.1271 — the additive analysis payload. All composition lives in the
+// helper; this route contributes the security ladder and the graph it read.
+import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -430,6 +433,31 @@ export default async function route(app: FastifyInstance) {
       // "not yours" — collapsing the very distinction the UI needs.
       const graphPresent = graph !== null && graph !== undefined;
 
+      // ── 5. THE ADDITIVE ANALYSIS PAYLOAD (ROADMAP 2.1271) ───────────────
+      //
+      // ADDITIVE BY CONSTRUCTION. Two new keys, both nullable; not one existing
+      // key is rewritten, reordered or conditioned on them. A client that has
+      // never heard of them sees a byte-identical body — asserted against a
+      // capture taken on the PR BASE, not against a fixture this lane wrote
+      // (`__tests__/scenario-graph-analysis-additive.test.ts`).
+      //
+      // WHY IT BELONGS ON THIS ROUTE RATHER THAN A NEW ONE. The security ladder
+      // above — identity → UUID → existence-before-ownership → ownership
+      // pre-flight → per-IP limiter — is 120 lines of hard-won reasoning, and a
+      // dedicated `/assist/v1/scenarios/:id/analysis` would need every line of
+      // it a second time. Same route, same ownership check, same limiter, same
+      // scenario's own data: the caller entitled to read this graph is exactly
+      // the caller entitled to read the analysis OF that graph.
+      //
+      // It reads the SAME graph object this response returns, so the freshness
+      // verdict cannot describe a different model than the one being delivered.
+      // Never throws; on any failure both keys are `null` and the graph stands.
+      const analysis = await readScenarioAnalysis({
+        scenarioId,
+        graph: graphPresent ? graph : null,
+        requestId,
+      });
+
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         scenario_id: scenarioId,
@@ -460,6 +488,14 @@ export default async function route(app: FastifyInstance) {
           briefText,
           graphPresent ? graph : null,
         ),
+        // ROADMAP 2.1271 — see §5 above. `null` on either means "this leg did
+        // not answer", never a state: a consumer must leave what it already
+        // believed standing, and in particular must NOT read a null or a
+        // `never_run` here as evidence against an in-flight run the DRAFT TURN
+        // told it about (the H4 seam — the two authorities answer different
+        // questions).
+        analysis_state: analysis.analysis_state,
+        analysis_result: analysis.analysis_result,
         request_id: requestId,
       });
     },
