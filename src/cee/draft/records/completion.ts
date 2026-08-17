@@ -102,6 +102,14 @@ export interface CompletionAskItem {
     | "illegal_shape"
     | "unconnected_record"
     | "option_without_chain"
+    /**
+     * ⭐⭐ THERE IS NO GOAL NODE AT ALL — and until this kind existed, nothing
+     * asked. See the derivation on `enumerateCompletionAsk`: the two
+     * connectivity items below are both gated on `goalIds.length > 0`, so a
+     * goal-less graph — the worst graph the projector can produce — received an
+     * ask that was SILENT about the one thing wrong with it.
+     */
+    | "no_goal"
     | "no_chain_reaches_goal"
     | "no_outcome_or_risk"
     | "options_indistinguishable";
@@ -713,6 +721,52 @@ export function enumerateCompletionAsk(
     goalStatedIndices.length > 0
       ? goalStatedIndices.map((i) => `\`to_stated: ${i}\` (${JSON.stringify(records.stated_items[i]!.source_quote)})`).join(" or ")
       : null;
+
+  // ⭐⭐ NO GOAL AT ALL — THE ROOT CAUSE THE OTHER TWO ITEMS CANNOT SEE.
+  //
+  // MEASURED on the frozen governed corpus, at this tip
+  // (`tools/graph-evaluator/scripts/rederive-canonical-readiness.ts`): three of
+  // fourteen briefs produced graphs with ZERO goal nodes, and `NO_GOAL` is the
+  // ONLY remaining blocker on two of them once the deterministic sweep has run
+  // (05-product-feature and 10-many-observables, post-sweep findings 1 and 1).
+  // So this single silence is what stands between those two briefs and an
+  // analysable model.
+  //
+  // ⚠ AND IT IS A SILENCE WITH THREE CAUSES, ALL THE SAME PREDICATE. A missing
+  // goal disables `no_chain_reaches_goal` (immediately below), `no_outcome_or_risk`
+  // (below that), AND the projector's own unconnected-node prune
+  // (`projector.ts:1899`) — every one of them gated on a goal existing. The graph
+  // is worst exactly where every guard switches off. The sweep repairs the orphan
+  // consequence (`ORPHAN_NODE` 26 → 3 across the corpus); nothing repaired the cause.
+  //
+  // In all three briefs the model KNEW the goal: it emitted links labelled
+  // *"… reaches goal"* / *"… harms goal"* aimed at a stated item that projected to
+  // `option` or `factor`, and every one was refused as an unrescuable shape. So the
+  // ask is for the FILING, not for the objective — the model is told where a goal
+  // has to live, because `instruction.ts:210` already says *"The goal is a
+  // stated_item … The goal is never one of your claims"* and this is the case where
+  // it did not comply.
+  //
+  // ⚠⚠ THE ASK MAY NOT PROPOSE A GOAL, and that is a hard constraint rather than a
+  // style choice. The only candidate labels available here are the model's OWN
+  // inferences (10-many-observables carries an `outcome` literally labelled
+  // *"Business Health Goal"*); offering one back would hand an invented objective
+  // the authority of the user's own words, and an inverted or invented objective is
+  // the estate's ratified never-do (trap 22f — where it cannot be determined, make
+  // the AMBIGUITY the product and ask). The completion grammar carries no
+  // `stated_items` at all, so the second turn cannot answer with a fabricated user
+  // quote even if it tried; this item's wording keeps the ASK equally clean.
+  //
+  // `MISSING_GOAL` is Bucket C (`bucket-c-codes.ts`), so `isBlockingAskItem`
+  // classifies this as blocking by IMPORT rather than by anything restated here.
+  if (goalIds.length === 0) {
+    push({
+      kind: "no_goal",
+      detail:
+        "this model has no goal, so nothing can be analysed against anything — file the objective the user stated as a `stated_items` entry of kind `goal`, quoting their own words, and link what you already emitted to it with `to_stated`",
+      validatorCode: "MISSING_GOAL",
+    });
+  }
 
   if (goalIds.length > 0 && !edges.some((e) => reachesGoal.has(e.from) && e.from !== e.to && reachesGoal.has(e.to))) {
     push({

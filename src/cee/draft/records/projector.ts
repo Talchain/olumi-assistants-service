@@ -1204,7 +1204,38 @@ function projectOnce(
     // than emit an untyped node.
     if (!kind) return;
 
-    const id = mintUnique(sha8(item.kind, quote), usedIds);
+    // ⭐⭐ ONE OBJECTIVE STATED TWICE IS ONE GOAL — measured on the frozen
+    // governed corpus (12-similar-options).
+    //
+    // `mintUnique` suffixes an identical `(kind, quote)` pair so that "the graph
+    // silently loses one" cannot happen, and for a repeated `figure` that is
+    // exactly right. For a `goal` it is wrong, and the corpus shows the harm: the
+    // model stated *"increase MRR from £215k to £250k within 6 months"* twice, so
+    // `c100a827` and `c100a827-2` were both minted, the model attached its
+    // goal-bound link to the SECOND, and the first was left with zero edges —
+    // `ORPHAN_NODE` plus `NO_PATH_TO_GOAL`, two blocking findings bought by a
+    // duplicate of the user's own sentence.
+    //
+    // A decision has ONE objective. A second copy of the same words is not a
+    // second objective, so the second stated index is BOUND TO THE FIRST NODE
+    // rather than given a node of its own. Nothing is dropped: refs through
+    // EITHER index resolve to the surviving goal, which is what keeps the
+    // goal-bound link alive instead of trading one defect for a lost path.
+    //
+    // ⚠ SCOPED TO `goal`, AND TO A BYTE-IDENTICAL QUOTE, deliberately. Two goals
+    // with DIFFERENT words are two genuine objectives — 04-conflicting-constraints
+    // carries exactly that (*"cutting our burn rate by 30%"* and *"achieve 3x user
+    // growth this year"*, both connected), and collapsing on kind alone would
+    // delete one of the user's own objectives. Both halves are pinned in
+    // `__tests__/goal-identity-and-absence.test.ts`; the discrimination is the
+    // point, not the collapse.
+    const statedBaseId = sha8(item.kind, quote);
+    if (kind === "goal" && usedIds.has(statedBaseId)) {
+      statedIdByIndex.set(index, statedBaseId);
+      return;
+    }
+
+    const id = mintUnique(statedBaseId, usedIds);
     statedIdByIndex.set(index, id);
 
     // ⭐⭐ ROOT 1 — THE BADGE IS NOW EARNED, NOT ASSUMED.

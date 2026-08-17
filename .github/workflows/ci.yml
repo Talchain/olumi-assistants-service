@@ -400,10 +400,28 @@ jobs:
   # Job D: Live LLM tests (optional, requires secrets)
   # Note: GitHub Actions cannot check secret existence in job-level 'if' conditions.
   # This job will run but skip the test step if the secret is not set.
+  #
+  # ⭐⭐ THE KEY IS DEFINED AT JOB LEVEL, AND THAT IS THE WHOLE POINT — a step's
+  # own `env:` is NOT in scope for that step's own `if:`.
+  #
+  # This job used to guard the live step with `if: ${{ env.ANTHROPIC_API_KEY != '' }}`
+  # while supplying `ANTHROPIC_API_KEY` in the SAME step's `env:` block. GitHub
+  # evaluates a step's `if:` before that step's `env:` is in scope, and there was no
+  # workflow- or job-level definition, so the condition was ALWAYS FALSE: the live
+  # step could never execute, the complementary "skipped" echo always ran, and the
+  # job reported GREEN having run no tests. The secret's presence was irrelevant.
+  # (Estate trap 7: a green that cannot fail is a broken alarm — here a job whose
+  # success carried no information at all.)
+  #
+  # Hoisting the definition to JOB level puts `env.ANTHROPIC_API_KEY` in scope for
+  # both step conditions, so the guard now discriminates: with the secret set the
+  # live tests run; without it the skip notice runs. Both branches remain honest.
   live-tests:
     name: Live LLM Integration Tests
     runs-on: ubuntu-latest
     needs: unit-tests  # Run after unit tests pass
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -421,11 +439,8 @@ jobs:
       - name: Run live LLM tests
         if: ${{ env.ANTHROPIC_API_KEY != '' }}
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LIVE_LLM: '1'
         run: pnpm test:live
       - name: Skip live tests (no API key)
         if: ${{ env.ANTHROPIC_API_KEY == '' }}
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: echo "⏭️ Skipping live LLM tests - ANTHROPIC_API_KEY not configured"
