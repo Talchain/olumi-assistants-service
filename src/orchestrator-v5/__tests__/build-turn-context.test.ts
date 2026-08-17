@@ -598,6 +598,64 @@ describe('buildTurnContext — coaching_state freshness agreement (Stage 2A)', (
     expect(stale?.status).toBe('active');
     expect(stale?.reason_code).toBe('graph_hash_diverged');
   });
+
+  // ── ROADMAP 2.1264 — the EXPOSED derivation is the SAME one, not a second ──
+  //
+  // `persisted_analysis_freshness` now leaves this function and reaches the wire
+  // (via `TurnExitStamp.exitFreshness` → the graph-less exits' `analysis_state`).
+  // The value of exposing it rather than recomputing downstream is ENTIRELY that
+  // it is the same object the coaching state was built from: two derivations of
+  // one turn's freshness is how two surfaces come to disagree, which is the
+  // defect the whole analysis-state contract exists to close. These two tests
+  // are what make that a property rather than a comment — a change that computes
+  // a fresh verdict here (a different hash, a different helper, a dropped
+  // degraded-read flag) turns them red.
+
+  it('the EXPOSED derivation equals the single-source verdict for the same inputs', async () => {
+    const parsed = GraphStateIngressSchema.safeParse(STAGE1_GRAPH);
+    expect(parsed.success).toBe(true);
+    const expectedHash = computeAnalysisAffectingGraphHash(parsed.data as never) as string;
+    const matchFact = makeRunAnalysisFact(expectedHash);
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    setTestSink((name, data) => events.push({ name, data }));
+    const store = createNoopSessionStore({
+      loadGraphResult: STAGE1_GRAPH,
+      priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      facts: [matchFact],
+    });
+    const ctx = await buildTurnContext(BASE, 'req-paf-1', { sessionStore: store });
+
+    // Same verdict as the routing/pre-dispatch selector on the same inputs…
+    expect(ctx.persisted_analysis_freshness).toEqual(
+      deriveAnalysisFreshness([matchFact], expectedHash),
+    );
+    // …and it is the PERSISTED graph's hash, which is what makes it safe for a
+    // graph-less exit to describe what the user is looking at.
+    expect(ctx.persisted_analysis_freshness.current_graph_hash).toBe(expectedHash);
+    // Cross-checked against the coaching state's own emitted hash, so the two
+    // consumers are pinned to one number rather than to each other's word.
+    const ev = events.find((e) => e.name === 'v5.coaching_state.derived')!;
+    expect(ev.data.graph_hash).toBe(expectedHash);
+    expect(ev.data.freshness).toBe(ctx.persisted_analysis_freshness.freshness);
+  });
+
+  it('THE OTHER DIRECTION — a diverged hash exposes stale, agreeing with the signal', async () => {
+    // The discriminating twin. Without it the assertion above could hold on a
+    // fixture where every path returns `fresh`, and an implementation that
+    // ignored divergence would pass.
+    const diffFact = makeRunAnalysisFact('0000000000000000');
+    const store = createNoopSessionStore({
+      loadGraphResult: STAGE1_GRAPH,
+      priorTurns: [makeSessionTurn('t1', '2026-05-01T00:00:00.000+00:00')],
+      facts: [diffFact],
+    });
+    const ctx = await buildTurnContext(BASE, 'req-paf-2', { sessionStore: store });
+    expect(ctx.persisted_analysis_freshness.freshness).toBe('stale');
+    expect(ctx.persisted_analysis_freshness.reason).toBe('graph_hash_diverged');
+    // The coaching signal derived from the SAME object says the same thing.
+    const stale = ctx.coaching_state.signals.find((s) => s.kind === 'analysis_stale');
+    expect(stale?.reason_code).toBe(ctx.persisted_analysis_freshness.reason);
+  });
 });
 
 /**
