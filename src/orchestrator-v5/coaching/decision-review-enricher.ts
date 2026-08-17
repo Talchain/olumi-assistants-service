@@ -1772,8 +1772,33 @@ function computeDecisionReviewInputDensity(
  *  - output_bias_findings_count / _key_assumptions_count
  *    / _decision_quality_prompts_count / _story_headlines_count: count
  *    drives card emission count.
- *  - output_has_pre_mortem / _has_framing_check: optional sub-objects;
- *    presence drives whether the corresponding card considers emission.
+ *  - output_has_pre_mortem: optional sub-object; presence drives whether the
+ *    corresponding card considers emission (`compose/phase3-blocks.ts:2417`
+ *    review card, `:2631` exercise companion).
+ *  - output_has_framing_check: ⚠ optional sub-object with NO CONSUMER. This
+ *    line previously read "presence drives whether the corresponding card
+ *    considers emission" for BOTH keys. True of `pre_mortem`; FALSE of
+ *    `framing_check` — there is no framing card anywhere, and this counter is
+ *    the field's ONLY reader in the estate. Derived 17 Aug 2026 at CEE
+ *    `2ceb65f9` / UI `81b5c966`: `\.framing_check` reaches 3 files in CEE
+ *    `src/**` (the `composeFragments` passthrough at
+ *    `cee/decision-review/decompose.ts:441-442`, the shape warning at
+ *    `cee/decision-review/shape-check.ts:435`, and this counter), zero of them
+ *    a block builder; contrast `\.pre_mortem` in the same sweep = 9 files
+ *    including the two builders named above. In the UI the key appears in two
+ *    COMMENTS and no code (`components/results/StressTestSection.tsx:23`,
+ *    `components/results/utils/stressTestTemplates.ts:9`) and is absent from
+ *    both `V0_30_PROJECTED_KEYS` and `V0_30_ENRICHER_OWNED_KEYS`
+ *    (`v5/decisionReviewAdapter.ts:139-166`), so it is dropped at that
+ *    adapter. A telemetry docstring asserting a consumer that does not exist
+ *    is how a whole capability stays invisible — this counter measures the
+ *    producer, and nothing downstream acts on it. Building the consumer is
+ *    forked on three items outside a build lane's authority: no `coaching_kind`
+ *    / `card_kind` / `exercise_kind` member admits a framing block at the
+ *    `@talchain/schemas` 0.46.0 pin (all three enums are `.strict()`); no
+ *    `data/dsk/v1.json` claim grounds goal-vs-outcome framing (DSK-B-007 is
+ *    option-set size, Nutt 2004); and no route accepts a goal reframe, so
+ *    `suggested_reframe` cannot be offered without breaching P8.
  */
 interface OutputDensity {
   readonly output_narrative_summary_length: number;
