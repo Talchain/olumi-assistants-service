@@ -154,9 +154,24 @@ const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const TURN_ID_BASE = '44444444-4444-4444-8444-4444444444';
 
-/** The analysis-affecting hash of the CURRENT persisted graph — what a live client holds. */
+/**
+ * The analysis-affecting hash of the CURRENT persisted graph — what a live client
+ * holds, and the only hash CEE ever puts on the wire.
+ *
+ * The non-null assertion is a real GUARD, not a cast to silence the compiler:
+ * `computeAnalysisAffectingGraphHash` returns `string | null`, and a null here
+ * would send `base_graph_hash: "null"`-ish garbage into the stale gate and make
+ * every CAS test below pass for the wrong reason. Failing loudly on null keeps
+ * the fixture honest.
+ */
 function currentBaseHash(): string {
-  return computeAnalysisAffectingGraphHash(persisted as never);
+  const hash = computeAnalysisAffectingGraphHash(persisted as never);
+  if (hash === null) {
+    throw new Error(
+      'fixture graph produced no analysis-affecting hash — the base_graph_hash tests would be vacuous',
+    );
+  }
+  return hash;
 }
 
 function payloadFor(event: Record<string, unknown>, suffix: string) {
