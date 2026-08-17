@@ -233,6 +233,31 @@ run_mutant "B7 answerability-hardcoded-instead-of-derived" "$COMP" \
   's/const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem\["kind"\]> = new Set\(\[\n  "no_goal",\n\]\);/const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([]);/'
 
 echo
+# ⭐⭐ B8 — THE INVERSE MUTANT: PIN THE DERIVATION ITSELF, NOT JUST ITS CONSUMERS.
+#
+# ⚠ FOUND BY ADVERSARIAL REVIEW, AND IT CLOSES A REAL HOLE IN THIS VERY KIT.
+# `isModelAnswerableAskItem`'s headline property is that the verdict is DERIVED from
+# the completion grammar, so the day `stated_items` is added the ask RE-ENABLES
+# automatically. B6 mutates the filter and B7 mutates the kind SET — neither touches
+# the derivation, so the property was TRUE and UNPINNED.
+#
+# PROVEN by the reviewer in an isolated worktree: replacing the derived return with
+# `return false` — the first formulation of B6 — typechecks CLEAN and passes 13/13.
+# Neither tsconfig sets `noUnusedLocals` (verified: only `"strict": true` is set), so
+# the orphaned `properties` binding is not caught. **A future tidy-up to `return
+# false` would therefore ship silently green, in the fail-CLOSED direction this
+# module's own comment names as the harm** — permanently withholding an ask that had
+# become legal.
+#
+# So the mutation goes on the DEPENDENCY: give the grammar `stated_items` and the ask
+# must become answerable, which REDs the premise control, the verdict test and the
+# prompt test together. This is trap 12d (derivation MOVES the risk, it does not
+# remove it) and trap 13b's third face (a discriminator resting on something nothing
+# pins).
+run_mutant "B8 grammar-GAINS-stated_items-and-the-ask-RE-ENABLES" "$COMP" \
+  "omits it from the prompt the model is shown" \
+  's/      claims: \{ type: "array", items: buildDraftClaimItemSchema\(\) \},\n    \},\n    required: \["claims"\],/      claims: { type: "array", items: buildDraftClaimItemSchema() },\n      stated_items: { type: "array" },\n    },\n    required: ["claims"],/'
+
 echo "=== trailing control: tree pristine, suite GREEN again ==="
 echo "  dirty in src/: [$(git -C "$WT" status --porcelain -- src/ | tr '\n' ' ')]"
 (cd "$WT" && npx vitest run "$SPEC" 2>&1 | grep -vE '^\{"level"' | grep -E "Tests +[0-9]+ (passed|failed)" | sed 's/^/  /')
