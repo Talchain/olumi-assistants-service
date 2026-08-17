@@ -67,6 +67,22 @@ const REAL_FACTOR_EXCLUSIONS = [
  */
 const REAL_FACTOR_WITH_OPTION_IN_REASON =
   'Team morale factor: plausible but unlikely to change option ranking given the primary budget and knowledge trade-off';
+/**
+ * Real capture: scenario 5df20177, 2026-08-10. ⭐⭐ THE SHARPER LIE TWIN, AND IT
+ * EXISTS BECAUSE A MUTANT SURVIVED.
+ *
+ * A mutant that looked for the option word ANYWHERE IN THE ENTRY (rather than
+ * in the designation) survived the twin above — because that twin's designation
+ * contains the word "factor", so the NON_OPTION_ENTITY veto caught it and the
+ * test could not tell which of the two clauses was protecting it. Searching the
+ * census for the class the mutant would mis-accept found **76 real entries**
+ * whose designation carries NO entity word at all while their REASON mentions
+ * options. This is one of them. Without this fixture the emitter's protection
+ * rested entirely on a hand-written veto list (trap 12); with it, the test binds
+ * to the head-scoping that is the actual design.
+ */
+const REAL_FACTOR_WITH_OPTIONS_IN_REASON_ONLY =
+  'Ongoing support cost — could differ across options but brief does not mention it';
 
 /** Real option labels: scenario 75ff7b6d…, 2026-08-15. Two options — a narrow set. */
 function crmGraph(optionLabels: readonly string[] = ['Replacing the CRM', 'Keeping it']): GraphV3T {
@@ -306,6 +322,18 @@ describe('buildDraftOptionWideningBlocks — 6b. ⭐ the entity-class gate (the 
       build({
         wideningLog: {
           elements_considered_but_excluded: [REAL_FACTOR_WITH_OPTION_IN_REASON],
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it('⭐⭐ THE SHARPER LIE TWIN: silent when the designation names no entity and only the reason says "options"', () => {
+    // 76 real entries take this shape. The card must not call "Ongoing support
+    // cost" an option the drafter set aside — the drafter said no such thing.
+    expect(
+      build({
+        wideningLog: {
+          elements_considered_but_excluded: [REAL_FACTOR_WITH_OPTIONS_IN_REASON_ONLY],
         },
       }),
     ).toEqual([]);
