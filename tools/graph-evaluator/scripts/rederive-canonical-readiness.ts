@@ -200,7 +200,18 @@ async function main(): Promise<void> {
   const production = await loadProduction();
   const frozenById = new Map(artefact.run.scores.map((s) => [s.brief_id, s]));
 
-  const rows = [];
+  type Arm = Awaited<ReturnType<typeof assessArm>>;
+  interface Row {
+    brief_id: string;
+    pre: Arm;
+    post: Arm;
+    frozen_ready: boolean;
+    frozen_codes: string[];
+    output_tokens: number | null;
+    latency_ms: number | null;
+    finish_reason: string | null;
+  }
+  const rows: Row[] = [];
   for (const capture of artefact.run.cases) {
     if (capture.graph === undefined) continue;
     const brief = await briefBody(capture.brief_id);
@@ -219,8 +230,8 @@ async function main(): Promise<void> {
     });
   }
 
-  const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((n, r) => n + f(r), 0);
-  const classes = (pick: (r: (typeof rows)[number]) => readonly string[]) =>
+  const sum = (f: (r: Row) => number) => rows.reduce((n, r) => n + f(r), 0);
+  const classes = (pick: (r: Row) => readonly string[]) =>
     Object.fromEntries(
       Object.entries(tally(rows.flatMap((r) => [...pick(r)]))).sort((a, b) => b[1] - a[1]),
     );
