@@ -165,9 +165,41 @@ export interface MissingEffectPair {
  * a blocker this module cannot name is a blocker it must not bind to.
  * Deduplicated by (option_id, factor_id); order preserved (the first pair is
  * the one the readiness-recovery copy presents as "next").
+ *
+ * ⭐ THIS IS THE ESTATE'S ONE OWNER of "which option × factor pairs is the
+ * product currently saying it has no value for". `compose/blocked-slot-claim-guard.ts`
+ * imports it rather than re-deriving it, and that is load-bearing rather than
+ * tidy: the claim guard's whole invariant is that a blocker and a possession
+ * claim are mutually exclusive, and two readers of "which pairs are blocked"
+ * could disagree about exactly the pair under dispute (CLAUDE.md trap 12).
+ *
+ * ⚠⚠ THE DISCRIMINATOR HAS TWO SPELLINGS AND THIS FUNCTION USED TO SEE ONLY
+ * ONE. Measured on the J4 t2 wire capture (deployed CEE `8be62df`), a SINGLE
+ * payload carries the same ten blockers twice:
+ *
+ *   `analysis_ready.blockers[]`           → `blocker_type: "missing_value"`
+ *   `analysis_state.readiness.blockers[]` → `code: "MISSING_OPTION_VALUE"`,
+ *                                           and NO `blocker_type` field at all
+ *
+ * The canonical Zod type (`schemas/analysis-ready.ts:152`) declares
+ * `blocker_type` and has no `code`, so a reader written from the schema is
+ * green in unit and blind to half the payloads it will actually be handed.
+ * Both spellings are read; which one matched is deliberately not recorded,
+ * because a consumer that behaved differently per spelling would be a second
+ * concept (trap 21).
+ *
+ * ⚠ WIDENING DIRECTION, stated: this can only ADD pairs, never remove one. The
+ * reachable behavioural change is a payload that carried only the `code`
+ * spelling moving from `no_missing_effect_values` (no bind) to `bind`/`ask`,
+ * and a single-pair payload gaining a second pair moves `bind` → `ask` — which
+ * asks the user instead of choosing for them. Both directions are toward less
+ * guessing.
  */
+const MISSING_VALUE_BLOCKER_TYPE = 'missing_value';
+const MISSING_VALUE_BLOCKER_CODE = 'MISSING_OPTION_VALUE';
+
 export function deriveMissingEffectPairs(
-  readiness: AnalysisReadyPayload | null | undefined,
+  readiness: { readonly blockers?: unknown } | null | undefined,
 ): readonly MissingEffectPair[] {
   const blockers = readiness?.blockers;
   if (!Array.isArray(blockers)) return [];
@@ -176,7 +208,12 @@ export function deriveMissingEffectPairs(
   for (const raw of blockers as readonly unknown[]) {
     if (raw === null || typeof raw !== 'object') continue;
     const blocker = raw as Record<string, unknown>;
-    if (blocker.blocker_type !== 'missing_value') continue;
+    if (
+      blocker.blocker_type !== MISSING_VALUE_BLOCKER_TYPE
+      && blocker.code !== MISSING_VALUE_BLOCKER_CODE
+    ) {
+      continue;
+    }
     const optionId = nonEmpty(blocker.option_id);
     const optionLabel = nonEmpty(blocker.option_label);
     const factorId = nonEmpty(blocker.factor_id);
