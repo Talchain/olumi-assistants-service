@@ -95,6 +95,8 @@ export {
   enumerateCompletionAsk,
   countBlockingAskItems,
   isBlockingAskItem,
+  isModelAnswerableAskItem,
+  modelAnswerableAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
   askItemIdentity,

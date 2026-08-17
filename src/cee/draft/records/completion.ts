@@ -159,6 +159,71 @@ export interface CompletionAsk {
  * `CYCLE_DETECTED` already did, to Bucket A — this classification moves with it
  * on the next build, with nothing for anyone to remember.
  */
+/**
+ * ⭐⭐ CAN THE COMPLETION TURN ACTUALLY ANSWER THIS ITEM?
+ *
+ * A DIFFERENT QUESTION FROM `isBlockingAskItem`, AND THE DISTINCTION IS THE
+ * WHOLE POINT (trap 21 — two questions under one name is the estate's chronic
+ * defect). "Does this block the draft?" and "is there a legal response to this?"
+ * are independent, and `no_goal` is the case that separates them: it blocks, and
+ * NOTHING the completion grammar admits can clear it.
+ *
+ * ── WHY `no_goal` IS UNANSWERABLE, over the complete claim axis ─────────────
+ * Its repair is *"file the objective as a `stated_items` entry of kind `goal`"*,
+ * and the completion turn cannot do that, three times over:
+ *   · `buildRecordsCompletionSchema()` exposes ONLY `claims`, with
+ *     `additionalProperties: false` — a `stated_items` key is rejected before the
+ *     answer is read;
+ *   · `goal` is not in `DRAFT_RECORD_CLAIM_KINDS`, so it cannot arrive on the
+ *     claim axis either (`outcome` and `risk` can, which is the contrast that
+ *     shows this is a real gap and not a blind read);
+ *   · `mergeCompletionClaims` returns `stated_items_disturbed` if `stated_items`
+ *     is present AT ALL, so literal compliance DISCARDS THE ENTIRE COMPLETION —
+ *     including the claims that would have repaired every OTHER item on the same
+ *     draft. All three goal-less corpus briefs carry 6-12 other items, so that is
+ *     a reachable regression, not a hypothetical one.
+ *
+ * ⚠ AND THE PROMPT CANNOT NAME A TARGET ON THIS CASE: `buildRecordsCompletionPrompt`'s
+ * `goalLines` block is conditional on a goal EXISTING, so no `to_stated: N` is
+ * offered precisely here — while the same message says *"Emit ONLY new claims"*.
+ *
+ * ⭐ THE FABRICATION-SAFETY ARGUMENT AND THE UNANSWERABILITY ARE ONE SENTENCE.
+ * *"The completion grammar carries no `stated_items`, so the second turn cannot
+ * fabricate a user quote"* is exactly why raising the ask is safe and exactly why
+ * it cannot be answered. The first version of this change drew one consequence
+ * from that fact and not the other, and put an unanswerable instruction to the
+ * model — an advertised action terminating in refusal, which is the defect class
+ * this estate has already shipped once on the Research CTA.
+ *
+ * ── DERIVED, NOT MIRRORED (trap 12) ────────────────────────────────────────
+ * The kind is listed, but the VERDICT is read from the completion grammar at
+ * call time. The day `stated_items` is added to `buildRecordsCompletionSchema`,
+ * `no_goal` becomes answerable and reaches the model automatically, with nothing
+ * for anyone to remember. A hardcoded `false` would go stale silently in the
+ * fail-CLOSED direction — permanently withholding an ask that had become legal.
+ */
+const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([
+  "no_goal",
+]);
+
+export function isModelAnswerableAskItem(item: CompletionAskItem): boolean {
+  if (!ASK_KINDS_NEEDING_A_STATED_ITEM.has(item.kind)) return true;
+  const properties = buildRecordsCompletionSchema().properties as Record<string, unknown> | undefined;
+  return properties !== undefined
+    && Object.prototype.hasOwnProperty.call(properties, "stated_items");
+}
+
+/**
+ * The ask items that are worth spending a provider turn on. Exported because the
+ * TURN GATE reads it too: a draft whose only complaint is unanswerable must buy
+ * no completion call at all.
+ */
+export function modelAnswerableAskItems(
+  ask: CompletionAsk,
+): readonly CompletionAskItem[] {
+  return ask.items.filter(isModelAnswerableAskItem);
+}
+
 export function isBlockingAskItem(item: CompletionAskItem): boolean {
   return item.validatorCode !== null && BUCKET_C_CODES.has(item.validatorCode);
 }
@@ -1087,7 +1152,14 @@ export function buildRecordsCompletionPrompt(args: {
   ask: CompletionAsk;
 }): string {
   const { brief, records, ask } = args;
-  const problems = ask.items.map((i) => `- ${i.detail}`).join("\n");
+  // ⭐ ONLY THE ANSWERABLE ITEMS ARE PUT TO THE MODEL. `no_goal` is withheld here
+  // — it stays visible to `shouldKeepCompletion` and to telemetry, because it is
+  // a true statement about the draft, but there is no legal response to it in
+  // this grammar and asking anyway is an instruction that can only be refused.
+  // See `isModelAnswerableAskItem`.
+  const problems = modelAnswerableAskItems(ask)
+    .map((i) => `- ${i.detail}`)
+    .join("\n");
   // The goal's stated index, named explicitly so pass 2 always has the correct
   // target. Run 8's completion emitted TEN well-formed links and contributed
   // zero nodes and zero edges, because the one link that had to reach the goal

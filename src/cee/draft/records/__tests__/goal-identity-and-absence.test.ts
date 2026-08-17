@@ -62,7 +62,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { enumerateCompletionAsk, isBlockingAskItem } from "../completion.js";
+import {
+  buildRecordsCompletionPrompt,
+  buildRecordsCompletionSchema,
+  enumerateCompletionAsk,
+  isBlockingAskItem,
+  isModelAnswerableAskItem,
+} from "../completion.js";
 import { projectRecordsToGraph } from "../projector.js";
 import type { DraftRecordSet } from "../grammar.js";
 
@@ -342,5 +348,162 @@ describe("one objective stated twice is one goal node", () => {
     expect(
       dropped.filter((d) => d.label === DUPLICATE_QUOTE && d.reason === "unconnected_to_goal"),
     ).toHaveLength(0);
+  });
+});
+
+/**
+ * ⭐⭐ THE ASK IS RAISED, AND IT IS NOT PUT TO THE MODEL — because no legal
+ * response to it exists.
+ *
+ * ── THE DEFECT THIS PINS, PROVEN OVER THE COMPLETE CLAIM AXIS ──────────────
+ * `no_goal`'s repair is *"file the objective as a `stated_items` entry of kind
+ * `goal`"*, and the completion turn cannot do that, three times over:
+ *
+ *   · `buildRecordsCompletionSchema()` exposes ONLY `claims`, with
+ *     `additionalProperties: false` — a `stated_items` key is structurally
+ *     rejected before the model's answer is ever read.
+ *   · `goal` is not in `DRAFT_RECORD_CLAIM_KINDS` (contrast control below:
+ *     `outcome` IS), so it cannot arrive on the claim axis either.
+ *   · `mergeCompletionClaims` returns `{ok: false, reason:
+ *     "stated_items_disturbed"}` if `stated_items` is present AT ALL — so literal
+ *     compliance DISCARDS THE WHOLE COMPLETION, including the claims that would
+ *     have repaired the OTHER ask items on the same draft. All three goal-less
+ *     corpus briefs carry 6-12 other items, so that is a reachable regression,
+ *     not a hypothetical one.
+ *
+ * ⚠ AND THE PROMPT CANNOT EVEN NAME A TARGET: `buildRecordsCompletionPrompt`'s
+ * `goalLines` block is conditional on a goal EXISTING, so on precisely this case
+ * no `to_stated: N` is offered — while the same message says *"Emit ONLY new
+ * claims"*. An ask that contradicts its own prompt inside one message.
+ *
+ * ⭐ THE FABRICATION ARGUMENT AND THE UNANSWERABILITY ARE THE SAME SENTENCE.
+ * *"The completion grammar carries no `stated_items`, so the second turn cannot
+ * fabricate a user quote"* is exactly why the ask is safe AND exactly why it
+ * cannot be answered. The first version of this change drew one consequence from
+ * that fact and not the other.
+ *
+ * So the item stays VISIBLE and BLOCKING — `MISSING_GOAL` is Bucket C, meaning
+ * *"not deterministically repairable"*, which is true and worth recording — and
+ * is withheld from the model prompt and from the turn gate. Nothing unanswerable
+ * reaches the model, and no futile provider call is bought.
+ */
+describe("an unanswerable ask is recorded, not put to the model", () => {
+  it("the completion grammar admits no `stated_items` — the fact the exclusion is derived from", () => {
+    const schema = buildRecordsCompletionSchema();
+    const properties = schema.properties as Record<string, unknown>;
+
+    expect(Object.prototype.hasOwnProperty.call(properties, "stated_items")).toBe(false);
+    // Contrast control in the same assertion block: the probe can see a presence,
+    // so the absence above is a real absence and not a blind read (trap 13e).
+    expect(Object.prototype.hasOwnProperty.call(properties, "claims")).toBe(true);
+    expect(schema.additionalProperties).toBe(false);
+  });
+
+  it("classifies `no_goal` as not model-answerable, and a repairable item as answerable", () => {
+    const { ask } = askFor(recordsWithoutAStatedGoal());
+    const noGoal = ask.items.find((i) => i.kind === "no_goal");
+    expect(noGoal).toBeDefined();
+    expect(isModelAnswerableAskItem(noGoal!)).toBe(false);
+
+    // The discriminating half: this fixture also raises `option_without_chain`,
+    // which the completion CAN repair with a causal_link claim. A filter that
+    // blanked everything would pass the assertion above and fail this one.
+    const answerable = ask.items.filter((i) => i.kind !== "no_goal");
+    expect(answerable.length).toBeGreaterThan(0);
+    for (const item of answerable) expect(isModelAnswerableAskItem(item)).toBe(true);
+  });
+
+  it("keeps it blocking — Bucket C is a true statement about repairability", () => {
+    const { ask } = askFor(recordsWithoutAStatedGoal());
+    const noGoal = ask.items.find((i) => i.kind === "no_goal")!;
+    // Withheld from the model is NOT downgraded: `shouldKeepCompletion` and
+    // telemetry must still see it, or a goal-less draft would silently read as
+    // unblocked.
+    expect(isBlockingAskItem(noGoal)).toBe(true);
+  });
+
+  it("omits it from the prompt the model is shown, while keeping the answerable items", () => {
+    const records = recordsWithoutAStatedGoal();
+    const { ask } = askFor(records);
+    const noGoal = ask.items.find((i) => i.kind === "no_goal")!;
+    const answerable = ask.items.filter((i) => i.kind !== "no_goal");
+    expect(answerable.length).toBeGreaterThan(0);
+
+    const prompt = buildRecordsCompletionPrompt({ brief: BRIEF, records, ask });
+
+    // ⭐ THE LOAD-BEARING ASSERTION: the unanswerable detail is not in the message.
+    expect(prompt).not.toContain(noGoal.detail);
+    // …and the answerable ones still are. Bind by the item's own text, so a
+    // filter that dropped everything REDs here (trap 19 — the pair, not one half).
+    for (const item of answerable) expect(prompt).toContain(item.detail);
+  });
+});
+
+describe("collapsing a duplicate goal never loses the stated target", () => {
+  const QUOTE = "increase MRR from £215k to £250k within 6 months";
+
+  /** The corpus shape, with the TARGET VALUE on the second copy only. */
+  function goalStatedTwiceValueOnSecond(): DraftRecordSet {
+    return {
+      stated_items: [
+        { kind: "goal", source_quote: QUOTE },
+        { kind: "goal", source_quote: QUOTE, value: 250000, unit: "GBP", role: "target" },
+        { kind: "option", source_quote: "hold all prices" },
+        { kind: "option", source_quote: "raise Enterprise by 30%" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Enterprise Price Point", basis: [3] },
+        { claim_kind: "outcome", label: "Monthly Recurring Revenue", basis: [3] },
+        { claim_kind: "causal_link", label: "holding leaves price unchanged", from_stated: 2, to_claim: 0, effect: "positive" },
+        { claim_kind: "causal_link", label: "raising lifts price", from_stated: 3, to_claim: 0, effect: "positive" },
+        { claim_kind: "causal_link", label: "price lifts MRR", from_claim: 0, to_claim: 1, effect: "positive" },
+        // The model attaches the goal-bound link to the SECOND copy — as it did
+        // in 12-similar-options.
+        { claim_kind: "causal_link", label: "MRR reaches the goal", from_claim: 1, to_stated: 1, effect: "positive" },
+      ],
+    };
+  }
+
+  it("carries the target onto the survivor when only the duplicate stated it", () => {
+    const { graph } = projectRecordsToGraph(goalStatedTwiceValueOnSecond(), BRIEF);
+    const goals = graph.nodes.filter((n) => n.kind === "goal");
+
+    // Precondition pinned in-test: the collapse really did happen here, so the
+    // assertion below is about the survivor and not about two separate nodes.
+    expect(goals).toHaveLength(1);
+
+    // ⭐⭐ THE SPEC, NOT THE FAILURE MODE IN HAND (trap 13d). The first version of
+    // this suite asserted only that refs RESOLVE — which they did, while the
+    // user's own success criterion was silently reduced to prose inside the
+    // label. That is precisely the harm the goal-value branch's ROOT 3 comment
+    // exists to prevent, reintroduced by the collapse returning before it.
+    expect(goals[0]!.goal_threshold_raw).toBe(250000);
+    expect(goals[0]!.goal_threshold_unit).toBe("GBP");
+  });
+
+  it("refuses to collapse when the two copies state DIFFERENT targets", () => {
+    const records = goalStatedTwiceValueOnSecond();
+    const stated = [...records.stated_items];
+    stated[0] = { kind: "goal", source_quote: QUOTE, value: 300000, unit: "GBP", role: "target" };
+    const { graph } = projectRecordsToGraph({ ...records, stated_items: stated }, BRIEF);
+
+    // Two success criteria under one sentence is not one objective. Collapsing
+    // would silently pick a winner, so the projector declines and both survive
+    // — visibly — rather than one being chosen for the user.
+    const goals = graph.nodes.filter((n) => n.kind === "goal");
+    expect(goals).toHaveLength(2);
+    expect(goals.map((g) => g.goal_threshold_raw).sort()).toEqual([250000, 300000]);
+  });
+
+  it("control: a single stated goal keeps its target, collapse or no collapse", () => {
+    const records = goalStatedTwiceValueOnSecond();
+    const { graph } = projectRecordsToGraph(
+      { ...records, stated_items: records.stated_items.slice(1) },
+      BRIEF,
+    );
+    // Reindexed by one: with the duplicate removed the goal is stated_items[0].
+    const goals = graph.nodes.filter((n) => n.kind === "goal");
+    expect(goals).toHaveLength(1);
+    expect(goals[0]!.goal_threshold_raw).toBe(250000);
   });
 });

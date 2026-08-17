@@ -1100,6 +1100,35 @@ export function goalValueIsATarget(role: DraftRecordRole | undefined): boolean {
 }
 
 /**
+ * ⭐⭐ THE FIVE GOAL-THRESHOLD FIELDS, MINTED AT ONE SITE.
+ *
+ * Extracted so the duplicate-goal collapse can carry a target onto the survivor
+ * WITHOUT a second copy of this derivation. The reason is stated at the original
+ * call site and is worth repeating because it is a correctness constraint, not a
+ * tidiness one: ISL computes `delta_threshold = goal_threshold - baseline`, and a
+ * threshold scored against a different denominator than its baseline "does not
+ * fail — it silently returns a WRONG probability" (`graph.ts:325-330`). So raw ·
+ * cap · normalised · frame · unit travel together, from ONE derivation, or not at
+ * all. Two mint sites would be two authorities on the denominator (trap 12).
+ */
+function applyStatedGoalTarget(
+  node: ProjectedNode,
+  value: number,
+  unit: string | undefined,
+): void {
+  const cap = resolveGoalThresholdCap(undefined, value, unit, undefined);
+  node.goal_threshold_raw = value;
+  if (unit !== undefined) node.goal_threshold_unit = unit;
+  if (cap !== null) {
+    node.goal_threshold_cap = cap;
+    node.goal_threshold = value / cap;
+    // A CODE CONSTANT, never derived from model output — `'level'` is true by
+    // construction of the `raw / cap` arithmetic one line above.
+    node.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
+  }
+}
+
+/**
  * The per-factor frame, or `undefined` when none is needed (already unit
  * interval) or none truthfully exists (a negative magnitude).
  */
@@ -1229,10 +1258,59 @@ function projectOnce(
     // delete one of the user's own objectives. Both halves are pinned in
     // `__tests__/goal-identity-and-absence.test.ts`; the discrimination is the
     // point, not the collapse.
+    // ⚠ THE KEY IS `canonicalText(quote)`, NOT THE RAW BYTES. `quote` above has
+    // already been through `canonicalText`, which collapses surrounding
+    // whitespace; CASE is preserved, so two goals differing only in case remain
+    // two goals. Stated precisely because "byte-identical" is the obvious
+    // shorthand and it is not what this compares.
     const statedBaseId = sha8(item.kind, quote);
     if (kind === "goal" && usedIds.has(statedBaseId)) {
-      statedIdByIndex.set(index, statedBaseId);
-      return;
+      const survivor = nodes.find((n) => n.id === statedBaseId);
+      const duplicateStatesATarget =
+        typeof item.value === "number" && goalValueIsATarget(item.role);
+
+      // ⭐⭐ TWO SUCCESS CRITERIA UNDER ONE SENTENCE IS NOT ONE OBJECTIVE.
+      //
+      // If both copies register a target and they DISAGREE on the number or the
+      // unit, collapsing would silently pick a winner — choosing which of the
+      // user's two thresholds their model is scored against. That is the
+      // floor/ceiling class of harm (trap 22f) and the refusal is the honest
+      // branch: decline to collapse, let both nodes exist VISIBLY, and let the
+      // duplicate be a problem the user can see rather than one we resolved for
+      // them.
+      const survivorTarget = survivor?.goal_threshold_raw;
+      const disagrees =
+        survivor !== undefined
+        && survivorTarget !== undefined
+        && duplicateStatesATarget
+        && (survivorTarget !== item.value
+          || (item.unit !== undefined && survivor.goal_threshold_unit !== item.unit));
+
+      if (survivor !== undefined && !disagrees) {
+        // ⭐⭐ THE TARGET SURVIVES THE COLLAPSE — the defect this branch exists to
+        // prevent, and the first version of this change shipped it.
+        //
+        // MEASURED: with the goal stated twice and the VALUE on the second copy
+        // only, an early `return` here skipped the goal-value branch entirely, so
+        // `goal_threshold_raw` was ABSENT at HEAD and preserved before the change
+        // — the user's own success criterion reduced to prose inside the label,
+        // which is exactly the harm that branch's ROOT 3 comment exists to
+        // prevent. And in the corpus case (12-similar-options) the model attached
+        // its goal-bound link to the SECOND copy, so the losing copy is the one
+        // carrying the model's own intent.
+        //
+        // Carried ONLY when the survivor registered none: a survivor that already
+        // has a target keeps it, so the FIRST stated target wins and this can
+        // never overwrite one. Nothing is invented — the value is the user's own,
+        // moved from a node being withdrawn onto the node that replaces it.
+        if (survivorTarget === undefined && duplicateStatesATarget) {
+          applyStatedGoalTarget(survivor, item.value as number, item.unit);
+        }
+        statedIdByIndex.set(index, statedBaseId);
+        return;
+      }
+      // Fall through: no survivor found (defensive), or the targets disagree —
+      // mint a distinct node exactly as before this change.
     }
 
     const id = mintUnique(statedBaseId, usedIds);
@@ -1384,16 +1462,7 @@ function projectOnce(
       // "does not fail — it silently returns a WRONG probability"
       // (`graph.ts:325-330`). So the cap is never derived separately from the
       // value it divides.
-      const cap = resolveGoalThresholdCap(undefined, item.value, item.unit, undefined);
-      node.goal_threshold_raw = item.value;
-      if (item.unit !== undefined) node.goal_threshold_unit = item.unit;
-      if (cap !== null) {
-        node.goal_threshold_cap = cap;
-        node.goal_threshold = item.value / cap;
-        // A CODE CONSTANT, never derived from model output — `'level'` is true by
-        // construction of the `raw / cap` arithmetic one line above.
-        node.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
-      }
+      applyStatedGoalTarget(node, item.value, item.unit);
       // ⚠⚠ `goal_baseline` IS DELIBERATELY NEVER MINTED HERE, and the omission is
       // the honest branch, not a gap. The contract is explicit: it is
       // "EXTRACTION ONLY. Present only when the user STATED a current level in
