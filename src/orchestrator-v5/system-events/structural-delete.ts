@@ -66,7 +66,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import { BASE_HASH_DIVERGED } from '../graph-management/reason-codes.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
-import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
@@ -246,7 +246,7 @@ function buildSafeSummary(
  * applier produced. This asserts the property on the PROJECTED bytes — the ones
  * the store will actually receive.
  */
-function hasDanglingEdge(graph: GraphV3T): boolean {
+export function hasDanglingEdge(graph: GraphV3T): boolean {
   const ids = new Set(graph.nodes.map((n) => n.id));
   return graph.edges.some((e) => !ids.has(e.from) || !ids.has(e.to));
 }
@@ -409,15 +409,44 @@ export function applyStructuralDelete(
     );
   }
 
-  // ── 5. put the rest of the graph back ────────────────────────────────────
+  // ── 5. put the rest of the graph back — AND prune the deleted option ─────
   // `applyPatchOperations` deliberately returns ONLY `{nodes, edges}` (it clones
   // exactly those two keys). Persisting that verbatim would silently strip
   // `goal_node_id`, `options`, `meta`, `coaching`, `causal_claims` and every
   // other top-level field — un-analysabling the scenario on the very turn the
-  // user edited it. The canonical re-merge is what stops that.
-  const merged = mergeMutatedGraphForPersistence({
-    mutatedGraph: candidate as unknown as Record<string, unknown>,
+  // user edited it.
+  //
+  // ⚠ WHY `mergeAppliedGraphForPersistence` AND NOT ITS NEAR-IDENTICAL TWIN
+  // `mergeMutatedGraphForPersistence` — measured, and it is the difference
+  // between fixing this P0 and reproducing it one field over.
+  //
+  // GraphV3 carries options in TWO places: option-KIND entries in `nodes[]` and
+  // a top-level `options[]` array, and live CEE readers prefer `options[]` (the
+  // ContextPack projection among them). The D1 twin merges `nodes`/`edges` only,
+  // so a deleted option's `options[]` entry SURVIVES — the node goes and the
+  // canonical option surface still lists it. That is this very defect wearing a
+  // different field name.
+  //
+  // `reconcile-top-level-options.ts` names the owner of the removal explicitly:
+  // *"It never modifies or removes an existing entry: deletion of a removed
+  // option's entry stays owned by `mergeAppliedGraphForPersistence`"* — whose
+  // precedence rule 4 drops exactly the entries provably deleted by THIS change
+  // (id was a base node, node absent from the applied graph) and preserves every
+  // other entry byte-for-byte. Proven at the bytes: with the D1 twin, projecting
+  // a one-option deletion left `options` = [o-launch, o-wait] while `nodes` held
+  // only o-wait.
+  //
+  // `ingressBase` is a fallback used ONLY when `persistedBase` is structurally
+  // unusable — unreachable here, because a malformed persisted graph has already
+  // thrown `InvalidPersistedDeleteGraphError` above. It is fed the same trusted
+  // server read rather than anything client-supplied, so the trusted-base rule
+  // holds on both arguments.
+  const merged = mergeAppliedGraphForPersistence({
+    appliedGraph: candidate,
     persistedBase: persistedGraph,
+    ingressBase: baseGraph as unknown as Parameters<
+      typeof mergeAppliedGraphForPersistence
+    >[0]['ingressBase'],
     requestId,
     scenarioId: payload.scenario_id,
   });

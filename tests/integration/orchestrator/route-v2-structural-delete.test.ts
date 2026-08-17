@@ -152,7 +152,7 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
-const TURN_ID_BASE = '44444444-4444-4444-8444-44444444444';
+const TURN_ID_BASE = '44444444-4444-4444-8444-4444444444';
 
 /** The analysis-affecting hash of the CURRENT persisted graph — what a live client holds. */
 function currentBaseHash(): string {
@@ -162,7 +162,10 @@ function currentBaseHash(): string {
 function payloadFor(event: Record<string, unknown>, suffix: string) {
   return {
     kind: 'system_event',
-    turn_id: `${TURN_ID_BASE}${suffix}`,
+    // Padded to two HEX chars: the last UUID group must be 12 hex digits, and a
+    // non-hex suffix makes the whole payload fail boundary validation with 422
+    // (measured — it looked like a contract refusal of the event itself).
+    turn_id: `${TURN_ID_BASE}${suffix.padStart(2, '0')}`,
     scenario_id: SCENARIO_ID,
     stage: 'analyse',
     event,
@@ -318,6 +321,44 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
     }
   });
 
+  it('PRUNES the deleted option from the TOP-LEVEL options[] array, not just from nodes[]', async () => {
+    // ⭐ THIS IS THE P0 WEARING A DIFFERENT FIELD NAME, and it was found by a
+    // surviving mutant rather than by reading the code. GraphV3 carries options
+    // in TWO places — option-kind entries in `nodes[]` and a top-level
+    // `options[]` array — and live CEE readers PREFER `options[]` (the
+    // ContextPack projection among them). A merge that only replaces
+    // nodes/edges leaves the deleted option listed in `options[]`, so the
+    // canonical option surface still has it and the resurrection continues.
+    persisted = {
+      ...buildPersistedGraph(),
+      options: [
+        { id: 'o-launch', label: 'Launch now' },
+        { id: 'o-wait', label: 'Wait a quarter' },
+      ],
+    };
+
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: ['o-launch'],
+        removed_edges: [],
+        base_graph_hash: currentBaseHash(),
+      },
+      'f',
+    );
+    expect(res.statusCode).toBe(200);
+
+    const graph = committedGraph();
+    expect(nodeIds(graph)).not.toContain('o-launch');
+    const optionIds = ((graph?.options ?? []) as Array<{ id: string }>).map((o) => o.id);
+    // Bound by identity: the deleted option is gone…
+    expect(optionIds).not.toContain('o-launch');
+    // …and the OTHER option's entry is preserved byte-for-byte (the
+    // opposite-direction twin — a prune that took both would be a worse defect
+    // than the one being fixed).
+    expect(optionIds).toContain('o-wait');
+  });
+
   it('an edges-only delete removes exactly the named edge and no node', async () => {
     await post(
       {
@@ -463,6 +504,50 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
     // this line is what discriminates a real refusal from a silent 200.
     expect(body.assistant_text).toMatch(/haven't removed anything/i);
     expect(edgePairs(persisted as Record<string, unknown>)).toContain('o-wait->g-revenue');
+  });
+
+  it('REFUSES a DUPLICATED edge rather than removing whichever one sorts first', async () => {
+    // ⭐ ADDED BECAUSE A MUTANT SURVIVED. Neutering the edge resolver looked
+    // harmless: for an ABSENT edge the applier throws `EDGE_NOT_FOUND` one seam
+    // later and the refusal is the same, so the mutant was genuinely equivalent
+    // on that class — my corpus simply had no other class.
+    //
+    // On a DUPLICATE it is not equivalent at all. `applyRemoveEdge` is
+    // `findIndex` + `splice`, so without the resolver it removes whichever
+    // duplicate sorts first — exactly the "mutate whichever sorted first, a
+    // defect by construction" hazard the contract cites and `edge_strength_edit`
+    // refuses. A corpus that omits a class the contract admits cannot certify
+    // the code over that class.
+    const dup = buildPersistedGraph();
+    dup.edges.push({
+      from: 'o-wait',
+      to: 'g-revenue',
+      strength: { mean: 0.31, std: 0.1 },
+      exists_probability: 0.9,
+      effect_direction: 'positive',
+    });
+    persisted = dup;
+
+    const res = await post(
+      {
+        kind: 'structural_delete',
+        removed_node_ids: [],
+        removed_edges: [{ from: 'o-wait', to: 'g-revenue' }],
+        base_graph_hash: currentBaseHash(),
+      },
+      '10',
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    // Refused, with NOTHING written — never an arbitrary pick.
+    expect(committedGraph()).toBeUndefined();
+    expect(body.assistant_text).toMatch(/couldn't match every connection/i);
+    // Both duplicates survive: the model is unchanged, not half-repaired.
+    expect(
+      edgePairs(persisted as Record<string, unknown>).filter((p) => p === 'o-wait->g-revenue')
+        .length,
+    ).toBe(2);
   });
 
   it('the CONTRACT refuses a no-op delete (both arrays empty) at the boundary — 422, never a turn', async () => {
