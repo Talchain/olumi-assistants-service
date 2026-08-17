@@ -35,8 +35,12 @@ import {
   type BlockedValueSlot,
 } from '../blocked-slot-claim-guard.js';
 import { resolveRepairValueBinding } from '../../routing/repair-value-binding.js';
-import witness from './fixtures/live-assistant-text-corpus-2026-08-17/j4-t2-fabrication.json' with { type: 'json' };
-import digitBearingReplies from './fixtures/live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json' with { type: 'json' };
+// ⚠ PLAIN JSON IMPORTS, deliberately. The `with { type: 'json' }` form raises
+// TS2823 under the repo's test tsconfig (`module` is not esnext/nodenext) — the
+// one existing user of that syntax sits in `scripts/ci/typecheck-baseline.txt`
+// for exactly this reason, and adding to a baseline is not a fix.
+import witness from './fixtures/live-assistant-text-corpus-2026-08-17/j4-t2-fabrication.json';
+import digitBearingReplies from './fixtures/live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json';
 
 const BLOCKERS: unknown[] = witness.blockers as unknown[];
 const GRAPH: unknown = witness.persisted_graph;
@@ -385,7 +389,12 @@ describe('⭐ P8 — the correction ASKS ONLY WHAT THE PRODUCT CAN ACCEPT', () =
     ];
     const bound = resolveRepairValueBinding({
       message: 'Set it to 0.6.',
-      readiness: { blockers: singlePair },
+      readiness: {
+        status: 'needs_user_input',
+        options: [],
+        goal_node_id: 'g1',
+        blockers: singlePair,
+      } as unknown as Parameters<typeof resolveRepairValueBinding>[0]['readiness'],
     });
     expect(bound.matched).toBe(true);
     if (bound.matched && bound.kind === 'bind') {

@@ -28,7 +28,7 @@ import {
   composeConfigureOptionClarifyResponse,
   QUALITATIVE_VALUE_KNOWN_DROPPED,
 } from '../../compose/configure-option-clarify-response.js';
-import type { StageType } from '../../../schemas/cee-v3.js';
+import type { StageType } from '@talchain/schemas/boundary';
 
 const OPTION = 'Subcontract inner-city runs';
 const FACTOR = 'Courier cost share';

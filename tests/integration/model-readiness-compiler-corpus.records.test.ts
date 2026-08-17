@@ -264,6 +264,9 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
       optionLabel: intercept.optionLabel,
       factorLabels: intercept.factorLabels,
       stage: 'analyse',
+      // First-ask copy: the message must not read as an answer, or the composer
+      // correctly terminates instead of demanding.
+      message: `Configure ${intercept.optionLabel}`,
     });
     // ⚠ WAS `toContain('<0-1>')` (row 2.1235 / NEW-5). That placeholder reached
     // real user copy — a strategic user was asked to hand-expand a template

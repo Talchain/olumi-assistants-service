@@ -65,10 +65,10 @@ const compose = (message: string) =>
 
 describe('angle-bracket placeholder syntax never reaches user copy', () => {
   it.each([
-    ['first ask', NOT_AN_ANSWER],
-    ['after the user supplied a value', ANSWERED],
+    ['first ask', NOT_AN_ANSWER] as const,
+    ['after the user supplied a value', ANSWERED] as const,
   ])('%s — no `<0-1>`, and no angle-bracket placeholder of any kind', (_name, supplied) => {
-    const text = compose(supplied as boolean);
+    const text = compose(supplied);
     expect(text).not.toContain('<0-1>');
     // Bound to the CLASS, not to the one literal that was filed: any
     // `<...>` slot in prose is the same defect wearing different characters.
