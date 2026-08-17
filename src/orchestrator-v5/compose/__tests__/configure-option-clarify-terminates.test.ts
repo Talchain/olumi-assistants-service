@@ -35,24 +35,38 @@ import {
 import { FORBIDDEN_USER_FACING_PHRASES } from '../forbidden-user-facing-phrases.js';
 import { CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE } from '../../configure-option-chip-text.js';
 import { carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
+import { messageAnswersMissingValueAsk } from '../../routing/missing-value-answer.js';
 
 const OPTION = 'Hire 3 Senior Engineers';
 const FACTOR = 'Engineering Delivery Velocity';
 
+/**
+ * ⚠ THIS HELPER USED TO TAKE A BOOLEAN (`valueAlreadySupplied`) AND NOW TAKES
+ * THE USER'S MESSAGE. The boolean was optional, and the sibling call site in
+ * `route-v2.ts` never passed it — so at that site the terminating branch was
+ * unreachable and the demand repeated however the user answered (ROADMAP 2.1267).
+ * The composer derives the condition itself now, so these tests drive the REAL
+ * predicate over a REAL message instead of asserting the flag the caller was
+ * trusted to compute.
+ */
+const NOT_AN_ANSWER = `Configure ${OPTION}`;
+/** Verbatim compliance with the product's own advised phrasing. */
+const ANSWERED = `Set the ${OPTION} option's effect on ${FACTOR} to 0.6`;
+
 /** Default arm: the run WOULD proceed, so the promise is licensed. */
-const compose = (valueAlreadySupplied: boolean) =>
+const compose = (message: string) =>
   composeConfigureOptionClarifyResponse({
     optionLabel: OPTION,
     factorLabels: [FACTOR],
     stage: 'analyse',
-    valueAlreadySupplied,
+    message,
     analysisWillProceed: true,
   }).assistant_text;
 
 describe('angle-bracket placeholder syntax never reaches user copy', () => {
   it.each([
-    ['first ask', false],
-    ['after the user supplied a value', true],
+    ['first ask', NOT_AN_ANSWER],
+    ['after the user supplied a value', ANSWERED],
   ])('%s — no `<0-1>`, and no angle-bracket placeholder of any kind', (_name, supplied) => {
     const text = compose(supplied as boolean);
     expect(text).not.toContain('<0-1>');
@@ -73,8 +87,8 @@ describe('angle-bracket placeholder syntax never reaches user copy', () => {
 
 describe('the loop terminates', () => {
   it('does NOT repeat the demand once the user has supplied a value', () => {
-    const firstAsk = compose(false);
-    const afterCompliance = compose(true);
+    const firstAsk = compose(NOT_AN_ANSWER);
+    const afterCompliance = compose(ANSWERED);
 
     // PRECONDITION PINNED IN-TEST: the first ask really is the demand, so the
     // inequality below is about the SECOND reply changing, not about the first
@@ -90,7 +104,7 @@ describe('the loop terminates', () => {
   });
 
   it('the terminating reply is ACTIONABLE — it names the option, the factor, and a route out', () => {
-    const text = compose(true);
+    const text = compose(ANSWERED);
     expect(text).toContain(OPTION);
     expect(text).toContain(FACTOR);
     // It must tell the user the thing that is now true: this does not block the
@@ -104,7 +118,7 @@ describe('the loop terminates', () => {
     const PROMISE = /analysis will run/i;
 
     // Licensed: the caller derived that the run proceeds.
-    expect(compose(true)).toMatch(PROMISE);
+    expect(compose(ANSWERED)).toMatch(PROMISE);
 
     // NOT licensed — three ways the caller can fail to license it. Each must
     // drop the promise. This was unconditional in the first version of the fix,
@@ -119,7 +133,7 @@ describe('the loop terminates', () => {
         optionLabel: OPTION,
         factorLabels: [FACTOR],
         stage: 'analyse',
-        valueAlreadySupplied: true,
+        message: ANSWERED,
         ...extra,
       }).assistant_text;
       expect(text, `promise leaked: ${name}`).not.toMatch(PROMISE);
@@ -134,7 +148,7 @@ describe('the loop terminates', () => {
       optionLabel: OPTION,
       factorLabels: [FACTOR],
       stage: 'analyse',
-      valueAlreadySupplied: true,
+      message: ANSWERED,
       analysisWillProceed: false,
       blockedNextStep: NEXT,
     }).assistant_text;
@@ -143,14 +157,18 @@ describe('the loop terminates', () => {
   });
 
   it('C2 — it never claims to possess the user number (the flag is a ROUTING regex)', () => {
-    // `valueAlreadySupplied` is fed by a digit-anchored routing predicate that
-    // cannot tell WHOSE value it saw. Measured below: a message aimed at an
-    // entirely different target sets it true. So no possession claim may
-    // appear in this copy at all — every sentence must be true of the MODEL.
+    // The termination signal is a TEXT predicate and cannot tell WHOSE value it
+    // saw. Measured below: a message aimed at an entirely different target
+    // terminates the demand. That is the RIGHT call for termination (repeating
+    // the demand at someone who just typed a value is the defect) and it is
+    // exactly why no possession claim may appear in this copy — every sentence
+    // must be true of the MODEL, whatever the message contained. Two different
+    // questions under one signal is trap 21, and this is the guard against it.
     const offTarget = 'Update the timeline to 3 months';
-    expect(carriesConfigureOptionValuePayload(offTarget)).toBe(true);
+    expect(messageAnswersMissingValueAsk(offTarget)).toBe(true);
+    expect(compose(offTarget)).not.toMatch(/\byour (?:number|value)\b/i);
 
-    const text = compose(true);
+    const text = compose(ANSWERED);
     expect(text).not.toMatch(/\bI have your (?:number|value)\b/i);
     expect(text).not.toMatch(/\byour number\b/i);
     // What it says instead is a fact about the graph, true either way.
@@ -172,25 +190,34 @@ describe('the loop terminates', () => {
     ]);
   });
 
-  it('C2 — KNOWN-DROPPED: every recorded phrasing genuinely still fails to terminate', () => {
-    // Trap 22f's honest-gap protocol: a gap the suite can SEE. This half REDs
-    // when a phrasing starts WORKING (the record went stale and the gap has
-    // partly closed); the half above REDs when the record is edited. Closing
-    // the gap needs a value parsed for THIS option×factor — real work, rowed,
-    // not smuggled into a copy fix.
+  it('C2 — KNOWN-DROPPED: still UNBINDABLE, but no longer LOOPING', () => {
+    // ⚠⚠ THIS TEST'S CLAIM CHANGED AND IS RESTATED RATHER THAN LEFT TO READ
+    // FALSELY (trap 14 — an honest label must not survive as a stale one). It
+    // used to assert these phrasings "genuinely still fail to terminate", which
+    // was true and was the DEFECT: the product advised "…to {value}", the user
+    // answered "…to high", and the demand repeated.
+    //
+    // Both halves of the truth are now asserted:
+    //   (a) they still fail the DIGIT-anchored routing predicate — nothing about
+    //       binding has changed, and no word is mapped to a number;
+    //   (b) they nonetheless TERMINATE, via the changed ask.
     for (const phrasing of QUALITATIVE_VALUE_KNOWN_DROPPED) {
       expect(carriesConfigureOptionValuePayload(phrasing), phrasing).toBe(false);
+      expect(messageAnswersMissingValueAsk(phrasing), phrasing).toBe(true);
+      const reply = compose(phrasing);
+      expect(reply, phrasing).not.toBe(compose(NOT_AN_ANSWER));
+      expect(reply, phrasing).toContain('has to be a number');
     }
 
-    // POSITIVE CONTROL — the probe can see the other answer, so the loop above
-    // is a measurement and not a predicate that always returns false.
+    // POSITIVE CONTROL — the digit probe can see the other answer, so the loop
+    // above is a measurement and not a predicate that always returns false.
     expect(
       carriesConfigureOptionValuePayload("Set the X option's effect on Y to 0.6"),
     ).toBe(true);
   });
 
   it('both branches survive the egress guard', () => {
-    for (const text of [compose(false), compose(true)]) {
+    for (const text of [compose(NOT_AN_ANSWER), compose(ANSWERED)]) {
       // Derived from the live list, never a re-listed mirror (trap 12).
       const hit = FORBIDDEN_USER_FACING_PHRASES.find((p) => p.test(text));
       expect(hit, `forbidden phrase in: ${text}`).toBeUndefined();

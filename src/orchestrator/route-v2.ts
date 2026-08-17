@@ -4685,6 +4685,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           optionLabel: configureClarify.optionLabel,
           factorLabels: configureClarify.factorLabels,
           stage: ingress.stage,
+          // ⭐ NEW-1 — THE SITE THAT COULD NOT TERMINATE. This call passed no
+          // termination signal at all, so however the user answered they got the
+          // same demand. The composer derives it from the message now, and the
+          // parameter is required so the omission cannot recur.
+          message: ingress.message,
         });
         return sendFinalised200(reply, requestId, 'edit_graph', response, {
           // ⭐ GATE-REASON INTEGRITY. On the walk, the turns that took the
