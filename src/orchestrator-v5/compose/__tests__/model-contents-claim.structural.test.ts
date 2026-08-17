@@ -144,6 +144,29 @@ describe('RESTORE THE CLAIM — every shape must be refused as blocker_says_miss
     });
   }
 
+  it('MIXED CLAIM: one grounded value does NOT license an ungrounded one in the same sentence', () => {
+    // ⚠ ADDED AFTER A SURVIVING MUTANT (recorded, not quietly patched — trap 14).
+    // The `every`→`some` mutant on `groundModelValueClaim` SURVIVED the whole
+    // first battery: every case in the corpus asserted exactly ONE number, so
+    // "all values held" and "any value held" are indistinguishable on all of
+    // them. That is trap 22b exactly — a corpus that tests one direction — and
+    // the harm it hides is the dangerous one: a reply that pairs a TRUE figure
+    // with a fabricated one would ship the fabrication on the true one's licence.
+    // 0.5 IS grounded (the witnessed factor default); 12% is not.
+    const mixed =
+      'Your model already uses 0.5 for that driver and already reflects 12% on the subcontracting route.';
+    expect(read.groundedValues.has(0.5)).toBe(true);
+    expect(read.groundedValues.has(0.12)).toBe(false);
+    const verdict = groundModelValueClaim({
+      read,
+      assertedValues: extractAssertedNumbers(mixed),
+    });
+    expect(verdict).toEqual({ grounded: false, reason: 'blocker_says_missing' });
+    // …and end to end through the recogniser.
+    const decision = classifyModelContentsClaim({ assistantText: mixed, read });
+    expect(decision.verdict).toBe('swap');
+  });
+
   it('the SEAM itself refuses, not just the recogniser — grounding is denied at source', () => {
     const verdict = groundModelValueClaim({
       read,
