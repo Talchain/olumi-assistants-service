@@ -42,6 +42,10 @@ import {
 // V5 H5 invariant). The composer is the SAME one route-v2's pre-edit-lane
 // intercept uses, so the recovery copy and the intercept copy cannot drift.
 import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outcome.js';
+// ⭐⭐ ROADMAP 2.1266 (D1b) — the edit-lane arm of the option-intervention
+// misroute guard: a factor-baseline write must not persist behind a reply that
+// says the option's effect value is still unset.
+import { decideOptionInterventionWrite } from '../routing/option-intervention-write-guard.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
 import { carriesConfigureOptionValuePayload } from '../routing/configure-option-intent.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
@@ -2880,12 +2884,83 @@ export async function dispatchEditGraph(
     });
   }
   const gmBlockedApply = gmDecision !== null && gmDecision.blockApply;
+  // ⭐⭐ ROADMAP 2.1266 (D1b) — OPTION-INTERVENTION MISROUTE, EDIT-LANE ARM.
+  //
+  // Wire-witnessed on deployed `8be62df` (witness-acceptance-2026-08-17, J4
+  // t5): a message naming an option and asking for its effect value applied a
+  // FACTOR-BASELINE `parameter_update` instead — factor `49a2b80b` 0.5
+  // `cee_inference` → 0.12 `user_override`, persisted and guest-readable at
+  // reload, while option `21ea9b80` kept `interventions: {}` — and the reply
+  // was the byte-identical "still has no effect value … open it on the canvas"
+  // refusal. `option-intervention-guard.ts` exists to refuse exactly this
+  // mutation, but it is wired ONLY in the turn-executor's validate block, which
+  // an `exit_path: edit_graph` turn never reaches (see the module header).
+  //
+  // The verdict is computed HERE — before `effectiveAppliedMutation` — for one
+  // reason: that predicate is the estate's declared single gate for "every
+  // downstream success effect (persist, edit fact, analysis_ready, returned
+  // graph)". Withholding through it means the write, the receipt fact, the wire
+  // graph and the readiness stamp cannot disagree about whether this turn
+  // mutated anything, and no new per-signal wiring can be forgotten. The
+  // configure-option OUTCOME guard further down still owns the TEXT (it already
+  // replaced this reply wholesale); this owns the WRITE, so the honest text is
+  // finally true.
+  const optionInterventionWriteVerdict = decideOptionInterventionWrite({
+    message: payload.message,
+    before: parsedGraph,
+    after: editResult.appliedGraph ?? null,
+    appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
+  });
+  const optionInterventionWriteWithheld =
+    optionInterventionWriteVerdict.verdict === 'withhold';
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
-  // live-blocked verdict — or a part-accounting substitution block — can
-  // never surface an applied-mutation signal.
+  // live-blocked verdict — or a part-accounting substitution block, or a
+  // withheld wrong-entity write — can never surface an applied-mutation signal.
   const effectiveAppliedMutation =
-    successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked;
+    successfulAppliedMutation &&
+    !gmBlockedApply &&
+    !paSubstitutionBlocked &&
+    !optionInterventionWriteWithheld;
+  if (optionInterventionWriteVerdict.verdict === 'withhold') {
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_intervention_write_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        option_id: optionInterventionWriteVerdict.optionId,
+        baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      'V5 edit_graph — the applied mutation moved a node baseline while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
+    );
+    // The graph did NOT change this turn — re-derive the wire freshness against
+    // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
+    // branches do, so staleness is never claimed off an unpersisted mutation.
+    // A `derivation_failed` verdict is kept as honest degradation.
+    if (freshness.reason !== 'derivation_failed') {
+      let unchangedHash: string | null = null;
+      try {
+        unchangedHash = computeAnalysisAffectingGraphHash(
+          gmFrameBase as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        unchangedHash = null;
+      }
+      freshness = deriveAnalysisFreshness(
+        priorFactsForRecovery,
+        unchangedHash,
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(gmFrameBase)
+          : undefined,
+        priorFactsReadOkForRecovery === undefined
+          ? undefined
+          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+      );
+    }
+    ev.branch = 'option_intervention_write_withheld';
+    ev.outcome = 'clarify';
+  }
   if (paSubstitutionBlocked && partAccounting !== null) {
     // Defect-B fail-closed branch: replace the V4 narration with the
     // deterministic clarify that enumerates EVERY part and names the
@@ -3451,7 +3526,12 @@ export async function dispatchEditGraph(
   const configureOutcome = evaluateConfigureOptionOutcome({
     message: payload.message,
     before: parsedGraph,
-    after: editResult.appliedGraph ?? null,
+    // ⭐ 2.1266 (D1b): when the wrong-entity write is withheld the applied graph
+    // never persists, so the copy must be composed against the state the user
+    // keeps. The verdict is `not_honoured` either way (no interventions write
+    // landed on either graph); this only stops the FACTORS NAMED being read off
+    // a graph nobody will hold.
+    after: optionInterventionWriteWithheld ? null : editResult.appliedGraph ?? null,
   });
   if (configureOutcome.status === 'not_honoured') {
     emit(TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured, {
@@ -3476,7 +3556,15 @@ export async function dispatchEditGraph(
     // whenever a structural blocker co-existed. Assessed against the graph the
     // user now has: the applied one if the edit landed, else the pre-edit one —
     // the same authority `evaluateConfigureOptionOutcome` compares.
-    const admissionNow = resolveRunAdmission(editResult.appliedGraph ?? parsedGraph);
+    // ⭐ 2.1266 (D1b): assess the graph the user will ACTUALLY have. When the
+    // wrong-entity write is withheld, `appliedGraph` is a graph that never
+    // persists, so admitting against it would promise a run over state nobody
+    // holds — the same class of error as stamping readiness from it.
+    const admissionNow = resolveRunAdmission(
+      optionInterventionWriteWithheld
+        ? parsedGraph
+        : editResult.appliedGraph ?? parsedGraph,
+    );
     response = {
       ...response,
       assistant_text: composeConfigureOptionClarifyResponse({
@@ -3626,9 +3714,19 @@ export async function dispatchEditGraph(
   // lifecycle with its own receipt copy, not the failed-remedy dead end the
   // walk measured. This branch covers only the genuine non-apply outcomes the
   // walk actually witnessed: rejected, no-op, zero-ops.
+  // ⭐ 2.1266 (D1b): a WITHHELD wrong-entity write leaves `parsedGraph`
+  // persisted, so it takes the same honest branch as a non-apply — NOT the
+  // `undefined` the other withhold paths use. The L16 gate-reason-integrity
+  // argument above applies with full force here: this is a failed remedy turn on
+  // a blocked model, and dropping the block is exactly what degrades the gate
+  // copy from the specific reason to the generic one. The hazard the
+  // `successfulAppliedMutation` guard screens (readiness stamped from an
+  // UNPERSISTED `appliedGraph`) is absent by construction — the graph this reads
+  // is the one that stays in `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
-    : !successfulAppliedMutation && graphStrictlyCanonical
+    : (!successfulAppliedMutation || optionInterventionWriteWithheld) &&
+        graphStrictlyCanonical
       ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
 
@@ -3693,10 +3791,21 @@ export async function dispatchEditGraph(
       // also emit NO edit receipt fact (the builders derive "applied" from
       // editResult alone and cannot see the block). Same rule for a
       // part-accounting substitution block (defect B fail-closed).
-      editGraphFact =
-        gmBlockedApply || paSubstitutionBlocked
-          ? null
-          : buildEditGraphHandlerFact(factBuilderInput);
+      //
+      // ⭐ 2.1266 (D1b) — DERIVED FROM THE EFFECTIVE PREDICATE, not from a list
+      // of withhold reasons. This condition used to spell out
+      // `gmBlockedApply || paSubstitutionBlocked`, i.e. a hand-maintained mirror
+      // of the withhold set (trap 12) — and the third withhold reason
+      // (`optionInterventionWriteWithheld`) proved it: the fact was still built,
+      // so a committed `parameter_update` receipt narrated an edit no persisted
+      // graph carried, exactly the DL-7 hazard the goal-target withhold names.
+      // `effectiveAppliedMutation` IS the estate's declared gate for every
+      // downstream success effect, and it is a strict superset of the two
+      // reasons named here, so a withhold added tomorrow is covered the day it
+      // is written.
+      editGraphFact = effectiveAppliedMutation
+        ? buildEditGraphHandlerFact(factBuilderInput)
+        : null;
     } catch (err) {
       richBuilderThrew = true;
       richBuilderError = err instanceof Error ? err : new Error(String(err));

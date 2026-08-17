@@ -449,6 +449,9 @@ import {
   mentionsStructuralEditRequest,
   V5_STRUCTURAL_DECLINE_TEXT,
 } from './routing/mutation-language.js';
+// ⭐⭐ ROADMAP 2.1265 (D2) — no reply may assert the model already holds a value
+// its own MISSING_OPTION_VALUE blocker says is missing.
+import { classifyMissingValueClaim } from './compose/missing-value-claim-guard.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -11816,6 +11819,76 @@ export async function runTurnExecutor(
   }
 
   /**
+   * ⭐⭐ ROADMAP 2.1265 (D2) — THE FABRICATED-MODEL-STATE GUARD, the FIFTH
+   * finaliser-level guard.
+   *
+   * Wire-witnessed on deployed `8be62df` (witness-acceptance-2026-08-17, J4
+   * turn 2, `exit_path: turn_executor`, one `routing` LLM call, prompt 120):
+   * *"Your model already reflects subcontractor cost at 12% of affected-route
+   * revenue, so no change is needed there."* — while the SAME payload's
+   * `readiness.blockers[0]` was a live `MISSING_OPTION_VALUE` for that very
+   * option×factor pair and the persisted graph held no such value anywhere in
+   * the slots the claim is about. **A reply that contradicts its own payload's
+   * blocker is unconditionally wrong**, and this is the estate's worst defect
+   * class: a confident, well-formed statement about the USER'S OWN model.
+   *
+   * ⭐ WHY HERE. The fabrication came out of the generic routing/direct-answer
+   * composer, and there are 39 `finalizeRun` exits — the same geometry that made
+   * the leader-claim enforcer structurally blind and that this file has already
+   * answered three times: `finalizeRun` is the one chokepoint every exit passes
+   * through. A per-composer hook would miss the next composer.
+   *
+   * ⭐ WHAT IT READS, and why the pairing is exact. `analysisReadyForTurn` and
+   * `effectiveTurnGraph` are set from the SAME parse (see `:2108-2109`), so the
+   * blocker that triggers the guard and the graph that answers it describe one
+   * state. No second read, no second derivation (trap 12).
+   *
+   * ORDERING: after the leader-claim guard (which owns its own harm and whose
+   * replacement copy contains no value claim, so this stands down on it) and
+   * BEFORE the forbidden-phrase and structural-success guards, so this guard's
+   * own replacement copy is swept by them rather than bypassing them — the
+   * identical argument the leader-claim guard's placement rests on.
+   */
+  function enforceMissingValueClaimGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    const decision = classifyMissingValueClaim({
+      assistantText,
+      readiness: analysisReadyForTurn ?? null,
+      persistedGraph: effectiveTurnGraph,
+    });
+    if (decision.verdict !== 'swap') return;
+    log.warn(
+      {
+        event: 'v5.missing_value_claim_swapped',
+        request_id: requestId,
+        scenario_id: context.session_id,
+        dispatch_path: dispatchPath,
+        // Labels are graph facts already present on the wire's own blocker
+        // list; the asserted numbers are the user-visible figures being
+        // withdrawn. The offending sentence is NOT logged — the copy is the
+        // model's, and the two facts above are what a diagnosis needs.
+        option_label: decision.pairs[0]?.optionLabel ?? null,
+        factor_label: decision.pairs[0]?.factorLabel ?? null,
+        asserted_values: decision.assertedValues,
+        blocker_pair_count: decision.pairs.length,
+      },
+      'V5 TurnExecutor — reply asserted the model already holds a value its own MISSING_OPTION_VALUE blocker says is missing and the persisted graph does not carry; replaced with the honest ask',
+    );
+    response = {
+      ...response,
+      assistant_text: decision.text,
+    };
+    // The replacement is a clarify/ask, not an answer — mark it functional so
+    // the egress does not reshape it behind progressive disclosure. Same
+    // classification-carry as the structural decline above.
+    functionalAnswerText = decision.text;
+  }
+
+  /**
    * F6 — THE DEFAULTED-VALUE EGRESS INVARIANT. The FOURTH finaliser guard, and
    * deliberately the LAST to run.
    *
@@ -12406,6 +12479,12 @@ export async function runTurnExecutor(
     // `enforceWithheldLeaderClaimGuard` for why a finaliser hook and not
     // another in-flow gate.
     enforceWithheldLeaderClaimGuard('turn_executor_finalise');
+    // ⭐⭐ 2.1265 (D2) — the FIFTH guard, and deliberately SECOND to run: it
+    // performs a WHOLE-TEXT substitution, so running it ahead of the two guards
+    // below means its replacement copy is itself subject to them rather than
+    // bypassing them (the same argument the leader-claim guard's placement
+    // rests on). See `enforceMissingValueClaimGuard`.
+    enforceMissingValueClaimGuard('turn_executor_finalise');
     enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     // AI Harness capability 1 — always-on false-success neutralisation. Runs
     // alongside the forbidden-phrase guard so EVERY emit path (incl. the
