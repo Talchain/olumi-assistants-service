@@ -186,9 +186,9 @@ describe("⭐ the option-duplication merge is deterministic, and knows where NOT
     const { graph, dropped } = projectRecordsToGraph(twoRefinements);
     expect(dropped.filter((d) => d.reason === "refinement_merged_into_stated_option")).toEqual([]);
     expect(graph.nodes.filter((n) => n.kind === "option").map((n) => n.label).sort()).toEqual([
+      "Expand Into Germany",
       "Germany direct",
       "Germany via partner",
-      "expand into Germany",
     ]);
   });
 
@@ -237,7 +237,10 @@ describe("⭐ the seam carries every field the grammar declares", () => {
     if (!result.ok) return;
     expect(result.records.claims[1]?.sets_to).toBe(42);
 
-    const option = result.projection.graph.nodes.find((n) => n.label === "hire more people")!;
+    // By the user's own words: the option label is AUTHORED from them.
+    const option = result.projection.graph.nodes.find(
+      (n) => n.provenance?.source_quote === "hire more people",
+    )!;
     const factor = result.projection.graph.nodes.find((n) => n.label === "sales capacity")!;
     // Keyed by the MINTED id of the factor the link named — identity, not position.
     // The MAGNITUDE arrives scale-projected by pass 3d: {42} → frame 50

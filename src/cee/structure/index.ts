@@ -4,7 +4,7 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { matchesStatusQuoLabel } from "./status-quo-patterns.js";
 import { buildCompoundGoalLabel } from "./compound-goal-label.js";
 import { buildOutcomeToGoalEdge } from "./goal-inference.js";
-import { deriveGoalObjectiveLabel } from "../draft/records/objective-label.js";
+import { deriveStatedObjectiveLabel } from "../draft/records/objective-label.js";
 import { createValidationIssue } from "../validation/classifier.js";
 
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
@@ -306,7 +306,7 @@ const canonicalLabelText = (text: unknown): string =>
  * Convert one non-primary goal node into the outcome node that carries its
  * objective (quality bar §8 A3). Pure; the caller owns placement and edges.
  *
- * ⭐ THE LABEL RULE IS IDEMPOTENT BY CONSTRUCTION. `deriveGoalObjectiveLabel`
+ * ⭐ THE LABEL RULE IS IDEMPOTENT BY CONSTRUCTION. `deriveStatedObjectiveLabel`
  * runs ONLY where the label is still the verbatim quote, so:
  *   · a projector-authored label ("Increase Productivity") is left alone —
  *     re-deriving an already-authored string is a second transformation over
@@ -354,7 +354,7 @@ function demoteGoalToOutcome(node: unknown): Record<string, unknown> {
   const labelIsStillTheQuote =
     quote !== undefined && canonicalLabelText(currentLabel) === canonicalLabelText(quote);
 
-  const authored = labelIsStillTheQuote ? deriveGoalObjectiveLabel(quote!) : undefined;
+  const authored = labelIsStillTheQuote ? deriveStatedObjectiveLabel(quote!) : undefined;
   const label = authored?.authored ? authored.label : currentLabel;
   const labelAuthored =
     authored?.authored === true || provenance?.label_authored === true;

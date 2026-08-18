@@ -265,7 +265,9 @@ describe("ROOT 1 — a stated item earns `from_brief` only when the brief bears 
     expect(projection.provenance[degenerate!.id]?.brief_binding).toBe("unverified");
     // …and a real short quote on the same brief is unaffected — the floor clears
     // genuine content rather than simply refusing short strings.
-    const real = projection.graph.nodes.find((n) => n.label === "keeping the current system");
+    const real = projection.graph.nodes.find(
+      (n) => n.provenance?.source_quote === "keeping the current system",
+    );
     expect(projection.provenance[real!.id]?.brief_binding).toBe("verified");
   });
 
@@ -943,8 +945,11 @@ describe("ROOT 4 — the final response agrees with itself about provenance", ()
     const wire = CEEGraphResponseV3.parse(
       transformResponseToV3({ graph: projection.graph } as never, { brief }),
     );
-    const node = wire.nodes.find((n) => n.label === "Open a second warehouse");
-    const option = wire.options.find((o) => o.label === "Open a second warehouse");
+    // Bound by the user's own words, not by the display label: the option's
+    // label is now AUTHORED from them ("Open a Second Warehouse"), while
+    // `source_quote` is the identity that does not move (trap 19).
+    const node = wire.nodes.find((n) => n.source_quote === "Open a second warehouse");
+    const option = wire.options.find((o) => o.label === node?.label);
     expect(node?.provenance).toBe("from_brief");
     expect(option?.provenance?.source).toBe("brief_extraction");
   });

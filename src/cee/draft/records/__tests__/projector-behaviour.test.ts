@@ -114,8 +114,10 @@ describe("C-K4: the projector cannot commit false authorship", () => {
   /**
    * ⚠ SCOPE NARROWED, AND THE GUARANTEE IS UNCHANGED — quality bar §8 A1.
    *
-   * This asserted `label === source_quote` for EVERY stated node. The goal node
-   * is now excluded, because its label is an AUTHORED objective: the projector
+   * This asserted `label === source_quote` for EVERY stated node. The `goal`
+   * node was excluded first, and `option` joined it on 18 Aug 2026 when the
+   * projector began authoring both (`AUTHORED_LABEL_STATED_KINDS`). In each
+   * case the reason is the same: its label is an AUTHORED name, and the projector
    * had been using `source_quote` — a field its own producer declares must be
    * "copied VERBATIM … do not paraphrase, tidy, translate or summarise"
    * (`instruction.ts:138-139`) — as a display string, and a brief fragment is
@@ -124,8 +126,10 @@ describe("C-K4: the projector cannot commit false authorship", () => {
    * What this test exists to prevent is FALSE AUTHORSHIP: the projector putting
    * words in the user's mouth. That is still fully pinned, in two places and
    * more strongly than a string equality could:
-   *   · every other stated kind keeps the verbatim, asserted below;
-   *   · the goal's label may contain no token the user did not write
+   *   · every other stated kind keeps the verbatim, asserted below — and the
+   *     two that remain, `constraint` and `figure`, are the VALUE-BEARING ones,
+   *     which is where a mislabelled node does the most damage;
+   *   · an authored label may contain no token the user did not write
    *     (`labelIsDerivedFrom`, enforced at RUNTIME inside the derivation, which
    *     refuses and falls back to the verbatim if it ever fails), and the
    *     verbatim itself is still on `source_quote` — both asserted in
@@ -134,16 +138,24 @@ describe("C-K4: the projector cannot commit false authorship", () => {
   it("no stated node's label is a paraphrase — it is the canonicalised quote verbatim", () => {
     const { graph, provenance } = project();
     let checked = 0;
+    let valueBearingChecked = 0;
     for (const node of graph.nodes) {
       const prov = provenance[node.id];
       if (prov?.provenance_class !== "stated") continue;
-      if (node.kind === "goal") continue;
+      if (node.kind === "goal" || node.kind === "option") continue;
       expect(node.label).toBe(prov.source_quote);
       checked += 1;
+      if (node.kind === "constraint" || node.kind === "risk" || node.kind === "factor") {
+        valueBearingChecked += 1;
+      }
     }
     // The exclusion above must not hollow the test out (trap 13b): assert it
-    // still had stated nodes to check.
+    // still had stated nodes to check, AND that the value-bearing kinds — the
+    // ones the exclusion must never reach — are among them. A bare
+    // `checked > 0` would still pass if the only survivor were an incidental
+    // kind, which is how an exclusion quietly empties a guard.
     expect(checked).toBeGreaterThan(0);
+    expect(valueBearingChecked).toBeGreaterThan(0);
   });
 
   it("the goal's label is authored while its verbatim stays retrievable on the provenance", () => {

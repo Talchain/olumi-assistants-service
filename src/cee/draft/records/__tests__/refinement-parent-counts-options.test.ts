@@ -84,7 +84,7 @@ describe("the parent link counts stated OPTIONS, not basis entries", () => {
 
     // And the consequence that matters: NO rival option node was minted. The
     // graph carries the user's TWO stated options and nothing else.
-    expect(optionLabels(records)).toEqual(["double down on the UK", "push into Germany next year"]);
+    expect(optionLabels(records)).toEqual(["Double Down on the UK", "Push Into Germany Next Year"]);
   });
 
   it("does NOT merge a refinement naming TWO options (run 12's shape) — the decision that stands", () => {
@@ -101,9 +101,9 @@ describe("the parent link counts stated OPTIONS, not basis entries", () => {
     ).toHaveLength(0);
     // It stands as its own alternative — three option nodes, not two.
     expect(optionLabels(records)).toEqual([
+      "Double Down on the UK",
+      "Push Into Germany Next Year",
       "Rewrite first, then copilot (sequenced)",
-      "double down on the UK",
-      "push into Germany next year",
     ]);
   });
 

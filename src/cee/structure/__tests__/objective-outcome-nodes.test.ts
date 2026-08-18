@@ -920,7 +920,7 @@ describe("⭐ a TRUE DUPLICATE objective is consolidated, not demoted to a secon
     // Found by this round's mutant battery: swapping the discriminator to
     // `label` survived every test, because the governed duplicate happens to
     // carry an identical label AND quote. The two are not interchangeable, and
-    // the label is the DANGEROUS choice: `deriveGoalObjectiveLabel` AUTHORS
+    // the label is the DANGEROUS choice: `deriveStatedObjectiveLabel` AUTHORS
     // labels, so two genuinely different objectives can normalise to the same
     // display string ("increase productivity" / "increasing productivity" both
     // → "Increase Productivity") while stating different things. A label-keyed

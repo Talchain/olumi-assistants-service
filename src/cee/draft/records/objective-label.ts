@@ -669,14 +669,31 @@ function wouldDiscardAClause(text: string): boolean {
 }
 
 /**
- * ⭐ THE GOAL NODE'S DISPLAY LABEL.
+ * ⭐ THE DISPLAY LABEL OF A STATED `goal` OR `option` NODE.
  *
  * Returns the authored objective, or the quote unchanged with the reason it
  * could not be authored. IDEMPOTENT: feeding an already-authored label back in
  * returns it unchanged (`identical_to_quote`), so a second pass anywhere in the
  * pipeline cannot compound the transform.
+ *
+ * ⚠ IT WAS `deriveGoalObjectiveLabel` AND SERVED GOALS ALONE UNTIL 18 Aug 2026.
+ * The projector now calls it for `option` as well (`AUTHORED_LABEL_STATED_KINDS`),
+ * so the name would otherwise have become the estate's chronic defect — a
+ * function whose name describes one of its two callers. Nothing about the
+ * derivation changed with the rename; the behaviour on a goal quote is
+ * byte-identical, which is what `authored-node-labels.test.ts` still pins.
+ *
+ * ⚠⚠ AND THE LIMIT, MEASURED ON THE GOVERNED CORPUS RATHER THAN ASSUMED. Over
+ * the 37 option nodes whose label is still their own verbatim quote it authors
+ * 14 and refuses 23, and only TWO of the 14 get shorter (by 6 and 3 characters)
+ * — the rest are recasings. It does NOT reduce a long option label, because
+ * {@link wouldDiscardAClause} refuses every clause discard and a long option
+ * label is a clause-discard problem (17 of the 23). That gap is pinned BY NAME
+ * in `authored-option-labels.test.ts` so it stays visible in the suite; do not
+ * close it with another punctuation rule (trap 22f — this predicate has already
+ * oscillated, and the six minimal pairs above show why).
  */
-export function deriveGoalObjectiveLabel(quote: string): AuthoredLabel {
+export function deriveStatedObjectiveLabel(quote: string): AuthoredLabel {
   const source = canonical(quote);
   if (source.length === 0) return { label: source, authored: false, reason: "empty" };
 

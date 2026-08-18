@@ -83,7 +83,7 @@ import {
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
-import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
+import { deriveStatedObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
@@ -286,7 +286,7 @@ export interface RecordProvenance {
    *
    * DERIVED, never asserted (trap 12): it holds exactly when the label differs
    * from the quote, so a hand-set `true` beside an unchanged label is impossible
-   * — `deriveGoalObjectiveLabel` returns the two together from one computation.
+   * — `deriveStatedObjectiveLabel` returns the two together from one computation.
    */
   readonly label_authored?: boolean;
 }
@@ -752,6 +752,25 @@ const STATED_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"]>> 
   // A stated figure is a quantity the user asserted: a factor node carrying it.
   figure: "factor",
 };
+
+/**
+ * ⭐ THE NODE KINDS WHOSE DISPLAY LABEL IS AUTHORED FROM THE USER'S OWN WORDS.
+ *
+ * A `goal` and an `option` are the two stated kinds whose label is read as a
+ * NAME — the goal node's body and the option cards, the two surfaces a stranger
+ * reads first, and the two that a repair turn has to refer to by name (ledger
+ * N-26). Both carry their verbatim on `source_quote`, so nothing is lost.
+ *
+ * ⚠ `constraint` and `figure` are DELIBERATELY ABSENT and this is the careful
+ * part: both are VALUE-BEARING, and a transformation of a label certifies
+ * nothing about the number beside it. Adding either would re-admit the class
+ * `bindStatedItemToBrief` exists to close — an exact quote carrying a
+ * contradicted value. Derived from the node's role, never from convenience.
+ */
+const AUTHORED_LABEL_STATED_KINDS: ReadonlySet<ProjectedNode["kind"]> = new Set([
+  "goal",
+  "option",
+]);
 
 const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | null>> = {
   factor: "factor",
@@ -1357,7 +1376,7 @@ function projectOnce(
     // IS the user's own words. Nothing is paraphrased: a paraphrase badged
     // `stated` would be a misrepresentation of the user to themselves."* That
     // reasoning is CORRECT and it is preserved in full:
-    //   · nothing here paraphrases — `deriveGoalObjectiveLabel` cannot emit a
+    //   · nothing here paraphrases — `deriveStatedObjectiveLabel` cannot emit a
     //     token the user did not write (`labelIsDerivedFrom` rejects the
     //     derivation if it ever does), so no wording is put in the user's mouth;
     //   · the verbatim is not lost — it stays on `source_quote`, which is what
@@ -1373,28 +1392,59 @@ function projectOnce(
     // That asymmetry is the whole defect: every inferred node read "Monthly
     // Recurring Revenue" while the user's objective read like a pasted fragment.
     //
-    // ⚠ SCOPED TO `goal`. Option labels are NOT touched: `transforms/schema-v3.ts:1130`
-    // binds an option's provenance on its LABEL, so authoring one flips
-    // `from_brief` → `ai_inferred`. Breaking that coupling is a separate,
-    // named prerequisite and this lane does not own it. A goal node is safe
-    // because it carries a TYPED record provenance, and `:1121-1128` returns on
-    // that path before any label match is reached — derived at those bytes, and
-    // pinned by `authored-node-labels.test.ts`.
-    const authoredGoalLabel =
-      kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
+    // ⭐⭐ EXTENDED TO `option` (18 Aug 2026), AND THE PREREQUISITE THAT BLOCKED
+    // IT IS REFUTED BY EXECUTION.
+    //
+    // This gate used to read `kind === "goal"`, on the ground that
+    // *"`transforms/schema-v3.ts` binds an option's provenance on its LABEL, so
+    // authoring one flips `from_brief` → `ai_inferred`"*. That is true of the
+    // LEGACY label-only path and FALSE for a typed record, which is what every
+    // node minted here carries: `readTypedRecordProvenance` recognises the
+    // record and `continue`s before the `node.kind === "option"` label-bound
+    // branch is reached, and the verdict is then decided by `brief_binding` —
+    // derived from the QUOTE by `bindStatedItemToBrief` a few lines above, not
+    // from the label. Settled by a DISCRIMINATING PAIR rather than by reading:
+    // `authored-option-labels.test.ts` drives an authored option that keeps
+    // `from_brief` beside a control that must read `ai_inferred`, so the
+    // assertion cannot pass on a constant.
+    //
+    // ⚠⚠ AND THE HONEST SIZE OF WHAT THIS BUYS, MEASURED BEFORE IT WAS WRITTEN.
+    // Over the 37 governed option nodes still carrying `label === source_quote`,
+    // the authority authors 14 and refuses 23 — and of the 14, TWELVE are pure
+    // title-casing and only TWO get shorter, by 6 and 3 characters. **Not one
+    // long label is reduced**, including the two 85/101-character options the
+    // 18 Aug composed-journey witness caught truncating mid-phrase.
+    //
+    // That is the whitelist working as designed, not a bug to route around:
+    // `wouldDiscardAClause` admits only transformations that delete no
+    // propositional content, and the option defect IS a clause-discard problem
+    // (17 of the 23 refusals). Relaxing it for options was considered and
+    // rejected — this module's own six minimal pairs show every token-list veto
+    // has a synonym that walks through, `(payments platform excluded)` being the
+    // measured one, and trap 22f rules that no further punctuation-only rule
+    // settles a predicate that has already oscillated. The residual class needs
+    // a channel where the MODEL authors the label and this file verifies it; it
+    // is named in the test's KNOWN-DROPPED block, not silently absorbed here.
+    //
+    // ⚠ NOT EXTENDED to `constraint` or `figure`. Both are VALUE-BEARING, and a
+    // label transformation certifies nothing about a number — the same reason
+    // `schema-v3.ts` keeps factors off the label-bound path.
+    const authoredLabel = AUTHORED_LABEL_STATED_KINDS.has(kind)
+      ? deriveStatedObjectiveLabel(quote)
+      : { label: quote, authored: false };
 
     const prov: RecordProvenance = {
       provenance_class: "stated",
       source_quote: quote,
       brief_binding: briefBinding,
-      ...(authoredGoalLabel.authored ? { label_authored: true } : {}),
+      ...(authoredLabel.authored ? { label_authored: true } : {}),
     };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
       id,
       kind,
-      label: authoredGoalLabel.label,
+      label: authoredLabel.label,
       provenance: prov,
     };
 

@@ -39,7 +39,7 @@ import { describe, expect, it } from "vitest";
 import { projectRecordsToGraph } from "../projector.js";
 import type { DraftRecordSet } from "../grammar.js";
 import {
-  deriveGoalObjectiveLabel,
+  deriveStatedObjectiveLabel,
   deriveDecisionLabel,
   labelIsDerivedFrom,
 } from "../objective-label.js";
@@ -175,7 +175,7 @@ describe("the goal label is an authored objective, not the user's verbatim fragm
     for (const c of corpusCases()) {
       for (const node of (c.graph?.nodes ?? []).filter((n) => n.kind === "goal")) {
         const quote = canonical(node.provenance?.source_quote ?? node.label);
-        const derived = deriveGoalObjectiveLabel(quote);
+        const derived = deriveStatedObjectiveLabel(quote);
         if (derived.authored) continue;
         stillVerbatim.push(`${c.brief_id}:${node.id}`);
       }
@@ -195,7 +195,7 @@ describe("the goal label is an authored objective, not the user's verbatim fragm
     const authored = corpusCases()
       .flatMap((c) => c.graph?.nodes ?? [])
       .filter((n) => n.kind === "goal")
-      .filter((n) => deriveGoalObjectiveLabel(canonical(n.provenance?.source_quote ?? n.label)).authored);
+      .filter((n) => deriveStatedObjectiveLabel(canonical(n.provenance?.source_quote ?? n.label)).authored);
     expect(authored).toHaveLength(9);
   });
 });
@@ -386,7 +386,7 @@ describe("the decision node carries a real label derived from the decision being
 describe("twins: authoring must not invent, must not lose, and must not spread", () => {
   it("a brief that already states a crisp objective is not re-authored into different content", () => {
     const quote = "achieve 15% revenue growth within 18 months";
-    const derived = deriveGoalObjectiveLabel(quote);
+    const derived = deriveStatedObjectiveLabel(quote);
     expect(derived.authored).toBe(true);
     expect(derived.label).toBe("Achieve 15% Revenue Growth Within 18 Months");
     // The enforceable half: every token comes from the user's own words.
@@ -427,7 +427,7 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
     for (const c of corpusCases()) {
       for (const node of (c.graph?.nodes ?? []).filter((n) => n.kind === "goal")) {
         const quote = canonical(node.provenance?.source_quote ?? node.label);
-        const derived = deriveGoalObjectiveLabel(quote);
+        const derived = deriveStatedObjectiveLabel(quote);
         if (!derived.authored) continue;
         expect(
           labelIsDerivedFrom(derived.label, quote),
@@ -506,7 +506,25 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
     expect(goal?.label).toBe("Increase MRR from £215k to £250k Within 6 Months");
   });
 
-  it("a node that is not the goal is untouched — option, factor and constraint labels stay verbatim", () => {
+  /**
+   * ⚠⚠ RETITLED AND REAIMED, 18 Aug 2026 — AND THE OLD TITLE WAS OVERSTATING
+   * WHAT IT CHECKED, WHICH IS ONLY VISIBLE NOW THAT IT FAILS.
+   *
+   * This read *"option, factor and constraint labels stay verbatim"*. Measured
+   * at pristine when `option` was added to the exclusion: the loop then had
+   * **zero** subjects left. Its factor and constraint stated items carry no
+   * causal link, so the connectivity prune withdraws both before the assertion
+   * ever sees them — **the only nodes it was ever checking were the two
+   * options.** The test was true, and its name described a coverage it did not
+   * have (trap 14: a label that outlives what it labelled).
+   *
+   * So it is re-aimed at what it can actually witness: the authored option
+   * invents nothing and loses nothing. The verbatim rule for the VALUE-BEARING
+   * stated kinds is pinned where subjects for it genuinely survive — C-K4 in
+   * `projector-behaviour.test.ts`, whose own anti-vacuity control now asserts a
+   * value-bearing node was among those checked.
+   */
+  it("a user-stated option's authored label invents nothing and keeps the user's words retrievable", () => {
     const brief =
       "We must keep spend below £250,000. We could hold all prices, or raise Enterprise by 30%. Headcount is 35.";
     const records: DraftRecordSet = {
@@ -556,15 +574,37 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
       ],
     };
     const projected = projectRecordsToGraph(records, brief).graph;
+
+    // ⭐ A STRICTLY STRONGER CLAIM THAN THE STRING EQUALITY IT REPLACES, because
+    // it survives the authoring: no token may appear that the user did not
+    // write, and the exact words stay retrievable on `source_quote` — which is
+    // the answer a user asking "why is this called that?" must receive.
+    let optionsChecked = 0;
     for (const node of projected.nodes) {
-      if (node.kind === "goal" || node.kind === "decision") continue;
+      if (node.kind !== "option") continue;
       if (node.provenance?.provenance_class !== "stated") continue;
-      // Bound by IDENTITY: this node's own quote.
-      expect(canonical(node.label), `${node.kind} ${node.id} must keep the user's words`).toBe(
-        canonical(node.provenance?.source_quote ?? ""),
-      );
-      expect(node.provenance?.label_authored).toBeUndefined();
+      const quote = node.provenance?.source_quote ?? "";
+      expect(quote, `option ${node.id} must retain the user's exact words`).not.toBe("");
+      expect(
+        labelIsDerivedFrom(node.label, quote),
+        `option ${node.id} label "${node.label}" invents a token absent from "${quote}"`,
+      ).toBe(true);
+      optionsChecked += 1;
     }
+    // Non-vacuity, and pinned to the EXACT count this record set states, so a
+    // prune that silently withdrew an option would RED here rather than leave
+    // the loop quietly checking nothing — the defect this test just exposed in
+    // its own predecessor.
+    expect(optionsChecked).toBe(2);
+
+    // The two authored labels, by identity — asserted so the invariant above
+    // cannot pass on a label that never changed.
+    expect(
+      projected.nodes
+        .filter((n) => n.kind === "option")
+        .map((n) => n.label)
+        .sort(),
+    ).toEqual(["Hold All Prices", "Raise Enterprise by 30%"]);
   });
 
   /**
@@ -610,7 +650,7 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   it.each(MEASURED_HARMS)(
     "REFUSES (%s): %s",
     (_harm, quote, expectedReason) => {
-      const derived = deriveGoalObjectiveLabel(quote);
+      const derived = deriveStatedObjectiveLabel(quote);
       expect(derived.authored, `must not author: ${quote}`).toBe(false);
       expect(derived.reason).toBe(expectedReason);
       // Fail-closed means the verbatim survives — refusing is today's shipped
@@ -642,7 +682,7 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   it.each(MINIMAL_PAIR_TWINS)(
     "REFUSES the synonym twin that walked through the token vetoes (%s): %s",
     (_swap, quote) => {
-      const derived = deriveGoalObjectiveLabel(quote);
+      const derived = deriveStatedObjectiveLabel(quote);
       expect(derived.authored, `the twin must refuse too: ${quote}`).toBe(false);
       expect(derived.label).toBe(quote);
     },
@@ -664,7 +704,7 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   ];
 
   it.each(UNGUARDED_CLASSES)("REFUSES an unguarded class (%s): %s", (_kind, quote) => {
-    expect(deriveGoalObjectiveLabel(quote).authored, `must not author: ${quote}`).toBe(false);
+    expect(deriveStatedObjectiveLabel(quote).authored, `must not author: ${quote}`).toBe(false);
   });
 
   /**
@@ -683,13 +723,13 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   ];
 
   it.each(MUST_STILL_AUTHOR)("still AUTHORS when no clause is discarded: %s", (quote, expected) => {
-    const derived = deriveGoalObjectiveLabel(quote);
+    const derived = deriveStatedObjectiveLabel(quote);
     expect(derived.authored, `must still author: ${quote}`).toBe(true);
     expect(derived.label).toBe(expected);
   });
 
   it("a deliberation-framed goal is REFUSED, not authored into an invented objective", () => {
-    const derived = deriveGoalObjectiveLabel(
+    const derived = deriveStatedObjectiveLabel(
       "evaluating whether to invest £800k in robotic picking systems or to hire 15 additional quality control staff",
     );
     expect(derived.authored).toBe(false);
@@ -700,16 +740,16 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
     for (const c of corpusCases()) {
       for (const node of (c.graph?.nodes ?? []).filter((n) => n.kind === "goal")) {
         const quote = canonical(node.provenance?.source_quote ?? node.label);
-        const derived = deriveGoalObjectiveLabel(quote);
+        const derived = deriveStatedObjectiveLabel(quote);
         expect(derived.authored, `${c.brief_id}:${node.id}`).toBe(canonical(derived.label) !== quote);
       }
     }
   });
 
   it("authoring is idempotent — an already-authored label is returned unchanged", () => {
-    const once = deriveGoalObjectiveLabel("reduce our cost-per-delivery below £7 within 12 months");
+    const once = deriveStatedObjectiveLabel("reduce our cost-per-delivery below £7 within 12 months");
     expect(once.authored).toBe(true);
-    const twice = deriveGoalObjectiveLabel(once.label);
+    const twice = deriveStatedObjectiveLabel(once.label);
     expect(twice.label).toBe(once.label);
   });
 });

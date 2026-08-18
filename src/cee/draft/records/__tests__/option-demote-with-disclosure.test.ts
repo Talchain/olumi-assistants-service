@@ -36,7 +36,18 @@ type G = { nodes: Array<{ id: string; kind: string; label: string; data?: Record
 
 /** The minted id of the single node carrying this EXACT label. Loud if 0 or 2+. */
 function idOf(graph: G, label: string): string {
-  const hits = graph.nodes.filter((n) => n.label === label);
+  // ⭐ RESOLVED BY THE NODE'S STABLE IDENTITY — its own `source_quote` — with the
+  // display label as the fallback for nodes that carry no quote. A stated
+  // `goal`/`option` label is AUTHORED from the user's words
+  // (`objective-label.ts`, `AUTHORED_LABEL_STATED_KINDS`), so keying a lookup on
+  // the display string binds every assertion below to a value the product is
+  // free to restyle. The user's own words are the thing that does not move
+  // (trap 19: bind by identity, never by a predicate another value could satisfy).
+  const hits = graph.nodes.filter(
+    (n) =>
+      n.label === label ||
+      (n as { provenance?: { source_quote?: string } }).provenance?.source_quote === label,
+  );
   expect(hits, `expected exactly one node labelled "${label}"`).toHaveLength(1);
   return hits[0]!.id;
 }
@@ -90,14 +101,14 @@ describe("a MODEL option indistinguishable from a STATED one is demoted and disc
     // The model's duplicate is gone from the OPTION SET.
     expect(optionLabels(graph)).not.toContain("Rewrite First, Then Copilot (Sequenced)");
     // …and the option that was genuinely different is untouched.
-    expect(optionLabels(graph)).toContain("bet the next two quarters on the AI copilot");
+    expect(optionLabels(graph)).toContain("Bet the Next Two Quarters on the AI Copilot");
 
     // DISCLOSED, bound to the claim by INDEX, naming what it duplicated.
     const demote = dropped.find((d) => d.claim_index === 2);
     expect(demote?.reason).toBe("undeveloped_duplicate_of_stated");
     expect(demote?.label).toBe("Rewrite First, Then Copilot (Sequenced)");
     expect(demote?.duplicate_of).toBe(stated);
-    expect(demote?.duplicate_of_label).toBe("finally do the platform rewrite");
+    expect(demote?.duplicate_of_label).toBe("Finally Do the Platform Rewrite");
     expect(demote?.intervention_signature).toBe(signatureOf(graph, stated));
   });
 
@@ -195,7 +206,7 @@ describe("the demote pass runs to a FIXED POINT, because a merge can change a si
     expect(optionLabels(graph)).not.toContain("Defer Germany 12 Months (CFO path)");
 
     // The user's own two options both stand.
-    expect(optionLabels(graph)).toEqual(["double down on the UK", "push into Germany next year"]);
+    expect(optionLabels(graph)).toEqual(["Double Down on the UK", "Push Into Germany Next Year"]);
   });
 
   it("terminates and is deterministic across the iterated pass", () => {
@@ -295,7 +306,7 @@ describe("what the demote deliberately does NOT touch", () => {
       ],
     };
     const { graph, dropped } = projectRecordsToGraph(records);
-    expect(optionLabels(graph)).toEqual(["expand the sales team", "hire more reps"]);
+    expect(optionLabels(graph)).toEqual(["Expand the Sales Team", "Hire More Reps"]);
     // Both signatures identical and BOTH still on the graph: the collision is
     // handed to the validator, loudly, rather than resolved behind the user.
     expect(signatureOf(graph, idOf(graph, "expand the sales team"))).toBe(
@@ -367,7 +378,7 @@ describe("what the demote deliberately does NOT touch", () => {
     const demotes = dropped.filter((d) => d.reason === "undeveloped_duplicate_of_stated");
     expect(demotes).toHaveLength(1);
     expect(demotes[0]!.label).toBe("Expand, but offshore");
-    expect(demotes[0]!.duplicate_of_label).toBe("expand the sales team");
+    expect(demotes[0]!.duplicate_of_label).toBe("Expand the Sales Team");
   });
 
   it("keeps the LOWEST claim index when two MODEL options collide with no stated member", () => {
@@ -396,10 +407,10 @@ describe("what the demote deliberately does NOT touch", () => {
     // (force it in, drop it silently, disclose it), and this is the disclosed
     // one. A stated option is still never touched.
         const { graph, dropped } = projectRecordsToGraph(ONE_OPTION_SHAPE);
-    expect(optionLabels(graph)).toEqual(["keep what we have"]); // the USER's, and only the user's
+    expect(optionLabels(graph)).toEqual(["Keep What We Have"]); // the USER's, and only the user's
     const demote = dropped.find((d) => d.reason === "undeveloped_duplicate_of_stated");
     expect(demote?.label).toBe("Hire a growth team");
-    expect(demote?.duplicate_of_label).toBe("keep what we have");
+    expect(demote?.duplicate_of_label).toBe("Keep What We Have");
   });
 
   it("keeps its disclosure RESOLVABLE when the survivor itself later merges away", () => {
@@ -427,7 +438,7 @@ describe("what the demote deliberately does NOT touch", () => {
     // THE INVARIANT: the disclosure names a node that is ON THE FINAL GRAPH.
     const parent = idOf(graph, "push into Germany next year");
     expect(demote?.duplicate_of).toBe(parent);
-    expect(demote?.duplicate_of_label).toBe("push into Germany next year");
+    expect(demote?.duplicate_of_label).toBe("Push Into Germany Next Year");
     // …and the option it ORIGINALLY duplicated is not lost from the record.
     expect(demote?.merged_survivor_label).toBe("Germany Direct");
 
@@ -503,7 +514,7 @@ describe("what the demote deliberately does NOT touch", () => {
       ],
     };
     const { graph, dropped } = projectRecordsToGraph(records);
-    expect(optionLabels(graph)).toEqual(["expand the sales team", "hold steady"]);
+    expect(optionLabels(graph)).toEqual(["Expand the Sales Team", "Hold Steady"]);
     expect(dropped.filter((d) => d.reason.startsWith("undeveloped_duplicate"))).toEqual([]);
   });
 });

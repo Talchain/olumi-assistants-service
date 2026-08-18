@@ -324,8 +324,8 @@ describe("C-K1 control: the battery is running on something", () => {
     // The user's own two options both survive — nothing the user said is
     // withdrawn by any number of rounds.
     expect(p.graph.nodes.filter((n) => n.kind === "option").map((n) => n.label).sort()).toEqual([
-      "double down on the UK",
-      "push into Germany next year",
+      "Double Down on the UK",
+      "Push Into Germany Next Year",
     ]);
   });
 });

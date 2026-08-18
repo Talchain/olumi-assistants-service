@@ -21,7 +21,18 @@ import type { DraftRecordSet } from "../grammar.js";
 
 /** Locate a node by its EXACT label and return its minted id. Fails loud if absent. */
 function idOf(graph: { nodes: Array<{ id: string; label: string }> }, label: string): string {
-  const hits = graph.nodes.filter((n) => n.label === label);
+  // ⭐ RESOLVED BY THE NODE'S STABLE IDENTITY — its own `source_quote` — with the
+  // display label as the fallback for nodes that carry no quote. A stated
+  // `goal`/`option` label is AUTHORED from the user's words
+  // (`objective-label.ts`, `AUTHORED_LABEL_STATED_KINDS`), so keying a lookup on
+  // the display string binds every assertion below to a value the product is
+  // free to restyle. The user's own words are the thing that does not move
+  // (trap 19: bind by identity, never by a predicate another value could satisfy).
+  const hits = graph.nodes.filter(
+    (n) =>
+      n.label === label ||
+      (n as { provenance?: { source_quote?: string } }).provenance?.source_quote === label,
+  );
   // A label that resolves to 0 or 2+ nodes makes every downstream assertion
   // ambiguous, so it is an error here rather than a silent first-match.
   expect(hits, `expected exactly one node labelled "${label}"`).toHaveLength(1);
