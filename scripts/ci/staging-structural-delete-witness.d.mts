@@ -135,3 +135,21 @@ export declare function classifyRerun(
   body: unknown,
   removedIds: readonly string[],
 ): { kind: string | null; recomputed: boolean; namesRemoved: string[]; reason_code: string | null };
+
+/** Which leg entitles the report to which sentence of the founder's acceptance chain. */
+export declare const ACCEPTANCE_CLAUSES: Readonly<Record<string, string>>;
+
+/**
+ * Exit codes. INCOMPLETE is its own code so an unmeasured leg can be mistaken
+ * for neither a pass nor a defect; PREFLIGHT (2) stays reserved for the
+ * missing-secret / production-host / unparseable-URL refusals.
+ */
+export declare const EXIT: Readonly<{ PASS: 0; FAIL: 1; PREFLIGHT: 2; INCOMPLETE: 3 }>;
+
+/**
+ * Decide the run's outcome from its legs. PURE. A PASS requires every acceptance
+ * clause's leg to have PASSED and no leg anywhere to be UNKNOWN.
+ */
+export declare function decideOutcome(
+  legs: ReadonlyArray<{ name?: string; verdict?: string; detail?: string; findings?: string[] }>,
+): { status: "PASS" | "FAIL" | "INCOMPLETE"; exitCode: number; lines: string[] };

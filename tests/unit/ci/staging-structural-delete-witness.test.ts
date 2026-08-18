@@ -54,7 +54,10 @@ import {
   pickOrphanTarget,
   readyOptionIds,
   wireGraphOf,
+  decideOutcome,
+  ACCEPTANCE_CLAUSES,
   CANONICAL_READ_SENTINEL,
+  EXIT,
   LEG_COVERAGE,
   RELOAD_EPISTEMICS,
 } from "../../../scripts/ci/staging-structural-delete-witness.mjs";
@@ -439,6 +442,165 @@ describe("small predicates", () => {
       expect(LEG_COVERAGE[leg], `${leg} has no stated scope`).toBeTruthy();
     }
     expect(RELOAD_EPISTEMICS.does_not_prove).toContain("browser");
+  });
+});
+
+describe("decideOutcome — an UNKNOWN leg may never be reported as, or contribute to, a PASS", () => {
+  /**
+   * THE DEFECT THIS BLOCK PINS, measured on deployed build `293da07` before the
+   * fix: the report exited 0 and printed
+   *
+   *   "PASS — a deleted option was acknowledged truthfully, left the persisted
+   *    canonical graph, and stayed gone across a rerun and a fresh uncached read
+   *    of the canonical state."
+   *
+   * whenever no leg had FAILED — including when RERUN was UNKNOWN (the analysis
+   * never recomputed, because the deployed build has no option-effect write verb
+   * so the readiness repair it advises cannot be applied) and CANONICAL-DB was
+   * UNKNOWN (Supabase vars unset). Two of that sentence's clauses were therefore
+   * asserted without being measured, by the acceptance authority for a domain
+   * closure.
+   *
+   * These cases are written against the SPEC (the founder's acceptance chain),
+   * not against that one failure mode — so a future leg cannot slip past them.
+   */
+  type Leg = { name: string; verdict: string; detail: string; findings: string[] };
+  const leg = (name: string, verdict: string, detail = ""): Leg => ({ name, verdict, detail, findings: [] });
+  const CLAUSE_LEGS = Object.keys(ACCEPTANCE_CLAUSES);
+  /**
+   * BIND TO THE CLAIM MARKER, NOT TO THE WHOLE BLOB.
+   *
+   * The first version of these tests asserted `banner.not.toContain(clause)`,
+   * and every clause case FAILED — because the banner names a withheld clause
+   * under "NOT ESTABLISHED", which is the correct behaviour and the opposite of
+   * a claim. A substring test over the whole text cannot tell "asserted" from
+   * "explicitly withheld", so it was a predicate a different object satisfied.
+   * `claimed` reads only the lines the report marks with `+`.
+   */
+  const claimed = (lines: string[]): string =>
+    lines.filter((l) => l.trim().startsWith("+ ")).join("\n");
+  const withheld = (lines: string[]): string =>
+    lines.filter((l) => l.trim().startsWith("- ") || l.trim().startsWith("REMEDY:")).join("\n");
+  const allPass = (): Leg[] => [leg("BUILD", "PASS"), leg("DRAFT", "PASS"), ...CLAUSE_LEGS.map((n) => leg(n, "PASS"))];
+
+  it("PRECONDITION: the all-PASS fixture really does cover every acceptance clause", () => {
+    // Without this, every "…is not a PASS" case below could pass vacuously.
+    const names = new Set(allPass().map((l) => l.name));
+    for (const c of CLAUSE_LEGS) expect(names.has(c), `${c} missing from the all-PASS fixture`).toBe(true);
+    expect(decideOutcome(allPass()).status).toBe("PASS");
+  });
+
+  it("a fully-witnessed run is PASS, exits 0, and lists every clause it established", () => {
+    const out = decideOutcome(allPass());
+    expect(out.status).toBe("PASS");
+    expect(out.exitCode).toBe(0);
+    for (const clause of Object.values(ACCEPTANCE_CLAUSES)) expect(claimed(out.lines)).toContain(clause);
+    expect(withheld(out.lines)).toBe("");
+  });
+
+  it("POSITIVE CONTROL — THE SHIPPED DEFECT: RERUN + CANONICAL-DB UNKNOWN is INCOMPLETE, never PASS", () => {
+    const legs = allPass().map((l) =>
+      l.name === "RERUN" || l.name === "CANONICAL-DB" ? { ...l, verdict: "UNKNOWN" } : l,
+    );
+    const out = decideOutcome(legs);
+    expect(out.status).toBe("INCOMPLETE");
+    expect(out.exitCode).not.toBe(0);
+    const text = out.lines.join("\n");
+    // The old banner's two unmeasured clauses must NOT be CLAIMED…
+    expect(claimed(out.lines)).not.toContain(ACCEPTANCE_CLAUSES.RERUN);
+    expect(claimed(out.lines)).not.toContain(ACCEPTANCE_CLAUSES["CANONICAL-DB"]);
+    // …and must instead be NAMED as withheld, which is the requirement.
+    expect(withheld(out.lines)).toContain(ACCEPTANCE_CLAUSES.RERUN);
+    expect(withheld(out.lines)).toContain(ACCEPTANCE_CLAUSES["CANONICAL-DB"]);
+    expect(text).toContain("NOT witnessed");
+    expect(text).toContain("NOT ESTABLISHED");
+    expect(text).toContain("RERUN");
+    expect(text).toContain("CANONICAL-DB");
+    // The clauses that WERE measured are still credited — this is not a blunt refusal.
+    expect(claimed(out.lines)).toContain(ACCEPTANCE_CLAUSES.DELETE);
+    expect(claimed(out.lines)).toContain(ACCEPTANCE_CLAUSES.PERSISTED);
+  });
+
+  it("the INCOMPLETE code is distinct from PASS, FAIL and the preflight refusal code", () => {
+    // A caller must be able to tell "not measured" from both "witnessed" and
+    // "broken", and 2 stays reserved for the missing-secret / production refusals.
+    const codes = [EXIT.PASS, EXIT.FAIL, EXIT.PREFLIGHT, EXIT.INCOMPLETE];
+    expect(new Set(codes).size).toBe(4);
+    expect(EXIT.INCOMPLETE).not.toBe(EXIT.PREFLIGHT);
+  });
+
+  it("a FAIL outranks an UNKNOWN and keeps its own exit code", () => {
+    const legs = allPass().map((l) => (l.name === "DELETE" ? { ...l, verdict: "FAIL" } : l));
+    legs.push(leg("CANONICAL-DB", "UNKNOWN"));
+    const out = decideOutcome(legs);
+    expect(out.status).toBe("FAIL");
+    expect(out.exitCode).toBe(EXIT.FAIL);
+    expect(out.lines.join("\n")).toContain("NOT witnessed");
+  });
+
+  it.each(CLAUSE_LEGS)(
+    "DERIVED, so a new leg cannot escape it: with %s UNKNOWN the banner never claims that clause",
+    (legName) => {
+      const legs = allPass().map((l) => (l.name === legName ? { ...l, verdict: "UNKNOWN" } : l));
+      const out = decideOutcome(legs);
+      const clause = ACCEPTANCE_CLAUSES[legName as keyof typeof ACCEPTANCE_CLAUSES];
+      expect(out.status, `${legName} UNKNOWN must not be a PASS`).toBe("INCOMPLETE");
+      expect(out.exitCode).toBe(EXIT.INCOMPLETE);
+      expect(claimed(out.lines), `${legName}'s clause was CLAIMED while UNKNOWN`).not.toContain(clause);
+      // Opposite-direction twin: withholding must be VISIBLE, not silent.
+      expect(withheld(out.lines), `${legName} was dropped rather than withheld`).toContain(clause);
+      expect(out.lines.join("\n")).toContain(legName);
+    },
+  );
+
+  it("a clause whose leg NEVER RAN is withheld too — an early return is not a pass", () => {
+    const out = decideOutcome([leg("BUILD", "PASS"), leg("DRAFT", "PASS")]);
+    expect(out.status).toBe("INCOMPLETE");
+    expect(out.lines.join("\n")).toContain("NEVER REACHED");
+  });
+
+  it("no legs at all is INCOMPLETE — an empty run is the emptiest possible pass", () => {
+    for (const empty of [[], null, undefined]) {
+      const out = decideOutcome(empty as never);
+      expect(out.status).toBe("INCOMPLETE");
+      expect(out.exitCode).toBe(EXIT.INCOMPLETE);
+    }
+  });
+
+  it("CANONICAL-DB UNKNOWN is LOUD: it names the env vars and what stays unverifiable", () => {
+    const legs = allPass().map((l) => (l.name === "CANONICAL-DB" ? { ...l, verdict: "UNKNOWN" } : l));
+    const text = decideOutcome(legs).lines.join("\n");
+    expect(text).toContain("WITNESS_SUPABASE_URL");
+    expect(text).toContain("WITNESS_SUPABASE_KEY");
+    // The point that makes it loud rather than a footnote: these fields are not
+    // on the CEE wire at all, so nothing else can verify them.
+    expect(text).toContain("options[]");
+    expect(text).toContain("meta.roots");
+    expect(text).toContain("EVERY SURFACE");
+  });
+
+  it("BUILD RECORDED is surfaced as not-asserted, so an unpinned build is visible", () => {
+    const legs = allPass().map((l) => (l.name === "BUILD" ? { ...l, verdict: "RECORDED" } : l));
+    const out = decideOutcome(legs);
+    expect(out.lines.join("\n")).toContain("WITNESS_EXPECT_SHA");
+  });
+
+  it("UNION ASSERTION: every acceptance clause names a real leg with a stated scope", () => {
+    // Guards the short-list defect: a clause pointing at a leg the witness never
+    // records would be permanently unestablished and silently block every PASS.
+    for (const legName of CLAUSE_LEGS) {
+      expect(LEG_COVERAGE[legName], `${legName} is claimed as a clause but has no stated scope`).toBeTruthy();
+    }
+  });
+
+  it("the chain covers the founder's five clauses, with the SECOND DELETE bound to ORPHAN", () => {
+    // RERUN re-runs the ANALYSIS; ORPHAN issues the second structural_delete.
+    // These two were conflated once — pinned here so the mapping cannot drift.
+    for (const legName of ["DELETE", "PERSISTED", "RERUN", "RELOAD", "ORPHAN"]) {
+      expect(CLAUSE_LEGS, `${legName} is not in the acceptance chain`).toContain(legName);
+    }
+    expect(ACCEPTANCE_CLAUSES.ORPHAN).toContain("second delete");
+    expect(ACCEPTANCE_CLAUSES.RERUN).toContain("re-running the analysis");
   });
 });
 
