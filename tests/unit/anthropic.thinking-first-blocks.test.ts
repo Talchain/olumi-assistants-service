@@ -275,7 +275,7 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
     ]);
     expect(
       result.graph.nodes
-        .map((n) => n.provenance?.source_quote)
+        .map((n) => (n.provenance as { source_quote?: string } | undefined)?.source_quote)
         .filter((q): q is string => typeof q === "string")
         .sort(),
     ).toEqual([

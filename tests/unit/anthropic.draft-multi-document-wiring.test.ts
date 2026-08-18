@@ -149,9 +149,11 @@ describe("draftGraphWithAnthropic — multi-document selection is WIRED (2.996)"
     // `provenance.source_quote`, asserted below so this stays bound to the
     // user's words and not only to our rendering of them.
     expect(result.graph.nodes.map((n) => n.label).sort()).toEqual(["Get More Value from the CRM"]);
-    expect(result.graph.nodes.map((n) => n.provenance?.source_quote)).toEqual([
-      "get more value from the CRM",
-    ]);
+    expect(
+      result.graph.nodes.map(
+        (n) => (n.provenance as { source_quote?: string } | undefined)?.source_quote,
+      ),
+    ).toEqual(["get more value from the CRM"]);
   });
 
   /**
