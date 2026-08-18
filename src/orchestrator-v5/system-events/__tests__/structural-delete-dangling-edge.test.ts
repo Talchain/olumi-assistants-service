@@ -101,8 +101,11 @@ describe('hasDanglingEdge — every surviving edge must have both endpoints', ()
  *
  * WHY IT IS NOT COSMETIC — measured end to end, not argued: an intervention
  * keyed on a deleted factor loses its cap, so `{value: 0.4, raw_value: 40000}`
- * reaches the wire as 40000; PLoT's `needsNormalisation` is a WHOLE-REQUEST
- * gate; one stranded value re-scales every other factor's value at ISL.
+ * projects to 40000; that strands a raw magnitude beside unit-scale siblings,
+ * `mixedUnresolved` flips false -> true on the identical payload, and
+ * `decideAnalysisScaleBlock` blocks the run with `mixed_scale_unresolved`. The
+ * user gets a NON-RETRYABLE REFUSAL of an analysis that would have run
+ * correctly, naming a factor no longer in their model.
  */
 describe('pruneDanglingNodeReferences — a delete must not leave references behind', () => {
   function graphWithRefs(): Record<string, unknown> {
@@ -215,5 +218,108 @@ describe('findOrphanedNodeReference — the postcondition on the projected bytes
         new Set(['f-gone']),
       ),
     ).toBeNull();
+  });
+
+  // The prune and the postcondition must cover the SAME field set. `meta` was
+  // pruned but unguarded, which is how a later refactor of the prune stops
+  // covering it with nothing going red.
+  it('names meta.roots when a removed id survives there', () => {
+    expect(
+      findOrphanedNodeReference({ meta: { roots: ['f-gone', 'f-stays'] } }, new Set(['f-gone'])),
+    ).toBe('meta.roots');
+  });
+
+  it('names meta.leaves when a removed id survives there', () => {
+    expect(
+      findOrphanedNodeReference({ meta: { leaves: ['f-gone'] } }, new Set(['f-gone'])),
+    ).toBe('meta.leaves');
+  });
+
+  it('does NOT fire on meta lists holding only survivors', () => {
+    expect(
+      findOrphanedNodeReference(
+        { meta: { roots: ['f-stays'], leaves: ['g'] } },
+        new Set(['f-gone']),
+      ),
+    ).toBeNull();
+  });
+
+  // PRUNE ↔ POSTCONDITION PARITY, asserted rather than trusted: whatever the
+  // prune touches, the postcondition must be able to see. Run them back to back
+  // over one graph carrying a removed id in EVERY covered field — the
+  // postcondition must be dirty before and clean after.
+  it('is satisfied by the prune over every field the prune covers', () => {
+    const g: Record<string, unknown> = {
+      nodes: [{ id: 'o1', interventions: { 'f-gone': { value: 1 } } }],
+      options: [{ id: 'o1', raw_interventions: { 'f-gone': { value: 1 } } }],
+      meta: { roots: ['f-gone'], leaves: ['f-gone'] },
+    };
+    expect(findOrphanedNodeReference(g, new Set(['f-gone']))).not.toBeNull();
+    pruneDanglingNodeReferences(g, new Set(['f-gone']));
+    expect(findOrphanedNodeReference(g, new Set(['f-gone']))).toBeNull();
+  });
+});
+
+/**
+ * The downstream outcome of an option the prune EMPTIES.
+ *
+ * Deleting the only factor an option intervened on leaves that option with
+ * `interventions: {}`. That behaviour is PRE-EXISTING and already ruled — the
+ * analysable-option gate excludes it with `reason: 'no_interventions'`, so it
+ * gets no rank and no probability and is named in the submission disclosure
+ * rather than silently dropped.
+ *
+ * Nothing here is a new decision. It is pinned because an emptied option is now
+ * a state `structural_delete` can produce ON PURPOSE, and the review's point
+ * stands: the outcome was ruled but nothing bound the delete path to it. If the
+ * exclusion rule ever changes, a delete becomes the cheapest way to reach the
+ * new behaviour and this test is what says so.
+ */
+describe('an option the prune empties is EXCLUDED from the run, never silently ranked', () => {
+  const gateInput = (interventions: Record<string, unknown>) => ({
+    options: [
+      { option_id: 'o-emptied', label: 'Emptied', interventions },
+      {
+        option_id: 'o-configured',
+        label: 'Configured',
+        interventions: { 'f-stays': { value: 0.6 } },
+      },
+    ],
+    graph: {
+      goal_node_id: 'g',
+      nodes: [
+        { id: 'g', kind: 'goal', label: 'Goal' },
+        { id: 'f-stays', kind: 'factor', label: 'Stays' },
+      ],
+      edges: [],
+    },
+    scaleNetEnabled: true,
+  });
+
+  it('excludes it with reason `no_interventions` and keeps the configured sibling', async () => {
+    const { gateAnalysableOptions } = await import(
+      '../../tools/handlers/analysable-option-gate.js'
+    );
+    // interventions emptied — exactly what deleting its only factor produces.
+    const outcome = gateAnalysableOptions(gateInput({}));
+
+    expect(outcome.excluded.map((e) => e.option_id)).toContain('o-emptied');
+    expect(outcome.excluded.find((e) => e.option_id === 'o-emptied')?.reason).toBe(
+      'no_interventions',
+    );
+    // Not submitted ⇒ no rank, no probability, by construction rather than by
+    // suppression.
+    expect(outcome.options.map((o) => o.option_id)).not.toContain('o-emptied');
+    expect(outcome.options.map((o) => o.option_id)).toContain('o-configured');
+  });
+
+  it('TWIN: the same option WITH an intervention is submitted and not excluded', async () => {
+    const { gateAnalysableOptions } = await import(
+      '../../tools/handlers/analysable-option-gate.js'
+    );
+    const outcome = gateAnalysableOptions(gateInput({ 'f-stays': { value: 0.3 } }));
+
+    expect(outcome.excluded.map((e) => e.option_id)).not.toContain('o-emptied');
+    expect(outcome.options.map((o) => o.option_id)).toContain('o-emptied');
   });
 });

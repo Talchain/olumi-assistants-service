@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { validateGraphStructure, type StructuralViolationCode } from '../../../src/orchestrator/graph-structure-validator.js';
 import type { GraphV3T } from '../../../src/schemas/cee-v3.js';
 
@@ -67,45 +67,15 @@ describe('validateGraphStructure', () => {
     expect(hasViolation(result, 'FEWER_THAN_TWO_OPTIONS')).toBe(true);
   });
 
-  it('NODE_LIMIT_EXCEEDED: detects more than default 20 nodes', () => {
-    const graph = makeValidGraph();
-    // Add 16 more nodes (5 existing + 16 = 21 > default 20)
-    for (let i = 0; i < 16; i++) {
-      const id = `extra_${i}`;
-      graph.nodes.push({ id, kind: 'factor', label: `Extra ${i}` } as GraphV3T['nodes'][number]);
-      // Connect to avoid orphan violation
-      graph.edges.push({
-        from: 'opt_a', to: id,
-        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
-      } as GraphV3T['edges'][number]);
-    }
-
-    const result = validateGraphStructure(graph);
-    expect(result.valid).toBe(false);
-    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(true);
-  });
-
-  it('EDGE_LIMIT_EXCEEDED: detects more than default 30 edges', () => {
-    const graph = makeValidGraph();
-    // Add enough extra nodes and edges to exceed 30
-    // 5 existing edges + 13 nodes × 2 edges each = 5 + 26 = 31 > 30
-    for (let i = 0; i < 13; i++) {
-      const id = `extra_${i}`;
-      graph.nodes.push({ id, kind: 'factor', label: `Extra ${i}` } as GraphV3T['nodes'][number]);
-      graph.edges.push({
-        from: 'opt_a', to: id,
-        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
-      } as GraphV3T['edges'][number]);
-      graph.edges.push({
-        from: 'opt_b', to: id,
-        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
-      } as GraphV3T['edges'][number]);
-    }
-
-    const result = validateGraphStructure(graph);
-    expect(result.valid).toBe(false);
-    expect(hasViolation(result, 'EDGE_LIMIT_EXCEEDED')).toBe(true);
-  });
+  // ⚠ The NODE_LIMIT_EXCEEDED / EDGE_LIMIT_EXCEEDED cases that stood here
+  // pinned an absolute 20-node / 30-edge ceiling this validator no longer
+  // owns (removed 2026-08-18 — see the file header of
+  // `src/orchestrator/graph-structure-validator.ts` for the measurement).
+  // Their INVERSE, plus the opposite-direction twins that guard against
+  // over-admission, live in
+  // `tests/unit/orchestrator/graph-structure-validator.size-authority.test.ts`.
+  // Deleted rather than re-tuned on purpose: a second size pin here is how
+  // this file came to out-rank `config/graphCaps.ts` in the first place.
 
   it('ORPHAN_NODE: detects node with no edges', () => {
     const graph = makeValidGraph();
@@ -380,64 +350,13 @@ describe('validateGraphStructure', () => {
     expect(result.violations.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('defaults are 20 nodes / 30 edges (from env or hardcoded default)', () => {
-    // With no env override and default limits of 20/30, a graph with exactly 20 nodes should pass
-    const graph = makeValidGraph();
-    // Add 15 more nodes (5 existing + 15 = 20, exactly at limit)
-    for (let i = 0; i < 15; i++) {
-      const id = `extra_${i}`;
-      graph.nodes.push({ id, kind: 'factor', label: `Extra ${i}` } as GraphV3T['nodes'][number]);
-      graph.edges.push({
-        from: 'opt_a', to: id,
-        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
-      } as GraphV3T['edges'][number]);
-    }
-
-    const result = validateGraphStructure(graph);
-    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(false);
-  });
-
-  it('env override: CEE_GRAPH_MAX_NODES and CEE_GRAPH_MAX_EDGES are respected', async () => {
-    // Re-import with env overrides set — module-level constants re-evaluate
-    vi.stubEnv('CEE_GRAPH_MAX_NODES', '4');
-    vi.stubEnv('CEE_GRAPH_MAX_EDGES', '3');
-
-    // Dynamic import with unique query string to bypass vitest module cache
-    const { validateGraphStructure: validate } = await import(
-      '../../../src/orchestrator/graph-structure-validator.js?env-override-test'
-    );
-
-    const graph = makeValidGraph(); // 5 nodes, 5 edges
-    const result = validate(graph);
-    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(true); // 5 nodes > 4 limit
-    expect(hasViolation(result, 'EDGE_LIMIT_EXCEEDED')).toBe(true); // 5 edges > 3 limit
-
-    vi.unstubAllEnvs();
-  });
-
-  it('NaN env values fall back to defaults (limits still enforced)', async () => {
-    vi.stubEnv('CEE_GRAPH_MAX_NODES', 'not-a-number');
-    vi.stubEnv('CEE_GRAPH_MAX_EDGES', '');
-
-    const { validateGraphStructure: validate } = await import(
-      '../../../src/orchestrator/graph-structure-validator.js?nan-guard-test'
-    );
-
-    // With defaults (20/30), a graph with 21 nodes should exceed the limit
-    const graph = makeValidGraph();
-    for (let i = 0; i < 16; i++) {
-      const id = `nan_${i}`;
-      graph.nodes.push({ id, kind: 'factor', label: `NaN ${i}` } as GraphV3T['nodes'][number]);
-      graph.edges.push({
-        from: 'opt_a', to: id,
-        strength: { mean: 0.1, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive',
-      } as GraphV3T['edges'][number]);
-    }
-
-    const result = validate(graph);
-    // Defaults should be enforced (20 nodes), 21 nodes > 20
-    expect(hasViolation(result, 'NODE_LIMIT_EXCEEDED')).toBe(true);
-
-    vi.unstubAllEnvs();
-  });
+  // ⚠ Three further cases stood here and are gone with the clause they pinned:
+  //   - 'defaults are 20 nodes / 30 edges'
+  //   - 'env override: CEE_GRAPH_MAX_NODES and CEE_GRAPH_MAX_EDGES are respected'
+  //   - 'NaN env values fall back to defaults (limits still enforced)'
+  // `validateGraphStructure` no longer reads either env var, so those three
+  // could only be kept by resurrecting the ceiling they tested. The
+  // replacement pin is the opposite assertion — setting
+  // CEE_GRAPH_MAX_NODES=4 must NOT reintroduce a refusal — and it lives in
+  // `graph-structure-validator.size-authority.test.ts`.
 });

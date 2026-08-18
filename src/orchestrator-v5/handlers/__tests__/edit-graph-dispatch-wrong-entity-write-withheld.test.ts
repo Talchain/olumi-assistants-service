@@ -538,10 +538,42 @@ describe('2.1266 coherence — every derived signal reads the graph that PERSIST
     // instruction about a model that never existed.
     const persisted = resolveRunAdmission(PRE_EDIT_GRAPH());
     const withheld = resolveRunAdmission(wrongEntityGraphWithExtraOption());
-    // Precondition, pinned in-test: the two graphs must genuinely disagree, or
-    // the assertion below passes without discriminating anything.
-    expect(withheld.strict.nextStep).not.toBe(persisted.strict.nextStep);
-    expect(out.response.assistant_text).toContain(persisted.strict.nextStep);
+
+    // ⚠ REWRITTEN 2026-08-18 — the property is unchanged; what changed is that
+    // the old observable stopped being a legitimate thing to assert.
+    //
+    // This test used to require `assistant_text` to contain
+    // `persisted.strict.nextStep`. That worked only because the persisted graph
+    // was refused, and it was refused partly for being over a 20-node/30-edge
+    // ceiling that has since been deleted as unfounded (this fixture is 19
+    // nodes / 33 edges — over the old EDGE limit alone). With the spurious
+    // structural blocker gone, the persisted model's run PROCEEDS: its four
+    // unconfigured options are excluded and named, exactly as designed.
+    //
+    // So asserting the old string would now demand that the product tell the
+    // user to "review all 4 readiness issues together before analysis" about an
+    // analysis that is about to run — the manufactured obligation
+    // `RunAdmission.blockedNextStep` now makes structurally impossible. The
+    // coherence property being protected is unchanged: EVERY DERIVED SIGNAL
+    // READS THE PERSISTED GRAPH. It is observed below through the admission
+    // decision itself, which is a stronger binding than a copy string.
+    //
+    // PRECONDITION, pinned in-test: the two graphs must genuinely disagree, or
+    // the assertions below discriminate nothing. The withheld graph's invented
+    // option is not waivable, so it alone is refused.
+    expect(persisted.willProceed).toBe(true);
+    expect(withheld.willProceed).toBe(false);
+    expect(persisted.blockedNextStep).toBeNull();
+    expect(withheld.blockedNextStep).not.toBeNull();
+
+    // The product speaks the PERSISTED verdict: the run proceeds, and the
+    // option named is one the user actually holds.
+    expect(out.response.assistant_text).toContain('the analysis will run on the options that are set');
+    expect(out.response.assistant_text).toContain(FACTOR_LABEL);
+    // …and never the WITHHELD one. Bound by identity to the withheld
+    // admission's own sentence, not to a paraphrase of it.
+    expect(out.response.assistant_text).not.toContain(withheld.blockedNextStep!);
+    expect(out.response.assistant_text).not.toContain('An option this edit invented');
   });
 });
 
