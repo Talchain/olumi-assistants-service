@@ -59,6 +59,7 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
+import { applyStructuralDelete } from './structural-delete.js';
 
 export type SystemEventCommitSkipReason = 'client_only_event';
 
@@ -211,6 +212,11 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // Train B's deployed explicit no-write refusal and its integrity-strict
   // pending carry-forward; reader and writer rollback remain independent.
   edge_strength_edit: 'mutating',
+  // 0.48.0 — THE P0 L-22 WRITER. `'ack_and_commit'` here is the defect itself:
+  // it commits a turn row and writes NO graph, so the next turn reloads a graph
+  // that still holds the deleted option and re-adds it. A delete that does not
+  // reach `scenarios.graph` is not a delete.
+  structural_delete: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -395,6 +401,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'edge_strength_edit'
   ) {
     return await dispatchEdgeStrengthEdit(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'structural_delete'
+  ) {
+    return await dispatchStructuralDelete(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -830,6 +842,414 @@ async function dispatchEdgeStrengthEdit(
   return {
     response,
     commitPerformed: true,
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    freshness,
+    graph: graphForReadiness,
+  };
+}
+
+/**
+ * `structural_delete` — persist a removal, atomically, or change nothing.
+ *
+ * Same shape as the two writers above, and the ORDER is the part that matters:
+ *
+ *   1. load the persisted graph STRICTLY — the trusted base is the SERVER's own
+ *      read, never request-supplied structure (`session/store.ts`: a CAS fed
+ *      from the incoming graph validates the write against itself and always
+ *      "matches"). For a DELETE this is sharper than for an edit: without an
+ *      independent view the server has nothing to refuse a stale removal with;
+ *   2. resolve + apply through the canonical PatchOperation train (no mutation
+ *      code lives here, and none lives in the adapter either);
+ *   3. commit ONCE, with the atomic CAS expected-base threaded — one graph, one
+ *      transaction. A partial apply would leave DANGLING EDGES, which is worse
+ *      than no apply: the model becomes incoherent rather than merely unchanged;
+ *   4. verify the committed bytes actually lost what the user removed;
+ *   5. ONLY THEN derive readiness, from the graph that landed.
+ *
+ * ⚠ WHY THIS WRITER IS NOT GATED ON `config.features.graphCas.rpcEnforce`,
+ * unlike `edge_strength_edit` — a deliberate, reversible divergence, disclosed
+ * rather than quietly taken.
+ *
+ * `edge_strength_edit`'s gate is a ROLLOUT device, not a safety property: its own
+ * comment describes Train B's "deployed reader floor" for a wire member "whose
+ * writer is deliberately not deployed yet". `CEE_V5_GRAPH_CAS_RPC` defaults to
+ * `'shadow'` and config records `'enforce'` as "a later explicit step", so
+ * gating on it would ship this P0 fix DARK — a user's delete would return
+ * FEATURE_NOT_ENABLED and the option would still come back, which is the defect
+ * unchanged. The estate's standing rulings forbid exactly that ("ship
+ * capabilities ON; rollback = code revert"; no new env gates).
+ *
+ * ⚠ THE HONEST SAFETY POSTURE — do NOT restate this as "two gates make the write
+ * safe". An earlier draft did, and it claimed more than the mechanisms deliver.
+ * `CEE_V5_GRAPH_CAS_RPC` defaults to `shadow` (the UPDATE stays UNCONDITIONAL —
+ * the CAS is stamped, not enforced) and `CEE_V5_GRAPH_CAS_MODE` defaults to
+ * `off`, so NEITHER the adapter's `base_graph_hash` gate nor the receipt check
+ * closes the read→write window. The base hash is checked at T0 and the write
+ * happens later; nothing in that pair is atomic.
+ *
+ * What largely closes the window is a DIFFERENT mechanism: the TURN FENCE
+ * (`session/turn-fence.ts`), which refuses a graph write from a superseded turn
+ * — post-migration inside the append transaction under a FOR UPDATE on the
+ * turn's own fence row, and fail-closed when the fence RPC is unavailable.
+ *
+ * State the posture exactly as: **base checked at T0, writes ordered by the turn
+ * fence, CAS stamped-not-enforced** — adequate for single-user acceptance. What
+ * IS true about the flag is narrower and still worth having: both the stale gate
+ * and the receipt check run UNCONDITIONALLY, so no shadow-mode path reaches the
+ * write with an unchecked base hash, and the atomic CAS hashes are threaded so
+ * moving the deployment to `enforce` upgrades this writer with no code change —
+ * the same posture as `factor_value_edit`, the sibling mutating writer that has
+ * never been gated on it. A safety claim stronger than its mechanism is how the
+ * next lane gets hurt.
+ */
+async function dispatchStructuralDelete(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'structural_delete' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  try {
+    // All three reads are authoritative and required before ANY newest-turn
+    // append. On failure the prior row stays newest and authoritative: no
+    // transcript is appended, because a degraded read gives no trusted base and
+    // guessing at one is how a server model gets clobbered.
+    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+      loadPersistedGraphStrict(payload.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_delete — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: ReturnType<typeof applyStructuralDelete>;
+  try {
+    result = applyStructuralDelete({ payload, event, requestId, persistedGraph });
+  } catch (err) {
+    // A malformed-but-present persisted graph lands here (corruption, not
+    // absence). Retryable 500 with no append; the corrupt row stays
+    // authoritative rather than being healed forward under a delete.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_delete — adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    // A stale base hash is canonical-state divergence, not a domain refusal, and
+    // must never masquerade as a 200. Append NOTHING: the route turns this
+    // descriptor into 409 GRAPH_DIVERGED carrying the hash the server holds, so
+    // the client's refresh is a bounded action rather than a guess.
+    if (result.baseHashConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.baseHashConflict.recovery_action,
+          conflict_category: result.baseHashConflict.conflict_category,
+          expected_base_graph_hash: result.baseHashConflict.expected_base_graph_hash,
+        },
+      };
+    }
+    // Every other refusal IS recorded: the transcript should say the user tried
+    // to delete and was refused, with no graph write and no new pending. The
+    // exact valid newest pending set is fed to canonical carry-forward, which
+    // alone owns TTL, wall expiry and graph-hash survival.
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions,
+        ...(currentAnalysisHash !== null ? { graph_hash: currentAnalysisHash } : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 structural_delete — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 structural_delete refused — committed honestly, no graph written',
+    );
+    return { response, commitPerformed: true, graph: contentGraph };
+  }
+
+  // ── the mutation path: ONE atomic commit ─────────────────────────────────
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    // The trusted expected base is the SERVER-READ graph, hashed both ways:
+    // identity for the in-transaction CAS (append_turn_atomic_v4/v3 compares it
+    // under the row lock when enforcing, closing the read→write race) and
+    // analysis for the cosmetic-vs-substantive downgrade.
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      // ⚠ `direct_answer` + `handler_id: null` IS the estate's ruling for an
+      // `edit_graph` receipt, not a shortcut — and it differs from the two
+      // writers above, which claim `turn_class: 'handler'` because their
+      // handler ids (`set_factor_value`, `adjust_edge_strength`) ARE members of
+      // the contract's `V5ActionType`. `edit_graph` is not, so stamping it here
+      // would need a schemas widening. `edit-graph-dispatch.ts:3673-3682` records
+      // the War Room correction verbatim: turn_class stays `direct_answer`, the
+      // RPC accepts non-empty `handler_facts` alongside it (verified via SQL
+      // inspection), and the FACT-level `fact_type === 'edit_graph'` is the
+      // canonical discriminator every downstream consumer already keys off
+      // (recent_changes projector, state-query guard, prior_facts readers).
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      // THE LINE THE WHOLE CHANGE IS ABOUT. `commitDirectAnswer` writes
+      // scenarios.graph atomically with the turn row when — and only when —
+      // this key is present. Omitting it is precisely the defect: a turn row
+      // that says a deletion happened over a graph that never lost the node.
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      priorPendingActions,
+      contentGraph: result.mutatedGraph,
+      ...(cas.expectedGraphIdentityHash !== null
+        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
+        : {}),
+      ...(cas.expectedGraphAnalysisHash !== null
+        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
+        : {}),
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 structural_delete — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          expected_base_graph_hash: err.expected_base_graph_hash ?? null,
+        },
+      };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_delete — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  // ── the post-commit receipt check ────────────────────────────────────────
+  // A successful append without a trustworthy receipt is an ambiguous transport
+  // outcome, never a 200 mutation success. For a DELETE the claim to verify is
+  // ABSENCE: every id the user removed must be gone.
+  //
+  // ⚠⚠ WHAT THIS ACTUALLY CHECKS — READ BEFORE RELYING ON IT. An earlier version
+  // of this comment called it "the bytes the store actually holds" and told the
+  // next lane never to fabricate it "from the adapter's pre-commit copy". THAT
+  // WAS A STRONGER CLAIM THAN THE CODE DELIVERS, which is exactly the defect
+  // class this estate calls an honest label overwritten by a false one.
+  //
+  // `commitResult.persistedGraph` is `graphForStore`, and `commit.ts:372-373`
+  // says so in terms: *"Do NOT treat it as a general read-back: it is this
+  // commit's own input after projection, not a re-read."* So this compares the
+  // adapter's projected graph against the commit chokepoint's own SECOND
+  // projection of it. It is a non-idempotent-projection check, NOT a database
+  // read-back.
+  //
+  // That is still worth having — `projectGraphForPersistence` repairs,
+  // normalises and reconciles, and `reconcileTopLevelOptionsFromNodes` is
+  // precisely a pass that can re-add option entries — so a projection that
+  // reintroduced a removed id would be caught here. What it CANNOT see is the
+  // store persisting something different from what it was handed. A real
+  // read-back would need a post-commit SELECT this seam does not perform.
+  // (This is the demonstrated reason the M12 mutant survives: with no second,
+  // independent source of bytes, the comparison has nothing to disagree with.)
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const committedNodeIds = committedParse.success
+    ? new Set(committedParse.data.nodes.map((n) => n.id))
+    : new Set<string>();
+  const committedEdgePairs = committedParse.success
+    ? new Set(committedParse.data.edges.map((e) => `${e.from}::${e.to}`))
+    : new Set<string>();
+  const removalsLanded =
+    committedParse.success &&
+    result.removedNodeIds.every((id) => !committedNodeIds.has(id)) &&
+    result.removedEdgePairs.every((pair) => !committedEdgePairs.has(pair));
+  if (
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !removalsLanded
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        removals_landed: removalsLanded,
+      },
+      'V5 structural_delete — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForReadiness = committedParse.data;
+
+  // The authoritative receipt the UI binds to. `draft_graph` is the UI's ONLY
+  // inline-graph ingestion path (`applied-graph-emit.ts`), and a removal is
+  // expressed there as ABSENCE from the applied graph — which is why the
+  // `graph_patch` block is not the right carrier for this event even setting
+  // aside that its `operation` enum cannot name a delete.
+  const response: OlumiResponse = {
+    ...committedResponse,
+    graph_hash: persistedAnalysisGraphHash,
+    draft_graph: buildAppliedGraphWireField(graphForReadiness),
+  };
+
+  // Fact history is observational only: it never authorises or blocks the write.
+  // A healthy empty read means canonical `none`; a degraded read must not
+  // fabricate that conclusion and therefore emits honest `unknown`.
+  const freshness: FreshnessDerivation =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
+      : {
+          freshness: 'unknown',
+          reason: 'derivation_failed',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: persistedAnalysisGraphHash,
+          computed_at: null,
+        };
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.structural_delete',
+    },
+    {
+      prior_fact_count: priorFactsRead.facts.length,
+      prior_fact_read_status: priorFactsRead.status,
+      removed_node_count: result.removedNodeIds.length,
+      removed_edge_count: result.removedEdgePairs.length,
+    },
+  );
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      removed_node_count: result.removedNodeIds.length,
+      removed_edge_count: result.removedEdgePairs.length,
+    },
+    'V5 structural_delete committed — canonical graph/fact written atomically, removals verified in the persisted bytes',
+  );
+  return {
+    response,
+    commitPerformed: true,
+    // Readiness from the bytes that LANDED, never the pre-mutation graph:
+    // deleting an option can legitimately move the model to not-analysable, and
+    // that verdict must describe the model the user now has.
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
     freshness,
     graph: graphForReadiness,

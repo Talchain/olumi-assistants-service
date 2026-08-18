@@ -7,7 +7,62 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.46.0.tgz`
+### `talchain-schemas-0.48.0.tgz`
+
+> **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE.**
+>
+> Packed from a fresh blobless clone of `olumi-schemas` with `HEAD` asserted
+> equal to `git rev-list -n1 v0.48.0` =
+> **`81493081b8ad947cbb0eefb54a6af989328a6efd`** *before any read* — fetching a
+> ref is not checking it out — and `package.json.version == 0.48.0` asserted,
+> then `npm ci && npm run build && npm pack`
+> (node 20.19.5 / npm 10.8.2, the toolchain every entry below records).
+>
+> sha256 `02f78afc8e554fc498c00e26ae555524da36516ebe632a253f8147bb8055805a`
+> — 452,498 bytes. A second independent `npm pack` produced **byte-identical**
+> output.
+>
+> ⚠ **REGISTRY CONTENT-IDENTITY NOT VERIFIED FOR THIS ENTRY, unlike 0.46.0
+> below.** The 0.46.0 entry compared the source-packed tarball against the
+> GitHub Packages artifact by unpacking both and diffing all 226 files (npm
+> REPACKS on publish, so comparing compressed sha256s is a check that can only
+> ever fail). That comparison needs a registry credential this lane did not
+> have, so it was NOT performed here and must not be assumed: what is proven is
+> that these bytes are reproducibly derived from the tagged, merged source, and
+> that the resolved install reports `0.48.0` with `structural_delete` present in
+> `SystemEventKind.options` (13 members, asserted at the installed bytes).
+> **State this limit rather than inheriting 0.46.0's stronger claim.**
+
+**Why 0.48.0 (P0 L-22 — a deleted option came back).** Adds one
+`SystemEventSchema` member, `structural_delete`, plus the `SystemEventKind`
+literal and the exported `refineStructuralDelete` cross-field rule. **Purely
+additive: no existing field, member, vocabulary or validation rule changed.**
+Before it, no UI→CEE vocabulary had a removal verb at all, so a canvas delete
+never reached the server and the next turn's graph read still held the node.
+
+**The jump crosses 0.47.0 — measured, not assumed.** 0.47.0 is validation
+tightening only: six `refineAnalysisStateV1` cross-checks (CC-A…CC-F) refusing
+`AnalysisStateV1` combinations its own producer cannot emit. Those rules were
+derived FROM this service's composer (`context/canonical-analysis-state.ts`,
+`compose/analysis-state-v1.ts`), so the expected impact here is zero.
+**Measured at this tip: `pnpm typecheck` surfaced exactly ONE error, the
+intended `SYSTEM_EVENT_HANDLING` exhaustiveness failure for the new kind — no
+`AnalysisStateV1` type or validation fallout of any kind.** The 0.44.0 → 0.46.0
+bump below set the two-minor-jump precedent.
+
+**⚠ DEPLOY ORDER IS NOT NEGOTIABLE: schemas → CEE → UI.** Every
+`SystemEventSchema` member is `.strict()` and the union is a
+`discriminatedUnion` on `kind`, so a consumer pinned ≤0.47.0 that receives this
+member does not ignore an unknown field — it **fails the discriminator and
+rejects the whole turn (422)**. UI-alone would 422 every turn containing a
+delete. **CEE-alone is invisible and safe:** the reader and writer exist here
+and nothing emits the event yet, so no deployed surface changes behaviour.
+
+**Rollback** is a code revert: restore the 0.46.0 tarball, checksum, pin and
+lockfile. No consumer emits `structural_delete`, so nothing downstream
+regresses. Reverting never unpublishes 0.48.0.
+
+### `talchain-schemas-0.46.0.tgz` (historical — no longer vendored as of 0.48.0)
 
 > **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE, AND VERIFIED AGAINST THE
 > PUBLISHED BYTES BY CONTENT DIFF.**

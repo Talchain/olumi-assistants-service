@@ -797,6 +797,56 @@
                     "intent"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "structural_delete"
+                    },
+                    "removed_node_ids": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from"
+                      },
+                      "description": "The node ids the user removed. REQUIRED but MAY be empty — an edges-only delete is legitimate. Required rather than optional so absence is impossible and there is no \"omitted vs empty\" ambiguity for a consumer to resolve differently per pin."
+                    },
+                    "removed_edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                            "description": "Exact canonical source node id of the removed edge (edge identity, half 1)."
+                          },
+                          "to": {
+                            "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                            "description": "Exact canonical target node id of the removed edge (edge identity, half 2)."
+                          }
+                        },
+                        "required": [
+                          "from",
+                          "to"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The edges the user removed, each addressed by its canonical (from, to) pair — edges have no id in GraphV3. REQUIRED but MAY be empty: a nodes-only delete is legitimate, and CEE removes edges orphaned by a node removal as part of the same transaction whether or not the client enumerated them."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical graph hash the client last read, i.e. the graph the user was actually looking at when they deleted. An optimistic-concurrency assertion, never a requested value. Absent, null and empty are all forbidden: the stale gate is non-optional, because a delete applied to a graph the user did not see removes something they never selected. CEE MUST refuse on divergence rather than applying a best-effort subset."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "removed_node_ids",
+                    "removed_edges",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }

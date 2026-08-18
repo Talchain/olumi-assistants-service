@@ -77,7 +77,31 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // between the two tarballs (the version string), so `cmp` is demonstrably
     // able to see a difference and the four identical verdicts are not a
     // comparator that cannot fail.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.46.0');
+    //
+    // 0.46.0 → 0.48.0 (the `structural_delete` train, which also carries the
+    // never-vendored 0.47.0 AnalysisStateV1 cross-checks). RE-DERIVED THE SAME
+    // WAY rather than inherited: both tarballs were unpacked and every `dist`
+    // file mentioning `edge_strength_edit` was compared. The FILE SET is
+    // identical (the same five files) and, measured symmetrically — line
+    // numbers stripped from BOTH sides, no filter applied to one side only:
+    //   ZERO of 0.46.0's `edge_strength_edit` lines are lost; every one survives
+    //   verbatim in 0.48.0.
+    // The five files DO differ, and every difference is accounted for:
+    //   enums.d.ts        the SystemEventKind type literal is EXACTLY 0.46's
+    //                     list with "structural_delete" APPENDED — proven by
+    //                     string equality against a constructed expectation,
+    //                     so nothing was removed, renamed or reordered;
+    //   turn-payload.js   the three pre-existing lines are textually identical
+    //                     and merely shifted (468→475, 478→485, 560→710); the
+    //                     four "new" hits are COMMENT lines inside the new
+    //                     structural_delete block that mention this member;
+    //   enums.js /        every `edge_strength_edit` line textually identical;
+    //   turn-payload.d.ts
+    //   fixtures/index.js every `edge_strength_edit` line textually identical.
+    // The comparator carries the same positive control: `package.json` DOES
+    // differ between the two tarballs, so `cmp` is demonstrably able to see a
+    // difference and these verdicts are not a comparator that cannot fail.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.48.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -218,8 +242,20 @@ const PRE_042_EVENTS: ReadonlyArray<Record<string, unknown>> = [
 ];
 
 describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () => {
-  it('adds exactly one kind without removing or renaming any 0.41 kind', () => {
-    expect(SystemEventKind.options).toEqual([...PRE_042_KINDS, 'edge_strength_edit']);
+  it('adds only APPENDED kinds, without removing or renaming any 0.41 kind', () => {
+    // The property under test is unchanged and is the one that matters for a
+    // pre-0.42 corpus: every 0.41 kind is still present, still spelled the same,
+    // still in the same ORDER, and additions only ever arrive at the end.
+    // 0.48.0 appends `structural_delete` (P0 L-22) exactly as 0.42.0 appended
+    // `edge_strength_edit`; asserted at the vendored bytes by unpacking 0.46.0
+    // and 0.48.0 and proving the enum literal is the former with the new member
+    // appended. Asserting the prefix separately from the tail keeps the 0.41
+    // guarantee legible instead of burying it in one long literal.
+    expect(SystemEventKind.options.slice(0, PRE_042_KINDS.length)).toEqual([...PRE_042_KINDS]);
+    expect(SystemEventKind.options.slice(PRE_042_KINDS.length)).toEqual([
+      'edge_strength_edit',
+      'structural_delete',
+    ]);
   });
 
   it('reproduces the exact serialized 0.41 root-parse corpus', () => {

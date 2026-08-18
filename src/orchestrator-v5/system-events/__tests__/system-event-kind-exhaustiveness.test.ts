@@ -60,17 +60,34 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     expect(unionKinds).toEqual([...SystemEventKind.options].sort());
   });
 
-  it('the declared mutating set is exactly the two value-carrying writers', () => {
+  it('the declared mutating set is exactly the three server-side writers', () => {
     const mutating = Object.entries(SYSTEM_EVENT_HANDLING)
       .filter(([, handling]) => handling === 'mutating')
       .map(([kind]) => kind);
     // Pinned deliberately narrow. Anything that writes `scenarios.graph` moves
-    // `graph_hash` and invalidates the user's analysis, so a second kind joining
-    // this set must be a conscious act with a RED to justify it. Train C adds
+    // `graph_hash` and invalidates the user's analysis, so a kind joining this
+    // set must be a conscious act with a RED to justify it. Train C adds
     // edge_strength_edit deliberately; dispatch still resolves it back onto
     // the reader-only floor unless the boot-validated CAS capability is in
     // enforce mode.
-    expect(mutating).toEqual(['factor_value_edit', 'edge_strength_edit']);
+    //
+    // 2026-08-17 P0 L-22 — `structural_delete` joins, and this RED is the
+    // justification the comment above asks for. It is the first member that
+    // REMOVES rather than sets a value, and it had to become mutating because
+    // the alternative IS the defect: as `'ack_and_commit'` it commits a turn row
+    // and writes no graph, so the next turn reloads a graph that still holds the
+    // deleted option and re-adds it ("it keeps adding the option that I deleted
+    // back"). Unlike edge_strength_edit it is NOT resolved back to a reader
+    // floor under CAS off/shadow — that gate is a rollout device, and applying
+    // it here would ship this P0 fix dark; see the long note in
+    // `dispatchStructuralDelete`. Its own stale gate (`base_graph_hash`) and its
+    // committed-bytes readback are what make the write safe, and both run
+    // regardless of RPC mode.
+    expect(mutating).toEqual([
+      'factor_value_edit',
+      'edge_strength_edit',
+      'structural_delete',
+    ]);
   });
 
   it('has no permanently reader-only kind after Train C writer declaration', () => {
