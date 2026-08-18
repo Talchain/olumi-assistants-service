@@ -341,8 +341,21 @@ describe('⭐⭐⭐ RUN-B ACCEPTANCE — a natural answer modifies X and nothing
 // ───────────────────────────────────────────────────────────────────────────
 describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => {
   it('the whole-message binder keeps its ENTIRELY-bare contract — one shape, one owner', () => {
-    expect(readMissingValueAnswer(R1)?.kind).toBe('numeric');
-    expect(readMissingValueAnswer(R1)?.leadingContext).not.toBe('');
+    // ⚠ NARROWED, NOT OPTIONAL-CHAINED, AND THE TYPECHECK RATCHET IS WHY.
+    // The first draft asserted `readMissingValueAnswer(R1)?.leadingContext`
+    // `.not.toBe('')`, which `tsc --noEmit` rejected because `leadingContext`
+    // lives only on the numeric arm of the union. It was ALSO VACUOUS: on a
+    // `null` reading the expression is `undefined`, and `undefined !== ''`
+    // passes — the exact defect this suite exists to catch, one level up. Bound
+    // to the whole object instead, so the shape is pinned rather than probed.
+    // (`tsc -p tsconfig.build.json` EXCLUDES tests and was green; only
+    // `scripts/ci/typecheck-ratchet.sh` could see it.)
+    expect(readMissingValueAnswer(R1)).toEqual({
+      kind: 'numeric',
+      valueText: '0.8',
+      referent: 'it',
+      leadingContext: 'that would push sales headcount up a lot',
+    });
     // Trap 21: two owners for one shape is the defect this estate keeps paying
     // for. The context-bearing form must NOT reach the sole-missing-pair binder.
     expect(matchBareRepairValue(R1)).toBeNull();
