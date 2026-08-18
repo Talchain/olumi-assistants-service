@@ -259,6 +259,55 @@ describe('a pre-boundary fixture can never certify this arm again', () => {
     expect(live.dispatch).toBe('structure_origin');
   });
 
+  /**
+   * ⭐ P1 — ONE SEAM BEYOND THE GUARD.
+   *
+   * The module's own seam is `tryStructureOriginAnswer`, and RED-11 covers a
+   * null/empty graph there. The seam PAST it is the guard, which is what the
+   * turn-executor calls and whose outcome becomes the user's reply
+   * (`turn-executor.ts:7078`, `composeAnswer({answerKind:'functional'})`). A
+   * throw here would take the whole turn, not just the origin answer.
+   *
+   * `context.persistedGraph` is typed `unknown` and comes straight from a JSONB
+   * column, so every one of these shapes is reachable on a degraded read. Each
+   * must DECLINE — never throw, and never fall back to the edit-history
+   * deflection, which is the harm the arm exists to remove.
+   */
+  it('RED-I a malformed persisted graph declines through the REAL guard without throwing', () => {
+    const malformed: readonly unknown[] = [
+      null,
+      undefined,
+      'not a graph',
+      42,
+      [],
+      {},
+      { nodes: 'not an array' },
+      { nodes: [null, 7, 'x'] },
+      { nodes: [{ id: 939, kind: 'option', label: 'Hybrid Phased Approach' }] },
+      { nodes: [{ id: 'a', kind: 'option', label: '' }] },
+      { nodes: [{ id: 'a', kind: 'option', label: 'Hybrid Phased Approach', provenance: ['ai_inferred'] }] },
+      { nodes: [{ id: 'a', kind: 'option', label: 'Hybrid Phased Approach', provenance: 'ai_inferred', source_quote: 99 }] },
+    ];
+    for (const graph of malformed) {
+      const outcome = tryStateQueryGuard({
+        message: WITNESS_TURN_2,
+        contextPack: ctx([]),
+        briefAudit: { briefText: null, graph },
+      });
+      // Declines to the reasoning layer.
+      expect(outcome.matched, `graph ${JSON.stringify(graph)} was claimed`).toBe(false);
+    }
+
+    // ⭐ POSITIVE CONTROL in the same run — a WELL-FORMED graph is still claimed,
+    // so the loop above is not passing because the guard is simply dead.
+    const live = tryStateQueryGuard({
+      message: WITNESS_TURN_2,
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph: WITNESS_GRAPH },
+    });
+    expect(live.matched).toBe(true);
+  });
+
   it('RED-G an ANALYSIS question is not claimed by the guard at all', () => {
     const outcome = tryStateQueryGuard({
       message: 'Why is the hybrid option scoring highest in the analysis?',

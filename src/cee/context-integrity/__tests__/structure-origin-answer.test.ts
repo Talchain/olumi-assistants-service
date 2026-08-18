@@ -525,6 +525,59 @@ describe('the brief claim is inherited from the producer, never re-decided here'
   });
 
   /**
+   * ⭐⭐ RED-27 — AN UNREADABLE QUOTE IS NOT AN ABSENT QUOTE.
+   *
+   * Found by P1, driving malformed input one seam past the guard. `source_quote`
+   * arrives from a JSONB column typed `unknown`; a value that is not a non-empty
+   * string fails the read, and round 2 keyed the ambiguity gate on the READ
+   * rather than on the FIELD. So a degraded `ai_inferred` + `source_quote: 99`
+   * node — the unverified-stated class, the user's own words — was answered
+   * "was my suggestion, not something you wrote". That is the precise
+   * fabrication RED-16/RED-23 exist to prevent, arriving through the one input
+   * shape those tests did not carry.
+   */
+  const UNREADABLE_QUOTES: readonly [string, unknown][] = [
+    ['a number', 99],
+    ['an empty string', ''],
+    ['an object', { text: 'we said this' }],
+    ['an array', ['we said this']],
+    ['explicit null', null],
+  ];
+  for (const [why, value] of UNREADABLE_QUOTES) {
+    it(`RED-27 ai_inferred with ${why} for source_quote DECLINES (recorded, not readable, is the gate)`, () => {
+      const graph = {
+        nodes: [
+          {
+            id: 'g1',
+            kind: 'factor',
+            label: 'Regulatory Approval Timeline',
+            provenance: 'ai_inferred',
+            source_quote: value,
+          },
+        ],
+        edges: [],
+      };
+      expect(
+        tryStructureOriginAnswer('Why did you add a Regulatory Approval Timeline?', graph),
+      ).toBeNull();
+    });
+  }
+
+  it('RED-27-CONTROL with NO source_quote FIELD at all, the same node IS answered', () => {
+    // The opposite-direction twin: without this, RED-27 would also pass if the
+    // ai_inferred branch had simply been disabled.
+    const graph = {
+      nodes: [
+        { id: 'g1', kind: 'factor', label: 'Regulatory Approval Timeline', provenance: 'ai_inferred' },
+      ],
+      edges: [],
+    };
+    const answer = tryStructureOriginAnswer('Why did you add a Regulatory Approval Timeline?', graph);
+    expect(answer).not.toBeNull();
+    expect(answer!.toLowerCase()).toContain('my suggestion');
+  });
+
+  /**
    * ⭐ RED-24 — the SECOND producer path into `from_brief`, previously untested.
    * `projectNodeProvenance` also awards `from_brief` to an OPTION whose LABEL
    * binds to the brief (`schema-v3.ts:1164-1167`, via `bindOptionLabelToBrief`).

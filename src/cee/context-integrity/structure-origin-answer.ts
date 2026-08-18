@@ -268,6 +268,21 @@ interface GraphNodeView {
   readonly provenanceEnum: string | null;
   /** Lifted to node level by `projectNodeProvenance` (`schema-v3.ts:1145-1146`). */
   readonly sourceQuote: string | null;
+  /**
+   * ⭐⭐ WHETHER A QUOTE WAS RECORDED AT ALL — which is NOT the same question as
+   * whether we can READ one, and conflating them was a live fabrication.
+   *
+   * Found by P1 (drive a malformed input one seam PAST the guard): a node
+   * carrying `source_quote: 99` from a degraded JSONB read fails the string
+   * test, so `sourceQuote` is null, so the `ai_inferred` ambiguity gate below
+   * does not fire — and the user is told their own words were "my suggestion,
+   * not something you wrote". The presence of the field is the producer telling
+   * us this node came off a STATED record (`schema-v3.ts:1145` lifts it only
+   * from `typed.source_quote`), so presence alone must close the gate.
+   * Fail-CLOSED: an unreadable quote declines, and declining costs only a
+   * fall-through to the reasoning layer. Pinned by RED-I / RED-27.
+   */
+  readonly quoteRecorded: boolean;
   readonly labelAuthored: boolean;
 }
 
@@ -289,6 +304,10 @@ function nodeViews(graph: unknown): readonly GraphNodeView[] {
         typeof node.source_quote === 'string' && node.source_quote.length > 0
           ? node.source_quote
           : null,
+      // `undefined` is the ONLY value that means "no stated record behind this".
+      // Anything else — a string, an empty string, a number, null — means the
+      // producer wrote the field, and we must not out-argue it.
+      quoteRecorded: node.source_quote !== undefined,
       labelAuthored: node.label_authored === true,
     });
   }
@@ -445,10 +464,11 @@ function composeAnswer(node: GraphNodeView): string | null {
   }
 
   if (node.provenanceEnum === 'ai_inferred') {
-    // ⚠ The ambiguous case. A source_quote here means the user DID state
-    // something that the brief check could not confirm — neither "mine" nor
-    // "yours" is safe, so we say nothing.
-    if (node.sourceQuote !== null) return null;
+    // ⚠ The ambiguous case. A recorded source_quote here means the user DID
+    // state something that the brief check could not confirm — neither "mine"
+    // nor "yours" is safe, so we say nothing. Keyed on RECORDED, not on
+    // readable: see `quoteRecorded`.
+    if (node.quoteRecorded) return null;
     // ⚠⚠ ROUND 2 APPENDED "I put it forward while drafting the model from your
     // brief." — CAUGHT BY THE DERIVED GUARD (RED-21), NOT BY INSPECTION, and it
     // is this module's own defect class one level down. The enum records that
