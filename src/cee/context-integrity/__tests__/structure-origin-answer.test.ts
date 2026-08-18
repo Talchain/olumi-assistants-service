@@ -235,3 +235,158 @@ describe('tryStructureOriginAnswer — grounded in the persisted provenance reco
     expect(answer!.toLowerCase()).not.toContain('anything specific');
   });
 });
+
+// ============================================================================
+// ⭐⭐ THE PERSISTED SHAPE — THE ONLY ONE THAT FIRES LIVE
+// ============================================================================
+// Round 1's entire corpus used the RECORDS-dict shape, which
+// `transformResponseToV3`'s `projectNodeProvenance` collapses before persistence:
+// node provenance becomes the STRING enum "from_brief" | "ai_inferred" | "user_set",
+// while `source_quote` and `label_authored` are lifted to NODE level and `basis` /
+// `unbased` are dropped. Round 1 therefore certified a pre-boundary fixture and the
+// arm was DARK on every real graph (trap 16-inverse). These cases pin the shape the
+// guard actually receives from `context.persistedGraph`.
+const PERSISTED_GRAPH = {
+  nodes: [
+    // Olumi's own invention: ai_inferred with NO source_quote.
+    { id: '939d4630', kind: 'option', label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)', provenance: 'ai_inferred' },
+    // The user's own words, brief-VERIFIED (that is what from_brief means).
+    { id: '4abad64d', kind: 'option', label: 'double down on enterprise sales (higher margins but longer cycles)', provenance: 'from_brief', source_quote: 'double down on enterprise sales (higher margins but longer cycles)' },
+    // Authored label + verified quote.
+    { id: '666659b7', kind: 'goal', label: 'Cut Burn Rate by 30%', provenance: 'from_brief', source_quote: 'cutting our burn rate by 30%', label_authored: true },
+    // ⚠ THE AMBIGUOUS CLASS: the user stated it, but the brief check could not
+    // confirm it, so the enum reads ai_inferred WHILE a source_quote survives.
+    { id: 'aa11bb22', kind: 'factor', label: 'Regulatory Approval Timeline', provenance: 'ai_inferred', source_quote: 'approval might take a while' },
+    // The user set this directly.
+    { id: 'cc33dd44', kind: 'factor', label: 'Marketing Spend Ceiling', provenance: 'user_set' },
+  ],
+  edges: [],
+};
+
+describe('PERSISTED V3 shape — the live path', () => {
+  it('RED-13 THE DARK-ARM DEFECT: the witness turn is answered on a PERSISTED graph', () => {
+    const answer = tryStructureOriginAnswer(WITNESS_TURN_2, PERSISTED_GRAPH);
+    expect(answer).not.toBeNull();
+    expect(answer).toContain('Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)');
+    expect(answer!.toLowerCase()).toContain('my suggestion');
+    // `basis` does not exist in this shape, so no basis clause may be offered.
+    expect(answer!.toLowerCase()).not.toContain('working from what you said');
+  });
+
+  it('RED-14 from_brief quotes the user back (the binding gate is already inside the enum)', () => {
+    const answer = tryStructureOriginAnswer(
+      'Why is the goal Cut Burn Rate by 30% in my model? Where did that come from?',
+      PERSISTED_GRAPH,
+    );
+    expect(answer).not.toBeNull();
+    expect(answer).toContain('cutting our burn rate by 30%');
+    expect(answer!.toLowerCase()).toContain('your brief');
+    // (c) the producer warrants only that the label DIFFERS from the quote.
+    expect(answer!.toLowerCase()).not.toContain('shortened');
+  });
+
+  it('RED-15 user_set is attributed to the user, not to Olumi', () => {
+    const answer = tryStructureOriginAnswer(
+      'Why did you add a Marketing Spend Ceiling?',
+      PERSISTED_GRAPH,
+    );
+    expect(answer).not.toBeNull();
+    expect(answer!.toLowerCase()).toContain('you set it yourself');
+    expect(answer!.toLowerCase()).not.toContain('my suggestion');
+  });
+
+  it('RED-16 P5: ai_inferred WITH a source_quote is the unverified-stated class and DECLINES', () => {
+    // Claiming "my suggestion" would deny the user's own words; claiming "your
+    // brief" would contradict the wire badge. Neither is safe, so say nothing.
+    expect(
+      tryStructureOriginAnswer('Why did you add a Regulatory Approval Timeline?', PERSISTED_GRAPH),
+    ).toBeNull();
+  });
+
+  it('RED-17 an unrecognised enum value declines rather than guessing', () => {
+    const graph = { nodes: [{ id: 'z', kind: 'option', label: 'Some Option', provenance: 'future_value' }], edges: [] };
+    expect(tryStructureOriginAnswer('Why did you add Some Option?', graph)).toBeNull();
+  });
+});
+
+// ============================================================================
+// ⭐⭐ THE WITHDRAWN CLAIM — an origin frame must not swallow ANALYSIS questions
+// ============================================================================
+describe('a question about BEHAVIOUR is not a question about ORIGIN', () => {
+  // Verbatim from the adversarial review, reproduced by execution before the fix:
+  // all three received confident provenance answers with llm_calls: 0.
+  const ANALYSIS_QUESTIONS = [
+    'Why is the hybrid option scoring highest in the analysis?',
+    'Why would the hybrid approach fail?',
+    'Why does the burn rate goal matter so much?',
+    'Why is the burn rate goal so important to the result?',
+    'Why did the hybrid option win?',
+  ];
+  for (const message of ANALYSIS_QUESTIONS) {
+    it(`RED-18 declines the analysis question: ${JSON.stringify(message)}`, () => {
+      expect(isStructureOriginQuestion(message)).toBe(false);
+      expect(tryStructureOriginAnswer(message, PERSISTED_GRAPH)).toBeNull();
+      expect(tryStructureOriginAnswer(message, WITNESS_GRAPH)).toBeNull();
+    });
+  }
+
+  // ⭐ ORIGIN TWINS — the same subject, asked about ORIGIN. These must still be
+  // claimed, or the narrowing would be a blanket disable of the arm.
+  const ORIGIN_TWINS: readonly [string, string][] = [
+    ['Why did you add the hybrid option?', 'Hybrid Phased Approach'],
+    ['Why is there a hybrid phased option?', 'Hybrid Phased Approach'],
+    ['Where did the hybrid phased option come from?', 'Hybrid Phased Approach'],
+  ];
+  for (const [message, expected] of ORIGIN_TWINS) {
+    it(`RED-19 TWIN still claims the origin question: ${JSON.stringify(message)}`, () => {
+      expect(isStructureOriginQuestion(message)).toBe(true);
+      const answer = tryStructureOriginAnswer(message, PERSISTED_GRAPH);
+      expect(answer).not.toBeNull();
+      expect(answer).toContain(expected);
+    });
+  }
+});
+
+// ============================================================================
+// The binding gate on the records-dict branch (finding 2)
+// ============================================================================
+describe('records-dict branch gates authorship on the brief binding', () => {
+  function statedWith(binding: string | undefined) {
+    return {
+      nodes: [
+        {
+          id: 'g1',
+          kind: 'goal',
+          label: 'Revenue Growth Rate',
+          provenance: {
+            provenance_class: 'stated',
+            source_quote: 'Revenue is 10 million pounds',
+            ...(binding === undefined ? {} : { brief_binding: binding }),
+          },
+        },
+      ],
+      edges: [],
+    };
+  }
+  const Q = 'Why did you add Revenue Growth Rate?';
+
+  it('RED-20 verified EARNS the brief claim', () => {
+    const answer = tryStructureOriginAnswer(Q, statedWith('verified'));
+    expect(answer).not.toBeNull();
+    expect(answer!.toLowerCase()).toContain('your brief');
+  });
+
+  // ⚠ The producer: `unverified` means "the brief was available and does NOT
+  // support it". 22% of stated records on the reference capture are unverified.
+  it('RED-21 unverified must NOT claim the brief (it would contradict the wire badge)', () => {
+    expect(tryStructureOriginAnswer(Q, statedWith('unverified'))).toBeNull();
+  });
+
+  it('RED-22 unchecked must NOT claim the brief', () => {
+    expect(tryStructureOriginAnswer(Q, statedWith('unchecked'))).toBeNull();
+  });
+
+  it('RED-23 an ABSENT binding establishes nothing and must NOT claim the brief', () => {
+    expect(tryStructureOriginAnswer(Q, statedWith(undefined))).toBeNull();
+  });
+});

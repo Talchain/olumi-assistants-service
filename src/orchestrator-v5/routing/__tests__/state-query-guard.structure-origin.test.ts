@@ -165,7 +165,11 @@ describe('TWIN: the readback class the guard exists for is unchanged', () => {
     // So: assert FIRST that the origin arm genuinely COULD answer this message,
     // which makes the deferral the only thing that can produce the expected
     // outcome.
-    const message = 'Why did you change the Hybrid Phased Approach?';
+    // ⚠ MESSAGE CHANGED IN ROUND 2. 'why did you CHANGE x' is no longer an
+    // origin question at all — the narrowed frame requires a creation/inclusion
+    // predicate — so it would have made this test vacuous a second time. This
+    // message IS an origin question, which is what puts the deferral under test.
+    const message = 'Why did you add the Hybrid Phased Approach?';
     expect(tryStructureOriginAnswer(message, WITNESS_GRAPH)).not.toBeNull();
 
     const outcome = tryStateQueryGuard({
@@ -201,5 +205,43 @@ describe('the origin frame is exercised and disjoint (fail-loud, not hand-mainta
     ];
     const unexercised = patterns.filter((p) => !corpus.some((m) => p.test(m)));
     expect(unexercised.map(String)).toEqual([]);
+  });
+});
+
+// ============================================================================
+// ⭐⭐ THE LIVE PATH — a PERSISTED-shape graph through the real guard
+// ============================================================================
+// Round 1's guard tests all passed a records-dict graph, which persistence never
+// produces, so the arm was dark end to end while these tests were green.
+const PERSISTED_GRAPH = {
+  nodes: [
+    { id: '939d4630', kind: 'option', label: 'Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)', provenance: 'ai_inferred' },
+    { id: '4abad64d', kind: 'option', label: 'double down on enterprise sales (higher margins)', provenance: 'from_brief', source_quote: 'double down on enterprise sales (higher margins)' },
+  ],
+  edges: [],
+};
+
+describe('the guard answers from a PERSISTED graph, not just a records-dict one', () => {
+  it('RED-F turn 2 verbatim is answered through the guard on the persisted shape', () => {
+    const outcome = tryStateQueryGuard({
+      message: WITNESS_TURN_2,
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph: PERSISTED_GRAPH },
+    });
+    expect(outcome.matched).toBe(true);
+    if (!outcome.matched) return;
+    expect(outcome.dispatch).toBe('structure_origin');
+    expect(outcome.assistant_text).toContain('Hybrid Phased Approach (Pilot Self-Serve, Maintain Enterprise)');
+  });
+
+  it('RED-G an ANALYSIS question is not claimed by the guard at all', () => {
+    const outcome = tryStateQueryGuard({
+      message: 'Why is the hybrid option scoring highest in the analysis?',
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph: PERSISTED_GRAPH },
+    });
+    // Neither answered from provenance NOR deflected — it belongs to the
+    // reasoning layer.
+    expect(outcome.matched).toBe(false);
   });
 });
