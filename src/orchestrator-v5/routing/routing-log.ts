@@ -134,6 +134,15 @@ export type StateQueryGuardOutcomeForLog =
    * that bucket and the dashboards read it as a healthy honest answer.
    */
   | 'brief_audit'
+  /**
+   * The turn challenged a STRUCTURAL ELEMENT's origin ("why did you add a hybrid
+   * option?") and was answered from that element's persisted provenance record.
+   * Kept distinct from `no_recent_changes` for the same reason `brief_audit` is:
+   * the live journey witness of 18 Aug 2026 found every one of these landing in
+   * that bucket, where the dashboards read a canned deflection as a healthy
+   * honest answer.
+   */
+  | 'structure_origin'
   | 'not_evaluated';
 
 /**
