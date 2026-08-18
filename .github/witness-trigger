@@ -1,11 +1,14 @@
 Touch to fire the structural-delete acceptance witness.
 
-Fired 18 Aug 2026 against serving CEE 585f8dce — the FIRST build carrying all four
-closure fixes: #1027 router election gate, #1028 option-effect writer,
-#1032 wrong-entity nested-label fix, #1026 A3 outcome nodes + duplicate guard.
+Fired 18 Aug 2026 against CEE 0a274813 — the first build carrying the COMPLETE
+option-effect write path: #1028 (the verb), #1034 (identity resolved from the same
+payload the blocker sentence was composed from), plus #1027 router gate,
+#1026 A3 outcome nodes and #1033 provenance.
 
-The question this run answers: does RERUN still refuse? Previous run 32136391915
-gave 8 PASS / 0 FAIL / 2 UNKNOWN, with RERUN UNKNOWN on run_state=refused
-(reason_code=analysis_blocked) and CANONICAL-DB UNKNOWN for absent Supabase secrets.
+The question: does RERUN still refuse? Run 32136391915 on 3ce2fcc0 gave
+8 PASS / 0 FAIL / 2 UNKNOWN, with RERUN UNKNOWN on reason_code MISSING_OPTION_VALUE.
+That blocker is what #1028+#1034 were built to clear.
 
 Read LEG BY LEG. exit 3 = INCOMPLETE (not measured) is NOT a failure.
+CANONICAL-DB stays UNKNOWN until STAGING_SUPABASE_URL and
+STAGING_SUPABASE_SERVICE_ROLE_KEY exist as repo secrets — still absent.
