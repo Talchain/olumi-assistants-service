@@ -41,6 +41,38 @@ export declare function carriedDraftGraph(body: unknown): boolean;
  */
 export declare function readyOptionCount(body: unknown): number;
 
+/**
+ * REPORTS ONLY — never asserts. The readiness fields that tell the four
+ * producers of `{status:'blocked', goal_node_id:'', options:[]}` apart, printed
+ * on every turn of every run so a failure has something to be compared against.
+ * Shared by the per-turn log line and the continuity failure message.
+ */
+export declare function readinessDiagnosis(body: unknown): string;
+
+/**
+ * REPORTS ONLY — never asserts. The node-kind census of a turn's `draft_graph`,
+ * so "the drafted model contained a goal node" is an observation rather than an
+ * inference from a node total.
+ */
+export declare function draftGraphCensus(body: unknown): string;
+
+/**
+ * The product must not answer a CONVERSATIONAL turn with an ANALYSIS REFUSAL.
+ *
+ * Keyed on `blocked_reason` — which only `buildAnalysisRefusalReadiness` writes,
+ * and which the refusal-payload fix PRESERVES — rather than on `options`, which
+ * that fix repopulates. Orthogonal to the fix by construction, so the routing
+ * defect stays observable after the payload defect is closed.
+ *
+ * `requestedAnalysis` is DECLARED by the caller (this gate composes the
+ * messages, so it knows) and never inferred from the reply under test.
+ *
+ * @returns failure messages; an empty array means healthy.
+ */
+export declare function assertNoUnrequestedAnalysisRefusal(
+  turns: ReadonlyArray<{ label: string; body: unknown; requestedAnalysis: boolean }>,
+): string[];
+
 /** @returns failure messages; an empty array means healthy. */
 export declare function assertHealthyFrame(body: unknown): string[];
 

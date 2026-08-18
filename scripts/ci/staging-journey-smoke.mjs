@@ -124,6 +124,109 @@ export function readyOptionCount(body) {
 }
 
 /**
+ * THE READINESS DIAGNOSIS LINE — why this exists, and what it is for.
+ *
+ * On 18 Aug 2026 this gate fired `analysis_ready.options was empty … the model
+ * did not survive the turn` on 2 of 10 identical runs. Every diagnostic the log
+ * carried was IDENTICAL on the failing and the passing runs — same build_sha,
+ * same exit_path, same prompt_identity, same turn-1 node and option counts. The
+ * only thing the log said about the failure was that it happened.
+ *
+ * A whole diagnosis session then went into a SOURCE TRACE to answer a question
+ * the response body answers directly. Worse, the trace had to GUESS which of
+ * four producers of `{status:'blocked', goal_node_id:'', options:[]}` had
+ * emitted it — `assessCanonicalAnalysisReadiness`'s no-semantic fallback
+ * (analysis-ready-helper.ts:1122), its SCHEMA_INVALID exit (:976, which emits
+ * NO block at all), `buildAnalysisRefusalReadiness` (:1366) and
+ * `synthesiseFreshnessOnlyAnalysisReady` (analysis-ready-emit.ts:59) — and
+ * those four are told apart by exactly the fields below:
+ *
+ *   · `goal_node_id` empty vs real     → "the projection found no goal node"
+ *                                        vs "it found the goal and lost the
+ *                                        OPTIONS". Two different defects; the
+ *                                        old log could not distinguish them,
+ *                                        and the first diagnosis asserted the
+ *                                        first without evidence for it.
+ *   · `readiness_issues[].code`        → the projection's OWN reason, already
+ *                                        on the wire and never printed.
+ *   · `blocked_reason`                 → present on the refusal builder, absent
+ *                                        on the freshness-only carrier.
+ *   · `bias_findings` present with no
+ *     `readiness_issues`               → the freshness-only synthesis carrier.
+ *   · `freshness` / `freshness_reason` → whether the synthesis path was even
+ *                                        reachable (it needs a selected
+ *                                        run_analysis fact; a fresh journey has
+ *                                        none, so `none/no_successful_run_
+ *                                        analysis_fact` RULES IT OUT).
+ *   · `graph_hash`                     → whether this turn read the SAME model
+ *                                        the drafting turn committed. This is
+ *                                        the read-vs-write discriminator and
+ *                                        the gate already compares it — but it
+ *                                        only speaks when the two DISAGREE, so
+ *                                        on a failure the log never showed
+ *                                        whether it had agreed or simply been
+ *                                        absent. Silence from a check that
+ *                                        turns itself off on absence is not
+ *                                        evidence (CLAUDE.md trap 13).
+ *
+ * NOTHING HERE IS AN ASSERTION. This function only reports; it cannot pass or
+ * fail a run. It is deliberately shared by the per-turn log line AND the
+ * failure message, so the alarm and the diagnostic can never describe the same
+ * turn differently — the same one-concept-one-predicate rule the rest of this
+ * file is built on.
+ *
+ * ABSENT IS NEVER PRINTED AS EMPTY. `goal_node_id=""` (the projection ran and
+ * found no goal) and `goal_node_id=absent` (no readiness block at all) are
+ * different facts, and `graphLine`'s own header records what collapsing two
+ * facts into one symbol already cost this estate once.
+ */
+export function readinessDiagnosis(body) {
+  const a = body?.analysis_ready;
+  if (!a || typeof a !== "object") return "analysis_ready=absent(no-block)";
+  const q = (v) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "absent" : String(v));
+  const issues = Array.isArray(a.readiness_issues)
+    ? a.readiness_issues.map((i) => i?.code ?? "?").join("|") || "none"
+    : "absent";
+  const bias = Array.isArray(a.bias_findings) ? String(a.bias_findings.length) : "absent";
+  return (
+    `status=${q(a.status)} goal_node_id=${q(a.goal_node_id)} ` +
+    `blocked_reason=${q(a.blocked_reason)} readiness_issues=${issues} bias_findings=${bias} ` +
+    `freshness=${q(a.freshness)}/${q(a.freshness_reason)} graph_hash=${q(body?.graph_hash)}`
+  );
+}
+
+/**
+ * The node-kind census of a turn's `draft_graph`.
+ *
+ * The counterpart to `readinessDiagnosis` on the WRITE side. `nodes=14` says
+ * nothing about whether the drafted model contained the one node the readiness
+ * projection requires — a node with `kind: "goal"`; without it
+ * `projectSemanticAnalysisReadyFromGraph` returns `undefined` and the whole
+ * payload collapses to `{status:'blocked', goal_node_id:'', options:[]}`
+ * (analysis-ready-helper.ts:788 → :1122). So the census makes "the drafted
+ * model had a goal / had N options" an OBSERVATION rather than an inference
+ * from a total.
+ *
+ * Returns `draft_graph=absent(no-block)` — never a zero — when the turn carried
+ * no graph, for the same reason `graphLine` does.
+ */
+export function draftGraphCensus(body) {
+  const g = body?.draft_graph;
+  if (!g || typeof g !== "object") return "draft_graph=absent(no-block)";
+  if (!Array.isArray(g.nodes)) return "draft_graph.nodes=absent(not-an-array)";
+  const counts = new Map();
+  for (const n of g.nodes) {
+    const k = n && typeof n === "object" && typeof n.kind === "string" ? n.kind : "(no-kind)";
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const census = [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, n]) => `${k}:${n}`)
+    .join(",");
+  return `draft_graph.kinds=${census || "(empty)"}`;
+}
+
+/**
  * Assert turn 1 (frame) produced a coherent response.
  * @returns {string[]} failure messages; empty means healthy.
  */
@@ -378,10 +481,45 @@ export function assertHealthyJourney(frameBody, followUpBody) {
             `Fix the trace: an unclassifiable turn is not a pass.`,
         );
       } else if (READINESS_PRODUCING_EXIT_PATHS.has(laterExit)) {
+        // ⚠⚠ THIS MESSAGE HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
+        // THAT IS WHY IT NOW NAMES CANDIDATES INSTEAD OF A CAUSE.
+        //
+        // v1 said "the model did not survive the turn" — pointing at
+        // DRAFTING/PERSISTENCE. A diagnosis lane went there; that seam was
+        // healthy.
+        // v2 said the failure is "in that READ or that PROJECTION". Also wrong,
+        // and wrong while the message's own printed fields disproved it: on the
+        // measured failures the read returned the committed model (identical
+        // `graph_hash`) and the projection SUCCEEDED, finding a goal and four
+        // options. It was overwritten AFTERWARDS, by the analyse-refusal arm —
+        // a THIRD seam neither version named.
+        //
+        // ⭐ THE RULE THIS ENCODES: an alarm may state what it OBSERVED with
+        // confidence and must not state a CAUSE it cannot observe. A confident
+        // wrong seam is worse than no seam, because it is acted on. Enumerate
+        // every seam consistent with the evidence, in the order the payload
+        // itself discriminates them, and let the printed fields decide — the
+        // one thing an alarm must never do is disagree with its own data on its
+        // own line.
         f.push(
           `${later.label}: analysis_ready.options was empty on exit_path=${laterExit}, which ` +
             `DOES produce readiness, after the model was drafted on ${drafting.label} — ` +
-            `the model did not survive the turn`,
+            `this turn PUT NO COMPARABLE OPTIONS ON THE WIRE. That is an OBSERVATION about ` +
+            `the payload, not yet a cause: a follow-up turn re-reads the persisted graph and ` +
+            `re-projects readiness from it, so at least three seams can produce it and the ` +
+            `fields below tell them apart. ` +
+            `(a) OVERWRITTEN AFTER A GOOD PROJECTION — the analyse-refusal arm replaces the ` +
+            `structural payload it just built (turn-executor.ts, the ANALYSE_HANDLER_ID branch ` +
+            `→ buildAnalysisRefusalReadiness). TELL: blocked_reason present with ` +
+            `readiness_issues ABSENT, and freshness "unknown". This was the measured cause on ` +
+            `18 Aug 2026 and the read and the projection were both healthy. ` +
+            `(b) THE PROJECTION FOUND NOTHING — analysis-ready-helper's no-semantic fallback. ` +
+            `TELL: readiness_issues PRESENT (it always sets them). ` +
+            `(c) THE READ RETURNED SOMETHING ELSE — stale, empty or foreign persisted state. ` +
+            `TELL: graph_hash DIFFERS between the two turns; equal hashes RULE THIS OUT. ` +
+            `Read these first: [${drafting.label}] ${readinessDiagnosis(drafting.body)} | ` +
+            `[${later.label}] ${readinessDiagnosis(later.body)}. ` +
+            `Do not conclude past what these fields support.`,
         );
       }
       continue;
@@ -396,6 +534,79 @@ export function assertHealthyJourney(frameBody, followUpBody) {
     }
   }
 
+  return f;
+}
+
+/**
+ * THE PRODUCT MUST NOT ANSWER A CONVERSATIONAL TURN WITH AN ANALYSIS REFUSAL.
+ *
+ * ⭐⭐ WHY THIS EXISTS, AND WHY IT IS DELIBERATELY NOT KEYED ON `options`.
+ *
+ * The 18 Aug 2026 P0 had TWO defects stacked on one turn, and only one of them
+ * is being fixed:
+ *
+ *   1. the turn ROUTED TO THE ANALYSE HANDLER although the user asked it to
+ *      "draft the model now" — nobody requested an analysis; and
+ *   2. the resulting refusal ERASED the model's identity from `analysis_ready`.
+ *
+ * The fix for (2) makes `options` non-empty again, so the continuity check
+ * above — the only thing that has ever caught this turn — goes GREEN. **The
+ * mis-routing then becomes unobservable**: a real, unfixed defect with no alarm
+ * over it, on a build where CI is entirely green. That is the sharpest form of
+ * the "a fix validated against the symptom's metric kills the symptom and
+ * leaves the defect alive" trap, because here the fix also removes the
+ * instrument that was measuring the residual.
+ *
+ * So this assertion keys on `blocked_reason`, which the fix PRESERVES, rather
+ * than on `options`, which the fix repopulates. It is orthogonal to the fix by
+ * construction and survives it.
+ *
+ * ⭐ THE PREDICATE IS DERIVED FROM THE PRODUCER, not from the observed payloads
+ * (P7). `src/orchestrator/types.ts:595` declares `blocked_reason` is *"written
+ * ONLY by `buildAnalysisRefusalReadiness`"*, and that function is called from
+ * exactly two sites, both of them the analyse-refusal arm. So a non-empty
+ * `blocked_reason` IS the turn declaring "I declined to analyse" — it is not a
+ * proxy for it, and no other producer can set it.
+ *
+ * ⭐ "THE USER DID NOT ASK TO ANALYSE" IS DECLARED BY THE CALLER, NEVER INFERRED
+ * FROM THE RESPONSE. This gate is the user: it composes every message it sends,
+ * so it KNOWS which turns requested an analysis. Deriving that intent back out
+ * of the reply would be circular — the reply is the thing under test. Each turn
+ * therefore carries an explicit `requestedAnalysis` flag, and only turns
+ * declared `false` are judged.
+ *
+ * NOTE WHAT THIS IS SILENT ABOUT, deliberately. A turn that runs an unrequested
+ * analysis and SUCCEEDS emits no `blocked_reason` and is not flagged here.
+ * Measured on the same sampling batch: 2 of 6 passing runs had turn 2 report
+ * `freshness="fresh"/"graph_hash_match"`, which on a two-turn journey with no
+ * prior analysis can only mean a run_analysis fact was produced ON THAT TURN.
+ * So the mis-routing is materially more common than the refusals alone reveal.
+ * That is recorded in the diagnosis line (freshness is printed on every turn)
+ * rather than asserted, because an analysis on a follow-up turn is legitimate
+ * in other journeys and firing on it here would be a false alarm — and false
+ * alarms are how this estate loses real ones.
+ *
+ * @param {Array<{label: string, body: unknown, requestedAnalysis: boolean}>} turns
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertNoUnrequestedAnalysisRefusal(turns) {
+  const f = [];
+  for (const t of turns) {
+    if (t.requestedAnalysis) continue;
+    const reason = t.body?.analysis_ready?.blocked_reason;
+    if (typeof reason !== "string" || reason.trim().length === 0) continue;
+    f.push(
+      `${t.label}: the product answered a CONVERSATIONAL turn with an ANALYSIS REFUSAL ` +
+        `(analysis_ready.blocked_reason="${reason}") — this turn never asked for an analysis. ` +
+        `Only the analyse-refusal arm writes blocked_reason, so the turn routed to the analyse ` +
+        `handler, ran the readiness gate, and declined. The user asked for something else and ` +
+        `got a refusal to do a thing they did not request. ` +
+        `This is a ROUTING defect and it is NOT fixed by making the refusal payload honest: ` +
+        `that fix restores analysis_ready.options, which turns the continuity check above ` +
+        `green while leaving this turn just as wrong. ` +
+        `Readiness on this turn: ${readinessDiagnosis(t.body)}`,
+    );
+  }
   return f;
 }
 
@@ -629,6 +840,12 @@ async function main() {
     `  HTTP ${t1.status} in ${(t1.ms / 1000).toFixed(1)}s | exit_path=${d1.exit_path} | ` +
       `build_sha=${d1.build_sha} | ${graphLine(t1.body)}`,
   );
+  // Printed on EVERY run, healthy or not — a diagnostic only emitted on failure
+  // gives you nothing to compare the failure against, which is precisely why
+  // the 18 Aug intermittent had no discriminator: the passing runs, of which
+  // there were eight, carried the answer and never printed it.
+  log(`    ${draftGraphCensus(t1.body)}`);
+  log(`    readiness: ${readinessDiagnosis(t1.body)}`);
   if (t1.status !== 200) failures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
   failures.push(...assertHealthyFrame(t1.body));
 
@@ -656,10 +873,25 @@ async function main() {
     `  HTTP ${t2.status} in ${(t2.ms / 1000).toFixed(1)}s | exit_path=${d2.exit_path} | ` +
       `build_sha=${d2.build_sha} | ${graphLine(t2.body)}`,
   );
+  log(`    ${draftGraphCensus(t2.body)}`);
+  log(`    readiness: ${readinessDiagnosis(t2.body)}`);
   if (t2.status !== 200) failures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
 
   // Assert over the JOURNEY, not over turn 2. See assertHealthyJourney.
   failures.push(...assertHealthyJourney(t1.body, t2.body));
+
+  // NEITHER TURN ASKED FOR AN ANALYSIS, and both messages are literals a few
+  // lines above — turn 1 frames a decision, turn 2 says "draft the model now".
+  // The intent is DECLARED here, at the only place that knows it, rather than
+  // inferred from the reply under test. If a future turn is added that DOES
+  // request one, it declares `requestedAnalysis: true` and is skipped; there is
+  // no heuristic to get wrong.
+  failures.push(
+    ...assertNoUnrequestedAnalysisRefusal([
+      { label: "turn 1", body: t1.body, requestedAnalysis: false },
+      { label: "turn 2", body: t2.body, requestedAnalysis: false },
+    ]),
+  );
 
   report(failures, [
     { label: "turn 1", d: d1, body: t1.body },
