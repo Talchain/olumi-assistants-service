@@ -85,7 +85,11 @@ function loadBankedEmission(): DraftRecordSet {
  * re-worded, while the quote is the record's identity.
  */
 function nodeByQuote(nodes: readonly ProjectedNode[], quote: string): ProjectedNode | undefined {
-  return nodes.find((n) => n.provenance?.source_quote === quote || n.label === quote);
+  // ⚠ NO `|| n.label === quote` FALLBACK. A review showed the disjunct is dead
+  // (the file runs green without it) and actively harmful: if the identity
+  // binding ever broke, the label branch would keep the suite green — trap 19
+  // reopened by the very helper written to close it.
+  return nodes.find((n) => n.provenance?.source_quote === quote);
 }
 
 // ───────────────────────────────────────────────────────────────────────────

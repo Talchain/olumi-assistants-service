@@ -252,7 +252,7 @@ describe("the decision node carries a real label derived from the decision being
     expect(decision.provenance?.label_authored).toBe(true);
   });
 
-  it("authors 10 of the 14 governed decision labels, and refuses the other 4 by name", () => {
+  it("authors 9 of the 14 governed decision labels, and refuses the other 5 by name", () => {
     const refused: string[] = [];
     for (const c of corpusCases()) {
       const goalQuotes = (c.graph?.nodes ?? [])
@@ -269,7 +269,63 @@ describe("the decision node carries a real label derived from the decision being
       "06-operations-warehouse",
       "08-channel-strategy",
       "12-similar-options",
+      // ⭐ THE ONE COST OF THE DELETION VETOES, RECORDED RATHER THAN TUNED AWAY.
+      // 14's decision sentence trails ", which could cannibalise … BUT would
+      // provide …". The `but` sits in the span the relative cut discards, and
+      // the veto cannot tell a qualification of the DECISION from one of its
+      // EFFECTS without semantics. It refuses. That is one label traded for
+      // seven measured misrepresentations closed, in the safe direction —
+      // refusing falls back to today's behaviour and can regress nothing. A
+      // further rule to recover it would be the fifth round on one natural
+      // -language predicate, which this estate has ratified as the point to
+      // stop guessing (trap 22f).
+      "14-qualitative-strategy",
     ]);
+  });
+
+  /**
+   * ⭐⭐ THE DECISION NODE MUST NAME *THIS* DECISION. A review measured it
+   * naming a different one: the goal-quote path accepted ANY deliberation
+   * frame, and `considering ` is one, so a goal sentence about hiring became
+   * the decision node's name while the real decision sat unread in the brief.
+   */
+  it("does not name a goal from an unrelated sentence when the brief states the decision", () => {
+    const derived = deriveDecisionLabel({
+      brief: "We are deciding whether to acquire Northgate or build in-house.",
+      goalQuotes: ["We are considering hiring 15 more engineers"],
+    });
+    expect(derived.authored).toBe(true);
+    expect(derived.label).toBe("Acquire Northgate or Build In-House");
+    expect(derived.label.toLowerCase()).not.toContain("engineer");
+  });
+
+  /**
+   * ⭐ A `between` FRAME'S VERB *IS* THE CHOICE. Stripping it produced
+   * `Close Leeds and Closing Bristol` — an instruction to do both.
+   */
+  it("keeps the choosing verb on a `between` construction rather than collapsing it to a conjunction", () => {
+    const derived = deriveDecisionLabel({
+      brief: "We must choose between closing Leeds and closing Bristol.",
+      goalQuotes: [],
+    });
+    expect(derived.authored).toBe(true);
+    expect(derived.label).toBe("Choose Between Closing Leeds and Closing Bristol");
+  });
+
+  /**
+   * ⭐ THE FOUNDER'S OWN BRIEF. Its decision is phrased "We could X, or Y" —
+   * which matched no frame, so his screenshot's second half still read
+   * `Decision` after round 1.
+   */
+  it("names the decision on the founder's own brief, which reads 'We could X, or Y'", () => {
+    const derived = deriveDecisionLabel({
+      brief:
+        "We'd like to spend less. We also want to increase productivity, while maintaining code quality. " +
+        "We could refactor the monolith, or buy a platform.",
+      goalQuotes: ["we'd like to spend less", "increase productivity, while maintaining code quality"],
+    });
+    expect(derived.authored).toBe(true);
+    expect(derived.label).toBe("Refactor the Monolith, or Buy a Platform");
   });
 
   it("a refused decision keeps the honest generic and says so", () => {
@@ -299,9 +355,25 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
   it("labelIsDerivedFrom accepts a re-cased/base-form derivation and REJECTS an introduced word", () => {
     expect(labelIsDerivedFrom("Cut Burn Rate by 30%", "cutting our burn rate by 30%")).toBe(true);
     expect(labelIsDerivedFrom("Reach £25M GMV Within 18 Months", "reach £25M GMV within 18 months")).toBe(true);
+    expect(
+      labelIsDerivedFrom(
+        "Reduce Cost-per-Delivery Below £7 Within 12 Months",
+        "reduce our cost-per-delivery below £7 within 12 months",
+      ),
+    ).toBe(true);
     // "Drastically" and "Costs" are nowhere in the source. A derivation that
     // produced them would be a paraphrase badged as the user's own statement.
     expect(labelIsDerivedFrom("Reduce Costs Drastically", "cut spending")).toBe(false);
+    // ⚠ IT WAS A SUBSTRING TEST AND A REVIEW MEASURED THE HOLE: `or` sits
+    // inside `for`, so an introduced coordinator passed as "derived".
+    expect(labelIsDerivedFrom("Or", "for the quarter")).toBe(false);
+    // A gerund resolves ONLY through the declared closed map — "shipping" is not
+    // in it, so `Ship` is treated as introduced. Deliberately strict: the map is
+    // the whole safety property, and a general `-ing` rule would coin verbs.
+    expect(labelIsDerivedFrom("Ship Weekly", "shipping is our weekly ritual")).toBe(false);
+    expect(
+      labelIsDerivedFrom("Switch from Weekly to Flexible Scheduling", "switching from weekly to flexible scheduling"),
+    ).toBe(true);
   });
 
   it("every token of every authored governed label is derived from that node's own quote", () => {
@@ -360,14 +432,21 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
     const projected = projectRecordsToGraph(records, brief).graph;
     const goal = projected.nodes.find((n) => n.kind === "goal");
     expect(goal).toBeDefined();
-    const union = [
-      goal?.label ?? "",
-      goal?.provenance?.source_quote ?? "",
-      String(goal?.goal_threshold_raw ?? ""),
-    ].join(" ");
+    // ⚠ `source_quote` IS DELIBERATELY EXCLUDED FROM THE UNION, and including
+    // it was the defect a review caught: the quote is the WHOLE input, so every
+    // numeral is present in it unconditionally and the assertion passed for a
+    // label of `""` or `"TOTALLY WRONG LABEL"`. A conservation twin that cannot
+    // fail is a guard agreeing with itself (trap 13b). Asserted over the
+    // DERIVED carriers only — the label and the threshold quad — which is the
+    // question A2 actually asks of them.
+    const union = [goal?.label ?? "", String(goal?.goal_threshold_raw ?? "")].join(" ");
+    expect(union).not.toContain(goal?.provenance?.source_quote ?? "\u0000");
     for (const numeral of ["215", "250", "6"]) {
       expect(union, `numeral ${numeral} must survive the union`).toContain(numeral);
     }
+    // Non-vacuity: the label really is a different string from the quote, so
+    // the union above is not the quote wearing a hat.
+    expect(canonical(goal?.label ?? "")).not.toBe(canonical(goal?.provenance?.source_quote ?? ""));
   });
 
   it("a node that is not the goal is untouched — option, factor and constraint labels stay verbatim", () => {
@@ -428,6 +507,69 @@ describe("twins: authoring must not invent, must not lose, and must not spread",
         canonical(node.provenance?.source_quote ?? ""),
       );
       expect(node.provenance?.label_authored).toBeUndefined();
+    }
+  });
+
+  /**
+   * ⭐⭐⭐ THE ADVERSARIAL CORPUS, AND IT IS THE LOAD-BEARING EVIDENCE HERE.
+   *
+   * These quotes were written OUTSIDE the author's head, by an adversarial
+   * review, in ordinary British business prose. The first version of this
+   * module authored a misrepresenting label for **28 of 61** of them — and not
+   * one could have been caught by `labelIsDerivedFrom`, because every word on
+   * screen was genuinely the user's. **The guard detected ADDITION and every
+   * harm was DELETION** (trap 13d: the invariant written with the same
+   * asymmetry as the code it guards).
+   *
+   * Each case is named by the harm class it produced. Per trap 22, the
+   * reviewer's corpus is the evidence and the author's was the development aid.
+   */
+  const MEASURED_HARMS: ReadonlyArray<readonly [string, string, string]> = [
+    ["disclaimer shown as the goal", "This is not about cutting costs: we want to double our delivery speed", "head_disclaims"],
+    ["disclaimer shown as the goal", "We are not trying to grow headcount — the aim is to raise output per engineer", "head_disclaims"],
+    ["disclaimer shown as the goal", "Cost is not the problem; the problem is that we cannot ship weekly", "head_disclaims"],
+    ["unmade alternative settled", "Build our own last-mile fleet — or partner with a third-party courier", "states_alternatives"],
+    ["scope silently widened", "Cut cloud spend by 25% without any change that degrades latency", "would_drop_a_qualification"],
+    ["exception dropped", "Raise prices — but only for new customers", "would_drop_a_qualification"],
+    ["label contradicts its own quote", "Move the whole estate to Azure (but not the payments platform)", "would_drop_a_qualification"],
+    ["deliberation the frame list missed", "Torn between rebuilding and buying", "deliberation_frame"],
+    ["deliberation the frame list missed", "The question is whether to rebuild or buy", "deliberation_frame"],
+    ["deliberation the frame list missed", "Whether to enter the German market", "deliberation_frame"],
+    ["deliberation the frame list missed", "Do we rebuild the platform or buy one", "deliberation_frame"],
+    ["negation inverted into an aim", "We must not exceed £250,000", "head_disclaims"],
+    ["negation inverted into an aim", "We must never let latency exceed 200ms", "head_disclaims"],
+    ["exception dropped", "Grow revenue, but not at the expense of margin", "head_disclaims"],
+  ];
+
+  it.each(MEASURED_HARMS)(
+    "REFUSES (%s): %s",
+    (_harm, quote, expectedReason) => {
+      const derived = deriveGoalObjectiveLabel(quote);
+      expect(derived.authored, `must not author: ${quote}`).toBe(false);
+      expect(derived.reason).toBe(expectedReason);
+      // Fail-closed means the verbatim survives — refusing is today's shipped
+      // behaviour, so a veto can never make a label worse than it already is.
+      expect(derived.label).toBe(quote);
+    },
+  );
+
+  /**
+   * ⚠ THE OPPOSITE DIRECTION FOR THE SAME VETOES, or they would be a licence to
+   * refuse everything. A hedge that SURVIVES into the label is not a dropped
+   * hedge, and must still author.
+   */
+  it("a qualification that survives into the label does NOT trip the deletion vetoes", () => {
+    for (const quote of [
+      "Improve retention unless it costs more than £50k",
+      "Ship weekly, except for the payments service",
+    ]) {
+      const derived = deriveGoalObjectiveLabel(quote);
+      expect(derived.authored, `must still author: ${quote}`).toBe(true);
+      for (const kept of ["Unless", "Except"]) {
+        if (quote.toLowerCase().includes(kept.toLowerCase())) {
+          expect(derived.label).toContain(kept);
+        }
+      }
     }
   });
 

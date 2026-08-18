@@ -38,6 +38,16 @@
  *      two objectives. Removing the visible defect does not require answering
  *      it, which is exactly why this ships first.
  *
+ * ⚠⚠ AND THE FIRST VERSION OF THIS PARAGRAPH WAS THE DEFECT IT DESCRIBES. It
+ * rested the faithfulness claim entirely on `labelIsDerivedFrom` — no token may
+ * appear that the user did not write. True, and **the wrong claim**: that guard
+ * detects ADDITION and every harm this module can do is DELETION. An
+ * adversarial corpus written outside the author's head produced a
+ * misrepresenting label on **28 of 61** ordinary business quotes, none of which
+ * the guard could ever have caught, because every word on screen was the
+ * user's own. The vetoes below — stated over what is THROWN AWAY — are what
+ * carries the claim now; the token guard is the smaller half.
+ *
  * ── THE PROJECTOR'S ARGUMENT, ANSWERED RATHER THAN IGNORED ─────────────────
  * `projector.ts:1342-1344` said: *"The label IS the user's own words. Nothing
  * is paraphrased: a paraphrase badged `stated` would be a misrepresentation of
@@ -61,11 +71,16 @@
  * "the team's goal" would be a fabrication of exactly the class the quality bar
  * forbids for numbers. So the derivation REFUSES, the verbatim stays as the
  * label, and `label_authored` is absent — the product says it has not authored
- * an objective rather than inventing one. Measured on the frozen governed
- * corpus: 9 of 13 goal labels authored, 4 refused; 10 of 14 decision labels
- * authored, 4 refused. Both refusal sets are pinned BY NAME in
- * `__tests__/authored-node-labels.test.ts`, so neither can grow or shrink in
- * silence (the KNOWN-DROPPED discipline, trap 22f).
+ * an objective rather than inventing one.
+ *
+ * ⭐ REFUSAL IS ALSO WHY THE VETOES ARE SAFE TO ADD FREELY: falling back to the
+ * verbatim IS the pre-existing shipped behaviour, so a veto can close a harm
+ * and cannot regress a label. Measured on the frozen governed corpus after the
+ * vetoes landed: **9 of 13 goal labels authored** (unchanged — no win lost) and
+ * **9 of 14 decision labels**, one fewer than before, the single cost being a
+ * decision sentence whose trailing clause carries a `but`. Both refusal sets
+ * are pinned BY NAME in `__tests__/authored-node-labels.test.ts`, so neither
+ * can grow or shrink in silence (the KNOWN-DROPPED discipline, trap 22f).
  */
 
 /** The outcome of one derivation. `authored` holds iff the label changed. */
@@ -79,8 +94,12 @@ export type AuthoredLabelRefusal =
   | "empty"
   /** The quote states a DECISION, not an objective. Nothing to author. */
   | "deliberation_frame"
-  /** No reduction reaches the bound without dropping one of two alternatives. */
-  | "would_drop_an_alternative"
+  /** The quote offers a free-standing alternative — a choice, not an objective. */
+  | "states_alternatives"
+  /** A reduction would have thrown away a negation, exception, hedge or alternative. */
+  | "would_drop_a_qualification"
+  /** The surviving head says what the objective is NOT. A disclaimer is not a goal. */
+  | "head_disclaims"
   /** Still over the bound after every permitted reduction. */
   | "no_concise_form"
   | "too_few_tokens"
@@ -109,6 +128,7 @@ export type AuthoredLabelRefusal =
  */
 const DELIBERATION_FRAMES: readonly string[] = [
   "should we ",
+  "do we ",
   "trying to decide whether to ",
   "trying to decide ",
   "deciding whether to ",
@@ -125,6 +145,14 @@ const DELIBERATION_FRAMES: readonly string[] = [
   "choosing an ",
   "must choose between ",
   "need to choose between ",
+  "torn between ",
+  "the question is whether to ",
+  "the question is whether ",
+  "whether to ",
+  "we could ",
+  "we can either ",
+  "our options are ",
+  "the options are ",
   "figuring out ",
   "figure out ",
   "working out ",
@@ -132,6 +160,58 @@ const DELIBERATION_FRAMES: readonly string[] = [
   "considering ",
   "deciding ",
 ];
+
+/**
+ * ⭐ THE SUBSET THAT INTRODUCES ALTERNATIVES.
+ *
+ * Only these may speak for the DECISION node from a goal quote. A bare
+ * `considering ` or `figure out ` marks deliberation about a subject; it does
+ * not say the sentence is the decision, and treating it as one let a goal from
+ * an unrelated sentence become the decision node's name.
+ */
+const CHOICE_FRAMES: ReadonlySet<string> = new Set([
+  "should we ",
+  "do we ",
+  "trying to decide whether to ",
+  "deciding whether to ",
+  "deciding between ",
+  "evaluating whether to ",
+  "considering whether to ",
+  "weighing whether to ",
+  "debating whether to ",
+  "choosing whether to ",
+  "choosing between ",
+  "must choose between ",
+  "need to choose between ",
+  "torn between ",
+  "the question is whether to ",
+  "the question is whether ",
+  "whether to ",
+  "we could ",
+  "we can either ",
+  "our options are ",
+  "the options are ",
+]);
+
+/** Frames whose own verb carries the choice and must NOT be stripped. */
+const BETWEEN_FRAMES: ReadonlySet<string> = new Set([
+  "deciding between ",
+  "choosing between ",
+  "must choose between ",
+  "need to choose between ",
+  "torn between ",
+]);
+
+/** Leading modals left behind when a `between` frame keeps its verb. */
+const CHOICE_MODALS: readonly string[] = ["must ", "need to ", "have to ", "will "];
+
+function stripChoiceModal(text: string): string {
+  const lower = text.toLowerCase();
+  for (const modal of CHOICE_MODALS) {
+    if (lower.startsWith(modal)) return text.slice(modal.length).trim();
+  }
+  return text;
+}
 
 /**
  * Gerund → base form. A CLOSED MAP, not a `-ing` rule: a general rule turns
@@ -145,11 +225,15 @@ const GERUND_TO_BASE: ReadonlyMap<string, string> = new Map(
     achieving: "achieve",
     adding: "add",
     building: "build",
+    choosing: "choose",
     closing: "close",
     cutting: "cut",
+    debating: "debate",
+    deciding: "decide",
     delivering: "deliver",
     doubling: "double",
     entering: "enter",
+    evaluating: "evaluate",
     exiting: "exit",
     expanding: "expand",
     growing: "grow",
@@ -242,23 +326,37 @@ const bareToken = (token: string): string =>
 /**
  * ⭐⭐ THE NO-INVENTION GUARANTEE, AS AN EXECUTABLE PREDICATE.
  *
- * Every token of `label` must be a token of `source` — case-folded, or the base
- * form of a gerund the source contains. Nothing else may appear. This is what
- * makes "authored" safe to badge over a `stated` provenance class: the wording
- * is rearranged and re-cased, never supplied.
+ * Every token of `label` must be a TOKEN of `source` — case-folded, or the base
+ * form of a gerund the source contains. Nothing else may appear.
  *
- * Callers treat `false` as a REFUSAL, not as a warning — if the derivation ever
+ * ⚠ IT WAS A SUBSTRING TEST AND THAT WAS FAR WEAKER THAN THIS DOCSTRING CLAIMED
+ * — an adversarial review measured it. `Or` passed against `for the quarter`
+ * (`or` sits inside `for`), and `Exceed £250,000` passed against `we must not
+ * exceed £250,000`. The first is a genuine hole; the second is the deeper point
+ * and is why this guard alone was never enough: **a substring test detects
+ * ADDITION, and every harm in this module is DELETION.** Tokenising closes the
+ * first. The second is closed by the discard vetoes below, not here.
+ *
+ * Callers treat `false` as a REFUSAL, not a warning — if the derivation ever
  * produces a token the user did not write, the verbatim is kept instead.
  */
 export function labelIsDerivedFrom(label: string, source: string): boolean {
-  const haystack = source.toLowerCase();
+  const sourceTokens = new Set(
+    words(source.toLowerCase()).map((t) => bareToken(t)).filter((t) => t.length > 0),
+  );
+  // Hyphenated compounds are also compared piecewise, so `cost-per-delivery`
+  // admits `cost`, `per` and `delivery` — the split is the user's own text.
+  for (const token of [...sourceTokens]) {
+    for (const piece of token.split("-")) if (piece.length > 0) sourceTokens.add(piece);
+  }
   for (const token of words(label)) {
     const bare = bareToken(token).toLowerCase();
     if (bare.length === 0) continue;
-    if (haystack.includes(bare)) continue;
+    if (sourceTokens.has(bare)) continue;
+    if (bare.split("-").every((piece) => piece.length === 0 || sourceTokens.has(piece))) continue;
     let viaGerund = false;
     for (const [gerund, base] of GERUND_TO_BASE) {
-      if (base === bare && haystack.includes(gerund)) {
+      if (base === bare && sourceTokens.has(gerund)) {
         viaGerund = true;
         break;
       }
@@ -294,8 +392,19 @@ function stripPreamble(text: string): string {
   return text;
 }
 
-const dropParentheticals = (text: string): string =>
-  text.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+/** Removes `(…)` asides AND reports them, because what was removed is the
+ *  thing the veto below has to look at. */
+function dropParentheticals(text: string): { text: string; removed: string[] } {
+  const removed: string[] = [];
+  const out = text
+    .replace(/\s*\(([^)]*)\)\s*/g, (_m, inner: string) => {
+      removed.push(inner);
+      return " ";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+  return { text: out, removed };
+}
 
 /** Cuts that separate a PREAMBLE from its elaboration. The head is a summary. */
 const PREAMBLE_CUTS: readonly string[] = [":", ";", " — ", "—"];
@@ -304,6 +413,81 @@ const RELATIVE_CUTS: readonly string[] = [" that ", " which ", " where ", " who 
 /** A top-level `or` — the marker of a second alternative. Hyphenated compounds
  *  ("feast-or-famine") are deliberately NOT matched: only a free-standing `or`. */
 const NAMES_AN_ALTERNATIVE = /(^|\s)or(\s|$)/i;
+
+/**
+ * ⭐⭐⭐ THE VETOES — AND WHY THEY ARE THE LOAD-BEARING PART OF THIS MODULE.
+ *
+ * The first version of this file rested its faithfulness claim on
+ * {@link labelIsDerivedFrom}: no token may appear that the user did not write.
+ * That claim was true and it was **the wrong claim**, because it detects
+ * ADDITION and every harm this module can do is DELETION. An adversarial
+ * corpus written outside the author's head found 28 of 61 ordinary British
+ * business quotes producing a misrepresenting label — and not one of them
+ * could ever have been caught by an add-only guard, because every word on
+ * screen was genuinely the user's. Trap 13d: the invariant had been written
+ * with the same asymmetry as the code it guarded.
+ *
+ * So the rule is now stated over what is THROWN AWAY. Three vetoes, all
+ * FAIL-CLOSED — a veto means "keep the verbatim", which is exactly today's
+ * shipped behaviour, so a veto can never make any label worse than it is now.
+ */
+
+/**
+ * V1 · A DISCARDED SPAN CARRYING A QUALIFICATION. Dropping "but not the
+ * payments platform" from a scope, or "but only for new customers" from a
+ * price rise, leaves a label that CONTRADICTS its own quote while consisting
+ * entirely of the user's words.
+ */
+const DISCARD_CARRIES_A_QUALIFICATION =
+  /(^|[\s,;:—(])(not|never|without|except|unless|only|but|provided|assuming|no|nor|rather|instead)([\s,;:—).]|$)/i;
+const CONTRACTED_NEGATION = /\p{L}n['’]t\b/iu;
+
+/**
+ * V2 · A SURVIVING HEAD THAT DISCLAIMS. "This is not about cutting costs",
+ * "We are not trying to grow headcount", "Cost is not the problem" — each is
+ * the user saying what the objective is NOT, immediately before saying what it
+ * IS. Displaying the disclaimer as the team's goal inverts them, and it is the
+ * worst class the review found because the label reads fluently and wrongly.
+ */
+const HEAD_DISCLAIMS = /(^|\s)(not|never|no|nor)(\s|$)/i;
+
+/**
+ * V3 · A RESTRICTIVE RELATIVE CLAUSE. "any change that degrades latency" is one
+ * noun phrase; cutting at ` that ` leaves "without any change", widening a
+ * latency guard into a freeze on all change. A relative clause after a
+ * quantifier or an exception is restricting it, not describing it.
+ */
+const HEAD_TAKES_A_RESTRICTIVE_CLAUSE =
+  /(^|\s)(without|except|unless|only|any|all|every)(\s|$)/i;
+
+/** V1 proper: a negation, exception or hedge was thrown away. Never exempt. */
+const discardCarriesAQualification = (span: string): boolean =>
+  DISCARD_CARRIES_A_QUALIFICATION.test(span) || CONTRACTED_NEGATION.test(span);
+
+/**
+ * The whole discard veto, for spans with no surviving head to consider
+ * (parentheticals). Alternatives count as qualifications here because a
+ * parenthetical is removed from INSIDE a clause, never from beside it.
+ */
+const discardIsUnsafe = (span: string): boolean =>
+  discardCarriesAQualification(span) || NAMES_AN_ALTERNATIVE.test(span);
+
+/**
+ * ⚠ ONE EXEMPTION, AND IT IS MEASURED RATHER THAN ARGUED.
+ *
+ * Vetoing every `or`-bearing tail cost two governed decision labels, and the
+ * reason is the distinction the original (false) comment was reaching for. When
+ * the surviving head is ITSELF a choice construction — "decide between two
+ * major feature investments for Q3" — the enumeration that follows the colon is
+ * the list of alternatives, and dropping it asserts none of them. When the head
+ * is a bare action — "build our own last-mile fleet" — dropping the `or` clause
+ * settles a choice the user has not made. The head is what tells the two apart,
+ * which is why the veto reads it.
+ */
+const headNamesTheChoiceItself = (head: string): boolean => /(^|\s)between(\s|$)/i.test(head);
+
+const discardEndsAChoice = (head: string, tail: string): boolean =>
+  NAMES_AN_ALTERNATIVE.test(tail) && !headNamesTheChoiceItself(head);
 
 function cutAt(text: string, cuts: readonly string[]): { head: string; tail: string } | undefined {
   const lower = text.toLowerCase();
@@ -329,26 +513,37 @@ function cutAt(text: string, cuts: readonly string[]): { head: string; tail: str
  * ⚠ THE COUNT IS DELIBERATE. Each additional reduction rule over natural
  * language buys one direction and reopens another — this estate has watched
  * four consecutive rounds of that on one predicate (trap 22f). Two reductions,
- * both structural, with one safety veto:
+ * both structural:
  *
  *  1. drop a PREAMBLE (`:` `;` `—`) — the head is the sentence's own summary;
  *  2. drop a trailing RELATIVE clause (` that `, ` which `, ` where `, ` who `)
  *     — the head is the thing described.
  *
- * The veto: a relative cut is REFUSED when the discarded tail names a second
- * alternative, because there the head is one of two options and keeping only it
- * would state that the choice is already made. A preamble cut is not vetoed:
- * its head describes the whole set, not one member of it.
+ * ⚠⚠ THE PREAMBLE CUT USED TO BE UNVETOED, ON THE GROUND THAT *"its head
+ * describes the whole set, not one member of it"*. **That sentence was false**
+ * and a review measured it: `Build our own last-mile fleet — or partner with a
+ * third-party courier` reduced to `Build Our Own Last-Mile Fleet`, promoting an
+ * unmade choice to a settled objective. Every cut is now vetoed on the same
+ * terms; a reduction that throws away a qualification, an exception or an
+ * alternative refuses instead.
  *
- * Returns `undefined` when the veto fires — the caller must then refuse.
+ * Returns `undefined` when a veto fires — the caller then keeps the verbatim,
+ * which is the pre-existing behaviour, so a veto cannot regress a label.
  */
 function reduceToLabelBody(text: string): string | undefined {
   let body = text;
   const preamble = cutAt(body, PREAMBLE_CUTS);
-  if (preamble && preamble.head.length > 0) body = preamble.head;
+  if (preamble && preamble.head.length > 0) {
+    if (discardCarriesAQualification(preamble.tail)) return undefined;
+    if (discardEndsAChoice(preamble.head, preamble.tail)) return undefined;
+    body = preamble.head;
+  }
   const relative = cutAt(body, RELATIVE_CUTS);
   if (relative && relative.head.length > 0) {
-    if (NAMES_AN_ALTERNATIVE.test(relative.tail)) return undefined;
+    if (discardCarriesAQualification(relative.tail)) return undefined;
+    if (discardEndsAChoice(relative.head, relative.tail)) return undefined;
+    // V3: the clause is RESTRICTING the head, not describing it.
+    if (HEAD_TAKES_A_RESTRICTIVE_CLAUSE.test(relative.head)) return undefined;
     body = relative.head;
   }
   return body.replace(/[,\s]+$/, "").trim();
@@ -427,13 +622,42 @@ export function deriveGoalObjectiveLabel(quote: string): AuthoredLabel {
     return { label: source, authored: false, reason: "deliberation_frame" };
   }
 
-  let body = stripPreamble(source);
-  body = dropParentheticals(body).replace(/[.?!]+$/, "").trim();
+  // ⭐ AND THE STRUCTURAL FORM OF THE SAME THING, which the frame list cannot
+  // reach. A review found every short deliberation phrasing outside the closed
+  // list being authored as a goal — "Torn between rebuilding and buying",
+  // "Whether to enter the German market", "Do we rebuild or buy". Some were
+  // refused in the first round, but by WORD COUNT, which is the right answer
+  // for the wrong reason: shorten the phrasing and they authored. A quote
+  // offering a free-standing alternative is a choice, and a choice is not an
+  // objective however it is worded. New frames are still added, but this is
+  // what stops the list being the only defence.
+  if (NAMES_AN_ALTERNATIVE.test(source)) {
+    return { label: source, authored: false, reason: "states_alternatives" };
+  }
+
+  const stripped = stripPreamble(source);
+  const withoutAsides = dropParentheticals(stripped);
+  // A parenthetical is a discard like any other — `Move the whole estate to
+  // Azure (but not the payments platform)` produced a label contradicting its
+  // own quote, entirely in the user's words.
+  if (withoutAsides.removed.some(discardIsUnsafe)) {
+    return { label: source, authored: false, reason: "would_drop_a_qualification" };
+  }
+  const body = withoutAsides.text.replace(/[.?!]+$/, "").trim();
   const reduced = reduceToLabelBody(body);
   if (reduced === undefined) {
-    return { label: source, authored: false, reason: "would_drop_an_alternative" };
+    return { label: source, authored: false, reason: "would_drop_a_qualification" };
   }
   const normalised = normaliseHead(reduced);
+  // ⭐ THE WORST CLASS THE REVIEW FOUND: a disclaimer displayed as the goal.
+  // "This is not about cutting costs: we want to double our delivery speed"
+  // reduced to `This Is Not About Cutting Costs` — the user's exact words, the
+  // exact inverse of their objective, and fluent enough that nobody reading the
+  // canvas would query it. A head that says what the objective is NOT is not an
+  // objective, whatever survives the cut.
+  if (HEAD_DISCLAIMS.test(normalised) || CONTRACTED_NEGATION.test(normalised)) {
+    return { label: source, authored: false, reason: "head_disclaims" };
+  }
   const tokenCount = words(normalised).length;
   if (tokenCount > GOAL_WORD_BOUND) {
     return { label: source, authored: false, reason: "no_concise_form" };
@@ -459,14 +683,27 @@ const splitSentences = (text: string | undefined): string[] =>
     .filter(Boolean);
 
 /** One candidate sentence → a decision label, or `undefined` to keep looking. */
-function decisionLabelFromCandidate(candidate: string): string | undefined {
+function decisionLabelFromCandidate(
+  candidate: string,
+  requireChoiceFrame = false,
+): string | undefined {
   const source = canonical(candidate);
   const frame = findDeliberationFrame(source);
   if (!frame) return undefined;
+  if (requireChoiceFrame && !CHOICE_FRAMES.has(frame.frame)) return undefined;
 
-  const stated = source.slice(frame.index + frame.frame.length).replace(/[.?!]+$/, "").trim();
-  const body = dropParentheticals(stated);
-  const reduced = reduceToLabelBody(body);
+  // ⭐ A `between` FRAME IS NOT A PREAMBLE — THE FRAME WORD *IS* THE SEMANTICS.
+  // Stripping it turned "We must choose between closing Leeds and closing
+  // Bristol" into `Close Leeds and Closing Bristol`, which reads as an
+  // instruction to do BOTH. The verb is kept (it is the user's own word), so
+  // the label states the choice instead of collapsing it.
+  const startsAt = BETWEEN_FRAMES.has(frame.frame)
+    ? frame.index
+    : frame.index + frame.frame.length;
+  const stated = stripChoiceModal(source.slice(startsAt).replace(/[.?!]+$/, "").trim());
+  const withoutAsides = dropParentheticals(stated);
+  if (withoutAsides.removed.some(discardIsUnsafe)) return undefined;
+  const reduced = reduceToLabelBody(withoutAsides.text);
   if (reduced === undefined) return undefined;
 
   const normalised = normaliseHead(reduced);
@@ -500,8 +737,16 @@ export function deriveDecisionLabel(input: {
   readonly brief?: string;
   readonly goalQuotes?: readonly string[];
 }): AuthoredLabel {
+  // ⚠ THE GOAL-QUOTE PATH REQUIRES A *CHOICE* FRAME, NOT ANY FRAME. It accepted
+  // any of them, and `considering ` is one — so a brief reading "We are
+  // deciding whether to acquire Northgate or build in-house", carrying a goal
+  // quote "We are considering hiring 15 more engineers", labelled the decision
+  // node `Hire 15 More Engineers`: the decision node naming a goal from a
+  // different sentence while the real decision sat unread. Only a frame that
+  // introduces alternatives may speak for the decision; everything else falls
+  // through to the brief, which is where the decision sentence actually is.
   for (const quote of input.goalQuotes ?? []) {
-    const label = decisionLabelFromCandidate(quote);
+    const label = decisionLabelFromCandidate(quote, true);
     if (label !== undefined) return { label, authored: true };
   }
   for (const sentence of splitSentences(input.brief)) {
