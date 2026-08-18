@@ -132,6 +132,63 @@ const NUMERIC_ANSWER_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * ⭐⭐ THE CLAUSE ANCHOR — the numeric arm's `^` becomes "start of message, OR
+ * the start of the FINAL sentence-level clause".
+ *
+ * WITNESSED (18 Aug 2026 composed model-compiler journey, deployed CEE
+ * `585f8dce` / UI `dd089a50`, fresh guest). Olumi asked, on screen, for one
+ * option×factor effect value. The user answered in ordinary English:
+ *
+ *   "Doubling down on enterprise sales would push sales headcount up a lot -
+ *    set it to 0.8."
+ *
+ * The final clause IS the whole-message form this module already claims. The
+ * `^` anchor refused it for carrying context, the turn fell to the value-update
+ * path, and the product refused the answer to its own question (P8).
+ *
+ * ⚠ WHY A SENTENCE-LEVEL BREAK AND NOT A COMMA, stated as a rule rather than
+ * tuned to a corpus (P7). A comma CONTINUES a clause, so a bare referent after
+ * one routinely binds to something that clause just introduced — *"For the
+ * hybrid option, set it to 0.8"* means the hybrid option's effect, and reading
+ * the prose as mere context there would be the wrong-entity write in a new
+ * costume. A full stop, `!`, `?`, `;` or a spaced dash ENDS one, after which the
+ * preceding words are context and the referent's only antecedent is the question
+ * the product asked. The comma form is pinned in
+ * `ANSWERED_ASK_KNOWN_DROPPED`, not silently absent.
+ *
+ * ⚠ `(?<!\d)[.!?;](?!\d)` — a decimal point is not a clause break. Without the
+ * lookarounds "set it to 0.8." splits into "set it to 0" and "8.", and the
+ * reading silently binds the WRONG NUMBER. Pinned by its own case.
+ *
+ * ⚠ THE WHOLE-MESSAGE READING IS TRIED FIRST AND IS UNCHANGED, so every message
+ * that binds today binds identically today — including "Yes. Set it to 0.12.",
+ * whose affirmative lead the whole-message pattern already absorbs and which a
+ * split-first reading would have demoted to context-bearing. This relaxation is
+ * strictly ADDITIVE by construction, not by inspection.
+ */
+const CLAUSE_BREAK = /(?<!\d)[.!?;](?!\d)\s+|\s+[\u2014\u2013-]\s+/g;
+
+function splitTrailingClause(text: string): {
+  readonly leadingContext: string;
+  readonly clause: string;
+} {
+  const re = new RegExp(CLAUSE_BREAK.source, 'g');
+  let breakStart = -1;
+  let breakEnd = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    breakStart = match.index;
+    breakEnd = match.index + match[0].length;
+    if (re.lastIndex === match.index) re.lastIndex += 1;
+  }
+  if (breakStart < 0) return { leadingContext: '', clause: text };
+  return {
+    leadingContext: text.slice(0, breakStart).trim(),
+    clause: text.slice(breakEnd).trim(),
+  };
+}
+
+/**
  * A QUALITATIVE answer: an assignment whose value slot carries no digit.
  *
  * ⭐ DERIVED FROM THE PRODUCT'S OWN TEMPLATE SHAPE, NOT FROM A WORD LIST (P7).
@@ -191,6 +248,24 @@ export type MissingValueAnswer =
       /** The value exactly as the user wrote it — never reformatted. */
       readonly valueText: string;
       readonly referent: string | null;
+      /**
+       * ⭐ THE PROSE THAT PRECEDED THE ANSWERING CLAUSE, normalised — `''` when
+       * the message is, in its entirety, the answer.
+       *
+       * WHY IT IS ON THE READING AND NOT A SECOND FUNCTION (trap 21 — name the
+       * concepts apart, do not build a second reader). Two consumers need
+       * DIFFERENT answers to "did the user answer?", and the difference is
+       * exactly this field:
+       *   · `matchBareRepairValue` may bind ONLY the whole-message form, because
+       *     its caller resolves the slot from "exactly one pair is missing" and
+       *     has no reader for what the prose points at. It requires `''`.
+       *   · `resolveOptionEffectWrite`'s rule 3c binds a context-bearing answer,
+       *     because it FIRST checks the prose against the graph's own entities
+       *     and against the pair the product is asking about.
+       * A second grammar in a second module is how this estate loses seams
+       * (trap 12); one reading with the distinction recorded on it cannot drift.
+       */
+      readonly leadingContext: string;
     }
   | {
       readonly kind: 'qualitative';
@@ -210,11 +285,9 @@ function normalise(message: string): string {
  * Numeric is tried first: a digit-bearing answer is bindable and must not be
  * demoted to the clarify branch.
  */
-export function readMissingValueAnswer(message: string): MissingValueAnswer | null {
-  if (typeof message !== 'string') return null;
-  const text = normalise(message);
-  if (text.length === 0) return null;
-
+function readNumericClause(
+  text: string,
+): { readonly valueText: string; readonly referent: string | null } | null {
   for (const re of NUMERIC_ANSWER_PATTERNS) {
     const m = re.exec(text);
     if (m === null) continue;
@@ -226,7 +299,38 @@ export function readMissingValueAnswer(message: string): MissingValueAnswer | nu
     const valueText = groups[groups.length - 1];
     if (valueText === undefined) continue;
     const referent = groups.length > 1 ? (groups[groups.length - 2] ?? null) : null;
-    return { kind: 'numeric', valueText, referent };
+    return { valueText, referent };
+  }
+  return null;
+}
+
+export function readMissingValueAnswer(message: string): MissingValueAnswer | null {
+  if (typeof message !== 'string') return null;
+  const text = normalise(message);
+  if (text.length === 0) return null;
+
+  // (1) TODAY'S READING, UNCHANGED AND FIRST. Anything that binds at this tip
+  // binds identically, with `leadingContext: ''`.
+  const whole = readNumericClause(text);
+  if (whole !== null) return { kind: 'numeric', ...whole, leadingContext: '' };
+
+  // (2) THE ANSWER CARRIED CONTEXT. The final sentence-level clause is the
+  // SAME grammar — no new patterns, no widened vocabulary (see CLAUSE_BREAK).
+  //
+  // ⭐ THE REFERENT IS REQUIRED HERE AND OPTIONAL ABOVE, and the asymmetry is
+  // the safety. "Use 0.8." alone is unmistakably an answer because there is
+  // nothing else in the message; "…so the CAC picture is grim - use 0.8."
+  // carries a whole clause the value might belong to instead. A bare referent
+  // from the CLOSED set ("it", "that", "the value", …) is the one construction
+  // that cannot name a graph entity, which is what leaves the product's own
+  // outstanding question as the only antecedent. Refused shapes are pinned in
+  // `ANSWERED_ASK_KNOWN_DROPPED`.
+  const { leadingContext, clause } = splitTrailingClause(text);
+  if (leadingContext.length > 0 && clause.length > 0) {
+    const trailing = readNumericClause(clause);
+    if (trailing !== null && trailing.referent !== null) {
+      return { kind: 'numeric', ...trailing, leadingContext };
+    }
   }
 
   const q = QUALITATIVE_ANSWER_PATTERN.exec(text);

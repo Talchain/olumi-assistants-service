@@ -234,11 +234,15 @@ import { composeOptionEffectAskResponse } from '../orchestrator-v5/compose/optio
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
-  matchBareRepairValue,
   resolveRepairValueBinding,
   type RepairValueBindingResolution,
 } from '../orchestrator-v5/routing/repair-value-binding.js';
 import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
+// ⭐ ROADMAP 2.1266 / A2 — the ONE owner of "is this message an answer to the
+// missing-value ask?". Used HERE only as the cheap text gate that decides
+// whether the pre-route pays for its reads; the slot resolution belongs to the
+// resolvers below, never to this site.
+import { readMissingValueAnswer } from '../orchestrator-v5/routing/missing-value-answer.js';
 import { buildCanonicalAnalysisReadyFromGraph } from './tools/analysis-ready-helper.js';
 import {
   isProcessMetaIntake,
@@ -4771,12 +4775,29 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       (extensions.selectedElements?.node_ids.length ?? 0) > 0 ||
       (extensions.selectedElements?.edge_ids.length ?? 0) > 0;
     let repairValueBinding: (RepairValueBindingResolution & { kind: 'bind' }) | null = null;
+    // ⭐⭐ ROADMAP 2.1266 / A2 — THE ANSWERED-ASK CLAIM, and it exists because a
+    // resolver nothing routes to is dark code (CLAUDE.md trap 16).
+    //
+    // The witnessed turn 4 — "Doubling down on enterprise sales would push sales
+    // headcount up a lot - set it to 0.8." — is value-update phrasing
+    // (`shouldSuppressEditDispatchForValueUpdate` = true, MEASURED at this tip),
+    // so `editVerbCandidate` is false, and it carries no configure/effect
+    // vocabulary, so `configureOptionIntent` is false. The turn therefore never
+    // reached the edit lane at all, and rule 3c inside `resolveOptionEffectWrite`
+    // would have been unreachable however correct it was. This flag is the ONLY
+    // thing this site decides: whether the turn is an edit-lane turn. WHICH pair
+    // it binds, and whether it binds at all, stays with the resolver.
+    let answeredAskClaim = false;
+    // ONE reading of "did the user answer?", shared with both resolvers — never
+    // a second text predicate at the route (trap 12).
+    const repairAnswerReading = readMissingValueAnswer(ingress.message);
     if (
       !bypassEditHandling &&
       !configureOptionIntent &&
       !structuralRestructureIntent &&
       !repairSelectionPresent &&
-      matchBareRepairValue(ingress.message) !== null
+      repairAnswerReading !== null &&
+      repairAnswerReading.kind === 'numeric'
     ) {
       let repairClaimBlocked = false;
       try {
@@ -4843,6 +4864,19 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (resolution.matched && resolution.kind === 'bind') {
           repairValueBinding = resolution;
         }
+        if (!resolution.matched) {
+          // ⭐ The bare-value binder owns the WHOLE-MESSAGE form and declined, so
+          // this is the context-bearing shape. Resolved against the SAME
+          // persisted graph the edit dispatch will reload, by the SAME resolver
+          // that will run there — this call decides routing only, and a `write`
+          // or an `ask` both mean "the edit lane owns this turn". Every gate
+          // above (bypass, configure-intent, structural, selection, pendings,
+          // strict parse) has already had its say.
+          answeredAskClaim = resolveOptionEffectWrite({
+            message: ingress.message,
+            graph: persistedForRepair,
+          }).matched;
+        }
       }
     }
 
@@ -4859,7 +4893,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // its own right — the claim anchor + the sole-missing-pair derivation
       // above ARE its gates (bypassEditHandling was already required to claim).
       (editVerbCandidate || configureOptionIntent || structuralRestructureIntent ||
-        repairValueBinding !== null) &&
+        repairValueBinding !== null ||
+        // ⭐ ROADMAP 2.1266 / A2 — an answer to the product's own outstanding ask
+        // is an edit-lane intent in its own right, on exactly the same footing
+        // as 2.1261's bare-value bind: the pre-route's gates ARE its gates.
+        answeredAskClaim) &&
       !proposalConfirmSuppressed &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness

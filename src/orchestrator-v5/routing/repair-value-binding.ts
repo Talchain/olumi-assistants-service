@@ -118,6 +118,15 @@ export function matchBareRepairValue(message: string): BareRepairValueMatch | nu
   // for the user is the fabrication class the sibling claim guard exists to
   // close. The clarify composer handles that reading instead.
   if (answer === null || answer.kind !== 'numeric') return null;
+  // ⭐ AND NEITHER MAY A CONTEXT-BEARING ANSWER, which is what keeps this
+  // function's own contract ("ENTIRELY a bare value-set instruction") true after
+  // the clause anchor widened the reading. THIS CALLER'S SLOT RESOLUTION IS
+  // "exactly one pair is missing" — it has NO reader for what the prose points
+  // at, so admitting context here would bind a sentence naming one option to a
+  // pair belonging to another. The context-bearing form is claimed by
+  // `resolveOptionEffectWrite`'s rule 3c, which checks the prose against the
+  // graph's own entities first. Trap 21: two questions, named apart.
+  if (answer.leadingContext !== '') return null;
   return { valueText: answer.valueText, referent: answer.referent };
 }
 
@@ -201,6 +210,40 @@ export function deriveMissingEffectPairs(
 
 function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * ⭐⭐ THE PAIR THE PRODUCT IS CURRENTLY ASKING ABOUT — `blockers[0]`, and the
+ * identity of that index is DERIVED FROM THE PRODUCER, not chosen here (P7).
+ *
+ * `coaching/readiness-recovery.ts` composes the sentence the user is answering
+ * from exactly one element:
+ *
+ *   const firstBlocker = asBlocker(analysisReady?.blockers?.[0]);   // :194
+ *   …
+ *   nextStep: `Next, choose the missing effect value for "\${option}" on
+ *              "\${factor}" so the comparison can be prepared.`     // :242
+ *
+ * So "which pair did Olumi ask about?" has ONE answer in this system and it is
+ * the head of the blocker list. `deriveMissingEffectPairs` — this module's, and
+ * the estate's, sole owner of "which pairs is the product saying it has no value
+ * for" — is run over the head ALONE rather than re-implemented, so this reader
+ * cannot drift from it about what qualifies as a missing-effect blocker
+ * (CLAUDE.md trap 12: the second spelling is the one that rots).
+ *
+ * ⚠ RETURNS null WHEN THE HEAD IS NOT SUCH A BLOCKER, and that is the whole
+ * point rather than a convenience. `pairs[0]` is NOT the same thing: if the head
+ * blocker is a mapping or encoding issue, the recovery copy renders a DIFFERENT
+ * sentence and the product is not asking for an effect value at all — binding an
+ * answer to `pairs[0]` there would be answering a question nobody asked.
+ */
+export function deriveAskedEffectPair(
+  readiness: { readonly blockers?: unknown } | null | undefined,
+): MissingEffectPair | null {
+  const blockers = readiness?.blockers;
+  if (!Array.isArray(blockers) || blockers.length === 0) return null;
+  const head = deriveMissingEffectPairs({ blockers: blockers.slice(0, 1) });
+  return head.length === 1 ? head[0]! : null;
 }
 
 /**
