@@ -1221,12 +1221,114 @@ function pickUncertaintyDriver(nodes: readonly NodeLite[]): string | null {
 
 // ----- text utilities -------------------------------------------------------
 
-function truncate(label: string, max: number): string {
+/**
+ * ⭐⭐ THE OPENING SENTENCE CUT A LABEL MID-PHRASE ON AN UNCLOSED BRACKET, AND
+ * THIS FUNCTION IS WHERE IT HAPPENED — DERIVED, NOT INFERRED.
+ *
+ * ── WHAT WAS WITNESSED, AND WHAT REPRODUCES IT ─────────────────────────────
+ * Two independent 18 Aug 2026 witnesses caught the same shape on the deployed
+ * build. Run against the old body, this function reproduced all three strings
+ * BYTE FOR BYTE:
+ *
+ *   `truncate(<the 85-char option>, 40)`
+ *      → "double down on enterprise sales (higher"     ← composed-journey
+ *   `truncate(<the 90-char goal>,   80)`
+ *      → "…are asking for a self-hosted"               ← UX gate point 4a
+ *   `truncate("hold the line on cloud-only for another year", 40)`
+ *      → "hold the line on cloud-only for another"     ← UX gate point 4a
+ *
+ * A UI lane independently refuted the theory that this was a rendering defect:
+ * the strings arrive ALREADY TRUNCATED ON THE WIRE, while the SAME payload
+ * carries the full label intact at five other sites. So the label the user
+ * reads in prose was not the label on their node, and nothing downstream could
+ * repair it without inventing text — which is the defect class itself.
+ *
+ * ── THE THREE FAULTS OF THE OLD BODY ───────────────────────────────────────
+ *  1. `cut.trim()` on the `else` branch cut MID-TOKEN whenever the last space
+ *     fell in the first half of the window;
+ *  2. it never looked at DELIMITERS, so a cut inside `(…)` shipped an unclosed
+ *     bracket — which is what makes it read as broken English rather than as
+ *     abbreviation;
+ *  3. it appended NO ellipsis, so nothing on screen said the text was elided.
+ *
+ * ── THE RULE NOW, AND WHY IT REFUSES ───────────────────────────────────────
+ * A cut is taken only at a WORD BOUNDARY, only where it leaves every delimiter
+ * closed, and it is always marked with `…`. Where no such point exists the
+ * label is returned WHOLE — a long honest label beats a mangled one, and
+ * returning the whole label can never misrepresent it.
+ *
+ * ⚠ THE RESULT IS ALWAYS A WORD-BOUNDED PREFIX OF THE INPUT (plus `…`), NEVER A
+ * SUBSTITUTE STRING. That is the property the conformance test binds to, by
+ * identity against the node's own label rather than by any length predicate —
+ * so a future composer that "helpfully" swaps in a shorter phrase goes RED.
+ *
+ * ⚠ `'` IS DELIBERATELY NOT TREATED AS A DELIMITER: in ordinary British prose it
+ * is an apostrophe far more often than a quote ("don't", "the team's"), and
+ * treating it as an opener would refuse cuts on perfectly safe labels.
+ *
+ * ⚠ SIBLINGS NOT TOUCHED, AND NAMED SO THEY ARE NOT FORGOTTEN: four other
+ * `truncate` helpers exist (`compose/phase3-blocks.ts`, `compose/helpers.ts`,
+ * `coaching/readiness-recovery.ts`, `cee/observability/collector.ts`). All four
+ * append an ellipsis, so none produces the witnessed unclosed-bracket string,
+ * but all four still cut mid-token and inside brackets. Consolidating them onto
+ * this rule is a separate change with its own blast radius; this lane fixes the
+ * seam the witnesses actually caught.
+ */
+export function elideAtWordBoundary(label: string, max: number): string {
   const trimmed = label.trim();
   if (trimmed.length <= max) return trimmed;
-  const cut = trimmed.slice(0, max);
-  const lastSpace = cut.lastIndexOf(' ');
-  return lastSpace > Math.floor(max / 2) ? cut.slice(0, lastSpace).trim() : cut.trim();
+
+  // One character is reserved for the ellipsis: the mark is what turns a cut
+  // into an abbreviation the reader can recognise as one.
+  let end = trimmed.lastIndexOf(' ', max - 1);
+
+  // Back the cut up until nothing is left open. Each pass moves strictly
+  // leftwards, so this terminates.
+  while (end > 0) {
+    const opener = firstUnclosedDelimiter(trimmed.slice(0, end));
+    if (opener < 0) break;
+    end = trimmed.lastIndexOf(' ', opener - 1);
+  }
+
+  // No honest cut point — keep the user's label whole rather than mangle it.
+  if (end <= 0) return trimmed;
+
+  const head = trimmed.slice(0, end).replace(/[\s,;:—–-]+$/u, '');
+  if (head.length === 0) return trimmed;
+  return `${head}…`;
+}
+
+/**
+ * The index of the earliest delimiter that `text` opens and never closes, or
+ * `-1` when every one of them is closed. Brackets nest; the double quote is a
+ * toggle, which is why an odd count of them reports the first as still open.
+ */
+function firstUnclosedDelimiter(text: string): number {
+  const PAIRS: Readonly<Record<string, string>> = { '(': ')', '[': ']', '{': '}', '\u201c': '\u201d' };
+  const CLOSERS = new Set(Object.values(PAIRS));
+  const open: number[] = [];
+  let doubleQuoteAt = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (ch === '"') {
+      doubleQuoteAt = doubleQuoteAt < 0 ? i : -1;
+      continue;
+    }
+    if (PAIRS[ch] !== undefined) {
+      open.push(i);
+      continue;
+    }
+    if (CLOSERS.has(ch)) open.pop();
+  }
+  const first = open.length > 0 ? open[0]! : -1;
+  if (first < 0) return doubleQuoteAt;
+  if (doubleQuoteAt < 0) return first;
+  return Math.min(first, doubleQuoteAt);
+}
+
+/** The composer's own name for the rule above. */
+function truncate(label: string, max: number): string {
+  return elideAtWordBoundary(label, max);
 }
 
 function cleanLeadIn(s: string): string {

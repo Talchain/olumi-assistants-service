@@ -622,6 +622,11 @@ describe("one terminal V3 graph/options projection authority", () => {
     ) as StagedV3Graph;
     expect(byLabel(staged.nodes, "Operational Effectiveness").provenance).toBe("from_brief");
     expect(byLabel(staged.nodes, "Delivery Risk").provenance).toBe("from_brief");
-    expect(byLabel(staged.nodes, "two developers").provenance).toBe("from_brief");
+    // ⚠ THE AUTHORED LABEL, ON PURPOSE. This test strips `provenance` to force
+    // the LEGACY label-only path — the one branch where an option's badge IS
+    // decided by its label — so it is the case the projector's old comment
+    // warned about. Asserting it here with the authored spelling is what proves
+    // the containment check survives the authoring rather than assuming it.
+    expect(byLabel(staged.nodes, "Two Developers").provenance).toBe("from_brief");
   });
 });

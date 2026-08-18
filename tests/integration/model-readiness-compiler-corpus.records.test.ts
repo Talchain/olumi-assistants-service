@@ -218,7 +218,10 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
 
   it('temporal route receives no fabricated scalar and enters the human configure flow', () => {
     const compiled = compile(CASES[2]);
-    const temporalLabel = 'charging £49 now and £59 in Q2';
+    // The user's own words; the display label is AUTHORED from them
+    // (`objective-label.ts`), so the quote is what binds by identity (trap 19).
+    const temporalQuote = 'charging £49 now and £59 in Q2';
+    const temporalLabel = 'Charging £49 Now and £59 in Q2';
     const temporalNode = compiled.nodes.find(
       (node) => node.kind === 'option' && node.label === temporalLabel,
     );
@@ -228,6 +231,9 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
     );
 
     expect(temporalNode).toBeDefined();
+    // Bound to the user's words as well as the display label, so a future
+    // relabelling cannot quietly point this case at a different option.
+    expect(temporalNode?.source_quote).toBe(temporalQuote);
     expect(temporalOption).toBeDefined();
     expect(temporalAnalysisOption).toBeDefined();
     expect(Object.keys(

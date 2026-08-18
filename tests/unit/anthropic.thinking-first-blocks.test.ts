@@ -269,9 +269,11 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
     expect(result.graph.nodes.map((n) => n.label).sort()).toEqual([
       "Decision",
       "Grow Revenue Without Over-Hiring",
+      // Option labels are AUTHORED from the user's own words
+      // (`objective-label.ts`); the verbatim stays on `source_quote`.
+      "Hire a Contractor",
+      "Hire a Full-Time Employee",
       "delivery capacity",
-      "hire a contractor",
-      "hire a full-time employee",
     ]);
     expect(
       result.graph.nodes
