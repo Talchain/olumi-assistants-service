@@ -437,6 +437,10 @@ import {
   hasMutationSignal,
   looksLikeImperativeRerun,
 } from './routing/analytical-intent.js';
+import {
+  evaluateAnalysisElection,
+  GATED_ANALYSIS_HANDLER_ID,
+} from './routing/analysis-election-gate.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
 import {
@@ -7729,6 +7733,79 @@ export async function runTurnExecutor(
             ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
             : {}),
         });
+
+        // ══════════════════════════════════════════════════════════════
+        // ⭐⭐ THE ANALYSIS-ELECTION GATE — routing/analysis-election-gate.ts
+        // ══════════════════════════════════════════════════════════════
+        //
+        // ⚠ THE POSITION IS THE MECHANISM. This sits INSIDE the
+        // `if (routingResult === undefined)` block, on the line after the
+        // router returns, and that placement — not any field, flag or
+        // discriminator — is what guarantees the gate sees ONLY LLM-elected
+        // proposals. Every deterministic pre-route (value-update, typed-chip,
+        // deictic, compound, clarification-resume, short-confirm, and the
+        // ROADMAP 2.229 imperative re-run) assigns `routingResult` above and
+        // is itself gated on `routingResult === undefined`, so control cannot
+        // reach this line when one of them owns the turn. There is no mirror
+        // to keep in sync (CLAUDE.md trap 12), and moving this block out of
+        // the `if` silently widens it to every synthesised proposal — which is
+        // exactly the mutant `analysis-election-gate.integration.test.ts`
+        // kills with its imperative-re-run twin.
+        //
+        // ⚠ AND THE SANCTIONED PROVISIONAL ANALYSIS IS NOT REACHABLE FROM
+        // HERE AT ALL. `scheduleAutoRunAfterFreshDraft` dispatches through
+        // `dispatchChipClickRunAnalysis`, which builds its own turn context
+        // and never calls `routeWithToolUse` or `runTurnExecutor`; the
+        // user-clicked chip is claimed by route-v2 dispatch branch (b), ahead
+        // of the TurnExecutor fallthrough. Neither can produce a
+        // `routingResult.proposal`, so no reachable input lets this gate
+        // suppress the automatic analysis after initial model generation.
+        //
+        // DEMOTION SHAPE. The elected execute proposal is replaced by a
+        // synthesised CONVERSE proposal carrying its own deterministic
+        // `answer_text`, which is the same idiom the deterministic pre-routes
+        // use in reverse (synthesise a `RoutingToolCallResult` and let the
+        // unchanged lifecycle own the turn). `rawResult` and `llmCallCount`
+        // are carried through untouched so token accounting, the context
+        // -budget event and `capturedReasoning` all still describe the real
+        // call. The router's `orientationText` is DISCARDED, deliberately: the
+        // served prompt scopes it to "pre-action orientation … say what the
+        // simulation will test", so on a demoted election it describes a
+        // simulation that will not run.
+        if (
+          routingResult.type === 'tool_call' &&
+          routingResult.proposal.intent_class === 'execute'
+        ) {
+          const electionOutcome = evaluateAnalysisElection({
+            electedHandlerId: routingResult.proposal.action.handler_id,
+            message: payload.message,
+          });
+          if (electionOutcome.kind !== 'not_analysis_election') {
+            emit(TelemetryEvents.V5AnalysisElectionGate, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              handler_id: GATED_ANALYSIS_HANDLER_ID,
+              outcome: electionOutcome.kind,
+              reason: electionOutcome.reason,
+            });
+          }
+          if (electionOutcome.kind === 'demoted') {
+            routingResult = {
+              type: 'tool_call',
+              proposal: {
+                intent_class: 'converse',
+                answer_text: electionOutcome.assistant_text,
+              },
+              // Belt and braces: the converse branch prefers `answer_text`,
+              // but any path that falls back to `orientationText` must also
+              // read honest copy, never the discarded pre-action orientation.
+              orientationText: electionOutcome.assistant_text,
+              rawResult: routingResult.rawResult,
+              llmCallCount: routingResult.llmCallCount,
+              droppedActions: [],
+            };
+          }
+        }
         // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE.
         // Capture only after the real router successfully consumed the FINAL
         // pack. Merely assembling `focus` is not authority to claim that a

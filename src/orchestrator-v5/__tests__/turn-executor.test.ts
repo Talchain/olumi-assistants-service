@@ -190,7 +190,14 @@ const BASE_PAYLOAD: MessageTurnPayload = {
   source: 'composer',
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-  message: 'frame the decision',
+  // ⚠ MESSAGE CORRECTED — the analysis-election gate (same class as the
+  // ROADMAP 2.652 correction in tests/integration/phase1-behavioural.test.ts).
+  // The execute-path cases in this file drive `run_analysis` proposals, and
+  // 'frame the decision' is not a request to run one, so those turns now
+  // demote before the handler, validator and routing-log behaviour they pin.
+  // Measured inert to every deterministic pre-route and guard, so each turn
+  // still reaches the mocked routing adapter exactly as it did.
+  message: 'Run the analysis.',
   turn_class: 'frame',
   stage: 'frame',
 };

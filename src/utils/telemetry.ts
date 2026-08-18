@@ -1868,6 +1868,14 @@ export const TelemetryEvents = {
   // enums + booleans only.
   V5NoAnalysisGuard: "v5.no_analysis_guard",
 
+  // ⭐ The analysis-election gate (routing/analysis-election-gate.ts). Fires on
+  // every LLM-elected proposal so the ADMITTED and DEMOTED arms are both
+  // countable and the deployed demotion rate is derivable rather than
+  // inferred. `outcome` is the gate's own enum
+  // ('admitted' | 'demoted'); `reason` is its structural reason enum.
+  // NEVER carries the message or any user copy.
+  V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
+
   // V5 Context Management v1 — edit_graph no-op recovery. Emitted from
   // the dispatchEditGraph no-op branch when the recovery decision is
   // computed. Replaces the bland fallback with context-aware copy when

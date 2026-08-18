@@ -243,7 +243,16 @@ describe('Phase 1.5 — HTTP E2E with real UI fixture', () => {
       kind: 'message' as const,
       turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      message: UI_FIXTURE.message as string,
+      // ⚠ MESSAGE CORRECTED — the analysis-election gate. The golden capture's
+      // own sentence is "How does this model look?", a conversational question,
+      // while this case elects execute/`run_analysis`; the gate now demotes
+      // that combination. What this test is about is the GRAPH — that the
+      // precondition does not over-reach on the real wire shape — so the
+      // UNMODIFIED `UI_FIXTURE.graph_state` below is preserved exactly, which
+      // is the whole point of the case, and only the sentence is made to match
+      // the turn. (The sibling case at the top of this file still uses the
+      // capture's own message; it is unaffected.)
+      message: 'Run the analysis.',
       turn_class: 'frame',
       stage: 'frame',
       source: 'composer' as const,
