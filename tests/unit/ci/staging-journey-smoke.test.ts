@@ -30,6 +30,9 @@ import {
   extractDiagnostics,
   carriedDraftGraph,
   readyOptionCount,
+  readinessDiagnosis,
+  draftGraphCensus,
+  assertNoUnrequestedAnalysisRefusal,
   READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
@@ -262,7 +265,7 @@ describe("staging journey smoke — the model must arrive, on whichever turn dra
       analysis_ready: { ...LIVE_DRAFTFIRST_TURN2.analysis_ready, options: [] },
     };
     expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, lost).join(" ")).toContain(
-      "did not survive the turn",
+      "PUT NO COMPARABLE OPTIONS ON THE WIRE",
     );
   });
 
@@ -653,7 +656,7 @@ describe("2.1300 F3 — an absent analysis_ready is only a LOSS where readiness 
     };
     expect(READINESS_PRODUCING_EXIT_PATHS.has("turn_executor")).toBe(true);
     const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, freshnessOnly);
-    expect(failures.join(" ")).toContain("did not survive the turn");
+    expect(failures.join(" ")).toContain("PUT NO COMPARABLE OPTIONS ON THE WIRE");
     // The message must NAME the exit_path, or the on-call engineer cannot tell
     // a real loss from a mis-classified exit without opening the payload.
     expect(failures.join(" ")).toContain("turn_executor");
@@ -666,7 +669,7 @@ describe("2.1300 F3 — an absent analysis_ready is only a LOSS where readiness 
     const noExit = { assistant_text: "…", analysis_ready: { options: [] } };
     const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, noExit);
     expect(failures.join(" ")).toContain("exit_path");
-    expect(failures.join(" ")).not.toContain("did not survive the turn");
+    expect(failures.join(" ")).not.toContain("PUT NO COMPARABLE OPTIONS ON THE WIRE");
   });
 
   it("DERIVED, NOT MIRRORED: the readiness-producing set matches route-v2's call sites", () => {
@@ -754,5 +757,360 @@ describe("2.1300 F4 — the invariant is the model the user LEAVES HOLDING", () 
     const failures = assertHealthyJourney(trivialTurn1, LIVE_DRAFTFIRST_TURN2);
     expect(failures.join(" ")).toContain("turn 1:");
     expect(failures.join(" ")).toContain(`expected >= ${MIN_NODES}`);
+  });
+});
+
+/**
+ * ROADMAP — the 18 Aug 2026 turn-2 readiness intermittent.
+ *
+ * WHAT THESE PIN, AND WHY THEY ARE NOT "tests for a log line".
+ *
+ * The gate fired on 2 of 10 identical runs and every field it printed was
+ * BYTE-IDENTICAL across the failing and the passing runs. The response bodies
+ * were not: they carried `goal_node_id`, `readiness_issues`, `blocked_reason`,
+ * `freshness_reason` and `graph_hash`, and those five fields separate four
+ * different producers of the same `{status:'blocked', options:[]}` shape. A
+ * diagnostic that omits the only discriminating fields is the same defect class
+ * as an assertion that cannot fail — it agrees with every hypothesis.
+ *
+ * So each case below is stated as a DISCRIMINATION: two bodies that the gate
+ * previously described identically must now describe differently, and the twin
+ * proves the reporter is not simply printing the same string for everything
+ * (CLAUDE.md trap 20 — when a per-item probe returns the same answer for every
+ * item, suspect the probe).
+ */
+describe("18 Aug intermittent — the readiness diagnosis discriminates the producers", () => {
+  /** The shape measured on staging: blocked, no goal, no options. */
+  const NO_GOAL_BODY = {
+    analysis_ready: {
+      status: "blocked",
+      goal_node_id: "",
+      options: [],
+      blocked_reason: "NO_GOAL",
+      readiness_issues: [{ code: "NO_GOAL" }, { code: "OPTIONS_NOT_CONFIGURED" }],
+      freshness: "none",
+      freshness_reason: "no_successful_run_analysis_fact",
+    },
+    graph_hash: "f986ac90c77eafbd",
+  };
+
+  /**
+   * THE TWIN THAT MATTERS. Same `status`, same empty `options`, same
+   * `graph_hash` — and a REAL goal_node_id. Under the old log line these two
+   * bodies printed the identical `analysis_ready.options=0`, so the first
+   * diagnosis of this defect asserted "the graph had no goal node" on evidence
+   * that could not tell these two apart. They are different defects with
+   * different owners: no goal is a structural loss, a real goal with no options
+   * is an option-projection loss.
+   */
+  const GOAL_BUT_NO_OPTIONS_BODY = {
+    analysis_ready: {
+      status: "blocked",
+      goal_node_id: "378f195a",
+      options: [],
+      readiness_issues: [{ code: "OPTIONS_NOT_CONFIGURED" }],
+      freshness: "none",
+      freshness_reason: "no_successful_run_analysis_fact",
+    },
+    graph_hash: "f986ac90c77eafbd",
+  };
+
+  it("PREMISE: the old counter really cannot tell the two apart", () => {
+    // If this ever stops being true the discrimination tests below are
+    // asserting against a distinction the gate already made.
+    expect(readyOptionCount(NO_GOAL_BODY)).toBe(0);
+    expect(readyOptionCount(GOAL_BUT_NO_OPTIONS_BODY)).toBe(0);
+    expect(NO_GOAL_BODY.analysis_ready.status).toBe(
+      GOAL_BUT_NO_OPTIONS_BODY.analysis_ready.status,
+    );
+  });
+
+  it("DISCRIMINATES no-goal from goal-with-no-options — the distinction the first diagnosis guessed at", () => {
+    const noGoal = readinessDiagnosis(NO_GOAL_BODY);
+    const withGoal = readinessDiagnosis(GOAL_BUT_NO_OPTIONS_BODY);
+    expect(noGoal).not.toBe(withGoal);
+    // Bound by IDENTITY of the field, not by "the strings differ": a reporter
+    // that differed on some incidental field would pass a mere inequality.
+    expect(noGoal).toContain('goal_node_id=""');
+    expect(withGoal).toContain('goal_node_id="378f195a"');
+  });
+
+  it("NEVER collapses an absent readiness block into an empty one", () => {
+    // `goal_node_id=""` (the projection ran and found no goal) and no block at
+    // all (nothing produced readiness) are different facts. `graphLine`'s own
+    // header records what collapsing two facts into one symbol cost once.
+    expect(readinessDiagnosis({ assistant_text: "…" })).toBe("analysis_ready=absent(no-block)");
+    expect(readinessDiagnosis(NO_GOAL_BODY)).not.toContain("absent(no-block)");
+  });
+
+  it("surfaces the projection's OWN reason codes, which were already on the wire and never printed", () => {
+    expect(readinessDiagnosis(NO_GOAL_BODY)).toContain("readiness_issues=NO_GOAL|OPTIONS_NOT_CONFIGURED");
+    // TWIN: a payload with NO readiness_issues key must say `absent`, not
+    // `none` — the refusal builder omits the key entirely and the helper
+    // fallback always sets it, so absent-vs-empty is itself a producer tell.
+    expect(readinessDiagnosis({ analysis_ready: { status: "blocked", options: [] } })).toContain(
+      "readiness_issues=absent",
+    );
+    expect(
+      readinessDiagnosis({ analysis_ready: { status: "blocked", options: [], readiness_issues: [] } }),
+    ).toContain("readiness_issues=none");
+  });
+
+  it("reports the freshness verdict that decides whether the synthesis carrier was even reachable", () => {
+    // `synthesiseFreshnessOnlyAnalysisReady` emits the identical shape, but only
+    // for FRESHNESS_ONLY_SYNTHESIS_REASONS, both of which require a selected
+    // run_analysis fact. A fresh journey has none, so this reason RULES THAT
+    // PRODUCER OUT — and the gate never printed it.
+    expect(readinessDiagnosis(NO_GOAL_BODY)).toContain(
+      'freshness="none"/"no_successful_run_analysis_fact"',
+    );
+    const synth = {
+      analysis_ready: {
+        status: "blocked",
+        goal_node_id: "",
+        options: [],
+        bias_findings: [],
+        freshness: "unknown",
+        freshness_reason: "current_graph_hash_unavailable",
+      },
+    };
+    expect(readinessDiagnosis(synth)).toContain('freshness="unknown"/"current_graph_hash_unavailable"');
+    // The synthesis carrier is the ONLY producer that ships bias_findings with
+    // no readiness_issues — print both so the pair is legible.
+    expect(readinessDiagnosis(synth)).toContain("bias_findings=0");
+    expect(readinessDiagnosis(synth)).toContain("readiness_issues=absent");
+  });
+
+  it("reports graph_hash, so read-of-the-wrong-model can be ruled in or out rather than inferred from silence", () => {
+    // The continuity check compares hashes but speaks ONLY on disagreement, so
+    // on a failure the log never revealed whether it had agreed or simply been
+    // absent. An absence probe with no positive control (trap 13).
+    expect(readinessDiagnosis(NO_GOAL_BODY)).toContain('graph_hash="f986ac90c77eafbd"');
+    expect(readinessDiagnosis({ analysis_ready: { options: [] } })).toContain("graph_hash=absent");
+  });
+
+  it("the real captured healthy turn 2 reports a REAL goal and its true issue codes", () => {
+    // Positive control against a committed live capture, not a hand-built
+    // object: the reporter must produce the right answer on the shape the
+    // product actually emits.
+    const line = readinessDiagnosis(LIVE_DRAFTFIRST_TURN2);
+    expect(line).toContain(`goal_node_id="${LIVE_DRAFTFIRST_TURN2.analysis_ready.goal_node_id}"`);
+    expect(LIVE_DRAFTFIRST_TURN2.analysis_ready.goal_node_id).not.toBe("");
+    expect(line).toContain("MISSING_OPTION_VALUE");
+    expect(line).toContain(`graph_hash="${LIVE_DRAFTFIRST_TURN2.graph_hash}"`);
+  });
+});
+
+describe("18 Aug intermittent — the draft census makes the goal node an observation", () => {
+  it("counts the drafted node KINDS on the real capture, including the goal", () => {
+    const census = draftGraphCensus(LIVE_DRAFTFIRST_TURN1);
+    const kinds: Record<string, number> = {};
+    for (const n of LIVE_DRAFTFIRST_TURN1.draft_graph.nodes) kinds[n.kind] = (kinds[n.kind] ?? 0) + 1;
+    // Derived from the fixture, not hand-copied: a hand-written expectation
+    // here would be a mirror of the capture and would drift from it silently.
+    expect(kinds.goal).toBeGreaterThan(0);
+    expect(census).toContain(`goal:${kinds.goal}`);
+    expect(census).toContain(`option:${kinds.option}`);
+  });
+
+  it("DISCRIMINATES a graph with a goal from one without, at the SAME node total", () => {
+    // The whole point: `nodes=2` is identical for both, and the census is not.
+    const withGoal = { draft_graph: { nodes: [{ id: "a", kind: "goal" }, { id: "b", kind: "option" }] } };
+    const withoutGoal = { draft_graph: { nodes: [{ id: "a", kind: "factor" }, { id: "b", kind: "option" }] } };
+    expect(withGoal.draft_graph.nodes.length).toBe(withoutGoal.draft_graph.nodes.length);
+    expect(draftGraphCensus(withGoal)).toContain("goal:1");
+    expect(draftGraphCensus(withoutGoal)).not.toContain("goal:");
+  });
+
+  it("says absent(no-block) for a turn with no graph, never a zero", () => {
+    expect(draftGraphCensus(LIVE_DRAFTFIRST_TURN2)).toBe("draft_graph=absent(no-block)");
+    expect(draftGraphCensus({ draft_graph: { nodes: [] } })).toBe("draft_graph.kinds=(empty)");
+  });
+});
+
+describe("18 Aug intermittent — the failure message must not misattribute the seam", () => {
+  const lostOptions = {
+    ...LIVE_DRAFTFIRST_TURN2,
+    analysis_ready: { ...LIVE_DRAFTFIRST_TURN2.analysis_ready, options: [], goal_node_id: "" },
+  };
+
+  it("ENUMERATES the candidate seams and asserts NO cause — both retired wordings stay retired", () => {
+    const msg = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, lostOptions).join(" ");
+    // ⚠ THIS MESSAGE HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, and both
+    // wrong versions are pinned out here rather than only the first.
+    //   v1 "the model did not survive the turn"  → pointed at PERSISTENCE.
+    //   v2 "the failure is in that READ or that PROJECTION" → pointed at the
+    //      read/projection, while the message's OWN printed fields showed the
+    //      read returned the committed model and the projection had succeeded.
+    // The measured cause was a THIRD seam — the analyse-refusal arm overwriting
+    // a good projection — which neither version named.
+    expect(msg).not.toContain("did not survive the turn");
+    expect(msg).not.toContain("the failure is in that READ or that PROJECTION");
+
+    // What it must do instead: report the OBSERVATION, then enumerate every
+    // seam consistent with the evidence, each with the field that identifies
+    // it. An alarm may state what it saw; it may not state a cause it cannot
+    // observe, because a confident wrong seam is acted on.
+    expect(msg).toContain("That is an OBSERVATION about the payload, not yet a cause");
+    for (const candidate of [
+      "OVERWRITTEN AFTER A GOOD PROJECTION",
+      "THE PROJECTION FOUND NOTHING",
+      "THE READ RETURNED SOMETHING ELSE",
+    ]) {
+      expect(msg, candidate).toContain(candidate);
+    }
+    // Each candidate must ship the field that discriminates it, or the list is
+    // three guesses rather than a decision procedure.
+    expect(msg).toContain("TELL: blocked_reason present with readiness_issues ABSENT");
+    expect(msg).toContain("TELL: readiness_issues PRESENT");
+    expect(msg).toContain("TELL: graph_hash DIFFERS");
+  });
+
+  it("carries the discriminating fields INTO the alarm, not only into the log", () => {
+    // CI surfaces the failure list; a log line above it can be scrolled past or
+    // truncated. The message and the log must also never disagree, so both are
+    // rendered by the SAME function — one concept, one predicate.
+    const msg = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, lostOptions).join(" ");
+    expect(msg).toContain(readinessDiagnosis(lostOptions));
+    expect(msg).toContain(readinessDiagnosis(LIVE_DRAFTFIRST_TURN1));
+  });
+
+  it("TWIN: a healthy journey still emits NO message at all", () => {
+    // Opposite direction — none of the above may be bought with a new false
+    // alarm on the shape the gate must let through.
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, LIVE_DRAFTFIRST_TURN2)).toEqual([]);
+  });
+});
+
+/**
+ * C-2 — THE INSTRUMENT MUST NOT BE BLINDED BY THE FIX IT MEASURED.
+ *
+ * The 18 Aug P0 stacked TWO defects on one turn: the product ROUTED a
+ * conversational turn ("draft the model now") to the analyse handler, and the
+ * resulting refusal ERASED the model's identity from `analysis_ready`.
+ *
+ * Only the second is being fixed. That fix repopulates `options`, which turns
+ * the continuity check — the ONLY assertion that has ever caught this turn —
+ * fully GREEN. Proven by execution below. So without this block, closing the
+ * payload defect makes the routing defect UNOBSERVABLE: a real, unfixed defect
+ * with no alarm over it, on a build where CI is entirely green.
+ *
+ * That is the sharpest form of "a fix validated against the symptom's metric
+ * kills the symptom and leaves the defect alive" — here the fix also removes
+ * the instrument measuring the residual.
+ *
+ * The assertion is therefore keyed on `blocked_reason`, which the fix
+ * PRESERVES, not on `options`, which the fix repopulates. Orthogonal by
+ * construction. Both halves are pinned: the fixed payload must still trip this
+ * alarm, and a genuinely conversational reply must not.
+ */
+describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its own defect", () => {
+  /** The wire shape measured on staging, 18 Aug 2026 (pre-fix). */
+  const REFUSAL_PRE_FIX = {
+    assistant_text: "I could not complete the analysis.",
+    analysis_ready: {
+      status: "blocked",
+      goal_node_id: "",
+      options: [],
+      blocked_reason: "MISSING_OPTION_VALUE",
+    },
+    graph_hash: "cfded3af0aa14ebd",
+    _diagnostic_trace: { exit_path: "turn_executor" },
+  };
+
+  /**
+   * THE SAME TURN AFTER THE PAYLOAD FIX: identity restored, refusal intact.
+   * This is what staging will emit once the sibling fix deploys.
+   */
+  const REFUSAL_POST_FIX = {
+    ...REFUSAL_PRE_FIX,
+    analysis_ready: {
+      status: "blocked",
+      goal_node_id: "378f195a",
+      options: LIVE_DRAFTFIRST_TURN1.analysis_ready.options,
+      blocked_reason: "MISSING_OPTION_VALUE",
+    },
+    graph_hash: LIVE_DRAFTFIRST_TURN1.graph_hash,
+  };
+
+  it("PREMISE, PROVEN BY EXECUTION: the payload fix turns the continuity check GREEN on this turn", () => {
+    // The whole justification for this block. If this ever stops being true,
+    // the reasoning above is stale and must be re-derived before trusting it.
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, REFUSAL_PRE_FIX).join(" ")).toContain(
+      "PUT NO COMPARABLE OPTIONS ON THE WIRE",
+    );
+    expect(assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, REFUSAL_POST_FIX)).toEqual([]);
+  });
+
+  it("FIRES on the post-fix payload — the routing defect stays visible after the payload defect is closed", () => {
+    const f = assertNoUnrequestedAnalysisRefusal([
+      { label: "turn 2", body: REFUSAL_POST_FIX, requestedAnalysis: false },
+    ]);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("CONVERSATIONAL turn with an ANALYSIS REFUSAL");
+    // Bound by IDENTITY of the reason, not merely "something was reported".
+    expect(f[0]).toContain('blocked_reason="MISSING_OPTION_VALUE"');
+  });
+
+  it("FIRES on the pre-fix payload too — one alarm spans both sides of the fix", () => {
+    // If it only fired on one shape it would be a fixture-shaped guard rather
+    // than a statement about routing.
+    expect(
+      assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 2", body: REFUSAL_PRE_FIX, requestedAnalysis: false },
+      ]),
+    ).toHaveLength(1);
+  });
+
+  it("OPPOSITE-DIRECTION TWIN: the real healthy journey is SILENT", () => {
+    // No false alarm may be bought with the above. Both real captures.
+    expect(
+      assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 1", body: LIVE_DRAFTFIRST_TURN1, requestedAnalysis: false },
+        { label: "turn 2", body: LIVE_DRAFTFIRST_TURN2, requestedAnalysis: false },
+      ]),
+    ).toEqual([]);
+    // And the premise that makes that meaningful: the healthy capture really
+    // has no blocked_reason, so the silence is the predicate's doing and not
+    // the fixture's (trap 13b).
+    expect(LIVE_DRAFTFIRST_TURN2.analysis_ready.blocked_reason).toBeUndefined();
+  });
+
+  it("OPPOSITE-DIRECTION TWIN: a turn that DID request an analysis is not judged", () => {
+    // A refusal is a legitimate answer to a request to analyse. Firing there
+    // would make the alarm a complaint about the handler doing its job.
+    expect(
+      assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 2", body: REFUSAL_POST_FIX, requestedAnalysis: true },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("an empty or whitespace blocked_reason is NOT a refusal declaration", () => {
+    // The legacy freshness-only carrier is `blocked` with NO reason, and CEE's
+    // own consumer (`deriveAnalysisRefusalNoticeUpdate`) treats that as "not a
+    // refusal statement". Agreeing with the producer's own reader, rather than
+    // inventing a second rule, is the point.
+    for (const reason of [undefined, null, "", "   "]) {
+      const body = { analysis_ready: { status: "blocked", options: [], blocked_reason: reason } };
+      expect(
+        assertNoUnrequestedAnalysisRefusal([{ label: "turn 2", body, requestedAnalysis: false }]),
+        `blocked_reason=${JSON.stringify(reason)}`,
+      ).toEqual([]);
+    }
+  });
+
+  it("CALL-SITE PIN: the CLI declares BOTH turns as not requesting an analysis", () => {
+    // The intent must be declared where it is known, never inferred from the
+    // reply under test. A future turn that legitimately asks for an analysis
+    // declares `true` — but until then, a call site that silently stopped
+    // judging turn 2 would disable this alarm with no test going red.
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    const call = src.slice(src.indexOf("assertNoUnrequestedAnalysisRefusal(["));
+    const block = call.slice(0, call.indexOf("]),"));
+    expect(block).toContain('label: "turn 1", body: t1.body, requestedAnalysis: false');
+    expect(block).toContain('label: "turn 2", body: t2.body, requestedAnalysis: false');
+    // And the result must actually reach `failures`, or the call is decorative.
+    expect(src).toContain("failures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
   });
 });
