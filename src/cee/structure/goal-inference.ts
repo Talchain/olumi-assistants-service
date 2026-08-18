@@ -142,6 +142,43 @@ export function createGoalNode(
 }
 
 /**
+ * ⭐ THE ONE CONSTRUCTOR FOR AN `outcome|risk → goal` EDGE.
+ *
+ * Extracted from `wireOutcomesToGoal` (its only caller until now) because
+ * `enforceSingleGoal` needs the identical edge when it demotes a non-primary
+ * objective to an outcome node (quality bar §8 A3). Two sites building the same
+ * edge shape from two literals is the hand-maintained mirror this estate keeps
+ * paying for (CLAUDE.md trap 12): the magnitudes would drift and nothing would
+ * go red. There is one literal, and both callers read it.
+ *
+ * The shape is UNCHANGED from what this module has always emitted — this is a
+ * pure extraction, asserted by the callers' own suites.
+ */
+export function buildOutcomeToGoalEdge(
+  nodeId: string,
+  goalId: string,
+  kind: string | undefined,
+): Record<string, unknown> {
+  const isRisk = kind === "risk";
+  return {
+    from: nodeId,
+    to: goalId,
+    // Use flat field names to match V3 transform expectations
+    // (edges added here bypass LLM normalisation which flattens strength.mean)
+    strength_mean: isRisk ? -0.5 : 0.7,
+    strength_std: 0.15,
+    belief_exists: 0.9,
+    effect_direction: isRisk ? ("negative" as const) : ("positive" as const),
+    origin: "default" as const,
+    provenance: {
+      source: "synthetic",
+      quote: `Wired ${kind} to goal (synthetic edge)`,
+    },
+    provenance_source: "synthetic",
+  };
+}
+
+/**
  * Wire outcomes and risks to a goal node
  *
  * @param graph - The graph to modify
@@ -181,24 +218,10 @@ export function wireOutcomesToGoal(
     if (!alreadyWired.has(nodeId)) {
       // Determine if outcome (positive) or risk (negative)
       const node = graph.nodes.find((n: any) => n.id === nodeId);
-      const isRisk = (node as any)?.kind === "risk";
       const kind = (node as any)?.kind;
 
-      const newEdge = {
-        from: nodeId,
-        to: goalId,
-        // Use flat field names to match V3 transform expectations
-        // (edges added here bypass LLM normalisation which flattens strength.mean)
-        strength_mean: isRisk ? -0.5 : 0.7,
-        strength_std: 0.15,
-        belief_exists: 0.9,
-        effect_direction: isRisk ? "negative" as const : "positive" as const,
-        origin: "default" as const,
-        provenance: {
-          source: "synthetic",
-          quote: `Wired ${kind} to goal (synthetic edge)`,
-        },
-        provenance_source: "synthetic",
+      const newEdge = buildOutcomeToGoalEdge(nodeId, goalId, kind) as {
+        strength_mean: number;
       };
 
       newEdges.push(newEdge);

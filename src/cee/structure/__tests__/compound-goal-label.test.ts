@@ -175,14 +175,23 @@ describe("C — enforceSingleGoal", () => {
   });
 
   it("does NOT discard the merged-away goal's threshold quad", () => {
-    // The quality bar's HARD rule. Before this fix the merged-away node was
-    // filtered out entirely and its `goal_threshold` went with it.
+    // The quality bar's HARD rule. Before, the merged-away node was filtered out
+    // entirely and its `goal_threshold` went with it.
+    //
+    // ⚠ THE ASSERTION'S INTENT IS UNCHANGED; ITS CARRIER MOVED, because the old
+    // one never delivered. This used to read the quad off `merged_goals` — a key
+    // `GraphV3` STRIPS, with zero product readers, so the quad was "preserved"
+    // into a field nothing could ever see. Under §8 A3 the merged-away objective
+    // survives as its own OUTCOME NODE, which does cross the wire, so the quad is
+    // asserted there. Re-pointing an honest assertion at the mechanism that now
+    // delivers it is not the same as relaxing it: this test still fails if the
+    // quad is dropped, and it now fails for a reason a user would notice.
     const { graph } = enforceSingleGoal(twoGoalGraph() as any)!;
-    const goal = (graph as any).nodes.find((n: any) => n.id === "goal_a");
 
     // Bound by IDENTITY — the specific merged goal, not "some node with a threshold".
-    const preserved = goal.merged_goals.find((g: any) => g.id === "goal_b");
+    const preserved = (graph as any).nodes.find((n: any) => n.id === "goal_b");
     expect(preserved).toBeDefined();
+    expect(preserved.kind).toBe("outcome");
     expect(preserved.goal_threshold).toEqual({ unit: "£", value: 59, operator: ">=" });
     expect(preserved.label).toBe("I want to reach £59");
   });

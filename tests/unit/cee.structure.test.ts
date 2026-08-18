@@ -331,8 +331,20 @@ describe("enforceSingleGoal", () => {
     // Nothing is lost: the merged-away objective stays recoverable. Asserted
     // explicitly so this test still fails if the label shortens by DISCARDING
     // rather than by relocating.
-    expect(goalNodes[0].merged_from).toEqual(["Increase Revenue", "Reduce Churn"]);
-    expect(goalNodes[0].merged_goals.map((g: any) => g.label)).toEqual(["Reduce Churn"]);
+    //
+    // ⭐ UPDATED AGAIN (A3 outcome-nodes lane, 2026-08-18) — SAME CLAIM, REAL
+    // CARRIER. This read `merged_from` / `merged_goals`, which `GraphV3` strips
+    // and nothing reads, so "stays recoverable" was true of an object no user or
+    // service could reach. Paul's §8 A3 ruling makes the merged-away objective a
+    // separate OUTCOME node that crosses the wire; the recoverability claim is
+    // therefore asserted against that node, bound by id.
+    const relocated = nodes.find((n) => n.id === "g2");
+    expect(relocated).toBeDefined();
+    expect(relocated.kind).toBe("outcome");
+    expect(relocated.label).toBe("Reduce Churn");
+    // …and the superseded carriers are gone rather than left beside it.
+    expect(goalNodes[0].merged_from).toBeUndefined();
+    expect(goalNodes[0].merged_goals).toBeUndefined();
   });
 
   it("redirects edges from removed goals to primary goal", () => {

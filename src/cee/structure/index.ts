@@ -3,6 +3,8 @@ import type { GraphV1 } from "../../contracts/plot/engine.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { matchesStatusQuoLabel } from "./status-quo-patterns.js";
 import { buildCompoundGoalLabel } from "./compound-goal-label.js";
+import { buildOutcomeToGoalEdge } from "./goal-inference.js";
+import { deriveGoalObjectiveLabel } from "../draft/records/objective-label.js";
 import { createValidationIssue } from "../validation/classifier.js";
 
 type CEEStructuralWarningV1 = components["schemas"]["CEEStructuralWarningV1"];
@@ -245,7 +247,41 @@ export interface SingleGoalResult {
   hadMultipleGoals: boolean;
   originalGoalCount: number;
   mergedGoalIds?: string[];
-  /** Maps each merged-away goal ID to the primary goal ID it was merged into. */
+  /**
+   * Maps each DEMOTED goal id to the primary goal id.
+   *
+   * ⚠ THE NAME AND THE OLD WORDING BOTH PREDATE THE §8 A3 RULING. This said
+   * "merged-away goal ID", and those nodes are no longer merged away — they
+   * survive as `outcome` nodes under their ORIGINAL ids. Nothing is renamed and
+   * nothing disappears; what the map now records is *"this id's KIND changed,
+   * and some of its edges moved"*.
+   *
+   * ⭐ THE ENTRIES ARE KEPT DELIBERATELY. Both consumers were read at the bytes,
+   * and the FIRST DRAFT OF THIS COMMENT GAVE THE WRONG REASON — corrected here
+   * rather than quietly, because a plausible-but-false rationale in a contract
+   * comment is what the next lane inherits:
+   *
+   *  1. `edge-identity.ts:131` `restoreEdgeFields` STRATEGY 3 — reverses this
+   *     map to recover a stash key when the current `from::to` misses. ⚠ I first
+   *     wrote that the OUTBOUND limb keeps this reachable. **That is wrong: the
+   *     outbound limb is effectively DEAD in the live pipeline.**
+   *     `fixGoalHasOutgoing` (`deterministic-sweep.ts:266`) deletes EVERY
+   *     goal-sourced edge at repair substep 1, and the merge is substep 4; the
+   *     projector independently refuses `goal->option|factor|risk|goal` via
+   *     `UNRESCUABLE_EDGE_SHAPES`. Measured: ZERO outbound-from-demoted edges
+   *     across the governed corpus. Strategy 3 does still fire for a TRUE
+   *     DUPLICATE, whose edges are redirected at both ends — but that is a
+   *     narrow path, not the general one.
+   *  2. `threshold-sweep.ts:85` — attestation transfer: the surviving primary
+   *     INHERITS the enricher-minted attestation of anything merged into it.
+   *     Additive; it never clears the other id. **This is the LIVE consumer and
+   *     the real reason the entries stay.**
+   *
+   * The map therefore covers BOTH classes of non-primary goal: duplicates (node
+   * deleted, edges redirected) and distinct objectives (node survives as an
+   * outcome). For a distinct objective nothing is renamed at all — the entry
+   * exists for the attestation transfer above.
+   */
   nodeRenames?: Map<string, string>;
 }
 
@@ -263,16 +299,145 @@ function edgePriority(edge: any): number {
   return score;
 }
 
+const canonicalLabelText = (text: unknown): string =>
+  String(text ?? "").replace(/\s+/g, " ").trim();
+
 /**
- * Enforce single goal constraint.
- * If multiple goal nodes exist, merge them into a compound goal.
+ * Convert one non-primary goal node into the outcome node that carries its
+ * objective (quality bar §8 A3). Pure; the caller owns placement and edges.
  *
- * Strategy:
- * - Keep the first goal node as the primary
- * - Update its label to combine all goal labels
- * - Redirect all edges pointing to other goals to point to the primary
- * - Remove the duplicate goal nodes
- * - When deduplicating edges, prefer edges with provenance/metadata
+ * ⭐ THE LABEL RULE IS IDEMPOTENT BY CONSTRUCTION. `deriveGoalObjectiveLabel`
+ * runs ONLY where the label is still the verbatim quote, so:
+ *   · a projector-authored label ("Increase Productivity") is left alone —
+ *     re-deriving an already-authored string is a second transformation over
+ *     natural language, and this estate has ratified stopping at the first;
+ *   · a legacy/LLM-path label that IS the quote gets one authoring pass;
+ *   · a refusal (deliberation frame, discarded qualification, no concise form)
+ *     keeps the user's exact words. Refusal falls back to verbatim, never to a
+ *     guess — the deriver cannot emit a token the user did not write.
+ *
+ * ⚠ EVERY OTHER FIELD IS CARRIED THROUGH UNTOUCHED ON THE V1 NODE, and that is
+ * load-bearing for A2 conservation: the `goal_threshold` quad rides along, so a
+ * demoted objective's numerals survive in `label ∪ goal_threshold*` — the union
+ * the conservation rule is asserted over once `source_quote` is excluded from
+ * it. The quality bar's HARD rule is that no repair may discard a
+ * `goal_threshold` quad; before this it was discarded at the wire in every case.
+ *
+ * ⚠⚠ BUT "UNTOUCHED" IS A CLAIM ABOUT THIS FUNCTION, NOT ABOUT THE WIRE — AND
+ * THERE IS EXACTLY ONE EXCEPTION, NAMED HERE RATHER THAN LEFT TO BE DISCOVERED.
+ * `goal_baseline` is NOT a declared `NodeV3` field; it reaches V3 only through
+ * the `observed_state` limb at `transforms/schema-v3.ts:276`, and that limb is
+ * KIND-GATED: `node.kind === "goal" && node.goal_baseline != null`. A demoted
+ * node is `outcome`, so it does not take the limb and its `goal_baseline` is
+ * dropped at the transform even though this function preserved it. (The four
+ * `goal_threshold*` fields are copied by a separate, kind-INDEPENDENT block at
+ * `:246-249`, which is why the quad does survive — verified by execution, not
+ * by reading the neighbouring comment, whose "for goal nodes" wording describes
+ * intent rather than the gate.)
+ *
+ * That drop is not a harm: `observed_state` absence is the NORMAL state for an
+ * outcome node — organic outcomes carry none — and ISL's `missing_goal_baseline`
+ * refusal is raised against GOALS, which this node no longer is. Parity with an
+ * organic outcome, which is the acceptance bar for every other property here.
+ *
+ * `provenance_class` stays `stated`: the user DID state this objective, and A1
+ * is explicit that the class means *the user stated this*, not *this text is the
+ * user's*. `label_authored` beside it is what says the display string is ours.
+ * Three live readers key on `stated` and none of them is touched.
+ */
+function demoteGoalToOutcome(node: unknown): Record<string, unknown> {
+  const source = (node ?? {}) as Record<string, unknown>;
+  const provenance = (source.provenance ?? undefined) as Record<string, unknown> | undefined;
+  const quote = typeof provenance?.source_quote === "string" ? provenance.source_quote : undefined;
+  const currentLabel = typeof source.label === "string" ? source.label : "";
+
+  const labelIsStillTheQuote =
+    quote !== undefined && canonicalLabelText(currentLabel) === canonicalLabelText(quote);
+
+  const authored = labelIsStillTheQuote ? deriveGoalObjectiveLabel(quote!) : undefined;
+  const label = authored?.authored ? authored.label : currentLabel;
+  const labelAuthored =
+    authored?.authored === true || provenance?.label_authored === true;
+
+  return {
+    ...source,
+    kind: "outcome",
+    ...(label.length > 0 && { label }),
+    ...(provenance !== undefined && {
+      provenance: {
+        ...provenance,
+        ...(labelAuthored && { label_authored: true }),
+      },
+    }),
+  };
+}
+
+/**
+ * ⭐⭐ A NON-PRIMARY OBJECTIVE BECOMES AN OUTCOME NODE. IT IS NOT DELETED.
+ *
+ * ── THE RULING (quality bar §8 A3, Paul, 18 Aug 2026) ───────────────────────
+ * "A brief with multiple objectives yields ONE overarching goal node + SEPARATE
+ *  explicit outcome/criterion nodes carrying the distinct objectives/targets.
+ *  Not several goal roots; not objectives hidden in coaching; never a string
+ *  join. Exact user wording preserved as provenance."
+ *
+ * ── THE DEFECT THIS CLOSES, MEASURED AT THE WIRE ───────────────────────────
+ * This function kept `goalIds[0]` and FILTERED THE REST OUT, recording them in
+ * `merged_from` (labels) and `merged_goals` (full records). Both are stripped at
+ * the wire — `NodeV3` is a plain `z.object`, so undeclared keys are deleted by
+ * `GraphV3.safeParse` — and both have ZERO product readers (producer site and
+ * tests only, swept `rg -a` across the repo).
+ *
+ * So on the founder's own brief, driven through the real chain
+ * (`projectRecordsToGraph` → here → `projectGraphAndOptionsToV3` → `GraphV3`):
+ *
+ *   projected     goal "Spend Less" · goal "Increase Productivity" · goal "Maintain Code Quality"
+ *   at the wire   goal "Spend Less" — and the strings "productivity" and
+ *                 "code quality" reach **ZERO nodes**.
+ *
+ * Two of three objectives left the product entirely. `merged_goals` was not a
+ * preservation mechanism, it was a comment addressed to nobody.
+ *
+ * ── WHY `outcome`, AND WHY THIS TOPOLOGY IS DERIVED RATHER THAN INVENTED ────
+ * `outcome` is a canonical kind at every hop (`NodeKindV3`, `V3_VALID_KINDS`,
+ * `NODE_KIND_MAP`), and `ALLOWED_EDGES` (`validators/graph-validator.types.ts`
+ * :293-302) declares exactly one shape with `outcome` as a source:
+ * `{ fromKind: "outcome", toKind: "goal" }`. That is the edge minted here, built
+ * by `buildOutcomeToGoalEdge` — the SAME constructor `wireOutcomesToGoal` has
+ * always used for this shape, extracted rather than copied so the two cannot
+ * drift.
+ *
+ * ⚠ THE EDGE IS NOT OPTIONAL, and this is the P6 half. `validateReachability`
+ * (`graph-validator.ts:578-608`) exempts an outcome from `UNREACHABLE_FROM_DECISION`
+ * only when `canReachGoal.has(node.id)` — with the edge it is an `info` issue
+ * (`EXEMPT_UNREACHABLE_OUTCOME_RISK`, reason `isolated`); WITHOUT it the node is
+ * an `error`. A demoted objective with no edge would therefore manufacture a
+ * blocking obligation out of structure the system created, which P6 forbids by
+ * name. Adding the node also cannot create `MISSING_BRIDGE` — that error fires
+ * when outcomes and risks are BOTH absent, so a new outcome can only relieve it.
+ * And it mints no `MISSING_OPTION_VALUE`: that ask is keyed `option_id::factor_id`
+ * over option→factor pairs, which this edge is not.
+ *
+ * ── WHAT IS DELIBERATELY UNCHANGED ─────────────────────────────────────────
+ * The EDGE REDIRECT IS BYTE-IDENTICAL. Edges that pointed at a demoted goal
+ * still move to the primary, exactly as before, and are deduplicated exactly as
+ * before. This change is purely ADDITIVE — one node kept alive per demoted
+ * objective, plus one `outcome → goal` edge each. Letting the old edges follow
+ * the demoted node instead would produce `outcome → outcome` and `risk → outcome`
+ * shapes, which `ALLOWED_EDGES` does not admit; that is a different and larger
+ * change, and it is not this one.
+ *
+ * `merged_from` / `merged_goals` are also left in place. They are now redundant
+ * rather than load-bearing, but they are pinned by existing suites and removing
+ * them is a separate deletion with its own review.
+ *
+ * ── THE LABEL ──────────────────────────────────────────────────────────────
+ * Authored via the whitelist deriver, and IDEMPOTENT BY CONSTRUCTION: the
+ * deriver runs only when the label is still the verbatim quote. Where the
+ * projector already authored it ("increase productivity" → "Increase
+ * Productivity") the existing label stands untouched; where the deriver refuses
+ * (a deliberation-framed quote, a discarded qualification) the verbatim stands.
+ * Refusal falls back to the user's own words, never to a guess.
  */
 export function enforceSingleGoal(
   graph: GraphV1 | undefined,
@@ -308,7 +473,52 @@ export function enforceSingleGoal(
   const primaryId = goalIds[0];
   const otherGoalIds = new Set(goalIds.slice(1));
 
-  // Build nodeRenames map: each merged-away goal → primary goal
+  // ⭐⭐ THE DUPLICATE GUARD — §8 A3's amendment, and the one case where the
+  // BASE behaviour (delete + redirect both ends) was right all along.
+  //
+  // A3 gives each distinct objective its own outcome node. That reasoning
+  // presupposes the objectives ARE distinct. When the model emits the SAME goal
+  // twice — and it does: `12-similar-options` in the governed corpus carries two
+  // goals with byte-identical `source_quote` — demoting the second one produces
+  // TWO wire nodes with the identical quote (the user sees one objective twice)
+  // plus a synthetic `duplicate → primary` edge with invented magnitudes, i.e.
+  // the product asserting that the objective positively drives ITSELF, while the
+  // real drivers reach the goal only through that fabricated link.
+  //
+  // For a true duplicate, redirecting inbound edges is not misattribution — it
+  // is correct CONSOLIDATION. Both ends move to the primary, exactly as before.
+  //
+  // ⚠ THE DISCRIMINATOR IS EXACT CANONICAL EQUALITY OF `source_quote`, and it
+  // stays that way. A fuzzy same-objective predicate over natural language is
+  // the shape this estate has already burned four rounds oscillating on
+  // (trap 22f); whitespace normalisation is the whole of the cleverness here.
+  //
+  // ⚠ AND IT FAILS TOWARD PRESERVATION. An absent or empty quote never matches,
+  // so two quote-less goals (the legacy/LLM path) are treated as DISTINCT and
+  // both survive. Wrongly keeping an objective is a duplicate node; wrongly
+  // deleting one is the silent loss A3 exists to fix. Only one of those is
+  // recoverable by the user.
+  const primaryQuote = canonicalLabelText(
+    ((goalNodes[0] as any)?.provenance ?? {})?.source_quote,
+  );
+  const duplicateGoalIds = new Set(
+    goalNodes
+      .slice(1)
+      .filter(
+        (n) =>
+          primaryQuote.length > 0 &&
+          canonicalLabelText(((n as any)?.provenance ?? {})?.source_quote) === primaryQuote,
+      )
+      .map((n) => (n as any).id as string),
+  );
+  /** Non-primary goals that state a genuinely different objective. */
+  const distinctGoalIds = new Set(
+    [...otherGoalIds].filter((id) => !duplicateGoalIds.has(id)),
+  );
+
+  // Build nodeRenames map: each DEMOTED goal id → primary goal id. The node
+  // itself survives under this id as an outcome (§8 A3) — see the field's
+  // contract on `SingleGoalResult` for why the entries are still required.
   const nodeRenames = new Map<string, string>();
   for (const otherId of otherGoalIds) {
     nodeRenames.set(otherId, primaryId);
@@ -327,48 +537,91 @@ export function enforceSingleGoal(
   // is not in this repo — and it does not change WHICH goals merge.
   const composed = buildCompoundGoalLabel(labels);
 
-  // Everything the merged-away goals carried, preserved rather than filtered
-  // away with them. The quality bar's HARD rule is that no repair may discard a
-  // `goal_threshold` quad; before this, the `.filter` below dropped the whole
-  // node and the quad went with it.
-  const mergedGoalRecords = nodes
-    .filter((node) => otherGoalIds.has((node as any)?.id))
-    .map((node) => {
-      const n = node as any;
-      return {
-        id: n.id,
-        label: n.label,
-        ...(n.goal_threshold !== undefined && { goal_threshold: n.goal_threshold }),
-        ...(n.goal_constraints !== undefined && { goal_constraints: n.goal_constraints }),
-        ...(n.provenance !== undefined && { provenance: n.provenance }),
-      };
-    });
+  // ⭐⭐ `merged_from` / `merged_goals` ARE DELETED HERE, NOT KEPT ALONGSIDE.
+  //
+  // They were this function's answer to the quality bar's HARD rule that no
+  // repair may discard a `goal_threshold` quad. Measured, that answer never
+  // delivered: `NodeV3` is a plain `z.object`, so `GraphV3.safeParse` strips
+  // both keys, and a repo-wide `rg -a` finds ZERO product readers — the survivor
+  // set for those fields is `['id','kind','label']`, while the contrast control
+  // `source_quote`/`label_authored` DOES survive the same parse. The quad
+  // reached a V1-only field nothing reads, and only ONE of the four threshold
+  // fields was even copied into it (`goal_threshold`, never `_raw`/`_unit`/
+  // `_cap`).
+  //
+  // The demotion below IS the conservation mechanism `merged_from` was failing
+  // to be: the objective survives as a real node, carrying its FULL quad and its
+  // verbatim quote, and it crosses the wire. Keeping the old field beside the
+  // new one would leave two authorities for one concept with only one of them
+  // true — this estate's chronic defect, and the reason this is a deletion
+  // rather than a deprecation comment.
 
-  // Create updated nodes array
+  // Create updated nodes array.
+  //
+  // A non-primary goal is CONVERTED to an outcome node in place — same id, same
+  // provenance, same `goal_threshold` quad — rather than filtered away. Keeping
+  // the id is what lets the edge redirect below stay byte-identical while the
+  // objective itself survives to the wire.
   const updatedNodes = nodes.map((node) => {
     if ((node as any)?.id === primaryId) {
+      // Label only. `buildCompoundGoalLabel` still RETURNS `merged_from` — it is
+      // a pure selection function with its own suite and its `labels[0]` choice
+      // is what keeps `label_authored`/`source_quote` truthful on this node — but
+      // nothing is attached to the graph from it any more.
       return {
         ...(node as any),
         label: composed.label,
-        ...(composed.merged_from !== undefined && { merged_from: composed.merged_from }),
-        ...(mergedGoalRecords.length > 0 && { merged_goals: mergedGoalRecords }),
       };
     }
+    if (distinctGoalIds.has((node as any)?.id)) {
+      return demoteGoalToOutcome(node);
+    }
     return node;
-  }).filter((node) => !otherGoalIds.has((node as any)?.id));
+  }).filter((node) => !duplicateGoalIds.has((node as any)?.id));
 
-  // Redirect edges from other goals to primary goal
+  // ⭐⭐ THE INBOUND REDIRECT IS GONE. THE USER'S STATED CAUSALITY IS PRESERVED.
+  //
+  // Technical-architect ruling, 18 Aug 2026. This block used to move BOTH ends
+  // of any edge touching a non-primary goal onto the primary. That was correct
+  // for a world where the secondary goal was DELETED and its edges had nowhere
+  // else to go. Once the node SURVIVES as an outcome, redirecting its INBOUND
+  // edges MISATTRIBUTES the user's own causal claims: the factor the user said
+  // drives "raise productivity" silently starts driving "cut cost", carrying the
+  // user's provenance while saying something the user never said.
+  //
+  // That is strictly worse than the loss it replaced. A deleted objective is
+  // visibly absent; a misattributed edge looks like the user's own claim, and
+  // nothing downstream can tell the difference. It is also exactly the
+  // fabricated-causality class the scientific ruling forbids.
+  //
+  // ⚠ ONLY THE INBOUND HALF GOES, AND THE ASYMMETRY IS DERIVED, NOT STYLISTIC.
+  // `ALLOWED_EDGES` (`validators/graph-validator.types.ts:293-302`) has NO rule
+  // with `goal` as a source, so an OUTBOUND `goal → decision` / `goal → factor`
+  // edge has no legal shape to survive into as `outcome → …`; those still move
+  // to the primary, exactly as before. The one exception is an edge that already
+  // pointed at the primary goal: preserving it yields `outcome → goal`, the one
+  // legal shape and precisely the contribution link this merge wants — whereas
+  // redirecting it would manufacture a `primary → primary` SELF-LOOP.
   const updatedEdges = edges.map((edge) => {
     const from = (edge as any)?.from;
     const to = (edge as any)?.to;
     const newEdge = { ...(edge as any) };
 
-    if (typeof from === "string" && otherGoalIds.has(from)) {
+    // A TRUE DUPLICATE is consolidated exactly as the base implementation did:
+    // BOTH ends move to the primary, because the two nodes are one objective.
+    if (typeof from === "string" && duplicateGoalIds.has(from)) {
       newEdge.from = primaryId;
     }
-    if (typeof to === "string" && otherGoalIds.has(to)) {
+    if (typeof to === "string" && duplicateGoalIds.has(to)) {
       newEdge.to = primaryId;
     }
+    // A DISTINCT objective survives, so only its OUTBOUND edges move — and not
+    // when they already land on the primary, where the edge IS the legal
+    // `outcome → goal` contribution and redirecting would make a self-loop.
+    if (typeof from === "string" && distinctGoalIds.has(from) && to !== primaryId) {
+      newEdge.from = primaryId;
+    }
+    // Inbound to a DISTINCT objective: NEVER redirected. This is the ruling.
 
     return newEdge;
   });
@@ -395,6 +648,21 @@ export function enforceSingleGoal(
     return edge;
   });
 
+  // Each demoted objective gets its `outcome → goal` edge. Appended AFTER the
+  // dedup above so the redirect/dedup behaviour it must not disturb has already
+  // finished, and guarded on the id actually surviving as an outcome.
+  const demotedOutcomeIds = updatedNodes
+    .filter((node) => distinctGoalIds.has((node as any)?.id) && (node as any)?.kind === "outcome")
+    .map((node) => (node as any).id as string);
+  const edgesWithDemotedOutcomes = [...dedupedEdges];
+  for (const outcomeId of demotedOutcomeIds) {
+    // Never a second edge where one already survived the redirect.
+    if (edgesWithDemotedOutcomes.some((e) => (e as any)?.from === outcomeId && (e as any)?.to === primaryId)) {
+      continue;
+    }
+    edgesWithDemotedOutcomes.push(buildOutcomeToGoalEdge(outcomeId, primaryId, "outcome") as any);
+  }
+
   // Update meta.roots to reflect single goal
   const updatedMeta = {
     ...((graph as any).meta || {}),
@@ -405,7 +673,7 @@ export function enforceSingleGoal(
     graph: {
       ...(graph as any),
       nodes: updatedNodes as any,
-      edges: dedupedEdges as any,
+      edges: edgesWithDemotedOutcomes as any,
       meta: updatedMeta,
     } as GraphV1,
     hadMultipleGoals: true,
