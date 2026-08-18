@@ -162,6 +162,13 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../compose/repair-value-ask-response.ts',
   ),
+  // ROADMAP 2.1266 — the option-effect ASK composer. Caught by
+  // `derivedComposeFileDomain()` on the commit that created the file (the
+  // mechanism working, sixth instance), registered on the same commit.
+  'compose/option-effect-ask-response.ts': resolve(
+    HERE,
+    '../compose/option-effect-ask-response.ts',
+  ),
 };
 
 /**
@@ -765,6 +772,39 @@ const REPAIR_VALUE_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator-v5/compose/option-effect-ask-response.ts` — brought into
+ * scope by ROADMAP 2.1266, on the commit that created the file. The derived
+ * domain test caught it on its first run, which is the mechanism working.
+ */
+const OPTION_EFFECT_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
+      + 'shape as EDIT_CLARIFY_SITES and REPAIR_VALUE_ASK_SITES). The value is a deterministic '
+      + "template over exactly three ingredient kinds: module string constants, the USER'S OWN "
+      + 'numeric value (read by `readOptionEffectValue` in routing/option-effect-write.ts, a '
+      + 'grammar that admits only a bare model-unit number after an assignment `to` — no '
+      + 'currency, no percent, no attached unit, no second assignment — so the echoed value '
+      + 'provably came from the message), and graph labels for the OPTION(s) and FACTOR(s) the '
+      + 'message itself named. '
+      + 'IT CANNOT ASSERT A LEADER, and the derivation is about SELECTION: every entity named is '
+      + 'selected by word-bounded `containsPhrase` label matching against the persisted graph, '
+      + 'i.e. it is named because THE USER NAMED IT, never because it ranks. Factors are further '
+      + 'restricted to `edge.from === optionId` walks over that same graph. No analysis result is '
+      + 'read on this path at all — the resolver takes the message and the graph and nothing '
+      + 'else — so no probability, margin, win-rate, ordering or comparative claim is available '
+      + 'to interpolate even if the copy wanted one. Zero LLM calls: this composer exists '
+      + 'precisely to answer without one. '
+      + 'The chip channel DOES carry labels out of this file: each chip message is '
+      + '`buildConfigureOptionAdvisedFormat` over the same user-named option×factor pair and the '
+      + "same user value — the identical selection criterion, so no chip can name an option by "
+      + 'rank either. The route threads `mayNameLeadingOption` from `claimSafety.forExit()` on '
+      + 'this exit, not a literal.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -775,6 +815,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'system-events/edge-strength-edit.ts': EDGE_STRENGTH_EDIT_SITES,
   'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
   'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
+  'compose/option-effect-ask-response.ts': OPTION_EFFECT_ASK_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -1213,11 +1254,19 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // this ledger failed `pnpm test:required` on the commit that created the
     // site, and the guard found the omission rather than a human remembering
     // it. Fifth instance of the mechanism working.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(44);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(40);
+    // ⚠ OPTION-EFFECT WRITE PATH (ROADMAP 2.1266): 44 -> 45 sites, 40 -> 41
+    // keys, one ADDED file (compose/option-effect-ask-response.ts), registered
+    // `structural` with its derivation (OPTION_EFFECT_ASK_SITES). Recorded the
+    // same way as every entry above, and for the same reason: this ledger
+    // failed `pnpm test:required` on the commit that created the site, and the
+    // guard found the omission rather than a human remembering it. Sixth
+    // instance of the mechanism working.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(45);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(41);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',
+      'compose/option-effect-ask-response.ts',
       'compose/repair-value-ask-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',

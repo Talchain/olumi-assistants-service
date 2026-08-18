@@ -660,6 +660,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Log-only (see debugOnlyEvents).
         V5RepairValueBindingResolved:
           "v5.edit_graph.repair_value_binding_resolved",
+        // ⭐⭐ ROADMAP 2.1266 — the deterministic option-effect WRITE bound a
+        // turn, and its ASK twin. Log-only (see debugOnlyEvents).
+        V5OptionEffectWriteResolved:
+          "v5.edit_graph.option_effect_write_resolved",
+        V5OptionEffectAskEmitted:
+          "v5.edit_graph.option_effect_ask_emitted",
         V5ConfigureOptionOutcomeUnhonoured:
           "v5.edit_graph.configure_option_outcome_unhonoured",
         // Wave-1 Lane B (PR3, ROADMAP 3.16) — edit target not present in the
@@ -1503,6 +1509,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolution.
         // Diagnostic-only, same posture as its configure-option siblings.
         TelemetryEvents.V5RepairValueBindingResolved,
+        TelemetryEvents.V5OptionEffectWriteResolved,
+        TelemetryEvents.V5OptionEffectAskEmitted,
         // ⭐ ROADMAP 2.427 — the configure-option outcome did not honour the
         // turn's intent (no interventions write for the named option id).
         // Diagnostic-only, same posture as its false-success sibling
@@ -2357,6 +2365,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding resolved (bind/ask).
         // Deliberate frozen-registry addition per the registry discipline.
         "v5.edit_graph.repair_value_binding_resolved",
+        // ⭐⭐ ROADMAP 2.1266 — the option-effect WRITE path's two meters.
+        // Deliberate frozen-registry additions per the registry discipline.
+        "v5.edit_graph.option_effect_write_resolved",
+        "v5.edit_graph.option_effect_ask_emitted",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

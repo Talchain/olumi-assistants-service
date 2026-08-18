@@ -84,9 +84,16 @@ export function composeOptionEffectAskResponse(
       ? 'Pick one below, or name the option and the factor together in your reply.'
       : 'Name the option and the factor together in your reply and I will set it.';
 
+  // Named, then passed by ES6 shorthand — the same shape as
+  // `edit-clarify-response.ts` and `repair-value-ask-response.ts`, so the
+  // compose-site register keys this site as `assistant_text` rather than as
+  // the template literal's own source text (a key that would change with every
+  // wording edit). See `OPTION_EFFECT_ASK_SITES`.
+  const assistant_text = `${opening} I have not changed the model. ${closing}`;
+
   return composeDirectAnswerResponse({
     answerKind: 'functional',
-    assistant_text: `${opening} I have not changed the model. ${closing}`,
+    assistant_text,
     stage: input.stage,
     suggested_actions: offered.map((candidate, index) => ({
       id: `chip_prompt_option_effect_bind_${index + 1}`,
