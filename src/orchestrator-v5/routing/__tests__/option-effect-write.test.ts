@@ -1313,6 +1313,29 @@ describe('A2 — OPPOSITE-DIRECTION TWINS: the exclusions that must NOT move', (
     });
   });
 
+  it('⭐ TWIN — a CONTEXT-BEARING answer that the classifier CLAIMS still declines', () => {
+    // ⚠ ADDED FROM A SURVIVING MUTANT, not from imagination (trap 22). The
+    // battery mutated conjunct (a) to admit `option_value_set` into rule 3c and
+    // all 215 tests stayed GREEN — because the W1 twin below ends in a trailing
+    // clause, so the answer reading refused it for an unrelated reason and the
+    // conjunct was never exercised. This sentence IS a well-formed
+    // context-bearing answer AND classifies `option_value_set`, so it reaches
+    // conjunct (a) and nothing else. Under the mutant it BINDS.
+    const message = `For the ${J18.ids.option_label} option this matters - set it to 0.8.`;
+    const parsed = GraphV3.parse(j18Graph()) as GraphV3T;
+    // Both preconditions pinned in-test, or the decline could be either gate's
+    // (trap 13b — a guard must pin its own precondition).
+    expect(detectConfigureOptionIntent(message, projectOptionLabels(parsed.nodes))).toEqual({
+      matched: true,
+      trigger: 'option_value_set',
+    });
+    expect(readMissingValueAnswer(message)?.kind).toBe('numeric');
+    expect(resolveOptionEffectWrite({ message, graph: j18Graph() })).toEqual({
+      matched: false,
+      reason: 'not_effect_framed_intent',
+    });
+  });
+
   it('TWIN — the `baseline` suppressor still fires on a context-bearing answer', () => {
     expect(
       resolveOptionEffectWrite({

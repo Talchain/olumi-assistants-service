@@ -156,9 +156,25 @@ const NUMERIC_ANSWER_PATTERNS: readonly RegExp[] = [
  * the product asked. The comma form is pinned in
  * `ANSWERED_ASK_KNOWN_DROPPED`, not silently absent.
  *
- * ⚠ `(?<!\d)[.!?;](?!\d)` — a decimal point is not a clause break. Without the
- * lookarounds "set it to 0.8." splits into "set it to 0" and "8.", and the
- * reading silently binds the WRONG NUMBER. Pinned by its own case.
+ * ⚠⚠ `(?<!\d)[.!?;](?!\d)` — AND THE FIRST VERSION OF THIS COMMENT WAS WRONG,
+ * WHICH IS WHY THE MUTANT FOR IT SURVIVED. It claimed that without the
+ * lookarounds `"set it to 0.8."` splits into `"set it to 0"` and `"8."`.
+ * MEASURED: it does not. The break already requires `\s+` AFTER the
+ * punctuation, and a decimal point is followed by a digit, so the decimal case
+ * is protected by the whitespace requirement and the lookarounds are redundant
+ * for it. Deleting them left the whole 215-test battery GREEN.
+ *
+ * THE LOOKAROUNDS' REAL JOB, derived by finding what actually discriminates
+ * them: a number that ENDS a clause. *"We agreed 0.5. Set it to 0.8."* — the
+ * stop after `0.5` IS followed by whitespace, so without the lookbehind it
+ * becomes a break and the message binds. It is kept, and kept in the DECLINING
+ * direction: a message carrying a second figure the reader cannot account for
+ * is one this write path should not claim. Pinned by that case, not by the
+ * decimal one.
+ *
+ * ⭐ The correction is the lesson (trap 13c): the mutant did not find a missing
+ * test, it found a FALSE CLAIM ABOUT OUR OWN GUARD. A survivor is a claim
+ * either way and had to be measured, not argued.
  *
  * ⚠ THE WHOLE-MESSAGE READING IS TRIED FIRST AND IS UNCHANGED, so every message
  * that binds today binds identically today — including "Yes. Set it to 0.12.",

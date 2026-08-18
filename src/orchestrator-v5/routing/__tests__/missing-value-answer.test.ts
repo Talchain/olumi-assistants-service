@@ -313,14 +313,29 @@ describe('A2 — the clause anchor is STRICTLY ADDITIVE', () => {
   });
 
   it('a decimal point is NOT a clause break — the value is never truncated', () => {
-    // Without `(?<!\d)[.!?;](?!\d)` the split lands inside "0.8" and the reading
-    // binds `8`. This case is the whole reason the lookarounds exist.
+    // ⚠ THE STATED REASON HERE USED TO BE WRONG AND A MUTANT CAUGHT IT. It said
+    // the digit lookarounds stop "0.8" splitting into "0" and "8."; measured,
+    // the `\s+` requirement already does that, and deleting the lookarounds left
+    // the whole battery green. The assertion is still worth keeping — it pins
+    // the value the reading returns — but it is NOT what makes the lookarounds
+    // load-bearing. The case below is.
     expect(readMissingValueAnswer('The costs are fixed - set it to 0.8.')).toStrictEqual({
       kind: 'numeric',
       valueText: '0.8',
       referent: 'it',
       leadingContext: 'the costs are fixed',
     });
+  });
+
+  it('⭐ a number that ENDS a clause is not a break either — the killing case for the lookbehind', () => {
+    // "We agreed 0.5." — the stop IS followed by whitespace, so without
+    // `(?<!\d)` this becomes a break and the message binds while carrying a
+    // second figure the reader cannot account for. Declining is the safe
+    // direction and this is the case that pins it.
+    expect(readMissingValueAnswer('We agreed 0.5. Set it to 0.8.')).toBeNull();
+    // Opposite-direction twin: the same shape with a NON-numeric lead binds, so
+    // the guard is narrow rather than a blanket refusal of leading stops.
+    expect(readMissingValueAnswer('We agreed on this. Set it to 0.8.')?.kind).toBe('numeric');
   });
 
   it('every closed referent works after context too — no second vocabulary', () => {
