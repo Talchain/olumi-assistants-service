@@ -33,6 +33,7 @@ import {
   readinessDiagnosis,
   draftGraphCensus,
   assertNoUnrequestedAnalysisRefusal,
+  hasAnalysisRefusalFingerprint,
   READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
@@ -1047,9 +1048,15 @@ describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its
       { label: "turn 2", body: REFUSAL_POST_FIX, requestedAnalysis: false },
     ]);
     expect(f).toHaveLength(1);
-    expect(f[0]).toContain("CONVERSATIONAL turn with an ANALYSIS REFUSAL");
+    expect(f[0]).toContain("ANALYSE-REFUSAL ARM's payload");
     // Bound by IDENTITY of the reason, not merely "something was reported".
     expect(f[0]).toContain('blocked_reason="MISSING_OPTION_VALUE"');
+    // ⭐ THE MESSAGE MUST NOT ASSERT A CAUSE IT CANNOT OBSERVE. It used to state
+    // "the turn routed to the analyse handler" as fact; this gate sees a
+    // payload, never a route. It now names candidates and says which half is
+    // observed — pinned here so a future edit cannot quietly re-assert it.
+    expect(f[0]).toContain("WHAT IS NOT OBSERVED: which seam put the turn there");
+    expect(f[0]).not.toContain("so the turn routed to the analyse");
   });
 
   it("FIRES on the pre-fix payload too — one alarm spans both sides of the fix", () => {
@@ -1112,5 +1119,105 @@ describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its
     expect(block).toContain('label: "turn 2", body: t2.body, requestedAnalysis: false');
     // And the result must actually reach `failures`, or the call is decorative.
     expect(src).toContain("failures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
+  });
+});
+
+/**
+ * THE OPPOSITE-DIRECTION TWIN THE OLD PREDICATE DID NOT HAVE — and the reason
+ * this block exists is that the twin FAILS against it.
+ *
+ * `assertNoUnrequestedAnalysisRefusal` fired on ANY non-empty `blocked_reason`,
+ * on the authority of a `types.ts` comment claiming the field was written ONLY
+ * by `buildAnalysisRefusalReadiness`. Derived at the bytes, three sites write it
+ * (analysis-ready-helper.ts :1441 / :1117 / :1126), and the `hardBlocked` limb
+ * at :1117 fires on `category === 'graph_structure'` — which
+ * `OPTION_NO_FACTOR_EDGES` is. So a `structural_delete` that SUCCEEDS and leaves
+ * an option with no wired factor stamps a `blocked_reason` on its RECEIPT, and
+ * the alarm would have called that correct receipt a ROUTING DEFECT.
+ *
+ * Both directions, in one block: the delete-success shape must be SILENT, the
+ * genuine refusal shape must SPEAK. Either alone proves nothing — a predicate
+ * stuck on "never fire" passes the first and a predicate stuck on "always fire"
+ * passes the second.
+ */
+describe("the refusal fingerprint discriminates the REFUSAL ARM from its two siblings", () => {
+  /**
+   * `assessCanonicalAnalysisReadiness`'s `hardBlocked` branch, transcribed from
+   * the producer (analysis-ready-helper.ts:1113-1121) rather than invented: the
+   * semantic projection is spread, `status`/`blocked_reason` are stamped, and
+   * `readiness_issues` is present because `allIssues` is non-empty by
+   * construction whenever `hardBlocked` is true (`allIssues = [...carrierIssues,
+   * ...blockingIssues]`, and a non-empty `blockingIssues` is what makes it true).
+   */
+  const DELETE_SUCCESS_RECEIPT = {
+    assistant_text: "I removed that option.",
+    analysis_ready: {
+      status: "blocked",
+      goal_node_id: "378f195a",
+      options: [{ option_id: "o-a" }, { option_id: "o-b" }],
+      blocked_reason: "OPTION_NO_FACTOR_EDGES",
+      readiness_issues: [
+        { issue_id: "i1", code: "OPTION_NO_FACTOR_EDGES", category: "graph_structure" },
+      ],
+    },
+    _diagnostic_trace: { exit_path: "system_event" },
+  };
+
+  /** The refusal arm's exact return shape (analysis-ready-helper.ts:1437-1442). */
+  const TRUE_REFUSAL = {
+    assistant_text: "I could not complete the analysis.",
+    analysis_ready: {
+      status: "blocked",
+      goal_node_id: "",
+      options: [],
+      blocked_reason: "MISSING_OPTION_VALUE",
+    },
+    _diagnostic_trace: { exit_path: "turn_executor" },
+  };
+
+  it("PRECONDITION: both shapes really do carry a blocked_reason, so the pair is not vacuous", () => {
+    // Without this the "silent" half could pass because the fixture has no
+    // blocked_reason at all — a guard agreeing with itself (trap 13b).
+    expect(DELETE_SUCCESS_RECEIPT.analysis_ready.blocked_reason).toBeTruthy();
+    expect(TRUE_REFUSAL.analysis_ready.blocked_reason).toBeTruthy();
+  });
+
+  it("SILENT on a structural_delete SUCCESS receipt that carries a blocked_reason", () => {
+    expect(
+      assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 2", body: DELETE_SUCCESS_RECEIPT, requestedAnalysis: false },
+      ]),
+    ).toEqual([]);
+    expect(hasAnalysisRefusalFingerprint(DELETE_SUCCESS_RECEIPT)).toBe(false);
+  });
+
+  it("SPEAKS on the genuine unrequested refusal", () => {
+    expect(
+      assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 2", body: TRUE_REFUSAL, requestedAnalysis: false },
+      ]),
+    ).toHaveLength(1);
+    expect(hasAnalysisRefusalFingerprint(TRUE_REFUSAL)).toBe(true);
+  });
+
+  it("THE DISCRIMINATION IS THE readiness_issues KEY, proven by moving only that", () => {
+    // One field apart, opposite verdicts — so the discrimination is provably
+    // this predicate's doing and not some other difference between the fixtures.
+    const { readiness_issues: _dropped, ...withoutIssues } = DELETE_SUCCESS_RECEIPT.analysis_ready;
+    expect(hasAnalysisRefusalFingerprint({ ...DELETE_SUCCESS_RECEIPT, analysis_ready: withoutIssues })).toBe(true);
+    expect(
+      hasAnalysisRefusalFingerprint({
+        ...TRUE_REFUSAL,
+        analysis_ready: { ...TRUE_REFUSAL.analysis_ready, readiness_issues: [{ code: "X" }] },
+      }),
+    ).toBe(false);
+  });
+
+  it("a turn that DECLARED it requested an analysis is never judged, either way", () => {
+    expect(
+      assertNoUnrequestedAnalysisRefusal([
+        { label: "turn 2", body: TRUE_REFUSAL, requestedAnalysis: true },
+      ]),
+    ).toEqual([]);
   });
 });

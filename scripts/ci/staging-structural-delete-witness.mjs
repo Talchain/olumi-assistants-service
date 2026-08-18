@@ -344,9 +344,20 @@ export function assertModelWithout(label, body, { absentIds, presentIds }) {
   // ⚠ OBSERVABILITY IS SEPARATE FROM THE VERDICT, and that separation is a
   // MEASURED correction to this file. The first version treated an EMPTY
   // `analysis_ready.options` as a present surface, so a legitimate refusal turn
-  // (`run_state.kind: "refused"`, `MISSING_OPTION_VALUE`) — which carries no
-  // graph and an empty options array — was reported as *"wholesale loss, not a
-  // deletion"*. The very next turn showed the model intact. That message would
+  // (`run_state.kind: "refused"`, `MISSING_OPTION_VALUE`) — which at the time
+  // carried no graph and an empty options array — was reported as *"wholesale
+  // loss, not a deletion"*. The very next turn showed the model intact.
+  //
+  // ⚠⚠ AND THE SHAPE IN THAT SENTENCE IS NOW ONLY ONE OF TWO. Since
+  // `buildAnalysisRefusalReadiness` began PRESERVING a non-degenerate
+  // `goal_node_id` and `options` from the structural projection
+  // (analysis-ready-helper.ts:1460-1471), a refusal turn may carry REAL
+  // options — so "a refusal turn carries an empty options array" is no longer
+  // a fact you may reason from. That does not weaken the rule below, it
+  // strengthens why the rule is written the way it is: `observable` is derived
+  // from WHAT THIS PAYLOAD NAMES, never from what a turn's CLASS is assumed to
+  // carry. A refusal that names options is measurable; one that names nothing
+  // is not; and neither is decided by knowing it was a refusal. That message would
   // have sent someone to the wrong subsystem, which is exactly the
   // misattribution this estate keeps paying for. A turn that names NOTHING
   // cannot support an absence claim OR a loss claim: it is UNMEASURED, and the
@@ -783,6 +794,109 @@ function recordLeg(name, verdict, detail, findings = []) {
   for (const m of findings) log(`   x ${m}`);
 }
 
+/** Print a hash whole, labelled by space, so no reader can mistake one for the other. */
+export function describeAnalysisHash(v) {
+  if (typeof v !== "string" || v.length === 0) return "absent";
+  return looksLikeAnalysisHash(v) ? v : `NOT-16-HEX(${JSON.stringify(v).slice(0, 40)})`;
+}
+
+/** The 64-hex identity column, truncated — and the truncation is REAL here. */
+export function describeIdentityHash(v) {
+  if (typeof v !== "string" || v.length === 0) return "absent";
+  return v.length > 24 ? `${v.slice(0, 24)}… (${v.length} hex)` : `${v} (${v.length} hex)`;
+}
+
+/**
+ * RACE, or a PERMANENT at-rest mismatch? — the one question the 409 payload
+ * cannot answer, decided from same-space observations only.
+ *
+ * ⚠⚠ WHAT THIS REPLACES, AND WHY THE OLD FORM COULD ONLY EVER SAY "PERMANENT".
+ * The previous diagnostic compared the 64-hex `scenarios.graph_identity_hash`
+ * column against the wire's `expected_base_graph_hash`. Since `dispatch.ts`
+ * moved that field to 16-hex ANALYSIS space, the two operands are DISJOINT BY
+ * LENGTH — `!==` is unconditionally true — so the instrument that closed the
+ * CAS P0 would have declared "THEY DISAGREE AT REST … the refusal is
+ * PERMANENT" on every ordinary transient race. A comparator that cannot return
+ * one of its two answers is not a comparator.
+ *
+ * ⚠ AND WHY NOT SIMPLY RE-DERIVE THE IDENTITY HASH FROM THE ROW. Because this
+ * witness runs under `sparse-checkout: scripts/ci` with NO `pnpm install`, by
+ * design — it must keep working when the dependency graph is what broke. CEE's
+ * `computeGraphIdentityHash` is TypeScript in `src/`, unreachable from here, and
+ * re-implementing its projection in this file would be the hand-maintained
+ * mirror (CLAUDE.md trap 12) inside the instrument whose job is catching one.
+ *
+ * SO THE DISCRIMINATION IS BUILT FROM WHAT IS OBSERVABLE, IN ONE SPACE EACH:
+ *
+ *   · the 64-hex identity COLUMN sampled over time (column vs column) — if it
+ *     MOVED between attempts, a concurrent writer demonstrably touched the row.
+ *     That is a RACE, proven, in the exact space the in-transaction CAS reads;
+ *   · the 16-hex ANALYSIS hash the witness SENT versus the one the server
+ *     returned on the same attempt (analysis vs analysis) — a disagreement
+ *     means the persisted graph moved inside the read→write window.
+ *
+ * If nothing moved on EITHER axis across every attempt, the row was static
+ * while the CAS kept refusing, which the column cannot explain — that is the
+ * PERMANENT verdict, and it is reported with its own limit named: this witness
+ * cannot recompute identity(scenarios.graph), so "permanent" here means
+ * "unexplained by any movement this run could observe", not "proven at rest".
+ * An honest UNKNOWN is returned whenever the column arm is unavailable.
+ */
+export function classifyCasConflict({ columnSamples = [], analysisSamples = [] } = {}) {
+  const readable = columnSamples.filter((c) => typeof c?.identityHash === "string");
+  const identities = new Set(readable.map((c) => c.identityHash));
+  if (identities.size > 1) {
+    return {
+      verdict: "RACE",
+      why:
+        `scenarios.graph_identity_hash MOVED during the run ` +
+        `(${[...identities].map(describeIdentityHash).join(" -> ")}) — a concurrent writer ` +
+        `touched the row, in the same 64-hex space the in-transaction CAS compares. This is a ` +
+        `race, not a stuck state.`,
+    };
+  }
+
+  const moved = analysisSamples.filter(
+    (a) =>
+      typeof a?.sentAnalysisHash === "string" &&
+      typeof a?.serverAnalysisHash === "string" &&
+      a.sentAnalysisHash !== a.serverAnalysisHash,
+  );
+  if (moved.length > 0) {
+    const a = moved[0];
+    return {
+      verdict: "RACE",
+      why:
+        `the persisted graph moved inside the read->write window: attempt ${a.attempt} sent ` +
+        `analysis-space ${describeAnalysisHash(a.sentAnalysisHash)} and the server's fresh read ` +
+        `answered ${describeAnalysisHash(a.serverAnalysisHash)} (same space, same row).`,
+    };
+  }
+
+  if (readable.length === 0) {
+    return {
+      verdict: "UNKNOWN",
+      why:
+        `the canonical-DB arm is not configured, so scenarios.graph_identity_hash could not be ` +
+        `sampled. Whether this is a race or a permanent at-rest mismatch is UNKNOWN on this run, ` +
+        `not assumed.`,
+    };
+  }
+
+  return {
+    verdict: "PERMANENT",
+    why:
+      `nothing moved on either observable axis across ${analysisSamples.length} attempt(s): the ` +
+      `64-hex identity column held ${describeIdentityHash(readable[0].identityHash)} throughout, ` +
+      `and every attempt's sent and server-returned 16-hex analysis hashes agreed. A static row ` +
+      `that keeps failing an identity CAS cannot be explained by a concurrent writer, so the ` +
+      `column and the graph bytes disagree AT REST and no client value can satisfy the gate. ` +
+      `LIMIT OF THIS CLAIM: this witness cannot recompute identity(scenarios.graph) — it has no ` +
+      `install and no access to CEE's hash function — so "permanent" means UNEXPLAINED BY ANY ` +
+      `MOVEMENT OBSERVABLE HERE, not proven at rest.`,
+  };
+}
+
 /**
  * READ the canonical persisted graph hash, writing nothing. See
  * `CANONICAL_READ_SENTINEL`. Asserting the conflict CATEGORY is what makes this a
@@ -880,10 +994,19 @@ const buildShaOf = (body) => body?._diagnostic_trace?.environment?.build_sha ?? 
  *     cleanly ~90s later. It is a race, not a stuck state — but three retries
  *     inside a ten-second window all failed, so "just retry immediately" does not
  *     rescue it either;
- *   - the `expected_base_graph_hash` this arm returns is the 64-hex IDENTITY
- *     hash, which is a DIFFERENT hash space from the 16-hex analysis hash the
- *     client must put in `base_graph_hash`. So the recovery value cannot be used
- *     as the field it looks like it is for.
+ *   - ⚠ THE HASH-SPACE HALF OF THIS NOTE IS HISTORY, AND IS DELETED RATHER THAN
+ *     LEFT AS "still probably true". It used to say the arm returns the 64-hex
+ *     IDENTITY hash, which a client cannot hold and cannot send — a recovery
+ *     instruction terminating in refusal. `dispatch.ts` closed that: the
+ *     `structural_delete` and `edge_strength_edit` CAS arms now answer with
+ *     `readClientRecoverableBaseHash`, a FRESH persisted read rendered in
+ *     16-hex ANALYSIS space, the same space as the client's `base_graph_hash`.
+ *     (The chat-turn arms in `turn-executor.ts` still emit identity space —
+ *     that residual is disclosed at `readClientRecoverableBaseHash`; it is not
+ *     the arm this witness drives.) Nothing below may compare this value
+ *     against the 64-hex `scenarios.graph_identity_hash` column: the two are
+ *     disjoint by LENGTH, so `!==` is unconditionally true and the diagnostic
+ *     would report a PERMANENT at-rest mismatch on every ordinary race.
  *
  * The witness therefore RETRIES this category — and REPORTS every retry. Silently
  * absorbing it would hide a live defect; failing on it would make the alarm flaky
@@ -901,10 +1024,20 @@ const CAS_RETRY_DELAY_MS = 15000;
  */
 async function postStructuralDelete(ctx, event) {
   const casConflicts = [];
+  /** Per-attempt analysis-space pair — the input to `classifyCasConflict`. */
+  const casSamples = [];
+  /**
+   * Per-attempt 64-hex identity COLUMN samples. This is the axis that can PROVE
+   * a race: the column moving between attempts means a concurrent writer
+   * touched the row, in the exact space the in-transaction CAS compares. It is
+   * sampled per attempt rather than once at the end because a race that has
+   * already settled is invisible to a single reading.
+   */
+  const columnSamples = [];
   let last = null;
   for (let attempt = 1; attempt <= CAS_RETRY_ATTEMPTS; attempt++) {
     const canonical = await readCanonicalHash(ctx);
-    if (canonical.hash === null) return { res: null, why: canonical.why, casConflicts, attempts: attempt };
+    if (canonical.hash === null) return { res: null, why: canonical.why, casConflicts, casSamples, columnSamples, attempts: attempt };
     last = await postTurn(
       ctx.base,
       ctx.key,
@@ -918,15 +1051,26 @@ async function postStructuralDelete(ctx, event) {
       ctx.turnTimeout,
     );
     if (last.body?.details?.conflict_category !== RPC_CAS_CONFLICT) {
-      return { res: last, why: null, casConflicts, attempts: attempt, baseHash: canonical.hash };
+      return { res: last, why: null, casConflicts, casSamples, columnSamples, attempts: attempt, baseHash: canonical.hash };
     }
+    // ⚠ NO TRUNCATION ELLIPSIS AND NO "identity" LABEL. Both were wrong after
+    // the arm moved to analysis space: `.slice(0, 16)` on a 16-hex value prints
+    // the WHOLE hash while the trailing "…" claims it is a prefix of something
+    // longer, and a reader who trusted the label would compare it against the
+    // 64-hex column. Print it whole, and say which space it is in.
+    const serverSaid = last.body?.details?.expected_base_graph_hash ?? null;
     casConflicts.push(
       `attempt ${attempt}: base=${canonical.hash} -> 409 ${RPC_CAS_CONFLICT} ` +
-        `(server expected identity ${String(last.body?.details?.expected_base_graph_hash ?? "?").slice(0, 16)}…)`,
+        `(server's recoverable base, analysis-space: ${describeAnalysisHash(serverSaid)})`,
     );
+    casSamples.push({ attempt, sentAnalysisHash: canonical.hash, serverAnalysisHash: serverSaid });
+    const col = await readCasColumn(ctx);
+    if (col !== null && col.error === undefined) {
+      columnSamples.push({ attempt, identityHash: col.graph_identity_hash ?? null, updatedAt: col.updated_at });
+    }
     if (attempt < CAS_RETRY_ATTEMPTS) await new Promise((r) => setTimeout(r, CAS_RETRY_DELAY_MS));
   }
-  return { res: last, why: null, casConflicts, attempts: CAS_RETRY_ATTEMPTS };
+  return { res: last, why: null, casConflicts, casSamples, columnSamples, attempts: CAS_RETRY_ATTEMPTS };
 }
 
 async function main() {
@@ -1270,9 +1414,22 @@ async function main() {
       orphanDetail = `${orphanPick.mode} mode: the canonical base-hash read failed, so the delete was never attempted`;
       orphanVerdict = "FAIL";
     } else if (fdel.status !== 200 || !carriedCommittedGraph(fdel.body)) {
+      // ⚠⚠ THE ROOT-CAUSE READ IS NOW A ONE-SPACE COMPARISON. It used to test
+      // the 64-hex identity COLUMN against the wire's `expected_base_graph_hash`
+      // — which `dispatch.ts` moved to 16-hex ANALYSIS space, making the two
+      // disjoint by length, `!==` unconditionally true, and the verdict
+      // PERMANENT on every ordinary race. See `classifyCasConflict` for what
+      // replaced it and for the limit of what it can claim.
       const casCol = await readCasColumn(ctx);
-      const serverExpected = fdel.body?.details?.expected_base_graph_hash ?? null;
       const casReadable = casCol !== null && casCol.error === undefined;
+      const columnSamples = [
+        ...(casReadable ? [{ identityHash: casCol.graph_identity_hash ?? null, updatedAt: casCol.updated_at }] : []),
+        ...(orphanDeleted.columnSamples ?? []),
+      ];
+      const classified = classifyCasConflict({
+        columnSamples,
+        analysisSamples: orphanDeleted.casSamples ?? [],
+      });
       orphanDetail =
         `${orphanPick.mode} mode: the second structural_delete on this scenario was REFUSED. ` +
         `attempts=${orphanDeleted.attempts}`;
@@ -1283,13 +1440,11 @@ async function main() {
           `text=${JSON.stringify((fdel.body?.assistant_text ?? "").slice(0, 200))}` +
           (fdel.body?.details?.conflict_category !== RPC_CAS_CONFLICT
             ? ""
-            : casReadable
-              ? `\n     ROOT-CAUSE READ (CEE out of the path): scenarios.graph_identity_hash = ` +
-                `${String(casCol.graph_identity_hash ?? "null").slice(0, 24)}… (written ${casCol.updated_at}), ` +
-                `while CEE's own read of the SAME row derives ${String(serverExpected ?? "?").slice(0, 24)}…. ` +
-                `${casCol.graph_identity_hash !== serverExpected ? "THEY DISAGREE AT REST, so no client value can satisfy the gate and the refusal is PERMANENT, not a race." : "They agree, so this WAS a race with a concurrent writer."}`
-              : `\n     ROOT-CAUSE READ NOT AVAILABLE (${casCol?.error ?? "unknown"}) — whether this is a race or a ` +
-                `permanent at-rest mismatch is therefore UNKNOWN on this run, not assumed.`),
+            : `\n     ROOT-CAUSE READ (CEE out of the path): ${classified.verdict} — ${classified.why}` +
+              (casReadable
+                ? `\n     at-rest sample: scenarios.graph_identity_hash = ` +
+                  `${describeIdentityHash(casCol.graph_identity_hash)} (written ${casCol.updated_at})`
+                : `\n     at-rest sample UNAVAILABLE (${casCol?.error ?? "unknown"})`)),
       ];
       orphanVerdict = "FAIL";
     } else if ((preRefsWire + (preRefsDb ?? 0)) === 0) {

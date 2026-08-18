@@ -156,16 +156,36 @@ export function readyOptionCount(body) {
  * `synthesiseFreshnessOnlyAnalysisReady` (analysis-ready-emit.ts:59) — and
  * those four are told apart by exactly the fields below:
  *
- *   · `goal_node_id` empty vs real     → "the projection found no goal node"
- *                                        vs "it found the goal and lost the
- *                                        OPTIONS". Two different defects; the
- *                                        old log could not distinguish them,
- *                                        and the first diagnosis asserted the
- *                                        first without evidence for it.
+ *   · `goal_node_id` empty vs real     → ⚠ THIS ROW IS NO LONGER A PRODUCER
+ *                                        DISCRIMINATOR, and saying so is the
+ *                                        point: it read "empty = the projection
+ *                                        found no goal node", which
+ *                                        `buildAnalysisRefusalReadiness` made
+ *                                        false when it began PRESERVING a
+ *                                        non-degenerate `goal_node_id` and
+ *                                        `options` from the structural
+ *                                        projection (analysis-ready-helper.ts
+ *                                        :1460-1471). A refusal turn can now
+ *                                        carry a real goal and real options.
+ *                                        Still worth printing — it is the
+ *                                        difference between "the model has an
+ *                                        identity" and "it does not" — but it
+ *                                        no longer names WHICH producer spoke.
  *   · `readiness_issues[].code`        → the projection's OWN reason, already
- *                                        on the wire and never printed.
- *   · `blocked_reason`                 → present on the refusal builder, absent
- *                                        on the freshness-only carrier.
+ *                                        on the wire and never printed. ⭐ AND
+ *                                        it is now the load-bearing half of the
+ *                                        producer discriminator: `blocked_reason`
+ *                                        PRESENT with `readiness_issues` ABSENT
+ *                                        is the refusal builder and nothing else
+ *                                        (see `hasAnalysisRefusalFingerprint`).
+ *   · `blocked_reason`                 → ⚠ NOT unique to the refusal builder.
+ *                                        `assessCanonicalAnalysisReadiness`
+ *                                        writes it too, at :1117 and :1126, so a
+ *                                        SUCCESSFUL `structural_delete` receipt
+ *                                        can carry `OPTION_NO_FACTOR_EDGES`.
+ *                                        Absent on the freshness-only carrier.
+ *                                        Read it WITH `readiness_issues`, never
+ *                                        alone.
  *   · `bias_findings` present with no
  *     `readiness_issues`               → the freshness-only synthesis carrier.
  *   · `freshness` / `freshness_reason` → whether the synthesis path was even
@@ -557,12 +577,49 @@ export function assertHealthyJourney(frameBody, followUpBody) {
  * than on `options`, which the fix repopulates. It is orthogonal to the fix by
  * construction and survives it.
  *
- * ⭐ THE PREDICATE IS DERIVED FROM THE PRODUCER, not from the observed payloads
- * (P7). `src/orchestrator/types.ts:595` declares `blocked_reason` is *"written
- * ONLY by `buildAnalysisRefusalReadiness`"*, and that function is called from
- * exactly two sites, both of them the analyse-refusal arm. So a non-empty
- * `blocked_reason` IS the turn declaring "I declined to analyse" — it is not a
- * proxy for it, and no other producer can set it.
+ * ⭐⭐ THE PREDICATE IS DERIVED FROM THE PRODUCER (P7) — AND THE PRODUCER'S OWN
+ * DOC WAS WRONG, WHICH IS WHY THIS PARAGRAPH IS LONGER THAN IT LOOKS IT SHOULD BE.
+ *
+ * This gate used to fire on ANY non-empty `blocked_reason`, on the authority of
+ * `src/orchestrator/types.ts`, which declared the field *"written ONLY by
+ * `buildAnalysisRefusalReadiness`"*. Derived at the bytes, that is FALSE: three
+ * sites write it to the wire —
+ *   · `analysis-ready-helper.ts:1441`  `buildAnalysisRefusalReadiness` (THE
+ *     analyse-refusal arm — the one this alarm is about);
+ *   · `analysis-ready-helper.ts:1117`  `assessCanonicalAnalysisReadiness`, the
+ *     `hardBlocked` branch over a SEMANTIC projection;
+ *   · `analysis-ready-helper.ts:1126`  the same function's no-semantic branch.
+ * (A fourth literal, `chip-click-dispatch.ts:670`, is a LOG field, not the wire.)
+ *
+ * The consequence is not hypothetical and was EXECUTED: a `structural_delete`
+ * that SUCCEEDS and leaves an option with no wired factor edge stamps
+ * `blocked_reason: "OPTION_NO_FACTOR_EDGES"` on its receipt, via the
+ * `graph_structure` limb of `hardBlocked`. Under the old predicate this alarm
+ * would have called a correct delete receipt a ROUTING DEFECT — a false alarm
+ * about the wrong subsystem, and false alarms are how this estate loses real ones.
+ *
+ * ⭐ SO THE KEY IS THE REFUSAL ARM'S **FINGERPRINT**, NOT THE FIELD.
+ * `buildAnalysisRefusalReadiness` returns exactly
+ * `{ options, goal_node_id, status: 'blocked', blocked_reason }` — it writes NO
+ * `readiness_issues`, because that block is OUTPUT the turn declined to produce.
+ * Both `assessCanonicalAnalysisReadiness` branches always carry
+ * `readiness_issues`: the no-semantic branch sets it unconditionally, and the
+ * `hardBlocked` branch reaches `allIssues = [...carrierIssues,
+ * ...blockingIssues]` with `blockingIssues` non-empty by construction (that is
+ * what makes `hardBlocked` true). So
+ *
+ *     blocked_reason PRESENT **and** readiness_issues ABSENT
+ *
+ * is the refusal arm and no other producer — a conjunction, derived from the
+ * three producers' own code rather than from a doc sentence or an observed
+ * corpus. It is also the exact discriminator `readinessDiagnosis` already
+ * prints, so the alarm and the diagnostic cannot describe a turn differently.
+ *
+ * ⚠ AND THE MESSAGE IS AN OBSERVATION, NOT A CAUSE. The old text asserted "the
+ * turn routed to the analyse handler" as fact. This gate cannot see routing; it
+ * sees a payload shape. It now lists the candidate seams and leaves the
+ * attribution to whoever reads the log — the same rule this file already applies
+ * to `assertModelWithout`'s unmeasured turns.
  *
  * ⭐ "THE USER DID NOT ASK TO ANALYSE" IS DECLARED BY THE CALLER, NEVER INFERRED
  * FROM THE RESPONSE. This gate is the user: it composes every message it sends,
@@ -589,21 +646,49 @@ export function assertNoUnrequestedAnalysisRefusal(turns) {
   const f = [];
   for (const t of turns) {
     if (t.requestedAnalysis) continue;
+    if (!hasAnalysisRefusalFingerprint(t.body)) continue;
     const reason = t.body?.analysis_ready?.blocked_reason;
-    if (typeof reason !== "string" || reason.trim().length === 0) continue;
     f.push(
-      `${t.label}: the product answered a CONVERSATIONAL turn with an ANALYSIS REFUSAL ` +
-        `(analysis_ready.blocked_reason="${reason}") — this turn never asked for an analysis. ` +
-        `Only the analyse-refusal arm writes blocked_reason, so the turn routed to the analyse ` +
-        `handler, ran the readiness gate, and declined. The user asked for something else and ` +
-        `got a refusal to do a thing they did not request. ` +
-        `This is a ROUTING defect and it is NOT fixed by making the refusal payload honest: ` +
-        `that fix restores analysis_ready.options, which turns the continuity check above ` +
-        `green while leaving this turn just as wrong. ` +
+      `${t.label}: the product answered a CONVERSATIONAL turn with the ANALYSE-REFUSAL ARM's ` +
+        `payload (analysis_ready.blocked_reason="${reason}" WITH NO readiness_issues) — this turn ` +
+        `never asked for an analysis. ` +
+        `WHAT IS OBSERVED, not inferred: that key set is ` +
+        `\`buildAnalysisRefusalReadiness\` (analysis-ready-helper.ts:1441) and no other wire ` +
+        `producer — its two siblings at :1117 and :1126 always carry readiness_issues. ` +
+        `WHAT IS NOT OBSERVED: which seam put the turn there. This gate sees a payload, never a ` +
+        `route. Candidate seams, in the order worth checking: the V5 turn router's classification ` +
+        `of this message, the run_analysis handler's entry condition, and the chip-click arm ` +
+        `(chip-click-dispatch.ts:659 calls the same builder, so a spurious chip dispatch presents ` +
+        `identically here). ` +
+        `Either way the user asked for something else and got a refusal to do a thing they did ` +
+        `not request — and that is NOT fixed by making the refusal payload honest: that fix ` +
+        `restores analysis_ready.options, which turns the continuity check above green while ` +
+        `leaving this turn just as wrong. ` +
         `Readiness on this turn: ${readinessDiagnosis(t.body)}`,
     );
   }
   return f;
+}
+
+/**
+ * The analyse-refusal arm's fingerprint: a `blocked_reason` with NO
+ * `readiness_issues`.
+ *
+ * Exported so the discriminator has ONE definition rather than one per caller —
+ * two predicates for one concept is the divergence that let #1002 silently
+ * disable this file's provenance half.
+ *
+ * ⚠ `readiness_issues` ABSENT, not empty. `assessCanonicalAnalysisReadiness`
+ * only sets the key when it has issues, and the refusal builder never sets it,
+ * so absence is the real signal; an empty ARRAY would be a third producer's
+ * shape and is deliberately not treated as the refusal arm.
+ */
+export function hasAnalysisRefusalFingerprint(body) {
+  const a = body?.analysis_ready;
+  if (!a || typeof a !== "object") return false;
+  const reason = a.blocked_reason;
+  if (typeof reason !== "string" || reason.trim().length === 0) return false;
+  return a.readiness_issues === undefined;
 }
 
 /**

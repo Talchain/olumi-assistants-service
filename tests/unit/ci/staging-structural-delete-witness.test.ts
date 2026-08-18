@@ -39,6 +39,9 @@ import { parse } from "yaml";
 
 import {
   assertBatchAtomicity,
+  classifyCasConflict,
+  describeAnalysisHash,
+  describeIdentityHash,
   assertModelWithout,
   assertNoOrphanedReferences,
   assertNotifyDidNotMutate,
@@ -471,5 +474,110 @@ describe("the workflow cannot be silenced quietly", () => {
   it("declares why it is dispatch-only, so the choice is visible rather than assumed", () => {
     expect(raw).toContain("workflow_dispatch");
     expect(raw.toLowerCase()).toContain("why this is not on push");
+  });
+});
+
+/**
+ * THE CAS ROOT-CAUSE DIAGNOSTIC MUST BE ABLE TO RETURN **BOTH** ANSWERS.
+ *
+ * ⭐ WHAT WENT WRONG, and it is the sharpest possible instance of what this file
+ * exists for. The diagnostic compared the 64-hex `scenarios.graph_identity_hash`
+ * COLUMN against the wire's `expected_base_graph_hash` — which `dispatch.ts`
+ * had moved to the 16-hex ANALYSIS space so a client could actually satisfy it.
+ * The two operands became DISJOINT BY LENGTH, so `!==` was unconditionally
+ * true and the instrument that CLOSED the CAS P0 would have reported
+ * *"THEY DISAGREE AT REST … the refusal is PERMANENT"* on every ordinary
+ * transient race. A comparator with one reachable answer is not a comparator,
+ * and nothing was red.
+ *
+ * So the pair below is the whole point: the SAME function must say RACE on one
+ * input and PERMANENT on the other. Neither alone shows anything — a broken
+ * comparator agrees with whichever verdict it is stuck on.
+ */
+describe("classifyCasConflict — the race/permanent discrimination is REAL, both ways", () => {
+  const STATIC_IDENTITY = "a".repeat(64);
+  const MOVED_IDENTITY = "b".repeat(64);
+  const H1 = "0123456789abcdef";
+  const H2 = "fedcba9876543210";
+
+  it("PERMANENT: nothing moved on either observable axis", () => {
+    const r = classifyCasConflict({
+      columnSamples: [
+        { attempt: 1, identityHash: STATIC_IDENTITY },
+        { attempt: 2, identityHash: STATIC_IDENTITY },
+      ],
+      analysisSamples: [
+        { attempt: 1, sentAnalysisHash: H1, serverAnalysisHash: H1 },
+        { attempt: 2, sentAnalysisHash: H1, serverAnalysisHash: H1 },
+      ],
+    });
+    expect(r.verdict).toBe("PERMANENT");
+    // …and it must NAME its own limit rather than overclaiming at-rest proof.
+    expect(r.why).toContain("UNEXPLAINED BY ANY MOVEMENT OBSERVABLE HERE");
+  });
+
+  it("RACE: the 64-hex identity column moved between attempts", () => {
+    const r = classifyCasConflict({
+      columnSamples: [
+        { attempt: 1, identityHash: STATIC_IDENTITY },
+        { attempt: 2, identityHash: MOVED_IDENTITY },
+      ],
+      analysisSamples: [{ attempt: 1, sentAnalysisHash: H1, serverAnalysisHash: H1 }],
+    });
+    expect(r.verdict).toBe("RACE");
+    expect(r.why).toContain("MOVED");
+  });
+
+  it("RACE: the analysis-space hash the server returned differs from the one sent", () => {
+    const r = classifyCasConflict({
+      columnSamples: [{ attempt: 1, identityHash: STATIC_IDENTITY }],
+      analysisSamples: [{ attempt: 1, sentAnalysisHash: H1, serverAnalysisHash: H2 }],
+    });
+    expect(r.verdict).toBe("RACE");
+    expect(r.why).toContain("read->write window");
+  });
+
+  it("UNKNOWN, never PERMANENT, when the canonical-DB arm is not configured", () => {
+    // The old form could not express this either: with no column to read it
+    // still compared `undefined !== "<16-hex>"` and answered PERMANENT.
+    const r = classifyCasConflict({
+      columnSamples: [],
+      analysisSamples: [{ attempt: 1, sentAnalysisHash: H1, serverAnalysisHash: H1 }],
+    });
+    expect(r.verdict).toBe("UNKNOWN");
+  });
+
+  it("THE REGRESSION PIN: a 64-hex column and a 16-hex wire value never meet in a comparison", () => {
+    // The defect was cross-SPACE, so the pin is about spaces, not about a
+    // string. Feed the exact shape that produced the false PERMANENT — a
+    // static 64-hex column and a well-formed 16-hex analysis pair — and require
+    // the verdict to be decided by MOVEMENT, not by the length mismatch. If
+    // anyone reintroduces `column !== wireValue`, this stays PERMANENT while
+    // the RACE cases above go wrong, and both halves of the pair fail together.
+    const raced = classifyCasConflict({
+      columnSamples: [
+        { attempt: 1, identityHash: STATIC_IDENTITY },
+        { attempt: 2, identityHash: MOVED_IDENTITY },
+      ],
+      analysisSamples: [{ attempt: 1, sentAnalysisHash: H1, serverAnalysisHash: H1 }],
+    });
+    const stuck = classifyCasConflict({
+      columnSamples: [{ attempt: 1, identityHash: STATIC_IDENTITY }],
+      analysisSamples: [{ attempt: 1, sentAnalysisHash: H1, serverAnalysisHash: H1 }],
+    });
+    expect([raced.verdict, stuck.verdict]).toEqual(["RACE", "PERMANENT"]);
+  });
+
+  it("the hash renderers say which space they are in and never fake a truncation", () => {
+    // `.slice(0, 16) + "…"` on a 16-hex value printed the WHOLE hash while the
+    // ellipsis claimed it was a prefix — which is how a reader ends up
+    // comparing it to the 64-hex column by hand.
+    expect(describeAnalysisHash("0123456789abcdef")).toBe("0123456789abcdef");
+    expect(describeAnalysisHash("0123456789abcdef")).not.toContain("…");
+    expect(describeAnalysisHash(null)).toBe("absent");
+    expect(describeAnalysisHash("a".repeat(64))).toContain("NOT-16-HEX");
+    // The identity column IS truncated, and says by how much.
+    expect(describeIdentityHash("a".repeat(64))).toContain("(64 hex)");
+    expect(describeIdentityHash("a".repeat(64))).toContain("…");
   });
 });

@@ -592,9 +592,32 @@ export interface GraphPatchBlockData {
     /**
      * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — WHY this turn's analysis was
      * refused, as a stable machine-readable code. Present if and only if
-     * `status === 'blocked'`; written ONLY by `buildAnalysisRefusalReadiness` in
-     * `src/orchestrator/tools/analysis-ready-helper.ts` (the live readiness
-     * writer — see ROADMAP 2.1135 on the twin that is NOT on the wire path).
+     * `status === 'blocked'`.
+     *
+     * ⚠⚠ CORRECTED — THIS SAID *"written ONLY by `buildAnalysisRefusalReadiness`"*
+     * AND A CI GATE WAS BUILT ON IT. Derived at the bytes, THREE sites in
+     * `src/orchestrator/tools/analysis-ready-helper.ts` write this field to the
+     * wire:
+     *   · `:1441` `buildAnalysisRefusalReadiness` — the analyse-REFUSAL arm;
+     *   · `:1117` `assessCanonicalAnalysisReadiness`, the `hardBlocked` branch
+     *     over a semantic projection;
+     *   · `:1126` the same function's no-semantic branch.
+     * (`chip-click-dispatch.ts:670` is a LOG field, not the wire; its wire write
+     * goes through `buildAnalysisRefusalReadiness` at `:659`.)
+     *
+     * So a non-empty `blocked_reason` does NOT mean the turn refused to analyse:
+     * a SUCCESSFUL `structural_delete` receipt carries
+     * `OPTION_NO_FACTOR_EDGES` through the `graph_structure` limb of
+     * `hardBlocked`. `scripts/ci/staging-journey-smoke.mjs` fired on this field
+     * alone and would have reported a correct delete as a ROUTING DEFECT.
+     *
+     * ⭐ TO TELL THE REFUSAL ARM APART, USE THE CONJUNCTION: `blocked_reason`
+     * PRESENT **and** `readiness_issues` ABSENT. `buildAnalysisRefusalReadiness`
+     * never writes `readiness_issues` (it is output the turn declined to
+     * produce); both `assessCanonicalAnalysisReadiness` branches always carry it.
+     * See `hasAnalysisRefusalFingerprint` in the journey gate.
+     *
+     * (See ROADMAP 2.1135 on the twin that is NOT on the wire path.)
      *
      * The value is the producing handler's own `details.reason_code` when it
      * declared one (e.g. `mixed_scale_unresolved`, `baseline_scale_unresolved`,
