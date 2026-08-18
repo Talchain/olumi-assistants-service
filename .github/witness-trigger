@@ -1,14 +1,10 @@
 Touch to fire the structural-delete acceptance witness.
 
-Fired 18 Aug 2026 against CEE 0a274813 — the first build carrying the COMPLETE
-option-effect write path: #1028 (the verb), #1034 (identity resolved from the same
-payload the blocker sentence was composed from), plus #1027 router gate,
-#1026 A3 outcome nodes and #1033 provenance.
+Fired against CEE 4a513781 — all five first-send fixes merged.
+Prior run 32187329790 on 0a274813: 8 PASS / 0 FAIL / 2 UNKNOWN.
+RERUN PASSED (the blocker that held this domain open all day is cleared).
+This run exists to recover the ORPHAN leg — "a second delete on the same
+scenario also succeeds" — which went UNMEASURED there.
 
-The question: does RERUN still refuse? Run 32136391915 on 3ce2fcc0 gave
-8 PASS / 0 FAIL / 2 UNKNOWN, with RERUN UNKNOWN on reason_code MISSING_OPTION_VALUE.
-That blocker is what #1028+#1034 were built to clear.
-
-Read LEG BY LEG. exit 3 = INCOMPLETE (not measured) is NOT a failure.
-CANONICAL-DB stays UNKNOWN until STAGING_SUPABASE_URL and
-STAGING_SUPABASE_SERVICE_ROLE_KEY exist as repo secrets — still absent.
+CANONICAL-DB stays UNKNOWN by decision: DB-level proof is Milestone B.
+Read LEG BY LEG. exit 3 = INCOMPLETE, not a failure.
