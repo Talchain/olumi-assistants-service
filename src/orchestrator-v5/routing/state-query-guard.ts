@@ -14,7 +14,9 @@
  *   2. If matched AND `recent_changes` is non-empty, return a
  *      `direct_answer` dispatch with deterministic copy that quotes the
  *      most recent change's summary verbatim (so the answer is grounded
- *      in the persisted handler fact, not a fabricated summary).
+ *      in the persisted handler fact, not a fabricated summary),
+ *      ATTRIBUTED TO THE RECORD ("Earlier in this session: …") so that a
+ *      past receipt can never read as a claim about the current turn.
  *   3. If matched AND `recent_changes` is empty, return a "no recent
  *      changes" dispatch that owns the state-query without falling to
  *      `edit_graph`. The user gets honest copy — "I haven't applied
@@ -542,11 +544,26 @@ export function tryStateQueryGuard(
 }
 
 /**
- * Deterministic answer copy. The leading sentence quotes the most
- * recent mutation's summary verbatim so the response is grounded in the
- * persisted handler fact (i.e. the answer references the actual £50k
- * value, not a generic safe phrase). Suffix is short and asks the user
- * to confirm whether they want to follow up with an analysis run.
+ * Deterministic answer copy. The persisted mutation summary is quoted VERBATIM
+ * so the response is grounded in the handler fact (i.e. the answer references
+ * the actual £50k value, not a generic safe phrase). Suffix is short and asks
+ * the user to confirm whether they want to follow up with an analysis run.
+ *
+ * ⭐⭐ AND IT IS ATTRIBUTED TO THE RECORD RATHER THAN TO THIS TURN, WHICH IS THE
+ * WHOLE POINT OF THE PREFIX. Emitted BARE, the summary is a perfective mutation
+ * receipt ("Updated Enterprise sales headcount and spend") written by a handler
+ * at the time of a PAST mutation — so as a whole reply on a turn that wrote
+ * nothing it reads as a claim about THIS turn, and it is false. Measured live:
+ * composed journey witness 18 Aug 2026, deployed `4a513781`, LINK 6, where a
+ * provenance challenge received exactly that sentence at `llm_calls: 0` with the
+ * graph hash unchanged.
+ *
+ * ⚠ THE ATTRIBUTION IS TRUE BY CONSTRUCTION, NOT BY INSPECTION — which is why it
+ * is unconditional rather than gated on anything. `TryStateQueryGuardInput`
+ * takes `Pick<ContextPack, 'recent_changes'>`, and `recent_changes` is BY TYPE
+ * the projection of `prior_facts` (`context/recent-changes.ts`); this guard runs
+ * before any handler and never mutates. There is therefore no reachable state in
+ * which the quoted change belongs to the turn being answered.
  *
  * British English; no em dashes; no internal terms.
  */
