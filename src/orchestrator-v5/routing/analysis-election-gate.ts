@@ -100,9 +100,28 @@
  * 2. **THE TWO ERROR DIRECTIONS ARE NOT TWO HARMS** (trap 22b requires two
  *    parameters only when they are). A false POSITIVE here honours an election
  *    that would have been honoured anyway — byte-identical to today's staging
- *    behaviour, no new harm class. A false NEGATIVE costs one click: the turn
- *    answers conversationally and still offers the analysis. Neither direction
- *    can produce a false claim, so one window is sound.
+ *    behaviour, no new harm class. A false NEGATIVE costs one click ON THE CHIP
+ *    THIS MODULE EMITS (see THE OFFER below), or, on a model that cannot be
+ *    analysed yet, costs nothing that was available: there was no run to have.
+ *    Neither direction can produce a false claim, so one window is sound.
+ *
+ *    ⚠ THAT SENTENCE USED TO SAY "costs one click: the turn … still offers the
+ *    analysis", AND IT WAS NOT TRUE WHEN WRITTEN. The demotion emitted no chip;
+ *    whether one appeared was decided by chip rules answering an unrelated
+ *    question. Measured through the real `runTurnExecutor` at 585f8dce, on the
+ *    P0 message, three states and three different answers:
+ *
+ *      | readiness | prior turn offered Run? | chips shipped                |
+ *      |-----------|-------------------------|------------------------------|
+ *      | ready     | no                      | `chip_action_run_analysis`   |
+ *      | ready     | YES                     | **none** — the chip-sameness |
+ *      |           |                         | guard removed it             |
+ *      | blocked   | no                      | "Resolve model issue" prompt |
+ *
+ *    A justification resting on an affordance the code does not emit is the
+ *    guarantee-theatre class this estate hunts. The fix is not to soften the
+ *    sentence: it is to make the module OWN the affordance, so the claim and
+ *    the behaviour cannot drift apart again.
  *
  * 3. **THE GATE IS MONOTONE.** It can only ever REMOVE an analysis election;
  *    it never adds one. So no reachable input makes the product do something
@@ -118,15 +137,44 @@
  * simulation that will now not run — a fabrication of exactly the P5/P8 class.
  * `answer_shape` is unavailable too: the same prompt forbids it on execute.
  *
- * So the demotion carries its OWN deterministic answer ({@link
- * ANALYSIS_ELECTION_DEMOTION_TEXT}), composed with no model call. It makes no
- * claim about the contents of the user's model (P5 — there is no persisted
- * read at this seam, so it asserts nothing that would need one), manufactures
- * no obligation (P6), and its one affordance has a pinned acceptance path
- * (P8): the sentence it prints tells the user to say "run the analysis", and
- * {@link looksLikeExplicitAnalysisRequest} admits that string — asserted in
- * `__tests__/analysis-election-gate.test.ts`, together with every
- * run-analysis chip message the product emits anywhere in `src/`.
+ * So the demotion carries its OWN deterministic answer, composed with no model
+ * call. It makes no claim about the contents of the user's model (P5 — there is
+ * no persisted read at this seam, so it asserts nothing that would need one)
+ * and manufactures no obligation (P6).
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * ⭐ THE OFFER — one affordance, one acceptance path, both owned here (P8)
+ * ─────────────────────────────────────────────────────────────────────────
+ * A demoted turn returns TWO things: the copy and, when a run could actually
+ * be honoured, {@link ANALYSIS_ELECTION_RUN_CHIP}. They move together by
+ * construction:
+ *
+ *   `runAnalysisOfferable === true`  → {@link
+ *     ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER} + the chip. One click
+ *     runs the analysis the user turns out to have wanted, and the chip's
+ *     message is itself admitted by {@link looksLikeExplicitAnalysisRequest},
+ *     so the typed form of the same sentence works too.
+ *   `runAnalysisOfferable === false` → {@link ANALYSIS_ELECTION_DEMOTION_TEXT}
+ *     and NO chip. The copy does not mention running, because on this model a
+ *     click could only refuse — and an affordance that terminates in refusal is
+ *     the same defect as a fabrication wearing different clothes (P8).
+ *
+ * ⚠ THE CALLER DERIVES `runAnalysisOfferable`, AND IT IS THE PRODUCER'S OWN
+ * ADMISSION PREDICATE, NOT A NEW ONE (P7): `analysisReady.status === 'ready'`
+ * AND `run_analysis` present in the validation registry — the exact conjunction
+ * every executable-Run chip rule in `compose/chip-generator.ts` already uses
+ * (its analyse-stage rule, its post-mutation rule and its floor). Inventing a
+ * second readiness opinion here would be trap 21's shape: two predicates
+ * answering the same question under different names.
+ *
+ * ⚠ AND THE CHIP IS NOT SUBJECT TO THE CHIP-SAMENESS GUARD. That guard exists
+ * so a turn does not look stuck by repeating the previous turn's chip; this one
+ * is the acceptance path a sentence on the SAME turn names. Suppressing it is
+ * exactly how the measured "ready + recently offered → zero chips" state
+ * arose. The copy and the chip are emitted or withheld together, never one
+ * without the other — {@link withAnalysisElectionOffer} is the single place
+ * that merges the offer into the turn's chips, and it prepends rather than
+ * replaces so the generator's other affordances survive.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * REJECTED ALTERNATIVE, recorded so it is not re-proposed
@@ -140,33 +188,77 @@
  * it is trap 22b's shape — closing one direction by opening the other.
  */
 
+import type { SuggestedAction } from '../compose/types.js';
+
 import { looksLikeExplicitAnalysisRequest } from './analytical-intent.js';
 
 /** The one handler id this gate governs. */
 export const GATED_ANALYSIS_HANDLER_ID = 'run_analysis' as const;
 
 /**
- * The deterministic reply a demoted turn carries.
+ * The deterministic reply a demoted turn carries when no run can be honoured.
  *
  * ⚠ EVERY CLAUSE IS LOAD-BEARING; read the P-notes before editing it.
- *  - "I did not read that as a request" is a claim about THIS SYSTEM'S OWN
- *    READING, never about the user. It stays true even when the predicate
- *    misses a genuine request, which a sentence like "you did not ask" would
- *    not (P5 — never assert beyond what is grounded).
+ *  - It LEADS WITH WHAT THE USER CAN DO. The shipped first version opened
+ *    "I have not run the analysis, because I did not read that as a request to
+ *    run one" — a negation about the system followed by a self-justification,
+ *    which is ledger defect L-43 (robotic / defensive register) on what is now
+ *    one of the most-read sentences in the product. The user did not ask for an
+ *    analysis; answering a question they never asked, and then explaining the
+ *    router's reading of their words, is not information they can use.
  *  - It never says an analysis ran, will run, or was skipped for a reason it
- *    cannot know.
+ *    cannot know. It makes no claim at all about the run, which is the only
+ *    thing at this seam that is unambiguously true.
  *  - It makes no statement about what the model contains. There is no
  *    canonical persisted read at this seam, so it makes no claim that would
- *    need one.
- *  - The quoted phrase is the ACCEPTANCE PATH (P8) and is pinned by test
- *    against the admission predicate.
+ *    need one (P5).
+ *  - It offers nothing this state cannot honour (P8). The run offer lives in
+ *    {@link ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER} and ships only
+ *    beside {@link ANALYSIS_ELECTION_RUN_CHIP}.
  *  - House style, from the served prompt's own STYLE section: British
  *    English, sentence case, no em dashes.
  */
 export const ANALYSIS_ELECTION_DEMOTION_TEXT =
-  'I have not run the analysis, because I did not read that as a request to run one. '
-  + 'Tell me what you would like added, changed or filled in and I will work on the model with you. '
-  + 'Say "run the analysis" whenever you want the results computed.';
+  'Tell me what you would like added, changed or filled in and I will work on the model with you.';
+
+/**
+ * The same reply plus the run offer, used ONLY when the caller has told the
+ * gate a run could be honoured now.
+ *
+ * ⚠ COMPOSED FROM THE BASE, never written out a second time: two hand-kept
+ * copies of one sentence is the hand-maintained mirror this estate keeps paying
+ * for (CLAUDE.md trap 12), and a test pins that the offer variant still STARTS
+ * WITH the base so an edit to one cannot silently diverge them.
+ *
+ * The offered sentence is also the typed acceptance path: `run the analysis` is
+ * admitted by {@link looksLikeExplicitAnalysisRequest}, so a user who types it
+ * instead of clicking gets the same outcome.
+ */
+export const ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER =
+  `${ANALYSIS_ELECTION_DEMOTION_TEXT} Or run the analysis whenever you want the results.`;
+
+/**
+ * ⭐ THE ACCEPTANCE PATH THE COPY NAMES, emitted by this module so the two
+ * cannot drift apart (P8).
+ *
+ * Deliberately byte-identical to the executable Run chip
+ * `compose/chip-generator.ts` already emits — same id, same label, same message,
+ * same `action_type` — so a click lands on the SAME deterministic dispatch
+ * (route-v2 branch (b) → `dispatchChipClickRunAnalysis`), which the header's
+ * path table lists as SANCTIONED and which never re-enters this gate. A new
+ * bespoke chip here would have been a second affordance for one action, and the
+ * dedupe in {@link withAnalysisElectionOffer} relies on the shared id.
+ *
+ * The `message` is scanned out of `src/` by the unit suite's MUST-ADMIT corpus,
+ * so if it is ever re-worded into a shape the gate demotes, that test — not a
+ * user — finds out.
+ */
+export const ANALYSIS_ELECTION_RUN_CHIP: SuggestedAction = Object.freeze({
+  id: 'chip_action_run_analysis',
+  label: 'Run analysis',
+  message: 'Run analysis.',
+  action_type: 'run_analysis',
+});
 
 /** Why an election was admitted or demoted. Structural enums only. */
 export type AnalysisElectionOutcome =
@@ -183,7 +275,16 @@ export type AnalysisElectionOutcome =
       /** No explicit request; the handler must not be invoked. */
       readonly kind: 'demoted';
       readonly reason: 'no_explicit_analysis_request';
+      /**
+       * The turn's reply. Which variant is decided by `runAnalysisOfferable`,
+       * and it always agrees with `suggested_actions` — see THE OFFER above.
+       */
       readonly assistant_text: string;
+      /**
+       * The offer, or empty. NEVER a chip without the sentence that names it,
+       * and never the sentence without the chip.
+       */
+      readonly suggested_actions: readonly SuggestedAction[];
     };
 
 export interface AnalysisElectionGateInput {
@@ -204,6 +305,21 @@ export interface AnalysisElectionGateInput {
   readonly electedHandlerId: string;
   /** The user's message, verbatim. */
   readonly message: string;
+  /**
+   * Could a `run_analysis` actually execute for this turn's model, right now?
+   *
+   * ⚠ THE CALLER DERIVES THIS FROM THE PRODUCER, NOT FROM A NEW OPINION (P7):
+   * `analysisReady.status === 'ready'` AND `run_analysis` present in the
+   * validation registry — the identical conjunction `compose/chip-generator.ts`
+   * requires before it will emit an executable Run chip anywhere. This gate
+   * must never widen it: the whole point of the flag is that the offer it
+   * controls can be honoured, and a readiness opinion of our own would be a
+   * second answer to a question that already has one (trap 21).
+   *
+   * `false` is the safe value. It withholds an offer; it never suppresses the
+   * demotion, and it never admits a run.
+   */
+  readonly runAnalysisOfferable: boolean;
 }
 
 /**
@@ -220,9 +336,42 @@ export function evaluateAnalysisElection(
   if (looksLikeExplicitAnalysisRequest(input.message)) {
     return { kind: 'admitted', reason: 'explicit_analysis_request' };
   }
-  return {
-    kind: 'demoted',
-    reason: 'no_explicit_analysis_request',
-    assistant_text: ANALYSIS_ELECTION_DEMOTION_TEXT,
-  };
+  return input.runAnalysisOfferable
+    ? {
+        kind: 'demoted',
+        reason: 'no_explicit_analysis_request',
+        assistant_text: ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER,
+        suggested_actions: [ANALYSIS_ELECTION_RUN_CHIP],
+      }
+    : {
+        kind: 'demoted',
+        reason: 'no_explicit_analysis_request',
+        assistant_text: ANALYSIS_ELECTION_DEMOTION_TEXT,
+        suggested_actions: [],
+      };
+}
+
+/**
+ * Merge a demotion's offer into the turn's composed chips.
+ *
+ * PREPENDS rather than replaces: the offer is the affordance this turn's copy
+ * names, so it must be present and first, but the generator's other chips are
+ * answers to other questions and are not this module's to discard.
+ *
+ * Dedupes by id — the generator frequently produces the same Run chip on its
+ * own, and shipping it twice would be a visible defect — then caps to the
+ * caller's chip budget, which is passed in rather than imported so this module
+ * stays free of the compose layer's internals.
+ *
+ * Total and pure: an empty offer returns the base array unchanged (same
+ * reference), so every non-demoted turn is byte-identical to before.
+ */
+export function withAnalysisElectionOffer(
+  offer: readonly SuggestedAction[],
+  baseChips: readonly SuggestedAction[],
+  maxChips: number,
+): readonly SuggestedAction[] {
+  if (offer.length === 0) return baseChips;
+  const offeredIds = new Set(offer.map((chip) => chip.id));
+  return [...offer, ...baseChips.filter((chip) => !offeredIds.has(chip.id))].slice(0, maxChips);
 }

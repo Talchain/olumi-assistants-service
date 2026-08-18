@@ -168,7 +168,14 @@ export interface ChipGeneratorInput {
   >;
 }
 
-const MAX_CHIPS = 3;
+/**
+ * The chip budget every compose surface shares.
+ *
+ * EXPORTED so callers that merge their own chips into a composed set (the
+ * analysis-election demotion's offer) cap against the same number instead of
+ * writing a fourth copy of `3` (CLAUDE.md trap 12 — derive, do not mirror).
+ */
+export const MAX_CHIPS = 3;
 
 /**
  * Defensive chip-egress validator. Drops chips that cannot map cleanly to a

@@ -271,7 +271,8 @@ import {
 } from './tools/registry.js';
 import { sanitiseNarrateOutput } from './sanitise.js';
 import { sanitiseAssistantTextProse } from './format/numeric-prose-formatter.js';
-import { generateChips } from './compose/chip-generator.js';
+import { generateChips, MAX_CHIPS } from './compose/chip-generator.js';
+import { curatedHandlerChips } from './compose/helpers.js';
 import { generatePostAnalysisCoaching } from './coaching/post-analysis-wrapper.js';
 import { buildPendingActionsWithProposalCapture } from './coaching/proposal-continuation.js';
 import { INTERNAL_TO_WIRE, UnhandledTurnClassError, type C1TurnClass } from './types.js';
@@ -439,6 +440,7 @@ import {
 } from './routing/analytical-intent.js';
 import {
   evaluateAnalysisElection,
+  withAnalysisElectionOffer,
   GATED_ANALYSIS_HANDLER_ID,
 } from './routing/analysis-election-gate.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
@@ -1821,6 +1823,17 @@ export async function runTurnExecutor(
     }
     return recentlyOfferedChipIdsMemo;
   };
+
+  /**
+   * ⭐ THE ANALYSIS-ELECTION DEMOTION'S OWN OFFER (routing/analysis-election-gate.ts).
+   *
+   * Empty on every turn the gate did not demote, which is why the converse
+   * merge below is a no-op for them. When the gate DID demote and a run could
+   * be honoured, this holds the chip whose one click runs it — carried here
+   * rather than left to `generateChips`, because the demotion's copy NAMES the
+   * affordance and the two must ship together or not at all (preamble P8).
+   */
+  let analysisElectionOffer: readonly SuggestedAction[] = [];
 
   // Routing log fields — closured so the finally block can emit one record
   // per turn regardless of which terminal path fires (success / typed
@@ -7765,7 +7778,12 @@ export async function runTurnExecutor(
         // synthesised CONVERSE proposal carrying its own deterministic
         // `answer_text`, which is the same idiom the deterministic pre-routes
         // use in reverse (synthesise a `RoutingToolCallResult` and let the
-        // unchanged lifecycle own the turn). `rawResult` and `llmCallCount`
+        // unchanged lifecycle own the turn). The outcome's `suggested_actions`
+        // are stashed in `analysisElectionOffer` and merged into the converse
+        // branch's chips further down — a proposal has no chip channel, and
+        // leaving the offer to `generateChips` is what made the module's
+        // "costs one click" justification false in two of three measured
+        // states. `rawResult` and `llmCallCount`
         // are carried through untouched so token accounting, the context
         // -budget event and `capturedReasoning` all still describe the real
         // call. The router's `orientationText` is DISCARDED, deliberately: the
@@ -7779,6 +7797,18 @@ export async function runTurnExecutor(
           const electionOutcome = evaluateAnalysisElection({
             electedHandlerId: routingResult.proposal.action.handler_id,
             message: payload.message,
+            // ⚠ THE PRODUCER'S OWN RUN-ADMISSION PREDICATE, not a new one (P7).
+            // `analysisReady.status === 'ready'` AND `run_analysis` present in
+            // the registry is the exact conjunction every executable-Run chip
+            // rule in `compose/chip-generator.ts` requires. Deriving it here
+            // rather than inventing a readiness opinion is what keeps the
+            // demotion's offer honourable: a click can only land on a run the
+            // rest of the product already agrees is runnable.
+            runAnalysisOfferable:
+              analysisReadyForTurn?.status === 'ready' &&
+              curatedHandlerChips(
+                options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+              ).some((chip) => chip.handler_id === GATED_ANALYSIS_HANDLER_ID),
           });
           if (electionOutcome.kind !== 'not_analysis_election') {
             emit(TelemetryEvents.V5AnalysisElectionGate, {
@@ -7790,6 +7820,12 @@ export async function runTurnExecutor(
             });
           }
           if (electionOutcome.kind === 'demoted') {
+            // The offer travels with the copy. `generateChips` decides chips
+            // from state that answers a DIFFERENT question (readiness,
+            // freshness, what the previous turn offered), and on the measured
+            // "ready + Run offered last turn" state its sameness guard removed
+            // the very chip this turn's sentence points at.
+            analysisElectionOffer = electionOutcome.suggested_actions;
             routingResult = {
               type: 'tool_call',
               proposal: {
@@ -10676,9 +10712,17 @@ export async function runTurnExecutor(
         // same threading as the coach-path wrapper call above.
         recentlyOfferedChipIds: recentlyOfferedChipIds(),
       });
-      const converseComposedChips = converseWrapper.fired
+      const converseComposedChipsBase = converseWrapper.fired
         ? [...converseWrapper.chips, ...converseChips]
         : converseChips;
+      // ⭐ P8 — the analysis-election demotion's offer, prepended and NOT
+      // subject to the chip-sameness guard that `generateChips` applies. A
+      // no-op (same array reference) on every turn the gate did not demote.
+      const converseComposedChips = withAnalysisElectionOffer(
+        analysisElectionOffer,
+        converseComposedChipsBase,
+        MAX_CHIPS,
+      );
       // See coach-path comment above re: telemetry-only recovery state.
       // Coaching Context Pack v1 deterministic post-check (flag-gated). On a
       // boundary violation, degrade to a safe rerun response; otherwise pass

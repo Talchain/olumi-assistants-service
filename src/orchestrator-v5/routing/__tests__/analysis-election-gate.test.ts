@@ -30,7 +30,10 @@ import { createHash } from 'node:crypto';
 import {
   evaluateAnalysisElection,
   ANALYSIS_ELECTION_DEMOTION_TEXT,
+  ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER,
+  ANALYSIS_ELECTION_RUN_CHIP,
   GATED_ANALYSIS_HANDLER_ID,
+  withAnalysisElectionOffer,
 } from '../analysis-election-gate.js';
 import {
   looksLikeExplicitAnalysisRequest,
@@ -105,6 +108,7 @@ describe('MUST-DEMOTE — the served prompt’s own DO-NOT-ROUTE corpus', () => 
     const outcome = evaluateAnalysisElection({
       electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
       message,
+      runAnalysisOfferable: true,
     });
     expect(outcome.kind).toBe('demoted');
   });
@@ -185,18 +189,91 @@ describe('MUST-ADMIT (P8) — the product can accept the sentences it prints', (
     },
   );
 
-  it('the demotion copy’s OWN offer is admissible (the P8 acceptance path)', () => {
-    // The demoted turn tells the user to say "run the analysis". If the gate
-    // then demoted that, the product would be asking for something it refuses
-    // — preamble P8's exact defect. The offered phrase is EXTRACTED from the
-    // shipped copy, so editing the copy without checking cannot pass.
-    const quoted = /"([^"]+)"/.exec(ANALYSIS_ELECTION_DEMOTION_TEXT);
-    expect(quoted, 'demotion copy no longer contains a quoted offer').not.toBeNull();
+  it('the demotion’s OWN offered chip is admissible (the P8 acceptance path)', () => {
+    // The demoted turn OFFERS a run. Its acceptance path is the chip: one click
+    // sends `ANALYSIS_ELECTION_RUN_CHIP.message` back through the product. If
+    // the gate then demoted that message, the product would be offering
+    // something it refuses — preamble P8's exact defect. The message is READ
+    // FROM THE SHIPPED CHIP, so re-wording the chip without checking cannot
+    // pass.
     const outcome = evaluateAnalysisElection({
       electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message: quoted![1]!,
+      message: ANALYSIS_ELECTION_RUN_CHIP.message,
+      runAnalysisOfferable: true,
     });
     expect(outcome.kind).toBe('admitted');
+  });
+
+  it('the offer is CARRIED BY the demotion, not left to a downstream chip rule', () => {
+    // Bound by IDENTITY: the id and the handler, never a label another chip
+    // could carry. This is what makes "one click" a property of the demotion
+    // rather than of whatever the chip generator happens to do this turn.
+    const outcome = evaluateAnalysisElection({
+      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+      message: 'Use your best guess for the rest and draft the model now.',
+      runAnalysisOfferable: true,
+    });
+    expect(outcome.kind).toBe('demoted');
+    const chips = outcome.kind === 'demoted' ? outcome.suggested_actions : [];
+    expect(chips).toEqual([ANALYSIS_ELECTION_RUN_CHIP]);
+    expect(ANALYSIS_ELECTION_RUN_CHIP.action_type).toBe(GATED_ANALYSIS_HANDLER_ID);
+    // The copy that names the offer is the one that ships with it.
+    const text = outcome.kind === 'demoted' ? outcome.assistant_text : '';
+    expect(text).toBe(ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER);
+    expect(text).toMatch(/\brun the analysis\b/i);
+  });
+
+  it('OPPOSITE DIRECTION — when no run can be honoured, neither the chip nor the sentence appears', () => {
+    // ⭐ THE HALF THAT STOPS THE FIX BECOMING THE DEFECT IT REMOVES. A product
+    // that always printed "or run the analysis" would be stating a capability
+    // it does not provide on every model that cannot be analysed.
+    const outcome = evaluateAnalysisElection({
+      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+      message: 'Use your best guess for the rest and draft the model now.',
+      runAnalysisOfferable: false,
+    });
+    expect(outcome.kind).toBe('demoted');
+    expect(outcome.kind === 'demoted' && outcome.suggested_actions).toEqual([]);
+    const text = outcome.kind === 'demoted' ? outcome.assistant_text : '';
+    expect(text).toBe(ANALYSIS_ELECTION_DEMOTION_TEXT);
+    expect(text).not.toMatch(/\brun the analysis\b/i);
+    // …and it is still an answer, not a silence.
+    expect(text.trim().length).toBeGreaterThan(0);
+  });
+
+  it('the two variants differ ONLY by the offer (so the invitation is never lost)', () => {
+    // Pins the composition: the offer sentence is ADDED to the invitation, it
+    // does not replace it. A future edit that rewrote one variant alone would
+    // RED here rather than silently diverging the two.
+    expect(ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER.startsWith(
+      ANALYSIS_ELECTION_DEMOTION_TEXT,
+    )).toBe(true);
+    expect(ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER).not.toBe(
+      ANALYSIS_ELECTION_DEMOTION_TEXT,
+    );
+  });
+
+  it('the copy leads with the user’s next step, not with what the system declined', () => {
+    // ⭐ LEDGER L-43 (robotic / defensive register). The shipped defect opened
+    // with a negation about the system and followed it with a self-
+    // justification. Both variants are checked, because the register defect can
+    // reappear in either.
+    for (const text of [
+      ANALYSIS_ELECTION_DEMOTION_TEXT,
+      ANALYSIS_ELECTION_DEMOTION_TEXT_WITH_RUN_OFFER,
+    ]) {
+      // No opening negation about the system's own action.
+      expect(text).not.toMatch(/^\s*(?:I have not|I did not|I didn’t|I haven’t|I cannot|I can’t)\b/i);
+      // No explanation of the router's reading — that is the self-justification
+      // half of the defect, and it is never the user's problem.
+      expect(text).not.toMatch(/\bI (?:did not|didn’t) read\b/i);
+      expect(text).not.toMatch(/\bbecause\b/i);
+      // No apology.
+      expect(text).not.toMatch(/\b(?:sorry|apolog)/i);
+      // British English, sentence case, no em dashes (the served prompt's own
+      // STYLE section).
+      expect(text).not.toContain('—');
+    }
   });
 });
 
@@ -209,6 +286,7 @@ describe('the four discriminating twins (predicate level)', () => {
     const outcome = evaluateAnalysisElection({
       electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
       message: 'Use your best guess for the rest and draft the model now.',
+      runAnalysisOfferable: true,
     });
     expect(outcome.kind).toBe('demoted');
     expect(outcome.kind === 'demoted' && outcome.reason).toBe('no_explicit_analysis_request');
@@ -234,6 +312,7 @@ describe('the four discriminating twins (predicate level)', () => {
       evaluateAnalysisElection({
         electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
         message,
+        runAnalysisOfferable: true,
       }).kind,
     ).toBe('admitted');
   });
@@ -250,6 +329,7 @@ describe('the four discriminating twins (predicate level)', () => {
       evaluateAnalysisElection({
         electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
         message,
+        runAnalysisOfferable: true,
       }).kind,
     ).toBe('demoted');
   });
@@ -270,6 +350,7 @@ describe('the four discriminating twins (predicate level)', () => {
       evaluateAnalysisElection({
         electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
         message,
+        runAnalysisOfferable: true,
       }).kind,
     ).toBe('demoted');
   });
@@ -278,6 +359,7 @@ describe('the four discriminating twins (predicate level)', () => {
     const outcome = evaluateAnalysisElection({
       electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
       message: 'Use your best guess for the rest and draft the model now.',
+      runAnalysisOfferable: true,
     });
     expect(outcome.kind).toBe('demoted');
     const text = outcome.kind === 'demoted' ? outcome.assistant_text : '';
@@ -306,7 +388,13 @@ describe('scope', () => {
     // Bound by IDENTITY (the handler id), never by a value predicate another
     // handler could satisfy.
     for (const message of ['Run the analysis.', 'Draft the model now.', '']) {
-      expect(evaluateAnalysisElection({ electedHandlerId: handlerId, message }).kind).toBe(
+      expect(
+        evaluateAnalysisElection({
+          electedHandlerId: handlerId,
+          message,
+          runAnalysisOfferable: true,
+        }).kind,
+      ).toBe(
         'not_analysis_election',
       );
     }
@@ -320,7 +408,12 @@ describe('scope', () => {
     const kinds = new Set(
       ['run_analysis', 'edit_graph'].flatMap((h) =>
         ['Run the analysis.', 'Draft the model now.'].map(
-          (m) => evaluateAnalysisElection({ electedHandlerId: h, message: m }).kind,
+          (m) =>
+            evaluateAnalysisElection({
+              electedHandlerId: h,
+              message: m,
+              runAnalysisOfferable: true,
+            }).kind,
         ),
       ),
     );

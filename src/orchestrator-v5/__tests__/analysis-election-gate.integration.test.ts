@@ -79,7 +79,13 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
-const { ANALYSIS_ELECTION_DEMOTION_TEXT } = await import('../routing/analysis-election-gate.js');
+const { ANALYSIS_ELECTION_DEMOTION_TEXT, ANALYSIS_ELECTION_RUN_CHIP } = await import(
+  '../routing/analysis-election-gate.js',
+);
+const { assessCanonicalAnalysisReadiness } = await import(
+  '../../orchestrator/tools/analysis-ready-helper.js',
+);
+const { HANDLER_VALIDATION_REGISTRY } = await import('../routing/validation-registry.js');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -401,5 +407,200 @@ describe('TWIN D — a demoted election answers the user (no silent substitution
     expect(response.assistant_text).not.toMatch(
       /\b(?:running the analysis|analysis is running|I('| wi)ll run|results are ready|analysis complete)\b/i,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TWIN E — the demotion's OFFER, in both directions
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐ THE MEASURED PROBLEM THIS TWIN PAIR PINS (all three states measured at
+ * 585f8dce, through the real `runTurnExecutor`):
+ *
+ * | readiness | prior turn offered Run? | chips the demoted turn shipped |
+ * |-----------|-------------------------|--------------------------------|
+ * | ready     | no                      | `chip_action_run_analysis`     |
+ * | ready     | YES                     | **none** (sameness guard ate it) |
+ * | blocked   | no                      | "Resolve model issue" prompt   |
+ *
+ * So the module header's fail-open justification — "a false negative costs one
+ * click on the offered chip" — was true in ONE of the three, and the copy told
+ * the user to type a sentence in all three. The offer has to be bound to the
+ * DEMOTION, not left to chip rules that answer a different question.
+ *
+ * E1 and E2 are opposite-direction twins over the same predicate: E1 proves the
+ * offer is PRESENT exactly where a click can honour it; E2 proves it is ABSENT
+ * — in the copy as well as the chips — where a click could not.
+ */
+
+/**
+ * `DRAFTED_GRAPH` plus the decision node it lacks.
+ *
+ * ⚠ DERIVED, NOT GUESSED, and it is a finding about the existing twins:
+ * `assessCanonicalAnalysisReadiness(DRAFTED_GRAPH)` returns
+ * `status: 'blocked', blocked_reason: 'NO_DECISION'`, so TWINS A-D all run
+ * against a model on which an analysis could never have executed. Each fixture
+ * asserts its own readiness below (trap 13b — a discriminator whose
+ * precondition is unpinned can silently stop discriminating).
+ */
+const READY_GRAPH = {
+  ...DRAFTED_GRAPH,
+  nodes: [
+    ...DRAFTED_GRAPH.nodes,
+    { id: 'dec_bakery', kind: 'decision', label: 'Bakery expansion decision' },
+  ],
+  edges: [
+    ...DRAFTED_GRAPH.edges,
+    {
+      from: 'dec_bakery',
+      to: 'opt_open',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+    {
+      from: 'dec_bakery',
+      to: 'opt_hold',
+      strength: { mean: 1, std: 0.1 },
+      exists_probability: 1,
+      effect_direction: 'positive' as const,
+    },
+  ],
+};
+
+/**
+ * A pending action that makes the prior turn's Run chip "recently offered".
+ *
+ * The id is written as a LITERAL rather than read from
+ * {@link ANALYSIS_ELECTION_RUN_CHIP} so this fixture builds at a tip where that
+ * export does not exist yet — which is what makes the twin below fail on the
+ * BEHAVIOUR (no chip shipped) rather than on a missing import. The test binds
+ * the literal back to the module before it finishes.
+ */
+function recentlyOfferedRunChip(): PendingAction {
+  return {
+    id: 'pa-prev-run',
+    scenario_id: SCENARIO_ID,
+    chip_id: 'chip_action_run_analysis',
+    action: { kind: 'run_analysis' },
+    preconditions: {},
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+    expires_at_iso: new Date(Date.now() + 3_600_000).toISOString(),
+    emitted_at_iso: new Date(Date.now() - 30_000).toISOString(),
+  } satisfies PendingAction;
+}
+
+describe('TWIN E — the demoted turn offers the run it withheld, when it can honour it', () => {
+  it('ships the executable run_analysis chip even when the chip-sameness guard would have removed it', async () => {
+    // Precondition, pinned in-test: this model CAN be analysed. Without it the
+    // assertion below could pass on a build that offers Run unconditionally.
+    expect(assessCanonicalAnalysisReadiness(READY_GRAPH).analysisReady?.status).toBe('ready');
+    mockState.persistedGraph = READY_GRAPH;
+    // Precondition, pinned in-test: the prior turn already offered this chip,
+    // which is the measured state where the generator ships ZERO chips.
+    mockState.pendingActions = [recentlyOfferedRunChip()];
+
+    const adapter = mockRoutingAdapter();
+    const { registry, runAnalysisSpy } = spyRegistry();
+    const { response } = await runTurnExecutor(mkPayload(P0_MESSAGE), 'req-twin-e1', {
+      routingAdapter: adapter,
+      handlerRegistry: registry,
+    });
+
+    // Still a demotion: the gate is not weakened by the offer.
+    expect(runAnalysisSpy).not.toHaveBeenCalled();
+    expect(gateEvents()[0]?.data).toMatchObject({ outcome: 'demoted' });
+
+    // ⭐ THE LOAD-BEARING ASSERTION — bound to the chip by IDENTITY (its id and
+    // its handler), never by a label another chip could carry.
+    const offered = response.suggested_actions.find((a) => a.id === 'chip_action_run_analysis');
+    expect(offered, 'the demoted turn shipped no run_analysis chip').toBeDefined();
+    expect(offered!.action_type).toBe('run_analysis');
+    // P8 — the copy names this affordance, so the affordance must exist AND the
+    // product must accept the message the chip sends.
+    expect(response.assistant_text).toMatch(/\brun the analysis\b/i);
+    // …and the chip on the wire IS the demotion's own offer, not a coincidence
+    // of some other rule that happens to use the same id.
+    expect(ANALYSIS_ELECTION_RUN_CHIP).toMatchObject({
+      id: 'chip_action_run_analysis',
+      action_type: 'run_analysis',
+    });
+    expect(offered).toEqual(ANALYSIS_ELECTION_RUN_CHIP);
+  });
+
+  it('does not double up when the chip generator offers the same chip on its own', async () => {
+    // The generator's own analyse-stage rule emits `chip_action_run_analysis`
+    // on exactly this state, so this is the case where a missing dedupe would
+    // ship the same chip twice. Bound by identity, and by COUNT.
+    expect(assessCanonicalAnalysisReadiness(READY_GRAPH).analysisReady?.status).toBe('ready');
+    mockState.persistedGraph = READY_GRAPH;
+    mockState.pendingActions = [];
+
+    const adapter = mockRoutingAdapter();
+    const { registry } = spyRegistry();
+    const { response } = await runTurnExecutor(mkPayload(P0_MESSAGE), 'req-twin-e3', {
+      routingAdapter: adapter,
+      handlerRegistry: registry,
+    });
+
+    expect(gateEvents()[0]?.data).toMatchObject({ outcome: 'demoted' });
+    expect(
+      response.suggested_actions.filter((a) => a.id === 'chip_action_run_analysis'),
+    ).toHaveLength(1);
+  });
+
+  it('opposite direction — no offer when `run_analysis` is not a registered handler', async () => {
+    // The SECOND conjunct of the caller's offerable predicate, made observable.
+    // Without this case a mutant that dropped the registry check would survive:
+    // the default registry always registers `run_analysis`, so readiness alone
+    // decides every other test here.
+    expect(assessCanonicalAnalysisReadiness(READY_GRAPH).analysisReady?.status).toBe('ready');
+    mockState.persistedGraph = READY_GRAPH;
+    mockState.pendingActions = [];
+
+    const adapter = mockRoutingAdapter();
+    const { registry, runAnalysisSpy } = spyRegistry();
+    const { response } = await runTurnExecutor(mkPayload(P0_MESSAGE), 'req-twin-e4', {
+      routingAdapter: adapter,
+      handlerRegistry: registry,
+      // Every OTHER handler, so the turn is otherwise ordinary.
+      validationRegistry: Object.fromEntries(
+        Object.entries(HANDLER_VALIDATION_REGISTRY).filter(([id]) => id !== 'run_analysis'),
+      ) as typeof HANDLER_VALIDATION_REGISTRY,
+    });
+
+    expect(runAnalysisSpy).not.toHaveBeenCalled();
+    expect(gateEvents()[0]?.data).toMatchObject({ outcome: 'demoted' });
+    expect(
+      response.suggested_actions.some((a) => a.action_type === 'run_analysis'),
+    ).toBe(false);
+    expect(response.assistant_text).not.toMatch(/\brun the analysis\b/i);
+  });
+
+  it('opposite direction — a model that cannot be analysed gets NO run chip and NO offer to run', async () => {
+    // Precondition, pinned in-test: this is the blocked state.
+    expect(assessCanonicalAnalysisReadiness(DRAFTED_GRAPH).analysisReady?.status).toBe('blocked');
+    mockState.persistedGraph = DRAFTED_GRAPH;
+    mockState.pendingActions = [];
+
+    const adapter = mockRoutingAdapter();
+    const { registry, runAnalysisSpy } = spyRegistry();
+    const { response } = await runTurnExecutor(mkPayload(P0_MESSAGE), 'req-twin-e2', {
+      routingAdapter: adapter,
+      handlerRegistry: registry,
+    });
+
+    expect(runAnalysisSpy).not.toHaveBeenCalled();
+    expect(gateEvents()[0]?.data).toMatchObject({ outcome: 'demoted' });
+
+    // ⭐ NEITHER HALF OF THE OFFER MAY BE PRESENT. A chip here would refuse on
+    // click; a sentence here would be the same defect in prose.
+    expect(
+      response.suggested_actions.some((a) => a.action_type === 'run_analysis'),
+    ).toBe(false);
+    expect(response.assistant_text).not.toMatch(/\brun the analysis\b/i);
+    // The turn still answers, and still invites the model work the user asked for.
+    expect(response.assistant_text).toContain(ANALYSIS_ELECTION_DEMOTION_TEXT);
   });
 });
