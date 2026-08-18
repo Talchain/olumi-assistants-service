@@ -395,6 +395,41 @@ describe('a question about BEHAVIOUR is not a question about ORIGIN', () => {
     });
   }
 
+  /**
+   * ⭐⭐ RED-26 — THE CLASS `CREATION_VERBS` EXISTS TO EXCLUDE, WHICH NOTHING
+   * PINNED UNTIL NOW.
+   *
+   * Found by asking what would have to be true for the guard to pass while the
+   * property fails (trap 13b). Answer: remove the creation predicate from the
+   * first frame pattern and NOTHING in the corpus goes red — the five RED-18
+   * analysis questions are all excluded by other conjuncts, so they cannot
+   * measure it. A mutant deleting `CREATION_VERBS` would have SURVIVED, and a
+   * survivor is a claim either way.
+   *
+   * The corpus below is derived from the predicate's DECLARED purpose rather
+   * than from an observed distribution (P7): the module's own comment states
+   * "the question must be about how the element came to BE in the model, not
+   * about what it does. Verbs of behaviour, ranking, importance and consequence
+   * are absent by construction." These are questions about Olumi's REASONING or
+   * OPINION — the reasoning layer's work, not the router's. Answering any of
+   * them with a statement about where the node came from is the guard
+   * substituting its own task for the user's, which is the whole defect class.
+   */
+  const OPINION_QUESTIONS = [
+    'Why do you think the hybrid option is best?',
+    'Why did you say the hybrid option was risky?',
+    'Why would you recommend the hybrid option?',
+    'Why does it matter that the hybrid option exists?',
+    'Why did you rank the hybrid option first?',
+    'Why do you keep talking about the hybrid option?',
+  ];
+  for (const message of OPINION_QUESTIONS) {
+    it(`RED-26 declines the opinion/reasoning question: ${JSON.stringify(message)}`, () => {
+      expect(isStructureOriginQuestion(message)).toBe(false);
+      expect(tryStructureOriginAnswer(message, PERSISTED_GRAPH)).toBeNull();
+    });
+  }
+
   // ⭐ ORIGIN TWINS — the same subject, asked about ORIGIN. These must still be
   // claimed, or the narrowing would be a blanket disable of the arm.
   const ORIGIN_TWINS: readonly [string, string][] = [
