@@ -469,7 +469,7 @@ export function handleUnreachableFactors(
       // ⚠⚠ SCOPE, CORRECTED — AND THE FIRST VERSION OF THIS COMMENT WAS FALSE.
       // It said the mark is carried "so the render can label it". It is NOT:
       // this promotion keeps the stamp alive for IN-PIPELINE readers only, and
-      // the stamp DIES BEFORE THE WIRE. `transformNodeToV3` (`schema-v3.ts`)
+      // the stamp DIES BEFORE THE WIRE. `transformNodeToV3` (`src/cee/transforms/schema-v3.ts`)
       // does not spread the node — it rebuilds field-by-field and forwards only
       // named fields, and `value_tier` appears ZERO times in that file
       // (positive control: `extractionType` IS forwarded, `schema-v3.ts:371`).

@@ -47,6 +47,7 @@
 import { describe, it, expect } from "vitest";
 import { handleUnreachableFactors } from "../unreachable-factors.js";
 import { fixObservableMissingData } from "../deterministic-sweep.js";
+import { ensureControllableFactorBaselines } from "../../../../../adapters/llm/normalisation.js";
 import {
   FACTOR_VALUE_TIER_FIELD,
   classifyFactorValueTier,
@@ -263,6 +264,71 @@ describe("C — end to end: an unvalued factor never acquires uniform(0.25, 0.75
   });
 });
 
+describe("C2 — which stampers can actually FEED the launderer", () => {
+  it("Stage-1 `ensureControllableFactorBaselines` is STRUCTURALLY DISJOINT from the launderer", () => {
+    // ⭐ A FINDING, NOT A GAP — and it corrects this lane's own PR body, which
+    // named three stampers feeding the launderer. Only two can.
+    //
+    // `ensureControllableFactorBaselines` derives its target set STRUCTURALLY,
+    // from `option→factor` edges (`normalisation.ts:938-950`). That is the exact
+    // predicate `handleUnreachableFactors` uses to EXCLUDE a node: it reclassifies
+    // only factors with no path from an option, and its reachable set is a
+    // superset of the direct option→factor targets (it additionally walks
+    // factor→factor chains). So every node Stage-1 touches is, by construction,
+    // a node the launderer will not touch.
+    //
+    // The `explicit`-without-value hole therefore reaches the launderer via
+    // `fixControllableMissingData` (which gates on `category`, a LABEL, and
+    // preserves an LLM `extractionType`) — not via Stage 1. The direct cases
+    // above cover that class; this test pins WHY the Stage-1 route cannot be
+    // written as an end-to-end one, so a later lane does not read its absence
+    // as an oversight and "fix" it with a fabricated fixture.
+    const optionConnected: any = {
+      nodes: [
+        { id: "goal_x", kind: "goal", label: "Goal" },
+        { id: "dec_x", kind: "decision", label: "Decision" },
+        { id: "opt_x", kind: "option", label: "Option" },
+        { id: "fac_x", kind: "factor", label: "Cost", data: { extractionType: "explicit" } },
+      ],
+      edges: [
+        { from: "dec_x", to: "opt_x", edge_type: "structural" },
+        { from: "opt_x", to: "fac_x", edge_type: "causal" },
+        { from: "fac_x", to: "goal_x", edge_type: "causal" },
+      ],
+    };
+
+    // Stage 1 DOES fire here — the node has an option edge.
+    const { defaultedFactors } = ensureControllableFactorBaselines(optionConnected);
+    expect(defaultedFactors).toContain("fac_x");
+
+    // …and the launderer does NOT reclassify it, precisely because of that edge.
+    const result = handleUnreachableFactors(optionConnected as GraphT, EDGE_FORMAT);
+    expect(result.reclassified).not.toContain("fac_x");
+    expect((optionConnected.nodes.find((n: any) => n.id === "fac_x") as any).prior)
+      .toBeUndefined();
+  });
+
+  it("CONTRAST — remove the option edge and Stage 1 stops firing, so it cannot hand over", () => {
+    // The discrimination that makes the claim above non-vacuous: the same node
+    // with no option edge is exactly the launderer's target, and Stage 1 skips it.
+    const unreachable: any = {
+      nodes: [
+        { id: "goal_x", kind: "goal", label: "Goal" },
+        { id: "dec_x", kind: "decision", label: "Decision" },
+        { id: "opt_x", kind: "option", label: "Option" },
+        { id: "fac_x", kind: "factor", label: "Cost", data: { extractionType: "explicit" } },
+      ],
+      edges: [
+        { from: "dec_x", to: "opt_x", edge_type: "structural" },
+        { from: "opt_x", to: "goal_x", edge_type: "causal" },
+      ],
+    };
+
+    const { defaultedFactors } = ensureControllableFactorBaselines(unreachable);
+    expect(defaultedFactors).not.toContain("fac_x");
+  });
+});
+
 // ───────────────────────────────────────────────────────────────────────────
 // D — THE GAP IS AN ELICITATION ASK, NEVER A BLOCKING ERROR
 //
@@ -382,10 +448,62 @@ describe("E — an unlabelled but real value is NOT treated as an invention", ()
     });
   });
 
-  it("B1 — brief-backed evidence OUTRANKS the stamp, so containment cannot break", () => {
-    // Measured regression: with the stamp checked first, this produced U(0,1),
-    // which does NOT contain 1.12 — the exact NRR shape that
-    // `synthesisePriorFromBaseline`'s docstring calls unbreakable.
+  it("A STAMPED value labelled `explicit` with no real value IS caught", () => {
+    // ⭐ THE CANONICAL CASE THIS MODULE WAS WRITTEN FOR, and round 2 let it
+    // through. `normalisation.ts:987` preserves an LLM-supplied `extractionType`
+    // (`existingType ?? 'inferred'`), and `fixControllableMissingData` only
+    // defaults it when undefined. So a factor the model labelled `explicit`
+    // while supplying NO VALUE gets a stamped invented 0.5 AND keeps the
+    // brief-backed label — and round 2's short-circuit let the label beat the
+    // stamp, laundering exactly as before.
+    //
+    // THREE nodes in the committed cold-read corpus are in this class, including
+    // `fac_nrr` — the node `factor-value-provenance.ts`'s own header cites as the
+    // deployed 2026-08-08 defect. `classifyFactorValueTier` says an `explicit`
+    // label with no value cannot be honoured; the short-circuit honoured it,
+    // because a defaulting site upstream had already erased the "no value"
+    // condition that disqualified it. Trap 21, inside the fix.
+    const graph = unreachableFactorGraph({
+      value: 0.5,
+      extractionType: "explicit",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+
+    handleUnreachableFactors(graph, EDGE_FORMAT);
+
+    expect(factorNode(graph).prior).toEqual({
+      distribution: "uniform", range_min: 0, range_max: 1,
+    });
+    expect(factorNode(graph).prior).not.toEqual({
+      distribution: "uniform", range_min: 0.25, range_max: 0.75,
+    });
+  });
+
+  it("…and the same for `observed`, the other brief-backed label", () => {
+    const graph = unreachableFactorGraph({
+      value: 0.5,
+      extractionType: "observed",
+      [FACTOR_VALUE_TIER_FIELD]: "fallback_default",
+    });
+
+    handleUnreachableFactors(graph, EDGE_FORMAT);
+
+    expect(factorNode(graph).prior).toEqual({
+      distribution: "uniform", range_min: 0, range_max: 1,
+    });
+  });
+
+  it("TWIN — containment ALONE protects a real brief-backed value, with no label rule", () => {
+    // The round-3 deletion's whole justification. The brief-backed short-circuit
+    // was added to stop `{1.12, explicit, stamped}` collapsing to a prior that
+    // does not contain 1.12 — and it did stop it, but so does the structural
+    // containment guard, which was added in the same change and is the half that
+    // needed no rule about labels.
+    //
+    // This test is what makes the deletion safe: it asserts the SAME protection
+    // survives with the label rule gone. Containment is structural — `[0,1]`
+    // contains every value in `[0,1]` by definition — so unlike a tuned
+    // discriminator it cannot quietly stop discriminating.
     const graph = unreachableFactorGraph({
       value: 1.12,
       extractionType: "explicit",

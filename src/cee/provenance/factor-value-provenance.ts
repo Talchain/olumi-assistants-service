@@ -148,44 +148,63 @@ export function readStampedFactorValueTier(node: unknown): FactorValueTier | und
  *      arbitrary unlabelled number.
  */
 export function factorValueIsFabricated(node: unknown): boolean {
-  const { extractionType } = readFactorValueView(node);
-
-  // ── 1. POSITIVE BRIEF-BACKED EVIDENCE WINS OVER EVERYTHING, INCLUDING THE
-  //       STAMP. (Adversarial review B1.)
-  // An earlier version checked the stamp FIRST, so a brief-backed value that
-  // also carried a stamp collapsed. Executed at that tip, `{value: 1.12,
-  // explicit, value_tier: "fallback_default"}` produced `U(0,1)` — which does
-  // not contain 1.12, and is the exact NRR shape `synthesisePriorFromBaseline`'s
-  // docstring calls unbreakable: a stated figure became max-width, topped the
-  // influence ranking, and the product asked the user for a number they had
-  // already given. Two opposite harms had been put under one predicate with the
-  // wrong one on top.
-  if (extractionType !== undefined && BRIEF_BACKED_EXTRACTION_TYPES.has(extractionType)) {
-    return false;
-  }
-
-  // ── 2. THE STAMP. The only remaining ground, and it is positive evidence:
-  // a defaulting site recorded that it invented this number.
+  // ONE GROUND. A defaulting site recorded that it invented this number.
+  // Nothing is inferred, from a label or from a magnitude.
   return readStampedFactorValueTier(node) === "fallback_default";
-
-  // ── 3. THERE IS NO MAGNITUDE LIMB, AND ITS REMOVAL IS THE POINT.
-  // This function previously ended `return value === INFERRED_DEFAULT_VALUE`,
-  // as a "legacy signature" for facts persisted before the stamp existed. It
-  // was a regression and the review measured it: `{value: 0.5, extractionType:
-  // "inferred"}` — a user saying "about half our customers" — was destroyed,
-  // while `0.51` survived. Everything else equal, the DISCRIMINATOR WAS THE
-  // MAGIC NUMBER for anything the model labelled `inferred` or `range`, which is
-  // trap 19 surviving inside the fix written for trap 19. The module's own
-  // quoted contract rule — "a consumer MUST NOT read absence as any particular
-  // class" — disagreed with its implementation by one line.
-  //
-  // Deleting it costs nothing on the path this lane exists to fix: the stamping
-  // sites and the launderer run in the SAME pipeline pass, so the stamp is
-  // always in memory when this is asked. What it gives up is re-detecting a
-  // fabrication on a graph that re-enters the pipeline with no stamp — which
-  // simply restores the pre-existing behaviour for that case, rather than
-  // destroying a real value to catch it. A gap is not a lie.
 }
+
+/*
+ * ── HOW THIS FUNCTION GOT TO ONE LINE, IN TWO DELETIONS ────────────────────
+ *
+ * Both rounds REMOVED a rule. That is worth recording, because the estate's own
+ * doctrine says a third round on one predicate is usually where an approach
+ * needs abandoning rather than patching — and the reason it was safe here is
+ * that each round subtracted. An oscillation is sustained by adding conditions;
+ * it ends when the conditions come out.
+ *
+ * DELETED (round 2) — the MAGNITUDE limb, `value === INFERRED_DEFAULT_VALUE`,
+ * kept as a "legacy signature" for pre-stamp facts. Measured: `{0.5, inferred}`
+ * destroyed, `0.51` survived, everything else equal — so the discriminator WAS
+ * the magic number for anything labelled `inferred` or `range`. Trap 19 alive
+ * inside the fix written for trap 19, one line below this module's own quotation
+ * of the contract rule forbidding it.
+ *
+ * DELETED (round 3) — the BRIEF-BACKED SHORT-CIRCUIT, `if (extractionType is
+ * explicit|observed) return false`. It was added to protect the containment
+ * invariant, and it did protect it — but so did the structural guard added in
+ * the same change, and the short-circuit was the sole cause of a live hole:
+ *
+ *   `normalisation.ts:987` preserves an LLM-supplied `extractionType`
+ *   (`existingType ?? 'inferred'`), and `fixControllableMissingData` only
+ *   defaults it when undefined. So a factor the model labelled `explicit` while
+ *   supplying NO VALUE receives a stamped invented `0.5` AND keeps the
+ *   brief-backed label — and the short-circuit let the label beat the stamp.
+ *   It laundered exactly as before. THREE nodes in the committed cold-read
+ *   corpus are in that class, including `fac_nrr`, the very node this module's
+ *   header cites as the deployed 2026-08-08 defect.
+ *
+ * ⭐ AND THE PRECISE SHAPE OF THE MISTAKE, because it is this estate's chronic
+ * one: `classifyFactorValueTier` (above) says an `explicit` label with NO VALUE
+ * cannot be honoured. `factorValueIsFabricated` honoured it — because by the
+ * time it runs, a defaulting site upstream has already supplied a value and
+ * thereby ERASED the condition that disqualified the label. Two authorities
+ * answering different questions under similar names, one reading state the
+ * other had already mutated. CLAUDE.md trap 21, inside the fix.
+ *
+ * WHY CONTAINMENT DID NOT NEED THE SHORT-CIRCUIT. The guard at the collapse site
+ * (`unreachable-factors.ts`) refuses to collapse a baseline that `[0,1]` cannot
+ * contain. That is STRUCTURAL — `[0,1]` contains every value in `[0,1]` by
+ * definition — so it cannot fail the way a tuned rule can. Verified: with the
+ * short-circuit deleted, `{1.12, explicit, stamped}` still narrows to
+ * [0.56, 1.68], and every containment test still passes.
+ *
+ * THE ONE RESIDUAL COST, and why it is unreachable: a STALE stamp landing on a
+ * value that later becomes real. `value_tier` occurs ZERO times in the V3
+ * transform (`src/cee/transforms/schema-v3.ts`; contrast control:
+ * `extractionType` occurs 24 times and IS forwarded at `:371`), the persisted
+ * graph is `GraphV3T`, and the V3 transform runs BEFORE the persist site. So no
+ * stamp survives a turn, and a stale one cannot exist.
+ */
 
 /**
  * The value that a `fallback_default` inference lands on. Declared by the
