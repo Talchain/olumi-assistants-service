@@ -512,6 +512,18 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *
    * On RED: add the new key here, and add it to `carriesValue` in
    * `schema-v3.ts` IF it can carry a model-authored value.
+   *
+   * ── DECISION RECORDED, 18 Aug: `source_quote` + `label_authored` ──────────
+   * Added for the authored-node-label ruling (quality bar §8 A1). The guard's
+   * question is answered explicitly, both ways:
+   *   · NOT value-bearing. Neither carries a model-authored quantity — one is
+   *     the user's own words, the other a boolean about the display string —
+   *     so neither belongs in `carriesValue`, whose job is to withhold the
+   *     label-match provenance upgrade from a node that already asserts a
+   *     number.
+   *   · And they could not reach it in any case: both are written on the TYPED
+   *     record path (`schema-v3.ts:1121-1136`), which `continue`s before
+   *     `carriesValue` is evaluated.
    */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
@@ -532,9 +544,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "is_baseline",
       "kind",
       "label",
+      "label_authored",
       "observed_state",
       "prior",
       "provenance",
+      "source_quote",
       "uncertainty_drivers",
     ]);
   });

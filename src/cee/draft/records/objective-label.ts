@@ -452,7 +452,7 @@ export function deriveGoalObjectiveLabel(quote: string): AuthoredLabel {
 
 /** Sentence split for scanning a brief. Abbreviation-naive by design: a wrong
  *  split can only produce a candidate that fails the bound and is refused. */
-const splitSentences = (text: string): string[] =>
+const splitSentences = (text: string | undefined): string[] =>
   String(text ?? "")
     .split(/(?<=[.?!])\s+/)
     .map(canonical)

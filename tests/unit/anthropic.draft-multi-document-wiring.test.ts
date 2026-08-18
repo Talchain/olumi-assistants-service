@@ -144,7 +144,14 @@ describe("draftGraphWithAnthropic — multi-document selection is WIRED (2.996)"
     expect(isUsableDraftDocument(JSON.parse(COMPLETE_RECORDS))).toBe(false);
 
     const result = await draft(MULTI_DOCUMENT);
-    expect(result.graph.nodes.map((n) => n.label).sort()).toEqual(["get more value from the CRM"]);
+    // The goal's DISPLAY label is an authored objective (quality bar §8 A1);
+    // the user's verbatim "get more value from the CRM" stays on the node's
+    // `provenance.source_quote`, asserted below so this stays bound to the
+    // user's words and not only to our rendering of them.
+    expect(result.graph.nodes.map((n) => n.label).sort()).toEqual(["Get More Value from the CRM"]);
+    expect(result.graph.nodes.map((n) => n.provenance?.source_quote)).toEqual([
+      "get more value from the CRM",
+    ]);
   });
 
   /**

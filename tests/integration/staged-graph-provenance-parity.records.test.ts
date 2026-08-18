@@ -49,7 +49,7 @@ const CASES: readonly RecordCase[] = [
       ],
     },
     expectedFromBrief: ["increase productivity", "hire a Tech lead", "two developers"],
-    expectedAiInferred: ["Decision", "Engineering Throughput", "Coordination Overhead"],
+    expectedAiInferred: ["decision", "Engineering Throughput", "Coordination Overhead"],
   },
   {
     name: "crm",
@@ -78,7 +78,7 @@ const CASES: readonly RecordCase[] = [
       "keep our current CRM",
       "minimise disruption for 30 people",
     ],
-    expectedAiInferred: ["Decision", "Workflow Efficiency", "Team Productivity"],
+    expectedAiInferred: ["decision", "Workflow Efficiency", "Team Productivity"],
   },
   {
     name: "pricing with a value-bearing target",
@@ -112,7 +112,7 @@ const CASES: readonly RecordCase[] = [
       "raise enterprise pricing by 30%",
       "hold price and push volume instead",
     ],
-    expectedAiInferred: ["Decision"],
+    expectedAiInferred: ["decision"],
   },
 ];
 
@@ -120,6 +120,8 @@ interface ComparableNode {
   readonly id: string;
   readonly kind: string;
   readonly label: string;
+  /** The user's verbatim, where the node has one — see `identityOf`. */
+  readonly source_quote: unknown;
   readonly provenance: unknown;
   readonly is_baseline: unknown;
   readonly goal_threshold: unknown;
@@ -135,6 +137,7 @@ function comparableNodes(nodes: readonly unknown[]): ComparableNode[] {
         id: String(node.id),
         kind: String(node.kind),
         label: String(node.label),
+        source_quote: node.source_quote,
         provenance: node.provenance,
         is_baseline: node.is_baseline,
         goal_threshold: node.goal_threshold,
@@ -239,8 +242,32 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/**
+ * Locate a node by IDENTITY, with the display label as the last resort.
+ *
+ * ⚠ It matched on `label` alone until the display labels became DERIVED
+ * (quality bar §8 A1): a stated goal's label is now an authored objective and
+ * the decision node's is taken from the user's own decision sentence. A stated
+ * node's identity is its verbatim `source_quote` — carried as a string on a V3
+ * node and inside `provenance` on a V1 one — and the projector-structural
+ * decision node's identity is its kind, which is what the key `"Decision"`
+ * always meant here. Claim-derived nodes keep model-authored labels and are
+ * unaffected.
+ */
 function byLabel(values: readonly unknown[], label: string): Record<string, unknown> {
-  const found = values.map(record).find((value) => value.label === label);
+  const candidates = values.map(record);
+  const quoteOf = (value: Record<string, unknown>): string | undefined => {
+    if (typeof value.source_quote === "string") return value.source_quote;
+    const prov = value.provenance;
+    if (prov && typeof prov === "object" && typeof (prov as Record<string, unknown>).source_quote === "string") {
+      return (prov as Record<string, unknown>).source_quote as string;
+    }
+    return undefined;
+  };
+  const found =
+    candidates.find((value) => quoteOf(value) === label) ??
+    (label === "Decision" ? candidates.find((value) => value.kind === "decision") : undefined) ??
+    candidates.find((value) => value.label === label);
   expect(found, `missing ${label}`).toBeDefined();
   return found!;
 }
@@ -255,12 +282,25 @@ describe("typed records → GRAPH_READY → COMPLETE provenance parity", () => {
       expect(stagedView.length).toBeGreaterThan(3);
       expect(stagedView).toEqual(finalView);
 
-      const provenanceByLabel = new Map(finalView.map((node) => [node.label, node.provenance]));
-      for (const label of recordCase.expectedFromBrief) {
-        expect(provenanceByLabel.get(label), `${recordCase.name}: ${label}`).toBe("from_brief");
+      // ⚠ KEYED BY IDENTITY, NOT BY DISPLAY LABEL. A stated node's identity is
+      // the user's verbatim `source_quote`; the projector-structural decision
+      // node's is its kind. Both display labels are now derived rather than
+      // fixed (quality bar §8 A1) — a goal's is an authored objective and the
+      // decision's is taken from the user's own decision sentence — so keying
+      // on the label was keying on a value another string could take, and it
+      // silently missed the node instead of failing on the verdict (trap 19).
+      const identityOf = (node: ComparableNode): string =>
+        typeof node.source_quote === "string" && node.source_quote.length > 0
+          ? node.source_quote
+          : node.kind === "decision"
+            ? "decision"
+            : node.label;
+      const provenanceByIdentity = new Map(finalView.map((node) => [identityOf(node), node.provenance]));
+      for (const key of recordCase.expectedFromBrief) {
+        expect(provenanceByIdentity.get(key), `${recordCase.name}: ${key}`).toBe("from_brief");
       }
-      for (const label of recordCase.expectedAiInferred) {
-        expect(provenanceByLabel.get(label), `${recordCase.name}: ${label}`).toBe("ai_inferred");
+      for (const key of recordCase.expectedAiInferred) {
+        expect(provenanceByIdentity.get(key), `${recordCase.name}: ${key}`).toBe("ai_inferred");
       }
 
       // The terminal option list is a third carrier of the same authorship

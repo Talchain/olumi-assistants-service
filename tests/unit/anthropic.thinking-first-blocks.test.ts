@@ -261,9 +261,26 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
     // the model's own words for a claim. Asserting the whole label set (not a
     // count) keeps this failing if the text block were dropped, mis-parsed, or
     // projected from the wrong document.
+    // ⚠ The GOAL's label is now an authored objective and not the raw quote
+    // (quality bar §8 A1); its verbatim rides on `provenance.source_quote`,
+    // asserted immediately below so the binding to the user's own words is not
+    // lost. `Decision` survives here because this brief states no decision
+    // sentence to derive one from — the honest generic, exercised for real.
     expect(result.graph.nodes.map((n) => n.label).sort()).toEqual([
       "Decision",
+      "Grow Revenue Without Over-Hiring",
       "delivery capacity",
+      "hire a contractor",
+      "hire a full-time employee",
+    ]);
+    expect(
+      result.graph.nodes
+        .map((n) => n.provenance?.source_quote)
+        .filter((q): q is string => typeof q === "string")
+        .sort(),
+    ).toEqual([
+      // `delivery capacity` is absent by design: it is a CLAIM node, so it has
+      // no user quote — which is the discrimination this list also makes.
       "grow revenue without over-hiring",
       "hire a contractor",
       "hire a full-time employee",
