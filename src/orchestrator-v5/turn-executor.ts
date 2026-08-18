@@ -6736,19 +6736,28 @@ export async function runTurnExecutor(
             emitted_at_iso: clarifyEmittedAtIso,
           }),
         );
+        // ⭐ ONE NAMED COMPOSE SITE for both branches. P8 at its most literal:
+        // the sentence the redirect replaces was a yes/no question whose only
+        // acceptance path was a numeral, and the witnessed user's correct
+        // "Yes, that one — under the enterprise sales option." was refused
+        // while the 0.8 they had already given was dropped. There is nothing to
+        // disambiguate on the redirect path — the sole candidate IS the factor
+        // the product is asking about — so the copy states the pair and carries
+        // the user's own number forward in the chip.
+        //
+        // ⚠ NAMED rather than inlined because the compose-site verdict ledger
+        // keys on the EXPRESSION at the site: an inline ternary registers as
+        // `outstandingAskRedirect !== null`, which tells a later reader nothing.
+        // The ledger caught this omission on the first full run of this change
+        // — it is doing its job, so give it a legible name (and re-derive the
+        // stance rather than carrying the old key's over).
+        const clarifyAssistantText =
+          outstandingAskRedirect !== null
+            ? buildOutstandingAskClarifyText(outstandingAskRedirect)
+            : buildClarifyAssistantText(deterministicValueUpdate.candidates);
         const clarifyResponse = composeAnswer({
           answerKind: 'functional',
-          assistant_text:
-            outstandingAskRedirect !== null
-              // P8 at its most literal: the sentence this replaces was a yes/no
-              // question whose only acceptance path was a numeral, and the
-              // witnessed user's correct "Yes, that one" was refused while the
-              // 0.8 they had already given was dropped. There is nothing to
-              // disambiguate — the sole candidate IS the factor the product is
-              // asking about — so the copy states the pair and carries the
-              // user's own number forward in the chip.
-              ? buildOutstandingAskClarifyText(outstandingAskRedirect)
-              : buildClarifyAssistantText(deterministicValueUpdate.candidates),
+          assistant_text: clarifyAssistantText,
           stage: context.stage,
           suggested_actions: clarifyChips,
         });

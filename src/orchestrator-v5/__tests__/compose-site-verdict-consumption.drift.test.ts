@@ -433,7 +433,10 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     stance: 'structural',
     why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis. (Site RENAMED 6 Aug 2026, ROADMAP 2.627: the expression was buildCalibrationPreviewText(calibrationOnly...) until text AND chips moved behind the single buildCalibrationReply builder. Same branch, same stance, re-derived not carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch.)',
   },
-  'buildClarifyAssistantText(deterministicValueUpdate.candidates)': { stance: 'structural', why: 'Clarify template.' },
+  clarifyAssistantText: {
+    stance: 'structural',
+    why: "Deterministic value-update clarify. (Site RENAMED 19 Aug 2026, ROADMAP 2.1266/A3, from 'buildClarifyAssistantText(deterministicValueUpdate.candidates)': the site now chooses between that template and `buildOutstandingAskClarifyText`, and the stance is RE-DERIVED for both branches rather than carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch. Branch 1 is the unchanged clarify template. Branch 2 fires only when the product has an OUTSTANDING option-effect ask whose factor is the sole clarify candidate; its every interpolated value is a graph label from `deriveAskedEffectPair` (the head blocker) plus the user's own number, it states 'I have not changed the model.', and it names one option WITHOUT comparing it to any other — no analysis projection is in scope on this pre-route, which returns before any handler runs with zero LLM calls.",
+  },
   clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
   'noAnalysisOutcome.assistant_text': { stance: 'structural', why: 'Fires only when NO analysis exists — there is no leader to name.' },
   'staleOutcome.assistant_text': { stance: 'structural', why: 'Stale-rerun recovery; suppresses cached insights by construction.' },

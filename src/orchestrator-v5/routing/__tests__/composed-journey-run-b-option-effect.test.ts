@@ -539,6 +539,41 @@ describe('⭐⭐ RUN-B — the disambiguation chip must propose the OPTION EFFEC
     ).toBeNull();
   });
 
+  it('⭐ M14 — the LABELS come from the PRODUCT\'S QUESTION, not from the clarify candidate', () => {
+    // ⚠ THIS TEST EXISTS BECAUSE A MUTANT SURVIVED, and a survivor is a claim in
+    // either direction that must be settled by execution, never asserted
+    // (trap 13c). The mutant rebuilt the returned pair as
+    //   { ...asked, factorId: candidates[0].id, factorLabel: candidates[0].label }
+    // and the whole battery stayed GREEN — because conjunct (b) already forces
+    // the two IDS equal, and in this fixture the two LABELS are the same string
+    // too. Nothing in the corpus distinguished the two SOURCES.
+    //
+    // They are not the same source. The candidate's label comes from the
+    // pre-route's graph lookup; the pair's label comes from the blocker, which
+    // is the element `readiness-recovery.ts:194,242` composed the sentence ON
+    // SCREEN from (P7). The copy and the chip must name what the QUESTION
+    // named. A caller handing a differently-spelled label must not be able to
+    // change what the user reads.
+    const redirect = resolveOutstandingAskClarifyRedirect({
+      message: R1,
+      candidates: [{ id: FACTOR_ID, label: 'A DIFFERENT SPELLING OF THE SAME FACTOR' }],
+      readiness: readiness(),
+      quantity: setQuantity,
+    });
+    expect(redirect).not.toBeNull();
+    expect(redirect!.pair.factorLabel).toBe(FACTOR_LABEL);
+    expect(redirect!.pair.optionLabel).toBe(OPTION_LABEL);
+    expect(buildOutstandingAskClarifyText(redirect!)).not.toContain('A DIFFERENT SPELLING');
+    expect(buildOutstandingAskChipMessage(redirect!.pair, '0.8')).not.toContain(
+      'A DIFFERENT SPELLING',
+    );
+    // …and the chip STILL routes, which is the point of using the blocker's
+    // label: the writer resolves labels against the same persisted graph.
+    const chip = buildOutstandingAskChipMessage(redirect!.pair, '0.8');
+    const r = resolveOptionEffectWrite({ message: chip, graph: graph() });
+    expect(r.matched && r.kind === 'write' && r.factorId).toBe(FACTOR_ID);
+  });
+
   it('the known-dropped set is pinned as data, and every member has a reason', () => {
     expect(OUTSTANDING_ASK_CLARIFY_KNOWN_DROPPED).toHaveLength(3);
     for (const m of OUTSTANDING_ASK_CLARIFY_KNOWN_DROPPED) {
